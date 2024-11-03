@@ -1,0 +1,39 @@
+body {
+  font-family: 'IBM Plex Sans', sans-serif;
+}
+
+.app {
+    display: flex;
+    height: 100vh;
+    overflow: hidden;
+  }
+  
+  .main-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
+  
+  .side-panel {
+    width: 300px;
+    height: 100vh;
+    overflow-y: auto;
+    border-left: 1px solid #ccc;
+  }
+  
+  .tabbed-panel-container {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  
+  .mission-controls-container {
+    position: sticky;
+    bottom: 0;
+    background-color: #f0f0f0;
+    padding: 10px;
+    border-top: 1px solid #ccc;
+  }
+  

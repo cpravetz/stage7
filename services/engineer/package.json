@@ -1,0 +1,32 @@
+{
+    "name": "@cktmcs/engineer",
+    "version": "1.0.0",
+    "description": "Central message routing component for the system",
+    "main": "src/Engineer.ts",
+    "scripts": {
+        "start": "ts-node src/Engineer.ts",
+        "build": "tsc",
+        "test": "jest"
+    },
+    "dependencies": {
+        "@cktmcs/shared": "file:../../shared",
+        "axios": "^1.7.7",
+        "body-parser": "^1.19.0",
+        "express": "^4.18.2",
+        "ws": "^8.18.0"
+    },
+    "devDependencies": {
+        "@types/express": "^5.0.0",
+        "@types/jest": "^29.5.14",
+        "@types/supertest": "^6.0.2",
+        "jest": "^29.7.0",
+        "supertest": "^7.0.0",
+        "ts-jest": "^29.2.5",
+        "ts-node": "^10.9.1",
+        "typescript": "^5.6.3"
+    },
+    "jest": {
+        "preset": "ts-jest",
+        "testEnvironment": "node"
+    }
+}

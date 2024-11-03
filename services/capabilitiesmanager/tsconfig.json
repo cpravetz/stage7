@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "esnext",
+    "moduleResolution": "node",
+    "esModuleInterop": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "baseUrl": ".",
+    "paths": {
+      "@cktmcs/shared": ["../../shared"]
+    },
+    "types": ["express"],
+    "resolveJsonModule": true,
+    "sourceMap": true,
+    "allowJs": true,
+    "noEmit": false
+  },
+  "include": ["src/**/*", "src/plugins/**/*" ],
+  "exclude": ["node_modules"]
+}

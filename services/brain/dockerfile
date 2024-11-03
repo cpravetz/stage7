@@ -1,0 +1,37 @@
+# Use an official Node.js runtime as the base image
+FROM node:18-alpine
+
+# Set the working directory in the container
+WORKDIR /usr/src/app
+
+# Copy package.json and package-lock.json to the working directory
+COPY package*.json ./
+COPY shared/package*.json ./shared/
+COPY services/brain/package*.json ./services/brain/
+
+# Install the application dependencies
+RUN npm install
+
+# Copy the application code to the working directory
+COPY shared ./shared
+COPY services/brain ./services/brain
+
+# Ensure plugins directory exists and copy plugins
+RUN mkdir -p ./services/brain/src/models 
+COPY services/brain/src/models/*.?s ./services/brain/src/models
+
+RUN mkdir -p ./services/brain/src/interfaces 
+COPY services/brain/src/interfaces/*.?s ./services/brain/src/interfaces
+
+# Build the TypeScript code
+RUN npm run build --workspace=shared
+RUN npm run build --workspace=services/brain
+
+# Set the working directory to the service
+WORKDIR /usr/src/app/services/brain
+
+# Expose the port the app runs on
+EXPOSE 5070
+
+# Define the command to run the application
+CMD ["node", "dist/Brain.js"]

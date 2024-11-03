@@ -1,0 +1,65 @@
+.mission-controls {
+  display: flex;
+  justify-content: space-around;
+  padding: 10px;
+}
+
+.mission-controls button {
+  padding: 10px 20px;
+  margin: 0 5px;
+  font-size: 16px;
+  font-weight: bold;
+  color: #fff;
+  background-color: #007bff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+}
+
+.mission-controls button:hover:not(:disabled) {
+  background-color: #0056b3;
+}
+
+.mission-controls button:disabled {
+  background-color: #cccccc;
+  color: #666666;
+  cursor: not-allowed;
+}
+
+/* Specific button colors */
+.mission-controls button:nth-child(1) { background-color: #28a745; } /* Play */
+.mission-controls button:nth-child(2) { background-color: #ffc107; color: #000; } /* Pause */
+.mission-controls button:nth-child(3) { background-color: #dc3545; } /* Abort */
+.mission-controls button:nth-child(4) { background-color: #17a2b8; } /* Save */
+.mission-controls button:nth-child(5) { background-color: #6c757d; } /* Load */
+
+.mission-controls button:nth-child(1):hover:not(:disabled) { background-color: #218838; }
+.mission-controls button:nth-child(2):hover:not(:disabled) { background-color: #e0a800; }
+.mission-controls button:nth-child(3):hover:not(:disabled) { background-color: #c82333; }
+.mission-controls button:nth-child(4):hover:not(:disabled) { background-color: #138496; }
+.mission-controls button:nth-child(5):hover:not(:disabled) { background-color: #5a6268; }
+
+/* Disabled button styles */
+.mission-controls button:disabled {
+  background-color: #cccccc;
+  color: #666666;
+}
+
+@media (max-width: 768px) {
+  .mission-controls {
+    padding: 15px;
+  }
+
+  .mission-controls button {
+    width: calc(50% - 10px);
+    margin: 0 5px 10px;
+  }
+}
+
+@media (max-width: 480px) {
+  .mission-controls button {
+    width: 100%;
+    margin: 0 0 10px;
+  }
+}

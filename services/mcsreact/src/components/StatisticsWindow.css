@@ -1,0 +1,86 @@
+.statistics-window {
+  background-color: #f8f9fa;
+  border-radius: 8px;
+  padding: 20px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  height: 100%;
+  overflow-y: auto;
+}
+
+.statistics-window h2 {
+  font-size: 1.3rem;
+  color: #333;
+  margin-bottom: 15px;
+  border-bottom: 2px solid #007bff;
+  padding-bottom: 10px;
+}
+
+.statistics-window h3 {
+  font-size: 1.2rem;
+  color: #333;
+  margin-bottom: 15px;
+  border-bottom: 2px solid #007bff;
+  padding-bottom: 10px;
+}
+
+.statistics-content {
+  display: flex;
+  flex-direction: column;
+}
+
+.statistics-content p {
+  font-size: 1.0rem;
+  margin-bottom: 10px;
+}
+
+.statistics-content h4 {
+  font-size: 1.1rem;
+  margin-top: 20px;
+  margin-bottom: 10px;
+  color: #007bff;
+}
+
+.statistics-content ul {
+  list-style-type: none;
+  padding-left: 0;
+}
+
+.statistics-content li {
+  background-color: #fff;
+  border-radius: 4px;
+  padding: 10px;
+  margin-bottom: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  transition: background-color 0.3s ease;
+}
+
+.statistics-content li:hover {
+  background-color: #e9ecef;
+}
+
+/* New styles for running agents list */
+.stat-list {
+  font-size: 0.9rem;
+  line-height: 1.2;
+}
+
+.stat-list li {
+  padding: 5px;
+  margin-bottom: 5px;
+}
+
+.stat-list p {
+  margin: 2px 0;
+}
+
+/* New styles for mission name */
+.mission-status {
+  font-size: 1.1rem;
+  font-weight: bold;
+  color: #007bff;
+  border: 2px solid #007bff;
+  border-radius: 4px;
+  padding: 5px 10px;
+  display: inline-block;
+  margin-bottom: 15px;
+}

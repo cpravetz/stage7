@@ -1,0 +1,44 @@
+We are creating a system that includes several independent node instances running components that interact with each other and collectively manage agents 
+that use LLMs and custom plugins to complete a given mission.  The system will be able to self-modify by creating new plugins for itself.  It will be 
+self-optimizing by using context to route LLM converations to the best available LLM for processing.  The main parts are MissionControl, the PostOffice, 
+the Brain, the frontend, the Engineer, the Librarian, the CapabilitiesManager, the agent and the securityManager. 
+
+The frontend is a react app that interacts with the system through the postoffice.  The frontend has a frame with the conversation history between the user and the system,
+a text entry box for new messages or responses from the user to the system, buttons to pause/play/abort save/load the mission, and a window with statistics (agents 
+by status or LLM call counts, for example)
+
+The postOffice maintains a registry of other available components and 
+routes messages between entities.  Message types are statements, requests and responses.  Entities are the singleton components, all agents, and the user.  
+
+The Librarian manages data storage and uses Redis and Mongo servers.  The Librarian api points are StoreData and LoadData.  Guids are used throughout the system 
+as keys - for components, agents, data bundles, messages, etc.  
+
+MissionControl handles operation of the system.  It takes a mission creation request from the postOffice and initializes a new mission and sets it running 
+through the rest of the system.  A mission has, at minimum, a goal.  MissionControl assigns a guid to the new mission (or gets a guid from the Librarian), c
+reates the initial agent and gives it the goal of ACCOMPLISH goal.  MissionControl is also capable of pausing, aborting, and with the Librarian saving or loading missions. 
+MissionControl keeps the user informed by sending status updates to the user.
+
+MissionControl uses the SecurityManager to ensure only verified and authorized users can access a mission or its data.  We will need functionality between the frontend, 
+postOffice and SecurityManager to define verified users, authorization schemes, and user/mission authorization.  Incorporate these needs into the code even if we don't bring 
+it up explicitly.
+
+Agents are told what to do by Action Verbs, like ACCOMPLISH, and objects like the goal.  Agents get the appropriate plugin from the CapabilitiesManager to 
+perform the task determined by the ActionVerb.  Agents can use the librarian to save and access data, or to save their own current state.  
+
+The CapabilitiesManager maintains the registry of ActionVerbs and plugins.  If a new ActionVerb is received, it asks the Engineer to write the plugin to execute 
+the ActionVerb.  The Engineer uses code generation AI to write the code and send it to the capabilities manager for registration and use.  We will need to define 
+a standard plugin structure.  Actions may have prerequisites and will maintain a list of their own prerequisites.  As agent status changes, they report this to 
+missionControl which the informs other agents that are dependent on the reporting agent.  Agent status can be pending, running, awaiting, paused, completed, or aborted.  
+Dependency between agents will likely include the workproducts of the preceeding agent, so agents will use the librarian to save data and pass the guid(s) of the 
+data back to missionControl on status change.
+
+The Brain handles interaction with LLMs.  The ActionVerb THINK triggers an agent to engage the brain to handle a new post to a conversation.  The Brain should choose from 
+the available LLMs (those registered with the postOffice) to maintain continuity of the thread - or to maximize accuracy of the reply, minimize the cost of the exchange as 
+directed by the agent.  The ActionVerb PLAN has the Brain develop a set of steps needed to achieve the goal of the agent.  Plans should be a set of ActionVerbs along with 
+their inputs (from predecessor steps or existing agents), goal statements as processable prose.
+
+All components will have api points named Hear, that accepts messages from the postOffice or other components and routes them internally to the appropriate methods.  They will 
+also have a method named Say that sends a message off to the postOffice or another components if a direct conversation is available.  Finally, each component has a registeration 
+method that notifies the postoffice of their existance.  They should tell the postOffice their guid, their component type, and their network name/url.
+
+Let's begin by writing the code for the postOffice.  Create the TypeScript code for a Node application that will be our instantiated postOffice.

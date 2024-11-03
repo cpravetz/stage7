@@ -1,0 +1,35 @@
+{
+    "name": "@cktmcs/capabilities-manager",
+    "version": "1.0.0",
+    "description": "Capabilities Manager component to handle ActionVerbs and Plugins",
+    "main": "dist/CapabilitiesManager.js",
+    "type": "module",
+    "scripts": {
+        "start": "ts-node src/CapabilitiesManager.ts",
+        "build": "tsc && cp -r src/plugins dist/plugins",
+        "test": "jest"
+    },
+    "dependencies": {
+        "@cktmcs/shared": "file:../../shared",
+        "axios": "^1.7.7",
+        "body-parser": "^1.19.0",
+        "cheerio": "^1.0.0",
+        "child_process": "^1.0.2",
+        "express": "^4.21.1",
+        "ws": "^8.18.0"
+    },
+    "devDependencies": {
+        "@types/express": "^5.0.0",
+        "@types/jest": "^29.5.14",
+        "@types/supertest": "^6.0.2",
+        "jest": "^29.7.0",
+        "supertest": "^7.0.0",
+        "ts-jest": "^29.2.5",
+        "ts-node": "^10.9.1",
+        "typescript": "^5.6.3"
+    },
+    "jest": {
+        "preset": "ts-jest",
+        "testEnvironment": "node"
+    }
+}

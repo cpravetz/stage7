@@ -1,0 +1,527 @@
+import express from 'express';
+import { v4 as uuidv4 } from 'uuid';
+import axios from 'axios';
+import { agentSetManager } from './utils/agentSetManager';
+import { dependencyManager } from './utils/dependencyManager';
+import { AgentStatus } from './utils/status';
+import Docker from 'dockerode';
+import { Message, MessageType,TrafficManagerStatistics, BaseEntity, PluginInput } from '@cktmcs/shared';
+
+
+const api = axios.create({
+    headers: {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*',
+    },
+  });
+
+
+export class TrafficManager extends BaseEntity {
+    private app: express.Application;
+    private docker: Docker;
+    private librarianUrl: string = process.env.LIBRARIAN_URL ||  'librarian:5040';
+    
+    constructor() {
+        super('TrafficManager', 'TrafficManager', `trafficmanager`, process.env.PORT || '5080');
+        this.app = express();
+        this.app.use(express.json());
+        this.setupRoutes();
+        this.startServer();
+        this.docker = new Docker();
+    }
+
+    private setupRoutes() {
+        this.app.post('/message', (req, res) => this.handleMessage(req, res));
+        this.app.post('/createAgent', async (req, res, next) => { this.createAgent(req, res).catch(next) });
+        this.app.post('/checkDependencies', (req, res) => this.checkDependencies(req, res));
+        this.app.post('/pauseAgents', async (req, res, next) => { 
+            try {    
+                await this.pauseAgents(req, res);
+            } catch(error) {
+                next(error);
+            }
+        });
+        this.app.post('/abortAgents', async (req, res) => this.abortAgents(req, res));
+        this.app.post('/resumeAgents', async (req, res) => this.resumeAgents(req, res));
+        this.app.get('/getAgentStatistics/:missionId', async (req: express.Request, res: express.Response) => { this.getAgentStatistics(req, res) });
+        this.app.post('/checkBlockedAgents', async (req, res) => { this.checkBlockedAgents(req, res)});
+        this.app.get('/dependentAgents/:agentId', (req: express.Request, res: express.Response) => { this.getDependentAgents(req, res); });
+    }
+
+    private async captureAgentStatus(agentId: string, status: AgentStatus) {
+        try {
+            await this.updateAgentStatusInStorage(agentId, status);
+        } catch (error) {
+            console.error(`Error capturing agent status for agent ${agentId}:`, error);
+        }
+    }
+
+    private async updateAgentStatus(message: Message) {
+        const agentId = message.sender;
+        const status = message.content.status;
+    
+        try {
+            if (status === 'CHECK') {
+                // Just return the current status without updating
+                const currentStatus = await this.getAgentStatus(agentId);
+                return { status: currentStatus };
+            }
+
+            // Perform actions based on the new status
+            switch (status) {
+                case AgentStatus.COMPLETED:
+                    await this.handleAgentCompletion(agentId);
+                    break;
+                case AgentStatus.ERROR:
+                    await this.handleAgentError(agentId);
+                    break;
+                case AgentStatus.PAUSED:
+                    await this.handleAgentPaused(agentId);
+                    break;
+                // Add more cases as needed
+            }
+
+            await this.updateAgentStatusInStorage(agentId, status);
+
+            // Check if this status update affects any dependent agents
+            await this.checkDependentAgents(agentId);
+
+            return { message: `Agent ${agentId} status updated to ${status}` }
+        } catch (error) {
+            console.error(`Error updating status for agent ${agentId}:`, error);
+            return { error: 'Failed to update agent status' };
+        }
+    }
+
+       
+    private async handleAgentCompletion(agentId: string) {
+        console.log(`Agent ${agentId} has completed its task`);
+    
+        try {
+            // Fetch the agent's final output
+            const agentOutput = await this.fetchAgentOutput(agentId);
+    
+            // Send the results to the user
+            this.say(`Agent ${agentId} has completed its task. Result: ${JSON.stringify(agentOutput)}`);
+    
+            // Update the agent's status in storage
+            await this.updateAgentStatusInStorage(agentId, AgentStatus.COMPLETED);
+    
+            // Check and update dependent agents
+            await this.updateDependentAgents(agentId);
+    
+            // Clean up any resources associated with this agent
+            await this.cleanupAgentResources(agentId);
+    
+        } catch (error) {
+            this.logAndSay(`An error occurred while processing the completion of agent ${agentId}`);
+        }
+    }
+    
+    private async fetchAgentOutput(agentId: string): Promise<any> {
+        try {
+            // Get the AgentSet URL for the given agent
+            const agentSetUrl = await agentSetManager.getAgentSetUrlForAgent(agentId);
+    
+            if (!agentSetUrl) {
+                throw new Error(`No AgentSet found for agent ${agentId}`);
+            }
+    
+            // Make a request to the AgentSet to fetch the agent's output
+            const response = await api.get(`http://${this.ensureProtocol(agentSetUrl)}/agent/${agentId}/output`);
+    
+            if (response.status === 200 && response.data) {
+                return response.data.output;
+            } else {
+                throw new Error(`Failed to fetch output for agent ${agentId}`);
+            }
+        } catch (error) {
+            console.error(`Error fetching output for agent ${agentId}:`, error);
+            throw error;
+        }
+    }    
+    private async updateDependentAgents(completedAgentId: string) {
+        const dependentAgents = await dependencyManager.getDependencies(completedAgentId);
+        for (const depAgentId of dependentAgents) {
+            const canProceed = await this.checkDependenciesRecursive(depAgentId);
+            if (canProceed) {
+                agentSetManager.resumeAgent(depAgentId);
+                this.say(`Dependent agent ${depAgentId} has been resumed`);
+            }
+        }
+    }
+    
+    private async cleanupAgentResources(agentId: string) {
+        // Implement any necessary cleanup logic
+        // This could include removing temporary files, freeing up memory, etc.
+        console.log(`Cleaning up resources for agent ${agentId}`);
+        // For example:
+        // await this.removeTemporaryFiles(agentId);
+        // await this.freeUpMemory(agentId);
+    }
+    private async handleAgentError(agentId: string) {
+        this.logAndSay(`Agent ${agentId} encountered an error`);
+        // Implement error handling logic
+        // For example, you might want to retry the agent's task or notify an administrator
+    }
+
+    private async handleAgentPaused(agentId: string) {
+        console.log(`Agent ${agentId} has been paused`);
+        // Implement any necessary logic for paused agents
+        // For example, you might want to reallocate resources or update scheduling
+    }
+
+    private async checkDependentAgents(agentId: string) {
+        const dependentAgents = await dependencyManager.getDependencies(agentId);
+        for (const depAgentId of dependentAgents) {
+            const canResume = await this.checkDependenciesRecursive(depAgentId);
+            if (canResume) {
+                agentSetManager.resumeAgent(depAgentId);
+            }
+        }
+    }
+
+    private async getAgentStatistics(req: express.Request, res: express.Response) {
+        const { missionId } = req.params;
+        if (!missionId) {
+            return res.status(400).send('Missing missionId parameter');
+        }
+        try {
+            const agentSetManagerStatistics = await agentSetManager.getAgentStatistics(missionId);
+            
+            // Convert agentsByStatus to a map of [status, count] records
+            const agentCountByStatus = new Map(
+                Array.from(agentSetManagerStatistics.agentsByStatus.entries())
+                    .map(([status, agents]) => [status, agents.length])
+            );
+
+            // Filter for running agents and collect their details
+            const runningAgents = agentSetManagerStatistics.agentsByStatus.get('running') || [];
+    
+            const trafficManagerStatistics: TrafficManagerStatistics = {
+                agentStatisticsByType: {
+                    totalAgents: agentSetManagerStatistics.totalAgentsCount,
+                    agentCountByStatus: Object.fromEntries(agentCountByStatus),
+                    agentSetCount: agentSetManagerStatistics.agentSetsCount
+                },
+                runningAgentStatistics: {
+                    runningAgentsCount: runningAgents.length,
+                    runningAgents: runningAgents
+                }
+            };
+    
+            res.status(200).json(trafficManagerStatistics);
+        } catch (error) {
+            console.error('Error fetching agent statistics:', error);
+            res.status(500).json({ error: 'Failed to fetch agent statistics' });
+        }
+    }
+
+    private async handleMessage(req: express.Request, res: express.Response) {
+        const message = req.body;
+        console.log('Received message:', message);
+        super.handleBaseMessage(message);
+    
+        if (message.forAgent) {
+          // This message is intended for a specific agent
+          try {
+            await this.forwardMessageToAgent(message);
+            res.status(200).send({ status: 'Message forwarded to agent' });
+          } catch (error) {
+            console.error('Error forwarding message to agent:', error);
+            res.status(500).send({ error: 'Failed to forward message to agent' });
+          }
+        } else {
+          // Process the message based on its content
+          // This might involve managing agent traffic or assignments
+          if (message.type === MessageType.AGENT_UPDATE) {
+            res.status(200).send(await this.updateAgentStatus(message));
+          }
+          console.log('Processing message in TrafficManager');
+          res.status(200).send({ status: 'Message received and processed by TrafficManager' });
+        }
+    }
+        
+    private async forwardMessageToAgent(message: any) {
+        const agentId = message.forAgent;
+        const agentSetUrl = await agentSetManager.getAgentSetUrlForAgent(agentId);
+    
+        if (!agentSetUrl) {
+          throw new Error(`No AgentSet found for agent ${agentId}`);
+        }
+    
+        try {
+          const response = await api.post(`${this.ensureProtocol(agentSetUrl)}/message`, {
+            ...message,
+            forAgent: agentId
+          });
+    
+          console.log(`Message forwarded to agent ${agentId} via AgentSet at ${agentSetUrl}`);
+          return response.data;
+        } catch (error) {
+          console.error(`Error forwarding message to agent ${agentId}:`, error);
+          throw error;
+        }
+    }
+    
+    private ensureProtocol(url: string): string {
+        return url.startsWith('http://') || url.startsWith('https://') ? url : `http://${url}`;
+    }
+    
+    private startServer() {
+        this.app.listen(this.port, () => {
+            console.log(`TrafficManager running on port ${this.port}`);
+        });
+    }
+
+    private async createAgent(req: express.Request, res: express.Response) {
+        //this.logAndSay(`Creating new Agent from ${JSON.stringify(req.body)}`);
+        const { actionVerb, inputs, dependencies, missionId, missionContext } = req.body;
+        let inputsMap: Map<string, PluginInput>;
+        
+        if (inputs instanceof Map) {
+            inputsMap = inputs;
+        } else {
+            inputsMap = new Map();
+            for (const [key, value] of Object.entries(inputs)) {
+                if (typeof value === 'object' && value !== null && 'inputValue' in value) {
+                    inputsMap.set(key, value as PluginInput);
+                } else {
+                    inputsMap.set(key, {
+                        inputName: key,
+                        inputValue: value,
+                        args: { [key]: value }
+                    });
+                }
+            }
+        }
+        try {
+            const agentId = uuidv4();
+            
+            if (dependencies) {
+                await dependencyManager.registerDependencies(agentId, dependencies);
+            }
+
+            const dependenciesSatisfied = await this.checkDependenciesRecursive(agentId);
+            
+            if (!dependenciesSatisfied) {
+                await this.captureAgentStatus(agentId, AgentStatus.PAUSED);
+                return res.status(200).send({ message: 'Agent created but waiting for dependencies.', agentId });
+            }
+
+            const response = await agentSetManager.assignAgentToSet(agentId, actionVerb, inputsMap, missionId, missionContext);
+            await this.captureAgentStatus(agentId, AgentStatus.RUNNING);
+
+            res.status(200).send({ message: 'Agent created and assigned.', agentId, response });
+        } catch (error) {
+            console.error('Error creating agent:', error);
+            res.status(500).send({ error: 'Failed to create agent' });
+        }
+    }
+
+    private async checkDependenciesRecursive(agentId: string): Promise<boolean> {
+        const dependencies = await dependencyManager.getDependencies(agentId);
+        
+        if (!dependencies || dependencies.length === 0) {
+            return true;
+        }
+
+        for (const depAgentId of dependencies) {
+            const depStatus = await this.getAgentStatus(depAgentId);
+            
+            if (depStatus !== AgentStatus.COMPLETED) {
+                const depDependenciesSatisfied = await this.checkDependenciesRecursive(depAgentId);
+                
+                if (!depDependenciesSatisfied) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    private agentStatusMap: Map<string, AgentStatus> = new Map();
+
+    private async getAgentStatus(agentId: string): Promise<AgentStatus> {
+
+        try {
+            // Check if the status is in our in-memory cache
+            if (this.agentStatusMap.has(agentId)) {
+                return this.agentStatusMap.get(agentId)!;
+            }
+    
+            // If not in cache, try to fetch from a persistent storage (e.g., database)
+            const status = await this.fetchAgentStatusFromStorage(agentId);
+    
+            if (status) {
+                // Update the cache
+                this.agentStatusMap.set(agentId, status);
+                return status;
+            }
+    
+            // If the agent is not found, return a default status or throw an error
+            console.warn(`Agent ${agentId} not found. Returning default status.`);
+            return AgentStatus.INITIALIZING;
+        } catch (error) {
+            console.error(`Error retrieving status for agent ${agentId}:`, error);
+            throw new Error(`Failed to retrieve status for agent ${agentId}`);
+        }
+    }
+    
+    private async fetchAgentStatusFromStorage(agentId: string): Promise<AgentStatus | null> {
+        // This is a placeholder for fetching the status from a persistent storage
+        // In a real implementation, you would query your database or storage service here
+        // For now, we'll simulate a delay and return a random status
+        await new Promise(resolve => setTimeout(resolve, 100)); // Simulate network delay
+        const statuses = Object.values(AgentStatus);
+        return statuses[Math.floor(Math.random() * statuses.length)] as AgentStatus;
+    }
+    
+    // Update this method to use the new agentStatusMap
+    private async updateAgentStatusInStorage(agentId: string, status: AgentStatus): Promise<void> {
+        // This is a placeholder for updating the status in a persistent storage
+        // In a real implementation, you would update your database or storage service here
+        await new Promise(resolve => setTimeout(resolve, 100)); // Simulate network delay
+        console.log(`Updated status for agent ${agentId} to ${status} in storage`);
+    }
+
+    private async pauseAgents(req: express.Request, res: express.Response) {
+        console.log('TrafficManager: Pausing agents for mission:', req.body);
+        const { missionId } = req.body;
+        try {
+            await agentSetManager.pauseAgents(missionId);
+            res.status(200).send({ message: 'Agent paused successfully.' });
+        } catch (error) {
+            console.error('Error pausing agent:', error);
+            res.status(500).send({ error: 'Failed to pause agent' });
+        }
+    }
+
+    private async abortAgents(req: express.Request, res: express.Response) {
+        const { missionId } = req.body;
+        try {
+            await agentSetManager.abortAgents(missionId);
+            res.status(200).send({ message: 'Agent aborted successfully.' });
+        } catch (error) {
+            console.error('Error aborting agent:', error);
+            res.status(500).send({ error: 'Failed to abort agent' });
+        }
+    }
+
+    private async resumeAgents(req: express.Request, res: express.Response) {
+        const { missionId } = req.body;
+        try {
+            await agentSetManager.resumeAgents(missionId);
+            res.status(200).send({ message: 'Agent resumed successfully.' });
+        } catch (error) {
+            console.error('Error resuming agent:', error);
+            res.status(500).send({ error: 'Failed to resume agent' });
+        }
+    }
+
+    private async checkDependencies(req: express.Request, res: express.Response) {
+        const { agentId } = req.body;
+
+        try {
+            const dependenciesSatisfied = await dependencyManager.areDependenciesSatisfied(agentId);
+            
+            if (dependenciesSatisfied) {
+                await this.captureAgentStatus(agentId, AgentStatus.RUNNING);
+                res.status(200).send({ message: 'Dependencies satisfied. Agent resumed.' });
+            } else {
+                res.status(200).send({ message: 'Dependencies not yet satisfied.' });
+            }
+        } catch (error) {
+            console.error('Error checking dependencies:', error);
+            res.status(500).send({ error: 'Failed to check dependencies' });
+        }
+    }
+
+    private async discoverService(type: string): Promise<string> {
+        const response = await axios.get(`http://${this.postOfficeUrl}/requestComponent?type=${type}`);
+        const services = response.data.components;
+        if (services.length === 0) {
+          throw new Error(`No ${type} service available`);
+        }
+        return services[0].url;
+    }
+
+    async createAgentSetContainer() {
+        const container = await this.docker.createContainer({
+          Image: 'agentset:latest',
+          Env: [
+            `POSTOFFICE_URL={${this.postOfficeUrl}}`,
+            `PORT=5090`,
+          ],
+          NetworkingConfig: {
+            EndpointsConfig: {
+              mcs_network: {}
+            }
+          }
+        });
+    
+        await container.start();
+    
+        const containerInfo = await container.inspect();
+        const ipAddress = containerInfo.NetworkSettings.Networks.mcs_network.IPAddress;
+    
+        // Register the new AgentSet with PostOffice
+        await axios.post(`http://${this.postOfficeUrl}/registerComponent`, {
+          type: 'AgentSet',
+          url: `http://${ipAddress}:5090`,
+          name: `AgentSet-${ipAddress}`
+        });
+    }
+
+    private async checkBlockedAgents(req: express.Request, res: express.Response) {
+        const { completedAgentId } = req.body;
+
+        if (!completedAgentId) {
+            return res.status(400).send({ error: 'completedAgentId is required' });
+        }
+
+        try {
+            const blockedAgents = await dependencyManager.getDependencies(completedAgentId);
+            
+            for (const blockedAgentId of blockedAgents) {
+                const canResume = await this.checkDependenciesRecursive(blockedAgentId);
+                if (canResume) {
+                    agentSetManager.resumeAgent(blockedAgentId);
+                }
+            }
+
+            res.status(200).send({ message: 'Blocked agents checked and resumed if possible' });
+        } catch (error) {
+            console.error('Error checking blocked agents:', error);
+            res.status(500).send({ error: 'Failed to check blocked agents' });
+        }
+    }
+
+    private async getDependentAgents(req: express.Request, res: express.Response) {
+        const { agentId } = req.params;
+    
+        try {
+            // Get all dependencies from the dependencyManager
+            const allDependencies = await dependencyManager.getAllDependencies();
+    
+            // Filter for agents that depend on the given agentId
+            const dependentAgents = Object.entries(allDependencies)
+                .filter(([_, dependency]) => dependency.dependencies.includes(agentId))
+                .map(([dependentAgentId, _]) => dependentAgentId);
+    
+            res.status(200).json(dependentAgents);
+        } catch (error) {
+            console.error('Error getting dependent agents:', error);
+            res.status(500).json({ error: 'Failed to get dependent agents' });
+        }
+    }
+}
+
+// Instantiate TrafficManager
+new TrafficManager();
+
+// Periodic clean-up for removing empty agent sets
+setInterval(async () => {
+    await agentSetManager.removeEmptySets();
+}, 60000); // Clean up every 60 seconds

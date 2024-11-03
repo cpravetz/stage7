@@ -1,0 +1,25 @@
+{
+    "name": "@cktmcs/mission-control",
+    "version": "1.0.0",
+    "description": "MissionControl component for managing missions",
+    "main": "dist/MissionControl.js",
+    "scripts": {
+        "start": "ts-node src/MissionControl.ts",
+        "build": "tsc"
+    },
+    "dependencies": {
+        "@cktmcs/shared": "file:../../shared",
+        "axios": "^1.7.7",
+        "body-parser": "^1.19.0",
+        "express": "^4.18.2",
+        "uuid": "^10.0.0",
+        "ws": "^8.18.0"
+    },
+    "devDependencies": {
+        "@types/express": "^5.0.0",
+        "@types/uuid": "^10.0.0",
+        "@types/ws": "^8.5.12",
+        "ts-node": "^10.9.1",
+        "typescript": "^5.6.3"
+    }
+}
