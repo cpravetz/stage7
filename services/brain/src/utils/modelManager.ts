@@ -1,6 +1,6 @@
 import { promises as fs } from 'fs';
 import path from 'path';
-import { Model, ContentConversationType } from '../models/Model';
+import { Model, LLMConversionType } from '../models/Model';
 import { ModelInterface } from '../interfaces/ModelInterface';
 
 export type OptimizationType = 'cost' | 'accuracy' | 'creativity' | 'speed' | 'continuity';
@@ -70,7 +70,7 @@ export class ModelManager {
         }
     }
 
-    selectModel(optimization: OptimizationType, conversionType: ContentConversationType): { model: Model, interface: ModelInterface } | undefined {
+    selectModel(optimization: OptimizationType, conversionType: LLMConversionType = LLMConversionType.TextToText): { model: Model, interface: ModelInterface } | undefined {
         let selectedModel: Model | undefined;
 
         // Temp force the OpenRouter interface and the llama model for now
@@ -82,7 +82,10 @@ export class ModelManager {
             }
         }
 
-        const compatibleModels = Array.from(this.models.values()).filter(model => model.contentConversation === conversionType);
+        const compatibleModels = Array.from(this.models.values()).filter(model => 
+            Array.isArray(model.contentConversation) && 
+            model.contentConversation.includes(conversionType)
+        );
 
         if (compatibleModels.length === 0) {
             return undefined;

@@ -1,4 +1,4 @@
-export enum ContentConversationType {
+export enum LLMConversionType {
     TextToText = 'text/text',
     TextToImage = 'text/image',
     TextToAudio = 'text/audio',
@@ -21,7 +21,7 @@ export class Model {
     public accuracyScore: number;
     public creativityScore: number;
     public speedScore: number;
-    public contentConversation: ContentConversationType;
+    public contentConversation: LLMConversionType[];
 
 constructor(
     options: {
@@ -32,7 +32,7 @@ constructor(
         accuracyScore: number,
         creativityScore: number,
         speedScore: number,
-        contentConversation: ContentConversationType }) {
+        contentConversation: LLMConversionType[] }) {
         this.name = options.name;
         this.modelName = options.modelName;
         this.interfaceKey = options.interfaceKey;

@@ -1,7 +1,7 @@
 import express from 'express';
 import bodyParser from 'body-parser';
 import { OptimizationType, ModelManager } from './utils/modelManager';
-import { Model, ContentConversationType } from './models/Model';
+import { Model, LLMConversionType } from './models/Model';
 import { BaseEntity } from '@cktmcs/shared';
 import dotenv from 'dotenv';
 
@@ -59,7 +59,7 @@ export class Brain extends BaseEntity {
                 exchanges: req.body.exchanges,
                 optimization: req.body.optimization,
                 metadata: req.body.metadata || null,
-                conversionType: req.body.conversionType || ContentConversationType.TextToText
+                conversionType: req.body.conversionType || LLMConversionType.TextToText
             };
             const selectedModel = req.body.model || this.modelManager.selectModel(thread.optimization, thread.conversionType);
 

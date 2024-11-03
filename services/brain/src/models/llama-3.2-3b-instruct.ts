@@ -1,4 +1,4 @@
-import { Model, ContentConversationType } from './Model';
+import { Model, LLMConversionType } from './Model';
 
 export class LlamaModel extends Model {
     constructor() {
@@ -10,7 +10,7 @@ export class LlamaModel extends Model {
             accuracyScore: 80,
             creativityScore: 80,
             speedScore: 80,
-            contentConversation: ContentConversationType.TextToText
+            contentConversation: [LLMConversionType.TextToText]
         });
     }
 }
