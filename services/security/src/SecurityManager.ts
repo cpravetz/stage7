@@ -270,25 +270,40 @@ export class SecurityManager extends BaseEntity {
 
     private async findUserByEmail(email: string): Promise<User | null> {
         try {
-            const response = await axios.get(`http://${this.librarianUrl}/loadData/${email}`, {
-                params: { storageType: 'mongo', collection: 'users' }
+            //console.log('Finding user by email:', email, ' from ',this.librarianUrl);
+            const response = await axios.post(`http://${this.librarianUrl}/queryData`, {
+                collection: 'users',
+                query: { email: email },
+                limit: 1
             });
-            return response.data.data;
-        } catch {
+    
+            if (response.data && response.data.data && response.data.data.length > 0) {
+                return response.data.data[0];
+            }
+            return null;
+        } catch (error) {
+            console.log('Error finding user by email:', email, error instanceof Error ? error.message : '');
             return null;
         }
     }
 
     private async findUserByProviderId(provider: string, providerId: string): Promise<User | null> {
         try {
-            const response = await axios.get(`http://${this.librarianUrl}/loadData/${provider}:${providerId}`, {
-                params: { storageType: 'mongo', collection: 'users' }
+            const response = await axios.post(`http://${this.librarianUrl}/queryData`, {
+                collection: 'users',
+                query: { provider: provider, providerId: providerId },
+                limit: 1
             });
-            return response.data.data;
-        } catch {
+        
+            if (response.data && response.data.data && response.data.data.length > 0) {
+                return response.data.data[0];
+            }
+            return null;
+        } catch (error) {
+            console.log('Error finding user by provider:', provider, providerId, error instanceof Error ? error.message : '');
             return null;
         }
-    }
+    }        
 
     private async storeUser(user: User): Promise<void> {
         return await axios.post(`http://${this.librarianUrl}/storeData`, {
@@ -306,13 +321,14 @@ export class SecurityManager extends BaseEntity {
     private async verifyToken(req: express.Request, res: express.Response) {
         try {
             const authHeader = req.headers.authorization;
-            
+            console.log('Verifying token:', authHeader);
             if (!authHeader) {
                 return res.status(401).json({ error: 'No token provided' });
             }
 
             // Extract token from Bearer header
             const token = authHeader.split(' ')[1];
+            console.log('Token:', token);
             if (!token) {
                 return res.status(401).json({ error: 'Invalid token format' });
             }
@@ -323,6 +339,7 @@ export class SecurityManager extends BaseEntity {
 
                 // Check if user still exists
                 const user = await this.findUserByEmail(decoded.email);
+                console.log('User:', user);
                 if (!user) {
                     return res.status(401).json({ error: 'User no longer exists' });
                 }

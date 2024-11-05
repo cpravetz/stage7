@@ -38,9 +38,9 @@ export class Librarian extends BaseEntity {
       private setupRoutes() {
         this.app.post('/storeData', (req: express.Request, res: express.Response) => { this.storeData(req, res)});
         this.app.get('/loadData/:id', (req: express.Request, res: express.Response) => { this.loadData(req, res)} );
-        this.app.get('/queryData', (req: express.Request, res: express.Response) => { this.queryData(req, res) });
+        this.app.post('/queryData', (req: express.Request, res: express.Response) => { this.queryData(req, res) });
         this.app.get('/getDataHistory/:id', (req: express.Request, res: express.Response) => { this.getDataHistory(req, res)} );
-        this.app.get('/searchData', (req: express.Request, res: express.Response) => {this.searchData(req, res)});
+        this.app.post('/searchData', (req: express.Request, res: express.Response) => {this.searchData(req, res)});
         this.app.delete('/deleteData/:id', (req: express.Request, res: express.Response) => { this.deleteData(req, res)});
         this.app.post('/storeWorkProduct', (req: express.Request, res: express.Response) => { this.storeWorkProduct(req, res) });
         this.app.get('/loadWorkProduct/:id', (req: express.Request, res: express.Response) => { this.loadWorkProduct(req, res) });    
@@ -180,20 +180,18 @@ export class Librarian extends BaseEntity {
 
 
     private async queryData(req: express.Request, res: express.Response) {
-        const { query, storageType, collection = 'mcsdata'  } = req.body;
-
-        if (!query) {
-            return res.status(400).send({ error: 'Query is required' });
+        const { collection, query, limit } = req.body;
+        //console.log('Querying data:', { collection, query, limit });
+    
+        if (!collection || !query) {
+            return res.status(400).send({ error: 'Collection and query are required' });
         }
-
+    
         try {
-            const result = await aggregateInMongo(collection as string,[
-                { $match: JSON.parse(query as string) },
-                { $group: { _id: '$id' } }
-            ]);
-
+            const result = await loadManyFromMongo(collection, query, limit);
             res.status(200).send({ data: result });
         } catch (error) {
+            console.error('Error querying data:', error instanceof Error ? error.message : String(error));
             res.status(500).send({ error: 'Failed to query data', details: error instanceof Error ? error.message : String(error) });
         }
     }
@@ -267,7 +265,8 @@ export class Librarian extends BaseEntity {
 
     private async getSavedMissions(req: express.Request, res: express.Response) {
         try {
-            const missions = await loadManyFromMongo('missions', {}, { projection: { id: 1, name: 1, _id: 0 } });
+            const { userId } = req.body;
+            const missions = await loadManyFromMongo('missions', { userId: userId }, { projection: { id: 1, name: 1, _id: 0 } });
             res.status(200).send(missions);
         } catch (error) {
             res.status(500).send({ error: 'Failed to get saved missions', details: error instanceof Error ? error.message : String(error) });

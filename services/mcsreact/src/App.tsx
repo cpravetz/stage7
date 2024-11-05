@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+  import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import UserInputModal from './components/UserInputModal';
 import TabbedPanel from './components/TabbedPanel';
 import TextInput from './components/TextInput';
@@ -124,14 +124,14 @@ export const App: React.FC = () => {
 }, []);
 
 const handleLogin = async (email: string, password: string) => {
-    try {
-        const token = await securityClient.login(email, password);
-        setToken(token);
-        setIsAuthenticated(true);
-        localStorage.setItem('authToken', token);
-    } catch (error) {
-        console.error('Login failed:', error);
-    }
+  try {
+    const token = await securityClient.login(email, password);
+    setToken(token);
+    setIsAuthenticated(true);
+    localStorage.setItem('authToken', token);
+  } catch (error) {
+    console.error('Login failed:', error);
+  }
 };
 
 const handleRegister = async (name: string, email: string, password: string) => {
@@ -148,12 +148,20 @@ const handleRegister = async (name: string, email: string, password: string) => 
 useEffect(() => {
   const generatedClientId = uuidv4();
   setClientId(generatedClientId);
-  const token = localStorage.getItem('authToken'); // Changed from 'token' to 'authToken'
-const ws = new WebSocket(`${WS_URL}?clientId=${generatedClientId}`, token ? [token] : undefined);
+  const authToken = localStorage.getItem('authToken');
+  
+  // Include the token in the WebSocket connection
+  const ws = new WebSocket(
+    `${WS_URL}?clientId=${generatedClientId}&token=${authToken}`
+  );
 
   ws.onopen = () => {
-      console.log('WebSocket connection established with PostOffice');
-      ws.send(JSON.stringify({ type: 'CLIENT_CONNECT', clientId: generatedClientId }));
+    console.log('WebSocket connection established with PostOffice');
+    ws.send(JSON.stringify({ 
+      type: 'CLIENT_CONNECT', 
+      clientId: generatedClientId,
+      token: authToken  // Include token in the connection message
+    }));
   };
 
   ws.onmessage = (event) => {
@@ -181,19 +189,25 @@ const ws = new WebSocket(`${WS_URL}?clientId=${generatedClientId}`, token ? [tok
 
   const handleSendMessage = async (message: string) => {
     if (!clientId) return;
-
+  
     setConversationHistory((prev) => [...prev, `User: ${message}`]);
     
     try {
       if (!activeMission) {
+        // Include the auth token in the createMission request
+        const authToken = localStorage.getItem('authToken');
         await api.post('/createMission', {
           goal: message,
           clientId
+        }, {
+          headers: {
+            'Authorization': `Bearer ${authToken}`
+          }
         });
         setActiveMission(true);
-        console.log('New mission created:');
+        console.log('New mission created');
       } else {
-        if (currentQuestion) {
+            if (currentQuestion) {
           await api.post('/sendMessage', {
             type: 'answer',
             questionGuid: currentQuestion.guid,

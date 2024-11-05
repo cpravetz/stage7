@@ -43,11 +43,11 @@ class MissionControl extends BaseEntity {
     }
 
     private async handleMessage(req: express.Request, res: express.Response) {
-        const { type, sender, content, clientId, user } = req.body;
+        const { type, sender, content, clientId } = req.body;
+        const user = (req as any).user;
+        console.log(`Received message: ${JSON.stringify(req.body)}`);
         const missionId = req.body.missionId ? req.body.missionId : (req.body.content.missionId ? req.body.content.missionId : null);
         console.log(`Received message of type ${type} from ${sender} for mission ${missionId}`);
-        const mission = missionId ? this.missions.get(missionId) : null;
-
         try {
             switch (type) {
                 case MessageType.CREATE_MISSION:
@@ -69,6 +69,7 @@ class MissionControl extends BaseEntity {
                     }
                     break;
                 case MessageType.SAVE:
+                    const mission = missionId ? this.missions.get(missionId) : null;
                     if (mission) {
                         const missionName = req.body.missionName ? req.body.missionName : (mission.name ? mission.name : `mission ${new Date()}`);
                         await this.saveMission(missionId, missionName);

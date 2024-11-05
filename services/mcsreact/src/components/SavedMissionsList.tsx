@@ -27,18 +27,29 @@ const SavedMissionsList: React.FC<SavedMissionsListProps> = ({ onMissionSelect, 
   const [missions, setMissions] = useState<SavedMission[]>([]);
 
   useEffect(() => {
+    const fetchSavedMissions = async () => {
+      const token = localStorage.getItem('authToken');
+      if (!token) {
+        console.error('No auth token found');
+        return;
+      }
+
+      try {
+        const response = await api.get('/getSavedMissions', {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+        setMissions(response.data);
+      } catch (error) {
+        console.error('Error fetching saved missions:', error);
+      }
+    };
+
     fetchSavedMissions();
-  }, []);
+    }, []);
 
-  const fetchSavedMissions = async () => {
-    try {
-      const response = await api.get('/getSavedMissions');
-      setMissions(response.data);
-    } catch (error) {
-      console.error('Error fetching saved missions:', error);
-    }
-  };
-
+  
   return (
     <div className="saved-missions-list">
       <div className="saved-missions-header">

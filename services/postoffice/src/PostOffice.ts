@@ -1,8 +1,8 @@
 import express from 'express';
+import jwt from 'jsonwebtoken';
 import cors from 'cors';
 import WebSocket from 'ws';
 import http from 'http';
-import { v4 as uuidv4 } from 'uuid';
 import { Component } from './types/Component';
 import { Message, MessageType } from '@cktmcs/shared';
 import axios from 'axios';
@@ -79,10 +79,10 @@ export class PostOffice {
         this.app.get('/requestComponent', (req, res) => this.requestComponent(req, res));
         this.app.get('/getServices', (req, res) => this.getServices(req, res)); 
         this.app.post('/submitUserInput', (req, res) => this.submitUserInput(req, res));
-        this.app.post('/createMission', (req, res) => this.createMission(req, res));
+        this.app.post('/createMission', (req, res) => { this.createMission(req, res) });
         this.app.post('/loadMission', (req, res) => this.loadMission(req, res));
         this.app.get('/librarian/retrieve/:id', (req, res) => this.retrieveWorkProduct(req, res));
-        this.app.get('/getSavedMissions', (req, res) => this.getSavedMissions(req, res));
+        this.app.get('/getSavedMissions', (req, res) => { this.getSavedMissions(req, res)} );
 
         const port = parseInt(process.env.PORT || '5020', 10);
         this.server.listen(port, '0.0.0.0', () => {
@@ -218,7 +218,7 @@ export class PostOffice {
                 if (component && messages.length > 0) {
                     const message = messages.shift()!;
                     try {
-                        await axios.post(`http://${component.url}/message`, message);
+                        await api.post(`http://${component.url}/message`, message);
                     } catch (error) {
                         console.error(`Failed to deliver message to ${recipientId}:`, error);
                         messages.unshift(message); // Put the message back in the queue
@@ -228,36 +228,29 @@ export class PostOffice {
         }
     }
 
-    private subscribeToTopic = (req: express.Request, res: express.Response) => {
-        const { componentId, topic } = req.body;
-        if (!this.subscriptions.has(topic)) {
-            this.subscriptions.set(topic, new Set());
-        }
-        this.subscriptions.get(topic)!.add(componentId);
-        res.status(200).send({ status: 'Subscribed successfully' });
-    }
-
-    private publishToTopic = async (req: express.Request, res: express.Response) => {
-        const { topic, message } = req.body;
-        const subscribers = this.subscriptions.get(topic) || new Set();
-        for (const subscriberId of subscribers) {
-            await this.routeMessage({ ...message, recipient: subscriberId });
-        }
-        res.status(200).send({ status: 'Message published to topic' });
-    }
-
-    
     private async createMission(req: express.Request, res: express.Response) {
         const { goal, clientId } = req.body;
         const token = req.headers.authorization;
-
-        console.log(`PotOffice has request to createMission for goal`,goal);
+    
+        console.log(`PostOffice has request to createMission for goal`, goal);
+        
+        if (!token) {
+            return res.status(401).json({ error: 'No authorization token provided' });
+        }
+    
         try {
             const missionControlUrl = this.getComponentUrl('MissionControl');
             if (!missionControlUrl) {
                 throw new Error('MissionControl not registered');
             }
-            const response = await axios.post(`http://${missionControlUrl}/message`, {
+    
+            // Pass the exact same token format received from the client
+            const headers = {
+                'Content-Type': 'application/json',
+                'Authorization': token  // Don't modify the token, pass it as-is
+            };
+    
+            const response = await api.post(`http://${missionControlUrl}/message`, {
                 type: MessageType.CREATE_MISSION,
                 sender: 'PostOffice',
                 recipient: 'MissionControl',
@@ -266,16 +259,24 @@ export class PostOffice {
                     goal
                 },
                 timestamp: new Date().toISOString()
-            }, {
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': token // Forward the token
-                }
-            });
+            }, { headers });
+    
             res.status(200).send(response.data);
         } catch (error) {
             console.error('Error creating mission:', error);
-            res.status(500).send({ error: 'Failed to create mission' });
+            if (axios.isAxiosError(error) && error.response) {
+                // More detailed error handling
+                const status = error.response.status;
+                const errorMessage = error.response.data?.error || 'Unknown error occurred';
+                
+                // Pass through the actual error status from MissionControl
+                res.status(status).json({ 
+                    error: errorMessage,
+                    details: error.response.data 
+                });
+            } else {
+                res.status(500).json({ error: 'Internal server error' });
+            }
         }
     }
 
@@ -454,7 +455,19 @@ export class PostOffice {
             if (!librarianUrl) {
                 throw new Error('Librarian not registered');
             }
-            const response = await api.get(`http://${librarianUrl}/getSavedMissions`);
+            
+            // Extract user ID from the JWT token
+            const token = req.headers.authorization?.split(' ')[1];
+            if (!token) {
+                return res.status(401).send({ error: 'No token provided' });
+            }
+    
+            const decodedToken = jwt.verify(token, process.env.JWT_SECRET as string) as { id: string };
+            const userId = decodedToken.id;
+    
+            const response = await api.get(`http://${librarianUrl}/getSavedMissions`, {
+                params: { userId }
+            });
             res.status(200).send(response.data);
         } catch (error) {
             console.error('Error getting saved missions:', error);
