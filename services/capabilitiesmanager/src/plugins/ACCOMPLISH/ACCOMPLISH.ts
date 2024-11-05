@@ -86,6 +86,17 @@ Guidelines for creating a plan:
 10. The actionVerb DELEGATE is available to use to create sub-agents with goals of their own.
 11. input values may be determined by preceeding steps.  In those instances set the value to 'undefined'
 
+A number of plugins are available to execute steps of the plan for you.  These include:
+
+ACCOMPLISH - this plugin takes a specific goal and either achieves it or returns a plan to achieve it.
+FILE_OPS - this plugin provides services for file operations read, write, append
+SEARCH - this plugin searches DuckDuckGo for a given term and returns a list of links
+SCRAPE - this plugin scrapes content from a given URL
+GET_USER_INPUT - this plugin requests input from the user
+
+
+If it makes sense to break work into multiple streams, you can use the actionVerb DELEGATE to create a sub-agent with a goal of its own.
+
 Ensure your response is a valid JSON object starting with either "type": "DIRECT_ANSWER" or "type": "PLAN". 
 Double check that you are returning valid JSON. Remove any leading or trailing characters that might invalidate the response as a JSON object.
 `  }
@@ -173,7 +184,7 @@ async function queryBrain(prompt: string): Promise<string> {
         const brainUrl = process.env.BRAIN_URL || 'brain:5070';
         try {
             const response = await axios.post(`http://${brainUrl}/chat`, {
-                exchanges: [{ sender: 'user', message: prompt }],
+                exchanges: [{ role: 'user', message: prompt }],
                 optimization: 'accuracy'
             });
             return response.data.response;

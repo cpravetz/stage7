@@ -7,7 +7,8 @@ import StatisticsWindow from './components/StatisticsWindow';
 import SavedMissionsList from './components/SavedMissionsList';
 import ErrorBoundary from './components/ErrorBoundary';
 import LoginComponent from './components/Login';
-import { MissionStatistics, MessageType, SecurityClient } from '@cktmcs/shared';
+import { MissionStatistics, MessageType } from '@cktmcs/shared';
+import { SecurityClient } from './SecurityClient';
 import axios, { AxiosInstance } from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import './App.css';
@@ -147,8 +148,8 @@ const handleRegister = async (name: string, email: string, password: string) => 
 useEffect(() => {
   const generatedClientId = uuidv4();
   setClientId(generatedClientId);
-
-  const ws = new WebSocket(`${WS_URL}?clientId=${generatedClientId}`);
+  const token = localStorage.getItem('authToken'); // Changed from 'token' to 'authToken'
+const ws = new WebSocket(`${WS_URL}?clientId=${generatedClientId}`, token ? [token] : undefined);
 
   ws.onopen = () => {
       console.log('WebSocket connection established with PostOffice');

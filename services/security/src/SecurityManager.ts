@@ -134,42 +134,46 @@ export class SecurityManager extends BaseEntity {
 
     private async registerUser(req: express.Request, res: express.Response) {
         try {
-            const { email, password, username } = req.body;
+            console.log('Registering user:', req.body);
+            const { email, password, name } = req.body;
             
             // Validate input
-            if (!email || !password || !username) {
+            if (!email || !password || !name) {
+                console.log('Missing required fields:', req.body);
                 return res.status(400).json({ error: 'Missing required fields' });
             }
-
+    
             // Check if user already exists
             const existingUser = await this.findUserByEmail(email);
             if (existingUser) {
+                console.log('User already exists:', email);
                 return res.status(409).json({ error: 'User already exists' });
             }
-
+            console.log('Creating new user:', email);
             // Hash password
             const hashedPassword = await bcrypt.hash(password, this.SALT_ROUNDS);
-
+            console.log('Hashed password:', hashedPassword);
             // Create user
             const user: User = {
                 id: uuidv4(),
                 email,
-                username,
+                username: name,
                 password: hashedPassword,
                 role: 'user',
                 lastLogin: new Date(),
                 authProvider: 'local'
             };
-
+            console.log('New user:', user);
             // Store user in Librarian
-            await this.storeUser(user);
-
+            this.storeUser(user);
+            console.log('User stored');
             // Generate token
             const token = this.generateToken(user);
-
+            console.log('Token generated:', token);
+            console.log('User registered successfully:', { ...user, password: undefined });
             res.status(201).json({ token, user: { ...user, password: undefined } });
         } catch (error) {
-            console.error('Registration error:', error);
+            console.error('New user registration error:', error);
             res.status(500).json({ error: 'Registration failed' });
         }
     }
@@ -287,7 +291,7 @@ export class SecurityManager extends BaseEntity {
     }
 
     private async storeUser(user: User): Promise<void> {
-        await axios.post(`http://${this.librarianUrl}/storeData`, {
+        return await axios.post(`http://${this.librarianUrl}/storeData`, {
             id: user.email,
             data: user,
             storageType: 'mongo',

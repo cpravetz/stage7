@@ -6,7 +6,8 @@ export enum PluginParameterType {
     OBJECT = 'object',
     PLAN = 'plan',
     PLUGIN = 'plugin',
-    ERROR = 'error'
+    ERROR = 'error',
+    ANY = 'any'
 }
 
 export interface EntryPointType {

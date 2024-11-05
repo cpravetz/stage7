@@ -12,6 +12,8 @@ export enum LLMConversionType {
     VideoToImage = 'video/image',
     VideoToAudio = 'video/audio',
     VideoToVideo = 'video/video',
+    TextToCode = 'text/code',
+    CodeToText = 'code/text',
 }
 export class Model {
     public name: string;

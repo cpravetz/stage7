@@ -147,7 +147,7 @@ async function queryBrain(prompt) {
     try {
         const brainUrl = process.env.BRAIN_URL || 'brain:5070';
         const response = await axios.post(\`http://\${brainUrl}/chat\`, {
-            exchanges: [{ sender: 'user', message: prompt }],
+            exchanges: [{ role: 'user', message: prompt }],
             optimization: 'accuracy'
         });
         return response.data.response;

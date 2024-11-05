@@ -11,13 +11,19 @@ const LoginComponent: React.FC<LoginProps> = ({ onLogin, onRegister }) => {
     const [name, setName] = useState('');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
+    const [error, setError] = useState<string | null>(null);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (isLogin) {
-            await onLogin(email, password);
-        } else {
-            await onRegister(name, email, password);
+        setError(null);
+        try {
+            if (isLogin) {
+                await onLogin(email, password);
+            } else {
+                await onRegister(name, email, password);
+            }
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'An error occurred');
         }
     };
 
@@ -25,6 +31,7 @@ const LoginComponent: React.FC<LoginProps> = ({ onLogin, onRegister }) => {
         <div className="auth-container">
             <form onSubmit={handleSubmit}>
                 <h2>{isLogin ? 'Login' : 'Register'}</h2>
+                {error && <div className="error-message">{error}</div>}
                 {!isLogin && (
                     <input
                         type="text"

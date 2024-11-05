@@ -8,7 +8,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 interface Thread {
-    exchanges: Array<{ sender: string, message: string }>;
+    exchanges: Array<{ role: string, message: string }>;
     optimization?: OptimizationType;
     metadata?: Record<string, any>;
 }
@@ -67,7 +67,7 @@ export class Brain extends BaseEntity {
                 throw new Error('No suitable model found.');
             }
 
-            const messages = thread.exchanges.map((ex: { sender: string; message: string }) => {
+            const messages = thread.exchanges.map((ex: { role: string; message: string }) => {
                 if (typeof ex.message !== 'string') {
                     throw new Error('Invalid message format in thread exchanges');
                 }

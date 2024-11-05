@@ -1,9 +1,10 @@
+import axios from 'axios';
 import express from 'express';
-import { Mission } from './types/Mission';
-import { Status } from './types/Status';
+import { Request, Response, NextFunction } from 'express';
+import { Mission, Status } from '@cktmcs/shared';
 import { generateGuid } from './utils/generateGuid';
 import { BaseEntity, TrafficManagerStatistics, MissionStatistics, MessageType, PluginInput } from '@cktmcs/shared';
-import axios from 'axios';
+import { verifyToken } from '@cktmcs/shared';
 
 const api = axios.create({
     headers: {
@@ -19,6 +20,7 @@ class MissionControl extends BaseEntity {
     private librarianUrl: string = process.env.LIBRARIAN_URL || 'librarian:5040';
     private brainUrl: string = process.env.BRAIN_URL || 'brain:5060';
     private engineerUrl: string = process.env.ENGINEER_URL || 'engineer:5050';
+    
 
     constructor() {
         super(generateGuid(), 'MissionControl', process.env.HOST || 'missioncontrol', process.env.PORT || '5050');
@@ -29,6 +31,9 @@ class MissionControl extends BaseEntity {
     private initializeServer() {
         const app = express();
         app.use(express.json());
+        app.use((req: Request, res: Response, next: NextFunction) => {
+            verifyToken(req, res, next);
+        });
 
         app.post('/message', (req, res) => this.handleMessage(req, res));
 
@@ -38,7 +43,7 @@ class MissionControl extends BaseEntity {
     }
 
     private async handleMessage(req: express.Request, res: express.Response) {
-        const { type, sender, content, clientId } = req.body;
+        const { type, sender, content, clientId, user } = req.body;
         const missionId = req.body.missionId ? req.body.missionId : (req.body.content.missionId ? req.body.content.missionId : null);
         console.log(`Received message of type ${type} from ${sender} for mission ${missionId}`);
         const mission = missionId ? this.missions.get(missionId) : null;
@@ -46,7 +51,7 @@ class MissionControl extends BaseEntity {
         try {
             switch (type) {
                 case MessageType.CREATE_MISSION:
-                    await this.createMission(content, clientId);
+                    await this.createMission(content, clientId, user.id);
                     break;
                 case MessageType.PAUSE:
                     if (missionId) {
@@ -70,7 +75,7 @@ class MissionControl extends BaseEntity {
                     }
                     break;
                 case MessageType.LOAD:
-                    await this.loadMission(missionId, clientId);
+                    await this.loadMission(missionId, clientId, user.id);
                     break;
                 default:
                     console.log(`Unhandled message type: ${type}`);
@@ -82,10 +87,11 @@ class MissionControl extends BaseEntity {
         }
     }
 
-    private async createMission(content: any, clientId: string) {
+    private async createMission(content: any, clientId: string, userId: string) {
         this.logAndSay(`Creating mission with goal: ${content.goal}`);
         const mission: Mission = {
             id: generateGuid(),
+            userId: userId,
             name: content.name,
             goal: content.goal,
             missionContext: content.missionContext || '',
@@ -152,13 +158,18 @@ class MissionControl extends BaseEntity {
         }
     }
 
-    private async loadMission(missionId: string, clientId: string) {
+    private async loadMission(missionId: string, clientId: string, userId: string) {
         try {
             const mission = await this.loadMissionState(missionId);
             if (!mission) {
                 console.error('Mission not found:', missionId);
                 return;
             }
+            if (mission.userId !== userId) {
+                console.error('User not authorized to load this mission');
+                return;
+            }
+    
             this.missions.set(missionId, mission);
             await api.post(`http://${this.trafficManagerUrl}/loadAgents`, { missionId });
             this.addClientMission(clientId, missionId);
@@ -190,6 +201,7 @@ class MissionControl extends BaseEntity {
         try {
             await api.post(`http://${this.librarianUrl}/storeData`, {
                 id: mission.id,
+                userId: mission.userId,
                 data: mission,
                 collection: 'missions',
                 storageType: 'mongo'

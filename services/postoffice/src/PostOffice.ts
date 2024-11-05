@@ -124,13 +124,17 @@ export class PostOffice {
             console.log(`Client ${clientId} connected`);
             this.clients.set(clientId, ws);
     
+            // Extract token from the WebSocket connection request
+            const token = req.headers['sec-websocket-protocol'] as string;
+    
             ws.on('message', (message: string) => {
                 try {
                     const parsedMessage = JSON.parse(message);
                     if (parsedMessage.type === MessageType.CLIENT_CONNECT) {
                         console.log(`Client ${parsedMessage.clientId} confirmed connection`);
                     } else {
-                        this.handleWebSocketMessage(parsedMessage);
+                        // Pass the token to handleWebSocketMessage
+                        this.handleWebSocketMessage(parsedMessage, token);
                     }
                 } catch (error) {
                     console.error('Error parsing WebSocket message:', error);
@@ -245,6 +249,8 @@ export class PostOffice {
     
     private async createMission(req: express.Request, res: express.Response) {
         const { goal, clientId } = req.body;
+        const token = req.headers.authorization;
+
         console.log(`PotOffice has request to createMission for goal`,goal);
         try {
             const missionControlUrl = this.getComponentUrl('MissionControl');
@@ -260,6 +266,11 @@ export class PostOffice {
                     goal
                 },
                 timestamp: new Date().toISOString()
+            }, {
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': token // Forward the token
+                }
             });
             res.status(200).send(response.data);
         } catch (error) {
@@ -331,13 +342,15 @@ export class PostOffice {
 
     private async handleIncomingMessage(req: express.Request, res: express.Response) {
         const message: Message = req.body;
+        const token = req.headers.authorization || '';
+
         try {
             const recipientUrl = await this.discoverService(message.recipient);
             if (!recipientUrl) {
                 res.status(404).send({ error: `Recipient not found for ${JSON.stringify(message.recipient)}` });
                 return;
             }
-            await this.sendToComponent(`${recipientUrl}/message`, message);
+            await this.sendToComponent(`${recipientUrl}/message`, message, token);
             res.status(200).send({ status: 'Message sent' });
         } catch (error) {
             console.error('Error sending message:', error);
@@ -345,7 +358,7 @@ export class PostOffice {
         }
     }
     
-    private async handleWebSocketMessage(message: string) {
+    private async handleWebSocketMessage(message: string, token: string) {
         try {
             let parsedMessage: Message;
             
@@ -358,13 +371,13 @@ export class PostOffice {
             }
     
             console.log('WebSocket message received:', parsedMessage);
-            
+            console.log('Looking for client:', parsedMessage.recipient);
             const recipientUrl = await this.discoverService(parsedMessage.recipient);
             if (!recipientUrl) {
                 console.error(`(ws)Recipient not found for ${JSON.stringify(parsedMessage)}`);
                 return;
             }
-            await this.sendToComponent(recipientUrl, parsedMessage);
+            await this.sendToComponent(recipientUrl, parsedMessage, token);
         } catch (error) {
             console.error('Error handling WebSocket message:', error);
             console.error('Raw message:', message);
@@ -382,7 +395,7 @@ export class PostOffice {
         return services[0].url;
     }
     
-    private async sendToComponent(url: string, message: Message): Promise<void> {
+    private async sendToComponent(url: string, message: Message, token: string): Promise<void> {
         try {
             // Ensure the URL has a protocol
             if (!url.startsWith('http://') && !url.startsWith('https://')) {
@@ -390,7 +403,12 @@ export class PostOffice {
             }
             message.type = message.type || message.content.type;
             console.log(`Sending message to: ${url}: ${message}`);            
-            await api.post(url, message);
+            await api.post(url, message, {
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': token // Forward the token
+                }
+            });
         } catch (error) {
             console.error(`Failed to send message to ${url}:`, error);
             throw error;
@@ -445,30 +463,39 @@ export class PostOffice {
     }
    
     private async routeSecurityRequest(req: express.Request, res: express.Response, next: express.NextFunction) {
-        if (!this.securityManagerUrl) { // If SecurityManager is not registered yet
+        if (!this.securityManagerUrl) {
             res.status(503).json({ error: 'SecurityManager not registered yet' });
-            next();
-        } else { // If SecurityManager is registered
-            const fullUrl = req.url.replace(`${this.url}/securityManager`, `http://${this.securityManagerUrl}`);
-            console.log(`Forwarding request to SecurityManager: ${fullUrl}`);
+            return next();
+        }
     
-            try {
-                const response = await axios({
-                    method: req.method,
-                    url: fullUrl,
-                    data: req.body,
-                    headers: req.headers,
-                });
+        console.log('Original URL:', req.originalUrl);
+        
+        const securityManagerPath = req.originalUrl.split('/securityManager')[1] || '/';
+        const fullUrl = `http://${this.securityManagerUrl}${securityManagerPath}`;
+        console.log(`Forwarding request to SecurityManager: ${fullUrl}`);
     
-                res.status(response.status).json(response.data);
-            } catch (error) {
-                console.error(`Error forwarding request to SecurityManager: ${error}`);
-                const message = error instanceof Error ? error.message : false;
-                if (message) {
-                    res.status(500).json({ error: message });
-                } else {
-                    res.status(500).json({ error: 'Internal server error' });
-                }
+        try {
+            const response = await axios({
+                method: req.method,
+                url: fullUrl,
+                data: req.body,
+                headers: req.headers,
+                params: req.query
+            });
+    
+            // Log the response from SecurityManager
+            console.log('Response from SecurityManager:', response.data);
+    
+            // Send the response back to the client
+            res.status(response.status).json(response.data);
+        } catch (error) {
+            console.error(`Error forwarding request to SecurityManager:`, error);
+            if (axios.isAxiosError(error) && error.response) {
+                // If it's an Axios error with a response, send that response to the client
+                res.status(error.response.status).json(error.response.data);
+            } else {
+                // For other types of errors, send a generic error message
+                res.status(500).json({ error: 'Internal server error' });
             }
         }
     }

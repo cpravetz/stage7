@@ -496,7 +496,7 @@ Please consider this context and the available plugins when planning and executi
         const userMessage = args ? args.inputValue : '';
         this.conversation.push({ role: 'user', content: userMessage });
         const reasoningInput = {
-            exchanges: [{ sender: 'user', message: this.conversation }],
+            exchanges: [{ role: 'user', message: this.conversation }],
             optimization: 'accuracy'
         };
 

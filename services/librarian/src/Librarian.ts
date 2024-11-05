@@ -1,12 +1,10 @@
 import express from 'express';
 import axios from 'axios';
 import bodyParser from 'body-parser';
+import dotenv from 'dotenv';
 import { storeInRedis, loadFromRedis, deleteFromRedis } from './utils/redisUtils';
 import { storeInMongo, loadFromMongo, loadManyFromMongo, aggregateInMongo, deleteManyFromMongo } from './utils/mongoUtils';
-import { DataBundle } from './types/DataBundle';
 import { WorkProduct } from './types/WorkProduct';
-import { Mission } from './types/Mission';
-import dotenv from 'dotenv';
 import { BaseEntity, MapSerializer } from '@cktmcs/shared';
 
 dotenv.config();

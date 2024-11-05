@@ -124,7 +124,7 @@ export class Engineer extends BaseEntity {
     `;
     
             const response = await axios.post(`http://${this.brainUrl}/chat`, {
-                exchanges: [{ sender: 'user', message: engineeringPrompt }],
+                exchanges: [{ role: 'user', message: engineeringPrompt }],
                 optimization: 'accuracy'
             });
             pluginStructure = JSON.parse(response.data.result);
@@ -171,7 +171,7 @@ export class Engineer extends BaseEntity {
         const prompt = `Given the action verb "${verb}" and the context "${context}", provide a detailed explanation of what a plugin for this verb should do. Include expected inputs and outputs.`;
         try {
             const response = await axios.post(`http://${this.brainUrl}/chat`, {
-                exchanges: [{ sender: 'user', message: prompt }],
+                exchanges: [{ role: 'user', message: prompt }],
                 optimization: 'accuracy'
             });
 

@@ -4,13 +4,16 @@
     "module": "commonjs",
     "declaration": true,
     "outDir": "./dist",
+    "moduleResolution": "node",
     "strict": true,
     "paths": {
       "@cktmcs/shared/*": ["./src/*"]  
     },
     "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
     "rootDir": "./src"  
   },
   "include": ["src"],
   "exclude": ["node_modules", "dist"]  
 }
+
