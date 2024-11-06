@@ -13,12 +13,12 @@
     "paths": {
       "@cktmcs/shared": ["../../shared"]
     },
-    "types": ["express", "mocha"],
+    "types": ["express", "jest"],
     "resolveJsonModule": true,
     "sourceMap": true,
     "allowJs": true,
     "noEmit": false
   },
-  "include": ["src/**/*", "src/plugins/**/*", "src/plugins/__tests__/ACCOMPLISH.test.ts" ],
+  "include": ["src/**/*", "src/plugins/**/*"],
   "exclude": ["node_modules"]
 }

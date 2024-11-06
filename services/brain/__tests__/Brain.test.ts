@@ -61,7 +61,7 @@ describe('Brain', () => {
       await brain.chat(mockReq, mockRes);
 
       expect(mockSelectedModel.interface.generate).toHaveBeenCalledWith(
-        [{ role: 'user', message: 'Hello' }],
+        [{ role: 'user', content: 'Hello' }],
         { max_length: 100, temperature: 0.7 }
       );
       expect(mockRes.json).toHaveBeenCalledWith({
