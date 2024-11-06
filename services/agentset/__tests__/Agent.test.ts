@@ -1,71 +1,51 @@
-import { Agent } from '../src/agents/Agent';
+import { Agent, AgentConfig } from '../src/agents/Agent';
 import axios from 'axios';
 import { AgentStatus } from '../src/utils/agentStatus';
+import { PluginInput, PluginOutput, PluginParameterType } from '@cktmcs/shared';
 
 jest.mock('axios');
-jest.mock('uuid', () => ({ v4: () => 'mocked-uuid' }));
-
-const mockedAxios = axios as jest.Mocked<typeof axios>;
+jest.mock('../src/utils/postOffice');
+jest.mock('../src/utils/AgentPersistenceManager');
 
 describe('Agent', () => {
   let agent: Agent;
-  const mockConfig = {
-    actionVerb: 'TEST',
-    inputValue: 'test-inputValue',
-    args: { testArg: 'value' },
-    missionId: 'test-mission',
-    dependencies: [],
-    postOfficeUrl: 'test-postoffice-url',
-    id: 'test-agent-id',
-  };
+  let mockConfig: AgentConfig;
 
   beforeEach(() => {
-    jest.clearAllMocks();
-    mockedAxios.create.mockReturnValue(mockedAxios);
-    mockedAxios.post.mockResolvedValue({ data: {} });
-    mockedAxios.get.mockResolvedValue({ data: {} });
+    mockConfig = {
+      actionVerb: 'TEST',
+      inputs: new Map(),
+      missionId: 'test-mission',
+      dependencies: [],
+      postOfficeUrl: 'test-postoffice:5000',
+      agentSetUrl: 'test-agentset:5001',
+      id: 'test-agent-id',
+      missionContext: 'Test mission context'
+    };
+
+    (axios.create as jest.Mock).mockReturnValue({
+      post: jest.fn().mockResolvedValue({ data: {} }),
+      get: jest.fn().mockResolvedValue({ data: {} })
+    });
+
     agent = new Agent(mockConfig);
   });
 
+  afterEach(() => {
+    jest.clearAllMocks();
+  });
+
   test('Agent initialization', () => {
-    expect(agent.getMissionId()).toBe('test-mission');
-    expect(agent.getStatus()).toBe(AgentStatus.INITIALIZING);
+    expect(agent.id).toBe('test-agent-id');
+    expect(agent.status).toBe(AgentStatus.INITIALIZING);
+    expect(agent.missionId).toBe('test-mission');
   });
 
   test('Agent runAgent method', async () => {
-    await agent['runAgent']();
-    expect(agent.getStatus()).toBe(AgentStatus.COMPLETED);
-  });
-
-  test('Agent handleMessage method', async () => {
-    const mockMessage = { type: 'TEST_MESSAGE', content: 'test content' };
-    await agent.handleMessage(mockMessage);
-    // Add assertions based on expected behavior
-  });
-
-  test('Agent pause method', async () => {
-    await agent.pause();
-    expect(agent.getStatus()).toBe(AgentStatus.PAUSED);
-  });
-
-  test('Agent resume method', async () => {
-    await agent.pause();
-    await agent.resume();
-    expect(agent.getStatus()).toBe(AgentStatus.RUNNING);
-  });
-
-  test('Agent abort method', async () => {
-    await agent.abort();
-    expect(agent.getStatus()).toBe(AgentStatus.ABORTED);
-  });
-
-  test('Agent getStatistics method', async () => {
-    const stats = await agent.getStatistics();
-    expect(stats).toHaveProperty('id', 'test-agent-id');
-    expect(stats).toHaveProperty('status');
-    expect(stats).toHaveProperty('taskCount');
-    expect(stats).toHaveProperty('currenTaskNo');
-    expect(stats).toHaveProperty('currentTaskVerb');
+    const runAgentSpy = jest.spyOn(agent as any, 'runAgent');
+    await (agent as any).initializeAgent();
+    expect(runAgentSpy).toHaveBeenCalled();
+    expect(agent.status).toBe(AgentStatus.RUNNING);
   });
 
   test('Agent processStep method', async () => {
@@ -73,23 +53,59 @@ describe('Agent', () => {
       id: 'test-step-id',
       stepNo: 1,
       actionVerb: 'TEST',
-      inputValue: 'test-inputValue',
-      args: {},
-      dependencies: [],
-      status: 'pending' as const,
+      inputs: new Map<string, PluginInput>(),
+      dependencies: new Map<string, number>(),
+      status: 'pending',
+      result: undefined
     };
 
-    mockedAxios.post.mockResolvedValueOnce({ 
-      data: { 
-        success: true, 
-        resultType: 'object', 
-        result: { test: 'result' } 
-      } 
-    });
+    const mockPluginOutput: PluginOutput = {
+      success: true,
+      resultType: PluginParameterType.STRING,
+      resultDescription: 'Test result',
+      result: 'Test output',
+      mimeType: 'text/plain'
+    };
 
-    await agent['processStep'](mockStep);
+    (agent as any).executeActionWithCapabilitiesManager = jest.fn().mockResolvedValue(mockPluginOutput);
+
+    await (agent as any).processStep(mockStep);
+
     expect(mockStep.status).toBe('completed');
+    expect(mockStep.result).toBe('Test output');
   });
 
-  // Add more tests for other methods as needed
+  test('Agent handleMessage method', async () => {
+    const mockMessage = {
+      type: 'ANSWER',
+      content: { answer: 'Test answer', questionGuid: 'test-guid' }
+    };
+
+    agent.questions = ['test-guid'];
+    (agent as any).currentQuestionResolve = jest.fn();
+
+    await agent.handleMessage(mockMessage);
+
+    expect(agent.questions).not.toContain('test-guid');
+    expect((agent as any).currentQuestionResolve).toHaveBeenCalledWith('Test answer');
+  });
+
+  test('Agent pause and resume methods', async () => {
+    await agent.pause();
+    expect(agent.status).toBe(AgentStatus.PAUSED);
+
+    await agent.resume();
+    expect(agent.status).toBe(AgentStatus.RUNNING);
+  });
+
+  test('Agent abort method', async () => {
+    await agent.abort();
+    expect(agent.status).toBe(AgentStatus.ABORTED);
+  });
+
+  test('Agent getStatistics method', async () => {
+    const stats = await agent.getStatistics();
+    expect(stats.id).toBe('test-agent-id');
+    expect(stats.status).toBe(agent.status);
+  });
 });

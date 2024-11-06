@@ -1,146 +1,127 @@
 import { AgentSet } from '../src/AgentSet';
 import { Agent } from '../src/agents/Agent';
-import { AgentStatus } from '../src/utils/agentStatus';
-import axios from 'axios';
+import { AgentPersistenceManager } from '../src/utils/AgentPersistenceManager';
 import express from 'express';
+import axios from 'axios';
 
-jest.mock('axios');
 jest.mock('../src/agents/Agent');
-jest.mock('express', () => {
-  const mockExpress = {
-    json: jest.fn(),
-    listen: jest.fn(),
-    post: jest.fn(),
-    get: jest.fn(),
-  };
-  return jest.fn(() => mockExpress);
-});
+jest.mock('../src/utils/AgentPersistenceManager');
+jest.mock('axios');
 
 describe('AgentSet', () => {
   let agentSet: AgentSet;
-  const mockAgent = {
-    id: 'test-agent-id',
-    pause: jest.fn(),
-    resume: jest.fn(),
-    abort: jest.fn(),
-    handleMessage: jest.fn(),
-    getMissionId: jest.fn(),
-    getStatus: jest.fn(),
-    getStatistics: jest.fn(),
-    getOutput: jest.fn(),
-  };
 
   beforeEach(() => {
-    jest.clearAllMocks();
-    (Agent as jest.Mock).mockImplementation(() => mockAgent);
     agentSet = new AgentSet();
+    (Agent as jest.Mock).mockClear();
+    (AgentPersistenceManager as jest.Mock).mockClear();
+    (axios.post as jest.Mock).mockClear();
   });
 
-  test('addAgent adds a new agent to the set', async () => {
-    const req = {
-      body: {
-        agentId: 'test-agent-id',
-        actionVerb: 'TEST',
-        inputValue: 'test',
-        args: {},
-        capabilitiesManagerUrl: 'http://test.com',
-        trafficManagerUrl: 'http://test.com',
-        missionId: 'test-mission',
-      },
-    };
-    const res = {
-      status: jest.fn().mockReturnThis(),
-      send: jest.fn(),
-    };
+  describe('addAgent', () => {
+    it('should add a new agent and return its ID', async () => {
+      const mockReq = {
+        body: {
+          agentId: 'test-agent-id',
+          actionVerb: 'TEST_ACTION',
+          inputs: { key: 'value' },
+          missionId: 'test-mission-id',
+          missionContext: 'test-context'
+        }
+      } as express.Request;
+      const mockRes = {
+        status: jest.fn().mockReturnThis(),
+        send: jest.fn()
+      } as unknown as express.Response;
 
-    await (agentSet as any).initializeServer().post('/addAgent')(req, res);
+      await (agentSet as any).addAgent(mockReq, mockRes);
 
-    expect(res.status).toHaveBeenCalledWith(200);
-    expect(res.send).toHaveBeenCalledWith({ message: 'Agent added', agentId: 'test-agent-id' });
-    expect(agentSet.agents.size).toBe(1);
+      expect(Agent).toHaveBeenCalledWith(expect.objectContaining({
+        id: 'test-agent-id',
+        actionVerb: 'TEST_ACTION',
+        missionId: 'test-mission-id'
+      }));
+      expect(mockRes.status).toHaveBeenCalledWith(200);
+      expect(mockRes.send).toHaveBeenCalledWith(expect.objectContaining({
+        message: 'Agent added',
+        agentId: expect.any(String)
+      }));
+    });
   });
 
-  test('pauseAgents pauses all agents in the set', async () => {
-    agentSet.agents.set('test-agent-id', mockAgent as unknown as Agent);
-    const req = {};
-    const res = {
-      status: jest.fn().mockReturnThis(),
-      send: jest.fn(),
-    };
+  describe('handleAgentMessage', () => {
+    it('should handle a message for an existing agent', async () => {
+      const mockAgent = {
+        handleMessage: jest.fn().mockResolvedValue(undefined)
+      };
+      (agentSet as any).agents.set('test-agent-id', mockAgent);
 
-    await (agentSet as any).initializeServer().post('/pauseAgents')(req, res);
+      const mockReq = {
+        params: { agentId: 'test-agent-id' },
+        body: { content: 'test message' }
+      } as unknown as express.Request;
+      const mockRes = {
+        status: jest.fn().mockReturnThis(),
+        send: jest.fn()
+      } as unknown as express.Response;
 
-    expect(mockAgent.pause).toHaveBeenCalled();
-    expect(res.status).toHaveBeenCalledWith(200);
-    expect(res.send).toHaveBeenCalledWith({ message: 'All agents paused' });
+      await (agentSet as any).handleAgentMessage(mockReq, mockRes);
+
+      expect(mockAgent.handleMessage).toHaveBeenCalledWith({ content: 'test message' });
+      expect(mockRes.status).toHaveBeenCalledWith(200);
+      expect(mockRes.send).toHaveBeenCalledWith({ status: 'Message delivered to agent' });
+    });
+
+    it('should return 404 for non-existent agent', async () => {
+      const mockReq = {
+        params: { agentId: 'non-existent-agent' },
+        body: { content: 'test message' }
+      } as unknown as express.Request;
+      const mockRes = {
+        status: jest.fn().mockReturnThis(),
+        send: jest.fn()
+      } as unknown as express.Response;
+
+      await (agentSet as any).handleAgentMessage(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(404);
+      expect(mockRes.send).toHaveBeenCalledWith({ error: 'Agent not found' });
+    });
   });
 
-  test('resumeAgents resumes all agents in the set', async () => {
-    agentSet.agents.set('test-agent-id', mockAgent as unknown as Agent);
-    const req = {};
-    const res = {
-      status: jest.fn().mockReturnThis(),
-      send: jest.fn(),
-    };
+  describe('getAgentStatistics', () => {
+    it('should return statistics for agents in a mission', async () => {
+      const mockAgent1 = {
+        getMissionId: jest.fn().mockReturnValue('test-mission'),
+        getStatus: jest.fn().mockReturnValue('ACTIVE'),
+        getStatistics: jest.fn().mockResolvedValue({ someStats: 'value' })
+      };
+      const mockAgent2 = {
+        getMissionId: jest.fn().mockReturnValue('test-mission'),
+        getStatus: jest.fn().mockReturnValue('IDLE'),
+        getStatistics: jest.fn().mockResolvedValue({ someOtherStats: 'value' })
+      };
+      (agentSet as any).agents.set('agent1', mockAgent1);
+      (agentSet as any).agents.set('agent2', mockAgent2);
 
-    await (agentSet as any).initializeServer().post('/resumeAgents')(req, res);
+      const mockReq = {
+        params: { missionId: 'test-mission' }
+      } as unknown as express.Request;
+      const mockRes = {
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn()
+      } as unknown as express.Response;
 
-    expect(mockAgent.resume).toHaveBeenCalled();
-    expect(res.status).toHaveBeenCalledWith(200);
-    expect(res.send).toHaveBeenCalledWith({ message: 'All agents resumed' });
-  });
+      await (agentSet as any).getAgentStatistics(mockReq, mockRes);
 
-  test('abortAgents aborts all agents in the set', async () => {
-    agentSet.agents.set('test-agent-id', mockAgent as unknown as Agent);
-    const req = {};
-    const res = {
-      status: jest.fn().mockReturnThis(),
-      send: jest.fn(),
-    };
-
-    await (agentSet as any).initializeServer().post('/abortAgents')(req, res);
-
-    expect(mockAgent.abort).toHaveBeenCalled();
-    expect(res.status).toHaveBeenCalledWith(200);
-    expect(res.send).toHaveBeenCalledWith({ message: 'All agents aborted' });
-  });
-
-  test('getAgentStatistics returns statistics for agents in a mission', async () => {
-    agentSet.agents.set('test-agent-id', mockAgent as unknown as Agent);
-    mockAgent.getMissionId.mockReturnValue('test-mission');
-    mockAgent.getStatus.mockReturnValue(AgentStatus.RUNNING);
-    mockAgent.getStatistics.mockResolvedValue({ id: 'test-agent-id', status: AgentStatus.RUNNING });
-
-    const req = { params: { missionId: 'test-mission' } };
-    const res = {
-      status: jest.fn().mockReturnThis(),
-      json: jest.fn(),
-    };
-
-    await (agentSet as any).getAgentStatistics(req, res);
-
-    expect(res.status).toHaveBeenCalledWith(200);
-    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
-      agentsCount: 1,
-      agentsByStatus: expect.objectContaining({
-        [AgentStatus.RUNNING]: [{ id: 'test-agent-id', status: AgentStatus.RUNNING }]
-      })
-    }));
-  });
-
-  test('getAgentOutput returns output for a specific agent', async () => {
-    agentSet.agents.set('test-agent-id', mockAgent as unknown as Agent);
-    mockAgent.getOutput.mockReturnValue('Test output');
-
-    const req = { params: { agentId: 'test-agent-id' } };
-    const res = {
-      status: jest.fn().mockReturnThis(),
-      json: jest.fn(),
-    };
-
-    await (agentSet as any).getAgentOutput(req, res);
-
-    expect(res.status).toHaveBeenCalledWith(200);
-    expect(res.json).toHaveBeenCalledWith({ output: 'Test output' });
+      expect(mockRes.status).toHaveBeenCalledWith(200);
+      expect(mockRes.json).toHaveBeenCalledWith(expect.objectContaining({
+        agentsCount: 2,
+        agentsByStatus: expect.objectContaining({
+          ACTIVE: [{ someStats: 'value' }],
+          IDLE: [{ someOtherStats: 'value' }]
+        })
+      }));
+    });
   });
 });

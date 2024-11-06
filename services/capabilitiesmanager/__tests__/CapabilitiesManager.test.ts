@@ -1,109 +1,149 @@
+import { CapabilitiesManager } from '../src/CapabilitiesManager';
 import axios from 'axios';
 import express from 'express';
-import CapabilitiesManager from '../src/CapabilitiesManager';
-import { loadPlugins } from '../src/utils/pluginUtils';
-import AccomplishPlugin from '../src/plugins/ACCOMPLISH';
+import { MapSerializer, PluginInput, PluginParameterType } from '@cktmcs/shared';
 
 jest.mock('axios');
-jest.mock('../src/utils/pluginUtils');
-jest.mock('../src/plugins/ACCOMPLISH');
+jest.mock('express');
+jest.mock('fs/promises');
+jest.mock('child_process');
 
 describe('CapabilitiesManager', () => {
   let capabilitiesManager: CapabilitiesManager;
-  let mockExpress: jest.Mocked<express.Express>;
 
   beforeEach(() => {
-    jest.clearAllMocks();
-    mockExpress = {
-      use: jest.fn(),
-      post: jest.fn(),
-      listen: jest.fn().mockImplementation((port, callback) => {
-        callback();
-        return { on: jest.fn() };
-      }),
-    } as unknown as jest.Mocked<express.Express>;
-    jest.spyOn(express, 'default').mockReturnValue(mockExpress);
-    
     capabilitiesManager = new CapabilitiesManager();
+    jest.clearAllMocks();
   });
 
   describe('start', () => {
-    it('should set up the server and load action verbs', async () => {
-      (loadPlugins as jest.Mock).mockResolvedValue(new Map([['TEST', 'test.js']]));
-      
+    it('should set up the server successfully', async () => {
+        const mockListen = jest.fn((port, callback) => callback());
+        const mockApp = {
+          use: jest.fn(),
+          post: jest.fn(),
+          get: jest.fn(),
+          listen: mockListen,
+        };
+        (express as jest.MockedFunction<typeof express>).mockReturnValue(mockApp as unknown as express.Application);
+
       await capabilitiesManager.start();
-      
-      expect(mockExpress.use).toHaveBeenCalled();
-      expect(mockExpress.post).toHaveBeenCalledTimes(3);
-      expect(loadPlugins).toHaveBeenCalled();
+
+      expect(mockListen).toHaveBeenCalled();
     });
 
-    it('should handle errors during startup', async () => {
-      (loadPlugins as jest.Mock).mockRejectedValue(new Error('Load error'));
-      
-      await expect(capabilitiesManager.start()).rejects.toThrow('Load error');
-    });
+    it('should handle server startup errors', async () => {
+        const mockListen = jest.fn((_port: number, _callback: () => void) => {
+          throw new Error('Server startup error');
+        });
+        const mockApp = {
+          use: jest.fn(),
+          post: jest.fn(),
+          get: jest.fn(),
+          listen: mockListen,
+        };
+        (express as jest.MockedFunction<typeof express>).mockReturnValue(mockApp as unknown as express.Application);
+  
+        await expect(capabilitiesManager.start()).rejects.toThrow('Server startup error');
+      });
   });
 
   describe('executeActionVerb', () => {
     it('should execute a known action verb', async () => {
+      const mockReq = {
+        body: MapSerializer.transformForSerialization({
+          step: {
+            actionVerb: 'TEST_VERB',
+            inputs: new Map<string, PluginInput>(),
+          },
+        }),
+      } as express.Request;
+      const mockRes = {
+        status: jest.fn().mockReturnThis(),
+        send: jest.fn(),
+      } as unknown as express.Response;
+
       const mockPlugin = {
-        execute: jest.fn().mockResolvedValue({ success: true, resultType: 'string', result: 'Test result' }),
+        verb: 'TEST_VERB',
+        language: 'javascript',
+        entryPoint: { main: 'index.js' },
       };
-      jest.mock('../src/plugins/TEST', () => ({ default: jest.fn(() => mockPlugin) }), { virtual: true });
-      
-      (capabilitiesManager as any).actionVerbs.set('TEST', 'TEST.js');
-      
-      const req = { body: { verb: 'TEST', inputs: { inputValue: 'test', args: {} } } } as express.Request;
-      const res = { status: jest.fn().mockReturnThis(), send: jest.fn() } as unknown as express.Response;
-      
-      await (capabilitiesManager as any).executeActionVerb(req, res);
-      
-      expect(res.status).toHaveBeenCalledWith(200);
-      expect(res.send).toHaveBeenCalledWith({ success: true, resultType: 'string', result: 'Test result' });
+
+      jest.spyOn(capabilitiesManager as any, 'loadActionVerbs').mockResolvedValue();
+      jest.spyOn(capabilitiesManager as any, 'actionVerbs', 'get').mockReturnValue(new Map([['TEST_VERB', mockPlugin]]));
+      jest.spyOn(capabilitiesManager as any, 'executeJavaScriptPlugin').mockResolvedValue({
+        success: true,
+        resultType: PluginParameterType.STRING,
+        result: 'Test result',
+      });
+
+      await (capabilitiesManager as any).executeActionVerb(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(200);
+      expect(mockRes.send).toHaveBeenCalledWith(expect.objectContaining({
+        success: true,
+        resultType: PluginParameterType.STRING,
+        result: 'Test result',
+      }));
     });
 
     it('should handle unknown action verbs', async () => {
-      (AccomplishPlugin.prototype.execute as jest.Mock).mockResolvedValue({
-        success: true,
-        resultType: 'string',
-        result: 'Handled unknown verb',
+      const mockReq = {
+        body: MapSerializer.transformForSerialization({
+          step: {
+            actionVerb: 'UNKNOWN_VERB',
+            inputs: new Map<string, PluginInput>(),
+          },
+        }),
+      } as express.Request;
+      const mockRes = {
+        status: jest.fn().mockReturnThis(),
+        send: jest.fn(),
+      } as unknown as express.Response;
+
+      jest.spyOn(capabilitiesManager as any, 'loadActionVerbs').mockResolvedValue();
+      jest.spyOn(capabilitiesManager as any, 'actionVerbs', 'get').mockReturnValue(new Map());
+      jest.spyOn(capabilitiesManager as any, 'handleUnknownVerb').mockResolvedValue({
+        success: false,
+        resultType: PluginParameterType.ERROR,
+        error: 'Unknown verb',
       });
-      
-      const req = { body: { verb: 'UNKNOWN', inputs: { inputValue: 'test', args: {} } } } as express.Request;
-      const res = { status: jest.fn().mockReturnThis(), send: jest.fn() } as unknown as express.Response;
-      
-      await (capabilitiesManager as any).executeActionVerb(req, res);
-      
-      expect(res.status).toHaveBeenCalledWith(200);
-      expect(res.send).toHaveBeenCalledWith({
-        success: true,
-        resultType: 'string',
-        result: 'Handled unknown verb',
-      });
+
+      await (capabilitiesManager as any).executeActionVerb(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+      expect(mockRes.send).toHaveBeenCalledWith(expect.objectContaining({
+        success: false,
+        resultType: PluginParameterType.ERROR,
+        error: 'Unknown verb',
+      }));
     });
   });
 
-  describe('registerActionVerb', () => {
-    it('should register a new action verb', async () => {
-      const req = { body: { verb: 'NEW_VERB', fileName: 'new_verb.js' } } as express.Request;
-      const res = { status: jest.fn().mockReturnThis(), send: jest.fn() } as unknown as express.Response;
-      
-      await (capabilitiesManager as any).registerActionVerb(req, res);
-      
-      expect(res.status).toHaveBeenCalledWith(200);
-      expect(res.send).toHaveBeenCalledWith({ status: 'success', verb: 'NEW_VERB', fileName: 'new_verb.js' });
-      expect((capabilitiesManager as any).actionVerbs.get('NEW_VERB')).toBe('new_verb.js');
-    });
+  describe('handleUnknownVerb', () => {
+    it('should attempt to create a new plugin for unknown verbs', async () => {
+      const mockStep = {
+        actionVerb: 'NEW_VERB',
+        inputs: new Map<string, PluginInput>(),
+      };
 
-    it('should handle invalid registration requests', async () => {
-      const req = { body: { verb: 'INVALID', fileName: 'invalid.txt' } } as express.Request;
-      const res = { status: jest.fn().mockReturnThis(), send: jest.fn() } as unknown as express.Response;
-      
-      await (capabilitiesManager as any).registerActionVerb(req, res);
-      
-      expect(res.status).toHaveBeenCalledWith(400);
-      expect(res.send).toHaveBeenCalledWith({ error: 'fileName must end with .js' });
+      jest.spyOn(capabilitiesManager as any, 'requestEngineerForPlugin').mockResolvedValue({
+        id: 'new-plugin',
+        verb: 'NEW_VERB',
+        language: 'javascript',
+        entryPoint: { main: 'index.js' },
+      });
+
+      jest.spyOn(capabilitiesManager as any, 'createPluginFiles').mockResolvedValue();
+
+      const result = await (capabilitiesManager as any).handleUnknownVerb(mockStep);
+
+      expect(result).toEqual({
+        success: true,
+        resultType: PluginParameterType.PLUGIN,
+        resultDescription: 'Created new plugin for NEW_VERB',
+        result: 'Created new plugin for NEW_VERB',
+      });
     });
   });
 });

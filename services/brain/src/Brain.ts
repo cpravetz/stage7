@@ -62,18 +62,14 @@ export class Brain extends BaseEntity {
                 conversionType: req.body.conversionType || LLMConversionType.TextToText
             };
             const selectedModel = req.body.model || this.modelManager.selectModel(thread.optimization, thread.conversionType);
-
+            this.logAndSay(`Chatting with model ${selectedModel.model.name} using interface ${selectedModel.model.interfaceKey}`);
             if (!selectedModel) {
                 throw new Error('No suitable model found.');
             }
-
-            const messages = thread.exchanges.map((ex: { role: string; message: string }) => {
-                if (typeof ex.message !== 'string') {
-                    throw new Error('Invalid message format in thread exchanges');
-                }
-                return ex.message;
-            });
-
+    
+            // Extract only the message content from the exchanges
+            const messages = thread.exchanges;
+    
             this.llmCalls++;
     
             const brainResponse = await selectedModel.interface.generate(messages, {
@@ -81,7 +77,7 @@ export class Brain extends BaseEntity {
                 temperature: thread.metadata?.temperature
             });
     
-                const mimeType = this.determineMimeType(brainResponse);
+            const mimeType = this.determineMimeType(brainResponse);
             res.json({
                 response: brainResponse,
                 mimeType: mimeType

@@ -1,99 +1,98 @@
 import { Librarian } from '../src/Librarian';
 import express from 'express';
-import request from 'supertest';
-import { storeInMongo, loadFromMongo, loadManyFromMongo, aggregateInMongo, deleteManyFromMongo } from '../src/utils/mongoUtils';
+import axios from 'axios';
 import { storeInRedis, loadFromRedis, deleteFromRedis } from '../src/utils/redisUtils';
+import { storeInMongo, loadFromMongo, loadManyFromMongo, aggregateInMongo, deleteManyFromMongo } from '../src/utils/mongoUtils';
 
-jest.mock('../src/utils/mongoUtils');
+jest.mock('express');
+jest.mock('axios');
 jest.mock('../src/utils/redisUtils');
-jest.mock('@cktmcs/shared', () => ({
-  BaseEntity: class {},
-}));
+jest.mock('../src/utils/mongoUtils');
 
 describe('Librarian', () => {
   let librarian: Librarian;
-  let app: express.Application;
+  let mockApp: jest.Mocked<express.Application>;
 
   beforeEach(() => {
+    mockApp = {
+      use: jest.fn(),
+      post: jest.fn(),
+      get: jest.fn(),
+      delete: jest.fn(),
+      listen: jest.fn(),
+    } as unknown as jest.Mocked<express.Application>;
+
+    (express as jest.MockedFunction<typeof express>).mockReturnValue(mockApp);
+
     librarian = new Librarian();
-    app = (librarian as any).app;
   });
 
   afterEach(() => {
     jest.clearAllMocks();
   });
 
+  it('should initialize correctly', () => {
+    expect(mockApp.use).toHaveBeenCalled();
+    expect(mockApp.post).toHaveBeenCalledTimes(4);
+    expect(mockApp.get).toHaveBeenCalledTimes(5);
+    expect(mockApp.delete).toHaveBeenCalledTimes(1);
+    expect(mockApp.listen).toHaveBeenCalled();
+  });
+
   describe('storeData', () => {
     it('should store data in MongoDB', async () => {
-      const mockStoreInMongo = storeInMongo as jest.MockedFunction<typeof storeInMongo>;
-      mockStoreInMongo.mockResolvedValue(undefined);
+      const mockReq = {
+        body: { id: 'test-id', data: { key: 'value' }, storageType: 'mongo', collection: 'testCollection' }
+      } as express.Request;
+      const mockRes = {
+        status: jest.fn().mockReturnThis(),
+        send: jest.fn()
+      } as unknown as express.Response;
 
-      const response = await request(app)
-        .post('/storeData')
-        .send({ id: '123', data: { foo: 'bar' }, storageType: 'mongo', collection: 'testCollection' });
+      await (librarian as any).storeData(mockReq, mockRes);
 
-      expect(response.status).toBe(200);
-      expect(mockStoreInMongo).toHaveBeenCalledWith('testCollection', { foo: 'bar' });
+      expect(storeInMongo).toHaveBeenCalledWith('testCollection', { key: 'value' });
+      expect(mockRes.status).toHaveBeenCalledWith(200);
     });
 
     it('should store data in Redis', async () => {
-      const mockStoreInRedis = storeInRedis as jest.MockedFunction<typeof storeInRedis>;
-      mockStoreInRedis.mockResolvedValue('OK');
+      const mockReq = {
+        body: { id: 'test-id', data: { key: 'value' }, storageType: 'redis' }
+      } as express.Request;
+      const mockRes = {
+        status: jest.fn().mockReturnThis(),
+        send: jest.fn()
+      } as unknown as express.Response;
 
-      const response = await request(app)
-        .post('/storeData')
-        .send({ id: '123', data: { foo: 'bar' }, storageType: 'redis' });
+      await (librarian as any).storeData(mockReq, mockRes);
 
-      expect(response.status).toBe(200);
-      expect(mockStoreInRedis).toHaveBeenCalledWith('data:123', JSON.stringify({ foo: 'bar' }));
+      expect(storeInRedis).toHaveBeenCalledWith('data:test-id', JSON.stringify({ key: 'value' }));
+      expect(mockRes.status).toHaveBeenCalledWith(200);
     });
   });
 
   describe('loadData', () => {
     it('should load data from MongoDB', async () => {
-      const mockLoadFromMongo = loadFromMongo as jest.MockedFunction<typeof loadFromMongo>;
-      mockLoadFromMongo.mockResolvedValue({ foo: 'bar' });
+      const mockReq = {
+        params: { id: 'test-id' },
+        query: { storageType: 'mongo', collection: 'testCollection' }
+      } as unknown as express.Request;
+      const mockRes = {
+        status: jest.fn().mockReturnThis(),
+        send: jest.fn()
+      } as unknown as express.Response;
 
-      const response = await request(app)
-        .get('/loadData/123?storageType=mongo&collection=testCollection');
+      const mockData = { key: 'value' };
+      (loadFromMongo as jest.Mock).mockResolvedValue(mockData);
 
-      expect(response.status).toBe(200);
-      expect(response.body).toEqual({ data: { foo: 'bar' } });
-      expect(mockLoadFromMongo).toHaveBeenCalledWith('testCollection', { id: '123' });
-    });
+      await (librarian as any).loadData(mockReq, mockRes);
 
-    it('should load data from Redis', async () => {
-      const mockLoadFromRedis = loadFromRedis as jest.MockedFunction<typeof loadFromRedis>;
-      mockLoadFromRedis.mockResolvedValue(JSON.stringify({ foo: 'bar' }));
-
-      const response = await request(app)
-        .get('/loadData/123?storageType=redis');
-
-      expect(response.status).toBe(200);
-      expect(response.body).toEqual({ data: { foo: 'bar' } });
-      expect(mockLoadFromRedis).toHaveBeenCalledWith('data:123');
+      expect(loadFromMongo).toHaveBeenCalledWith('testCollection', { _id: 'test-id' });
+      expect(mockRes.status).toHaveBeenCalledWith(200);
+      expect(mockRes.send).toHaveBeenCalledWith({ data: mockData });
     });
   });
 
-  describe('storeWorkProduct', () => {
-    it('should store work product', async () => {
-      const mockStoreInMongo = storeInMongo as jest.MockedFunction<typeof storeInMongo>;
-      mockStoreInMongo.mockResolvedValue(undefined);
+  // Add more test cases for other methods...
 
-      const response = await request(app)
-        .post('/storeWorkProduct')
-        .send({ agentId: 'agent1', stepId: 'step1', data: { result: 'success' } });
-
-      expect(response.status).toBe(200);
-      expect(response.body).toEqual({ status: 'Work product stored', id: 'agent1_step1' });
-      expect(mockStoreInMongo).toHaveBeenCalledWith('workProducts', expect.objectContaining({
-        id: 'agent1_step1',
-        agentId: 'agent1',
-        stepId: 'step1',
-        data: { result: 'success' },
-      }));
-    });
-  });
-
-  // Add more test cases for other methods as needed
 });

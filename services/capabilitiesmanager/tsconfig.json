@@ -19,6 +19,6 @@
     "allowJs": true,
     "noEmit": false
   },
-  "include": ["src/**/*", "src/plugins/**/*" ],
+  "include": ["src/**/*", "src/plugins/**/*", "src/plugins/__tests__/ACCOMPLISH.test.ts" ],
   "exclude": ["node_modules"]
 }

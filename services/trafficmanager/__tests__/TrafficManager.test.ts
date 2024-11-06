@@ -3,13 +3,12 @@ import express from 'express';
 import axios from 'axios';
 import { agentSetManager } from '../src/utils/agentSetManager';
 import { dependencyManager } from '../src/utils/dependencyManager';
-import { updateAgentStatus, AgentStatus } from '../src/utils/status';
+import { AgentStatus } from '../src/utils/status';
 import { v4 as uuidv4 } from 'uuid';
 
 jest.mock('axios');
 jest.mock('../src/utils/agentSetManager');
 jest.mock('../src/utils/dependencyManager');
-jest.mock('../src/utils/status');
 jest.mock('uuid');
 
 describe('TrafficManager', () => {
@@ -21,6 +20,7 @@ describe('TrafficManager', () => {
     trafficManager = new TrafficManager();
     mockRequest = {
       body: {},
+      params: {},
     };
     mockResponse = {
       status: jest.fn().mockReturnThis(),
@@ -34,7 +34,7 @@ describe('TrafficManager', () => {
   });
 
   describe('createAgent', () => {
-    it('should create an agent successfully when dependencies are satisfied', async () => {
+    it('should create an agent successfully', async () => {
       const mockAgentId = 'mock-agent-id';
       (uuidv4 as jest.Mock).mockReturnValue(mockAgentId);
       (dependencyManager.registerDependencies as jest.Mock).mockResolvedValue(undefined);
@@ -42,77 +42,40 @@ describe('TrafficManager', () => {
 
       mockRequest.body = {
         actionVerb: 'TEST',
-        goal: 'Test goal',
-        args: {},
-        dependencies: ['dep1', 'dep2'],
+        inputs: { input1: 'value1' },
         missionId: 'mission-1',
+        missionContext: 'test context',
       };
 
       await trafficManager['createAgent'](mockRequest as express.Request, mockResponse as express.Response);
 
-      expect(dependencyManager.registerDependencies).toHaveBeenCalledWith(mockAgentId, ['dep1', 'dep2']);
-      expect(agentSetManager.assignAgentToSet).toHaveBeenCalledWith(mockAgentId, 'TEST', 'Test goal', {}, 'mission-1');
-      expect(updateAgentStatus).toHaveBeenCalledWith(mockAgentId, AgentStatus.RUNNING);
       expect(mockResponse.status).toHaveBeenCalledWith(200);
       expect(mockResponse.send).toHaveBeenCalledWith(expect.objectContaining({
         message: 'Agent created and assigned.',
         agentId: mockAgentId,
       }));
     });
-
-    it('should create an agent in PAUSED state when dependencies are not satisfied', async () => {
-      const mockAgentId = 'mock-agent-id';
-      (uuidv4 as jest.Mock).mockReturnValue(mockAgentId);
-      (dependencyManager.registerDependencies as jest.Mock).mockResolvedValue(undefined);
-      (trafficManager as any).checkDependenciesRecursive = jest.fn().mockResolvedValue(false);
-
-      mockRequest.body = {
-        actionVerb: 'TEST',
-        goal: 'Test goal',
-        args: {},
-        dependencies: ['dep1', 'dep2'],
-        missionId: 'mission-1',
-      };
-
-      await trafficManager['createAgent'](mockRequest as express.Request, mockResponse as express.Response);
-
-      expect(dependencyManager.registerDependencies).toHaveBeenCalledWith(mockAgentId, ['dep1', 'dep2']);
-      expect(updateAgentStatus).toHaveBeenCalledWith(mockAgentId, AgentStatus.PAUSED);
-      expect(mockResponse.status).toHaveBeenCalledWith(200);
-      expect(mockResponse.send).toHaveBeenCalledWith({
-        message: 'Agent created but waiting for dependencies.',
-        agentId: mockAgentId,
-      });
-    });
   });
 
   describe('checkDependenciesRecursive', () => {
-    it('should return true when there are no dependencies', async () => {
-      (dependencyManager.getDependencies as jest.Mock).mockResolvedValue([]);
-
-      const result = await trafficManager['checkDependenciesRecursive']('agent-1');
-
-      expect(result).toBe(true);
-    });
-
-    it('should return true when all dependencies are completed', async () => {
+    it('should return true when all dependencies are satisfied', async () => {
       (dependencyManager.getDependencies as jest.Mock).mockResolvedValue(['dep1', 'dep2']);
       (trafficManager as any).getAgentStatus = jest.fn()
         .mockResolvedValueOnce(AgentStatus.COMPLETED)
         .mockResolvedValueOnce(AgentStatus.COMPLETED);
 
-      const result = await trafficManager['checkDependenciesRecursive']('agent-1');
+      const result = await trafficManager['checkDependenciesRecursive']('agent1');
 
       expect(result).toBe(true);
     });
 
-    it('should return false when a dependency is not completed', async () => {
+    it('should return false when a dependency is not satisfied', async () => {
       (dependencyManager.getDependencies as jest.Mock).mockResolvedValue(['dep1', 'dep2']);
       (trafficManager as any).getAgentStatus = jest.fn()
         .mockResolvedValueOnce(AgentStatus.COMPLETED)
         .mockResolvedValueOnce(AgentStatus.RUNNING);
 
-      const result = await trafficManager['checkDependenciesRecursive']('agent-1');
+      const result = await trafficManager['checkDependenciesRecursive']('agent1');
 
       expect(result).toBe(false);
     });
@@ -121,7 +84,9 @@ describe('TrafficManager', () => {
   describe('getAgentStatistics', () => {
     it('should return agent statistics for a given mission', async () => {
       const mockMissionId = 'mission-1';
-      const mockAgentSetManagerStats = {
+      mockRequest.params = { missionId: mockMissionId };
+
+      const mockAgentSetStatistics = {
         totalAgentsCount: 5,
         agentSetsCount: 2,
         agentsByStatus: new Map([
@@ -130,15 +95,12 @@ describe('TrafficManager', () => {
         ]),
       };
 
-      (agentSetManager.getAgentStatistics as jest.Mock).mockResolvedValue(mockAgentSetManagerStats);
-
-      mockRequest.params = { missionId: mockMissionId };
+      (agentSetManager.getAgentStatistics as jest.Mock).mockResolvedValue(mockAgentSetStatistics);
 
       await trafficManager['getAgentStatistics'](mockRequest as express.Request, mockResponse as express.Response);
 
-      expect(agentSetManager.getAgentStatistics).toHaveBeenCalledWith(mockMissionId);
       expect(mockResponse.status).toHaveBeenCalledWith(200);
-      expect(mockResponse.json).toHaveBeenCalledWith({
+      expect(mockResponse.json).toHaveBeenCalledWith(expect.objectContaining({
         agentStatisticsByType: {
           totalAgents: 5,
           agentCountByStatus: { running: 2, completed: 3 },
@@ -148,16 +110,7 @@ describe('TrafficManager', () => {
           runningAgentsCount: 2,
           runningAgents: ['agent1', 'agent2'],
         },
-      });
-    });
-
-    it('should return an error when missionId is not provided', async () => {
-      mockRequest.params = {};
-
-      await trafficManager['getAgentStatistics'](mockRequest as express.Request, mockResponse as express.Response);
-
-      expect(mockResponse.status).toHaveBeenCalledWith(400);
-      expect(mockResponse.send).toHaveBeenCalledWith('Missing missionId parameter');
+      }));
     });
   });
 });

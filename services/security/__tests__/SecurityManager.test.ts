@@ -1,31 +1,23 @@
-import SecurityManager from '../src/SecurityManager';
+import { SecurityManager } from '../src/SecurityManager';
 import axios from 'axios';
-import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
-import { v4 as uuidv4 } from 'uuid';
+import jwt from 'jsonwebtoken';
+import { CognitoIdentityProviderClient, InitiateAuthCommand } from "@aws-sdk/client-cognito-identity-provider";
 
 jest.mock('axios');
-jest.mock('jsonwebtoken');
 jest.mock('bcrypt');
-jest.mock('uuid');
+jest.mock('jsonwebtoken');
+jest.mock('@aws-sdk/client-cognito-identity-provider');
 
 describe('SecurityManager', () => {
   let securityManager: SecurityManager;
-  let mockRequest: any;
-  let mockResponse: any;
+  const mockJwtSecret = 'test-secret';
+  const mockLibrarianUrl = 'mock-librarian:5040';
 
   beforeEach(() => {
+    process.env.JWT_SECRET = mockJwtSecret;
+    process.env.LIBRARIAN_URL = mockLibrarianUrl;
     securityManager = new SecurityManager();
-    mockRequest = {
-      body: {},
-      headers: {},
-    };
-    mockResponse = {
-      status: jest.fn().mockReturnThis(),
-      json: jest.fn(),
-    };
-    process.env.JWT_SECRET = 'test-secret';
-    process.env.COMPONENT_TOKEN_SECRET = 'component-secret';
   });
 
   afterEach(() => {
@@ -34,128 +26,174 @@ describe('SecurityManager', () => {
 
   describe('registerUser', () => {
     it('should register a new user successfully', async () => {
-      mockRequest.body = {
-        email: 'test@example.com',
-        password: 'password123',
-        username: 'testuser',
-      };
+      const mockReq = {
+        body: {
+          email: 'test@example.com',
+          password: 'password123',
+          name: 'Test User'
+        }
+      } as any;
+      const mockRes = {
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn()
+      } as any;
 
-      (axios.get as jest.Mock).mockResolvedValueOnce({ data: { data: null } });
+      (axios.post as jest.Mock).mockResolvedValueOnce({ data: { data: [] } });
       (axios.post as jest.Mock).mockResolvedValueOnce({});
-      (bcrypt.hash as jest.Mock).mockResolvedValueOnce('hashedPassword');
-      (uuidv4 as jest.Mock).mockReturnValueOnce('mock-uuid');
-      (jwt.sign as jest.Mock).mockReturnValueOnce('mock-token');
+      (bcrypt.hash as jest.Mock).mockResolvedValue('hashedPassword');
+      (jwt.sign as jest.Mock).mockReturnValue('mockToken');
 
-      await securityManager['registerUser'](mockRequest, mockResponse);
+      await securityManager['registerUser'](mockReq, mockRes);
 
-      expect(mockResponse.status).toHaveBeenCalledWith(201);
-      expect(mockResponse.json).toHaveBeenCalledWith(
-        expect.objectContaining({
-          token: 'mock-token',
-          user: expect.objectContaining({
-            id: 'mock-uuid',
-            email: 'test@example.com',
-            username: 'testuser',
-          }),
+      expect(mockRes.status).toHaveBeenCalledWith(201);
+      expect(mockRes.json).toHaveBeenCalledWith(expect.objectContaining({
+        token: 'mockToken',
+        user: expect.objectContaining({
+          email: 'test@example.com',
+          username: 'Test User'
         })
-      );
+      }));
     });
 
-    it('should return an error if user already exists', async () => {
-      mockRequest.body = {
-        email: 'existing@example.com',
-        password: 'password123',
-        username: 'existinguser',
-      };
+    it('should return 409 if user already exists', async () => {
+      const mockReq = {
+        body: {
+          email: 'existing@example.com',
+          password: 'password123',
+          name: 'Existing User'
+        }
+      } as any;
+      const mockRes = {
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn()
+      } as any;
 
-      (axios.get as jest.Mock).mockResolvedValueOnce({ data: { data: { id: 'existing-id' } } });
+      (axios.post as jest.Mock).mockResolvedValueOnce({ data: { data: [{ email: 'existing@example.com' }] } });
 
-      await securityManager['registerUser'](mockRequest, mockResponse);
+      await securityManager['registerUser'](mockReq, mockRes);
 
-      expect(mockResponse.status).toHaveBeenCalledWith(409);
-      expect(mockResponse.json).toHaveBeenCalledWith({ error: 'User already exists' });
+      expect(mockRes.status).toHaveBeenCalledWith(409);
+      expect(mockRes.json).toHaveBeenCalledWith({ error: 'User already exists' });
     });
   });
 
   describe('handleLogin', () => {
-    it('should login a user successfully', async () => {
-      mockRequest.body = {
-        email: 'user@example.com',
-        password: 'password123',
-      };
-
-      const mockUser = {
-        id: 'user-id',
-        email: 'user@example.com',
-        role: 'user',
-      };
-
-      (jwt.sign as jest.Mock).mockReturnValueOnce('mock-token');
-
-      // Mock passport authenticate
-      const mockPassportAuthenticate = jest.fn((strategy, options, callback) => {
-        callback(null, mockUser, undefined);
-        return (req: any, res: any) => {};
-      });
-
-      securityManager['passport'] = {
-        authenticate: mockPassportAuthenticate,
+    it('should login user successfully', async () => {
+      const mockReq = {
+        body: {
+          email: 'test@example.com',
+          password: 'password123'
+        }
+      } as any;
+      const mockRes = {
+        json: jest.fn()
       } as any;
 
-      await securityManager['handleLogin'](mockRequest, mockResponse);
+      const mockUser = {
+        id: '123',
+        email: 'test@example.com',
+        password: 'hashedPassword',
+        role: 'user'
+      };
 
-      expect(mockResponse.json).toHaveBeenCalledWith(
-        expect.objectContaining({
-          token: 'mock-token',
-          user: expect.objectContaining({
-            id: 'user-id',
-            email: 'user@example.com',
-          }),
+      (axios.post as jest.Mock).mockResolvedValueOnce({ data: { data: [mockUser] } });
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+      (jwt.sign as jest.Mock).mockReturnValue('mockToken');
+
+      await securityManager['handleLogin'](mockReq, mockRes);
+
+      expect(mockRes.json).toHaveBeenCalledWith(expect.objectContaining({
+        token: 'mockToken',
+        user: expect.objectContaining({
+          email: 'test@example.com'
         })
-      );
+      }));
+    });
+  });
+
+  describe('handleCognitoLogin', () => {
+    it('should login with Cognito successfully', async () => {
+      const mockReq = {
+        body: {
+          username: 'testuser',
+          password: 'password123'
+        }
+      } as any;
+      const mockRes = {
+        json: jest.fn()
+      } as any;
+
+      process.env.COGNITO_CLIENT_ID = 'mock-client-id';
+      securityManager['cognitoClient'] = new CognitoIdentityProviderClient({}) as any;
+
+      const mockSend = jest.fn().mockResolvedValue({
+        AuthenticationResult: { AccessToken: 'mockCognitoToken' }
+      });
+      (CognitoIdentityProviderClient.prototype.send as jest.Mock) = mockSend;
+
+      (axios.post as jest.Mock).mockResolvedValueOnce({ data: { data: [] } });
+      (jwt.sign as jest.Mock).mockReturnValue('mockToken');
+
+      await securityManager['handleCognitoLogin'](mockReq, mockRes);
+
+      expect(mockRes.json).toHaveBeenCalledWith(expect.objectContaining({
+        token: 'mockToken',
+        user: expect.objectContaining({
+          email: 'testuser'
+        })
+      }));
     });
   });
 
   describe('verifyToken', () => {
     it('should verify a valid token', async () => {
-      mockRequest.headers.authorization = 'Bearer valid-token';
-      const mockDecodedToken = {
-        id: 'user-id',
-        email: 'user@example.com',
-        role: 'user',
-        iat: Date.now(),
-        exp: Date.now() + 3600000,
+      const mockReq = {
+        headers: {
+          authorization: 'Bearer validToken'
+        }
+      } as any;
+      const mockRes = {
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn()
+      } as any;
+
+      const decodedToken = {
+        id: '123',
+        email: 'test@example.com',
+        role: 'user'
       };
 
-      (jwt.verify as jest.Mock).mockReturnValueOnce(mockDecodedToken);
-      (axios.get as jest.Mock).mockResolvedValueOnce({ data: { data: { id: 'user-id' } } });
+      (jwt.verify as jest.Mock).mockReturnValue(decodedToken);
+      (axios.post as jest.Mock).mockResolvedValueOnce({ data: { data: [{ email: 'test@example.com' }] } });
 
-      await securityManager['verifyToken'](mockRequest, mockResponse);
+      await securityManager['verifyToken'](mockReq, mockRes);
 
-      expect(mockResponse.status).toHaveBeenCalledWith(200);
-      expect(mockResponse.json).toHaveBeenCalledWith({
+      expect(mockRes.status).toHaveBeenCalledWith(200);
+      expect(mockRes.json).toHaveBeenCalledWith(expect.objectContaining({
         valid: true,
-        user: expect.objectContaining({
-          id: 'user-id',
-          email: 'user@example.com',
-          role: 'user',
-        }),
-      });
+        user: decodedToken
+      }));
     });
 
-    it('should return an error for an invalid token', async () => {
-      mockRequest.headers.authorization = 'Bearer invalid-token';
+    it('should return 401 for invalid token', async () => {
+      const mockReq = {
+        headers: {
+          authorization: 'Bearer invalidToken'
+        }
+      } as any;
+      const mockRes = {
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn()
+      } as any;
 
-      (jwt.verify as jest.Mock).mockImplementationOnce(() => {
+      (jwt.verify as jest.Mock).mockImplementation(() => {
         throw new jwt.JsonWebTokenError('Invalid token');
       });
 
-      await securityManager['verifyToken'](mockRequest, mockResponse);
+      await securityManager['verifyToken'](mockReq, mockRes);
 
-      expect(mockResponse.status).toHaveBeenCalledWith(401);
-      expect(mockResponse.json).toHaveBeenCalledWith({ error: 'Invalid token' });
+      expect(mockRes.status).toHaveBeenCalledWith(401);
+      expect(mockRes.json).toHaveBeenCalledWith({ error: 'Invalid token' });
     });
   });
-
-  // Add more test cases for other methods as needed
 });

@@ -130,7 +130,9 @@ export async function execute(inputs: Map<string, PluginInput> | Record<string, 
             throw new Error('Goal or description is required for ACCOMPLISH plugin');
         }
         const prompt = generatePrompt(goal.toString());
-        const response = await queryBrain(prompt);
+        const messages = [{ role: 'user', content: prompt }];
+
+        const response = await queryBrain(messages);
         
         try {
             //console.log(`Brain response: `, MapSerializer.transformForSerialization(response));
@@ -180,19 +182,19 @@ export async function execute(inputs: Map<string, PluginInput> | Record<string, 
 }
 
  
-async function queryBrain(prompt: string): Promise<string> {
-        const brainUrl = process.env.BRAIN_URL || 'brain:5070';
-        try {
-            const response = await axios.post(`http://${brainUrl}/chat`, {
-                exchanges: [{ role: 'user', message: prompt }],
-                optimization: 'accuracy'
-            });
-            return response.data.response;
-        } catch (error) {
-            console.error('Error querying Brain:', error);
-            throw new Error('Failed to query Brain');
-        }
+async function queryBrain(messages: { role: string, content: string }[]): Promise<string> {
+    const brainUrl = process.env.BRAIN_URL || 'brain:5070';
+    try {
+        const response = await axios.post(`http://${brainUrl}/chat`, {
+            exchanges: messages,
+            optimization: 'accuracy'
+        });
+        return response.data.response;
+    } catch (error) {
+        console.error('Error querying Brain:', error);
+        throw new Error('Failed to query Brain');
     }
+}
 
 function convertJsonToTasks(jsonPlan: JsonPlanStep[]): ActionVerbTask[] {
     try{    

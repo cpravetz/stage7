@@ -13,6 +13,6 @@
       },
       "baseUrl": "src"
     },
-    "include": ["src/**/*", "__tests__/ConversationHistory.test.tsx"]
+    "include": ["src/**/*", "__tests__/App.test.tsx"]
   }
   

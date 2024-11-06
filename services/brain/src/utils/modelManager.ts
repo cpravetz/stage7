@@ -74,7 +74,7 @@ export class ModelManager {
         let selectedModel: Model | undefined;
 
         // Temp force the OpenRouter interface and the llama model for now
-        selectedModel = Array.from(this.models.values()).find(model => model.name === 'google/gemini-flash-1.5-exp');
+        selectedModel = Array.from(this.models.values()).find(model => model.name === 'hf/meta-lamma/llama-3.2-3b-instruct');
         if (selectedModel) {
             const selectedInterface = this.interfaces.get(selectedModel.interfaceKey);
             if (selectedInterface) {
