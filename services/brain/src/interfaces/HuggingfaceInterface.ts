@@ -12,20 +12,53 @@ export class HuggingfaceInterface extends ModelInterface {
         this.apiKey = apiKey;
     }
 
-    async generate(messages: string[], options: { max_length?: number, temperature?: number, modelName?: string }): Promise<string> {
+    async getChatCompletion(inference: HfInference, messages: Array<{ role: string, content: string }>, options: { max_length?: number, temperature?: number, modelName?: string }): Promise<string> {
         try {
-            const inference = new HfInference(this.apiKey);
-            let response:string = "";
+            let response: string = "";
             for await (const chunk of inference.chatCompletionStream({
                 model: options.modelName || 'meta-llama/llama-3.2-3b-instruct',
                 messages: messages,
-                max_tokens: options.max_length || 1000,
-                temperature: options.temperature || 0.7,
+                max_tokens: options.max_length || 2000,
+                temperature: options.temperature || 0.8,
             })) {
                 response += chunk.choices[0]?.delta?.content || "";
             }
+            return response;
+        } catch (error) {
+            console.error('Error generating response from Huggingface:', error);
+            throw new Error('Failed to generate response from Huggingface');
+        }
+    }
 
-            console.log('HF response: ', response);
+    private isResponseComplete(response: string): boolean {
+        // Implement your logic here. For example:
+        return response.endsWith('}') || response.toLowerCase().includes('end of response');
+    }
+
+    async generate(messages: Array<{ role: string, content: string }>, options: { max_length?: number, temperature?: number, modelName?: string }): Promise<string> {
+        try {
+            const inference = new HfInference(this.apiKey);
+            let response: string = await this.getChatCompletion(inference, messages, options) || "";
+
+            let attempts = 0;
+            const maxAttempts = 3;
+
+            while (attempts < maxAttempts) {
+                if (this.isResponseComplete(response)) {
+                    return response;
+                } else {
+                    console.log(`Response incomplete, attempt ${attempts + 1} of ${maxAttempts}`);
+                    messages.push({
+                        role: 'system',
+                        content: `Your response was truncated. Please continue from: "${response.substring(response.length - 50)}"`
+                    });
+                    const continuation = await this.getChatCompletion(inference, messages, options);
+                    response += continuation;
+                    attempts++;
+                }
+            }
+
+            console.warn('Max attempts reached. Returning potentially incomplete response.');
             return response;
     
         } catch (error) {

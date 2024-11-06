@@ -206,7 +206,7 @@ async function parseJsonWithErrorCorrection(jsonString: string): Promise<any> {
             
             try {
                 const response = await axios.post(`http://${brainUrl}/chat`, {
-                    exchanges: [{ role: 'user', message: prompt }],
+                    exchanges: [{ role: 'user', content: prompt }],
                     optimization: 'accuracy'
                 });
                 

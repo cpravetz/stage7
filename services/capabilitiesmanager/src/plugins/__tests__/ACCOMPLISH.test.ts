@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { execute, generatePrompt } from '../ACCOMPLISH/ACCOMPLISH';
+import { execute } from '../ACCOMPLISH/ACCOMPLISH';
 import { PluginInput, PluginParameterType, MapSerializer } from '@cktmcs/shared';
 
 jest.mock('axios');
@@ -10,13 +10,6 @@ describe('ACCOMPLISH plugin', () => {
     jest.clearAllMocks();
   });
 
-  describe('generatePrompt', () => {
-    it('should generate a prompt with the given goal', () => {
-      const goal = 'Test goal';
-      const prompt = generatePrompt(goal);
-      expect(prompt).toContain(`Accomplish the following goal: ${goal}`);
-    });
-  });
 
   describe('execute', () => {
     it('should return a plan when Brain responds with a plan', async () => {

@@ -8,7 +8,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 interface Thread {
-    exchanges: Array<{ role: string, message: string }>;
+    exchanges: Array<{ role: string, content: string }>;
     optimization?: OptimizationType;
     metadata?: Record<string, any>;
 }

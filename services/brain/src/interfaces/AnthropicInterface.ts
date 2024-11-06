@@ -14,7 +14,7 @@ export class AnthropicInterface extends ModelInterface {
         this.ApiClient = new OpenAI({ apiKey });
     }
 
-    async generate(messages: string[], options: { max_length?: number, temperature?: number, model?: string }): Promise<string> {
+    async generate(messages: Array<{ role: string, content: string }>, options: { max_length?: number, temperature?: number, model?: string }): Promise<string> {
         // Convert string messages to the new messages format
         const formattedMessages = messages.map((msg, index) => ({
             role: index % 2 === 0 ? 'user' : 'assistant',

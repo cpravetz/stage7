@@ -1,27 +1,25 @@
 import { ModelInterface } from './ModelInterface';
 import OpenAI from 'openai';
+import { ChatCompletionMessageParam } from 'openai/resources/chat';
 
 
 export class OpenRouterInterface extends ModelInterface {
     name = 'OpenRouter';
-    private OpenRouterApiClient: OpenAI;
+    private openRouterApiClient: OpenAI;
 
     constructor(apiKey: string) {
         super();
-        this.OpenRouterApiClient = new OpenAI({ apiKey, baseURL: "https://openrouter.ai/api/v1" }); 
+        this.openRouterApiClient = new OpenAI({ apiKey, baseURL: "https://openrouter.ai/api/v1" }); 
     }
 
-    async generate(messages: string[], options: { max_length?: number, temperature?: number, modelName?: string }): Promise<string> {
+    async generate(messages: Array<{ role: string, content: string }>, options: { max_length?: number, temperature?: number, modelName?: string }): Promise<string> {
         const max_length = options.max_length || 2000;
         const temperature = options.temperature || 0.7;
 
-        // Format messages for OpenRouter API
-        const formattedMessages = messages.map((message) => ({ role: 'user' as const, content: message }));
-
         try {
-            const response = await this.OpenRouterApiClient.chat.completions.create({
+            const response = await this.openRouterApiClient.chat.completions.create({
                 model: options.modelName || 'gpt-4',
-                messages: formattedMessages,
+                messages: messages as ChatCompletionMessageParam[],
                 temperature,
                 max_tokens: max_length,
             });
