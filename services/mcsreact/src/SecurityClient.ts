@@ -11,14 +11,14 @@ export class SecurityClient {
     }
 
     async sendHeartbeat(guid: string, token: string): Promise<void> {
-        await axios.post(`http://${this.postOfficeUrl}/component/heartbeat`, {
+        await axios.post(`${this.postOfficeUrl}/component/heartbeat`, {
             guid,
             token
         });
     }
 
     async login(email: string, password: string): Promise<string> {
-        const response = await axios.post(`http://${this.postOfficeUrl}/securityManager/login`, {
+        const response = await axios.post(`${this.postOfficeUrl}/securityManager/login`, {
             email,
             password
         });

@@ -1,4 +1,5 @@
 import express from 'express';
+import cors from 'cors';
 import passport from 'passport';
 import { Strategy as LocalStrategy } from 'passport-local';
 import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
@@ -73,6 +74,16 @@ export class SecurityManager extends BaseEntity {
     private setupServer() {
         const app = express();
 
+        const corsOptions = {
+            origin: true, // This allows all origins
+            methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+            allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin', 'Access-Control-Allow-Origin', 'Access-Control-Allow-Headers'],
+            credentials: true,
+        };
+
+        app.use(cors(corsOptions));
+
+
         app.use(express.json());
         app.use(passport.initialize());
 
@@ -134,7 +145,6 @@ export class SecurityManager extends BaseEntity {
 
     private async registerUser(req: express.Request, res: express.Response) {
         try {
-            console.log('Registering user:', req.body);
             const { email, password, name } = req.body;
             
             // Validate input
@@ -149,10 +159,8 @@ export class SecurityManager extends BaseEntity {
                 console.log('User already exists:', email);
                 return res.status(409).json({ error: 'User already exists' });
             }
-            console.log('Creating new user:', email);
             // Hash password
             const hashedPassword = await bcrypt.hash(password, this.SALT_ROUNDS);
-            console.log('Hashed password:', hashedPassword);
             // Create user
             const user: User = {
                 id: uuidv4(),
@@ -163,13 +171,10 @@ export class SecurityManager extends BaseEntity {
                 lastLogin: new Date(),
                 authProvider: 'local'
             };
-            console.log('New user:', user);
             // Store user in Librarian
             this.storeUser(user);
-            console.log('User stored');
             // Generate token
             const token = this.generateToken(user);
-            console.log('Token generated:', token);
             console.log('User registered successfully:', { ...user, password: undefined });
             res.status(201).json({ token, user: { ...user, password: undefined } });
         } catch (error) {
@@ -179,25 +184,28 @@ export class SecurityManager extends BaseEntity {
     }
 
     private async handleLogin(req: express.Request, res: express.Response) {
+        console.log('Handling login:', req.body);
         passport.authenticate('local', { session: false }, async (err: any, user: User | false, info: { message: string } | undefined) => {
+            console.log('Login Authenticate User:', user);
             if (err) {
                 console.error('Authentication error:', err);
                 return res.status(500).json({ error: 'Internal server error during authentication' });
             }
 
             if (!user) {
+                console.log('Authentication failed (no user):', info);
                 return res.status(401).json({ error: info?.message || 'Authentication failed' });
             }
 
             try {
                 // Update last login
                 user.lastLogin = new Date();
-                await this.updateUser(user);
+                this.storeUser(user);
 
                 // Generate token
                 const token = this.generateToken(user);
-
-                res.json({ token, user: { ...user, password: undefined } });
+                console.log('Login successful:', { ...user, password: undefined });
+                res.status(200).json({ token, user: { ...user, password: undefined } });
             } catch (error) {
                 console.error('Login error:', error);
                 res.status(500).json({ error: 'Login failed' });
@@ -312,10 +320,6 @@ export class SecurityManager extends BaseEntity {
             storageType: 'mongo',
             collection: 'users'
         });
-    }
-
-    private async updateUser(user: User): Promise<void> {
-        await this.storeUser(user);
     }
 
     private async verifyToken(req: express.Request, res: express.Response) {

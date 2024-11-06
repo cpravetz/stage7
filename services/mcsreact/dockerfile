@@ -18,6 +18,8 @@ RUN npm install --prefix services/mcsreact
 COPY shared ./shared
 COPY services/mcsreact ./services/mcsreact
 
+RUN npm config set strict-ssl false
+
 # Build the shared package
 WORKDIR /app/shared
 RUN npm run build

@@ -91,7 +91,8 @@ export class Librarian extends BaseEntity {
     
         try {
             if (storageType === 'mongo') {
-                await storeInMongo(collection, data);
+                const result = await storeInMongo(collection, data);
+                console.log('Result of storeInMongo: ', result);
             } else if (storageType === 'redis') {
                 await storeInRedis(`data:${id}`, JSON.stringify(data));
             } else {

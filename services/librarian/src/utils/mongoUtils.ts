@@ -14,8 +14,18 @@ export async function connectMongo() {
 } 
 
 export async function storeInMongo(collectionName: string, document: any) {
-    const collection: Collection = db.collection(collectionName);
-    await collection.insertOne(document);
+    try {
+        const collection: Collection = db.collection(collectionName);
+        const filter = { _id: document._id };
+        const result = await collection.updateOne(
+            filter,
+            { $set: document },
+            { upsert: true }
+        );
+        return result;
+    } catch(error) {
+        console.log('StoreInMongo error:', error);
+    }
 }
 
 export async function loadFromMongo(collectionName: string, query: any, options?: any): Promise<any> {

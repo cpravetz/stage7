@@ -16,6 +16,8 @@ RUN npm install
 COPY shared ./shared
 COPY services/trafficmanager ./services/trafficmanager
 
+RUN npm config set strict-ssl false
+
 # Build the TypeScript code
 RUN npm run build --workspace=shared
 RUN npm run build --workspace=services/trafficmanager

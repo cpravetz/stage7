@@ -23,6 +23,8 @@ COPY services/brain/src/models/*.?s ./services/brain/src/models
 RUN mkdir -p ./services/brain/src/interfaces 
 COPY services/brain/src/interfaces/*.?s ./services/brain/src/interfaces
 
+RUN npm config set strict-ssl false
+
 # Build the TypeScript code
 RUN npm run build --workspace=shared
 RUN npm run build --workspace=services/brain

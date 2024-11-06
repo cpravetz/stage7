@@ -23,6 +23,8 @@ COPY services/capabilitiesmanager ./services/capabilitiesmanager
 RUN mkdir -p ./services/capabilitiesmanager/src/plugins 
 COPY services/capabilitiesmanager/src/plugins ./services/capabilitiesmanager/src/plugins
 
+RUN npm config set strict-ssl false
+
 # Build the TypeScript code
 RUN npm run build --workspace=shared
 RUN npm run build --workspace=services/capabilitiesmanager

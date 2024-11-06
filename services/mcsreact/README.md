@@ -40,12 +40,12 @@ CKTMCS is an advanced, self-modifying system designed to manage and execute comp
    `npm install`
 3. Start the development server:
    `npm start`
-4. The application will be available at [http://localhost:3000](http://localhost:3000).
+4. The application will be available at [http://localhost:80](http://localhost:80).
 
 
 ### Usage
 
-1. Access the frontend at `http://localhost:3000`
+1. Access the frontend at `http://localhost:80`
 2. Create a new mission by providing a goal
 3. Monitor the mission progress and interact with the system through the user interface
 
@@ -79,7 +79,7 @@ In the project directory, you can run:
 ### `npm start`
 
 Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+Open [http://localhost:80](http://localhost:80) to view it in your browser.
 
 The page will reload when you make changes.\
 You may also see any lint errors in the console.
