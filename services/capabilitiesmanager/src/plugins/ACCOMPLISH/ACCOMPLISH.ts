@@ -89,11 +89,15 @@ Guidelines for creating a plan:
 A number of plugins are available to execute steps of the plan for you.  These include:
 
 ACCOMPLISH - this plugin takes a specific goal and either achieves it or returns a plan to achieve it.
+    (required input: goal)
 FILE_OPS - this plugin provides services for file operations read, write, append
+    (required inputs: path, operation, content)
 SEARCH - this plugin searches DuckDuckGo for a given term and returns a list of links
+    (required input: searchTerm)
 SCRAPE - this plugin scrapes content from a given URL
+    (required inputs: url, selector, attribute, limit)
 GET_USER_INPUT - this plugin requests input from the user
-
+    (required inputs: question, answerType) (optional imput: choices)
 
 If it makes sense to break work into multiple streams, you can use the actionVerb DELEGATE to create a sub-agent with a goal of its own.
 
@@ -136,7 +140,7 @@ export async function execute(inputs: Map<string, PluginInput> | Record<string, 
         
         try {
             //console.log(`Brain response: `, MapSerializer.transformForSerialization(response));
-            const parsedResponse = JSON.parse(response);
+            const parsedResponse = await parseJsonWithErrorCorrection(response);
             //console.log(`Parsed Brain response: `, MapSerializer.transformForSerialization(parsedResponse));
             if (parsedResponse.type === 'PLAN') {
                 const tasks = convertJsonToTasks(parsedResponse.plan);
@@ -182,6 +186,39 @@ export async function execute(inputs: Map<string, PluginInput> | Record<string, 
 }
 
  
+async function parseJsonWithErrorCorrection(jsonString: string): Promise<any> {
+    try {
+        return JSON.parse(jsonString);
+    } catch (error) {
+        console.log('Initial JSON parse failed, attempting to correct...');
+        
+        // Replace 'undefined' with null
+        const correctedJson = jsonString.replace(/: undefined/g, ': null');
+        
+        try {
+            return JSON.parse(correctedJson);
+        } catch (secondError) {
+            console.log('JSON correction failed, attempting to use LLM...');
+            
+            // If simple correction fails, use LLM to attempt correction
+            const brainUrl = process.env.BRAIN_URL || 'brain:5070';
+            const prompt = `The following JSON is malformed. Please correct it and return only the corrected JSON:\n\n${jsonString}`;
+            
+            try {
+                const response = await axios.post(`http://${brainUrl}/chat`, {
+                    exchanges: [{ role: 'user', message: prompt }],
+                    optimization: 'accuracy'
+                });
+                
+                const correctedByLLM = response.data.response;
+                return JSON.parse(correctedByLLM);
+            } catch (llmError) {
+                throw new Error(`Failed to parse JSON even with LLM assistance: ${llmError}`);
+            }
+        }
+    }
+}
+
 async function queryBrain(messages: { role: string, content: string }[]): Promise<string> {
     const brainUrl = process.env.BRAIN_URL || 'brain:5070';
     try {
@@ -199,7 +236,7 @@ async function queryBrain(messages: { role: string, content: string }[]): Promis
 function convertJsonToTasks(jsonPlan: JsonPlanStep[]): ActionVerbTask[] {
     try{    
         return jsonPlan.map(task => {
-            console.log('ACCOMPLISH: Mapping from json Step:',task);
+            //console.log('ACCOMPLISH: Mapping from json Step:',task);
             let inputMap: Map<string, PluginInput>;
             if (task.inputs instanceof Map) {
                 inputMap = task.inputs;

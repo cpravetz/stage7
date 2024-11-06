@@ -1,5 +1,5 @@
 import axios from 'axios';
-import cheerio from 'cheerio';
+import * as cheerio from 'cheerio';
 import { PluginInput, PluginOutput, PluginParameterType } from '@cktmcs/shared';
 
 interface ScrapeConfig {
