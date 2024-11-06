@@ -45,7 +45,7 @@ export async function execute(operation: 'read' | 'write' | 'append', path: stri
                     return {
                         success: true,
                         resultType: PluginParameterType.ANY,
-                        resultDescription: \`Read content from ${path}\`,
+                        resultDescription: \`Read content from \${path}\`,
                         result: data
                     };
         
@@ -54,7 +54,7 @@ export async function execute(operation: 'read' | 'write' | 'append', path: stri
                     return {
                         success: true,
                         resultType: PluginParameterType.ANY,
-                        resultDescription: \`Saved content to ${path}\`,
+                        resultDescription: \`Saved content to \${path}\`,
                         result: null
                     };
                 case 'append':
@@ -62,16 +62,16 @@ export async function execute(operation: 'read' | 'write' | 'append', path: stri
                     return {
                         success: true,
                         resultType: PluginParameterType.ANY,
-                        resultDescription: \`Appended content to ${path}\`,
+                        resultDescription: \`Appended content to \${path}\`,
                         result: null
                     };
                 default:
                     return {
                         success: false,
                         resultType: PluginParameterType.ERROR,
-                        resultDescription: \`Unknown operation ${operation}\`,
+                        resultDescription: \`Unknown operation \${operation}\`,
                         result: null,
-                        error: \`Unknown operation ${operation}\`
+                        error: \`Unknown operation \${operation}\`
                     };
 
             }
@@ -79,7 +79,7 @@ export async function execute(operation: 'read' | 'write' | 'append', path: stri
             return {
                 success: false,
                 resultType: PluginParameterType.ERROR,
-                resultDescription:\`An error occured for operation ${operation}\`,
+                resultDescription:\`An error occured for operation \${operation}\`,
                 result: null,
                 error: error instanceof Error ? error.message : 'An unknown error occurred'
             };

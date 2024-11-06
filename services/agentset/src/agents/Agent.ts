@@ -525,12 +525,30 @@ Please consider this context and the available plugins when planning and executi
         this.logAndSay(`Agent: Executing action ${step.actionVerb} with CapabilitiesManager`);
         console.log(`${step.actionVerb} Inputs are `, MapSerializer.transformForSerialization(step.inputs));
         try {
-            const response = await api.post(`http://${this.capabilitiesManagerUrl}/executeAction`, 
-                MapSerializer.transformForSerialization({ step }));
+            const payload = MapSerializer.transformForSerialization({ step });
+            console.log('Payload sent to CapabilitiesManager:', JSON.stringify(payload, null, 2));
+    
+            const response = await api.post(`http://${this.capabilitiesManagerUrl}/executeAction`, payload);
+            
+            console.log('Response from CapabilitiesManager:', response.data);
             return MapSerializer.transformFromSerialization(response.data);
         } catch (error) {
+            console.error('Error executing action with CapabilitiesManager:', error);
+            if (axios.isAxiosError(error)) {
+                console.error('Axios error details:', {
+                    response: error.response?.data,
+                    status: error.response?.status,
+                    headers: error.response?.headers,
+                });
+            }
             this.logAndSay(`Error executing action ${step.actionVerb} with CapabilitiesManager: ${error}`);
-            throw error;
+            return {
+                success: false,
+                resultType: PluginParameterType.ERROR,
+                resultDescription: 'Error executing action',
+                result: null,
+                error: error instanceof Error ? error.message : 'Unknown error occurred'
+            };
         }
     }
 

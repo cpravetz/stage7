@@ -130,8 +130,7 @@ function scrapeContent(html, config) {
     }
 }
 
-module.exports = { execute };
-                `
+module.exports = { execute };`
             }
         ]
     }

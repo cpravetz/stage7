@@ -137,11 +137,11 @@ export async function execute(inputs: Map<string, PluginInput> | Record<string, 
         const messages = [{ role: 'user', content: prompt }];
 
         const response = await queryBrain(messages);
-        
+        console.log('Raw Brain response:', response);
+
         try {
-            //console.log(`Brain response: `, MapSerializer.transformForSerialization(response));
             const parsedResponse = await parseJsonWithErrorCorrection(response);
-            //console.log(`Parsed Brain response: `, MapSerializer.transformForSerialization(parsedResponse));
+            console.log('Parsed Brain response:', parsedResponse);
             if (parsedResponse.type === 'PLAN') {
                 const tasks = convertJsonToTasks(parsedResponse.plan);
                 console.log('ACCOMPLISH: ACCOMPLISH plugin succeeded creating a plan',  MapSerializer.transformForSerialization(tasks));
@@ -162,23 +162,21 @@ export async function execute(inputs: Map<string, PluginInput> | Record<string, 
                 throw new Error('Invalid response format from Brain');
             }
         } catch (parseError) {
-            let errorMessage = 'Failed to parse Brain response';
-            if (parseError instanceof Error) {
-                errorMessage += `: ${parseError.message}`;
-            } else if (typeof parseError === 'string') {
-                errorMessage += `: ${parseError}`;
-            } else {
-                errorMessage += ': Unknown error occurred during parsing';
-            }
-            errorMessage += ` with response: ${JSON.stringify(response)}`;
-            throw new Error(errorMessage);
+            console.error('Error parsing Brain response:', parseError);
+            return {
+                success: false,
+                resultType: PluginParameterType.ERROR,
+                resultDescription: 'Failed to parse Brain response',
+                result: null,
+                error: parseError instanceof Error ? parseError.message : 'Unknown parsing error'
+            };
         }
     } catch (error) {
         console.error('ACCOMPLISH plugin execute() failed', error);
         return {
             success: false,
             resultType: PluginParameterType.ERROR,
-            resultDescription: 'Error',
+            resultDescription: 'Error in ACCOMPLISH plugin',
             result: null,
             error: error instanceof Error ? error.message : 'An unknown error occurred'
         };
@@ -192,17 +190,24 @@ async function parseJsonWithErrorCorrection(jsonString: string): Promise<any> {
     } catch (error) {
         console.log('Initial JSON parse failed, attempting to correct...');
         
+        // Remove any leading or trailing quotation marks
+        let correctedJson = jsonString.trim().replace(/^"|"$/g, '');
+        
         // Replace 'undefined' with null
-        const correctedJson = jsonString.replace(/: undefined/g, ': null');
+        correctedJson = correctedJson.replace(/: undefined/g, ': null');
+        
+        // Fix the malformed JSON in the GENERATE_USE_CASE step
+        correctedJson = correctedJson.replace(/"GENERATE_USE_CASE"\]:/g, '"GENERATE_USE_CASE":');
         
         try {
             return JSON.parse(correctedJson);
         } catch (secondError) {
             console.log('JSON correction failed, attempting to use LLM...');
+            console.log('Malformed JSON:', correctedJson);
             
             // If simple correction fails, use LLM to attempt correction
             const brainUrl = process.env.BRAIN_URL || 'brain:5070';
-            const prompt = `The following JSON is malformed. Please correct it and return only the corrected JSON:\n\n${jsonString}`;
+            const prompt = `The following JSON is malformed. Please correct it and return only the corrected JSON:\n\n${correctedJson}`;
             
             try {
                 const response = await axios.post(`http://${brainUrl}/chat`, {
@@ -211,8 +216,10 @@ async function parseJsonWithErrorCorrection(jsonString: string): Promise<any> {
                 });
                 
                 const correctedByLLM = response.data.response;
+                console.log('LLM corrected JSON:', correctedByLLM);
                 return JSON.parse(correctedByLLM);
             } catch (llmError) {
+                console.error('LLM correction failed:', llmError);
                 throw new Error(`Failed to parse JSON even with LLM assistance: ${llmError}`);
             }
         }

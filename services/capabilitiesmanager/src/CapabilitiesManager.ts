@@ -380,46 +380,46 @@ export class CapabilitiesManager extends BaseEntity {
             const result = await AccomplishPlugin(accomplishInputs);
 
             if (!result.success) {
-                throw new Error(result.error || 'Failed to process unknown verb');
+                console.error('ACCOMPLISH plugin failed:', result.error);
+                return result;
             }
 
-        if (result.resultType === 'string' && result.result.toLowerCase().includes('new plugin')) {
-            console.log(`Brain suggests creating new plugin for ${step.actionVerb}`);
-            try {
-                const newPlugin = await this.requestEngineerForPlugin(step.actionVerb, step.inputs);
-                await this.createPluginFiles(newPlugin);
-                this.actionVerbs.set(step.actionVerb, newPlugin);
-                return {
-                    success: true,
-                    resultType: PluginParameterType.PLUGIN,
-                    resultDescription: `Created new plugin for ${step.actionVerb}`,
-                    result: `Created new plugin for ${step.actionVerb}`
-                };
-            } catch (engineerError) {
-                console.error('Engineer plugin creation failed:', engineerError);
-                return {
-                    success: false,
-                    resultType: PluginParameterType.ERROR,
-                    mimeType: 'text/plain',
-                    resultDescription: `Unable to create plugin for ${step.actionVerb}`,
-                    result: `Unable to create plugin for ${step.actionVerb}. Please try breaking down the task into smaller steps.`
-                };
+            if (result.resultType === 'string' && result.result.toLowerCase().includes('new plugin')) {
+                console.log(`Brain suggests creating new plugin for ${step.actionVerb}`);
+                try {
+                    const newPlugin = await this.requestEngineerForPlugin(step.actionVerb, step.inputs);
+                    await this.createPluginFiles(newPlugin);
+                    this.actionVerbs.set(step.actionVerb, newPlugin);
+                    return {
+                        success: true,
+                        resultType: PluginParameterType.PLUGIN,
+                        resultDescription: `Created new plugin for ${step.actionVerb}`,
+                        result: `Created new plugin for ${step.actionVerb}`
+                    };
+                } catch (engineerError) {
+                    console.error('Engineer plugin creation failed:', engineerError);
+                    return {
+                        success: false,
+                        resultType: PluginParameterType.ERROR,
+                        mimeType: 'text/plain',
+                        resultDescription: `Unable to create plugin for ${step.actionVerb}`,
+                        result: `Unable to create plugin for ${step.actionVerb}. Please try breaking down the task into smaller steps.`
+                    };
+                }
             }
+
+            return result;
+        } catch (error) {
+            console.error('Error handling unknown verb:', error);
+            return {
+                success: false,
+                resultType: PluginParameterType.ERROR,
+                resultDescription: 'Error handling unknown verb',
+                result: null,
+                error: error instanceof Error ? error.message : 'Unknown error occurred'
+            };
         }
-
-        return result;
-    } catch (error) {
-        console.error('Error handling unknown verb:', error);
-        return {
-            success: false,
-            resultType: PluginParameterType.ERROR,
-            mimeType: 'text/plain',
-            result: 'Failed to handle unknown verb',
-            resultDescription: 'Error',
-            error: error instanceof Error ? error.message : 'Failed to handle unknown verb'
-        };
     }
-}
 
     private async createPluginFiles(plugin: Plugin): Promise<void> {
         const pluginDir = path.join(this.currentDir, 'plugins', plugin.verb);
