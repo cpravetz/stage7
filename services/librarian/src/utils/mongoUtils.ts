@@ -1,5 +1,6 @@
 import { MongoClient, Db, Collection } from 'mongodb';
 import dotenv from 'dotenv';
+import { analyzeError } from '@cktmcs/errorhandler';
 
 dotenv.config();
 
@@ -23,8 +24,8 @@ export async function storeInMongo(collectionName: string, document: any) {
             { upsert: true }
         );
         return result;
-    } catch(error) {
-        console.log('StoreInMongo error:', error);
+    } catch (error) { analyzeError(error as Error);
+        console.log('StoreInMongo error:', error instanceof Error ? error.message : error);
     }
 }
 

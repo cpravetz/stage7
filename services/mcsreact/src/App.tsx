@@ -129,8 +129,8 @@ const handleLogin = async (email: string, password: string) => {
     setToken(token);
     setIsAuthenticated(true);
     localStorage.setItem('authToken', token);
-  } catch (error) {
-    console.error('Login failed:', error);
+  } catch (error) { 
+    console.error('Login failed:', error instanceof Error ? error.message : error);
   }
 };
 
@@ -140,8 +140,8 @@ const handleRegister = async (name: string, email: string, password: string) => 
     setToken(token);
     setIsAuthenticated(true);
     localStorage.setItem('authToken', token);
-  } catch (error) {
-    console.error('Registration failed:', error);
+  } catch (error) { 
+    console.error('Registration failed:', error instanceof Error ? error.message : error);
   }
 };
 
@@ -171,7 +171,7 @@ useEffect(() => {
   };
 
   ws.onerror = (error) => {
-      console.error('WebSocket error:', error);
+      console.error('WebSocket error:', error instanceof Error ? error.message : error);
   };
 
   ws.onclose = () => {
@@ -224,8 +224,8 @@ useEffect(() => {
           });
         }
       }
-    } catch (error) {
-      console.error('Failed to send message:', error);
+    } catch (error) { 
+      console.error('Failed to send message:', error instanceof Error ? error.message : error);
       setConversationHistory((prev) => [...prev, 'System: Failed to send message. Please try again.']);
     }
   };
@@ -273,8 +273,8 @@ useEffect(() => {
         setActiveMissionName(null);
         setActiveMissionId(null);
       }
-    } catch (error) {
-      console.error('Failed to send control action:', error);
+    } catch (error) { 
+      console.error('Failed to send control action:', error instanceof Error ? error.message : error);
       setConversationHistory((prev) => [...prev, `System: Failed to send ${action} request to MissionControl. Please try again.`]);
     }
   };
@@ -284,8 +284,8 @@ useEffect(() => {
       await api.post('/loadMission', { missionId });
       setConversationHistory((prev) => [...prev, `System: Mission ${missionId} loaded.`]);
       setShowSavedMissions(false);
-    } catch (error) {
-      console.error('Failed to load mission:', error);
+    } catch (error) { 
+      console.error('Failed to load mission:', error instanceof Error ? error.message : error);
       setConversationHistory((prev) => [...prev, 'System: Failed to load mission. Please try again.']);
     }
   };

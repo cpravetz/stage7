@@ -1,7 +1,8 @@
 import { Agent } from '../agents/Agent';
 import { WorkProduct } from './WorkProduct';
 import axios from 'axios';
-import { MapSerializer } from '@cktmcs/shared';
+import { MapSerializer, PluginOutput } from '@cktmcs/shared';
+import { analyzeError } from '@cktmcs/errorhandler';
 
 const api = axios.create({
     headers: {
@@ -28,8 +29,8 @@ export class AgentPersistenceManager {
             });
             console.log('Agent state saved successfully.');
             return response.data;
-        } catch (error) {
-            console.error('Error saving agent state:', error);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error saving agent state:', error instanceof Error ? error.message : error);
             throw new Error('Failed to save agent state.');
         }
     }
@@ -40,8 +41,8 @@ export class AgentPersistenceManager {
                 params: { storageType: 'mongo' }
             });
             return MapSerializer.transformFromSerialization(response.data);
-        } catch (error) {
-            console.error('Error loading agent state:', error);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error loading agent state:', error instanceof Error ? error.message : error);
             return null;
         }
     }
@@ -51,17 +52,15 @@ export class AgentPersistenceManager {
     }
 
     async saveWorkProduct(workProduct: WorkProduct): Promise<void> {
-        console.log('Saving work product:', workProduct);
+        console.log('Saving work product for step:', workProduct.stepId);
         try {
-            await axios.post(`http://${this.librarianUrl}/storeWorkProduct`, {
+            return await axios.post(`http://${this.librarianUrl}/storeWorkProduct`, {
                 agentId: workProduct.agentId,
                 stepId: workProduct.stepId,
-                type: workProduct.type,
-                data: MapSerializer.transformForSerialization(workProduct.data),
-                mimeType: workProduct.mimeType
+                data: MapSerializer.transformForSerialization(workProduct.data)
             });
-        } catch (error) {
-            console.error('Error saving work product:', error);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error saving work product:', error instanceof Error ? error.message : String(error));
             throw new Error('Failed to save work product.');
         }
     }
@@ -69,13 +68,13 @@ export class AgentPersistenceManager {
     async loadWorkProduct(agentId: string, stepId: string): Promise<WorkProduct | null> {
         try {
             const response = await axios.get(`http://${this.librarianUrl}/loadWorkProduct/${agentId}/${stepId}`);
-            return new WorkProduct(agentId, 
+            return new WorkProduct(
+                    agentId, 
                     stepId, 
-                    response.data.type, 
-                    MapSerializer.transformFromSerialization(response.data), 
-                    response.data.mimeType || 'application/octet-stream');
-        } catch (error) {
-            console.error('Error loading work product:', error);
+                    MapSerializer.transformFromSerialization(response.data) as PluginOutput[]
+                    );
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error loading work product:', error instanceof Error ? error.message : error);
             return null;
         }
     }
@@ -83,9 +82,9 @@ export class AgentPersistenceManager {
     async loadAllWorkProducts(agentId: string): Promise<WorkProduct[]> {
         try {
             const response = await axios.get(`http://${this.librarianUrl}/loadAllWorkProducts/${agentId}`);
-            return response.data.map((wp: any) => new WorkProduct(agentId, wp.stepId, wp.data.type, MapSerializer.transformFromSerialization(wp.data), response.data.mimeType || 'application/octet-stream'));
-        } catch (error) {
-            console.error('Error loading all work products:', error);
+            return response.data.map((wp: any) => new WorkProduct(agentId, wp.stepId, MapSerializer.transformFromSerialization(wp.data) as PluginOutput[]));
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error loading all work products:', error instanceof Error ? error.message : error);
             return [];
         }
     }    

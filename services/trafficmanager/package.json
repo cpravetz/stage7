@@ -10,6 +10,7 @@
     },
     "dependencies": {
         "@cktmcs/shared": "file:../../shared",
+        "@cktmcs/errorhandler": "file:../../errorhandler",
         "axios": "^1.7.7",
         "dockerode": "^4.0.2",
         "dotenv": "^16.0.3",

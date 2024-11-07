@@ -29,10 +29,10 @@ describe('SCRAPE plugin', () => {
 
     const result = await execute(inputs);
 
-    expect(result.success).toBe(true);
-    expect(result.resultType).toBe(PluginParameterType.ARRAY);
-    expect(result.resultDescription).toBe('Scraped content from https://example.com');
-    expect(result.result).toEqual(['Test content 1', 'Test content 2']);
+    expect(result[0].success).toBe(true);
+    expect(result[0].resultType).toBe(PluginParameterType.ARRAY);
+    expect(result[0].resultDescription).toBe('Scraped content from https://example.com');
+    expect(result[0].result).toEqual(['Test content 1', 'Test content 2']);
   });
 
   it('should handle errors when URL is not provided', async () => {
@@ -40,9 +40,9 @@ describe('SCRAPE plugin', () => {
 
     const result = await execute(inputs);
 
-    expect(result.success).toBe(false);
-    expect(result.resultType).toBe(PluginParameterType.ERROR);
-    expect(result.error).toBe('URL is required for SCRAPE plugin');
+    expect(result[0].success).toBe(false);
+    expect(result[0].resultType).toBe(PluginParameterType.ERROR);
+    expect(result[0].error).toBe('URL is required for SCRAPE plugin');
   });
 
   it('should handle network errors', async () => {
@@ -53,9 +53,9 @@ describe('SCRAPE plugin', () => {
 
     const result = await execute(inputs);
 
-    expect(result.success).toBe(false);
-    expect(result.resultType).toBe(PluginParameterType.ERROR);
-    expect(result.error).toBe('Network error');
+    expect(result[0].success).toBe(false);
+    expect(result[0].resultType).toBe(PluginParameterType.ERROR);
+    expect(result[0].error).toBe('Network error');
   });
 
   it('should parse config from URL input', async () => {
@@ -77,8 +77,8 @@ describe('SCRAPE plugin', () => {
 
     const result = await execute(inputs);
 
-    expect(result.success).toBe(true);
-    expect(result.result).toEqual(['link1', 'link2']);
+    expect(result[0].success).toBe(true);
+    expect(result[0].result).toEqual(['link1', 'link2']);
   });
 
   it('should apply limit to scraped content', async () => {
@@ -102,8 +102,8 @@ describe('SCRAPE plugin', () => {
 
     const result = await execute(inputs);
 
-    expect(result.success).toBe(true);
-    expect(result.result).toEqual(['Test content 1', 'Test content 2']);
+    expect(result[0].success).toBe(true);
+    expect(result[0].result).toEqual(['Test content 1', 'Test content 2']);
   });
 
   it('should handle empty scrape results', async () => {
@@ -122,7 +122,7 @@ describe('SCRAPE plugin', () => {
 
     const result = await execute(inputs);
 
-    expect(result.success).toBe(true);
-    expect(result.result).toEqual([]);
+    expect(result[0].success).toBe(true);
+    expect(result[0].result).toEqual([]);
   });
 });

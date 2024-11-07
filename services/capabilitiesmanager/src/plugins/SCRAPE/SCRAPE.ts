@@ -1,6 +1,7 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { PluginInput, PluginOutput, PluginParameterType } from '@cktmcs/shared';
+import { analyzeError } from '@cktmcs/errorhandler';
 
 interface ScrapeConfig {
     selector?: string;
@@ -9,7 +10,7 @@ interface ScrapeConfig {
     transform?: (content: string) => string;
 }
 
-export async function execute(inputs: Map<string, PluginInput>): Promise<PluginOutput> {
+export async function execute(inputs: Map<string, PluginInput>): Promise<PluginOutput[]> {
         try {
             const url = inputs.get('url')?.inputValue || '';
             if (!url) {
@@ -20,21 +21,23 @@ export async function execute(inputs: Map<string, PluginInput>): Promise<PluginO
             const html = await fetchHtml(url);
             const scrapedData = scrapeContent(html, config);
 
-            return {
+            return [{
                 success: true,
+                name: 'content',
                 resultType: PluginParameterType.ARRAY,
                 resultDescription: `Scraped content from ${url}`,
                 result: scrapedData
-            };
-        } catch (error) {
-            console.error('SCRAPE plugin failed', error);
-            return {
+            }];
+        } catch (error) { analyzeError(error as Error);
+            console.error('SCRAPE plugin failed', error instanceof Error ? error.message : error);
+            return [{
                 success: false,
+                name: 'error',
                 resultType: PluginParameterType.ERROR,
                 resultDescription: `Error scraping ${inputs.get('url')?.inputValue || 'undefined Url'}`,
                 result: null,
                 error: error instanceof Error ? error.message : 'An unknown error occurred'
-            };
+            }];
         }
     }
 
@@ -96,8 +99,8 @@ function scrapeContent(html: string, config: ScrapeConfig): string[] {
             }
     
             return result;
-        } catch (error) {
-            console.error('Error in scrapeContent:', error);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error in scrapeContent:', error instanceof Error ? error.message : error);
             return [];
         }
     }

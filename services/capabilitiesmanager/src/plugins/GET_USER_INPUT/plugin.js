@@ -4,26 +4,30 @@ const getUserInputPlugin = {
     verb: 'GET_USER_INPUT',
     description: 'Requests input from the user',
     explanation: 'This plugin sends a question to the user and returns their response',
-    inputs: [
+    inputDefinitions: [
         {
             name: 'question',
+            required: true,
             type: 'string',
             description: 'The question to ask the user'
         },
         {
             name: 'choices',
+            required: false,
             type: 'array',
             description: 'Optional array of choices for multiple choice questions'
         },
         {
             name: 'answerType',
+            required: false,
             type: 'string',
             description: 'Type of answer expected (text, number, boolean, or multipleChoice)'
         }
     ],
-    outputs: [
+    outputDefinitions: [
         {
-            name: 'result',
+            name: 'answer',
+            required: false,
             type: 'string',
             description: 'The user\'s response'
         }
@@ -54,8 +58,8 @@ async function execute(input) {
             result: response,
             mimeType: 'text/plain'
         };
-    } catch (error) {
-        console.error('GET_USER_INPUT plugin failed', error);
+    } catch (error) { analyzeError(error as Error);
+        console.error('GET_USER_INPUT plugin failed', error instanceof Error ? error.message : error);
         return {
             success: false,
             resultType: 'error',
@@ -71,8 +75,8 @@ async function sendUserInputRequest(postOfficeUrl, request) {
     try {
         const response = await axios.post(\`http://\${postOfficeUrl}/sendUserInputRequest\`, request);
         return response.data.result;
-    } catch (error) {
-        console.error('Error sending user input request:', error);
+    } catch (error) { analyzeError(error as Error);
+        console.error('Error sending user input request:', error instanceof Error ? error.message : error);
         throw new Error('Failed to get user input');
     }
 }

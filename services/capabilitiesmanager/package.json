@@ -11,10 +11,10 @@
     },
     "dependencies": {
         "@cktmcs/shared": "file:../../shared",
+        "@cktmcs/errorhandler": "file:../../errorhandler",
         "axios": "^1.7.7",
         "body-parser": "^1.19.0",
         "cheerio": "^1.0.0",
-        "child_process": "^1.0.2",
         "express": "^4.21.1",
         "ws": "^8.18.0"
     },

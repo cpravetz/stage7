@@ -7,6 +7,7 @@ import { AgentConfig } from './agents/Agent';
 import axios from 'axios';
 import { AgentSetStatistics, AgentStatistics, PluginInput } from '@cktmcs/shared';
 import { AgentPersistenceManager } from './utils/AgentPersistenceManager';
+import { analyzeError } from '@cktmcs/errorhandler';
 
 
 const app = express();
@@ -97,8 +98,8 @@ export class AgentSet extends BaseEntity {
                 try {
                     const output = await agent.getOutput();
                     res.status(200).send({ output });
-                } catch (error) {
-                    console.error(`Error fetching output for agent ${agentId}:`, error);
+                } catch (error) { analyzeError(error as Error);
+                    console.error(`Error fetching output for agent ${agentId}:`, error instanceof Error ? error.message : error);
                     res.status(500).send({ error: `Failed to fetch output for agent ${agentId}` });
                 }
             }
@@ -115,8 +116,8 @@ export class AgentSet extends BaseEntity {
                 }
                 await this.persistenceManager.saveAgent(agent);
                 res.status(200).send({ message: 'Agent saved successfully', agentId: agent.id });
-            } catch (error) {
-                console.error('Error saving agent:', error);
+            } catch (error) { analyzeError(error as Error);
+                console.error('Error saving agent:', error instanceof Error ? error.message : error);
                 res.status(500).send({ error: 'Failed to save agent' });
             }
         });
@@ -172,8 +173,8 @@ export class AgentSet extends BaseEntity {
             try {
                 await agent.handleMessage(message);
                 res.status(200).send({ status: 'Message delivered to agent' });
-            } catch (error) {
-                console.error(`Error delivering message to agent ${agentId}:`, error);
+            } catch (error) { analyzeError(error as Error);
+                console.error(`Error delivering message to agent ${agentId}:`, error instanceof Error ? error.message : error);
                 res.status(500).send({ error: 'Failed to deliver message to agent' });
             }
         } else {
@@ -189,8 +190,8 @@ export class AgentSet extends BaseEntity {
             try {
                 const output = await agent.getOutput();
                 res.status(200).send(output);
-            } catch (error) {
-                console.error(`Error fetching output for agent ${agentId}:`, error);
+            } catch (error) { analyzeError(error as Error);
+                console.error(`Error fetching output for agent ${agentId}:`, error instanceof Error ? error.message : error);
                 res.status(500).send({ error: 'Failed to fetch agent output' });
             }
         } else {
@@ -211,8 +212,8 @@ export class AgentSet extends BaseEntity {
             try {
               await agent.handleMessage(message);
               res.status(200).send({ status: 'Message delivered to agent' });
-            } catch (error) {
-              console.error(`Error delivering message to agent ${agentId}:`, error);
+            } catch (error) { analyzeError(error as Error);
+              console.error(`Error delivering message to agent ${agentId}:`, error instanceof Error ? error.message : error);
               res.status(500).send({ error: 'Failed to deliver message to agent' });
             }
           } else {

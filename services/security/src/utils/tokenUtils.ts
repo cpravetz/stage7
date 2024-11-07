@@ -1,4 +1,5 @@
 import jwt from 'jsonwebtoken';
+import { analyzeError } from '@cktmcs/errorhandler';
 
 const SECRET_KEY = 'your-very-secret-key'; // Replace with an actual secret key
 
@@ -20,8 +21,8 @@ export function verifyToken(token: string): DecodedToken | null {
     try {
         const decoded = jwt.verify(token, SECRET_KEY) as DecodedToken;
         return decoded;
-    } catch (error) {
-        console.error('Token verification failed:', error);
+    } catch (error) { analyzeError(error as Error);
+        console.error('Token verification failed:', error instanceof Error ? error.message : error);
         return null;
     }
 }

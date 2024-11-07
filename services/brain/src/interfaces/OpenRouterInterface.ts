@@ -1,6 +1,7 @@
 import { ModelInterface } from './ModelInterface';
 import OpenAI from 'openai';
 import { ChatCompletionMessageParam } from 'openai/resources/chat';
+import { analyzeError } from '@cktmcs/errorhandler';
 
 
 export class OpenRouterInterface extends ModelInterface {
@@ -29,8 +30,8 @@ export class OpenRouterInterface extends ModelInterface {
             }
 
             return response.choices[0].message.content;
-        } catch (error) {
-            console.error('Error generating response from OpenRouter:', error);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error generating response from OpenRouter:', error instanceof Error ? error.message : error);
             if (error instanceof Error) {
                 throw new Error(`Failed to generate response from OpenRouter: ${error.message}`);
             } else {

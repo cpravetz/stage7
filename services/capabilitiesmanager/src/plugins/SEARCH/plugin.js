@@ -3,16 +3,18 @@ const searchPlugin = {
     verb: 'SEARCH',
     description: 'Searches DuckDuckGo for a given term and returns a list of links',
     explanation: 'This plugin takes a search term and returns a JSON array of search results from DuckDuckGo, including titles and URLs.',
-    inputs: [
+    inputDefinitions: [
         {
             name: 'searchTerm',
+            required: true,
             type: 'string',
             description: 'The term to search for on DuckDuckGo'
         }
     ],
-    outputs: [
+    outputDefinitions: [
         {
-            name: 'result',
+            name: 'results',
+            required: false,
             type: 'array',
             description: 'Array of search results, each containing a title and URL'
         }

@@ -23,7 +23,7 @@ export interface Step {
     inputs: Map<string, PluginInput>;
     dependencies: Map<string, number>;
     status: 'pending' | 'running' | 'completed' | 'error';
-    result?: PluginOutput;
+    result?: PluginOutput[];
     timeout?: number;
 }
 
@@ -33,14 +33,15 @@ export interface Plugin {
     verb: string;
     description?: string;
     explanation?: string;
-    inputs: PluginParameter[];
-    outputs: PluginParameter[];
+    inputDefinitions: PluginParameter[];
+    outputDefinitions: PluginParameter[];
     entryPoint?: EntryPointType;
     language: 'javascript' | 'python';
 }
 
 export interface PluginParameter {
     name: string;
+    required: boolean;
     type: PluginParameterType;
     description: string;
     mimeType?: string;
@@ -49,11 +50,13 @@ export interface PluginParameter {
 export interface PluginInput {
     inputName: string;
     inputValue: any;
+    inputSource?: string;
     args: Record<string, any>;
 }
 
 export interface PluginOutput {
     success: boolean;
+    name: string;
     resultType: PluginParameterType;
     result: any;
     resultDescription: string,

@@ -4,6 +4,7 @@ import { OptimizationType, ModelManager } from './utils/modelManager';
 import { Model, LLMConversionType } from './models/Model';
 import { BaseEntity } from '@cktmcs/shared';
 import dotenv from 'dotenv';
+import { analyzeError } from '@cktmcs/errorhandler';
 
 dotenv.config();
 
@@ -82,8 +83,8 @@ export class Brain extends BaseEntity {
                 response: brainResponse,
                 mimeType: mimeType
             });
-        } catch (error) {
-            console.error('Error processing thread:', error);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error processing thread:', error instanceof Error ? error.message : error);
             res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
         }
     }

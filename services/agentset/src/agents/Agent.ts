@@ -10,6 +10,7 @@ import { PluginInput, PluginOutput, PluginParameterType } from '@cktmcs/shared';
 import { Step, ActionVerbTask } from '@cktmcs/shared';
 import { AgentStatistics } from '@cktmcs/shared';
 import { Message, MessageType } from '@cktmcs/shared';
+import { analyzeError } from '@cktmcs/errorhandler';
 
 const api = axios.create({
     headers: {
@@ -28,7 +29,6 @@ export interface AgentConfig {
     id: string;
     missionContext: string;
 }
-
 
 export class Agent extends BaseEntity {
     private missionContext: string = '';
@@ -74,7 +74,19 @@ export class Agent extends BaseEntity {
         };
         this.steps.push(initialStep);
 
-        this.initializeAgent();
+        this.initializeAgent().then(() => {
+            this.runUntilDone();
+        }).catch(error => {
+            this.status = AgentStatus.ERROR;
+        });
+
+    }
+
+    private async runUntilDone() {
+        while (this.status !== AgentStatus.COMPLETED && this.status !== AgentStatus.ERROR && this.status !== AgentStatus.ABORTED) {
+            await this.runAgent();
+        }
+        return this.status;
     }
 
     private async initializeAgent() {
@@ -84,16 +96,16 @@ export class Agent extends BaseEntity {
             this.brainUrl = brainUrl;
             this.trafficManagerUrl = trafficManagerUrl;
             this.librarianUrl = librarianUrl;
+            this.status = AgentStatus.RUNNING;
 
-            console.log('Service URLs retrieved:', { capabilitiesManagerUrl, brainUrl, trafficManagerUrl, librarianUrl });
             if (this.missionContext && this.steps[0]?.actionVerb === 'ACCOMPLISH') {
                 await this.prepareOpeningInstruction();
             }
-            this.status = AgentStatus.RUNNING;
-            await this.runAgent();
-        } catch (error) {
-            console.error('Error initializing agent:', error);
+            return true;
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error initializing agent:', error instanceof Error ? error.message : error);
             this.status = AgentStatus.ERROR;
+            return false;
         }
     }
 
@@ -115,8 +127,8 @@ Please consider this context and the available plugins when planning and executi
         try {
             const response = await axios.get(`http://${this.capabilitiesManagerUrl}/availablePlugins`);
             return response.data;
-        } catch (error) {
-            console.error('Error fetching available plugins:', error);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error fetching available plugins:', error instanceof Error ? error.message : error);
             return [];
         }
     }
@@ -141,11 +153,11 @@ Please consider this context and the available plugins when planning and executi
                 this.say(`Agent has completed its work.`);
                 this.say(`Result ${this.output}`)
             }
-            await this.notifyTrafficManager();
-        } catch (error) {
-            console.error('Error running agent:', error);
+            this.notifyTrafficManager();
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error running agent:', error instanceof Error ? error.message : error);
             this.status = AgentStatus.ERROR;
-            await this.notifyTrafficManager();
+            this.notifyTrafficManager();
         }
     }
 
@@ -193,8 +205,8 @@ Please consider this context and the available plugins when planning and executi
     private async checkAndResumeBlockedAgents() {
         try {
             await api.post(`http://${this.trafficManagerUrl}/checkBlockedAgents`, { completedAgentId: this.id });
-        } catch (error) {
-            console.error('Error checking blocked agents:', error);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error checking blocked agents:', error instanceof Error ? error.message : error);
         }
     }
 
@@ -210,16 +222,19 @@ Please consider this context and the available plugins when planning and executi
                     const dependentStep = this.steps.find(s => s.stepNo === dependentStepNo);
                     if (dependentStep && dependentStep.result) {
                         step.inputs = step.inputs || new Map();
-                        step.inputs.set(inputKey, {
-                            inputName: inputKey,
-                            inputValue: dependentStep.result,
-                            args: { [inputKey]: dependentStep.result }
-                        });
+                        const inputData = step.inputs.get(inputKey);
+                        if (inputData && inputData.args && inputData.args.outputKey) {
+                            step.inputs.set(inputKey, {
+                                inputName: inputKey,
+                                inputValue: dependentStep.result[inputData.args.outputKey],
+                                args: { ...inputData.args }
+                            });
+                        }
                     }
                 });
             }
             console.log('Populated Inputs:', MapSerializer.transformForSerialization(step.inputs));
-            let result: PluginOutput;
+            let result;
 
             switch (step.actionVerb) {
                 case 'THINK':
@@ -231,32 +246,51 @@ Please consider this context and the available plugins when planning and executi
                 case MessageType.REQUEST:
                     result = await this.handleAskStep(step.inputs);
                     break;
-                case 'ACCOMPLISH':
-                    result = await this.executeActionWithCapabilitiesManager(step);
-                    break;
                 default:
                     result = await this.executeActionWithCapabilitiesManager(step);
             }
 
-            if (result.success && result.resultType === 'plan') {
-                this.addPlanSteps(result.result, step.stepNo);
+            step.status = 'completed';
+           // Ensure result is always an array of PluginOutput
+           if (!Array.isArray(result)) {
+            result = [result];
+        }
+
+        result = result.map(item => {
+            if (!('success' in item && 'name' in item && 'resultType' in item && 'resultDescription' in item && 'result' in item)) {
+                return {
+                    success: true,
+                    name: 'result',
+                    resultType: typeof item as PluginParameterType,
+                    resultDescription: 'Action result',
+                    result: item,
+                    mimeType: 'text/plain'
+                };
             }
-            if (!result.mimeType) { result.mimeType = 'text/plain'; }
-            step.result = result.result;
-            step.status = result.success ? 'completed' : 'error';
-            console.log(`Completed ${step.id}: ${result.resultType} ${step.result}`);
-            await this.saveWorkProduct(step.id, result.resultType, result.resultDescription, step.result, step.stepNo === this.steps.length, result.mimeType);
-            
-        } catch (error) {
-            this.logAndSay(`There was an error processing step ${step.stepNo}: ${JSON.stringify(error)}`);
-            console.log('Error processing step:', error);
+            return item;
+        });
+
+        result.forEach(resultItem => {
+            if (resultItem.success && resultItem.resultType === 'plan') {
+                this.addPlanSteps(resultItem.result, step.stepNo);
+            }
+            if (!resultItem.mimeType) { resultItem.mimeType = 'text/plain'; }
+            if (!resultItem.success) { step.status = 'error'; }
+        });
+
+        step.result = result;
+        console.log(`Completed ${step.id}: ${step.status}`);
+        await this.saveWorkProduct(step.id, step.result, step.stepNo === this.steps.length);            
+        } catch (error) { analyzeError(error as Error);
+            this.logAndSay(`There was an error processing step ${step.stepNo}: ${error instanceof Error ? error.message : JSON.stringify(error)}`);
             step.status = 'error';
-            step.result = { 
+            step.result = [{ 
                 success: false, 
+                name: 'error',
                 resultType: PluginParameterType.ERROR, 
                 resultDescription: 'Error', 
                 result: error instanceof Error ? error.message : String(error) ,
-                error: error instanceof Error ? error.message : String(error) };
+                error: error instanceof Error ? error.message : String(error) }];
         }
     }
 
@@ -268,7 +302,6 @@ Please consider this context and the available plugins when planning and executi
     }
 
     private addPlanSteps(plan: ActionVerbTask[], currentStepNo: number) {
-        console.log('Adding plan steps:', MapSerializer.transformForSerialization(plan));
         const currentStepCount = this.steps.length;
         const newSteps: Step[] = plan.map((task, index) => {
             console.log(`Adding plan step ${task.verb} with ${task.inputs.size} inputs and ${task.dependencies?.size} dependencies`);
@@ -332,17 +365,18 @@ Please consider this context and the available plugins when planning and executi
         });
         return outputs;
     }
-    private async handleAskStep(inputs: Map<string, PluginInput>): Promise<PluginOutput> {
+    private async handleAskStep(inputs: Map<string, PluginInput>): Promise<PluginOutput[]> {
         const input = inputs.get('question');
         if (!input) {
             this.logAndSay('Question is required for ASK plugin');
-            return {
+            return [{
                 success: false,
+                name: 'error',
                 resultType: PluginParameterType.ERROR,
                 resultDescription: 'Error',
                 result: null,
                 error: 'Question is required for ASK plugin'
-            }
+            }]
         }
         const question = input.args.question || input.inputValue;
         const choices = input.args.choices;
@@ -354,30 +388,33 @@ Please consider this context and the available plugins when planning and executi
                 new Promise((_, reject) => setTimeout(() => reject(new Error('Question timeout')), timeout))
             ]);
     
-            return {
+            return [{
                 success: true,
+                name: 'answer',
                 resultType: PluginParameterType.STRING,
                 resultDescription: 'User response',
                 result: response
-            };
-        } catch (error) {
+            }];
+        } catch (error) { analyzeError(error as Error);
             if (error instanceof Error && error.message === 'Question timeout') {
                 console.error(`Question timed out after ${timeout}ms: ${question}`);
-                return {
+                return [{
                     success: false,
+                    name: 'error',
                     resultType: PluginParameterType.ERROR,
                     resultDescription: 'Question to user timed out',
                     result: null,
                     error: 'Question timed out'
-                };
+                }];
             }
-            return {
+            return [{
                 success: false,
+                name: 'error',
                 resultType: PluginParameterType.ERROR,
                 result: null,
                 resultDescription: 'Error',
                 error: error instanceof Error ? error.message : 'Unknown error occurred'
-            };
+            }];
         }
     }
     private async askUser(question: string, choices?: string[]): Promise<string> {
@@ -419,14 +456,14 @@ Please consider this context and the available plugins when planning and executi
     private async sendMessage(message: Message): Promise<void> {
         try {
           await axios.post(`http://${this.postOfficeUrl}/message`, message);
-        } catch (error) {
-          console.error('Error sending message:', error);
+        } catch (error) { analyzeError(error as Error);
+          console.error('Error sending message:', error instanceof Error ? error.message : error);
         }
       }
 
-      private async saveWorkProduct(stepId: string, resultType: string, resultDescription: string, data: any, isFinal: boolean, mimeType: string): Promise<void> {
+      private async saveWorkProduct(stepId: string, data: PluginOutput[], isFinal: boolean): Promise<void> {
         const workProductId = stepId;
-        const workProduct = new WorkProduct(this.id, stepId, resultType, data, mimeType);
+        const workProduct = new WorkProduct(this.id, stepId, data);
         try {
             // Save to Librarian
             await this.agentPersistenceManager.saveWorkProduct(workProduct);
@@ -443,24 +480,32 @@ Please consider this context and the available plugins when planning and executi
                     id: workProductId,
                     type: isFinal ? 'Final' : 'Interim',
                     scope: isMissionOutput ? 'MissionOutput' : (isFinal ? 'AgentOutput' : 'AgentStep'),
-                    name: resultDescription,
+                    name: data[0]? data[0].resultDescription :  'Step Output',
                     agentId: this.id,
                     stepId: stepId,
                     missionId: this.missionId,
-                    mimeType: mimeType
+                    mimeType: data[0]?.mimeType || 'text/plain'
                 }
             };
             await this.sendMessage(message);
-        } catch (error) {
-            console.error('Error saving work product:', error);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error saving work product:', error instanceof Error ? error.message : error);
         }
     }
 
-    private async createSubAgent(inputs: Map<string, PluginInput>): Promise<PluginOutput> {
+    private async createSubAgent(inputs: Map<string, PluginInput>): Promise<PluginOutput[]> {
         try {
+            const subAgentGoal = inputs.get('subAgentGoal');
+            const newInputs = new Map(inputs);
+            
+            if (subAgentGoal) {
+                newInputs.delete('subAgentGoal');
+                newInputs.set('goal', subAgentGoal);
+            }
+    
             const subAgent = new Agent({
                 actionVerb: 'ACCOMPLISH',
-                inputs: inputs,
+                inputs: newInputs,
                 missionId: this.missionId,
                 dependencies: [this.id, ...(this.dependencies || [])],
                 postOfficeUrl: this.postOfficeUrl,
@@ -471,32 +516,34 @@ Please consider this context and the available plugins when planning and executi
             this.subAgents.push(subAgent);
             await subAgent.initializeAgent();
             
-            return {
+            return [{
                 success: true,
+                name: 'subAgent',
                 resultType: PluginParameterType.OBJECT,
                 resultDescription: 'Sub-agent created',
                 result: {
                     subAgentId: subAgent.id,
                     status: subAgent.status
                 }
-            };
-        } catch (error) {
-            console.error('Error creating sub-agent:', error);
-            return {
+            }];
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error creating sub-agent:', error instanceof Error ? error.message : error);
+            return [{
                 success: false,
+                name: 'error',
                 resultType: PluginParameterType.ERROR,
                 resultDescription:'Error',
                 result: null,
                 error: error instanceof Error ? error.message : 'Unknown error occurred while creating sub-agent'
-            };
+            }];
         }
     }
-    private async useBrainForReasoning(inputs: Map<string, PluginInput>): Promise<PluginOutput> {
+    private async useBrainForReasoning(inputs: Map<string, PluginInput>): Promise<PluginOutput[]> {
         const args = inputs.get('query');
         const userMessage = args ? args.inputValue : '';
         this.conversation.push({ role: 'user', content: userMessage });
         const reasoningInput = {
-            exchanges: [{ role: 'user', message: this.conversation }],
+            exchanges: this.conversation,
             optimization: 'accuracy'
         };
 
@@ -508,20 +555,40 @@ Please consider this context and the available plugins when planning and executi
             this.conversation.push({ role: 'assistant', content: response.data.response });
             const result : PluginOutput = {
                 success: true,
+                name: 'answer',
                 resultType: PluginParameterType.OBJECT,
                 result: brainResponse,
                 resultDescription: 'Brain reasoning output',
                 mimeType: mimeType
             };
              
-            return result;
-        } catch (error) {
-            console.error('Error using Brain for reasoning:', error);
-            throw error;
+            return [result];
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error using Brain for reasoning:', error instanceof Error ? error.message : error);
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: 'Error',
+                result: null,
+                error: error instanceof Error ? error.message : 'Unknown error occurred'
+            }];
         }
     }
 
-    private async executeActionWithCapabilitiesManager(step: Step): Promise<PluginOutput> {
+    private isPluginOutput(obj: any): obj is PluginOutput {
+        return (
+            typeof obj === 'object' &&
+            obj !== null &&
+            'success' in obj &&
+            'name' in obj &&
+            'resultType' in obj &&
+            'resultDescription' in obj &&
+            'result' in obj
+        );
+    }
+
+    private async executeActionWithCapabilitiesManager(step: Step): Promise<PluginOutput[]> {
         this.logAndSay(`Agent: Executing action ${step.actionVerb} with CapabilitiesManager`);
         console.log(`${step.actionVerb} Inputs are `, MapSerializer.transformForSerialization(step.inputs));
         try {
@@ -531,24 +598,32 @@ Please consider this context and the available plugins when planning and executi
             const response = await api.post(`http://${this.capabilitiesManagerUrl}/executeAction`, payload);
             
             console.log('Response from CapabilitiesManager:', response.data);
-            return MapSerializer.transformFromSerialization(response.data);
-        } catch (error) {
-            console.error('Error executing action with CapabilitiesManager:', error);
-            if (axios.isAxiosError(error)) {
-                console.error('Axios error details:', {
-                    response: error.response?.data,
-                    status: error.response?.status,
-                    headers: error.response?.headers,
-                });
+            const serializedresponse = MapSerializer.transformFromSerialization(response.data);
+            if (Array.isArray(serializedresponse) && serializedresponse.every(item => this.isPluginOutput(item))) {
+                return serializedresponse;
+            } else if (this.isPluginOutput(serializedresponse)) {
+                return [serializedresponse];
+            } else {
+                console.warn('Unexpected response type from CapabilitiesManager');
+                return [{
+                    success: false,
+                    name: 'error',
+                    resultType: PluginParameterType.ERROR,
+                    resultDescription: 'Unexpected response type',
+                    result: null,
+                    error: 'Unexpected response type from CapabilitiesManager'
+                }];
             }
-            this.logAndSay(`Error executing action ${step.actionVerb} with CapabilitiesManager: ${error}`);
-            return {
+        } catch (error) { analyzeError(error as Error);
+            this.logAndSay(`Error executing action ${step.actionVerb} with CapabilitiesManager: ${error instanceof Error ? error.message : error}`);
+            return [{
                 success: false,
+                name: 'error',
                 resultType: PluginParameterType.ERROR,
                 resultDescription: 'Error executing action',
                 result: null,
                 error: error instanceof Error ? error.message : 'Unknown error occurred'
-            };
+            }];
         }
     }
 
@@ -640,8 +715,8 @@ Please consider this context and the available plugins when planning and executi
               };
               this.sendMessage(message);
               axios.post(`http://${this.agentSetUrl}/updateFromAgent`, { agentId: this.id, status: this.status });
-        } catch (error) {
-            console.error(`Failed to notify TrafficManager about agent ${this.id}:`, error);
+        } catch (error) { analyzeError(error as Error);
+            console.error(`Failed to notify TrafficManager about agent ${this.id}:`, error instanceof Error ? error.message : error);
         }
     }
 
@@ -650,8 +725,8 @@ Please consider this context and the available plugins when planning and executi
           const response = await axios.get(`http://${this.trafficManagerUrl}/dependentAgents/${this.id}`);
           const dependentAgents = response.data;
           return dependentAgents.length > 0;
-        } catch (error) {
-          console.error('Error checking for dependent agents:', error);
+        } catch (error) { analyzeError(error as Error);
+          console.error('Error checking for dependent agents:', error instanceof Error ? error.message : error);
           return false;
         }
       }

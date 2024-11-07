@@ -6,6 +6,7 @@ import { dependencyManager } from './utils/dependencyManager';
 import { AgentStatus } from './utils/status';
 import Docker from 'dockerode';
 import { Message, MessageType,TrafficManagerStatistics, BaseEntity, PluginInput } from '@cktmcs/shared';
+import { analyzeError } from '@cktmcs/errorhandler';
 
 
 const api = axios.create({
@@ -37,7 +38,7 @@ export class TrafficManager extends BaseEntity {
         this.app.post('/pauseAgents', async (req, res, next) => { 
             try {    
                 await this.pauseAgents(req, res);
-            } catch(error) {
+            } catch (error) { analyzeError(error as Error);
                 next(error);
             }
         });
@@ -51,15 +52,15 @@ export class TrafficManager extends BaseEntity {
     private async captureAgentStatus(agentId: string, status: AgentStatus) {
         try {
             await this.updateAgentStatusInStorage(agentId, status);
-        } catch (error) {
-            console.error(`Error capturing agent status for agent ${agentId}:`, error);
+        } catch (error) { analyzeError(error as Error);
+            console.error(`Error capturing agent status for agent ${agentId}:`, error instanceof Error ? error.message : error);
         }
     }
 
     private async updateAgentStatus(message: Message) {
         const agentId = message.sender;
         const status = message.content.status;
-    
+        console.log(`Updating status for agent ${agentId} to ${status}`);
         try {
             if (status === 'CHECK') {
                 // Just return the current status without updating
@@ -87,8 +88,8 @@ export class TrafficManager extends BaseEntity {
             await this.checkDependentAgents(agentId);
 
             return { message: `Agent ${agentId} status updated to ${status}` }
-        } catch (error) {
-            console.error(`Error updating status for agent ${agentId}:`, error);
+        } catch (error) { analyzeError(error as Error);
+            console.error(`Error updating status for agent ${agentId}:`, error instanceof Error ? error.message : error);
             return { error: 'Failed to update agent status' };
         }
     }
@@ -113,7 +114,7 @@ export class TrafficManager extends BaseEntity {
             // Clean up any resources associated with this agent
             await this.cleanupAgentResources(agentId);
     
-        } catch (error) {
+        } catch (error) { analyzeError(error as Error);
             this.logAndSay(`An error occurred while processing the completion of agent ${agentId}`);
         }
     }
@@ -135,8 +136,8 @@ export class TrafficManager extends BaseEntity {
             } else {
                 throw new Error(`Failed to fetch output for agent ${agentId}`);
             }
-        } catch (error) {
-            console.error(`Error fetching output for agent ${agentId}:`, error);
+        } catch (error) { analyzeError(error as Error);
+            console.error(`Error fetching output for agent ${agentId}:`, error instanceof Error ? error.message : error);
             throw error;
         }
     }    
@@ -211,8 +212,8 @@ export class TrafficManager extends BaseEntity {
             };
     
             res.status(200).json(trafficManagerStatistics);
-        } catch (error) {
-            console.error('Error fetching agent statistics:', error);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error fetching agent statistics:', error instanceof Error ? error.message : error);
             res.status(500).json({ error: 'Failed to fetch agent statistics' });
         }
     }
@@ -227,8 +228,8 @@ export class TrafficManager extends BaseEntity {
           try {
             await this.forwardMessageToAgent(message);
             res.status(200).send({ status: 'Message forwarded to agent' });
-          } catch (error) {
-            console.error('Error forwarding message to agent:', error);
+          } catch (error) { analyzeError(error as Error);
+            console.error('Error forwarding message to agent:', error instanceof Error ? error.message : error);
             res.status(500).send({ error: 'Failed to forward message to agent' });
           }
         } else {
@@ -258,8 +259,8 @@ export class TrafficManager extends BaseEntity {
     
           console.log(`Message forwarded to agent ${agentId} via AgentSet at ${agentSetUrl}`);
           return response.data;
-        } catch (error) {
-          console.error(`Error forwarding message to agent ${agentId}:`, error);
+        } catch (error) { analyzeError(error as Error);
+          console.error(`Error forwarding message to agent ${agentId}:`, error instanceof Error ? error.message : error);
           throw error;
         }
     }
@@ -313,8 +314,8 @@ export class TrafficManager extends BaseEntity {
             await this.captureAgentStatus(agentId, AgentStatus.RUNNING);
 
             res.status(200).send({ message: 'Agent created and assigned.', agentId, response });
-        } catch (error) {
-            console.error('Error creating agent:', error);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error creating agent:', error instanceof Error ? error.message : error);
             res.status(500).send({ error: 'Failed to create agent' });
         }
     }
@@ -363,8 +364,8 @@ export class TrafficManager extends BaseEntity {
             // If the agent is not found, return a default status or throw an error
             console.warn(`Agent ${agentId} not found. Returning default status.`);
             return AgentStatus.INITIALIZING;
-        } catch (error) {
-            console.error(`Error retrieving status for agent ${agentId}:`, error);
+        } catch (error) { analyzeError(error as Error);
+            console.error(`Error retrieving status for agent ${agentId}:`, error instanceof Error ? error.message : error);
             throw new Error(`Failed to retrieve status for agent ${agentId}`);
         }
     }
@@ -373,6 +374,7 @@ export class TrafficManager extends BaseEntity {
         // This is a placeholder for fetching the status from a persistent storage
         // In a real implementation, you would query your database or storage service here
         // For now, we'll simulate a delay and return a random status
+        console.log(`Fetching status for agent ${agentId} from storage...`);
         await new Promise(resolve => setTimeout(resolve, 100)); // Simulate network delay
         const statuses = Object.values(AgentStatus);
         return statuses[Math.floor(Math.random() * statuses.length)] as AgentStatus;
@@ -392,8 +394,8 @@ export class TrafficManager extends BaseEntity {
         try {
             await agentSetManager.pauseAgents(missionId);
             res.status(200).send({ message: 'Agent paused successfully.' });
-        } catch (error) {
-            console.error('Error pausing agent:', error);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error pausing agent:', error instanceof Error ? error.message : error);
             res.status(500).send({ error: 'Failed to pause agent' });
         }
     }
@@ -403,8 +405,8 @@ export class TrafficManager extends BaseEntity {
         try {
             await agentSetManager.abortAgents(missionId);
             res.status(200).send({ message: 'Agent aborted successfully.' });
-        } catch (error) {
-            console.error('Error aborting agent:', error);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error aborting agent:', error instanceof Error ? error.message : error);
             res.status(500).send({ error: 'Failed to abort agent' });
         }
     }
@@ -414,8 +416,8 @@ export class TrafficManager extends BaseEntity {
         try {
             await agentSetManager.resumeAgents(missionId);
             res.status(200).send({ message: 'Agent resumed successfully.' });
-        } catch (error) {
-            console.error('Error resuming agent:', error);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error resuming agent:', error instanceof Error ? error.message : error);
             res.status(500).send({ error: 'Failed to resume agent' });
         }
     }
@@ -432,8 +434,8 @@ export class TrafficManager extends BaseEntity {
             } else {
                 res.status(200).send({ message: 'Dependencies not yet satisfied.' });
             }
-        } catch (error) {
-            console.error('Error checking dependencies:', error);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error checking dependencies:', error instanceof Error ? error.message : error);
             res.status(500).send({ error: 'Failed to check dependencies' });
         }
     }
@@ -492,8 +494,8 @@ export class TrafficManager extends BaseEntity {
             }
 
             res.status(200).send({ message: 'Blocked agents checked and resumed if possible' });
-        } catch (error) {
-            console.error('Error checking blocked agents:', error);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error checking blocked agents:', error instanceof Error ? error.message : error);
             res.status(500).send({ error: 'Failed to check blocked agents' });
         }
     }
@@ -511,8 +513,8 @@ export class TrafficManager extends BaseEntity {
                 .map(([dependentAgentId, _]) => dependentAgentId);
     
             res.status(200).json(dependentAgents);
-        } catch (error) {
-            console.error('Error getting dependent agents:', error);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error getting dependent agents:', error instanceof Error ? error.message : error);
             res.status(500).json({ error: 'Failed to get dependent agents' });
         }
     }

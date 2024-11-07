@@ -4,26 +4,30 @@ const fileOpsPlugin = {
     verb: 'FILE_OPS',
     description: 'Provides services for file operations read, write, append',
     explanation: 'This plugin takes a path and optional content and executes the selected operation',
-    inputs: [
+    inputDefinitions: [
         {
             name: 'path',
+            required: true,
             type: 'string',
             description: 'The path for the filename to read, write, or append content'
         },
         {
             name: 'operation',
+            required: true,
             type: 'string',
             description: `'read', 'write' or 'append'`
         },
         {
             name: 'content',
+            required: false,
             type: 'any',
             description: 'For write and append operations, the content to write or append'
         }
     ],
-    outputs: [
+    outputDefinitions: [
         {
             name: 'result',
+            required: false,
             type: 'any',
             description: 'Content for read operations'
         }
@@ -75,7 +79,7 @@ export async function execute(operation: 'read' | 'write' | 'append', path: stri
                     };
 
             }
-        } catch (error) {
+        } catch (error) { analyzeError(error as Error);
             return {
                 success: false,
                 resultType: PluginParameterType.ERROR,

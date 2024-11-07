@@ -25,7 +25,7 @@ describe('CapabilitiesManager', () => {
           get: jest.fn(),
           listen: mockListen,
         };
-        (express as jest.MockedFunction<typeof express>).mockReturnValue(mockApp as unknown as express.Application);
+        (express as jest.MockedFunction<typeof express>).mockReturnValue(mockApp as unknown as express.Express);
 
       await capabilitiesManager.start();
 
@@ -42,7 +42,7 @@ describe('CapabilitiesManager', () => {
           get: jest.fn(),
           listen: mockListen,
         };
-        (express as jest.MockedFunction<typeof express>).mockReturnValue(mockApp as unknown as express.Application);
+        (express as jest.MockedFunction<typeof express>).mockReturnValue(mockApp as unknown as express.Express);
   
         await expect(capabilitiesManager.start()).rejects.toThrow('Server startup error');
       });
@@ -69,13 +69,13 @@ describe('CapabilitiesManager', () => {
         entryPoint: { main: 'index.js' },
       };
 
-      jest.spyOn(capabilitiesManager as any, 'loadActionVerbs').mockResolvedValue();
+      jest.spyOn(capabilitiesManager as any, 'loadActionVerbs').mockResolvedValue(undefined);
       jest.spyOn(capabilitiesManager as any, 'actionVerbs', 'get').mockReturnValue(new Map([['TEST_VERB', mockPlugin]]));
-      jest.spyOn(capabilitiesManager as any, 'executeJavaScriptPlugin').mockResolvedValue({
+      jest.spyOn(capabilitiesManager as any, 'executeJavaScriptPlugin').mockResolvedValue([{
         success: true,
         resultType: PluginParameterType.STRING,
         result: 'Test result',
-      });
+      }]);
 
       await (capabilitiesManager as any).executeActionVerb(mockReq, mockRes);
 
@@ -101,7 +101,7 @@ describe('CapabilitiesManager', () => {
         send: jest.fn(),
       } as unknown as express.Response;
 
-      jest.spyOn(capabilitiesManager as any, 'loadActionVerbs').mockResolvedValue();
+      jest.spyOn(capabilitiesManager as any, 'loadActionVerbs').mockResolvedValue(undefined);
       jest.spyOn(capabilitiesManager as any, 'actionVerbs', 'get').mockReturnValue(new Map());
       jest.spyOn(capabilitiesManager as any, 'handleUnknownVerb').mockResolvedValue({
         success: false,
@@ -134,7 +134,7 @@ describe('CapabilitiesManager', () => {
         entryPoint: { main: 'index.js' },
       });
 
-      jest.spyOn(capabilitiesManager as any, 'createPluginFiles').mockResolvedValue();
+      jest.spyOn(capabilitiesManager as any, 'createPluginFiles').mockResolvedValue(undefined);
 
       const result = await (capabilitiesManager as any).handleUnknownVerb(mockStep);
 

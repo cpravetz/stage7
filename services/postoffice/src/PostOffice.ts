@@ -6,6 +6,7 @@ import http from 'http';
 import { Component } from './types/Component';
 import { Message, MessageType } from '@cktmcs/shared';
 import axios from 'axios';
+import { analyzeError } from '@cktmcs/errorhandler';
 
 
 const api = axios.create({
@@ -101,8 +102,8 @@ export class PostOffice {
             const response = await api.get(`http://${librarianUrl}/librarian/retrieve/${req.params.id}`);
             res.status(200).send(response.data);
         }
-        catch (error) {
-            console.error('Error retrieving work product:', error);
+        catch (error) { analyzeError(error as Error);
+            console.error('Error retrieving work product:', error instanceof Error ? error.message : error);
             res.status(500).send({ error: 'Failed to retrieve work product' });
         }
     }
@@ -136,8 +137,8 @@ export class PostOffice {
                         // Pass the token to handleWebSocketMessage
                         this.handleWebSocketMessage(parsedMessage, token);
                     }
-                } catch (error) {
-                    console.error('Error parsing WebSocket message:', error);
+                } catch (error) { analyzeError(error as Error);
+                    console.error('Error parsing WebSocket message:', error instanceof Error ? error.message : error);
                 }
             });
         
@@ -219,8 +220,8 @@ export class PostOffice {
                     const message = messages.shift()!;
                     try {
                         await api.post(`http://${component.url}/message`, message);
-                    } catch (error) {
-                        console.error(`Failed to deliver message to ${recipientId}:`, error);
+                    } catch (error) { analyzeError(error as Error);
+                        console.error(`Failed to deliver message to ${recipientId}:`, error instanceof Error ? error.message : error);
                         messages.unshift(message); // Put the message back in the queue
                     }
                 }
@@ -262,8 +263,8 @@ export class PostOffice {
             }, { headers });
     
             res.status(200).send(response.data);
-        } catch (error) {
-            console.error('Error creating mission:', error);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error creating mission:', error instanceof Error ? error.message : error);
             if (axios.isAxiosError(error) && error.response) {
                 // More detailed error handling
                 const status = error.response.status;
@@ -289,8 +290,8 @@ export class PostOffice {
             }
             const response = await api.post(`http://${missionControlUrl}/loadMission`, { missionId, clientId });
             res.status(200).send(response.data);
-        } catch (error) {
-            console.error('Error loading mission:', error);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error loading mission:', error instanceof Error ? error.message : error);
             res.status(500).send({ error: 'Failed to load mission' });
         }
     }
@@ -310,8 +311,8 @@ export class PostOffice {
 
             console.log(`Component registered: ${id} of type ${type}`);
             res.status(200).send({ message: 'Component registered successfully' });
-        } catch (error) {
-            console.error('Component registration failed:', error);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Component registration failed:', error instanceof Error ? error.message : error);
             res.status(500).send({ error: 'Failed to register component' });
         }
     }
@@ -353,8 +354,8 @@ export class PostOffice {
             }
             await this.sendToComponent(`${recipientUrl}/message`, message, token);
             res.status(200).send({ status: 'Message sent' });
-        } catch (error) {
-            console.error('Error sending message:', error);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error sending message:', error instanceof Error ? error.message : error);
             res.status(500).send({ error: 'Failed to send message' });
         }
     }
@@ -379,8 +380,8 @@ export class PostOffice {
                 return;
             }
             await this.sendToComponent(recipientUrl, parsedMessage, token);
-        } catch (error) {
-            console.error('Error handling WebSocket message:', error);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error handling WebSocket message:', error instanceof Error ? error.message : error);
             console.error('Raw message:', message);
         }
     }
@@ -410,8 +411,8 @@ export class PostOffice {
                     'Authorization': token // Forward the token
                 }
             });
-        } catch (error) {
-            console.error(`Failed to send message to ${url}:`, error);
+        } catch (error) { analyzeError(error as Error);
+            console.error(`Failed to send message to ${url}:`, error instanceof Error ? error.message : error);
             throw error;
         }
     }
@@ -469,8 +470,8 @@ export class PostOffice {
                 params: { userId }
             });
             res.status(200).send(response.data);
-        } catch (error) {
-            console.error('Error getting saved missions:', error);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error getting saved missions:', error instanceof Error ? error.message : error);
             res.status(500).send({ error: 'Failed to get saved missions' });
         }
     }
@@ -501,8 +502,8 @@ export class PostOffice {
     
             // Send the response back to the client
             res.status(response.status).json(response.data);
-        } catch (error) {
-            console.error(`Error forwarding request to SecurityManager:`, error);
+        } catch (error) { analyzeError(error as Error);
+            console.error(`Error forwarding request to SecurityManager:`, error instanceof Error ? error.message : error);
             if (axios.isAxiosError(error) && error.response) {
                 // If it's an Axios error with a response, send that response to the client
                 res.status(error.response.status).json(error.response.data);

@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@cktmcs/shared": "file:../../shared",
+    "@cktmcs/errorhandler": "file:../../errorhandler",
     "axios": "^1.7.7",
     "dotenv": "^16.0.3",
     "express": "^4.18.2",

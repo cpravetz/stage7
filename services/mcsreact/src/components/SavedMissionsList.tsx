@@ -41,8 +41,8 @@ const SavedMissionsList: React.FC<SavedMissionsListProps> = ({ onMissionSelect, 
           }
         });
         setMissions(response.data);
-      } catch (error) {
-        console.error('Error fetching saved missions:', error);
+      } catch (error) { 
+        console.error('Error fetching saved missions:', error instanceof Error ? error.message : error);
       }
     };
 

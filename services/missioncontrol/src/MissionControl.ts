@@ -5,6 +5,7 @@ import { Mission, Status } from '@cktmcs/shared';
 import { generateGuid } from './utils/generateGuid';
 import { BaseEntity, TrafficManagerStatistics, MissionStatistics, MessageType, PluginInput } from '@cktmcs/shared';
 import { verifyToken } from '@cktmcs/shared';
+import { analyzeError } from '@cktmcs/errorhandler';
 
 const api = axios.create({
     headers: {
@@ -82,8 +83,8 @@ class MissionControl extends BaseEntity {
                     console.log(`Unhandled message type: ${type}`);
             }
             res.status(200).send({ message: 'Message processed successfully' });
-        } catch (error) {
-            console.error('Error processing message:', error);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error processing message:', error instanceof Error ? error.message : error);
             res.status(500).send({ error: 'Internal server error' });
         }
     }
@@ -112,8 +113,8 @@ class MissionControl extends BaseEntity {
             await api.post(`http://${this.trafficManagerUrl}/createAgent`, { actionVerb: 'ACCOMPLISH', inputs, missionId: mission.id, dependencies: [] });
             mission.status = Status.RUNNING;
             this.sendStatusUpdate(mission, 'Mission started');
-        } catch (error) {
-            console.error('Error starting mission:', error);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error starting mission:', error instanceof Error ? error.message : error);
             mission.status = Status.ERROR;
             this.sendStatusUpdate(mission, 'Error starting mission');
         }
@@ -176,8 +177,8 @@ class MissionControl extends BaseEntity {
             this.addClientMission(clientId, missionId);
             console.log(`Mission loaded: ${missionId}, Name: ${mission.name || 'Unnamed'}, Client: ${clientId}`);
             this.sendStatusUpdate(mission, `Mission loaded: ${mission.name || 'Unnamed'}`);
-        } catch (error) {
-            console.error('Error loading mission:', error);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error loading mission:', error instanceof Error ? error.message : error);
         }
     }
 
@@ -193,8 +194,8 @@ class MissionControl extends BaseEntity {
             await api.post(`http://${this.trafficManagerUrl}/saveAgents`, { missionId });
             console.log(`Mission saved: ${missionId}, Name: ${mission.name || 'Unnamed'}`);
             this.sendStatusUpdate(mission, `Mission saved: ${mission.name || 'Unnamed'}`);
-        } catch (error) {
-            console.error('Error saving mission:', error);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error saving mission:', error instanceof Error ? error.message : error);
         }
     }
 
@@ -207,8 +208,8 @@ class MissionControl extends BaseEntity {
                 collection: 'missions',
                 storageType: 'mongo'
             });
-        } catch (error) {
-            console.error('Error saving mission state:', error);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error saving mission state:', error instanceof Error ? error.message : error);
             throw error;
         }
     }
@@ -217,8 +218,8 @@ class MissionControl extends BaseEntity {
         try {
             const response = await api.get(`http://${this.librarianUrl}/loadData/${missionId}?storageType=mongo?collection=missions`);
             return response.data;
-        } catch (error) {
-            console.error('Error loading mission state:', error);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error loading mission state:', error instanceof Error ? error.message : error);
             return null;
         }
     }
@@ -246,7 +247,7 @@ class MissionControl extends BaseEntity {
                     clientId: clientId,
                     data: statusUpdate
                 }).catch(error => {
-                    console.error(`Error sending status update to client ${clientId}:`, error);
+                    console.error(`Error sending status update to client ${clientId}:`, error instanceof Error ? error.message : error);
                 });
             }
         }
@@ -283,8 +284,8 @@ class MissionControl extends BaseEntity {
                     });
                 }
             }
-        } catch (error) {
-            console.error('Error fetching and pushing agent statistics:', error);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error fetching and pushing agent statistics:', error instanceof Error ? error.message : error);
         }
     }
 

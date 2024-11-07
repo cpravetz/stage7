@@ -1,8 +1,9 @@
 import axios from 'axios';
 import cheerio from 'cheerio';
 import { PluginInput, PluginOutput, PluginParameterType } from '@cktmcs/shared';
+import { analyzeError } from '@cktmcs/errorhandler';
 
-export async function execute(inputs: Map<string, PluginInput>): Promise<PluginOutput> {
+export async function execute(inputs: Map<string, PluginInput>): Promise<PluginOutput[]> {
     try {
         const searchTerm = inputs.get('searchTerm')?.inputValue;
         if (!searchTerm) {
@@ -20,20 +21,22 @@ export async function execute(inputs: Map<string, PluginInput>): Promise<PluginO
             };
         }).get();
 
-        return {
+        return [{
             success: true,
+            name: 'results',
             resultType: PluginParameterType.ARRAY,
             resultDescription: `Search results for "${searchTerm}"`,
             result: results
-        };
-    } catch (error) {
-        console.error('SEARCH plugin failed', error);
-        return {
+        }];
+    } catch (error) { analyzeError(error as Error);
+        console.error('SEARCH plugin failed', error instanceof Error ? error.message : error);
+        return [{
             success: false,
+            name: 'error',
             resultType: PluginParameterType.ERROR,
             resultDescription: `Error searching for "${inputs.get('searchTerm')?.inputValue || 'undefined search term'}"`,
             result: null,
             error: error instanceof Error ? error.message : 'An unknown error occurred'
-        };
+        }];
     }
 }

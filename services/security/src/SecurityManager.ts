@@ -9,6 +9,7 @@ import bcrypt from 'bcrypt';
 import { BaseEntity } from '@cktmcs/shared';
 import axios from 'axios';
 import { CognitoIdentityProviderClient, InitiateAuthCommand, SignUpCommand } from "@aws-sdk/client-cognito-identity-provider";
+import { analyzeError } from '@cktmcs/errorhandler';
 
 // Types
 interface User {
@@ -66,8 +67,8 @@ export class SecurityManager extends BaseEntity {
             if (process.env.COGNITO_CLIENT_ID) {
                 this.cognitoClient = new CognitoIdentityProviderClient({region: process.env.AWS_REGION || 'us-east-1'});
             }
-        } catch (error) {
-            console.error('Failed to construct SecurityManager:', error);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Failed to construct SecurityManager:', error instanceof Error ? error.message : error);
         }
     }
 
@@ -113,7 +114,7 @@ export class SecurityManager extends BaseEntity {
                     return done(null, false, { message: 'Invalid credentials' });
                 }
                 return done(null, user);
-            } catch (error) {
+            } catch (error) { analyzeError(error as Error);
                 return done(error);
             }
         }));
@@ -136,7 +137,7 @@ export class SecurityManager extends BaseEntity {
                         });
                     }
                     return done(null, user);
-                } catch (error) {
+                } catch (error) { analyzeError(error as Error);
                     return done(error);
                 }
             }));
@@ -177,8 +178,8 @@ export class SecurityManager extends BaseEntity {
             const token = this.generateToken(user);
             console.log('User registered successfully:', { ...user, password: undefined });
             res.status(201).json({ token, user: { ...user, password: undefined } });
-        } catch (error) {
-            console.error('New user registration error:', error);
+        } catch (error) { analyzeError(error as Error);
+            console.error('New user registration error:', error instanceof Error ? error.message : error);
             res.status(500).json({ error: 'Registration failed' });
         }
     }
@@ -206,8 +207,8 @@ export class SecurityManager extends BaseEntity {
                 const token = this.generateToken(user);
                 console.log('Login successful:', { ...user, password: undefined });
                 res.status(200).json({ token, user: { ...user, password: undefined } });
-            } catch (error) {
-                console.error('Login error:', error);
+            } catch (error) { analyzeError(error as Error);
+                console.error('Login error:', error instanceof Error ? error.message : error);
                 res.status(500).json({ error: 'Login failed' });
             }
         })(req, res);
@@ -239,8 +240,8 @@ export class SecurityManager extends BaseEntity {
                 } else {
                     res.status(401).json({ error: 'Authentication failed' });
                 }
-            } catch (error) {
-                console.error('Cognito login error:', error);
+            } catch (error) { analyzeError(error as Error);
+                console.error('Cognito login error:', error instanceof Error ? error.message : error);
                 res.status(500).json({ error: 'Login failed' });
             }
         }else {
@@ -289,7 +290,7 @@ export class SecurityManager extends BaseEntity {
                 return response.data.data[0];
             }
             return null;
-        } catch (error) {
+        } catch (error) { analyzeError(error as Error);
             console.log('Error finding user by email:', email, error instanceof Error ? error.message : '');
             return null;
         }
@@ -307,7 +308,7 @@ export class SecurityManager extends BaseEntity {
                 return response.data.data[0];
             }
             return null;
-        } catch (error) {
+        } catch (error) { analyzeError(error as Error);
             console.log('Error finding user by provider:', provider, providerId, error instanceof Error ? error.message : '');
             return null;
         }
@@ -369,7 +370,7 @@ export class SecurityManager extends BaseEntity {
                         role: decoded.role
                     }
                 });
-            } catch (error) {
+            } catch (error) { analyzeError(error as Error);
                 if (error instanceof jwt.TokenExpiredError) {
                     return res.status(401).json({ error: 'Token expired' });
                 }
@@ -378,8 +379,8 @@ export class SecurityManager extends BaseEntity {
                 }
                 throw error;
             }
-        } catch (error) {
-            console.error('Token verification error:', error);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Token verification error:', error instanceof Error ? error.message : error);
             return res.status(500).json({ error: 'Token verification failed' });
         }
     }
@@ -409,8 +410,8 @@ export class SecurityManager extends BaseEntity {
 
             // Return the created user
             return newUser;
-        } catch (error) {
-            console.error('Error creating OAuth user:', error);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error creating OAuth user:', error instanceof Error ? error.message : error);
             throw new Error('Failed to create user from OAuth data');
         }
     }
@@ -439,7 +440,7 @@ export class SecurityManager extends BaseEntity {
             };
 
             next();
-        } catch (error) {
+        } catch (error) { analyzeError(error as Error);
             if (error instanceof jwt.TokenExpiredError) {
                 return res.status(401).json({ error: 'Token expired' });
             }
@@ -489,8 +490,8 @@ export class SecurityManager extends BaseEntity {
                 token: newToken,
                 refreshToken: newRefreshToken
             });
-        } catch (error) {
-            console.error('Token refresh error:', error);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Token refresh error:', error instanceof Error ? error.message : error);
             res.status(401).json({ error: 'Invalid refresh token' });
         }
     }

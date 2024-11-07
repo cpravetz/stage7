@@ -29,10 +29,10 @@ describe('SEARCH plugin', () => {
 
     const result = await execute(inputs);
 
-    expect(result.success).toBe(true);
-    expect(result.resultType).toBe(PluginParameterType.ARRAY);
-    expect(result.resultDescription).toBe('Search results for "test search"');
-    expect(result.result).toEqual([
+    expect(result[0].success).toBe(true);
+    expect(result[0].resultType).toBe(PluginParameterType.ARRAY);
+    expect(result[0].resultDescription).toBe('Search results for "test search"');
+    expect(result[0].result).toEqual([
       { title: 'Test Title 1', url: 'https://example1.com' },
       { title: 'Test Title 2', url: 'https://example2.com' }
     ]);
@@ -44,10 +44,10 @@ describe('SEARCH plugin', () => {
 
     const result = await execute(inputs);
 
-    expect(result.success).toBe(false);
-    expect(result.resultType).toBe(PluginParameterType.ERROR);
-    expect(result.resultDescription).toBe('Error searching for "undefined search term"');
-    expect(result.error).toBe('Search term is required for SEARCH plugin');
+    expect(result[0].success).toBe(false);
+    expect(result[0].resultType).toBe(PluginParameterType.ERROR);
+    expect(result[0].resultDescription).toBe('Error searching for "undefined search term"');
+    expect(result[0].error).toBe('Search term is required for SEARCH plugin');
   });
 
   it('should handle network errors', async () => {
@@ -58,9 +58,9 @@ describe('SEARCH plugin', () => {
 
     const result = await execute(inputs);
 
-    expect(result.success).toBe(false);
-    expect(result.resultType).toBe(PluginParameterType.ERROR);
-    expect(result.resultDescription).toBe('Error searching for "test search"');
-    expect(result.error).toBe('Network error');
+    expect(result[0].success).toBe(false);
+    expect(result[0].resultType).toBe(PluginParameterType.ERROR);
+    expect(result[0].resultDescription).toBe('Error searching for "test search"');
+    expect(result[0].error).toBe('Network error');
   });
 });

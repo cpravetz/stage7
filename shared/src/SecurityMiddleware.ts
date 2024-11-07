@@ -21,8 +21,8 @@ export const verifyToken = async (req: Request, res: Response, next: NextFunctio
         } else {
             res.status(401).json({ error: 'Invalid token' });
         }
-    } catch (error) {
-        console.error('Error verifying token:', error);
+    } catch (error) { 
+        console.error('Error verifying token:', error instanceof Error ? error.message : error);
         res.status(500).json({ error: 'Failed to authenticate token' });
     }
 };

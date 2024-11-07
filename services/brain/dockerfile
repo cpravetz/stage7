@@ -7,6 +7,7 @@ WORKDIR /usr/src/app
 # Copy package.json and package-lock.json to the working directory
 COPY package*.json ./
 COPY shared/package*.json ./shared/
+COPY errorhandler/package*.json ./errorhandler/
 COPY services/brain/package*.json ./services/brain/
 
 # Install the application dependencies
@@ -14,6 +15,7 @@ RUN npm install
 
 # Copy the application code to the working directory
 COPY shared ./shared
+COPY errorhandler ./errorhandler
 COPY services/brain ./services/brain
 
 # Ensure plugins directory exists and copy plugins
@@ -27,6 +29,7 @@ RUN npm config set strict-ssl false
 
 # Build the TypeScript code
 RUN npm run build --workspace=shared
+RUN npm run build --workspace=errorhandler
 RUN npm run build --workspace=services/brain
 
 # Set the working directory to the service

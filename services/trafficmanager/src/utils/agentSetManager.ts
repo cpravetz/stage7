@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { MapSerializer, AgentSetManagerStatistics, AgentSetStatistics, AgentStatistics, PluginInput } from '@cktmcs/shared';
+import { analyzeError } from '@cktmcs/errorhandler';
 
 const api = axios.create({
     headers: {
@@ -55,8 +56,8 @@ class AgentSetManager {
 
             this.agentSets = updatedAgentSets;
             console.log(`AgentSets refreshed. Current count: ${this.agentSets.size}`);
-        } catch (error) {
-            console.error('Error refreshing AgentSets:', error);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error refreshing AgentSets:', error instanceof Error ? error.message : error);
         }
     }
 
@@ -95,8 +96,8 @@ class AgentSetManager {
                     }));
                     return;
                 }
-            } catch (error) {
-                console.error('Error fetching AgentSet components:', error);
+            } catch (error) { analyzeError(error as Error);
+                console.error('Error fetching AgentSet components:', error instanceof Error ? error.message : error);
             }
 
             retryCount--;
@@ -177,9 +178,9 @@ class AgentSetManager {
 
             availableSet.agentCount++;
             return response.data;
-        } catch (error) {
+        } catch (error) { analyzeError(error as Error);
             this.agentToSetMap.delete(agentId);
-            console.error('Failed to assign agent to set:', error);
+            console.error('Failed to assign agent to set:', error instanceof Error ? error.message : error);
             throw new Error('Failed to assign agent to set');
         }
     }
@@ -194,8 +195,8 @@ class AgentSetManager {
         try {
             const response = await api.post(`http://${agentSetUrl}/agent/${agentId}/message`, message);
             return response.data;
-        } catch (error) {
-            console.error(`Error sending message to agent ${agentId}:`, error);
+        } catch (error) { analyzeError(error as Error);
+            console.error(`Error sending message to agent ${agentId}:`, error instanceof Error ? error.message : error);
             throw error;
         }
     }
@@ -236,20 +237,25 @@ class AgentSetManager {
             totalAgentsCount: 0,
             agentsByStatus: new Map()
         };
-        for (const agentSet of this.agentSets.values()) {
-            stats.agentSetsCount++;
-            const response = await axios.get(`http://${agentSet.url}/statistics/${missionId}`);
-            const serializedStats = response.data;
-            stats.totalAgentsCount += serializedStats.agentsCount;
+        try {
+            for (const agentSet of this.agentSets.values()) {
+                stats.agentSetsCount++;
+                const response = await axios.get(`http://${agentSet.url}/statistics/${missionId}`);
+                const serializedStats = response.data;
+                stats.totalAgentsCount += serializedStats.agentsCount;
             // Merge agentCountByStatus
-            Object.entries(serializedStats.agentsByStatus).forEach(([status, agents]) => {
-                if (!stats.agentsByStatus.has(status)) {
-                    stats.agentsByStatus.set(status, [...agents as Array<AgentStatistics>]);
-                } else {
-                    stats.agentsByStatus.get(status)!.push(...agents as Array<AgentStatistics>);
-                }
-            });
+                Object.entries(serializedStats.agentsByStatus).forEach(([status, agents]) => {
+                    if (!stats.agentsByStatus.has(status)) {
+                        stats.agentsByStatus.set(status, [...agents as Array<AgentStatistics>]);
+                    } else {
+                        stats.agentsByStatus.get(status)!.push(...agents as Array<AgentStatistics>);
+                    }
+                });
+            }
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error fetching agent statistics:', error instanceof Error ? error.message : error);
         }
+        
         return stats;
     }
 
@@ -265,8 +271,8 @@ class AgentSetManager {
                 return this.loadAgentToSet(agentId, availableSetUrl);
             }
             return this.loadAgentToSet(agentId, agentSetUrl);
-        } catch (error) {
-            console.error(`Error loading agent ${agentId}:`, error);
+        } catch (error) { analyzeError(error as Error);
+            console.error(`Error loading agent ${agentId}:`, error instanceof Error ? error.message : error);
             return false;
         }
     }
@@ -290,8 +296,8 @@ class AgentSetManager {
             }
 
             return allLoaded;
-        } catch (error) {
-            console.error(`Error loading agents for mission ${missionId}:`, error);
+        } catch (error) { analyzeError(error as Error);
+            console.error(`Error loading agents for mission ${missionId}:`, error instanceof Error ? error.message : error);
             return false;
         }
     }
@@ -307,8 +313,8 @@ class AgentSetManager {
                 console.error(`Failed to load agent ${agentId} to ${agentSetUrl}`);
                 return false;
             }
-        } catch (error) {
-            console.error(`Error loading agent ${agentId} to ${agentSetUrl}:`, error);
+        } catch (error) { analyzeError(error as Error);
+            console.error(`Error loading agent ${agentId} to ${agentSetUrl}:`, error instanceof Error ? error.message : error);
             return false;
         }
     }
@@ -322,8 +328,8 @@ class AgentSetManager {
         try {
             const response = await api.get(`http://${this.postOfficeUrl}/getAgentIdsByMission/${missionId}`);
             return response.data;
-        } catch (error) {
-            console.error('Error getting agent IDs by mission:', error);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error getting agent IDs by mission:', error instanceof Error ? error.message : error);
             return [];
         }
     }
@@ -337,8 +343,8 @@ class AgentSetManager {
                 return false;
             }
             return this.saveAgentInSet(agentId, agentSetUrl);
-        } catch (error) {
-            console.error(`Error saving agent ${agentId}:`, error);
+        } catch (error) { analyzeError(error as Error);
+            console.error(`Error saving agent ${agentId}:`, error instanceof Error ? error.message : error);
             return false;
         }
     }
@@ -362,8 +368,8 @@ class AgentSetManager {
             }
 
             return allSaved;
-        } catch (error) {
-            console.error(`Error saving agents for mission ${missionId}:`, error);
+        } catch (error) { analyzeError(error as Error);
+            console.error(`Error saving agents for mission ${missionId}:`, error instanceof Error ? error.message : error);
             return false;
         }
     }
@@ -378,8 +384,8 @@ class AgentSetManager {
                 console.error(`Failed to save agent ${agentId} in ${agentSetUrl}`);
                 return false;
             }
-        } catch (error) {
-            console.error(`Error saving agent ${agentId} in ${agentSetUrl}:`, error);
+        } catch (error) { analyzeError(error as Error);
+            console.error(`Error saving agent ${agentId} in ${agentSetUrl}:`, error instanceof Error ? error.message : error);
             return false;
         }
     }

@@ -1,6 +1,7 @@
 import axios, { AxiosError } from 'axios';
 import { ModelInterface } from './ModelInterface';
 import { HfInference } from '@huggingface/inference';
+import { analyzeError } from '@cktmcs/errorhandler';
 
 export class HuggingfaceInterface extends ModelInterface {
     name = 'Huggingface';
@@ -23,9 +24,10 @@ export class HuggingfaceInterface extends ModelInterface {
             })) {
                 response += chunk.choices[0]?.delta?.content || "";
             }
+            response = response.replace(/```[^]*?```/g, '');
             return response;
-        } catch (error) {
-            console.error('Error generating response from Huggingface:', error);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error generating response from Huggingface:', error instanceof Error ? error.message : error);
             throw new Error('Failed to generate response from Huggingface');
         }
     }
@@ -48,6 +50,7 @@ export class HuggingfaceInterface extends ModelInterface {
                     return response;
                 } else {
                     console.log(`Response incomplete, attempt ${attempts + 1} of ${maxAttempts}`);
+                    console.log(response);
                     messages.push({
                         role: 'system',
                         content: `Your response was truncated. Please continue from: "${response.substring(response.length - 50)}"`
@@ -61,8 +64,8 @@ export class HuggingfaceInterface extends ModelInterface {
             console.warn('Max attempts reached. Returning potentially incomplete response.');
             return response;
     
-        } catch (error) {
-            console.error('Error generating response from Huggingface:', error);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error generating response from Huggingface:', error instanceof Error ? error.message : error);
             throw new Error('Failed to generate response from Huggingface');
         }
     }

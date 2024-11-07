@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { MapSerializer, PluginInput, PluginOutput, PluginParameterType, ActionVerbTask } from '@cktmcs/shared';
+import { analyzeError } from '@cktmcs/errorhandler';
 
 interface JsonPlanStep {
     number: number;
@@ -30,8 +31,8 @@ If a plan is needed, respond with a JSON object in this format:
         "verb": "ACTION_VERB",
         "description": "Brief description of the step",
         "inputs": {
-            "key1": "value1",
-            "key2": "value2"
+            "inputName1": {"value": "predeterminedValue"},
+            "inputName2": {"outputKey": "outputKeyFromPreviousStep"}
         },
         "dependencies": {},
         "outputs": {
@@ -44,26 +45,13 @@ If a plan is needed, respond with a JSON object in this format:
         "verb": "ANOTHER_ACTION",
         "description": "Description of another step",
         "inputs": {
-            "outputKey2": "value3"
+            "inputName3": {"outputKey": "outputKey2"}
         },
-        "dependencies": {"outputKey2":1},
+        "dependencies": {"outputKey2": 1},
         "outputs": {
             "outputKey3": "Description of output3"
         }
-    },
-    {
-        "number": 3,
-        "verb": "YET_ANOTHER_ACTION",
-        "description": "Description of another step",
-        "inputs": {
-            "outputKey2": "value3",
-            "outputKey3": "value4"
-        },
-        "dependencies": {"outputKey2":1, "outputKey3":2},
-        "outputs": {
-            "outputKey4": "Description of output3"
-        }
-    },
+    }
     // ... more steps ...
     ]
 }
@@ -75,18 +63,16 @@ Guidelines for creating a plan:
 1. Number each step sequentially, starting from 1.
 2. Use specific, actionable verbs for each step (e.g., SCRAPE, ANALYZE, PREDICT).
 3. Ensure each step has a clear, concise description.
-4. Provide detailed arguments for each step, including data sources or specific parameters.
-5. List dependencies for each step as a set of key values (from the inputs) and the step number that should provide the value for that input.
- Don't use the literal objecetKey# as the key, use the name given to the output from the preceeding step that is the input for this step.  The output name
- from the preceeding step and the input name for the depedent step should be the same.
+4. For inputs, use the expected input names for the action verb. Each input should be an object with either a 'value' property for predetermined values or an 'outputKey' property referencing an output from a previous step.
+5. List dependencies for each step, referencing the step numbers that provide the required inputs.
 6. Specify the outputs of each step that may be used by dependent steps.
 7. Aim for 5-10 steps in the plan, breaking down complex tasks if necessary.
-8. Be thorough in your description fields.  This is the only instruction the performer will have.
+8. Be thorough in your description fields. This is the only instruction the performer will have.
 9. Ensure the final step produces the desired outcome or prediction.
 10. The actionVerb DELEGATE is available to use to create sub-agents with goals of their own.
 11. input values may be determined by preceeding steps.  In those instances set the value to 'undefined'
 
-A number of plugins are available to execute steps of the plan for you.  These include:
+A number of plugins are available to execute steps of the plan for you.  Some have required inputs, which are required properties for the inputs object.  These plugins include:
 
 ACCOMPLISH - this plugin takes a specific goal and either achieves it or returns a plan to achieve it.
     (required input: goal)
@@ -99,13 +85,13 @@ SCRAPE - this plugin scrapes content from a given URL
 GET_USER_INPUT - this plugin requests input from the user
     (required inputs: question, answerType) (optional imput: choices)
 
-If it makes sense to break work into multiple streams, you can use the actionVerb DELEGATE to create a sub-agent with a goal of its own.
+If it makes sense to break work into multiple streams, you can use the actionVerb DELEGATE to create a sub-agent with a goal of it's own.
 
 Ensure your response is a valid JSON object starting with either "type": "DIRECT_ANSWER" or "type": "PLAN". 
 Double check that you are returning valid JSON. Remove any leading or trailing characters that might invalidate the response as a JSON object.
 `  }
 
-export async function execute(inputs: Map<string, PluginInput> | Record<string, any>): Promise<PluginOutput> {
+export async function execute(inputs: Map<string, PluginInput> | Record<string, any>): Promise<PluginOutput[]> {
     try {
         console.log('ACCOMPLISH plugin inputs:', inputs);
         
@@ -145,41 +131,45 @@ export async function execute(inputs: Map<string, PluginInput> | Record<string, 
             if (parsedResponse.type === 'PLAN') {
                 const tasks = convertJsonToTasks(parsedResponse.plan);
                 console.log('ACCOMPLISH: ACCOMPLISH plugin succeeded creating a plan',  MapSerializer.transformForSerialization(tasks));
-                return {
+                return [{
                     success: true,
+                    name: 'plan',
                     resultType: PluginParameterType.PLAN,
                     resultDescription: `A plan to: ${goal}`,
                     result: MapSerializer.transformForSerialization(tasks)
-                };
+                }];
             } else if (parsedResponse.type === 'DIRECT_ANSWER') {
-                return {
+                return [{
                     success: true,
+                    name: 'answer',
                     resultType: PluginParameterType.STRING,
                     resultDescription: `LLM Response`,
                     result: parsedResponse.answer
-                };
+                }];
             } else {
                 throw new Error('Invalid response format from Brain');
             }
         } catch (parseError) {
             console.error('Error parsing Brain response:', parseError);
-            return {
+            return [{
                 success: false,
+                name: 'error',
                 resultType: PluginParameterType.ERROR,
                 resultDescription: 'Failed to parse Brain response',
                 result: null,
                 error: parseError instanceof Error ? parseError.message : 'Unknown parsing error'
-            };
+            }];
         }
-    } catch (error) {
-        console.error('ACCOMPLISH plugin execute() failed', error);
-        return {
+    } catch (error) { analyzeError(error as Error);
+        console.error('ACCOMPLISH plugin execute() failed', error instanceof Error ? error.message : error);
+        return [{
             success: false,
+            name: 'error',
             resultType: PluginParameterType.ERROR,
             resultDescription: 'Error in ACCOMPLISH plugin',
             result: null,
             error: error instanceof Error ? error.message : 'An unknown error occurred'
-        };
+        }];
     }
 }
 
@@ -187,12 +177,13 @@ export async function execute(inputs: Map<string, PluginInput> | Record<string, 
 async function parseJsonWithErrorCorrection(jsonString: string): Promise<any> {
     try {
         return JSON.parse(jsonString);
-    } catch (error) {
+    } catch (error) { analyzeError(error as Error);
         console.log('Initial JSON parse failed, attempting to correct...');
         
         // Remove any leading or trailing quotation marks
         let correctedJson = jsonString.trim().replace(/^"|"$/g, '');
         
+        correctedJson = correctedJson.replace(/```[^]*?```/g, '');        
         // Replace 'undefined' with null
         correctedJson = correctedJson.replace(/: undefined/g, ': null');
         
@@ -214,8 +205,11 @@ async function parseJsonWithErrorCorrection(jsonString: string): Promise<any> {
                     exchanges: [{ role: 'user', content: prompt }],
                     optimization: 'accuracy'
                 });
+                const fullResponse = response.data.response;
+                const startIndex = fullResponse.indexOf('{');
+                const endIndex = fullResponse.lastIndexOf('}') + 1;
+                const correctedByLLM = fullResponse.substring(startIndex, endIndex);
                 
-                const correctedByLLM = response.data.response;
                 console.log('LLM corrected JSON:', correctedByLLM);
                 return JSON.parse(correctedByLLM);
             } catch (llmError) {
@@ -234,63 +228,35 @@ async function queryBrain(messages: { role: string, content: string }[]): Promis
             optimization: 'accuracy'
         });
         return response.data.response;
-    } catch (error) {
-        console.error('Error querying Brain:', error);
+    } catch (error) { analyzeError(error as Error);
+        console.error('Error querying Brain:', error instanceof Error ? error.message : error);
         throw new Error('Failed to query Brain');
     }
 }
 
 function convertJsonToTasks(jsonPlan: JsonPlanStep[]): ActionVerbTask[] {
-    try{    
-        return jsonPlan.map(task => {
-            //console.log('ACCOMPLISH: Mapping from json Step:',task);
-            let inputMap: Map<string, PluginInput>;
-            if (task.inputs instanceof Map) {
-                inputMap = task.inputs;
-            } else {
-                inputMap = new Map();
-                for (const [key, value] of Object.entries(task.inputs)) {
-                    console.log(`Adding ${key} to inputMap with value: ${value} `);
-                    inputMap.set(key, {
-                        inputName: key,
-                        inputValue: value,
-                        args: { [key]: value }
-                    });
-                }
-            }
+    return jsonPlan.map(step => {
+        const inputs = new Map<string, PluginInput>();
+        for (const [key, inputData] of Object.entries(step.inputs)) {
+            inputs.set(key, {
+                inputName: key,
+                inputValue: inputData.value !== undefined ? inputData.value : undefined,
+                args: { outputKey: inputData.outputKey }
+            });
+        }
 
-            let dependencyMap: Map<string, number>;
-            if (task.dependencies instanceof Map) {
-                dependencyMap = task.dependencies;
-            } else {
-                dependencyMap = new Map();
-                for (const [key, value] of Object.entries(task.dependencies)) {
-                    console.log(`Adding ${key} to dependencyMap with value: ${value} `);
-                    dependencyMap.set(key, value as number);
-                }
-            }
+        const dependencies = new Map<string, number>();
+        for (const [key, value] of Object.entries(step.dependencies)) {
+            dependencies.set(key, value);
+        }
 
-            let outputMap: Map<string, string>;
-            if (task.outputs instanceof Map) {
-                outputMap = task.outputs;
-            } else {
-                outputMap = new Map();
-                for (const [key, value] of Object.entries(task.outputs)) {
-                    outputMap.set(key, value as string);
-                }
-            }
-
-            return { 
-                verb: task.verb,
-                inputs: inputMap,
-                description: task.description + `Expected outputs: ${JSON.stringify(task.outputs)}`,
-                expectedOutputs: outputMap,
-                dependencies: dependencyMap
-            }
-        });
-    } catch (error) {
-        console.error('Error converting json to tasks:', error);
-        throw new Error('Failed to convert json to tasks');
-    }
+        return {
+            verb: step.verb,
+            inputs: inputs,
+            expectedOutputs: new Map(Object.entries(step.outputs)),
+            description: step.description,
+            dependencies: dependencies
+        };
+    });
 }
 

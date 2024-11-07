@@ -34,11 +34,11 @@ describe('ACCOMPLISH plugin', () => {
 
       const result = await execute(inputs);
 
-      expect(result.success).toBe(true);
-      expect(result.resultType).toBe(PluginParameterType.PLAN);
-      expect(result.resultDescription).toContain('Test goal');
-      expect(Array.isArray(result.result)).toBe(true);
-      expect(result.result[0].verb).toBe('TEST_ACTION');
+      expect(result[0].success).toBe(true);
+      expect(result[0].resultType).toBe(PluginParameterType.PLAN);
+      expect(result[0].resultDescription).toContain('Test goal');
+      expect(Array.isArray(result[0].result)).toBe(true);
+      expect(result[0].result[0].verb).toBe('TEST_ACTION');
     });
 
     it('should return a direct answer when Brain responds with a direct answer', async () => {
@@ -54,10 +54,10 @@ describe('ACCOMPLISH plugin', () => {
 
       const result = await execute(inputs);
 
-      expect(result.success).toBe(true);
-      expect(result.resultType).toBe(PluginParameterType.STRING);
-      expect(result.resultDescription).toBe('LLM Response');
-      expect(result.result).toBe('This is a direct answer');
+      expect(result[0].success).toBe(true);
+      expect(result[0].resultType).toBe(PluginParameterType.STRING);
+      expect(result[0].resultDescription).toBe('LLM Response');
+      expect(result[0].result).toBe('This is a direct answer');
     });
 
     it('should handle errors when Brain query fails', async () => {
@@ -68,9 +68,9 @@ describe('ACCOMPLISH plugin', () => {
 
       const result = await execute(inputs);
 
-      expect(result.success).toBe(false);
-      expect(result.resultType).toBe(PluginParameterType.ERROR);
-      expect(result.error).toContain('Failed to query Brain');
+      expect(result[0].success).toBe(false);
+      expect(result[0].resultType).toBe(PluginParameterType.ERROR);
+      expect(result[0].error).toContain('Failed to query Brain');
     });
   });
 });

@@ -1,6 +1,7 @@
 import axios from 'axios';
 
 
+
 export class SecurityClient {
     private postOfficeUrl: string;
     private token: string | null = null;
@@ -39,8 +40,8 @@ export class SecurityClient {
             
             this.token = response.data.token;
             return this.token || '';
-        } catch (error) {
-            console.error('Registration error:', error);
+        } catch (error) { 
+            console.error('Registration error:', error instanceof Error ? error.message : error);
             throw error;
         }
     }

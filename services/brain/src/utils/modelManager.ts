@@ -2,6 +2,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { Model, LLMConversionType } from '../models/Model';
 import { ModelInterface } from '../interfaces/ModelInterface';
+import { analyzeError } from '@cktmcs/errorhandler';
 
 export type OptimizationType = 'cost' | 'accuracy' | 'creativity' | 'speed' | 'continuity';
 
@@ -37,8 +38,8 @@ export class ModelManager {
                 }
             }
             console.log(`modelManager Loaded ${this.interfaces.size} interfaces.`);
-        } catch (error) {
-            console.error('Error loading interfaces:', error);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error loading interfaces:', error instanceof Error ? error.message : error);
         }
     }
 
@@ -65,8 +66,8 @@ export class ModelManager {
                 }
             }
             console.log(`modelManager Loaded ${this.models.size} models.`);
-        } catch (error) {
-            console.error('Error loading models:', error);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error loading models:', error instanceof Error ? error.message : error);
         }
     }
 

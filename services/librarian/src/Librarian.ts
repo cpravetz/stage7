@@ -6,6 +6,7 @@ import { storeInRedis, loadFromRedis, deleteFromRedis } from './utils/redisUtils
 import { storeInMongo, loadFromMongo, loadManyFromMongo, aggregateInMongo, deleteManyFromMongo } from './utils/mongoUtils';
 import { WorkProduct } from './types/WorkProduct';
 import { BaseEntity, MapSerializer } from '@cktmcs/shared';
+import { analyzeError } from '@cktmcs/errorhandler';
 
 dotenv.config();
 
@@ -73,7 +74,7 @@ export class Librarian extends BaseEntity {
           }
           console.log('Work product retrieved:', workProduct);
           res.status(200).send(workProduct);
-        } catch (error) {
+        } catch (error) { analyzeError(error as Error);
           res.status(500).send({ error: 'Failed to retrieve work product', details: error instanceof Error ? error.message : String(error) });
         }
       }
@@ -98,8 +99,8 @@ export class Librarian extends BaseEntity {
             } else {
                 return res.status(400).send({ error: 'Invalid storage type' });
             }
-        } catch (error) {
-            console.error('Error in storeData:', error);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error in storeData:', error instanceof Error ? error.message : error);
             res.status(500).send({ error: 'Failed to store data', details: error instanceof Error ? error.message : String(error) });
         }
     }
@@ -127,16 +128,16 @@ export class Librarian extends BaseEntity {
             }
 
             res.status(200).send({ data });
-        } catch (error) {
+        } catch (error) { analyzeError(error as Error);
             res.status(500).send({ error: 'Failed to load data', details: error instanceof Error ? error.message : String(error) });
         }
     }
 
     private async storeWorkProduct(req: express.Request, res: express.Response) {
-        const { agentId, stepId, type, data, mimeType } = req.body;
+        const { agentId, stepId, data } = req.body;
         console.log('Storing work product:', req.body);
     
-        if (!agentId || !stepId || !type) {
+        if (!agentId || !stepId ) {
             return res.status(400).send({ error: 'AgentId, StepId, and type are required' });
         }
     
@@ -144,17 +145,15 @@ export class Librarian extends BaseEntity {
             id: `${agentId}_${stepId}`,
             agentId,
             stepId,
-            type,
             data: MapSerializer.transformForSerialization(data || null),
-            timestamp: new Date().toISOString(),
-            mimeType: mimeType || 'application/json'
+            timestamp: new Date().toISOString()
         };
     
         try {
             const id = await storeInMongo('workProducts', workProduct);
             res.status(200).send({ status: 'Work product stored', id: id });
-        } catch (error) {
-            console.error('Error storing work product:', error);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error storing work product:', error instanceof Error ? error.message : error);
             res.status(500).send({ error: 'Failed to store work product', details: error instanceof Error ? error.message : String(error) });
         }
     }
@@ -174,7 +173,7 @@ export class Librarian extends BaseEntity {
             }
 
             res.status(200).send({ data: workProduct });
-        } catch (error) {
+        } catch (error) { analyzeError(error as Error);
             res.status(500).send({ error: 'Failed to load work product', details: error instanceof Error ? error.message : String(error) });
         }
     }
@@ -191,7 +190,7 @@ export class Librarian extends BaseEntity {
         try {
             const result = await loadManyFromMongo(collection, query, limit);
             res.status(200).send({ data: result });
-        } catch (error) {
+        } catch (error) { analyzeError(error as Error);
             console.error('Error querying data:', error instanceof Error ? error.message : String(error));
             res.status(500).send({ error: 'Failed to query data', details: error instanceof Error ? error.message : String(error) });
         }
@@ -207,7 +206,7 @@ export class Librarian extends BaseEntity {
         try {
             const history = await loadManyFromMongo('data_versions',{ id });
             res.status(200).send({ history });
-        } catch (error) {
+        } catch (error) { analyzeError(error as Error);
             res.status(500).send({ error: 'Failed to get data history', details: error instanceof Error ? error.message : String(error) });
         }
     }
@@ -231,7 +230,7 @@ export class Librarian extends BaseEntity {
             const result = await loadManyFromMongo(collection as string, query, parsedOptions);
             console.log(`Search result:`, result);
             res.status(200).send({ data: result });
-        } catch (error) {
+        } catch (error) { analyzeError(error as Error);
             res.status(500).send({ error: 'Failed to search data', details: error instanceof Error ? error.message : String(error) });
         }
     }
@@ -248,7 +247,7 @@ export class Librarian extends BaseEntity {
             await deleteFromRedis(`data:${id}`);
 
             res.status(200).send({ message: 'Data deleted successfully' });
-        } catch (error) {
+        } catch (error) { analyzeError(error as Error);
             res.status(500).send({ error: 'Failed to delete data', details: error instanceof Error ? error.message : String(error) });
         }
     }
@@ -269,7 +268,7 @@ export class Librarian extends BaseEntity {
             const { userId } = req.body;
             const missions = await loadManyFromMongo('missions', { userId: userId }, { projection: { id: 1, name: 1, _id: 0 } });
             res.status(200).send(missions);
-        } catch (error) {
+        } catch (error) { analyzeError(error as Error);
             res.status(500).send({ error: 'Failed to get saved missions', details: error instanceof Error ? error.message : String(error) });
         }
     }

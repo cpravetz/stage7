@@ -31,7 +31,7 @@ export class BaseEntity {
         });
 
         console.log(`${this.id} registered with PostOffice:`, response.data);
-      } catch (error) {
+      } catch (error) { 
         if (retryCount > 0) {
           console.log(`Retrying registration in 2 seconds... (${retryCount} attempts left)`);
           setTimeout(() => this.registerWithPostOffice(retryCount - 1), 3000);

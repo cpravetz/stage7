@@ -1,6 +1,7 @@
 import axios, { AxiosError } from 'axios';
 import { ModelInterface } from './ModelInterface';
 import OpenAI from 'openai';
+import { analyzeError } from '@cktmcs/errorhandler';
 
 export class AnthropicInterface extends ModelInterface {
     name = 'Anthropic';
@@ -43,7 +44,7 @@ export class AnthropicInterface extends ModelInterface {
 
             // Return the content of the first message in the response
             return response.data.content[0].text;
-        } catch (error) {
+        } catch (error) { analyzeError(error as Error);
             // Detailed error handling
             if (axios.isAxiosError(error)) {
                 const axiosError = error as AxiosError;
@@ -71,7 +72,7 @@ export class AnthropicInterface extends ModelInterface {
             }
             
             // Generic error handling
-            console.error('Error generating response from Anthropic:', error);
+            console.error('Error generating response from Anthropic:', error instanceof Error ? error.message : error);
             throw new Error('Failed to generate response from Anthropic');
         }
     }
@@ -86,7 +87,7 @@ export class AnthropicInterface extends ModelInterface {
         while (retries < maxRetries) {
             try {
                 return await fn();
-            } catch (error) {
+            } catch (error) { analyzeError(error as Error);
                 if (axios.isAxiosError(error) && error.response?.status === 429) {
                     const delay = baseDelay * Math.pow(2, retries);
                     console.warn(`Rate limited. Retrying in ${delay}ms...`);

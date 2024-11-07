@@ -25,8 +25,8 @@ const UserInputModal: React.FC<UserInputModalProps> = ({ requestId, question, ch
         try {
             await api.post('http://localhost:5020/submitUserInput', { requestId, response });
             onClose();
-        } catch (error) {
-            console.error('Error submitting user input:', error);
+        } catch (error) { 
+            console.error('Error submitting user input:', error instanceof Error ? error.message : error);
         }
     };
 

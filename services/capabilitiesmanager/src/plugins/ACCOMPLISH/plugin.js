@@ -3,19 +3,28 @@ const accomplishPlugin = {
     verb: 'ACCOMPLISH',
     description: 'Accomplishes a given goal or creates a plan to achieve it',
     explanation: 'This plugin takes a goal statement and either returns the result of accomplishing the goal or a plan of tasks to achieve it',
-    inputs: [
+    inputDefinitions: [
         {
             name: 'goal',
+            required: true,
             type: 'string',
             description: 'The goal to be accomplished or planned for'
         }
     ],
-    outputs: [
+    outputDefinitions: [
         {
-            name: 'result',
+            name: 'plan',
+            required: false,
             type: 'plan',
             description: 'A plan of tasks to achieve the goal, or a direct answer if the goal can be immediately accomplished'
+        },
+        {
+            name: 'answer',
+            required: false,
+            type: 'string',
+            description: 'A solution that matches or achieves the goal'
         }
+
     ],
     language: 'javascript',
     entryPoint: {
@@ -71,8 +80,8 @@ async function execute(input) {
             throw new Error(errorMessage);
         }
     
-    } catch (error) {
-        console.error('ACCOMPLISH plugin failed', error);
+    } catch (error) { analyzeError(error as Error);
+        console.error('ACCOMPLISH plugin failed', error instanceof Error ? error.message : error);
         return {
             success: false,
             resultType: 'error',
@@ -151,8 +160,8 @@ async function queryBrain(prompt) {
             optimization: 'accuracy'
         });
         return response.data.response;
-    } catch (error) {
-        console.error('Error querying Brain:', error);
+    } catch (error) { analyzeError(error as Error);
+        console.error('Error querying Brain:', error instanceof Error ? error.message : error);
         throw new Error('Failed to query Brain');
     }
 }

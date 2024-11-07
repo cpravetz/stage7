@@ -1,6 +1,7 @@
 import axios from 'axios';
 import express from 'express';
 import { MapSerializer, BaseEntity, PluginInput, Plugin, PluginParameter } from '@cktmcs/shared';
+import { analyzeError } from '@cktmcs/errorhandler';
 
 const api = axios.create({
     headers: {
@@ -29,8 +30,8 @@ export class Engineer extends BaseEntity {
             try {
                 const plugin = await this.createPlugin(verb, context);
                 res.json(plugin);
-            } catch (error) {
-                console.error('Failed to create plugin:', error);
+            } catch (error) { analyzeError(error as Error);
+                console.error('Failed to create plugin:', error instanceof Error ? error.message : error);
                 res.status(500).json({ error: error instanceof Error ? error.message : String(error)  });
             }
         });
@@ -87,8 +88,8 @@ export class Engineer extends BaseEntity {
         verb: string;
         description?: string;
         explanation?: string;
-        inputs: PluginParameter[];
-        outputs: PluginParameter[];
+        inputDefinitions: PluginParameter[];
+        outputDefinitions: PluginParameter[];
         entryPoint?: EntryPointType;
         language: 'javascript' | 'python';
     }
@@ -112,12 +113,13 @@ export class Engineer extends BaseEntity {
     
     export interface PluginParameter {
         name: string;
+        required: boolean;
         type: PluginParameterType;
         description: string;
         mimeType?: string;
     }
     
-    Ensure the plugin's 'inputs' field accurately defines the expected PluginInputs based on the provided context.
+    Ensure the plugin's 'inputDefinitions' field accurately defines the expected PluginInputs based on the provided context.
     The main file should implement the plugin logic and handle the inputs correctly, expecting a Map<string, PluginInput>.
     Include appropriate error handling and logging.
     The code should be immediately executable without any compilation step.
@@ -132,8 +134,8 @@ export class Engineer extends BaseEntity {
             if (!pluginStructure || !pluginStructure.entryPoint) {
                 throw new Error('Invalid plugin structure generated');
             }
-        } catch (error) {
-            console.error('Error querying Brain for plugin structure:', error);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error querying Brain for plugin structure:', error instanceof Error ? error.message : error);
             throw new Error('Failed to generate plugin structure');
         }
     
@@ -142,8 +144,8 @@ export class Engineer extends BaseEntity {
             verb: verb,
             description: pluginStructure.description,
             explanation: explanation,
-            inputs: pluginStructure.inputs,
-            outputs: pluginStructure.outputs,
+            inputDefinitions: pluginStructure.inputDefinitions,
+            outputDefinitions: pluginStructure.outputDefinitions,
             entryPoint: {
                 main: pluginStructure.entryPoint.main,
                 files: pluginStructure.entryPoint.files
@@ -161,8 +163,8 @@ export class Engineer extends BaseEntity {
             });
     
             return newPlugin;
-        } catch (error) {
-            console.error('Error saving or creating plugin:', error);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error saving or creating plugin:', error instanceof Error ? error.message : error);
             throw new Error('Failed to save or create plugin');
         }
     }
@@ -176,8 +178,8 @@ export class Engineer extends BaseEntity {
             });
 
             return response.data.result;
-        } catch (error) {
-            console.error('Error querying Brain:', error);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error querying Brain:', error instanceof Error ? error.message : error);
             throw new Error('Failed to generate explanation');
         }
     }
