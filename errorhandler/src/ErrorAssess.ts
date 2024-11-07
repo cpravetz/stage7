@@ -11,11 +11,21 @@ export const analyzeError = async (error: Error) => {
     const sourceCode = await getSourceCode(stackTrace);
 
     const conversation = [
-        { role: 'user', content: `Evaluate the following error report and
-        the associated source code.  Provide remediation recommendations include proposed code improvments.`
-        },
-        { role: 'user', content: ` The error is ${JSON.stringify(error)} and the source code is ${sourceCode}];`}
-    ];
+        { role: 'user', content: `Evaluate the following error report and the associated source code. Provide remediation recommendations including proposed code improvements. Format your response as follows:
+        
+        ANALYSIS:
+        [Your analysis here]
+  
+        RECOMMENDATIONS:
+        [Your recommendations here]
+  
+        CODE SUGGESTIONS:
+        \`\`\`
+        [Your code suggestions here]
+        \`\`\`
+        `},
+        { role: 'user', content: `The error is ${JSON.stringify(error)} and the source code is ${sourceCode}` }
+      ];
 
     // Send the error information to the Brain for analysis
     const response = await axios.post(`http://${brainUrl}/chat`, {
@@ -24,10 +34,9 @@ export const analyzeError = async (error: Error) => {
     });
     const remediationGuidance = response.data.response;
 
-    console.log('**** REMEDIATION GUIDANCE ****');
-    console.log('Error: ', error instanceof Error ? error.message : 'Unknown error');
-    console.log(remediationGuidance);
-    console.log('*******************************');
+    console.log(`**** REMEDIATION GUIDANCE ****\n
+    Error: ${error instanceof Error ? error.message : 'Unknown error'}\n\n
+    ${remediationGuidance}\n\n*******************************`);
 
     return remediationGuidance;
   } catch (err) {

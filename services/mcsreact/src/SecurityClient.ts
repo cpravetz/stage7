@@ -1,7 +1,6 @@
 import axios from 'axios';
 
 
-
 export class SecurityClient {
     private postOfficeUrl: string;
     private token: string | null = null;
@@ -46,5 +45,21 @@ export class SecurityClient {
         }
     }
     
+    async refreshToken(): Promise<string> {
+        const refreshToken = localStorage.getItem('refreshToken');
+        if (!refreshToken) {
+            throw new Error('No refresh token available');
+        }
+        
+        const response = await axios.post(`${this.postOfficeUrl}/securityManager/refresh-token`, {
+            refreshToken
+        });
+        
+        this.token = response.data.token;
+        localStorage.setItem('authToken', this.token ||'');
+        localStorage.setItem('refreshToken', response.data.refreshToken);
+        return this.token || '';
+    }
+
 }
 

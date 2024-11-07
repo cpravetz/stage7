@@ -22,28 +22,7 @@ interface WorkProduct {
   url: string;
 }
 
-const createAPI = (getToken: () => string | null): AxiosInstance => {
-  const api = axios.create({
-    baseURL: API_BASE_URL,
-    headers: {
-      'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
-    },
-    withCredentials: true,
-  });
 
-  api.interceptors.request.use((config) => {
-    const token = getToken();
-    if (token) {
-      config.headers['Authorization'] = `Bearer ${token}`;
-    }
-    return config;
-  });
-
-  return api;
-};
-
-const api = createAPI(() => localStorage.getItem('token'));
 
 export const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -68,6 +47,39 @@ export const App: React.FC = () => {
     engineerStatistics: { newPlugins: [] }
   });
 
+  const createAPI = (getToken: () => string | null, refreshToken: () => Promise<string>): AxiosInstance => {
+    const api = axios.create({
+      baseURL: API_BASE_URL,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+      },
+      withCredentials: true,
+    });
+  
+    api.interceptors.request.use(async (config) => {
+      let token = getToken();
+      if (!token) {
+        try {
+          token = await refreshToken();
+        } catch (error) {
+          // Handle refresh token failure (e.g., redirect to login)
+        }
+      }
+      if (token) {
+        config.headers['Authorization'] = `Bearer ${token}`;
+      }
+      return config;
+    });
+  
+    return api;
+  };
+  
+  const api = createAPI(
+    () => localStorage.getItem('token'),
+    () => securityClient.refreshToken()
+  );
+  
   const handleWebSocketMessage = useCallback((data: any) => {
     console.log('Processing WebSocket message:', data);
 

@@ -1,10 +1,12 @@
-import express from 'express';
+import express, { Request, Response, NextFunction, ErrorRequestHandler } from 'express';
+import { UnauthorizedError } from 'express-jwt';
 import cors from 'cors';
 import passport from 'passport';
 import { Strategy as LocalStrategy } from 'passport-local';
 import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
 import { v4 as uuidv4 } from 'uuid';
 import jwt from 'jsonwebtoken';
+import { expressjwt } from 'express-jwt';
 import bcrypt from 'bcrypt';
 import { BaseEntity } from '@cktmcs/shared';
 import axios from 'axios';
@@ -61,7 +63,7 @@ export class SecurityManager extends BaseEntity {
         super('SecurityManager', 'SecurityManager', `securitymanager`, process.env.PORT || '5010');
         this.librarianUrl = process.env.LIBRARIAN_URL || 'librarian:5040';
         try {
-            console.log('Constructing SecutityManager');
+            console.log('Constructing SecurityManager');
             this.setupServer();
             this.setupPassport();
             if (process.env.COGNITO_CLIENT_ID) {
@@ -76,26 +78,52 @@ export class SecurityManager extends BaseEntity {
         const app = express();
 
         const corsOptions = {
-            origin: true, // This allows all origins
+            origin: true,
             methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
             allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin', 'Access-Control-Allow-Origin', 'Access-Control-Allow-Headers'],
             credentials: true,
         };
 
         app.use(cors(corsOptions));
-
-
         app.use(express.json());
         app.use(passport.initialize());
 
+        // JWT middleware
+        const jwtMiddleware = expressjwt({
+            secret: this.JWT_SECRET,
+            algorithms: ['HS256'],
+        }).unless({ path: ['/register', '/login', '/login/google', '/login/cognito'] });
+
+        app.use(jwtMiddleware);
+
+        // Error handler for express-jwt
+        const errorHandler: ErrorRequestHandler = (err: unknown, req: Request, res: Response, next: NextFunction) => {
+            if (err instanceof UnauthorizedError) {
+                console.error('JWT Error:', err.message);
+                if ((err as any).inner?.name === 'TokenExpiredError') {
+                    res.status(401).json({ error: 'Token has expired', code: 'TOKEN_EXPIRED' });
+                } else {
+                    res.status(401).json({ error: 'Invalid token', code: 'INVALID_TOKEN' });
+                }
+            } else {
+                console.error('Unexpected error:', err);
+                res.status(500).json({ error: 'An unexpected error occurred', code: 'INTERNAL_SERVER_ERROR' });
+            }
+            // Ensure we always call next() to properly end the middleware chain
+            next();
+        };
+
+        app.use(errorHandler);
+
         // User Authentication Routes
-        app.post('/register', (req, res) => { this.registerUser(req,res) });
-        app.post('/login',  (req, res) => { this.handleLogin(req,res) });
+        app.post('/register', (req, res) => { this.registerUser(req, res) });
+        app.post('/login', (req, res) => { this.handleLogin(req, res) });
         app.post('/login/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
         if (process.env.COGNITO_CLIENT_ID) {
             app.post('/login/cognito', (req, res) => { this.handleCognitoLogin(req, res) });
         }
-        app.get('/auth/verify',  (req, res) => { this.verifyToken(req,res) });
+        app.get('/auth/verify', (req, res) => { this.verifyToken(req, res) });
+        app.post('/refresh-token', (req, res) => { this.refreshToken(req, res) });
 
         app.listen(this.port, () => {
             console.log(`SecurityManager listening on port ${this.port}`);
@@ -324,65 +352,22 @@ export class SecurityManager extends BaseEntity {
     }
 
     private async verifyToken(req: express.Request, res: express.Response) {
-        try {
-            const authHeader = req.headers.authorization;
-            console.log('Verifying token:', authHeader);
-            if (!authHeader) {
-                return res.status(401).json({ error: 'No token provided' });
-            }
-
-            // Extract token from Bearer header
-            const token = authHeader.split(' ')[1];
-            console.log('Token:', token);
-            if (!token) {
-                return res.status(401).json({ error: 'Invalid token format' });
-            }
-
-            try {
-                // Verify the token
-                const decoded = jwt.verify(token, this.JWT_SECRET) as DecodedToken;
-
-                // Check if user still exists
-                const user = await this.findUserByEmail(decoded.email);
-                console.log('User:', user);
-                if (!user) {
-                    return res.status(401).json({ error: 'User no longer exists' });
+        // Token is already verified by express-jwt middleware
+        const user = (req as any).auth;
+        if (user && !res.headersSent) {
+            res.json({
+                valid: true,
+                user: {
+                    id: user.id,
+                    email: user.email,
+                    role: user.role
                 }
-
-                // Check if token was issued before password change (if we implement password changes)
-                // This would require storing the password change timestamp in the user object
-                // if (user.passwordChangedAt && decoded.iat < user.passwordChangedAt.getTime() / 1000) {
-                //     return res.status(401).json({ error: 'Password changed, please login again' });
-                // }
-
-                // Attach user to request for use in subsequent middleware
-                (req as any).user = {
-                    id: decoded.id,
-                    email: decoded.email,
-                    role: decoded.role
-                };
-
-                return res.status(200).json({
-                    valid: true,
-                    user: {
-                        id: decoded.id,
-                        email: decoded.email,
-                        role: decoded.role
-                    }
-                });
-            } catch (error) { analyzeError(error as Error);
-                if (error instanceof jwt.TokenExpiredError) {
-                    return res.status(401).json({ error: 'Token expired' });
-                }
-                if (error instanceof jwt.JsonWebTokenError) {
-                    return res.status(401).json({ error: 'Invalid token' });
-                }
-                throw error;
-            }
-        } catch (error) { analyzeError(error as Error);
-            console.error('Token verification error:', error instanceof Error ? error.message : error);
-            return res.status(500).json({ error: 'Token verification failed' });
+            });
+        } else if (!res.headersSent) {
+            console.log('Invalid token in verifyToken');
+            res.status(401).json({ error: 'Invalid token' });
         }
+        // If headers have already been sent, do nothing
     }
 
     private async createUserFromOAuth(userData: OAuthUserData): Promise<User> {
