@@ -69,7 +69,7 @@ export class Agent extends BaseEntity {
             stepNo: 1,
             actionVerb: config.actionVerb,
             inputs: config.inputs || new Map(),
-            dependencies: new Map<string,number>(),
+            dependencies: new Map<string, string>(),
             status: 'pending'
         };
         this.steps.push(initialStep);
@@ -218,8 +218,8 @@ Please consider this context and the available plugins when planning and executi
             console.log('processStep: Details:', MapSerializer.transformForSerialization(step));
             // Populate inputs from dependent steps
             if (step.dependencies) {
-                step.dependencies.forEach((dependentStepNo, inputKey) => {
-                    const dependentStep = this.steps.find(s => s.stepNo === dependentStepNo);
+                step.dependencies.forEach((depStepId, inputKey) => {
+                    const dependentStep = this.steps.find(s => s.id === depStepId);
                     if (dependentStep && dependentStep.result) {
                         step.inputs = step.inputs || new Map();
                         const inputData = step.inputs.get(inputKey);
@@ -272,7 +272,7 @@ Please consider this context and the available plugins when planning and executi
 
         result.forEach(resultItem => {
             if (resultItem.success && resultItem.resultType === 'plan') {
-                this.addPlanSteps(resultItem.result, step.stepNo);
+                this.addPlanSteps(resultItem.result, step.id);
             }
             if (!resultItem.mimeType) { resultItem.mimeType = 'text/plain'; }
             if (!resultItem.success) { step.status = 'error'; }
@@ -280,7 +280,7 @@ Please consider this context and the available plugins when planning and executi
 
         step.result = result;
         console.log(`Completed ${step.id}: ${step.status}`);
-        await this.saveWorkProduct(step.id, step.result, step.stepNo === this.steps.length);            
+        await this.saveWorkProduct(step.id, step.result, this.stepIsEndPoint(step));            
         } catch (error) { analyzeError(error as Error);
             this.logAndSay(`There was an error processing step ${step.stepNo}: ${error instanceof Error ? error.message : JSON.stringify(error)}`);
             step.status = 'error';
@@ -294,6 +294,11 @@ Please consider this context and the available plugins when planning and executi
         }
     }
 
+    private stepIsEndPoint(step: Step): boolean {
+        const dependents = this.steps.filter(s => [...s.dependencies.values()].some(depId => depId === step.id));
+        return (dependents.length === 0);
+    }
+
     public async handleMessage(message: any): Promise<void> {
         console.log(`Agent ${this.id} received message:`, message);
         // Handle base entity messages (handles ANSWER)
@@ -301,40 +306,46 @@ Please consider this context and the available plugins when planning and executi
         // Add message handling as new types are defined
     }
 
-    private addPlanSteps(plan: ActionVerbTask[], currentStepNo: number) {
-        const currentStepCount = this.steps.length;
-        const newSteps: Step[] = plan.map((task, index) => {
-            console.log(`Adding plan step ${task.verb} with ${task.inputs.size} inputs and ${task.dependencies?.size} dependencies`);
-            return {
-            id: uuidv4(),
-            stepNo: currentStepCount + index + 1,
-            actionVerb: task.verb,
-            inputs: task.inputs,
-            description: task.description,
-            dependencies: this.adjustStepDependencies(task.dependencies, currentStepCount),
-            status: 'pending',
-            result: undefined,
-            timeout: undefined
-        }});
-        this.steps.push(...newSteps);
-    
-        // Adjust dependencies for steps that were dependent on the current step
-        this.steps.forEach(step => {
-            step.dependencies.forEach((value, key) => {
-                if (value === currentStepNo) {
-                    step.dependencies.set(key, currentStepCount + newSteps.length);
-                }
-            });
+    private addPlanSteps(plan: ActionVerbTask[], currentStepId: string) {
+        const newSteps: Step[] = plan.map((task) => {
+            const step: Step = {
+                id: uuidv4(),
+                stepNo: this.steps.length + 1,
+                actionVerb: task.verb,
+                inputs: task.inputs,
+                description: task.description,
+                dependencies: new Map<string, string>(),
+                status: 'pending',
+                result: undefined,
+                timeout: undefined
+            };
+
+            // Set dependencies for this step
+            if (task.dependencies) {
+                Object.entries(task.dependencies).forEach(([inputKey, depStepId]) => {
+                    step.dependencies.set(inputKey, depStepId);
+                });
+            }
+
+            return step;
         });
 
-        // Reset dependencies for all steps after the current one
-        for (let i = currentStepNo; i < this.steps.length; i++) {
-            if (this.steps[i].dependencies) {
-                this.steps[i].dependencies = new Map(
-                    Array.from(this.steps[i].dependencies)
-                        .filter(([_, value]) => value < currentStepNo)
-                );
-            }
+        // Add new steps to the main steps array
+        this.steps.push(...newSteps);
+
+        // Find steps in the new plan that have no internal dependencies
+        const endpointSteps = newSteps.filter(step => 
+            ![...step.dependencies.values()].some(depId => 
+                newSteps.some(s => s.id === depId)
+            )
+        );
+
+        // Update the dependencies of the current step
+        const currentStep = this.steps.find(s => s.id === currentStepId);
+        if (currentStep) {
+            endpointSteps.forEach(step => {
+                currentStep.dependencies.set(step.id, step.id);
+            });
         }
     }
 
@@ -348,8 +359,8 @@ Please consider this context and the available plugins when planning and executi
     }
 
     private areStepDependenciesSatisfied(step: Step): boolean {
-        return Array.from(step.dependencies.values()).every(depStepNo => {
-            const depStep = this.steps.find(s => s.stepNo === depStepNo);
+        return Array.from(step.dependencies.values()).every(depStepId => {
+            const depStep = this.steps.find(s => s.id === depStepId);
             return depStep && depStep.status === 'completed';
         });
     }
@@ -357,14 +368,15 @@ Please consider this context and the available plugins when planning and executi
     
     private getStepDependencyOutputs(step: Step): Record<string, any> {
         const outputs: Record<string, any> = {};
-        step.dependencies.forEach(depStepNo => {
-            const depStep = this.steps.find(s => s.stepNo === depStepNo);
+        step.dependencies.forEach((depStepId, inputKey) => {
+            const depStep = this.steps.find(s => s.id === depStepId);
             if (depStep && depStep.result) {
-                outputs[`step_${depStepNo}`] = depStep.result;
+                outputs[inputKey] = depStep.result;
             }
         });
         return outputs;
     }
+    
     private async handleAskStep(inputs: Map<string, PluginInput>): Promise<PluginOutput[]> {
         const input = inputs.get('question');
         if (!input) {

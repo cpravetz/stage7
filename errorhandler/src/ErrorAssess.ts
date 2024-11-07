@@ -20,9 +20,9 @@ export const analyzeError = async (error: Error) => {
         [Your recommendations here]
   
         CODE SUGGESTIONS:
-        \`\`\`
+        
         [Your code suggestions here]
-        \`\`\`
+        
         `},
         { role: 'user', content: `The error is ${JSON.stringify(error)} and the source code is ${sourceCode}` }
       ];

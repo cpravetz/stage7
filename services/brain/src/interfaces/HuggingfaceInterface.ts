@@ -24,7 +24,7 @@ export class HuggingfaceInterface extends ModelInterface {
             })) {
                 response += chunk.choices[0]?.delta?.content || "";
             }
-            response = response.replace(/```[^]*?```/g, '');
+            response = response.replace(/```/g, '');
             return response;
         } catch (error) { analyzeError(error as Error);
             console.error('Error generating response from Huggingface:', error instanceof Error ? error.message : error);

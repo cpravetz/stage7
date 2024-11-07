@@ -21,7 +21,7 @@ export interface Step {
     actionVerb: string;
     description?: string;
     inputs: Map<string, PluginInput>;
-    dependencies: Map<string, number>;
+    dependencies: Map<string, string>;
     status: 'pending' | 'running' | 'completed' | 'error';
     result?: PluginOutput[];
     timeout?: number;
