@@ -74,15 +74,6 @@ export class ModelManager {
     selectModel(optimization: OptimizationType, conversionType: LLMConversionType = LLMConversionType.TextToText): { model: Model, interface: ModelInterface } | undefined {
         let selectedModel: Model | undefined;
 
-        // Temp force the OpenRouter interface and the llama model for now
-        selectedModel = Array.from(this.models.values()).find(model => model.name === 'hf/meta-lamma/llama-3.2-3b-instruct');
-        if (selectedModel) {
-            const selectedInterface = this.interfaces.get(selectedModel.interfaceKey);
-            if (selectedInterface) {
-                return { model: selectedModel, interface: selectedInterface };
-            }
-        }
-
         const compatibleModels = Array.from(this.models.values()).filter(model => 
             Array.isArray(model.contentConversation) && 
             model.contentConversation.includes(conversionType)
@@ -108,6 +99,10 @@ export class ModelManager {
             case 'continuity':
                 // Implement continuity logic if needed
                 break;
+        }
+
+        if (!selectedModel) {
+            selectedModel = Array.from(this.models.values()).find(model => model.name === 'hf/meta-lamma/llama-3.2-3b-instruct');
         }
 
         if (selectedModel) {
