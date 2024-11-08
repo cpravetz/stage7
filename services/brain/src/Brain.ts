@@ -33,9 +33,18 @@ export class Brain extends BaseEntity {
         // Middleware
         app.use(bodyParser.json());
 
+         // Global error handler
+         app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
+            analyzeError(err as Error);
+            res.status(500).json({ error: 'Internal server error' });
+        });
         // API endpoint for processThread
-        app.post('/chat', async (req: express.Request, res: express.Response) => {
-            this.chat(req, res);
+        app.post('/chat', async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+            try {
+                await this.chat(req, res);
+            } catch (error) {
+                next(error); // Pass errors to the global error handler
+            }
         });
         //API endpoint to report LLMCall total
         app.get('/getLLMCalls', (req: express.Request, res: express.Response) => {
@@ -50,7 +59,23 @@ export class Brain extends BaseEntity {
         // Start the server
         app.listen(port, () => {
             console.log(`Brain service listening at http://localhost:${port}`);
-        });        
+        });   
+        
+        // Handle uncaught exceptions
+        process.on('uncaughtException', (error) => {
+            console.error('Uncaught Exception:', error);
+            analyzeError(error);
+            // Optionally, you can choose to exit here if it's a critical error
+            // process.exit(1);
+        });
+        
+        // Handle unhandled promise rejections
+        process.on('unhandledRejection', (reason, promise) => {
+            console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+            if (reason instanceof Error) {
+                analyzeError(reason);
+            }
+        });
     }
 
 
