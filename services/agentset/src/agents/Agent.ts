@@ -150,7 +150,7 @@ Please consider this context and the available plugins when planning and executi
                 this.output = this.steps[this.steps.length - 1].result;
                 this.status = AgentStatus.COMPLETED;
                 this.say(`Agent has completed its work.`);
-                this.say(`Result ${this.output}`)
+                this.say(`Result ${JSON.stringify(this.output)}`)
             }
             this.notifyTrafficManager();
         } catch (error) { analyzeError(error as Error);

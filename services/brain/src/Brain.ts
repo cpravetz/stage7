@@ -63,10 +63,11 @@ export class Brain extends BaseEntity {
                 conversionType: req.body.conversionType || LLMConversionType.TextToText
             };
             const selectedModel = req.body.model || this.modelManager.selectModel(thread.optimization, thread.conversionType);
-            this.logAndSay(`Chatting with model ${selectedModel.model.name} using interface ${selectedModel.model.interfaceKey}`);
             if (!selectedModel) {
-                throw new Error('No suitable model found.');
+                res.json({ respone: 'No suitable model found.', mimeType: 'text/plain' });
+                console.log('No suitable model found.');
             }
+            this.logAndSay(`Chatting with model ${selectedModel.model.name} using interface ${selectedModel.model.interfaceKey}`);
     
             // Extract only the message content from the exchanges
             const messages = thread.exchanges;
@@ -84,7 +85,6 @@ export class Brain extends BaseEntity {
                 mimeType: mimeType
             });
         } catch (error) { analyzeError(error as Error);
-            console.error('Error processing thread:', error instanceof Error ? error.message : error);
             res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
         }
     }

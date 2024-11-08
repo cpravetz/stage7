@@ -6,10 +6,10 @@ export class LlamaModel extends Model {
             name: "meta-lamma/llama-3.2-3b-instruct",
             modelName: "meta-llama/llama-3.2-3b-instruct:free",
             interfaceKey: "openrouter",
-            costScore: 100,
-            accuracyScore: 80,
-            creativityScore: 80,
-            speedScore: 80,
+            costScore: 1000,
+            accuracyScore: 800,
+            creativityScore: 800,
+            speedScore: 800,
             contentConversation: [LLMConversionType.TextToText]
         });
     }

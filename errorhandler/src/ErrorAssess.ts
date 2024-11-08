@@ -99,7 +99,7 @@ export const analyzeError = async (error: Error) => {
     });
     const remediationGuidance = response.data.response;
 
-    console.log(`**** REMEDIATION GUIDANCE ****\n
+    console.log(`\n\n**** REMEDIATION GUIDANCE ****\n\n
     Error: ${error instanceof Error ? error.message : 'Unknown error'}\n\n
     Stack: ${stackTrace}\n\n
     Remediation Guidance:\n
