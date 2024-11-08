@@ -64,7 +64,7 @@ export class Brain extends BaseEntity {
             };
             const selectedModel = req.body.model || this.modelManager.selectModel(thread.optimization, thread.conversionType);
             if (!selectedModel) {
-                res.json({ respone: 'No suitable model found.', mimeType: 'text/plain' });
+                res.json({ response: 'No suitable model found.', mimeType: 'text/plain' });
                 console.log('No suitable model found.');
             }
             this.logAndSay(`Chatting with model ${selectedModel.model.name} using interface ${selectedModel.model.interfaceKey}`);

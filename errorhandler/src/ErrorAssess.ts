@@ -1,7 +1,6 @@
 import axios from 'axios';
 import * as fs from 'node:fs/promises';
 import path from 'path';
-import { MapSerializer } from '@cktmcs/shared';
 
 
 function serializeError(error: Error): string {
@@ -128,14 +127,12 @@ async function getSourceCode(stackTrace: string | undefined): Promise<string> {
                 absolutePath = new URL(filePath).pathname;
             } else if (filePath.startsWith('node:')) {
                 // Skip built-in Node.js modules
-                console.log(`Skipping built-in module: ${filePath}`);
                 continue;
             } else {
                 // Handle regular file paths
                 absolutePath = path.resolve(filePath);
             }
             
-            console.log(`Looking for file ${filePath} line ${lineNumber} at ${absolutePath}`);            
             try {
                 if (await fs.access(absolutePath).then(() => true).catch(() => false)) {
                     const fileContent = await fs.readFile(absolutePath, 'utf-8');

@@ -560,7 +560,7 @@ Please consider this context and the available plugins when planning and executi
 
         try {
             const response = await api.post(`http://${this.brainUrl}/chat`, reasoningInput);
-            console.log(`Brain result: ${response.data.response}`);
+            //console.log(`Brain result: ${response.data.response}`);
             const brainResponse = response.data.response;
             const mimeType = response.data.mimeType || 'text/plain';            
             this.addToConversation('assistant', response.data.response);
