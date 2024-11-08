@@ -5,12 +5,35 @@ import { MapSerializer } from '@cktmcs/shared';
 
 
 function serializeError(error: Error): string {
-    const serialized: Record<string, any> = {};
+    const seen = new WeakSet();
+    
+    const serializer = (key: string, value: any) => {
+        if (typeof value === 'object' && value !== null) {
+            if (seen.has(value)) {
+                return '[Circular]';
+            }
+            seen.add(value);
+        }
+        
+        // Handle specific properties
+        if (key === 'config' && value && typeof value === 'object') {
+            // For axios errors, only include safe properties from config
+            return {
+                url: value.url,
+                method: value.method,
+                timeout: value.timeout
+                // Add other safe properties as needed
+            };
+        }
+        
+        return value;
+    };
 
-    // Capture standard error properties
-    serialized.name = error.name;
-    serialized.message = error.message;
-    serialized.stack = error.stack;
+    const serialized: Record<string, any> = {
+        name: error.name,
+        message: error.message,
+        stack: error.stack
+    };
 
     // Capture all enumerable properties
     Object.assign(serialized, error);
@@ -24,9 +47,18 @@ function serializeError(error: Error): string {
 
     // Remove potentially sensitive or irrelevant information
     delete serialized.domain;  // Node.js specific, usually not relevant
-    delete serialized.config;  // Often contains sensitive info in axios errors
 
-    return JSON.stringify(serialized, null, 2);
+    try {
+        return JSON.stringify(serialized, serializer, 2);
+    } catch (jsonError) {
+        console.error('Error during JSON serialization:', jsonError);
+        return JSON.stringify({
+            name: error.name,
+            message: error.message,
+            stack: error.stack,
+            serializationError: 'Failed to serialize full error object'
+        }, null, 2);
+    }
 }
 
 export const analyzeError = async (error: Error) => {
