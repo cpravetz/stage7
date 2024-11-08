@@ -267,7 +267,7 @@ export class AgentSet extends BaseEntity {
                 this.persistenceManager.saveAgent(agent);
                 res.status(200).send({ message: 'Agent updated' });
             } else {
-                res.status(404).send({ error: 'Agent not found' });
+                res.status(201).send({ error: 'Agent not found' });
             }
         }
 }

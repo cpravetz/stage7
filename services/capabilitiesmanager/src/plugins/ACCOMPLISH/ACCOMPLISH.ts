@@ -22,9 +22,10 @@ If you can provide a complete and direct answer or solution, respond with a JSON
 "answer": "Your direct answer here"
 }
 
-If a plan is needed, respond with a JSON object in this format:
+Otherwise, if a plan is needed, respond with a JSON object in this format:
 {
 "type": "PLAN",
+"context": "Any overarching points or introduction to the plan you want to share",
 "plan": [
     {
         "number": 1,
@@ -57,7 +58,7 @@ If a plan is needed, respond with a JSON object in this format:
 }
 
 
-Don't forget that trailing curly bracket right above in your JSON!
+This is important:  Your response needs to be fully formed JSON.
 
 Guidelines for creating a plan:
 1. Number each step sequentially, starting from 1.
@@ -89,7 +90,7 @@ If it makes sense to break work into multiple streams, you can use the actionVer
 
 Ensure your response is a valid JSON object starting with either "type": "DIRECT_ANSWER" or "type": "PLAN". 
 Double check that you are returning valid JSON. Remove any leading or trailing characters that might invalidate the response as a JSON object.
-`  }
+`}
 
 export async function execute(inputs: Map<string, PluginInput> | Record<string, any>): Promise<PluginOutput[]> {
     try {
@@ -149,15 +150,15 @@ export async function execute(inputs: Map<string, PluginInput> | Record<string, 
             } else {
                 throw new Error('Invalid response format from Brain');
             }
-        } catch (parseError) {
-            console.error('Error parsing Brain response:', parseError);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error parsing Brain response:', error);
             return [{
                 success: false,
                 name: 'error',
                 resultType: PluginParameterType.ERROR,
                 resultDescription: 'Failed to parse Brain response',
                 result: null,
-                error: parseError instanceof Error ? parseError.message : 'Unknown parsing error'
+                error: error instanceof Error ? error.message : 'Unknown parsing error'
             }];
         }
     } catch (error) { analyzeError(error as Error);
@@ -175,47 +176,39 @@ export async function execute(inputs: Map<string, PluginInput> | Record<string, 
 
  
 async function parseJsonWithErrorCorrection(jsonString: string): Promise<any> {
+    let correctedJson = '';
     try {
-        return JSON.parse(jsonString);
-    } catch (error) { analyzeError(error as Error);
-        console.log('Initial JSON parse failed, attempting to correct...');
-        
+
         // Remove any leading or trailing quotation marks
-        let correctedJson = jsonString.trim().replace(/^"|"$/g, '');
-        
-        correctedJson = correctedJson.replace(/```[^]*?```/g, '');        
+        correctedJson = jsonString.trim().replace(/^"|"$/g, '');
+
+        correctedJson = correctedJson.replace(/```/g, '');        
         // Replace 'undefined' with null
         correctedJson = correctedJson.replace(/: undefined/g, ': null');
-        
-        // Fix the malformed JSON in the GENERATE_USE_CASE step
-        correctedJson = correctedJson.replace(/"GENERATE_USE_CASE"\]:/g, '"GENERATE_USE_CASE":');
-        
-        try {
-            return JSON.parse(correctedJson);
-        } catch (secondError) {
-            console.log('JSON correction failed, attempting to use LLM...');
-            console.log('Malformed JSON:', correctedJson);
-            
-            // If simple correction fails, use LLM to attempt correction
-            const brainUrl = process.env.BRAIN_URL || 'brain:5070';
-            const prompt = `The following JSON is malformed. Please correct it and return only the corrected JSON:\n\n${correctedJson}`;
-            
-            try {
-                const response = await axios.post(`http://${brainUrl}/chat`, {
-                    exchanges: [{ role: 'user', content: prompt }],
-                    optimization: 'accuracy'
-                });
-                const fullResponse = response.data.response;
-                const startIndex = fullResponse.indexOf('{');
-                const endIndex = fullResponse.lastIndexOf('}') + 1;
-                const correctedByLLM = fullResponse.substring(startIndex, endIndex);
                 
-                console.log('LLM corrected JSON:', correctedByLLM);
-                return JSON.parse(correctedByLLM);
-            } catch (llmError) {
-                console.error('LLM correction failed:', llmError);
-                throw new Error(`Failed to parse JSON even with LLM assistance: ${llmError}`);
-            }
+        return JSON.parse(correctedJson);
+    } catch (error) { analyzeError(error as Error);
+        console.log('JSON correction failed, attempting to use LLM...');
+        console.log('Malformed JSON:', correctedJson);
+            
+        const brainUrl = process.env.BRAIN_URL || 'brain:5070';
+        const prompt = `The following JSON is malformed. Please correct it and return only the corrected JSON:\n\n${correctedJson}`;
+            
+        try {
+            const response = await axios.post(`http://${brainUrl}/chat`, {
+                exchanges: [{ role: 'user', content: prompt }],
+                optimization: 'accuracy'
+            });
+            const fullResponse = response.data.response;
+            const startIndex = fullResponse.indexOf('{');
+            const endIndex = fullResponse.lastIndexOf('}') + 1;
+            const correctedByLLM = fullResponse.substring(startIndex, endIndex);
+                
+            console.log('LLM corrected JSON:', correctedByLLM);
+            return JSON.parse(correctedByLLM);
+        } catch (llmError) {
+            console.error('LLM correction failed:', llmError);
+            throw new Error(`Failed to parse JSON even with LLM assistance: ${llmError}`);
         }
     }
 }

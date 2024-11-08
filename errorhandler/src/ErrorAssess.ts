@@ -1,7 +1,33 @@
 import axios from 'axios';
 import * as fs from 'node:fs/promises';
 import path from 'path';
+import { MapSerializer } from '@cktmcs/shared';
 
+
+function serializeError(error: Error): string {
+    const serialized: Record<string, any> = {};
+
+    // Capture standard error properties
+    serialized.name = error.name;
+    serialized.message = error.message;
+    serialized.stack = error.stack;
+
+    // Capture all enumerable properties
+    Object.assign(serialized, error);
+
+    // Capture non-enumerable properties
+    Object.getOwnPropertyNames(error).forEach(prop => {
+        if (!serialized.hasOwnProperty(prop)) {
+            serialized[prop] = (error as any)[prop];
+        }
+    });
+
+    // Remove potentially sensitive or irrelevant information
+    delete serialized.domain;  // Node.js specific, usually not relevant
+    delete serialized.config;  // Often contains sensitive info in axios errors
+
+    return JSON.stringify(serialized, null, 2);
+}
 
 export const analyzeError = async (error: Error) => {
   try {
@@ -9,6 +35,7 @@ export const analyzeError = async (error: Error) => {
     const brainUrl = process.env.BRAIN_URL || 'brain:5070';
     const stackTrace = error.stack;
     const sourceCode = await getSourceCode(stackTrace);
+    const serializedError = serializeError(error);
 
     const conversation = [
         { role: 'user', content: `Evaluate the following error report and the associated source code. Provide remediation recommendations including proposed code improvements. Format your response as follows:
@@ -20,11 +47,15 @@ export const analyzeError = async (error: Error) => {
         [Your recommendations here]
   
         CODE SUGGESTIONS:
-        
         [Your code suggestions here]
         
-        `},
-        { role: 'user', content: `The error is ${JSON.stringify(error)} and the source code is ${sourceCode}` }
+        "end of response"
+
+        The error is:
+        $ ${serializedError} 
+        
+        and the source code is:
+         ${sourceCode.substring(0,10000)}` }
       ];
 
     // Send the error information to the Brain for analysis
@@ -36,8 +67,9 @@ export const analyzeError = async (error: Error) => {
 
     console.log(`**** REMEDIATION GUIDANCE ****\n
     Error: ${error instanceof Error ? error.message : 'Unknown error'}\n\n
+    Stack: ${stackTrace}\n\n
+    Remediation Guidance:\n
     ${remediationGuidance}\n\n*******************************`);
-
     return remediationGuidance;
   } catch (err) {
     console.error('Error analyzing error:', err);
@@ -55,8 +87,21 @@ async function getSourceCode(stackTrace: string | undefined): Promise<string> {
         const match = line.match(/at .+ \((.+):(\d+):(\d+)\)/);
         if (match) {
             const [, filePath, lineNumber, columnNumber] = match;
-            const absolutePath = path.resolve(filePath);
+            let absolutePath;
+
+            if (filePath.startsWith('file:///')) {
+                // Handle file:/// protocol
+                absolutePath = new URL(filePath).pathname;
+            } else if (filePath.startsWith('node:')) {
+                // Skip built-in Node.js modules
+                console.log(`Skipping built-in module: ${filePath}`);
+                continue;
+            } else {
+                // Handle regular file paths
+                absolutePath = path.resolve(filePath);
+            }
             
+            console.log(`Looking for file ${filePath} line ${lineNumber} at ${absolutePath}`);            
             try {
                 if (await fs.access(absolutePath).then(() => true).catch(() => false)) {
                     const fileContent = await fs.readFile(absolutePath, 'utf-8');

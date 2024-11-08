@@ -376,7 +376,7 @@ Please consider this context and the available plugins when planning and executi
         });
         return outputs;
     }
-    
+
     private async handleAskStep(inputs: Map<string, PluginInput>): Promise<PluginOutput[]> {
         const input = inputs.get('question');
         if (!input) {
@@ -602,14 +602,9 @@ Please consider this context and the available plugins when planning and executi
 
     private async executeActionWithCapabilitiesManager(step: Step): Promise<PluginOutput[]> {
         this.logAndSay(`Agent: Executing action ${step.actionVerb} with CapabilitiesManager`);
-        console.log(`${step.actionVerb} Inputs are `, MapSerializer.transformForSerialization(step.inputs));
         try {
             const payload = MapSerializer.transformForSerialization({ step });
-            console.log('Payload sent to CapabilitiesManager:', JSON.stringify(payload, null, 2));
-    
             const response = await api.post(`http://${this.capabilitiesManagerUrl}/executeAction`, payload);
-            
-            console.log('Response from CapabilitiesManager:', response.data);
             const serializedresponse = MapSerializer.transformFromSerialization(response.data);
             if (Array.isArray(serializedresponse) && serializedresponse.every(item => this.isPluginOutput(item))) {
                 return serializedresponse;

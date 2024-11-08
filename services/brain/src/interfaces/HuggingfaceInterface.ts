@@ -33,8 +33,13 @@ export class HuggingfaceInterface extends ModelInterface {
     }
 
     private isResponseComplete(response: string): boolean {
-        // Implement your logic here. For example:
-        return response.endsWith('}') || response.toLowerCase().includes('end of response');
+        let isEndOfResponse = false;
+        if (!response.startsWith('{')) {
+            isEndOfResponse = true;
+        } else {
+            isEndOfResponse = response.endsWith('}');
+        }
+        return isEndOfResponse;
     }
 
     async generate(messages: Array<{ role: string, content: string }>, options: { max_length?: number, temperature?: number, modelName?: string }): Promise<string> {
@@ -50,14 +55,17 @@ export class HuggingfaceInterface extends ModelInterface {
                     return response;
                 } else {
                     console.log(`Response incomplete, attempt ${attempts + 1} of ${maxAttempts}`);
-                    console.log(response);
                     messages.push({
                         role: 'system',
-                        content: `Your response was truncated. Please continue from: "${response.substring(response.length - 50)}"`
+                        content: `Your response seems to be truncated. Please continue from: "${response.substring(response.length - 50)}" or return "END OF RESPONSE"`
                     });
                     const continuation = await this.getChatCompletion(inference, messages, options);
-                    response += continuation;
-                    attempts++;
+                    if (continuation === 'END OF RESPONSE') {
+                        attempts = maxAttempts;
+                    } else {
+                        response += continuation;
+                        attempts++;
+                    }
                 }
             }
 
