@@ -69,10 +69,8 @@ export class BaseEntity {
     axios.post(`http://${this.postOfficeUrl}/message`, {
       type: MessageType.REQUEST,
       recipient: 'user',
-      content,
-      sender: this.id,
-      questionGuid,
-      choices
+      content: { question: content, questionGuid: questionGuid, choices: choices, asker: this.id },
+      sender: this.id
     });
   }
 

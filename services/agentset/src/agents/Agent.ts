@@ -119,7 +119,7 @@ ${availablePlugins.map(plugin => `- ${plugin}`).join('\n')}
 Please consider this context and the available plugins when planning and executing the mission. Provide detailed and well-structured responses, and use the most appropriate plugins for each task.
         `;
 
-        this.conversation.push({ role: 'system', content: openingInstruction });
+        this.addToConversation('system', openingInstruction);
     }
 
     private async getAvailablePlugins() {
@@ -214,7 +214,7 @@ Please consider this context and the available plugins when planning and executi
             step.status = 'running';
             step.inputs = step.inputs || new Map();
             this.logAndSay(`Processing step ${step.stepNo}: ${step.actionVerb} with ${step.inputs.size} inputs`);
-            console.log('processStep: Details:', MapSerializer.transformForSerialization(step));
+            //console.log('processStep: Details:', MapSerializer.transformForSerialization(step));
             // Populate inputs from dependent steps
             if (step.dependencies) {
                 step.dependencies.forEach((depStepId, inputKey) => {
@@ -232,7 +232,7 @@ Please consider this context and the available plugins when planning and executi
                     }
                 });
             }
-            console.log('Populated Inputs:', MapSerializer.transformForSerialization(step.inputs));
+            //console.log('Populated Inputs:', MapSerializer.transformForSerialization(step.inputs));
             let result;
 
             switch (step.actionVerb) {
@@ -241,6 +241,9 @@ Please consider this context and the available plugins when planning and executi
                     break;
                 case 'DELEGATE':
                     result = await this.createSubAgent(step.inputs);
+                    break;
+                case 'ASK':
+                    result = await this.handleAskStep(step.inputs);
                     break;
                 case MessageType.REQUEST:
                     result = await this.handleAskStep(step.inputs);
@@ -303,6 +306,17 @@ Please consider this context and the available plugins when planning and executi
         // Handle base entity messages (handles ANSWER)
         await super.handleBaseMessage(message);
         // Add message handling as new types are defined
+        switch (message.type) {
+            case MessageType.USER_MESSAGE:
+                await this.addToConversation('user', message.content.message);
+                break;
+            default:
+                break;
+        }
+    }
+
+    private addToConversation(role: string, content: string) {
+        this.conversation.push({ role, content });
     }
 
     private addPlanSteps(plan: ActionVerbTask[], currentStepId: string) {
@@ -348,15 +362,6 @@ Please consider this context and the available plugins when planning and executi
         }
     }
 
-    private adjustStepDependencies(dependencies: Map<string, number> | undefined, currentStepCount: number): Map<string, number> {
-        if (!dependencies) {
-            return new Map();
-        }
-        return new Map(
-            Array.from(dependencies).map(([key, value]) => [key, value + currentStepCount])
-        );
-    }
-
     private areStepDependenciesSatisfied(step: Step): boolean {
         return Array.from(step.dependencies.values()).every(depStepId => {
             const depStep = this.steps.find(s => s.id === depStepId);
@@ -365,17 +370,6 @@ Please consider this context and the available plugins when planning and executi
     }
 
     
-    private getStepDependencyOutputs(step: Step): Record<string, any> {
-        const outputs: Record<string, any> = {};
-        step.dependencies.forEach((depStepId, inputKey) => {
-            const depStep = this.steps.find(s => s.id === depStepId);
-            if (depStep && depStep.result) {
-                outputs[inputKey] = depStep.result;
-            }
-        });
-        return outputs;
-    }
-
     private async handleAskStep(inputs: Map<string, PluginInput>): Promise<PluginOutput[]> {
         const input = inputs.get('question');
         if (!input) {
@@ -454,6 +448,7 @@ Please consider this context and the available plugins when planning and executi
                 this.workProducts.set(`${depId}_${wp.stepId}`, wp);
             }
         }
+        return Promise.resolve();
     }
 
     async loadWorkProduct(stepId: string): Promise<WorkProduct | null> {
@@ -466,9 +461,10 @@ Please consider this context and the available plugins when planning and executi
 
     private async sendMessage(message: Message): Promise<void> {
         try {
-          await axios.post(`http://${this.postOfficeUrl}/message`, message);
+          return await axios.post(`http://${this.postOfficeUrl}/message`, message);
         } catch (error) { analyzeError(error as Error);
           console.error('Error sending message:', error instanceof Error ? error.message : error);
+          return Promise.reject(error);
         }
       }
 
@@ -556,7 +552,7 @@ Please consider this context and the available plugins when planning and executi
     private async useBrainForReasoning(inputs: Map<string, PluginInput>): Promise<PluginOutput[]> {
         const args = inputs.get('query');
         const userMessage = args ? args.inputValue : '';
-        this.conversation.push({ role: 'user', content: userMessage });
+        this.addToConversation( 'user',  userMessage);
         const reasoningInput = {
             exchanges: this.conversation,
             optimization: 'accuracy'
@@ -567,7 +563,7 @@ Please consider this context and the available plugins when planning and executi
             console.log(`Brain result: ${response.data.response}`);
             const brainResponse = response.data.response;
             const mimeType = response.data.mimeType || 'text/plain';            
-            this.conversation.push({ role: 'assistant', content: response.data.response });
+            this.addToConversation('assistant', response.data.response);
             const result : PluginOutput = {
                 success: true,
                 name: 'answer',

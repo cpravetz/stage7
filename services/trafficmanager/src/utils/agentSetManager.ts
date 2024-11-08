@@ -1,5 +1,6 @@
+import express from 'express';
 import axios from 'axios';
-import { MapSerializer, AgentSetManagerStatistics, AgentSetStatistics, AgentStatistics, PluginInput } from '@cktmcs/shared';
+import { MapSerializer, AgentSetManagerStatistics, AgentSetStatistics, AgentStatistics, PluginInput, MessageType } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 
 const api = axios.create({
@@ -228,6 +229,16 @@ class AgentSetManager {
             throw new Error(`No AgentSet found for agent ${agentId}`);
         }
         await api.post(`http://${setUrl}/resumeAgent`, { agentId });
+    }
+
+    async distributeUserMessage(req: express.Request) {
+        this.agentSets.forEach(async agentSet =>{
+            try {
+                await api.post(`http://${agentSet.url}/message`, req.body);
+            } catch (error) { analyzeError(error as Error);
+                console.error(`Error sending message to AgentSet ${agentSet.url}:`, error instanceof Error ? error.message : error);
+            }
+        });
     }
 
     public async getAgentStatistics(missionId: string): Promise<AgentSetManagerStatistics> {

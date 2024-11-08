@@ -79,6 +79,9 @@ class MissionControl extends BaseEntity {
                 case MessageType.LOAD:
                     await this.loadMission(missionId, clientId, user.id);
                     break;
+                case MessageType.USER_MESSAGE:
+                    await this.handleUserMessage(content, clientId, missionId);
+                    break;
                 default:
                     console.log(`Unhandled message type: ${type}`);
             }
@@ -196,6 +199,37 @@ class MissionControl extends BaseEntity {
             this.sendStatusUpdate(mission, `Mission saved: ${mission.name || 'Unnamed'}`);
         } catch (error) { analyzeError(error as Error);
             console.error('Error saving mission:', error instanceof Error ? error.message : error);
+        }
+    }
+
+    private async handleUserMessage(content: { missionId: string, message: string }, clientId: string, missionId: string) {
+        const mission = this.missions.get(missionId);
+        if (!mission) {
+            console.error('Mission not found:', missionId);
+            return;
+        }
+    
+        try {
+            // Send the user message to the TrafficManager for distribution
+            await api.post(`http://${this.trafficManagerUrl}/distributeUserMessage`, {
+                type: MessageType.USER_MESSAGE,
+                sender: 'user',
+                recipient: 'agents',
+                content: {
+                    missionId: missionId,
+                    message: content.message
+                },
+                clientId: clientId
+            });
+    
+            console.log(`User message for mission ${missionId} sent to TrafficManager for distribution`);
+    
+            // Update mission status
+            mission.updatedAt = new Date();
+            this.sendStatusUpdate(mission, 'User message received and sent to agents');
+    
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error handling user message:', error instanceof Error ? error.message : error);
         }
     }
 

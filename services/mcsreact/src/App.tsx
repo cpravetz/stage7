@@ -35,7 +35,7 @@ export const App: React.FC = () => {
   const [activeMissionName, setActiveMissionName] = useState<string | null>(null);
   const [activeMissionId, setActiveMissionId] = useState<string | null>(null);
   const [showSavedMissions, setShowSavedMissions] = useState<boolean>(false);
-  const [currentQuestion, setCurrentQuestion] = useState<{ guid: string, sender: string, content: string, choices?: string[] } | null>(null);
+  const [currentQuestion, setCurrentQuestion] = useState<{ guid: string, sender: string, content: string, choices?: string[], asker: string } | null>(null);
   const [agentDetails, setAgentDetails] = useState<any[]>([]);
   const [missionStatus, setMissionStatus] = useState<any>(null);
   const [workProducts, setWorkProducts] = useState<WorkProduct[]>([]);
@@ -89,7 +89,7 @@ export const App: React.FC = () => {
             break;
         case MessageType.REQUEST:
             setConversationHistory((prev) => [...prev, `${data.sender} asks: ${data.content}`]);
-            setCurrentQuestion({ guid: data.questionGuid, sender: data.sender, content: data.content, choices: data.choices });
+            setCurrentQuestion({ guid: data.content.questionGuid, sender: data.sender, content: data.content.question, choices: data.content.choices, asker: data.content.asker });
             break;
         case MessageType.WORK_PRODUCT_UPDATE:
             setWorkProducts(prev => [...prev, {
@@ -221,18 +221,20 @@ useEffect(() => {
       } else {
             if (currentQuestion) {
           await api.post('/sendMessage', {
-            type: 'answer',
-            questionGuid: currentQuestion.guid,
-            sender: currentQuestion.sender,
-            answer: message
+            type: MessageType.ANSWER,
+            sender: 'user',
+            content: { missionId: activeMissionId, answer: message, asker: currentQuestion.asker, questionGuid: currentQuestion.guid },
+            recipient: 'missionControl',
+            clientId
           });
           setCurrentQuestion(null);
         } else {
           await api.post('/sendMessage', {
-            type: 'USER_MESSAGE',
-            content: message,
-            clientId,
-            missionId: activeMissionId
+            type: MessageType.USER_MESSAGE,
+            sender: 'user',
+            recipient: 'MissionControl',
+            content: { missionId: activeMissionId, message: message},
+            clientId
           });
         }
       }

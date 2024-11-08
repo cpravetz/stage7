@@ -220,6 +220,12 @@ export class AgentSet extends BaseEntity {
             res.status(404).send({ error: `Agent ${agentId} not found in this AgentSet` });
           }
         } else {
+            const { missionId } = req.body.content.missionId;
+            const agents = Array.from(this.agents.values()).filter(agent => agent.getMissionId() === missionId);
+            for (const agent of agents) {
+                await agent.handleMessage(message);
+            }
+
           // Handle messages for the AgentSet itself
           console.log('Processing message in AgentSet');
           res.status(200).send({ status: 'Message received and processed by AgentSet' });

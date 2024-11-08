@@ -47,6 +47,12 @@ export class TrafficManager extends BaseEntity {
         this.app.get('/getAgentStatistics/:missionId', async (req: express.Request, res: express.Response) => { this.getAgentStatistics(req, res) });
         this.app.post('/checkBlockedAgents', async (req, res) => { this.checkBlockedAgents(req, res)});
         this.app.get('/dependentAgents/:agentId', (req: express.Request, res: express.Response) => { this.getDependentAgents(req, res); });
+        this.app.post('/distributeUserMessage', async (req, res) => this.distributeUserMessage(req, res));
+    }
+
+    private getAgentSetsForMission(missionId: string) {
+        // Implementation to return AgentSets for the given mission
+        // This might involve looking up which AgentSets have agents for this mission
     }
 
     private async captureAgentStatus(agentId: string, status: AgentStatus) {
@@ -516,6 +522,17 @@ export class TrafficManager extends BaseEntity {
         } catch (error) { analyzeError(error as Error);
             console.error('Error getting dependent agents:', error instanceof Error ? error.message : error);
             res.status(500).json({ error: 'Failed to get dependent agents' });
+        }
+    }
+
+    private async distributeUserMessage(req: express.Request, res: express.Response) {
+    
+        try {
+            await agentSetManager.distributeUserMessage(req);
+            res.status(200).send({ message: 'User message distributed successfully' });
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error distributing user message:', error instanceof Error ? error.message : error);
+            res.status(500).send({ error: 'Failed to distribute user message' });
         }
     }
 }

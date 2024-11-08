@@ -15,6 +15,7 @@ export enum MessageType {
     AGENT_UPDATE = "agentUpdate",
     CREATE_MISSION = "createMission",
     STATUS_UPDATE = "statusUpdate",
+    USER_MESSAGE = "userMessage"
 }
 
 export interface Message {
