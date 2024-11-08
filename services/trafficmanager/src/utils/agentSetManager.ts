@@ -38,24 +38,15 @@ class AgentSetManager {
             const response = await api.get(`http://${this.postOfficeUrl}/requestComponent?type=AgentSet`);
             const agentSetComponents = response.data.components;
             // Update existing AgentSets and add new ones
-            const updatedAgentSets = new Map<string, AgentSetLink>();
-            agentSetComponents.map((component: any) => {
-                const agentSetLink: AgentSetLink = {
+            this.agentSets = new Map(agentSetComponents.map((component: any) => [
+                component.id,
+                {
                     id: component.id,
                     url: component.url,
                     agentCount: 0,
                     maxAgents: this.maxAgentsPerSet
-                };
-                updatedAgentSets.set(component.id, agentSetLink);
-            });
-            // Remove AgentSets that no longer exist
-            for (const [id, agentSet] of this.agentSets) {
-                if (!updatedAgentSets.has(id)) {
-                    this.removeAgentSet(id);
                 }
-            }
-
-            this.agentSets = updatedAgentSets;
+            ]));
             console.log(`AgentSets refreshed. Current count: ${this.agentSets.size}`);
         } catch (error) { analyzeError(error as Error);
             console.error('Error refreshing AgentSets:', error instanceof Error ? error.message : error);
@@ -89,12 +80,15 @@ class AgentSetManager {
                 const agentSetComponents = response.data.components;
                 console.log('AgentSet components response:', agentSetComponents.length);
                 if (agentSetComponents.length > 0) {
-                    this.agentSets = agentSetComponents.map((component: any) => ({
-                        id: component.id,
-                        url: component.url,
-                        agentCount: 0,
-                        maxAgents: this.maxAgentsPerSet
-                    }));
+                    this.agentSets = new Map(agentSetComponents.map((component: any) => [
+                        component.id,
+                        {
+                            id: component.id,
+                            url: component.url,
+                            agentCount: 0,
+                            maxAgents: this.maxAgentsPerSet
+                        }
+                    ]));
                     return;
                 }
             } catch (error) { analyzeError(error as Error);
@@ -203,24 +197,60 @@ class AgentSetManager {
     }
         
     async pauseAgents(missionId: string) {
-        console.log('agentSetManager: Pausing agents for mission:', missionId);
-        this.agentSets.forEach(async set => {
-            await api.post(`http://${set.url}/pauseAgents`, { missionId });
+        const pausePromises = Array.from(this.agentSets.values()).map(async (set) => {
+            try {
+                await api.post(`http://${set.url}/pauseAgents`, { missionId });
+            } catch (error) {
+                throw error; // Re-throw to be caught by Promise.allSettled
+            }
         });
+
+        const results = await Promise.allSettled(pausePromises);
+        
+        const failedSets = results.filter(result => result.status === 'rejected').length;
+        if (failedSets > 0) {
+            console.warn(`Failed to pause agents in ${failedSets} sets for mission ${missionId}`);
+        } else {
+            console.log(`Successfully paused all agents for mission ${missionId}`);
+        }
     }
 
     async abortAgents(missionId: string) {
-        console.log('Aborting agents for mission:', missionId);
-        this.agentSets.forEach(async set => {
-            await api.post(`http://${set.url}/abortAgents`, { missionId });
+        const abortPromises = Array.from(this.agentSets.values()).map(async (set) => {
+            try {
+                await api.post(`http://${set.url}/abortAgents`, { missionId });
+            } catch (error) {
+                throw error; // Re-throw to be caught by Promise.allSettled
+            }
         });
+
+        const results = await Promise.allSettled(abortPromises);
+        
+        const failedSets = results.filter(result => result.status === 'rejected').length;
+        if (failedSets > 0) {
+            console.warn(`Failed to abort agents in ${failedSets} sets for mission ${missionId}`);
+        } else {
+            console.log(`Successfully abort all agents for mission ${missionId}`);
+        }
     }
 
     async resumeAgents(missionId: string) {
-        console.log('Resuming agents for mission:', missionId);
-        this.agentSets.forEach(async set => {
-            await api.post(`http://${set.url}/resumeAgents`, { missionId });
+        const resumePromises = Array.from(this.agentSets.values()).map(async (set) => {
+            try {
+                await api.post(`http://${set.url}/resumeAgents`, { missionId });
+            } catch (error) {
+                throw error; // Re-throw to be caught by Promise.allSettled
+            }
         });
+
+        const results = await Promise.allSettled(resumePromises);
+        
+        const failedSets = results.filter(result => result.status === 'rejected').length;
+        if (failedSets > 0) {
+            console.warn(`Failed to resume agents in ${failedSets} sets for mission ${missionId}`);
+        } else {
+            console.log(`Successfully resumed all agents for mission ${missionId}`);
+        }
     }
 
     async resumeAgent(agentId: string) {
@@ -232,13 +262,22 @@ class AgentSetManager {
     }
 
     async distributeUserMessage(req: express.Request) {
-        this.agentSets.forEach(async agentSet =>{
+        const messagePromises = Array.from(this.agentSets.values()).map(async (set) => {
             try {
-                await api.post(`http://${agentSet.url}/message`, req.body);
-            } catch (error) { analyzeError(error as Error);
-                console.error(`Error sending message to AgentSet ${agentSet.url}:`, error instanceof Error ? error.message : error);
+                await api.post(`http://${set.url}/message`, req.body);
+            } catch (error) {
+                throw error; // Re-throw to be caught by Promise.allSettled
             }
         });
+
+        const results = await Promise.allSettled(messagePromises);
+        
+        const failedSets = results.filter(result => result.status === 'rejected').length;
+        if (failedSets > 0) {
+            console.warn(`Failed to message agents in ${failedSets} sets`);
+        } else {
+            console.log(`Successfully messaged all agents`);
+        }
     }
 
     public async getAgentStatistics(missionId: string): Promise<AgentSetManagerStatistics> {
