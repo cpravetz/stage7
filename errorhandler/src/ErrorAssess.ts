@@ -49,7 +49,9 @@ function serializeError(error: Error): string {
     delete serialized.domain;  // Node.js specific, usually not relevant
 
     try {
-        return JSON.stringify(serialized, serializer, 2);
+        let result:string = JSON.stringify(serialized, serializer, 2);
+        result = result.replace(/\s+/g, ' ');
+        return result.substring(0,1000);
     } catch (jsonError) {
         console.error('Error during JSON serialization:', jsonError);
         return JSON.stringify({

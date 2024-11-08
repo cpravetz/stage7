@@ -159,7 +159,7 @@ export class CapabilitiesManager extends BaseEntity {
         try {
             console.log(`Attempting to fetch plugins from Librarian at ${this.librarianUrl}`);
             const response = await axios.post(`http://${this.librarianUrl}/searchData`, {
-                params: { 
+                query: { 
                     collection: 'plugins', 
                     query: {}, 
                     options: { id: 1, name: 1, description: 1, version: 1, type: 1, verb: 1 } 
