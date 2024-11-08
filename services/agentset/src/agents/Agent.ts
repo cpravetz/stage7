@@ -44,7 +44,6 @@ export class Agent extends BaseEntity {
     brainUrl: string = '';
     trafficManagerUrl: string = '';
     librarianUrl: string = '';
-    subAgents: Agent[] = [];
     workProducts: Map<string, WorkProduct> = new Map();
     conversation: Array<{ role: string, content: string }> = [];
 
@@ -515,27 +514,30 @@ Please consider this context and the available plugins when planning and executi
                 newInputs.set('goal', subAgentGoal);
             }
     
-            const subAgent = new Agent({
+            const subAgentId = uuidv4();
+            const subAgentConfig = {
+                agentId: subAgentId,
                 actionVerb: 'ACCOMPLISH',
-                inputs: newInputs,
+                inputs: Object.fromEntries(newInputs),
                 missionId: this.missionId,
                 dependencies: [this.id, ...(this.dependencies || [])],
-                postOfficeUrl: this.postOfficeUrl,
-                agentSetUrl: this.agentSetUrl,
-                id: uuidv4(),
                 missionContext: this.missionContext
-            });
-            this.subAgents.push(subAgent);
-            await subAgent.initializeAgent();
-            
+            };
+    
+            const response = await axios.post(`http://${this.agentSetUrl}/addAgent`, subAgentConfig);
+    
+            if (response.status !== 200) {
+                throw new Error(`Failed to create sub-agent: ${response.data.error || 'Unknown error'}`);
+            }
+    
             return [{
                 success: true,
                 name: 'subAgent',
                 resultType: PluginParameterType.OBJECT,
                 resultDescription: 'Sub-agent created',
                 result: {
-                    subAgentId: subAgent.id,
-                    status: subAgent.status
+                    subAgentId: subAgentId,
+                    status: 'created'
                 }
             }];
         } catch (error) { analyzeError(error as Error);
@@ -550,6 +552,7 @@ Please consider this context and the available plugins when planning and executi
             }];
         }
     }
+
     private async useBrainForReasoning(inputs: Map<string, PluginInput>): Promise<PluginOutput[]> {
         const args = inputs.get('query');
         const userMessage = args ? args.inputValue : '';
@@ -656,7 +659,6 @@ Please consider this context and the available plugins when planning and executi
             this.trafficManagerUrl = state.trafficManagerUrl;
             this.librarianUrl = state.librarianUrl;
             this.questions = state.questions;
-            this.subAgents = state.subAgents;
             this.conversation = state.conversation || [];
             this.workProducts = new Map(JSON.parse(state.workProducts));
         }
@@ -682,13 +684,6 @@ Please consider this context and the available plugins when planning and executi
             await this.notifyTrafficManager();
             this.runAgent();
         }
-    }
-
-    async launchSubAgent(actionVerb: string, inputs: Map<string, PluginInput>) {
-        this.logAndSay(`Launching new sub-agent `);
-        const newSubAgent = new Agent({ actionVerb, inputs, missionId: this.missionId, id: uuidv4(), agentSetUrl: this.agentSetUrl, postOfficeUrl: this.postOfficeUrl, missionContext: this.missionContext });
-        this.subAgents.push(newSubAgent);
-        await newSubAgent.initializeAgent();
     }
 
     getMissionId(): string {
