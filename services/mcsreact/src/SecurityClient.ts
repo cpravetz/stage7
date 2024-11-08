@@ -26,6 +26,18 @@ export class SecurityClient {
         return this.token || '';
     }
 
+    async logout(): Promise<void> {
+        try {
+          await axios.post(`${this.postOfficeUrl}/securityManager/logout`, {}, {
+            headers: this.getAuthHeader()
+          });
+          this.token = null;
+        } catch (error) {
+          console.error('Logout failed:', error instanceof Error ? error.message : error);
+          throw error;
+        }
+      }
+
     getAuthHeader() {
         return this.token ? { Authorization: `Bearer ${this.token}` } : {};
     }

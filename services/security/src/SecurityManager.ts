@@ -118,6 +118,7 @@ export class SecurityManager extends BaseEntity {
         // User Authentication Routes
         app.post('/register', (req, res) => { this.registerUser(req, res) });
         app.post('/login', (req, res) => { this.handleLogin(req, res) });
+        app.post('/logout', (req, res) => { this.handleLogout(req, res) });
         app.post('/login/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
         if (process.env.COGNITO_CLIENT_ID) {
             app.post('/login/cognito', (req, res) => { this.handleCognitoLogin(req, res) });
@@ -240,6 +241,29 @@ export class SecurityManager extends BaseEntity {
                 res.status(500).json({ error: 'Login failed' });
             }
         })(req, res);
+    }
+
+    private async handleLogout(req: express.Request, res: express.Response) {
+        try {
+            const user = (req as any).user;
+            if (!user) {
+                return res.status(401).json({ error: 'Not authenticated' });
+            }
+
+            //Passport logout function
+            if (req.logout) {
+                req.logout((err) => {
+                    if (err) {
+                        console.error('Error logging out with Passport:', err);
+                    }
+                });
+            }
+        
+            res.status(200).json({ message: 'Logged out successfully' });
+        } catch (error) { analyzeError(error as Error);
+            console.error('Logout error:', error instanceof Error ? error.message : error);
+            res.status(500).json({ error: 'Logout failed' });
+        }
     }
 
     private async handleCognitoLogin(req: express.Request, res: express.Response) {

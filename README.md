@@ -1,8 +1,8 @@
-# CKTMCS (CKT Mission Control System)
+# stage7 - A self-aware, self-optimizing, scalable, and flexible system for managing and executing complex missions using Large Language Models (LLMs) and custom plugins.
 
 ## Overview
 
-CKTMCS is an advanced, self-modifying system designed to manage and execute complex missions using Large Language Models (LLMs) and custom plugins. The system is composed of several independent Node.js instances that interact with each other to collectively manage agents, process LLM conversations, and complete given missions.
+stage7 is an advanced, self-modifying system designed to manage and execute complex missions using Large Language Models (LLMs) and custom plugins. The system is composed of several independent Node.js instances that interact with each other to collectively manage agents, process LLM conversations, and complete given missions.
 
 ## Key Components
 
@@ -35,7 +35,7 @@ CKTMCS is an advanced, self-modifying system designed to manage and execute comp
 ### Installation
 
 1. Clone the repository:
-   `git clone https://github.com/ckt-mcs/CKTMCS.git`
+   `git clone https://github.com/cpravetz/CKTMCS.git`
 2. Install dependencies:
    `npm install`
 3. Start the development server:

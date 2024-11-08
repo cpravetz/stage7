@@ -1,4 +1,4 @@
-  import React, { useState, useEffect, useCallback, useMemo } from 'react';
+  import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import UserInputModal from './components/UserInputModal';
 import TabbedPanel from './components/TabbedPanel';
 import TextInput from './components/TextInput';
@@ -22,8 +22,6 @@ interface WorkProduct {
   url: string;
 }
 
-
-
 export const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [token, setToken] = useState<string | null>(null);
@@ -46,6 +44,8 @@ export const App: React.FC = () => {
     runningAgents: [],
     engineerStatistics: { newPlugins: [] }
   });
+
+  const ws = useRef<WebSocket | null>(null);  
 
   const createAPI = (getToken: () => string | null, refreshToken: () => Promise<string>): AxiosInstance => {
     const api = axios.create({
@@ -157,47 +157,64 @@ const handleRegister = async (name: string, email: string, password: string) => 
   }
 };
 
+const handleLogout = async () => {
+  try {
+    await securityClient.logout();
+    setIsAuthenticated(false);
+    setToken(null);
+    localStorage.removeItem('authToken');
+    // Close WebSocket connection if it exists
+    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+      ws.current.close();
+    }
+  } catch (error) {
+    console.error('Logout failed:', error instanceof Error ? error.message : error);
+  }
+};
+
 useEffect(() => {
   const generatedClientId = uuidv4();
   setClientId(generatedClientId);
   const authToken = localStorage.getItem('authToken');
   
   // Include the token in the WebSocket connection
-  const ws = new WebSocket(
+  ws.current = new WebSocket(
     `${WS_URL}?clientId=${generatedClientId}&token=${authToken}`
   );
 
-  ws.onopen = () => {
+  ws.current.onopen = () => {
     console.log('WebSocket connection established with PostOffice');
-    ws.send(JSON.stringify({ 
+    ws.current?.send(JSON.stringify({ 
       type: 'CLIENT_CONNECT', 
       clientId: generatedClientId,
       token: authToken  // Include token in the connection message
     }));
   };
 
-  ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      console.log('Received WebSocket message:', data);
-      handleWebSocketMessage(data);
+  ws.current.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    console.log('Received WebSocket message:', data);
+    handleWebSocketMessage(data);
   };
 
-  ws.onerror = (error) => {
-      console.error('WebSocket error:', error instanceof Error ? error.message : error);
+  ws.current.onerror = (error) => {
+    console.error('WebSocket error:', error instanceof Error ? error.message : error);
   };
 
-  ws.onclose = () => {
-      console.log('WebSocket connection closed. Attempting to reconnect...');
-      setTimeout(() => {
-          console.log('Attempting to reconnect WebSocket...');
-          // Implement reconnection logic here
-      }, 5000);
+  ws.current.onclose = () => {
+    console.log('WebSocket connection closed. Attempting to reconnect...');
+    setTimeout(() => {
+      console.log('Attempting to reconnect WebSocket...');
+      // Implement reconnection logic here
+    }, 5000);
   };
 
-    return () => {
-      ws.close();
-    };
-  }, [handleWebSocketMessage]);
+  return () => {
+    if (ws.current) {
+      ws.current.close();
+    }
+  };
+}, [handleWebSocketMessage]);
 
   const handleSendMessage = async (message: string) => {
     if (!clientId) return;
@@ -330,6 +347,10 @@ useEffect(() => {
           </div>
         </div>
         <div className="side-panel">
+        <div className="side-panel-header">
+            <h3>stage7</h3>
+            <button onClick={handleLogout} className="logout-button">Logout</button>
+          </div>
           {!showSavedMissions && (
             <StatisticsWindow 
               statistics={statistics} 
