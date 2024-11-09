@@ -550,31 +550,84 @@ Please consider this context and the available plugins when planning and executi
     }
 
     private async useBrainForReasoning(inputs: Map<string, PluginInput>): Promise<PluginOutput[]> {
-        const args = inputs.get('query');
-        const userMessage = args ? args.inputValue : '';
-        this.addToConversation( 'user',  userMessage);
+        const prompt = inputs.get('prompt')?.inputValue as string;
+        if (!prompt) {
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: 'Error',
+                result: null,
+                error: 'Prompt is required for THINK plugin'
+            }];
+        }
+    
+        const optimization = (inputs.get('optimization')?.inputValue as string) || 'accuracy';
+        const conversionType = (inputs.get('conversionType')?.inputValue as string) || 'text/text';
+    
+        const validOptimizations = ['cost', 'accuracy', 'creativity', 'speed', 'continuity'];
+        const validConversionTypes = ['text/text', 'text/image', 'text/audio', 'text/video', 'text/code'];
+    
+        if (!validOptimizations.includes(optimization)) {
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: 'Error',
+                result: null,
+                error: `Invalid optimization: ${optimization}. Must be one of ${validOptimizations.join(', ')}`
+            }];
+        }
+    
+        if (!validConversionTypes.includes(conversionType)) {
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: 'Error',
+                result: null,
+                error: `Invalid conversionType: ${conversionType}. Must be one of ${validConversionTypes.join(', ')}`
+            }];
+        }
+    
         const reasoningInput = {
-            exchanges: this.conversation,
-            optimization: 'accuracy'
+            exchanges: [{ role: 'user', content: prompt }],
+            optimization: optimization,
+            conversionType: conversionType
         };
-
+    
         try {
             const response = await api.post(`http://${this.brainUrl}/chat`, reasoningInput);
-            //console.log(`Brain result: ${response.data.response}`);
             const brainResponse = response.data.response;
-            const mimeType = response.data.mimeType || 'text/plain';            
-            this.addToConversation('assistant', response.data.response);
-            const result : PluginOutput = {
+            const mimeType = response.data.mimeType || 'text/plain';
+    
+            let resultType: PluginParameterType;
+            switch (conversionType) {
+                case 'text/image':
+                    resultType = PluginParameterType.OBJECT; // Assuming image data is returned as an object
+                    break;
+                case 'text/audio':
+                case 'text/video':
+                    resultType = PluginParameterType.OBJECT; // Assuming audio/video data is returned as an object
+                    break;
+                case 'text/code':
+                    resultType = PluginParameterType.STRING;
+                    break;
+                default:
+                    resultType = PluginParameterType.STRING;
+            }
+    
+            const result: PluginOutput = {
                 success: true,
                 name: 'answer',
-                resultType: PluginParameterType.OBJECT,
+                resultType: resultType,
                 result: brainResponse,
-                resultDescription: 'Brain reasoning output',
+                resultDescription: `Brain reasoning output (${conversionType})`,
                 mimeType: mimeType
             };
-             
+    
             return [result];
-        } catch (error) { analyzeError(error as Error);
+        } catch (error) {
             console.error('Error using Brain for reasoning:', error instanceof Error ? error.message : error);
             return [{
                 success: false,

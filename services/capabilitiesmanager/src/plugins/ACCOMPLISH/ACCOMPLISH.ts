@@ -81,6 +81,12 @@ A number of plugins are available to execute steps of the plan for you.  Some ha
 
 ACCOMPLISH - this plugin takes a specific goal and either achieves it or returns a plan to achieve it.
     (required input: goal)
+THINK - this plugin sends prompts to the LLMs attached to the system in order to generate content from a prompt.
+    (required input: prompt) (optional inputs: optimization, conversionType)
+    if included, optimization must be one of 'cost', 'accuracy', 'creativity', 'speed', or 'continuity'
+    accuracy is the default
+    if included, conversionType must be one of 'text/text', 'text/image', 'text/audio', 'text/video', or 'text/code'
+    text/text is the default
 FILE_OPS - this plugin provides services for file operations read, write, append
     (required inputs: path, operation, content)
 SEARCH - this plugin searches DuckDuckGo for a given term and returns a list of links
@@ -88,7 +94,7 @@ SEARCH - this plugin searches DuckDuckGo for a given term and returns a list of 
 SCRAPE - this plugin scrapes content from a given URL
     (required inputs: url, selector, attribute, limit)
 GET_USER_INPUT - this plugin requests input from the user
-    (required inputs: question, answerType) (optional imput: choices)
+    (required inputs: question, answerType) (optional input: choices)
 
 If it makes sense to break work into multiple streams, you can use the actionVerb DELEGATE to create a sub-agent with a goal of it's own.
 
