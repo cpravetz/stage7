@@ -66,7 +66,9 @@ Guidelines for creating a plan:
 1. Number each step sequentially, starting from 1.
 2. Use specific, actionable verbs for each step (e.g., SCRAPE, ANALYZE, PREDICT).
 3. Ensure each step has a clear, concise description.
-4. For inputs, use the expected input names for the action verb. Each input should be an object with either a 'value' property for predetermined values or an 'outputKey' property referencing an output from a previous step.
+4. For inputs, use the expected input names for the action verb as the input names. 
+Each input should be an object with either a 'value' property for predetermined values or an 'outputKey' property referencing an output from a previous step. So 
+an input would be defined as: {"inputName1": {value: "predeterminedValue"}} or {"inputName2": {outputKey: "outputKeyFromPreviousStep"}}
 5. List dependencies for each step, referencing the step numbers that provide the required inputs.
 6. Specify the outputs of each step that may be used by dependent steps.
 7. Aim for 5-10 steps in the plan, breaking down complex tasks if necessary.
@@ -126,14 +128,14 @@ export async function execute(inputs: Map<string, PluginInput> | Record<string, 
         const messages = [{ role: 'user', content: prompt }];
 
         const response = await queryBrain(messages);
-        console.log('Raw Brain response:', response);
+        //console.log('Raw Brain response:', response);
 
         try {
             const parsedResponse = await parseJsonWithErrorCorrection(response);
-            console.log('Parsed Brain response:', parsedResponse);
+            //console.log('Parsed Brain response:', parsedResponse);
             if (parsedResponse.type === 'PLAN') {
                 const tasks = convertJsonToTasks(parsedResponse.plan);
-                console.log('ACCOMPLISH: ACCOMPLISH plugin succeeded creating a plan',  MapSerializer.transformForSerialization(tasks));
+                //console.log('ACCOMPLISH: ACCOMPLISH plugin succeeded creating a plan',  MapSerializer.transformForSerialization(tasks));
                 return [{
                     success: true,
                     name: 'plan',
@@ -187,7 +189,17 @@ async function parseJsonWithErrorCorrection(jsonString: string): Promise<any> {
         correctedJson = correctedJson.replace(/```/g, '');        
         // Replace 'undefined' with null
         correctedJson = correctedJson.replace(/: undefined/gi, ': null');
-                
+
+         // Handle string concatenation in JSON
+         correctedJson = correctedJson.replace(/"\s*\+\s*JSON\.stringify\((.*?)\)\s*\+\s*"/g, (match, p1) => {
+            try {
+                const parsed = JSON.parse(p1);
+                return JSON.stringify(parsed);
+            } catch (e) {
+                return match; // If parsing fails, leave it as is
+            }
+        });
+
         return parseJSON(correctedJson);
     } catch (error) { analyzeError(error as Error);
         console.log('JSON correction failed, attempting to use LLM...');

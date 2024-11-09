@@ -49,7 +49,7 @@ async function execute(input) {
             const parsedResponse = JSON.parse(response);
             if (parsedResponse.type === 'PLAN') {
                 const tasks = convertJsonToTasks(parsedResponse.plan);
-                console.log('ACCOMPLISH plugin succeeded creating a plan', { tasks });
+                //console.log('ACCOMPLISH plugin succeeded creating a plan', { tasks });
                 return {
                     success: true,
                     resultType: 'plan',

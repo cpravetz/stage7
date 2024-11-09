@@ -201,7 +201,6 @@ export class AgentSet extends BaseEntity {
 
     private async handleMessage(req: express.Request, res: express.Response) {
         const message = req.body;
-        console.log('Received message in AgentSet:', message);
         await super.handleBaseMessage(message);
 
         if (message.forAgent) {
@@ -236,6 +235,7 @@ export class AgentSet extends BaseEntity {
         const { missionId } = req.params;
         console.log(`AgentSet:Getting statistics for mission ${missionId}`);
         if (!missionId) {
+            console.log(`AgentSet:Missing missionId parameter`);
             return res.status(400).send('Missing missionId parameter');
         }
     

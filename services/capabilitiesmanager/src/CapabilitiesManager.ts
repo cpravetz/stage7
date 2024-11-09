@@ -166,23 +166,24 @@ export class CapabilitiesManager extends BaseEntity {
                 },
                 timeout: 5000 // Set a 5-second timeout
             });
-            const pluginList = response.data.data || response.data;
-            if (pluginList && Array.isArray(pluginList)) {
-                for (const plugin of pluginList) {
-                    if (plugin.verb && !this.actionVerbs.has(plugin.verb)) {
-                        this.actionVerbs.set(plugin.verb, plugin);
-                        console.log(`Loaded plugin ${plugin.verb} from Librarian`);
+            if (response.data) {
+                const pluginList = response.data.data || response.data;
+                if (pluginList && Array.isArray(pluginList)) {
+                    for (const plugin of pluginList) {
+                        if (plugin.verb && !this.actionVerbs.has(plugin.verb)) {
+                            this.actionVerbs.set(plugin.verb, plugin);
+                            console.log(`Loaded plugin ${plugin.verb} from Librarian`);
+                        }
                     }
+                    console.log(`Successfully loaded ${pluginList.length} plugins from Librarian`);
+                } else {
+                    console.warn('Unexpected response format from Librarian:', pluginList);
                 }
-                console.log(`Successfully loaded ${pluginList.length} plugins from Librarian`);
-            } else {
-                console.warn('Unexpected response format from Librarian:', pluginList);
             }
         } catch (error) { analyzeError(error as Error);
             // Continue execution even if Librarian plugins couldn't be loaded
             console.warn('Continuing without Librarian plugins');
-            }
-
+        }
     }
     
 

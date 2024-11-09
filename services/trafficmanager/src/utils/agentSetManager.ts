@@ -288,8 +288,10 @@ class AgentSetManager {
             agentsByStatus: new Map()
         };
         try {
+            console.log(`AgentSetManager getting statistics from ${this.agentSets.size} AgentSets}`);
             for (const agentSet of this.agentSets.values()) {
                 stats.agentSetsCount++;
+                console.log(`AgentSetManager getting statistics from AgentSet ${agentSet.url}`);
                 const response = await axios.get(`http://${agentSet.url}/statistics/${missionId}`);
                 const serializedStats = response.data;
                 stats.totalAgentsCount += serializedStats.agentsCount;
