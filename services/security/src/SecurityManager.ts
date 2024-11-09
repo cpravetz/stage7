@@ -1,5 +1,5 @@
 import express, { Request, Response, NextFunction, ErrorRequestHandler } from 'express';
-import { UnauthorizedError } from 'express-jwt';
+import { expressjwt, Request as JWTRequest, UnauthorizedError } from 'express-jwt';
 import cors from 'cors';
 import passport from 'passport';
 import { Strategy as LocalStrategy } from 'passport-local';
@@ -7,7 +7,6 @@ import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
 import { v4 as uuidv4 } from 'uuid';
 import jwt from 'jsonwebtoken';
 import { sign, verify } from 'jsonwebtoken';
-import { expressjwt } from 'express-jwt';
 import bcrypt from 'bcrypt';
 import { BaseEntity } from '@cktmcs/shared';
 import axios from 'axios';
@@ -95,15 +94,23 @@ export class SecurityManager extends BaseEntity {
         const jwtMiddleware = expressjwt({
             secret: this.JWT_SECRET,
             algorithms: ['HS256'],
-        }).unless({ path: ['/register', '/login', '/login/google', '/login/cognito', '/logout'] });
-
+            getToken: function(req: JWTRequest): string | undefined {
+                if (req.headers.authorization && req.headers.authorization.split(' ')[0] === 'Bearer') {
+                    return req.headers.authorization.split(' ')[1];
+                } else if (req.query && req.query.token) {
+                    return req.query.token as string;
+                }
+                return undefined;
+            }
+          }).unless({ path: ['/register', '/login', '/login/google', '/login/cognito', '/logout'] });
+        
         app.use(jwtMiddleware);
-
+        
         // Error handler for express-jwt
         const errorHandler: ErrorRequestHandler = (err: unknown, req: Request, res: Response, next: NextFunction) => {
             if (err instanceof UnauthorizedError) {
                 console.error('JWT Error:', err.message);
-                if ((err as any).inner?.name === 'TokenExpiredError') {
+                if (err.inner && typeof err.inner === 'object' && 'name' in err.inner && err.inner.name === 'TokenExpiredError') {
                     res.status(401).json({ error: 'Token has expired', code: 'TOKEN_EXPIRED' });
                 } else {
                     res.status(401).json({ error: 'Invalid token', code: 'INVALID_TOKEN' });
@@ -112,10 +119,8 @@ export class SecurityManager extends BaseEntity {
                 console.error('Unexpected error:', err);
                 res.status(500).json({ error: 'An unexpected error occurred', code: 'INTERNAL_SERVER_ERROR' });
             }
-            // Ensure we always call next() to properly end the middleware chain
-            next();
         };
-
+        
         app.use(errorHandler);
 
         // User Authentication Routes
@@ -126,7 +131,10 @@ export class SecurityManager extends BaseEntity {
         if (process.env.COGNITO_CLIENT_ID) {
             app.post('/login/cognito', (req, res) => { this.handleCognitoLogin(req, res) });
         }
-        app.get('/auth/verify', (req, res) => { this.verifyToken(req, res) });
+        app.post('/auth/verify', (req: express.Request, res: express.Response) => {
+            this.returnUserFromToken(req, res);
+        });
+
         app.post('/refreshToken', (req, res) => { this.handleRefreshToken(req, res) });
 
         app.listen(this.port, () => {
@@ -379,7 +387,7 @@ export class SecurityManager extends BaseEntity {
         });
     }
 
-    private async verifyToken(req: express.Request, res: express.Response) {
+    private async returnUserFromToken(req: express.Request, res: express.Response) {
         // Token is already verified by express-jwt middleware
         const user = (req as any).auth;
         if (user && !res.headersSent) {

@@ -117,40 +117,24 @@ export class PostOffice {
         this.wss.on('connection', async (ws: WebSocket, req: http.IncomingMessage) => {
             const url = new URL(req.url!, `http://${req.headers.host}`);
             const clientId = url.searchParams.get('clientId');
-            const token = url.searchParams.get('token'); // Get token from URL params
+            const token = url.searchParams.get('token');
     
-            if (!clientId) {
-                console.error('Client connected without clientId');
-                ws.close();
+            if (!clientId || !token) {
+                console.error('Client ID or token missing');
+                ws.close(1008, 'Client ID or token missing');
                 return;
             }
     
-            // Verify token
-            if (!token) {
-                console.error(`Client ${clientId} attempted to connect without a token`);
-                ws.close(1008, 'Token required');
-                return;
-            }
-
-            try {
-                // Verify the token with the SecurityManager
-                const response = await axios.post(`http://${this.securityManagerUrl}/verifyToken`, { token });
-    
-                if (response.data.valid) {
-                    console.log(`Token verified for client ${clientId}`);
-                    this.clients.set(clientId, ws);
-                } else {
-                    console.error(`Invalid token for client ${clientId}`);
-                    ws.close(1008, 'Invalid token');
-                    return;
-                }
-            } catch (error) {
-                console.error(`Error verifying token for client ${clientId}:`, error instanceof Error ? error.message : error);
-                ws.close(1011, 'Token verification failed');
+            const isValid = await this.verifyToken(clientId, token);
+            if (!isValid) {
+                console.error(`Invalid token for client ${clientId}`);
+                ws.close(1008, 'Invalid token');
                 return;
             }
 
-            console.log(`Received and verified token for client ${clientId}`);    
+            this.clients.set(clientId, ws);
+            console.log(`Client ${clientId} connected`);
+    
             ws.on('message', (message: string) => {
                 try {
                     const parsedMessage = JSON.parse(message);
@@ -176,7 +160,6 @@ export class PostOffice {
 
     private handleMessage = async (req: express.Request, res: express.Response) => {
         const message: Message = req.body;
-        console.log('Received message to forward:', message);
         await this.routeMessage(message);
         res.status(200).send({ status: 'Message queued for processing' });
     }
@@ -538,6 +521,20 @@ export class PostOffice {
             }
         }
     }
+
+    private async verifyToken(clientId: string, token: string): Promise<boolean> {
+        try {
+          const response = await axios.post(`http://${this.securityManagerUrl}/auth/verify`, { token }, {
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          });
+          return response.data.valid;
+        } catch (error) {
+          console.error(`Error verifying token for client ${clientId}:`, error);
+          return false;
+        }
+      }
 }
 
 new PostOffice();

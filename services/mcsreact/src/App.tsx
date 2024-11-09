@@ -28,7 +28,7 @@ export const App: React.FC = () => {
   const securityClient = useMemo(() => new SecurityClient(API_BASE_URL), []);
   const [conversationHistory, setConversationHistory] = useState<string[]>([]);
   const [userInputRequest, setUserInputRequest] = useState<any>(null);
-  const [clientId, setClientId] = useState<string | null>(null);
+  const [clientId] = useState<string>(() => uuidv4()); // Generate clientId once and store it
   const [activeMission, setActiveMission] = useState<boolean>(false);
   const [activeMissionName, setActiveMissionName] = useState<string | null>(null);
   const [activeMissionId, setActiveMissionId] = useState<string | null>(null);
@@ -182,75 +182,41 @@ const handleLogout = async () => {
 };
 
 useEffect(() => {
-  const generatedClientId = uuidv4();
-  setClientId(generatedClientId);
   const authToken = localStorage.getItem('authToken');
   
-  // Include the token in the WebSocket connection URL
-  const wsUrl = `${WS_URL}?clientId=${generatedClientId}&token=${authToken}`;
-  ws.current = new WebSocket(wsUrl);
+  const connectWebSocket = () => {
+    // Include the token in the WebSocket connection URL
+    const wsUrl = `${WS_URL}?clientId=${clientId}&token=${authToken}`;
+    ws.current = new WebSocket(wsUrl);
 
-  ws.current.onopen = () => {
-    console.log('WebSocket connection established with PostOffice');
-    ws.current?.send(JSON.stringify({ 
-      type: 'CLIENT_CONNECT', 
-      clientId: generatedClientId
-    }));
-  };
+    ws.current.onopen = () => {
+      console.log('WebSocket connection established with PostOffice');
+      ws.current?.send(JSON.stringify({ 
+        type: 'CLIENT_CONNECT', 
+        clientId: clientId
+      }));
+    };
 
-  ws.current.onmessage = (event) => {
-    const data = JSON.parse(event.data);
-    console.log('Received WebSocket message:', data);
-    if (data.type === 'CONNECTION_CONFIRMED') {
-      console.log('Connection confirmed by server');
-    } else {
-      handleWebSocketMessage(data);
-    }
-  };
-
-  ws.current.onerror = (error) => {
-    console.error('WebSocket error:', error);
-  };
-
-  ws.current.onclose = () => {
-    console.log('WebSocket connection closed. Attempting to reconnect...');
-    const reconnect = () => {
-      if (ws.current?.readyState === WebSocket.CLOSED) {
-        const authToken = localStorage.getItem('authToken');
-        const wsUrl = `${WS_URL}?clientId=${clientId}&token=${authToken}`;
-        ws.current = new WebSocket(wsUrl);
-  
-        ws.current.onopen = () => {
-          console.log('WebSocket reconnected successfully');
-          ws.current?.send(JSON.stringify({ 
-            type: 'CLIENT_CONNECT', 
-            clientId: clientId
-          }));
-        };
-  
-        ws.current.onmessage = (event) => {
-          const data = JSON.parse(event.data);
-          console.log('Received WebSocket message:', data);
-          if (data.type === 'CONNECTION_CONFIRMED') {
-            console.log('Connection confirmed by server');
-          } else {
-            handleWebSocketMessage(data);
-          }
-        };
-  
-        ws.current.onerror = (error) => {
-          console.error('WebSocket error:', error);
-        };
-  
-        ws.current.onclose = () => {
-          console.log('WebSocket connection closed again. Retrying...');
-          setTimeout(reconnect, 5000);
-        };
+    ws.current.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      console.log('Received WebSocket message:', data);
+      if (data.type === 'CONNECTION_CONFIRMED') {
+        console.log('Connection confirmed by server');
+      } else {
+        handleWebSocketMessage(data);
       }
     };
-  
-    setTimeout(reconnect, 5000);
+
+    ws.current.onerror = (error) => {
+      console.error('WebSocket error:', error);
+    };
+
+    ws.current.onclose = () => {
+      console.log('WebSocket connection closed. Attempting to reconnect...');
+      setTimeout(connectWebSocket, 5000);
+    };
   };
+  connectWebSocket(); // Connect to WebSocket on mount
 
   return () => {
     if (ws.current) {

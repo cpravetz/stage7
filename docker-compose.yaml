@@ -23,6 +23,7 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=5030
+      - SECURITYMANAGER_URL=securitymanager:5010
       - POSTOFFICE_URL=postoffice:5020
       - TRAFFICMANAGER_URL=trafficmanager:5080
       - LIBRARIAN_URL=librarian:5040

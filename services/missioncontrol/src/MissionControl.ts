@@ -4,8 +4,8 @@ import { Request, Response, NextFunction } from 'express';
 import { Mission, Status } from '@cktmcs/shared';
 import { generateGuid } from './utils/generateGuid';
 import { BaseEntity, TrafficManagerStatistics, MissionStatistics, MessageType, PluginInput } from '@cktmcs/shared';
-import { verifyToken } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
+
 
 const api = axios.create({
     headers: {
@@ -21,14 +21,16 @@ class MissionControl extends BaseEntity {
     private librarianUrl: string = process.env.LIBRARIAN_URL || 'librarian:5040';
     private brainUrl: string = process.env.BRAIN_URL || 'brain:5060';
     private engineerUrl: string = process.env.ENGINEER_URL || 'engineer:5050';
+    private securityManagerUrl: string = process.env.SECURITY_MANAGER_URL || 'securitymanager:5010';
     
-
     constructor() {
         super(generateGuid(), 'MissionControl', process.env.HOST || 'missioncontrol', process.env.PORT || '5050');
         this.initializeServer();
         setInterval(() => this.getAndPushAgentStatistics(), 5000);
     }
 
+    
+    
     private initializeServer() {
         const app = express();
         app.use(express.json());
@@ -39,14 +41,8 @@ class MissionControl extends BaseEntity {
             next();
         });
     
-        app.use((req: Request, res: Response, next: NextFunction) => {
-            try {
-                verifyToken(req, res, next);
-            } catch (error) {
-                console.error('Token verification failed:', error);
-                res.status(401).json({ error: 'Token verification failed' });
-            }
-        });
+        app.use((req: Request, res: Response, next: NextFunction) => {this.verifyToken(req, res, next)});
+
 
         app.post('/message', (req, res) => this.handleMessage(req, res));
 
@@ -350,6 +346,34 @@ class MissionControl extends BaseEntity {
             }
         }
     }
+
+    private async verifyToken(req: Request, res: Response, next: NextFunction) {
+        const clientId = req.body.clientId || req.query.clientId;
+        const token = req.headers.authorization?.split(' ')[1];
+
+        if (!token) {
+            return res.status(401).json({ error: 'No token provided' });
+        }
+
+        try {
+            const response = await axios.post(`http://${this.securityManagerUrl}/auth/verify`, { token }, {
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
+            });
+
+            if (response.data.valid) {
+                (req as any).user = response.data.user;
+                next();
+            } else {
+                res.status(401).json({ error: 'Invalid token' });
+            }
+        } catch (error) {
+            console.error(`Error verifying token for client ${clientId}:`, error);
+            res.status(401).json({ error: 'Failed to authenticate token' });
+        }
+    }
+
 }
 
 new MissionControl();
