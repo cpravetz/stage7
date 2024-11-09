@@ -33,7 +33,19 @@ class MissionControl extends BaseEntity {
         const app = express();
         app.use(express.json());
         app.use((req: Request, res: Response, next: NextFunction) => {
-            verifyToken(req, res, next);
+            console.log('Received request:', req.method, req.path);
+            console.log('Headers:', req.headers);
+            console.log('Body:', req.body);
+            next();
+        });
+    
+        app.use((req: Request, res: Response, next: NextFunction) => {
+            try {
+                verifyToken(req, res, next);
+            } catch (error) {
+                console.error('Token verification failed:', error);
+                res.status(401).json({ error: 'Token verification failed' });
+            }
         });
 
         app.post('/message', (req, res) => this.handleMessage(req, res));
@@ -44,9 +56,9 @@ class MissionControl extends BaseEntity {
     }
 
     private async handleMessage(req: express.Request, res: express.Response) {
+        console.log(`Received message: ${JSON.stringify(req.body)}`);
         const { type, sender, content, clientId } = req.body;
         const user = (req as any).user;
-        console.log(`Received message: ${JSON.stringify(req.body)}`);
         const missionId = req.body.missionId ? req.body.missionId : (req.body.content.missionId ? req.body.content.missionId : null);
         console.log(`Received message of type ${type} from ${sender} for mission ${missionId}`);
         try {
@@ -88,7 +100,7 @@ class MissionControl extends BaseEntity {
             res.status(200).send({ message: 'Message processed successfully' });
         } catch (error) { analyzeError(error as Error);
             console.error('Error processing message:', error instanceof Error ? error.message : error);
-            res.status(500).send({ error: 'Internal server error' });
+            res.status(502).send({ error: 'Internal server error' });
         }
     }
 

@@ -47,7 +47,7 @@ export const App: React.FC = () => {
 
   const ws = useRef<WebSocket | null>(null);  
 
-  const createAPI = (getToken: () => string | null, refreshToken: () => Promise<string>): AxiosInstance => {
+  const createAPI = useCallback((getToken: () => string | null): AxiosInstance => {
     const api = axios.create({
       baseURL: API_BASE_URL,
       headers: {
@@ -61,24 +61,33 @@ export const App: React.FC = () => {
       let token = getToken();
       if (!token) {
         try {
-          token = await refreshToken();
+          token = await securityClient.refreshAccessToken();
+          if (token) {
+            config.headers['Authorization'] = `Bearer ${token}`;
+          } else {
+            // Redirect to login page or handle authentication failure
+            setIsAuthenticated(false);
+            setToken(null);
+          }
         } catch (error) {
-          // Handle refresh token failure (e.g., redirect to login)
+          console.error('Error refreshing token:', error);
+          // Redirect to login page or handle authentication failure
+          setIsAuthenticated(false);
+          setToken(null);
         }
-      }
-      if (token) {
+      } else {
         config.headers['Authorization'] = `Bearer ${token}`;
       }
       return config;
+    }, (error) => {
+      return Promise.reject(error);
     });
   
     return api;
-  };
+  }, [securityClient]);
+
   
-  const api = createAPI(
-    () => localStorage.getItem('token'),
-    () => securityClient.refreshToken()
-  );
+  const api = useMemo(() => createAPI(() => localStorage.getItem('authToken')), [createAPI]);
   
   const handleWebSocketMessage = useCallback((data: any) => {
     console.log('Processing WebSocket message:', data);

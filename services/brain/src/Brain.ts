@@ -35,8 +35,9 @@ export class Brain extends BaseEntity {
 
          // Global error handler
          app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
+            console.error('Express error in Brain:', err instanceof Error ? err.message : String(err));
             analyzeError(err as Error);
-            res.status(500).json({ error: 'Internal server error' });
+            res.status(501).json({ error: 'Internal server error' });
         });
         // API endpoint for processThread
         app.post('/chat', async (req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -109,7 +110,9 @@ export class Brain extends BaseEntity {
                 response: brainResponse,
                 mimeType: mimeType
             });
-        } catch (error) { analyzeError(error as Error);
+        } catch (error) { 
+            console.log('Chat Error in Brain:',error instanceof Error ? error.message : String(error));
+            analyzeError(error as Error);
             res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
         }
     }

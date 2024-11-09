@@ -6,6 +6,7 @@ import { Strategy as LocalStrategy } from 'passport-local';
 import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
 import { v4 as uuidv4 } from 'uuid';
 import jwt from 'jsonwebtoken';
+import { sign, verify } from 'jsonwebtoken';
 import { expressjwt } from 'express-jwt';
 import bcrypt from 'bcrypt';
 import { BaseEntity } from '@cktmcs/shared';
@@ -52,6 +53,7 @@ interface DecodedToken {
     exp: number;
 }
 
+
 export class SecurityManager extends BaseEntity {
     private readonly JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
     private readonly JWT_EXPIRES_IN = '24h';
@@ -74,6 +76,7 @@ export class SecurityManager extends BaseEntity {
         }
     }
 
+    
     private setupServer() {
         const app = express();
 
@@ -92,7 +95,7 @@ export class SecurityManager extends BaseEntity {
         const jwtMiddleware = expressjwt({
             secret: this.JWT_SECRET,
             algorithms: ['HS256'],
-        }).unless({ path: ['/register', '/login', '/login/google', '/login/cognito'] });
+        }).unless({ path: ['/register', '/login', '/login/google', '/login/cognito', '/logout'] });
 
         app.use(jwtMiddleware);
 
@@ -124,7 +127,7 @@ export class SecurityManager extends BaseEntity {
             app.post('/login/cognito', (req, res) => { this.handleCognitoLogin(req, res) });
         }
         app.get('/auth/verify', (req, res) => { this.verifyToken(req, res) });
-        app.post('/refresh-token', (req, res) => { this.refreshToken(req, res) });
+        app.post('/refreshToken', (req, res) => { this.handleRefreshToken(req, res) });
 
         app.listen(this.port, () => {
             console.log(`SecurityManager listening on port ${this.port}`);
@@ -245,12 +248,10 @@ export class SecurityManager extends BaseEntity {
 
     private async handleLogout(req: express.Request, res: express.Response) {
         try {
-            const user = (req as any).user;
-            if (!user) {
-                return res.status(401).json({ error: 'Not authenticated' });
-            }
-
-            //Passport logout function
+            // Remove the token check, as it might be invalid
+            // Instead, always perform logout actions
+    
+            // Passport logout function
             if (req.logout) {
                 req.logout((err) => {
                     if (err) {
@@ -258,9 +259,12 @@ export class SecurityManager extends BaseEntity {
                     }
                 });
             }
-        
+    
+            // Clear the token cookie if you're using one
+            res.clearCookie('token');
+    
             res.status(200).json({ message: 'Logged out successfully' });
-        } catch (error) { analyzeError(error as Error);
+        } catch (error) {
             console.error('Logout error:', error instanceof Error ? error.message : error);
             res.status(500).json({ error: 'Logout failed' });
         }
@@ -476,31 +480,37 @@ export class SecurityManager extends BaseEntity {
 
     // Additional method to refresh tokens
     private async refreshToken(req: express.Request, res: express.Response) {
-        try {
-            const { refreshToken } = req.body;
-            
-            if (!refreshToken) {
-                return res.status(400).json({ error: 'Refresh token required' });
-            }
+        const { refreshToken } = req.body;
+        if (!refreshToken) {
+            return res.status(400).json({ error: 'Refresh token is required' });
+        }
 
-            // Verify the refresh token
-            const decoded = jwt.verify(refreshToken, this.JWT_SECRET) as DecodedToken;
+        try {
+            const decoded = verify(refreshToken, this.JWT_SECRET) as DecodedToken;
             const user = await this.findUserByEmail(decoded.email);
 
             if (!user) {
-                return res.status(401).json({ error: 'User not found' });
+                return res.status(404).json({ error: 'User not found' });
             }
 
-            // Generate new tokens
-            const newToken = this.generateToken(user);
-            const newRefreshToken = this.generateRefreshToken(user);
+            const newAccessToken = sign(
+                { id: user.id, email: user.email, role: user.role },
+                this.JWT_SECRET,
+                { expiresIn: this.JWT_EXPIRES_IN }
+            );
+
+            const newRefreshToken = sign(
+                { id: user.id },
+                this.JWT_SECRET,
+                { expiresIn: '7d' }
+            );
 
             res.json({
-                token: newToken,
+                token: newAccessToken,
                 refreshToken: newRefreshToken
             });
-        } catch (error) { analyzeError(error as Error);
-            console.error('Token refresh error:', error instanceof Error ? error.message : error);
+        } catch (error) {
+            console.error('Error refreshing token:', error);
             res.status(401).json({ error: 'Invalid refresh token' });
         }
     }
@@ -513,6 +523,32 @@ export class SecurityManager extends BaseEntity {
         );
     }
 
+    private async handleRefreshToken(req: express.Request, res: express.Response) {
+        const { refreshToken } = req.body;
+        if (!refreshToken) {
+            return res.status(400).json({ error: 'Refresh token is required' });
+        }
+    
+        try {
+            const decoded = jwt.verify(refreshToken, this.JWT_SECRET) as DecodedToken;
+            const user = await this.findUserByEmail(decoded.email);
+    
+            if (!user) {
+                return res.status(404).json({ error: 'User not found' });
+            }
+    
+            const newAccessToken = this.generateToken(user);
+            const newRefreshToken = this.generateRefreshToken(user);
+    
+            res.json({
+                token: newAccessToken,
+                refreshToken: newRefreshToken
+            });
+        } catch (error) {
+            console.error('Error refreshing token:', error);
+            res.status(401).json({ error: 'Invalid refresh token' });
+        }
+    }
 }
 
 export const securityManager = new SecurityManager();

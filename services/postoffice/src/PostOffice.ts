@@ -276,7 +276,7 @@ export class PostOffice {
                     details: error.response.data 
                 });
             } else {
-                res.status(500).json({ error: 'Internal server error' });
+                res.status(503).json({ error: 'Internal server error' });
             }
         }
     }
