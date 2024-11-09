@@ -1,5 +1,5 @@
 # Build stage
-FROM node:18-alpine as build
+FROM node:20-alpine as build
 
 # Set the working directory
 WORKDIR /app
@@ -10,15 +10,14 @@ COPY shared/package*.json ./shared/
 COPY services/mcsreact/package*.json ./services/mcsreact/
 
 # Install dependencies
-RUN npm install
-RUN npm install --prefix shared
-RUN npm install --prefix services/mcsreact
+RUN npm install --verbose
+RUN npm install --verbose --prefix shared
+RUN npm install --verbose --prefix services/mcsreact
 
 # Copy the rest of the code
 COPY shared ./shared
 COPY services/mcsreact ./services/mcsreact
 
-RUN npm config set strict-ssl false
 
 # Build the shared package
 WORKDIR /app/shared

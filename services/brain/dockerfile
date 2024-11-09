@@ -1,5 +1,5 @@
 # Use an official Node.js runtime as the base image
-FROM node:18-alpine
+FROM node:20-alpine
 
 # Set the working directory in the container
 WORKDIR /usr/src/app
@@ -11,7 +11,7 @@ COPY errorhandler/package*.json ./errorhandler/
 COPY services/brain/package*.json ./services/brain/
 
 # Install the application dependencies
-RUN npm install
+RUN npm install --verbose
 
 # Copy the application code to the working directory
 COPY shared ./shared
@@ -24,8 +24,6 @@ COPY services/brain/src/models/*.?s ./services/brain/src/models
 
 RUN mkdir -p ./services/brain/src/interfaces 
 COPY services/brain/src/interfaces/*.?s ./services/brain/src/interfaces
-
-RUN npm config set strict-ssl false
 
 # Build the TypeScript code
 RUN npm run build --workspace=shared

@@ -1,5 +1,5 @@
 # Use an official Node.js runtime as the base image
-FROM node:18-alpine
+FROM node:20-alpine
 
 # Set the working directory in the container
 WORKDIR /usr/src/app
@@ -11,14 +11,12 @@ COPY errorhandler/package*.json ./errorhandler/
 COPY services/missioncontrol/package*.json ./services/missioncontrol/
 
 # Install the application dependencies
-RUN npm install
+RUN npm install --verbose
 
 # Copy the application code to the working directory
 COPY shared ./shared
 COPY errorhandler ./errorhandler
 COPY services/missioncontrol ./services/missioncontrol
-
-RUN npm config set strict-ssl false
 
 # Build the TypeScript code
 RUN npm run build --workspace=shared
