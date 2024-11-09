@@ -37,19 +37,47 @@ class AgentSetManager {
         try {
             const response = await api.get(`http://${this.postOfficeUrl}/requestComponent?type=AgentSet`);
             const agentSetComponents = response.data.components;
+            
+            // Create a new Map to store the updated AgentSets
+            const updatedAgentSets = new Map<string, AgentSetLink>();
+    
             // Update existing AgentSets and add new ones
-            this.agentSets = new Map(agentSetComponents.map((component: any) => [
-                component.id,
-                {
+            agentSetComponents.forEach((component: any) => {
+                const existingSet = this.agentSets.get(component.id);
+                updatedAgentSets.set(component.id, {
                     id: component.id,
                     url: component.url,
-                    agentCount: 0,
+                    agentCount: existingSet ? existingSet.agentCount : 0,
                     maxAgents: this.maxAgentsPerSet
+                });
+            });
+    
+            // Remove AgentSets that no longer exist, but keep their agents
+            this.agentSets.forEach((set, id) => {
+                if (!updatedAgentSets.has(id)) {
+                    const newSetId = updatedAgentSets.keys().next().value;
+                    if (newSetId) {
+                        // Reassign agents to a new AgentSet
+                        this.agentToSetMap.forEach((setId, agentId) => {
+                            if (setId === id) {
+                                this.agentToSetMap.set(agentId, newSetId);
+                                const newSet = updatedAgentSets.get(newSetId);
+                                if (newSet) {
+                                    newSet.agentCount++;
+                                }
+                            }
+                        });
+                    }
                 }
-            ]));
+            });
+    
+            // Update the agentSets Map
+            this.agentSets = updatedAgentSets;
+    
             console.log(`AgentSets refreshed. Current count: ${this.agentSets.size}`);
-        } catch (error) { analyzeError(error as Error);
+        } catch (error) {
             console.error('Error refreshing AgentSets:', error instanceof Error ? error.message : error);
+            analyzeError(error as Error);
         }
     }
 
