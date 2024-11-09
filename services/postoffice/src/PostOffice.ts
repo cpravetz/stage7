@@ -114,38 +114,63 @@ export class PostOffice {
     }
 
     private setupWebSocket() {
-        this.wss.on('connection', (ws: WebSocket, req: http.IncomingMessage) => {
-            const clientId = new URL(req.url!, `http://${req.headers.host}`).searchParams.get('clientId');
+        this.wss.on('connection', async (ws: WebSocket, req: http.IncomingMessage) => {
+            const url = new URL(req.url!, `http://${req.headers.host}`);
+            const clientId = url.searchParams.get('clientId');
+            const token = url.searchParams.get('token'); // Get token from URL params
+    
             if (!clientId) {
                 console.error('Client connected without clientId');
                 ws.close();
                 return;
             }
     
-            console.log(`Client ${clientId} connected`);
-            this.clients.set(clientId, ws);
+            // Verify token
+            if (!token) {
+                console.error(`Client ${clientId} attempted to connect without a token`);
+                ws.close(1008, 'Token required');
+                return;
+            }
+
+            try {
+                // Verify the token with the SecurityManager
+                const response = await axios.post(`http://${this.securityManagerUrl}/verifyToken`, { token });
     
-            // Extract token from the WebSocket connection request
-            const token = req.headers['sec-websocket-protocol'] as string;
-    
+                if (response.data.valid) {
+                    console.log(`Token verified for client ${clientId}`);
+                    this.clients.set(clientId, ws);
+                } else {
+                    console.error(`Invalid token for client ${clientId}`);
+                    ws.close(1008, 'Invalid token');
+                    return;
+                }
+            } catch (error) {
+                console.error(`Error verifying token for client ${clientId}:`, error instanceof Error ? error.message : error);
+                ws.close(1011, 'Token verification failed');
+                return;
+            }
+
+            console.log(`Received and verified token for client ${clientId}`);    
             ws.on('message', (message: string) => {
                 try {
                     const parsedMessage = JSON.parse(message);
                     if (parsedMessage.type === MessageType.CLIENT_CONNECT) {
                         console.log(`Client ${parsedMessage.clientId} confirmed connection`);
                     } else {
-                        // Pass the token to handleWebSocketMessage
-                        this.handleWebSocketMessage(parsedMessage, token);
+                        this.handleWebSocketMessage(parsedMessage, token || '');
                     }
-                } catch (error) { analyzeError(error as Error);
+                } catch (error) {
                     console.error('Error parsing WebSocket message:', error instanceof Error ? error.message : error);
                 }
             });
-        
+    
             ws.on('close', () => {
                 console.log(`Client ${clientId} disconnected`);
                 this.clients.delete(clientId);
             });
+    
+            // Send a connection confirmation message
+            ws.send(JSON.stringify({ type: 'CONNECTION_CONFIRMED', clientId }));
         });
     }
 

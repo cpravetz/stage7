@@ -186,36 +186,70 @@ useEffect(() => {
   setClientId(generatedClientId);
   const authToken = localStorage.getItem('authToken');
   
-  // Include the token in the WebSocket connection
-  ws.current = new WebSocket(
-    `${WS_URL}?clientId=${generatedClientId}&token=${authToken}`
-  );
+  // Include the token in the WebSocket connection URL
+  const wsUrl = `${WS_URL}?clientId=${generatedClientId}&token=${authToken}`;
+  ws.current = new WebSocket(wsUrl);
 
   ws.current.onopen = () => {
     console.log('WebSocket connection established with PostOffice');
     ws.current?.send(JSON.stringify({ 
       type: 'CLIENT_CONNECT', 
-      clientId: generatedClientId,
-      token: authToken  // Include token in the connection message
+      clientId: generatedClientId
     }));
   };
 
   ws.current.onmessage = (event) => {
     const data = JSON.parse(event.data);
     console.log('Received WebSocket message:', data);
-    handleWebSocketMessage(data);
+    if (data.type === 'CONNECTION_CONFIRMED') {
+      console.log('Connection confirmed by server');
+    } else {
+      handleWebSocketMessage(data);
+    }
   };
 
   ws.current.onerror = (error) => {
-    console.error('WebSocket error:', error instanceof Error ? error.message : error);
+    console.error('WebSocket error:', error);
   };
 
   ws.current.onclose = () => {
     console.log('WebSocket connection closed. Attempting to reconnect...');
-    setTimeout(() => {
-      console.log('Attempting to reconnect WebSocket...');
-      // Implement reconnection logic here
-    }, 5000);
+    const reconnect = () => {
+      if (ws.current?.readyState === WebSocket.CLOSED) {
+        const authToken = localStorage.getItem('authToken');
+        const wsUrl = `${WS_URL}?clientId=${clientId}&token=${authToken}`;
+        ws.current = new WebSocket(wsUrl);
+  
+        ws.current.onopen = () => {
+          console.log('WebSocket reconnected successfully');
+          ws.current?.send(JSON.stringify({ 
+            type: 'CLIENT_CONNECT', 
+            clientId: clientId
+          }));
+        };
+  
+        ws.current.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+          console.log('Received WebSocket message:', data);
+          if (data.type === 'CONNECTION_CONFIRMED') {
+            console.log('Connection confirmed by server');
+          } else {
+            handleWebSocketMessage(data);
+          }
+        };
+  
+        ws.current.onerror = (error) => {
+          console.error('WebSocket error:', error);
+        };
+  
+        ws.current.onclose = () => {
+          console.log('WebSocket connection closed again. Retrying...');
+          setTimeout(reconnect, 5000);
+        };
+      }
+    };
+  
+    setTimeout(reconnect, 5000);
   };
 
   return () => {
