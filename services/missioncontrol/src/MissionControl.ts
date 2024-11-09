@@ -28,18 +28,10 @@ class MissionControl extends BaseEntity {
         this.initializeServer();
         setInterval(() => this.getAndPushAgentStatistics(), 5000);
     }
-
-    
     
     private initializeServer() {
         const app = express();
         app.use(express.json());
-        app.use((req: Request, res: Response, next: NextFunction) => {
-            console.log('Received request:', req.method, req.path);
-            console.log('Headers:', req.headers);
-            console.log('Body:', req.body);
-            next();
-        });
     
         app.use((req: Request, res: Response, next: NextFunction) => {this.verifyToken(req, res, next)});
 
@@ -52,7 +44,6 @@ class MissionControl extends BaseEntity {
     }
 
     private async handleMessage(req: express.Request, res: express.Response) {
-        console.log(`Received message: ${JSON.stringify(req.body)}`);
         const { type, sender, content, clientId } = req.body;
         const user = (req as any).user;
         const missionId = req.body.missionId ? req.body.missionId : (req.body.content.missionId ? req.body.content.missionId : null);

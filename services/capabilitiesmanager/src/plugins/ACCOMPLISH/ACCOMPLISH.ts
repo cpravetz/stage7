@@ -1,4 +1,6 @@
 import axios from 'axios';
+// @ts-ignore
+import { parseJSON } from 'json-alexander';
 import { MapSerializer, PluginInput, PluginOutput, PluginParameterType, ActionVerbTask } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 
@@ -184,9 +186,9 @@ async function parseJsonWithErrorCorrection(jsonString: string): Promise<any> {
 
         correctedJson = correctedJson.replace(/```/g, '');        
         // Replace 'undefined' with null
-        correctedJson = correctedJson.replace(/: undefined/g, ': null');
+        correctedJson = correctedJson.replace(/: undefined/gi, ': null');
                 
-        return JSON.parse(correctedJson);
+        return parseJSON(correctedJson);
     } catch (error) { analyzeError(error as Error);
         console.log('JSON correction failed, attempting to use LLM...');
         console.log('Malformed JSON:', correctedJson);
@@ -205,7 +207,7 @@ async function parseJsonWithErrorCorrection(jsonString: string): Promise<any> {
             const correctedByLLM = fullResponse.substring(startIndex, endIndex);
                 
             console.log('LLM corrected JSON:', correctedByLLM);
-            return JSON.parse(correctedByLLM);
+            return parseJSON(correctedByLLM);
         } catch (llmError) {
             console.error('LLM correction failed:', llmError);
             throw new Error(`Failed to parse JSON even with LLM assistance: ${llmError}`);
