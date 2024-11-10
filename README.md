@@ -35,7 +35,7 @@ stage7 is an advanced, self-modifying system designed to manage and execute comp
 ### Installation
 
 1. Clone the repository:
-   `git clone https://github.com/cpravetz/CKTMCS.git`
+   `git clone https://github.com/cpravetz/stage7.git`
 2. Install dependencies:
    `npm install`
 3. Start the development server:
