@@ -6,7 +6,7 @@ import { Strategy as LocalStrategy } from 'passport-local';
 import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
 import { v4 as uuidv4 } from 'uuid';
 import jwt from 'jsonwebtoken';
-import { sign, verify } from 'jsonwebtoken';
+import { sign, verify, JwtPayload } from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
 import { BaseEntity } from '@cktmcs/shared';
 import axios from 'axios';
@@ -52,6 +52,7 @@ interface DecodedToken {
     exp: number;
 }
 
+const JWT_EXPIRATION_THRESHOLD = 60 * 5;
 
 export class SecurityManager extends BaseEntity {
     private readonly JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
@@ -105,6 +106,30 @@ export class SecurityManager extends BaseEntity {
           }).unless({ path: ['/register', '/login', '/login/google', '/login/cognito', '/logout'] });
         
         app.use(jwtMiddleware);
+
+        const refreshTokenMiddleware = async (req: Request, res: Response, next: NextFunction) => {
+            const token = req.headers.authorization?.split(' ')[1];
+            if (token) {
+                try {
+                    const decoded = jwt.verify(token, this.JWT_SECRET) as JwtPayload;
+                    const expirationTime = decoded.exp || 0;
+                    const timeRemaining = expirationTime - Math.floor(Date.now() / 1000);
+        
+                    if (timeRemaining < JWT_EXPIRATION_THRESHOLD) {
+                        const user = await this.findUserByEmail(decoded.email);
+                        if (user) {
+                            const newToken = this.generateToken(user);
+                            res.setHeader('Authorization', `Bearer ${newToken}`);
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error refreshing token:', error);
+                }
+            }
+            next();
+        };
+
+        app.use(refreshTokenMiddleware);
         
         // Error handler for express-jwt
         const errorHandler: ErrorRequestHandler = (err: unknown, req: Request, res: Response, next: NextFunction) => {
@@ -484,43 +509,6 @@ export class SecurityManager extends BaseEntity {
 
             next();
         };
-    }
-
-    // Additional method to refresh tokens
-    private async refreshToken(req: express.Request, res: express.Response) {
-        const { refreshToken } = req.body;
-        if (!refreshToken) {
-            return res.status(400).json({ error: 'Refresh token is required' });
-        }
-
-        try {
-            const decoded = verify(refreshToken, this.JWT_SECRET) as DecodedToken;
-            const user = await this.findUserByEmail(decoded.email);
-
-            if (!user) {
-                return res.status(404).json({ error: 'User not found' });
-            }
-
-            const newAccessToken = sign(
-                { id: user.id, email: user.email, role: user.role },
-                this.JWT_SECRET,
-                { expiresIn: this.JWT_EXPIRES_IN }
-            );
-
-            const newRefreshToken = sign(
-                { id: user.id },
-                this.JWT_SECRET,
-                { expiresIn: '7d' }
-            );
-
-            res.json({
-                token: newAccessToken,
-                refreshToken: newRefreshToken
-            });
-        } catch (error) {
-            console.error('Error refreshing token:', error);
-            res.status(401).json({ error: 'Invalid refresh token' });
-        }
     }
 
     private generateRefreshToken(user: User): string {

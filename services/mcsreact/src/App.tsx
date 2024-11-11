@@ -146,23 +146,26 @@ export const App: React.FC = () => {
 
 const handleLogin = async (email: string, password: string) => {
   try {
-    const token = await securityClient.login(email, password);
-    setToken(token);
-    setIsAuthenticated(true);
-    localStorage.setItem('authToken', token);
-  } catch (error) { 
-    console.error('Login failed:', error instanceof Error ? error.message : error);
+      await securityClient.login(email, password);
+      setToken(securityClient.getAccessToken()!);
+      setIsAuthenticated(true);
+  } catch (error) {
+      console.error('Login failed:', error instanceof Error ? error.message : error);
   }
 };
 
 const handleRegister = async (name: string, email: string, password: string) => {
   try {
-    const token = await securityClient.register(name, email, password);
-    setToken(token);
-    setIsAuthenticated(true);
-    localStorage.setItem('authToken', token);
-  } catch (error) { 
-    console.error('Registration failed:', error instanceof Error ? error.message : error);
+      await securityClient.register(name, email, password);
+      const newToken = securityClient.getAccessToken();
+      if (newToken) {
+          setToken(newToken);
+          setIsAuthenticated(true);
+      } else {
+          throw new Error('Registration successful but no token received');
+      }
+  } catch (error) {
+      console.error('Registration failed:', error instanceof Error ? error.message : error);
   }
 };
 
@@ -171,15 +174,10 @@ const handleLogout = async () => {
     await securityClient.logout();
     setIsAuthenticated(false);
     setToken(null);
-    localStorage.removeItem('authToken');
-    // Close WebSocket connection if it exists
-    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-      ws.current.close();
-    }
   } catch (error) {
     console.error('Logout failed:', error instanceof Error ? error.message : error);
   }
-};
+};    
 
 useEffect(() => {
   const authToken = localStorage.getItem('authToken');

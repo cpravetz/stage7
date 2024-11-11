@@ -563,10 +563,10 @@ Please consider this context and the available plugins when planning and executi
         }
     
         const optimization = (inputs.get('optimization')?.inputValue as string) || 'accuracy';
-        const conversionType = (inputs.get('conversionType')?.inputValue as string) || 'text/text';
+        const ConversationType = (inputs.get('ConversationType')?.inputValue as string) || 'text/text';
     
         const validOptimizations = ['cost', 'accuracy', 'creativity', 'speed', 'continuity'];
-        const validConversionTypes = ['text/text', 'text/image', 'text/audio', 'text/video', 'text/code'];
+        const validConversationTypes = ['text/text', 'text/image', 'text/audio', 'text/video', 'text/code'];
     
         if (!validOptimizations.includes(optimization)) {
             return [{
@@ -579,21 +579,21 @@ Please consider this context and the available plugins when planning and executi
             }];
         }
     
-        if (!validConversionTypes.includes(conversionType)) {
+        if (!validConversationTypes.includes(ConversationType)) {
             return [{
                 success: false,
                 name: 'error',
                 resultType: PluginParameterType.ERROR,
                 resultDescription: 'Error',
                 result: null,
-                error: `Invalid conversionType: ${conversionType}. Must be one of ${validConversionTypes.join(', ')}`
+                error: `Invalid ConversationType: ${ConversationType}. Must be one of ${validConversationTypes.join(', ')}`
             }];
         }
     
         const reasoningInput = {
             exchanges: [{ role: 'user', content: prompt }],
             optimization: optimization,
-            conversionType: conversionType
+            ConversationType: ConversationType
         };
     
         try {
@@ -602,7 +602,7 @@ Please consider this context and the available plugins when planning and executi
             const mimeType = response.data.mimeType || 'text/plain';
     
             let resultType: PluginParameterType;
-            switch (conversionType) {
+            switch (ConversationType) {
                 case 'text/image':
                     resultType = PluginParameterType.OBJECT; // Assuming image data is returned as an object
                     break;
@@ -622,7 +622,7 @@ Please consider this context and the available plugins when planning and executi
                 name: 'answer',
                 resultType: resultType,
                 result: brainResponse,
-                resultDescription: `Brain reasoning output (${conversionType})`,
+                resultDescription: `Brain reasoning output (${ConversationType})`,
                 mimeType: mimeType
             };
     

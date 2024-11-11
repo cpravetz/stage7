@@ -1,46 +1,19 @@
 import { promises as fs } from 'fs';
 import path from 'path';
-import { Model, LLMConversionType } from '../models/Model';
-import { ModelInterface } from '../interfaces/ModelInterface';
+import { BaseModel } from '../models/baseModel';
+import { serviceManager } from './serviceManager';
+import { interfaceManager } from './interfaceManager';
+import { BaseInterface, LLMConversationType } from '../interfaces/baseInterface';
+import { BaseService } from '../services/baseService';
 import { analyzeError } from '@cktmcs/errorhandler';
 
 export type OptimizationType = 'cost' | 'accuracy' | 'creativity' | 'speed' | 'continuity';
 
 export class ModelManager {
-    private models: Map<string, Model> = new Map();
-    private interfaces: Map<string, ModelInterface> = new Map();
+    private models: Map<string, BaseModel> = new Map();
 
     constructor() {
         this.loadModels();
-        this.loadInterfaces();
-    }
-
-    private async loadInterfaces() {
-        const interfaceDirectory = path.join(__dirname, '..','interfaces');
-
-        try {
-            const files = await fs.readdir(interfaceDirectory);
-            console.log('Files in interface directory',interfaceDirectory,': ', files);
-            for (const file of files) {
-                // Skip non-TS or non-JS files
-                if (!file.endsWith('.ts') && !file.endsWith('.js')) {
-                    continue;
-                }
-
-                // Dynamically import the model class
-                const interfaceModule = await import(path.join(interfaceDirectory, file));
-
-                // Assume that the class name is the default export from the module
-                const interfaceInstance = interfaceModule.default;
-                if (typeof interfaceInstance === 'object' && interfaceInstance.name) {
-                    this.interfaces.set(interfaceInstance.name.toLowerCase(), interfaceInstance);
-                    console.log(`Loaded interface: ${interfaceInstance.name}`);
-                }
-            }
-            console.log(`modelManager Loaded ${this.interfaces.size} interfaces.`);
-        } catch (error) { analyzeError(error as Error);
-            console.error('Error loading interfaces:', error instanceof Error ? error.message : error);
-        }
     }
 
     private async loadModels() {
@@ -61,8 +34,13 @@ export class ModelManager {
                 // Assume that the class name is the default export from the module
                 const modelInstance = modelModule.default;
                 if (typeof modelInstance === 'object' && modelInstance.name) {
-                    this.models.set(modelInstance.name.toLowerCase(), modelInstance);
-                    console.log(`Loaded model: ${modelInstance.name}`);
+                    const interfaceInstance = interfaceManager.getInterface(modelInstance.interfaceName);
+                    const serviceInstance = serviceManager.getService(modelInstance.serviceName);
+                    if (interfaceInstance && serviceInstance?.isAvailable()) {
+                        modelInstance.setProviders(interfaceInstance, serviceInstance);
+                        this.models.set(modelInstance.name.toLowerCase(), modelInstance);
+                        console.log(`Loaded model: ${modelInstance.name}`);
+                    }
                 }
             }
             console.log(`modelManager Loaded ${this.models.size} models.`);
@@ -71,12 +49,16 @@ export class ModelManager {
         }
     }
 
-    selectModel(optimization: OptimizationType, conversionType: LLMConversionType = LLMConversionType.TextToText): { model: Model, interface: ModelInterface } | undefined {
-        let selectedModel: Model | undefined;
+    getModel(name: string) : BaseModel | undefined{
+        return this.models.get(name);
+    }
+
+    selectModel(optimization: OptimizationType, ConversationType: LLMConversationType = LLMConversationType.TextToText): BaseModel | undefined {
+        let selectedModel: BaseModel | undefined;
 
         const compatibleModels = Array.from(this.models.values()).filter(model => 
             Array.isArray(model.contentConversation) && 
-            model.contentConversation.includes(conversionType)
+            model.contentConversation.includes(ConversationType)
         );
 
         if (compatibleModels.length === 0) {
@@ -106,10 +88,7 @@ export class ModelManager {
         }
 
         if (selectedModel) {
-            const selectedInterface = this.interfaces.get(selectedModel.interfaceKey);
-            if (selectedInterface) {
-                return { model: selectedModel, interface: selectedInterface };
-            }
+            return selectedModel;
         }
 
         return undefined;

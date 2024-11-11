@@ -81,12 +81,12 @@ A number of plugins are available to execute steps of the plan for you.  Some ha
 
 ACCOMPLISH - this plugin takes a specific goal and either achieves it or returns a plan to achieve it.
     (required input: goal)
-THINK - this plugin sends prompts to the LLMs attached to the system in order to generate content from a prompt.
-    (required input: prompt) (optional inputs: optimization, conversionType)
+THINK - this plugin sends prompts to the chat function of the LLMs attached to the system in order to generate content from a conversation.
+    (required input: prompt) (optional inputs: optimization, ConversationType)
     if included, optimization must be one of 'cost', 'accuracy', 'creativity', 'speed', or 'continuity'
     accuracy is the default
-    if included, conversionType must be one of 'text/text', 'text/image', 'text/audio', 'text/video', or 'text/code'
-    text/text is the default
+GENERATE - this plugin uses LLM services to generate content from a prompt or other content. Services include image creation, audio transscription, image editing, etc.
+    (required input: COnversationType) (optional inputs: modelName, optimization, prompt, file, audio, video, image...)
 FILE_OPS - this plugin provides services for file operations read, write, append
     (required inputs: path, operation, content)
 SEARCH - this plugin searches DuckDuckGo for a given term and returns a list of links
@@ -217,7 +217,8 @@ async function parseJsonWithErrorCorrection(jsonString: string): Promise<any> {
         try {
             const response = await axios.post(`http://${brainUrl}/chat`, {
                 exchanges: [{ role: 'user', content: prompt }],
-                optimization: 'accuracy'
+                optimization: 'accuracy',
+                optionals: { temperature: 0.2, response_format: { "type": "json_object" }}
             });
             const fullResponse = response.data.response;
             const startIndex = fullResponse.indexOf('{');
@@ -238,7 +239,8 @@ async function queryBrain(messages: { role: string, content: string }[]): Promis
     try {
         const response = await axios.post(`http://${brainUrl}/chat`, {
             exchanges: messages,
-            optimization: 'accuracy'
+            optimization: 'accuracy',
+            optionals: { temperature: 0.2, response_format: { "type": "json_object" }}
         });
         return response.data.response;
     } catch (error) { analyzeError(error as Error);

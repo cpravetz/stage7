@@ -1,16 +1,20 @@
-import axios, { AxiosInstance } from 'axios';
+import axios, { AxiosInstance, AxiosError, AxiosRequestConfig } from 'axios';
 
+const AUTH_TOKEN_KEY = 'authToken';
+const REFRESH_TOKEN_KEY = 'refreshToken';
+
+interface RetryableRequest extends AxiosRequestConfig {
+    _retry?: boolean;
+}
 
 export class SecurityClient {
     private postOfficeUrl: string;
-    private token: string | null = null;
     private api: AxiosInstance;
-    private refreshToken: string | null = null;
-    
+
     constructor(postOfficeUrl: string) {
         this.postOfficeUrl = postOfficeUrl.startsWith('http://') ? postOfficeUrl : `http://${postOfficeUrl}`;
         console.log('Created SecurityClient with PostOffice URL: ', this.postOfficeUrl);
-        
+
         this.api = axios.create({
             baseURL: this.postOfficeUrl,
             headers: {
@@ -21,12 +25,12 @@ export class SecurityClient {
 
         this.api.interceptors.response.use(
             (response) => response,
-            async (error) => {
-                const originalRequest = error.config;
-                if (error.response.status === 401 && !originalRequest._retry) {
+            async (error: AxiosError) => {
+                const originalRequest = error.config as RetryableRequest;
+                if (error.response?.status === 401 && originalRequest && !originalRequest._retry) {
                     originalRequest._retry = true;
                     const newToken = await this.refreshAccessToken();
-                    if (newToken) {
+                    if (newToken && originalRequest.headers) {
                         originalRequest.headers['Authorization'] = `Bearer ${newToken}`;
                         return this.api(originalRequest);
                     }
@@ -36,76 +40,67 @@ export class SecurityClient {
         );
     }
 
-    async sendHeartbeat(guid: string, token: string): Promise<void> {
-        await axios.post(`${this.postOfficeUrl}/component/heartbeat`, {
-            guid,
-            token
-        });
+    public getAccessToken(): string | null {
+        return localStorage.getItem(AUTH_TOKEN_KEY);
     }
 
-    async login(email: string, password: string): Promise<string> {
-        const response = await this.api.post('/securityManager/login', {
-            email,
-            password
-        });
-        this.token = response.data.token;
-        this.refreshToken = response.data.refreshToken;
-        localStorage.setItem('authToken', this.token || '');
-        localStorage.setItem('refreshToken', this.refreshToken || '');
-        return this.token || '';
+    async login(email: string, password: string): Promise<void> {
+        const response = await this.api.post('/securityManager/login', { email, password });
+        this.storeTokens(response.data.token, response.data.refreshToken);
     }
 
     async logout(): Promise<void> {
         try {
-          await axios.post(`${this.postOfficeUrl}/securityManager/logout`, {}, {
-            headers: this.getAuthHeader()
-          });
-          this.token = null;
+            await this.api.post(`/securityManager/logout`, {}, { headers: this.getAuthHeader() });
+            this.clearTokens();
         } catch (error) {
-          console.error('Logout failed:', error instanceof Error ? error.message : error);
-          throw error;
+            console.error('Logout failed:', error instanceof Error ? error.message : error);
+            throw error;
         }
-      }
-
-    getAuthHeader() {
-        return this.token ? { Authorization: `Bearer ${this.token}` } : {};
     }
 
-    async register(name: string, email: string, password: string): Promise<string> {    
+    async register(name: string, email: string, password: string): Promise<void> {
         try {
-            const response = await axios.post(
-                `${this.postOfficeUrl}/securityManager/register`,
-                { name, email, password }
-            );
-            
-            this.token = response.data.token;
-            return this.token || '';
-        } catch (error) { 
+            const response = await this.api.post('/securityManager/register', { name, email, password });
+            this.storeTokens(response.data.token, response.data.refreshToken);
+        } catch (error) {
             console.error('Registration error:', error instanceof Error ? error.message : error);
             throw error;
         }
     }
-    
+
     async refreshAccessToken(): Promise<string | null> {
         try {
-            const refreshToken = localStorage.getItem('refreshToken');
+            const refreshToken = this.getRefreshToken();
             if (!refreshToken) {
                 throw new Error('No refresh token available');
             }
-    
+
             const response = await this.api.post('/securityManager/refreshToken', { refreshToken });
-            const newToken = response.data.token;
-            const newRefreshToken = response.data.refreshToken;
-    
-            localStorage.setItem('authToken', newToken);
-            localStorage.setItem('refreshToken', newRefreshToken);
-    
-            return newToken;
+            this.storeTokens(response.data.token, response.data.refreshToken);
+            return response.data.token;
         } catch (error) {
             console.error('Failed to refresh token:', error);
             return null;
         }
     }
 
-}
+    getAuthHeader(): { Authorization?: string } {
+        const token = this.getAccessToken();
+        return token ? { Authorization: `Bearer ${token}` } : {};
+    }
 
+    private getRefreshToken(): string | null {
+        return localStorage.getItem(REFRESH_TOKEN_KEY);
+    }
+
+    private storeTokens(accessToken: string, refreshToken: string): void {
+        localStorage.setItem(AUTH_TOKEN_KEY, accessToken);
+        localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+    }
+
+    private clearTokens(): void {
+        localStorage.removeItem(AUTH_TOKEN_KEY);
+        localStorage.removeItem(REFRESH_TOKEN_KEY);
+    }
+}

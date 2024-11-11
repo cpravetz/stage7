@@ -1,8 +1,8 @@
 import { Brain } from '../src/Brain';
 import express from 'express';
 import axios from 'axios';
-import { ModelManager } from '../src/utils/modelManager';
-import { LLMConversionType } from '../src/models/Model';
+import { BaseModelManager } from '../src/utils/modelManager';
+import { LLMConversationType } from '../src/models/Model';
 
 jest.mock('express', () => {
   const mockExpress = {
@@ -43,8 +43,8 @@ describe('Brain', () => {
         body: {
           exchanges: [{ role: 'user', message: 'Hello' }],
           optimization: 'speed',
-          metadata: { max_length: 100, temperature: 0.7 },
-          conversionType: LLMConversionType.TextToText,
+          optionals: { max_length: 100, temperature: 0.7 },
+          ConversationType: LLMConversationType.TextToText,
         },
       } as express.Request;
       const mockRes = {

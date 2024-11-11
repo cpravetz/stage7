@@ -1,6 +1,6 @@
 import { ModelManager, OptimizationType } from '../src/utils/modelManager';
-import { LLMConversionType, Model } from '../src/models/Model';
-import { ModelInterface } from '../src/interfaces/ModelInterface';
+import { LLMConversionType, BaseModel } from '../src/models/baseModel';
+import { BaseInterface } from '../src/interfaces/baseInterface';
 
 jest.mock('fs', () => ({
   promises: {
@@ -43,8 +43,8 @@ describe('ModelManager', () => {
   beforeEach(() => {
     modelManager = new ModelManager();
     // Mock the interfaces
-    (modelManager as any).interfaces.set('interface1', {} as ModelInterface);
-    (modelManager as any).interfaces.set('interface2', {} as ModelInterface);
+    (modelManager as any).interfaces.set('interface1', {} as BaseInterface);
+    (modelManager as any).interfaces.set('interface2', {} as BaseInterface);
   });
 
   describe('selectModel', () => {

@@ -1,16 +1,19 @@
-import { Model, LLMConversionType } from './Model';
+import { BaseService} from './../services/baseService';
+import { BaseModel } from './baseModel';
+import { LLMConversationType } from '../interfaces/baseInterface';
 
-export class LlamaGeminiModel extends Model {
+export class LlamaGeminiModel extends BaseModel {
     constructor() {
         super({
             name: "google/gemini-flash-1.5-exp",
             modelName: "google/gemini-flash-1.5-exp",
-            interfaceKey: "openrouter",
+            interfaceName: "openrouter",
+            serviceName: "ORService",
             costScore: 100,
             accuracyScore: 80,
             creativityScore: 80,
             speedScore: 80,
-            contentConversation: [LLMConversionType.TextToText]
+            contentConversation: [LLMConversationType.TextToText]
         });
     }
 }

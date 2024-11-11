@@ -1,16 +1,20 @@
-import { Model, LLMConversionType } from './Model';
+import { BaseService} from './../services/baseService';
+import { BaseModel } from './baseModel';
+import { LLMConversationType } from '../interfaces/baseInterface';
 
-export class ClaudeHaikuModel extends Model {
+
+export class ClaudeHaikuModel extends BaseModel {
     constructor() {
         super({
             name: "anthropic/claude-3-haiku-20240307",
             modelName: "claude-3-haiku-20240307",
-            interfaceKey: "anthropic",
+            interfaceName: "anthropic",
+            serviceName: "AntService",
             costScore: 20,
             accuracyScore: 90,
             creativityScore: 90,
             speedScore: 80,
-            contentConversation: [LLMConversionType.TextToText, LLMConversionType.TextToCode,]
+            contentConversation: [LLMConversationType.TextToText, LLMConversationType.TextToCode,]
         });
     }
 }

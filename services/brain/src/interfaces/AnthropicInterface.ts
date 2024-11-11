@@ -1,21 +1,27 @@
 import axios, { AxiosError } from 'axios';
-import { ModelInterface } from './ModelInterface';
-import OpenAI from 'openai';
+import { BaseInterface, LLMConversationType, ConvertParamsType } from './baseInterface';
 import { analyzeError } from '@cktmcs/errorhandler';
+import { BaseService, ExchangeType } from '../services/baseService';
 
-export class AnthropicInterface extends ModelInterface {
-    name = 'Anthropic';
-    private apiUrl: string = 'https://api.anthropic.com/v1/messages';
-    private ApiClient: OpenAI;
-    private apiKey: string;
+export class AnthropicInterface extends BaseInterface {
+    interfaceName = 'anthropic';
     
-    constructor(apiKey: string) {
+    constructor() {
         super();
-        this.apiKey = apiKey;
-        this.ApiClient = new OpenAI({ apiKey });
+        this.converters.set(LLMConversationType.TextToText, {
+            conversationType: LLMConversationType.TextToText,
+            requiredParams: ['service', 'prompt'],
+            converter: this.convertTextToText,
+        });
+        this.converters.set(LLMConversationType.TextToCode, {
+            conversationType: LLMConversationType.TextToCode,
+            requiredParams: ['service', 'prompt'],
+            converter: this.convertTextToCode,
+        });        
     }
 
-    async generate(messages: Array<{ role: string, content: string }>, options: { max_length?: number, temperature?: number, model?: string }): Promise<string> {
+    async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, model?: string }): Promise<string> {
+        
         // Convert string messages to the new messages format
         const formattedMessages = messages.map((msg, index) => ({
             role: index % 2 === 0 ? 'user' : 'assistant',
@@ -24,7 +30,7 @@ export class AnthropicInterface extends ModelInterface {
 
         try {
             const response = await axios.post(
-                this.apiUrl,
+                service.apiUrl,
                 {
                     model: options?.model || 'claude-3-haiku-20240307',
                     max_tokens: options?.max_length || 2000,
@@ -35,7 +41,7 @@ export class AnthropicInterface extends ModelInterface {
                     headers: {
                         'Content-Type': 'application/json',
                         'anthropic-version': '2023-06-01',
-                        'X-API-Key': this.apiKey,
+                        'X-API-Key': service.apiKey,
                     },
                     // Add retry and timeout configurations
                     timeout: 30000, // 30 seconds timeout
@@ -100,7 +106,37 @@ export class AnthropicInterface extends ModelInterface {
         }
         throw new Error('Max retries exceeded');
     }
+
+    async convertTextToText(args: ConvertParamsType): Promise<string> {
+        const { service, prompt, modelName } = args;
+        const messages = [{ role: 'user', content: prompt || '' }];
+        return this.chat(service, messages, { model: modelName });
+    }
+
+    async convertTextToCode(args: ConvertParamsType): Promise<string> {
+        const { service, prompt, modelName } = args;
+        const messages = [
+            { role: 'system', content: 'You are a code generation assistant. Provide only code without explanations.' },
+            { role: 'user', content: prompt || ''}
+        ];
+        return this.chat(service, messages, { model: modelName });
+    }
+
+    async convert(service: BaseService, conversionType: LLMConversationType, convertParams: ConvertParamsType): Promise<any> {
+        const converter = this.converters.get(conversionType);
+        if (!converter) {
+            throw new Error(`Unsupported conversion type: ${conversionType}`);
+        }
+        const requiredParams = converter.requiredParams;
+        convertParams.service = service;
+        const missingParams = requiredParams.filter(param => !(param in convertParams));
+        if (missingParams.length > 0) {
+            throw new Error(`Missing required parameters: ${missingParams.join(', ')}`);
+        }
+        return converter.converter(convertParams);
+    }
+
 }
 
-const aiInterface = new AnthropicInterface(process.env.ANTHROPIC_API_KEY || '');
+const aiInterface = new AnthropicInterface();
 export default aiInterface;

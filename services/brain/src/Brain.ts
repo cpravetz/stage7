@@ -1,7 +1,8 @@
 import express from 'express';
 import bodyParser from 'body-parser';
 import { OptimizationType, ModelManager } from './utils/modelManager';
-import { Model, LLMConversionType } from './models/Model';
+import { LLMConversationType } from './interfaces/baseInterface';
+import { ExchangeType } from './services/baseService';
 import { BaseEntity } from '@cktmcs/shared';
 import dotenv from 'dotenv';
 import { analyzeError } from '@cktmcs/errorhandler';
@@ -9,9 +10,9 @@ import { analyzeError } from '@cktmcs/errorhandler';
 dotenv.config();
 
 interface Thread {
-    exchanges: Array<{ role: string, content: string }>;
+    exchanges: ExchangeType;
     optimization?: OptimizationType;
-    metadata?: Record<string, any>;
+    optionals?: Record<string, any>;
 }
 
 
@@ -43,6 +44,13 @@ export class Brain extends BaseEntity {
         app.post('/chat', async (req: express.Request, res: express.Response, next: express.NextFunction) => {
             try {
                 await this.chat(req, res);
+            } catch (error) {
+                next(error); // Pass errors to the global error handler
+            }
+        });
+        app.post('/generate', async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+            try {
+                await this.generate(req, res);
             } catch (error) {
                 next(error); // Pass errors to the global error handler
             }
@@ -79,37 +87,57 @@ export class Brain extends BaseEntity {
         });
     }
 
+    async generate(req: express.Request, res: express.Response) {
+        try {
+            const modelName = req.body.modelName;
+            const optimization = req.body.optimization;
+            const conversationType = req.body.conversationType;
+            const model = this.modelManager.getModel(modelName) || this.modelManager.selectModel(optimization, conversationType);
+            if (!model || !model.isAvailable() || !model.service) {
+                res.json({ response: 'No suitable model found.', mimeType: 'text/plain' });
+                console.log('No suitable model found.');
+            } else {
+                const convertParams =  req.body.convertParams;
+                model.llminterface?.convert(model.service, conversationType, convertParams);
+            }
+        } catch (error) {
+            analyzeError(error as Error);
+            res.status(400).json({ error: 'Invalid request' });
+        }
+    }
 
     async chat(req: express.Request, res: express.Response) {
         try {
             const thread = {
                 exchanges: req.body.exchanges,
                 optimization: req.body.optimization,
-                metadata: req.body.metadata || null,
-                conversionType: req.body.conversionType || LLMConversionType.TextToText
+                optionals: req.body.optionals || null,
+                conversationType: req.body.ConversationType || LLMConversationType.TextToText
             };
-            const selectedModel = req.body.model || this.modelManager.selectModel(thread.optimization, thread.conversionType);
+            const selectedModel = this.modelManager.getModel(req.body.model) || this.modelManager.selectModel(thread.optimization, thread.conversationType);
             if (!selectedModel) {
                 res.json({ response: 'No suitable model found.', mimeType: 'text/plain' });
                 console.log('No suitable model found.');
+            } else {
+                this.logAndSay(`Chatting with model ${selectedModel.modelName} using interface ${selectedModel.interfaceName}`);
+    
+                // Extract only the message content from the exchanges
+                const messages = thread.exchanges;
+    
+                this.llmCalls++;
+    
+                const brainResponse = await selectedModel.chat(messages, 
+                    {
+                        max_length: thread.optionals?.max_length,
+                        temperature: thread.optionals?.temperature
+                    });
+
+                const mimeType = this.determineMimeType(brainResponse);
+                res.json({
+                    response: brainResponse,
+                    mimeType: mimeType
+                });
             }
-            this.logAndSay(`Chatting with model ${selectedModel.model.name} using interface ${selectedModel.model.interfaceKey}`);
-    
-            // Extract only the message content from the exchanges
-            const messages = thread.exchanges;
-    
-            this.llmCalls++;
-    
-            const brainResponse = await selectedModel.interface.generate(messages, {
-                max_length: thread.metadata?.max_length,
-                temperature: thread.metadata?.temperature
-            });
-    
-            const mimeType = this.determineMimeType(brainResponse);
-            res.json({
-                response: brainResponse,
-                mimeType: mimeType
-            });
         } catch (error) { 
             console.log('Chat Error in Brain:',error instanceof Error ? error.message : String(error));
             analyzeError(error as Error);

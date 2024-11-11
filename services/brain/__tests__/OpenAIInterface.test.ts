@@ -33,7 +33,7 @@ describe('OpenAIInterface', () => {
         completions: { create: mockCreate },
       } as any;
 
-      const result = await openAIInterface.generate(mockMessages, mockOptions);
+      const result = await openAIInterface.chat(mockMessages, mockOptions);
 
       expect(result).toBe(mockResponse);
       expect(mockCreate).toHaveBeenCalledWith({
@@ -56,7 +56,7 @@ describe('OpenAIInterface', () => {
         completions: { create: mockCreate },
       } as any;
 
-      await openAIInterface.generate(mockMessages, {});
+      await openAIInterface.chat(mockMessages, {});
 
       expect(mockCreate).toHaveBeenCalledWith({
         model: 'gpt-4',
@@ -77,7 +77,7 @@ describe('OpenAIInterface', () => {
         completions: { create: mockCreate },
       } as any;
 
-      await expect(openAIInterface.generate(mockMessages, {})).rejects.toThrow('No content in OpenAI response');
+      await expect(openAIInterface.chat(mockMessages, {})).rejects.toThrow('No content in OpenAI response');
     });
 
     it('should handle OpenAI API errors', async () => {
@@ -90,7 +90,7 @@ describe('OpenAIInterface', () => {
         completions: { create: mockCreate },
       } as any;
 
-      await expect(openAIInterface.generate(mockMessages, {})).rejects.toThrow('Failed to generate response from OpenAI: API Error');
+      await expect(openAIInterface.chat(mockMessages, {})).rejects.toThrow('Failed to generate response from OpenAI: API Error');
     });
   });
 });
