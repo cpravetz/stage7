@@ -1,17 +1,17 @@
 import { BaseModel } from './baseModel';
 import { LLMConversationType } from '../interfaces/baseInterface';
 
-export class GPT4Model extends BaseModel {
+export class GPT4TurboModel extends BaseModel {
     constructor() {
         super({
-            name: "openai/gpt-4",
-            modelName: "gpt-4",
+            name: "openai/gpt-4-turbo",
+            modelName: "gpt-4-turbo-preview",
             interfaceName: "openai",
             serviceName: "OAIService",
-            costScore: 60,
-            accuracyScore: 95,
-            creativityScore: 93,
-            speedScore: 85,
+            costScore: 65,
+            accuracyScore: 96,
+            creativityScore: 94,
+            speedScore: 88,
             contentConversation: [
                 LLMConversationType.TextToCode,
                 LLMConversationType.CodeToText,
@@ -22,5 +22,5 @@ export class GPT4Model extends BaseModel {
     }
 }
 
-const aiModel = new GPT4Model();
+const aiModel = new GPT4TurboModel();
 export default aiModel;
