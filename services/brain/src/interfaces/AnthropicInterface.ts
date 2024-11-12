@@ -21,21 +21,18 @@ export class AnthropicInterface extends BaseInterface {
     }
 
     async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, model?: string }): Promise<string> {
-        
+        const max_tokens = options.max_length || 4000;
         // Convert string messages to the new messages format
-        const formattedMessages = messages.map((msg, index) => ({
-            role: index % 2 === 0 ? 'user' : 'assistant',
-            content: msg
-        }));
+        const trimmedMessages = this.trimMessages(messages, max_tokens);
 
         try {
             const response = await axios.post(
                 service.apiUrl,
                 {
                     model: options?.model || 'claude-3-haiku-20240307',
-                    max_tokens: options?.max_length || 2000,
+                    max_tokens: max_tokens,
                     temperature: options?.temperature ?? 0.7,
-                    messages: formattedMessages
+                    messages: trimmedMessages
                 },
                 {
                     headers: {

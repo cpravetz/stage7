@@ -46,14 +46,14 @@ export class OpenAIInterface extends BaseInterface {
     }
 
     async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string }): Promise<string> {
-        const max_length = options.max_length || 2000;
+        const max_length = options.max_length || 4000;
         const temperature = options.temperature || 0.7;
-
+        const trimmedMessages = this.trimMessages(messages, max_length);
         try {
             const openAiApiClient = new OpenAI({ apiKey: service.apiKey });
             const response = await openAiApiClient.chat.completions.create({
                 model: options.modelName || 'gpt-4',
-                messages: messages as ChatCompletionMessageParam[],
+                messages: trimmedMessages as ChatCompletionMessageParam[],
                 temperature,
                 max_tokens: max_length,
             });

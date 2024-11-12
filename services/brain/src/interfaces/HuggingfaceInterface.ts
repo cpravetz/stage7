@@ -72,6 +72,8 @@ export class HuggingfaceInterface extends BaseInterface {
 
     async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string }): Promise<string> {
         try {
+            const max_tokens = options.max_length || 4096;
+            const trimmedMessages = this.trimMessages(messages, max_tokens);
             const inference = new HfInference(service.apiKey);
             let response: string = "";
             let attempts = 0;
@@ -80,8 +82,8 @@ export class HuggingfaceInterface extends BaseInterface {
             while (!seemsComplete && attempts < maxAttempts) {
                 for await (const chunk of inference.chatCompletionStream({
                     model: options.modelName || 'meta-llama/llama-3.2-3b-instruct',
-                    messages: messages,
-                    max_tokens: options.max_length || 4096,
+                    messages: trimmedMessages,
+                    max_tokens: max_tokens,
                     temperature: options.temperature || 0.2,
                 })) {
                     response += chunk.choices[0]?.delta?.content || "";
