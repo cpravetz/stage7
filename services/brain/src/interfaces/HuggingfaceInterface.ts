@@ -129,11 +129,12 @@ async chat(service: BaseService, messages: ExchangeType, options: { max_length?:
             temperature: options.temperature || 0.2,
         });
 
-        if (!response || !response.generated_text) {
+        if (!response || !response.choices[0].message.content) {
+            console.log('Bad response from Huggingface:', response);
             throw new Error('No content in Huggingface response');
         }
 
-        const generatedText = response.generated_text;
+        const generatedText = response.choices[0].message;
         console.log(`Huggingface full response: ${JSON.stringify(generatedText)}`);
 
         // If generatedText is an object, we need to extract the actual text content

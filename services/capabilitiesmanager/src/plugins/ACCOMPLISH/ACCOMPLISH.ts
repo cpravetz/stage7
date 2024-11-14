@@ -158,7 +158,15 @@ export async function execute(inputs: Map<string, PluginInput> | Record<string, 
                     result: parsedResponse.answer
                 }];
             } else {
-                throw new Error('Invalid response format from Brain');
+                console.error(`Invalid response format from Brain: ${parsedResponse.type}`);
+                return [{
+                    success: false,
+                    name: 'error',
+                    resultType: PluginParameterType.ERROR,
+                    resultDescription: 'Failed to parse Brain response',
+                    result: null,
+                    error: 'Response type not PLAN or DIRECT_ANSWER'
+            }];
             }
         } catch (error) { analyzeError(error as Error);
             console.error('Error parsing Brain response:', error);

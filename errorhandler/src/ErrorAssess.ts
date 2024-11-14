@@ -109,8 +109,8 @@ export const analyzeError = async (error: Error) => {
     ${remediationGuidance}\n\n*******************************`);
     return remediationGuidance;
   } catch (err) {
-    console.error('Error analyzing error:', err);
-    throw err;
+    console.error('Error analyzing error:', err instanceof Error ? err.message : err);
+    //throw err;
   }
 }
 
