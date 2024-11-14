@@ -99,7 +99,7 @@ export class PostOffice {
             if (!librarianUrl) {
                 throw new Error('Librarian not registered');
             }
-            const response = await api.get(`http://${librarianUrl}/librarian/retrieve/${req.params.id}`);
+            const response = await api.get(`http://${librarianUrl}/loadWorkProduct/${req.params.id}`);
             res.status(200).send(response.data);
         }
         catch (error) { analyzeError(error as Error);

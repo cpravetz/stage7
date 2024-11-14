@@ -45,7 +45,6 @@ export class Librarian extends BaseEntity {
         this.app.delete('/deleteData/:id', (req: express.Request, res: express.Response) => { this.deleteData(req, res)});
         this.app.post('/storeWorkProduct', (req: express.Request, res: express.Response) => { this.storeWorkProduct(req, res) });
         this.app.get('/loadWorkProduct/:id', (req: express.Request, res: express.Response) => { this.loadWorkProduct(req, res) });    
-        this.app.get('/librarian/retrieve/:id', (req: express.Request, res: express.Response) =>  { this.retrieveWorkProduct(req, res)});
         this.app.get('/getSavedMissions', (req: express.Request, res: express.Response) => { this.getSavedMissions(req, res) });
         
       }
@@ -57,28 +56,6 @@ export class Librarian extends BaseEntity {
         });
     }
 
-
-    private async retrieveWorkProduct(req: express.Request, res: express.Response) {
-        const { id } = req.params;
-        console.log('Retrieving work product:', id);
-        if (!id) {
-          return res.status(400).send({ error: 'Work product step ID is required' });
-        }
-    
-        try {
-          const workProduct = await loadFromMongo('workProducts', { stepId: id });
-    
-          if (!workProduct) {
-            console.log('Work product not found:', id);
-            return res.status(404).send({ error: 'Work product not found' });
-          }
-          console.log('Work product retrieved:', workProduct);
-          res.status(200).send(workProduct);
-        } catch (error) { analyzeError(error as Error);
-          res.status(500).send({ error: 'Failed to retrieve work product', details: error instanceof Error ? error.message : String(error) });
-        }
-      }
-    
     private async storeData(req: express.Request, res: express.Response) {
     
         let { id, data, storageType, collection } = req.body;
