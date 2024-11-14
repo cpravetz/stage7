@@ -111,57 +111,76 @@ export class HuggingfaceInterface extends BaseInterface {
     }
 */
 
-async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string }): Promise<string> {
-    try {
-        const trimmedMessages = this.trimMessages(messages, options.max_length || 4096);
-        const inputTokens = trimmedMessages.reduce((sum, message) => {
-            return sum + Math.ceil(message.content.length / 3.5);
-        }, 0);
-        const max_new_tokens = Math.max(1, (options.max_length || 4096) - inputTokens);
-        console.log(`Huggingface input tokens: ${inputTokens} max_length: ${options.max_length} max_new_tokens: ${max_new_tokens}`);
+    async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string }): Promise<string> {
+        try {
+            const trimmedMessages = this.trimMessages(messages, options.max_length || 4096);
+            const inputTokens = trimmedMessages.reduce((sum, message) => {
+                return sum + Math.ceil(message.content.length / 3.8);
+            }, 0);
+            const max_new_tokens = Math.max(1, (options.max_length || 4096) - inputTokens);
 
-        const inference = new HfInference(service.apiKey);
-        
-        const response = await inference.chatCompletion({
-            model: options.modelName || 'meta-llama/llama-3.2-3b-instruct',
-            messages: trimmedMessages,
-            max_new_tokens: max_new_tokens,
-            temperature: options.temperature || 0.2,
-        });
+            const inference = new HfInference(service.apiKey);
 
-        if (!response || !response.choices[0].message.content) {
-            console.log('Bad response from Huggingface:', response);
-            throw new Error('No content in Huggingface response');
-        }
-
-        const generatedText = response.choices[0].message;
-        console.log(`Huggingface full response: ${JSON.stringify(generatedText)}`);
-
-        // If generatedText is an object, we need to extract the actual text content
-        if (typeof generatedText === 'object' && generatedText !== null) {
-            if (Array.isArray(generatedText)) {
-                // If it's an array, assume the last element is the response
-                const lastMessage = generatedText[generatedText.length - 1];
-                if (typeof lastMessage === 'object' && lastMessage !== null && 'content' in lastMessage) {
-                    return lastMessage.content as string;
-                }
-            } else if ('content' in generatedText) {
-                // If it's an object with a 'content' property
-                return generatedText.content as string;
-            } else {
-                // If it's some other object structure, stringify it
-                return JSON.stringify(generatedText);
+            let out = "";
+            const stream = inference.chatCompletionStream({
+                model: "meta-llama/Llama-3.2-3B-Instruct",
+                messages: trimmedMessages,
+                max_tokens: 4096-inputTokens,
+                temperature: 0.5,
+                top_p: 0.7
+            });
+            
+            for await (const chunk of stream) {
+                if (chunk.choices && chunk.choices.length > 0) {
+                    const newContent = chunk.choices[0].delta.content;
+                    out += newContent;
+                }  
             }
-        } else if (typeof generatedText === 'string') {
+            
+            const generatedText = out;
             return generatedText;
+            /*                    
+            const response = await inference.chatCompletion({
+                model: options.modelName || 'meta-llama/llama-3.2-3b-instruct',
+                messages: trimmedMessages,
+                max_new_tokens: max_new_tokens,
+                temperature: options.temperature || 0.2,
+            });
+
+            if (!response || !response.choices[0].message.content) {
+                console.log('Bad response from Huggingface:', response);
+                throw new Error('No content in Huggingface response');
+            }
+
+            const generatedText = response.choices[0].message;
+            
+
+            // If generatedText is an object, we need to extract the actual text content
+            if (typeof generatedText === 'object' && generatedText !== null) {
+                if (Array.isArray(generatedText)) {
+                    // If it's an array, assume the last element is the response
+                    const lastMessage = generatedText[generatedText.length - 1];
+                    if (typeof lastMessage === 'object' && lastMessage !== null && 'content' in lastMessage) {
+                        return lastMessage.content as string;
+                    }
+                } else if ('content' in generatedText) {
+                    // If it's an object with a 'content' property
+                    return generatedText.content as string;
+                } else {
+                    // If it's some other object structure, stringify it
+                    return JSON.stringify(generatedText);
+                }
+            } else if (typeof generatedText === 'string') {
+                return generatedText;
+            }
+            throw new Error('Unexpected response format from Huggingface');
+            */
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error('Error generating response from Huggingface:', error instanceof Error ? error.message : error);
+            throw new Error('Failed to generate response from Huggingface');
         }
-        throw new Error('Unexpected response format from Huggingface');
-    } catch (error) {
-        analyzeError(error as Error);
-        console.error('Error generating response from Huggingface:', error instanceof Error ? error.message : error);
-        throw new Error('Failed to generate response from Huggingface');
     }
-}
 
     async convertTextToText(args: ConvertParamsType): Promise<string> {
         const { service, prompt, modelName } = args;

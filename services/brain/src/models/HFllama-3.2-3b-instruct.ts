@@ -9,10 +9,10 @@ export class HFLlamaModel extends BaseModel {
             modelName: "meta-llama/llama-3.2-3b-instruct",
             interfaceName: "huggingface",
             serviceName: "HFService",
-            costScore: 1000,
-            accuracyScore: 800,
-            creativityScore: 800,
-            speedScore: 800,
+            costScore: 100,
+            accuracyScore: 80,
+            creativityScore: 80,
+            speedScore: 80,
             contentConversation: [LLMConversationType.TextToText]
         });
     }

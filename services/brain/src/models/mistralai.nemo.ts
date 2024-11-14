@@ -9,10 +9,10 @@ export class HFNemoModel extends BaseModel {
             modelName: "bigcoder/starcoder",
             interfaceName: "huggingface",
             serviceName: "HFService",
-            costScore: 100,
-            accuracyScore: 80,
-            creativityScore: 80,
-            speedScore: 80,
+            costScore: 1000,
+            accuracyScore: 800,
+            creativityScore: 800,
+            speedScore: 800,
             contentConversation: [LLMConversationType.TextToText,LLMConversationType.TextToCode]
         });
     }

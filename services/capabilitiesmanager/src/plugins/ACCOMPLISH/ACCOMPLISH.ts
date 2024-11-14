@@ -60,7 +60,7 @@ Otherwise, if a plan is needed, respond with a JSON object in this format:
 }
 
 
-This is important:  Your response needs to be fully formed JSON.
+This is important:  Your response needs to be fully formed JSON with minimal whitespace.
 
 Guidelines for creating a plan:
 1. Number each step sequentially, starting from 1.
@@ -77,7 +77,7 @@ an input would be defined as: {"inputName1": {value: "predeterminedValue"}} or {
 10. The actionVerb DELEGATE is available to use to create sub-agents with goals of their own.
 11. input values may be determined by preceeding steps.  In those instances set the value to 'undefined'
 
-A number of plugins are available to execute steps of the plan for you.  Some have required inputs, which are required properties for the inputs object.  These plugins include:
+A number of plugins are available to execute steps of the plan. Some have required inputs - required properties for the inputs object.  These plugins include:
 
 ACCOMPLISH - this plugin takes a specific goal and either achieves it or returns a plan to achieve it.
     (required input: goal)
@@ -96,7 +96,7 @@ SCRAPE - this plugin scrapes content from a given URL
 GET_USER_INPUT - this plugin requests input from the user
     (required inputs: question, answerType) (optional input: choices)
 
-If it makes sense to break work into multiple streams, you can use the actionVerb DELEGATE to create a sub-agent with a goal of it's own.
+You can use the actionVerb DELEGATE to create a sub-agent with a goal of it's own.
 
 Ensure your response is a valid JSON object starting with either "type": "DIRECT_ANSWER" or "type": "PLAN". 
 Double check that you are returning valid JSON. Remove any leading or trailing characters that might invalidate the response as a JSON object.
