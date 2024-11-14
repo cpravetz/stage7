@@ -109,11 +109,20 @@ export class HuggingfaceInterface extends BaseInterface {
     async convertTextToText(args: ConvertParamsType): Promise<string> {
         const { service, prompt, modelName } = args;
         const inference = new HfInference(service.apiKey);
+    
+        // Estimate the number of tokens in the input prompt
+        // A rough estimate is 1 token per 4 characters
+        const estimatedInputTokens = Math.ceil((prompt?.length || 0) / 4);
+    
+        // Calculate the maximum new tokens, ensuring we don't exceed the model's limit
+        const maxTotalTokens = args.max_length || 2048; // Default to 2048 if not specified
+        const maxNewTokens = Math.max(1, maxTotalTokens - estimatedInputTokens);
+    
         const response = await inference.textGeneration({
             model: modelName || 'gpt2',
-            inputs: prompt,
+            inputs: prompt || '',
             parameters: {
-                max_new_tokens: args.max_length || 100,
+                max_new_tokens: maxNewTokens,
                 temperature: args.temperature || 0.3,
             },
         });
