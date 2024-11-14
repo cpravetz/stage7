@@ -72,8 +72,11 @@ export class HuggingfaceInterface extends BaseInterface {
 
     async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string }): Promise<string> {
         try {
-            const max_tokens = options.max_length || 4096;
-            const trimmedMessages = this.trimMessages(messages, max_tokens);
+            const trimmedMessages = this.trimMessages(messages, options.max_length || 4096);
+            const inputTokens = trimmedMessages.reduce((sum, message) => {
+                return sum + Math.ceil(message.content.length / 3.5);
+            }, 0);
+            const max_new_tokens = (options.max_length || 4096) - inputTokens;
             const inference = new HfInference(service.apiKey);
             let response: string = "";
             let attempts = 0;
@@ -83,7 +86,7 @@ export class HuggingfaceInterface extends BaseInterface {
                 for await (const chunk of inference.chatCompletionStream({
                     model: options.modelName || 'meta-llama/llama-3.2-3b-instruct',
                     messages: trimmedMessages,
-                    max_tokens: max_tokens,
+                    max_new_tokens: max_new_tokens,
                     temperature: options.temperature || 0.2,
                 })) {
                     response += chunk.choices[0]?.delta?.content || "";
@@ -112,7 +115,7 @@ export class HuggingfaceInterface extends BaseInterface {
     
         // Estimate the number of tokens in the input prompt
         // A rough estimate is 1 token per 4 characters
-        const estimatedInputTokens = Math.ceil((prompt?.length || 0) / 4);
+        const estimatedInputTokens = Math.ceil((prompt?.length || 0) / 3.5);
     
         // Calculate the maximum new tokens, ensuring we don't exceed the model's limit
         const maxTotalTokens = args.max_length || 2048; // Default to 2048 if not specified

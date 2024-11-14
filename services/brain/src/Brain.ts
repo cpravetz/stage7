@@ -123,7 +123,6 @@ export class Brain extends BaseEntity {
     
                 // Extract only the message content from the exchanges
                 const messages = thread.exchanges;
-    
                 this.llmCalls++;
     
                 const brainResponse = await selectedModel.chat(messages, 
