@@ -61,53 +61,106 @@ export class HuggingfaceInterface extends BaseInterface {
     }
 
     private isResponseComplete(response: string): boolean {
-        let isEndOfResponse = false;
-        if (!response.startsWith('{')) {
-            isEndOfResponse = true;
-        } else {
-            isEndOfResponse = response.endsWith('}');
+        try {
+            JSON.parse(response);
+            return true;
+        } catch (e) {
+            return false;
         }
-        return isEndOfResponse;
     }
 
+/* Streaming chat
     async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string }): Promise<string> {
         try {
             const trimmedMessages = this.trimMessages(messages, options.max_length || 4096);
             const inputTokens = trimmedMessages.reduce((sum, message) => {
                 return sum + Math.ceil(message.content.length / 3.5);
             }, 0);
-            const max_new_tokens = (options.max_length || 4096) - inputTokens;
+            const max_new_tokens = Math.max(1, (options.max_length || 4096) - inputTokens);
+            console.log(`Huggingface input tokens: ${inputTokens} max_length: ${options.max_length} max_new_tokens: ${max_new_tokens}`);
+    
             const inference = new HfInference(service.apiKey);
-            let response: string = "";
-            let attempts = 0;
-            const maxAttempts = 3;
-            let seemsComplete = false;
-            while (!seemsComplete && attempts < maxAttempts) {
-                for await (const chunk of inference.chatCompletionStream({
-                    model: options.modelName || 'meta-llama/llama-3.2-3b-instruct',
-                    messages: trimmedMessages,
-                    max_new_tokens: max_new_tokens,
-                    temperature: options.temperature || 0.2,
-                })) {
-                    response += chunk.choices[0]?.delta?.content || "";
-                }
-                if (this.isResponseComplete(response)) {
-                    seemsComplete = true;
-                } else {
-                    console.log(`Response incomplete, attempt ${attempts + 1} of ${maxAttempts}`);
-                    messages.push({
-                        role: 'system',
-                        content: `Your response seems to be truncated. Please continue from: "${response.substring(response.length - 50)}" or return an empty string.`
-                    });
-                    attempts++;
+            let fullResponse: string = "";
+            let chunkCount = 0;
+    
+            for await (const chunk of inference.chatCompletionStream({
+                model: options.modelName || 'meta-llama/llama-3.2-3b-instruct',
+                messages: trimmedMessages,
+                max_new_tokens: max_new_tokens,
+                temperature: options.temperature || 0.2,
+            })) {
+                console.log(`Huggingface chunk ${chunkCount++}: ${JSON.stringify(chunk)}`);
+                const content = chunk.choices[0]?.delta?.content || "";
+                fullResponse += content;
+                if (chunk.choices[0]?.finish_reason === "stop" || chunk.choices[0]?.finish_reason === "length") {
+                    break;
                 }
             }
-            return response;
-        } catch (error) { analyzeError(error as Error);
+    
+            if (!fullResponse) {
+                throw new Error('No content in Huggingface response');
+            }
+    
+            console.log(`Huggingface full response: ${fullResponse}`);
+            return fullResponse;
+        } catch (error) {
+            analyzeError(error as Error);
             console.error('Error generating response from Huggingface:', error instanceof Error ? error.message : error);
             throw new Error('Failed to generate response from Huggingface');
         }
     }
+*/
+
+async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string }): Promise<string> {
+    try {
+        const trimmedMessages = this.trimMessages(messages, options.max_length || 4096);
+        const inputTokens = trimmedMessages.reduce((sum, message) => {
+            return sum + Math.ceil(message.content.length / 3.5);
+        }, 0);
+        const max_new_tokens = Math.max(1, (options.max_length || 4096) - inputTokens);
+        console.log(`Huggingface input tokens: ${inputTokens} max_length: ${options.max_length} max_new_tokens: ${max_new_tokens}`);
+
+        const inference = new HfInference(service.apiKey);
+        
+        const response = await inference.chatCompletion({
+            model: options.modelName || 'meta-llama/llama-3.2-3b-instruct',
+            messages: trimmedMessages,
+            max_new_tokens: max_new_tokens,
+            temperature: options.temperature || 0.2,
+        });
+
+        if (!response || !response.generated_text) {
+            throw new Error('No content in Huggingface response');
+        }
+
+        const generatedText = response.generated_text;
+        console.log(`Huggingface full response: ${JSON.stringify(generatedText)}`);
+
+        // If generatedText is an object, we need to extract the actual text content
+        if (typeof generatedText === 'object' && generatedText !== null) {
+            if (Array.isArray(generatedText)) {
+                // If it's an array, assume the last element is the response
+                const lastMessage = generatedText[generatedText.length - 1];
+                if (typeof lastMessage === 'object' && lastMessage !== null && 'content' in lastMessage) {
+                    return lastMessage.content as string;
+                }
+            } else if ('content' in generatedText) {
+                // If it's an object with a 'content' property
+                return generatedText.content as string;
+            } else {
+                // If it's some other object structure, stringify it
+                return JSON.stringify(generatedText);
+            }
+        } else if (typeof generatedText === 'string') {
+            return generatedText;
+        }
+        throw new Error('Unexpected response format from Huggingface');
+    } catch (error) {
+        analyzeError(error as Error);
+        console.error('Error generating response from Huggingface:', error instanceof Error ? error.message : error);
+        throw new Error('Failed to generate response from Huggingface');
+    }
+}
 
     async convertTextToText(args: ConvertParamsType): Promise<string> {
         const { service, prompt, modelName } = args;

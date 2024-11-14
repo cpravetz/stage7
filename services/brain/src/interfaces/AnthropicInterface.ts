@@ -22,9 +22,8 @@ export class AnthropicInterface extends BaseInterface {
 
     async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, model?: string }): Promise<string> {
         const max_tokens = options.max_length || 4000;
-        // Convert string messages to the new messages format
         const trimmedMessages = this.trimMessages(messages, max_tokens);
-
+    
         try {
             const response = await axios.post(
                 service.apiUrl,
@@ -32,7 +31,8 @@ export class AnthropicInterface extends BaseInterface {
                     model: options?.model || 'claude-3-haiku-20240307',
                     max_tokens: max_tokens,
                     temperature: options?.temperature ?? 0.7,
-                    messages: trimmedMessages
+                    messages: trimmedMessages,
+                    stream: true,
                 },
                 {
                     headers: {
@@ -40,45 +40,46 @@ export class AnthropicInterface extends BaseInterface {
                         'anthropic-version': '2023-06-01',
                         'X-API-Key': service.apiKey,
                     },
-                    // Add retry and timeout configurations
-                    timeout: 30000, // 30 seconds timeout
+                    responseType: 'stream',
                 }
             );
-
-            // Return the content of the first message in the response
-            return response.data.content[0].text;
-        } catch (error) { analyzeError(error as Error);
-            // Detailed error handling
-            if (axios.isAxiosError(error)) {
-                const axiosError = error as AxiosError;
-                
-                // Handle specific error scenarios
-                if (axiosError.response) {
-                    // The request was made and the server responded with a status code
-                    switch (axiosError.response.status) {
-                        case 429: // Rate limit exceeded
-                            throw new Error('Anthropic API rate limit reached. Please try again later.');
-                        
-                        case 401: // Unauthorized
-                            throw new Error('Invalid Anthropic API key. Please check your credentials.');
-                        
-                        case 500: // Server error
-                            throw new Error('Anthropic API encountered an internal server error.');
-                        
-                        default:
-                            throw new Error(`Anthropic API error: ${JSON.stringify(axiosError.response.statusText)}`);
+    
+            let fullResponse = '';
+            for await (const chunk of response.data) {
+                const lines = chunk.toString('utf8').split('\n').filter((line: string) => line.trim() !== '');
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        const data = JSON.parse(line.slice(6));
+                        if (data.type === 'content_block_delta') {
+                            fullResponse += data.delta.text;
+                        }
                     }
-                } else if (axiosError.request) {
-                    // The request was made but no response was received
-                    throw new Error('No response received from Anthropic API. Check your network connection.');
                 }
             }
-            
-            // Generic error handling
+    
+            if (!fullResponse) {
+                throw new Error('No content in Anthropic response');
+            }
+    
+            return fullResponse;
+        } catch (error) {
             console.error('Error generating response from Anthropic:', error instanceof Error ? error.message : error);
-            throw new Error('Failed to generate response from Anthropic');
+            analyzeError(error as Error);
+            if (axios.isAxiosError(error)) {
+                const axiosError = error as AxiosError;
+                if (axiosError.response) {
+                    throw new Error(`Anthropic API error: ${axiosError.response.status} - ${JSON.stringify(axiosError.response.data)}`);
+                } else if (axiosError.request) {
+                    throw new Error('No response received from Anthropic API. Please check your network connection.');
+                } else {
+                    throw new Error(`Error setting up request to Anthropic API: ${axiosError.message}`);
+                }
+            } else {
+                throw new Error(`Unexpected error when calling Anthropic API: ${error instanceof Error ? error.message : String(error)}`);
+            }
         }
     }
+           
 
     // Optional: Add a method to handle retries with exponential backoff
     private async retryRequest(

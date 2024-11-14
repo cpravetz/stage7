@@ -6,6 +6,7 @@ import { BaseService, ExchangeType } from '../services/baseService';
 import fs from 'fs';
 import { ImageEditParams, ImageGenerateParams } from 'openai/resources';
 import { SpeechCreateParams } from 'openai/resources/audio/speech';
+import { Stream } from 'openai/streaming';
 
 export class OpenAIInterface extends BaseInterface {
     interfaceName = 'openai';
@@ -51,24 +52,29 @@ export class OpenAIInterface extends BaseInterface {
         const trimmedMessages = this.trimMessages(messages, max_length);
         try {
             const openAiApiClient = new OpenAI({ apiKey: service.apiKey });
-            const response = await openAiApiClient.chat.completions.create({
+            const stream = await openAiApiClient.chat.completions.create({
                 model: options.modelName || 'gpt-4',
                 messages: trimmedMessages as ChatCompletionMessageParam[],
                 temperature,
                 max_tokens: max_length,
+                stream: true,
             });
-            if (!response.choices[0].message?.content) {
+    
+            let fullResponse = '';
+            for await (const chunk of stream) {
+                const content = chunk.choices[0]?.delta?.content || '';
+                fullResponse += content;
+            }
+    
+            if (!fullResponse) {
                 throw new Error('No content in OpenAI response');
             }
-
-            return response.choices[0].message.content;
-        } catch (error) { analyzeError(error as Error);
+    
+            return fullResponse;
+        } catch (error) {
             console.error('Error generating response from OpenAI:', error instanceof Error ? error.message : error);
-            if (error instanceof Error) {
-                throw new Error(`Failed to generate response from OpenAI: ${error.message}`);
-            } else {
-                throw new Error('Failed to generate response from OpenAI: Unknown error');
-            }
+            analyzeError(error as Error);
+            throw new Error(`Failed to generate response from OpenAI: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
     }
 

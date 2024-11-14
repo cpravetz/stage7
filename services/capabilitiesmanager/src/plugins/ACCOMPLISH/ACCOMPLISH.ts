@@ -240,8 +240,9 @@ async function queryBrain(messages: { role: string, content: string }[]): Promis
         const response = await axios.post(`http://${brainUrl}/chat`, {
             exchanges: messages,
             optimization: 'accuracy',
-            optionals: { temperature: 0.2, response_format: { "type": "json_object" }}
+            optionals: { temperature: 0.5, response_format: { "type": "json_object" }}
         });
+        console.log('Brain raw response:', response.data.response);
         return response.data.response;
     } catch (error) { analyzeError(error as Error);
         console.error('Error querying Brain:', error instanceof Error ? error.message : error);

@@ -4,6 +4,7 @@ import { ChatCompletionMessageParam } from 'openai/resources/chat';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { BaseService, ExchangeType } from '../services/baseService';
 import fs from 'fs';
+import { Stream } from 'openai/streaming';
 
 export class OpenRouterInterface extends BaseInterface {
     interfaceName = 'openrouter';
@@ -96,28 +97,32 @@ export class OpenRouterInterface extends BaseInterface {
         const max_length = options.max_length || 4000;
         const temperature = options.temperature || 0.7;
         const trimmedMessages = this.trimMessages(messages, max_length);
-
+    
         try {
-            const openRouterApiClient = new OpenAI({ apiKey:service.apiKey, baseURL: service.apiUrl});             
-            const response = await openRouterApiClient.chat.completions.create({
+            const openRouterApiClient = new OpenAI({ apiKey: service.apiKey, baseURL: service.apiUrl });
+            const stream = await openRouterApiClient.chat.completions.create({
                 model: options.modelName || 'gpt-4',
                 messages: trimmedMessages as ChatCompletionMessageParam[],
                 temperature,
                 max_tokens: max_length,
+                stream: true,
             });
-
-            if (!response.choices[0].message?.content) {
+    
+            let fullResponse = '';
+            for await (const chunk of stream) {
+                const content = chunk.choices[0]?.delta?.content || '';
+                fullResponse += content;
+            }
+    
+            if (!fullResponse) {
                 throw new Error('No content in OpenRouter response');
             }
-
-            return response.choices[0].message.content;
-        } catch (error) { analyzeError(error as Error);
+    
+            return fullResponse;
+        } catch (error) {
             console.error('Error generating response from OpenRouter:', error instanceof Error ? error.message : error);
-            if (error instanceof Error) {
-                throw new Error(`Failed to generate response from OpenRouter: ${error.message}`);
-            } else {
-                throw new Error('Failed to generate response from OpenRouter: Unknown error');
-            }
+            analyzeError(error as Error);
+            throw new Error(`Failed to generate response from OpenRouter: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
     }
 

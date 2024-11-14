@@ -130,7 +130,7 @@ export class Brain extends BaseEntity {
                         max_length: thread.optionals?.max_length,
                         temperature: thread.optionals?.temperature
                     });
-
+                console.log('Brain response:', brainResponse);
                 const mimeType = this.determineMimeType(brainResponse);
                 res.json({
                     response: brainResponse,

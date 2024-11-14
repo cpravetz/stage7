@@ -3,6 +3,8 @@ import * as fs from 'node:fs/promises';
 import path from 'path';
 
 
+let processingError: boolean = false;
+
 function serializeError(error: Error): string {
     const seen = new WeakSet();
     
@@ -64,7 +66,8 @@ function serializeError(error: Error): string {
 
 export const analyzeError = async (error: Error) => {
   try {
-
+    if (processingError) return;
+    processingError = true;
     const brainUrl = process.env.BRAIN_URL || 'brain:5070';
     const stackTrace = error.stack;
     const sourceCode = await getSourceCode(stackTrace);
@@ -98,6 +101,7 @@ export const analyzeError = async (error: Error) => {
     });
     const remediationGuidance = response.data.response;
 
+    processingError = false;
     console.log(`\n\n**** REMEDIATION GUIDANCE ****\n\n
     Error: ${error instanceof Error ? error.message : 'Unknown error'}\n\n
     Stack: ${stackTrace}\n\n
