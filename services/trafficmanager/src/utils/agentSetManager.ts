@@ -1,3 +1,4 @@
+import Docker from 'dockerode';
 import express from 'express';
 import axios from 'axios';
 import { MapSerializer, AgentSetManagerStatistics, AgentSetStatistics, AgentStatistics, PluginInput, MessageType } from '@cktmcs/shared';
@@ -25,11 +26,13 @@ class AgentSetManager {
     private maxAgentsPerSet: number;
     private postOfficeUrl: string;
     private refreshInterval: NodeJS.Timeout;
+    private docker: Docker;
 
     constructor(maxAgentsPerSet: number = 250, postOfficeUrl: string = 'postoffice:5020') {
         this.maxAgentsPerSet = maxAgentsPerSet;
         this.postOfficeUrl = postOfficeUrl;
         this.refreshInterval = setInterval(() => this.refreshAgentSets(), 60000); // Refresh every minute
+        this.docker = new Docker();
     }
 
     private async refreshAgentSets(): Promise<void> {
@@ -128,8 +131,8 @@ class AgentSetManager {
                 await new Promise(resolve => setTimeout(resolve, retryDelay));
             }
         }
-
-        throw new Error('Failed to retrieve AgentSet components from PostOffice');
+        console.log('Failed to retrieve AgentSet components from PostOffice');
+        return;
     }
 
     async getAgentUrl(agentId: string): Promise<string | undefined> {
@@ -183,11 +186,23 @@ class AgentSetManager {
 
     async assignAgentToSet(agentId: string, actionVerb: string, inputs: Map<string, PluginInput>,  missionId: string, missionContext: string): Promise<string> {
         console.log('Assigning agent to set...');
-        const availableSet = await this.getAvailableAgentSet();
+        let availableSet = await this.getAvailableAgentSet();
         if (!availableSet) {
-            throw new Error('No available agent set found');
+            console.log('No available agent set found. Attempting to create a new one...');
+            try {
+                await this.createNewAgentSet();
+                availableSet = await this.getAvailableAgentSet();
+                if (!availableSet) {
+                    console.log('No agentSet was available for the new agent.');
+                }
+                return '';
+            } catch (error) {
+                analyzeError(error as Error);
+                console.error('Error creating new agent set:', error instanceof Error ? error.message : error);
+                return '';
+            }
         }
-
+    
         this.agentToSetMap.set(agentId, availableSet.id);
         
         try {
@@ -198,13 +213,14 @@ class AgentSetManager {
                 missionId,
                 missionContext
             }));
-
+    
             availableSet.agentCount++;
             return response.data;
-        } catch (error) { analyzeError(error as Error);
+        } catch (error) {
+            analyzeError(error as Error);
             this.agentToSetMap.delete(agentId);
             console.error('Failed to assign agent to set:', error instanceof Error ? error.message : error);
-            throw new Error('Failed to assign agent to set');
+            return '';
         }
     }
 
@@ -212,7 +228,7 @@ class AgentSetManager {
         console.log(`Sending message ${message} to agent:`, agentId);
         const agentSetUrl = await this.getAgentUrl(agentId);
         if (!agentSetUrl) {
-            throw new Error(`No AgentSet found for agent ${agentId}`);
+            console.error(`No AgentSet found for agent ${agentId}`);
         }
 
         try {
@@ -220,7 +236,6 @@ class AgentSetManager {
             return response.data;
         } catch (error) { analyzeError(error as Error);
             console.error(`Error sending message to agent ${agentId}:`, error instanceof Error ? error.message : error);
-            throw error;
         }
     }
         
@@ -229,7 +244,7 @@ class AgentSetManager {
             try {
                 await api.post(`http://${set.url}/pauseAgents`, { missionId });
             } catch (error) {
-                throw error; // Re-throw to be caught by Promise.allSettled
+                analyzeError(error as Error);
             }
         });
 
@@ -248,7 +263,7 @@ class AgentSetManager {
             try {
                 await api.post(`http://${set.url}/abortAgents`, { missionId });
             } catch (error) {
-                throw error; // Re-throw to be caught by Promise.allSettled
+                analyzeError(error as Error);
             }
         });
 
@@ -267,7 +282,7 @@ class AgentSetManager {
             try {
                 await api.post(`http://${set.url}/resumeAgents`, { missionId });
             } catch (error) {
-                throw error; // Re-throw to be caught by Promise.allSettled
+                analyzeError(error as Error);
             }
         });
 
@@ -284,7 +299,7 @@ class AgentSetManager {
     async resumeAgent(agentId: string) {
         const setUrl = await this.getAgentSetUrlForAgent(agentId);
         if (!setUrl) {
-            throw new Error(`No AgentSet found for agent ${agentId}`);
+            console.error(`No AgentSet found for agent ${agentId}`);
         }
         await api.post(`http://${setUrl}/resumeAgent`, { agentId });
     }
@@ -294,7 +309,7 @@ class AgentSetManager {
             try {
                 await api.post(`http://${set.url}/message`, req.body);
             } catch (error) {
-                throw error; // Re-throw to be caught by Promise.allSettled
+                analyzeError(error as Error);
             }
         });
 
@@ -346,7 +361,8 @@ class AgentSetManager {
             if (!agentSetUrl) {
                 const availableSetUrl = await this.getAvailableAgentSetUrl();
                 if (!availableSetUrl) {
-                    throw new Error('No available agent set found');
+                    console.error('No available agent set found loadingOneAgent');
+                    return false
                 }
                 return this.loadAgentToSet(agentId, availableSetUrl);
             }
@@ -469,7 +485,52 @@ class AgentSetManager {
             return false;
         }
     }
-    
+
+    private async createNewAgentSet(): Promise<void> {
+        try {
+            const container = await this.createAgentSetContainer();
+            const containerInfo = await container.inspect();
+            const ipAddress = containerInfo.NetworkSettings.Networks.mcs_network.IPAddress;
+            
+            const newSet = {
+                id: containerInfo.Id,
+                url: `http://${ipAddress}:5090`,
+                agentCount: 0,
+                maxAgents: this.maxAgentsPerSet
+            };
+
+            this.agentSets.set(newSet.id, newSet);
+
+            // Register the new AgentSet with PostOffice
+            await axios.post(`http://${this.postOfficeUrl}/registerComponent`, {
+                type: 'AgentSet',
+                url: newSet.url,
+                name: `AgentSet-${ipAddress}`
+            });
+            console.log('Created new AgentSet:', newSet);
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error('Error creating new AgentSet:', error instanceof Error ? error.message : error);
+        }
+    }
+
+    private async createAgentSetContainer(): Promise<Docker.Container> {
+        const container = await this.docker.createContainer({
+            Image: 'agentset:latest',
+            Env: [
+                `POSTOFFICE_URL=${this.postOfficeUrl}`,
+                `PORT=5090`,
+            ],
+            NetworkingConfig: {
+                EndpointsConfig: {
+                    mcs_network: {}
+                }
+            }
+        });
+
+        await container.start();
+        return container;
+    }
 }
 
 export const agentSetManager = new AgentSetManager();

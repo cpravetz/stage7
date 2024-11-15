@@ -41,7 +41,8 @@ export class OpenRouterInterface extends BaseInterface {
     async convertImageToText(args: ConvertParamsType): Promise<string> {
         const { service, image, prompt, modelName } = args;
         if (!image || !prompt) {
-            throw new Error('No image file provided');
+            console.log('No image file provided');
+            return '';
         }
         const imageBase64 = fs.readFileSync(image, { encoding: 'base64' });
         const messages = [
@@ -114,28 +115,27 @@ export class OpenRouterInterface extends BaseInterface {
                 fullResponse += content;
             }
     
-            if (!fullResponse) {
-                throw new Error('No content in OpenRouter response');
-            }
-    
-            return fullResponse;
+   
+            return fullResponse || '';
         } catch (error) {
             console.error('Error generating response from OpenRouter:', error instanceof Error ? error.message : error);
             analyzeError(error as Error);
-            throw new Error(`Failed to generate response from OpenRouter: ${error instanceof Error ? error.message : 'Unknown error'}`);
+            return '';
         }
     }
 
     async convert(service: BaseService, conversionType: LLMConversationType, convertParams: ConvertParamsType): Promise<any> {
         const converter = this.converters.get(conversionType);
         if (!converter) {
-            throw new Error(`Unsupported conversion type: ${conversionType}`);
+            console.log(`ORI convert:Unsupported conversion type: ${conversionType}`);
+            return undefined;
         }
         const requiredParams = converter.requiredParams;
         convertParams.service = service;
         const missingParams = requiredParams.filter(param => !(param in convertParams));
         if (missingParams.length > 0) {
-            throw new Error(`Missing required parameters: ${missingParams.join(', ')}`);
+            console.log(`Missing required parameters: ${missingParams.join(', ')}`);
+            return undefined;
         }
         return converter.converter(convertParams);
     }

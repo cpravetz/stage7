@@ -14,7 +14,7 @@ export class MapSerializer {
 
     static deserialize(serialized: SerializedMap): Map<string, any> {
         if (serialized._type !== 'Map') {
-            throw new Error('Invalid serialized Map data');
+            return new Map(); // this wont' happen we check before calling this method
         }
         return new Map(serialized.entries);
     }

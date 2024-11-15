@@ -29,7 +29,7 @@ export class Engineer extends BaseEntity {
             const { verb, context } = MapSerializer.transformFromSerialization(req.body);
             try {
                 const plugin = await this.createPlugin(verb, context);
-                res.json(plugin);
+                res.json(plugin||{});
             } catch (error) { analyzeError(error as Error);
                 console.error('Failed to create plugin:', error instanceof Error ? error.message : error);
                 res.status(500).json({ error: error instanceof Error ? error.message : String(error)  });
@@ -60,7 +60,7 @@ export class Engineer extends BaseEntity {
         res.status(200).send({ status: 'Message received and processed' });
     }
     
-    async createPlugin(verb: string, context: Map<string, PluginInput>): Promise<Plugin> {
+    async createPlugin(verb: string, context: Map<string, PluginInput>): Promise<Plugin|undefined> {
         this.newPlugins.push(verb);
         const explanation = await this.generateExplanation(verb, context);
         let pluginStructure: Plugin;
@@ -68,7 +68,7 @@ export class Engineer extends BaseEntity {
         try {
             const contextString = JSON.stringify(Array.from(context.entries()));
             const engineeringPrompt = `
-    Create a "javascript" or "python" based plugin for the action verb "${verb}" with the following context: ${explanation}
+    Create a javascript or python based plugin for the action verb "${verb}" with the following context: ${explanation}
     
     The plugin should expect inputs structured as a Map<string, PluginInput>, where PluginInput is defined as:
     
@@ -82,6 +82,34 @@ export class Engineer extends BaseEntity {
     Use this context to determine the required inputs: ${contextString}
     
     Provide a JSON object with the following structure:
+    {
+    id: 'plugin-{verb}',
+    verb: '{verb}',
+    description: A short description of the plugin,
+    explanation: A more complete description including inputs, process overview, and outputs,
+    inputDefinitions: array of inputs definitions formed like
+        {
+            name: {input name},
+            required: true/false,
+            type: input javascript data type,
+            description: {brief explanation of the input}
+        }
+    ,
+    outputDefinitions: array of output definitions formed like
+        {
+            name: {output name},
+            required: false/true,
+            type: 'PLAN', 'DIRECT_ANSWER' or javascript type,
+            description: An overview of the type of output this plugin will create
+        },
+    language: 'javascript',
+    entryPoint: {
+        main: {name of primary code file to run},
+        files:  array of objects {filename: filecontent}
+    }
+}
+
+Types used in the plugin structure are:
     
     export interface Plugin {
         id: string;
@@ -94,7 +122,6 @@ export class Engineer extends BaseEntity {
         language: 'javascript' | 'python';
     }
     
-    Supporting types are:
     export enum PluginParameterType {
         STRING = 'string',
         NUMBER = 'number',
@@ -132,11 +159,12 @@ export class Engineer extends BaseEntity {
             pluginStructure = JSON.parse(response.data.result);
             
             if (!pluginStructure || !pluginStructure.entryPoint) {
-                throw new Error('Invalid plugin structure generated');
+                return undefined;
             }
-        } catch (error) { analyzeError(error as Error);
+        } catch (error) { 
+            analyzeError(error as Error);
             console.error('Error querying Brain for plugin structure:', error instanceof Error ? error.message : error);
-            throw new Error('Failed to generate plugin structure');
+            return undefined;
         }
     
         const newPlugin: Plugin = {
@@ -165,7 +193,6 @@ export class Engineer extends BaseEntity {
             return newPlugin;
         } catch (error) { analyzeError(error as Error);
             console.error('Error saving or creating plugin:', error instanceof Error ? error.message : error);
-            throw new Error('Failed to save or create plugin');
         }
     }
     
@@ -178,9 +205,10 @@ export class Engineer extends BaseEntity {
             });
 
             return response.data.result;
-        } catch (error) { analyzeError(error as Error);
+        } catch (error) { 
+            analyzeError(error as Error);
             console.error('Error querying Brain:', error instanceof Error ? error.message : error);
-            throw new Error('Failed to generate explanation');
+            return '';
         }
     }
 }

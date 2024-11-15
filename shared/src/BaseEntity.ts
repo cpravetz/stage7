@@ -21,7 +21,7 @@ export class BaseEntity {
     this.registerWithPostOffice();
   }
 
-  protected async registerWithPostOffice(retryCount: number = 3) {
+  protected async registerWithPostOffice(retryCount: number = 10) {
     const register = async () => {
       try {
         const response = await axios.post(`http://${this.postOfficeUrl}/registerComponent`, {
@@ -37,7 +37,6 @@ export class BaseEntity {
           setTimeout(() => this.registerWithPostOffice(retryCount - 1), 3000);
         } else {
           console.error(`Failed to register ${this.id} after multiple attempts`);
-          throw error;
         }
       }
     };

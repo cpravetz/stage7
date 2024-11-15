@@ -97,12 +97,13 @@ export class PostOffice {
         try {
             const librarianUrl = this.getComponentUrl('Librarian');
             if (!librarianUrl) {
-                throw new Error('Librarian not registered');
+                res.status(404).send({ error: 'Librarian not registered' });
             }
             const response = await api.get(`http://${librarianUrl}/loadWorkProduct/${req.params.id}`);
             res.status(200).send(response.data);
         }
-        catch (error) { analyzeError(error as Error);
+        catch (error) { 
+            analyzeError(error as Error);
             console.error('Error retrieving work product:', error instanceof Error ? error.message : error);
             res.status(500).send({ error: 'Failed to retrieve work product' });
         }
@@ -248,9 +249,9 @@ export class PostOffice {
         }
     
         try {
-            const missionControlUrl = this.getComponentUrl('MissionControl');
+            const missionControlUrl = this.getComponentUrl('MissionControl') || process.env.MISSIONCONTROL_URL;
             if (!missionControlUrl) {
-                throw new Error('MissionControl not registered');
+                res.status(404).send('Failed to create mission');
             }
     
             // Pass the exact same token format received from the client
@@ -271,21 +272,10 @@ export class PostOffice {
             }, { headers });
     
             res.status(200).send(response.data);
-        } catch (error) { analyzeError(error as Error);
+        } catch (error) { 
+            analyzeError(error as Error);
             console.error('Error creating mission:', error instanceof Error ? error.message : error);
-            if (axios.isAxiosError(error) && error.response) {
-                // More detailed error handling
-                const status = error.response.status;
-                const errorMessage = error.response.data?.error || 'Unknown error occurred';
-                
-                // Pass through the actual error status from MissionControl
-                res.status(status).json({ 
-                    error: errorMessage,
-                    details: error.response.data 
-                });
-            } else {
-                res.status(503).json({ error: 'Internal server error' });
-            }
+            res.status(503).json({ error: `Could not create mission, error: ${error instanceof Error ? error.message : 'Unknown' }`});
         }
     }
 
@@ -294,7 +284,7 @@ export class PostOffice {
         try {
             const missionControlUrl = this.getComponentUrl('MissionControl');
             if (!missionControlUrl) {
-                throw new Error('MissionControl not registered');
+                res.status(500).send({ error: 'Failed to load mission' });
             }
             const response = await api.post(`http://${missionControlUrl}/loadMission`, { missionId, clientId });
             res.status(200).send(response.data);
@@ -419,9 +409,9 @@ export class PostOffice {
                     'Authorization': token // Forward the token
                 }
             });
-        } catch (error) { analyzeError(error as Error);
+        } catch (error) { 
+            analyzeError(error as Error);
             console.error(`Failed to send message to ${url}:`, error instanceof Error ? error.message : error);
-            throw error;
         }
     }
     private getServices(req: express.Request, res: express.Response) {
@@ -460,15 +450,17 @@ export class PostOffice {
     }
     private async getSavedMissions(req: express.Request, res: express.Response) {
         try {
-            const librarianUrl = this.getComponentUrl('Librarian');
+            const librarianUrl = this.getComponentUrl('Librarian') || process.env.LIBRARIAN_URL;
             if (!librarianUrl) {
-                throw new Error('Librarian not registered');
+                res.status(200).send([]);
+                return;
             }
             
             // Extract user ID from the JWT token
             const token = req.headers.authorization?.split(' ')[1];
             if (!token) {
-                return res.status(401).send({ error: 'No token provided' });
+                res.status(401).send({ error: 'No token provided' });
+                return;
             }
     
             const decodedToken = jwt.verify(token, process.env.JWT_SECRET as string) as { id: string };
@@ -478,7 +470,8 @@ export class PostOffice {
                 params: { userId }
             });
             res.status(200).send(response.data);
-        } catch (error) { analyzeError(error as Error);
+        } catch (error) { 
+            analyzeError(error as Error);
             console.error('Error getting saved missions:', error instanceof Error ? error.message : error);
             res.status(500).send({ error: 'Failed to get saved missions' });
         }

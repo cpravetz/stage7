@@ -243,7 +243,6 @@ class MissionControl extends BaseEntity {
             });
         } catch (error) { analyzeError(error as Error);
             console.error('Error saving mission state:', error instanceof Error ? error.message : error);
-            throw error;
         }
     }
 

@@ -58,51 +58,15 @@ export class AnthropicInterface extends BaseInterface {
             }
     
             if (!fullResponse) {
-                throw new Error('No content in Anthropic response');
+                console.log('No content in Anthropic response');
             }
     
-            return fullResponse;
+            return fullResponse || '';
         } catch (error) {
             console.error('Error generating response from Anthropic:', error instanceof Error ? error.message : error);
             analyzeError(error as Error);
-            if (axios.isAxiosError(error)) {
-                const axiosError = error as AxiosError;
-                if (axiosError.response) {
-                    throw new Error(`Anthropic API error: ${axiosError.response.status} - ${JSON.stringify(axiosError.response.data)}`);
-                } else if (axiosError.request) {
-                    throw new Error('No response received from Anthropic API. Please check your network connection.');
-                } else {
-                    throw new Error(`Error setting up request to Anthropic API: ${axiosError.message}`);
-                }
-            } else {
-                throw new Error(`Unexpected error when calling Anthropic API: ${error instanceof Error ? error.message : String(error)}`);
-            }
+            return '';
         }
-    }
-           
-
-    // Optional: Add a method to handle retries with exponential backoff
-    private async retryRequest(
-        fn: () => Promise<any>, 
-        maxRetries = 3, 
-        baseDelay = 1000
-    ): Promise<any> {
-        let retries = 0;
-        while (retries < maxRetries) {
-            try {
-                return await fn();
-            } catch (error) { analyzeError(error as Error);
-                if (axios.isAxiosError(error) && error.response?.status === 429) {
-                    const delay = baseDelay * Math.pow(2, retries);
-                    console.warn(`Rate limited. Retrying in ${delay}ms...`);
-                    await new Promise(resolve => setTimeout(resolve, delay));
-                    retries++;
-                } else {
-                    throw error;
-                }
-            }
-        }
-        throw new Error('Max retries exceeded');
     }
 
     async convertTextToText(args: ConvertParamsType): Promise<string> {
@@ -123,13 +87,14 @@ export class AnthropicInterface extends BaseInterface {
     async convert(service: BaseService, conversionType: LLMConversationType, convertParams: ConvertParamsType): Promise<any> {
         const converter = this.converters.get(conversionType);
         if (!converter) {
-            throw new Error(`Unsupported conversion type: ${conversionType}`);
+            return '';
         }
         const requiredParams = converter.requiredParams;
         convertParams.service = service;
         const missingParams = requiredParams.filter(param => !(param in convertParams));
         if (missingParams.length > 0) {
-            throw new Error(`Missing required parameters: ${missingParams.join(', ')}`);
+            console.log(`Missing required parameters: ${missingParams.join(', ')}`);
+            return '';
         }
         return converter.converter(convertParams);
     }

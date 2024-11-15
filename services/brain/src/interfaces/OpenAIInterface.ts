@@ -43,7 +43,6 @@ export class OpenAIInterface extends BaseInterface {
             requiredParams: ['service', 'prompt'],
             converter: this.convertTextToText,
         });
-
     }
 
     async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string }): Promise<string> {
@@ -66,15 +65,11 @@ export class OpenAIInterface extends BaseInterface {
                 fullResponse += content;
             }
     
-            if (!fullResponse) {
-                throw new Error('No content in OpenAI response');
-            }
-    
-            return fullResponse;
+            return fullResponse || '';
         } catch (error) {
             console.error('Error generating response from OpenAI:', error instanceof Error ? error.message : error);
             analyzeError(error as Error);
-            throw new Error(`Failed to generate response from OpenAI: ${error instanceof Error ? error.message : 'Unknown error'}`);
+            return '';
         }
     }
 
@@ -94,14 +89,15 @@ export class OpenAIInterface extends BaseInterface {
             });
     
             if (!response.data || response.data.length === 0) {
-                throw new Error('No image data in response');
+                console.error('No image data in response');
+                return {};
             }
     
             return response.data[0];
         } catch (error) {
             console.error('Error generating image from OpenAI:', error instanceof Error ? error.message : error);
             analyzeError(error as Error);
-            throw new Error(`Failed to generate image from ${service.serviceName}`);
+            return {};
         }
     }
     
@@ -121,7 +117,7 @@ export class OpenAIInterface extends BaseInterface {
         } catch (error) {
             console.error('Error generating audio from OpenAI:', error instanceof Error ? error.message : error);
             analyzeError(error as Error);
-            throw new Error(`Failed to generate audio from ${service.serviceName}`);
+            return undefined;
         }
     }
 
@@ -130,7 +126,8 @@ export class OpenAIInterface extends BaseInterface {
         try {
             const openAiApiClient = new OpenAI({ apiKey: service.apiKey });
             if (!openAiApiClient || !audio) {
-                throw new Error('No audio file provided');
+                console.error('No audio file provided');
+                return '';
             }
             const response = await openAiApiClient.audio.transcriptions.create({
                 file: fs.createReadStream(audio),
@@ -141,7 +138,7 @@ export class OpenAIInterface extends BaseInterface {
         } catch (error) {
             console.error('Error transcribing audio with OpenAI:', error instanceof Error ? error.message : error);
             analyzeError(error as Error);
-            throw new Error(`Failed to transcribe audio with ${service.serviceName}`);
+            return '';
         }
     }
 
@@ -160,14 +157,15 @@ export class OpenAIInterface extends BaseInterface {
             });
 
             if (!response.choices[0].message?.content) {
-                throw new Error('No content in OpenAI response');
+                console.error('OAI TextToCode:No content in OpenAI response');
+                return '';
             }
 
             return response.choices[0].message.content;
         } catch (error) {
-            console.error(`Error generating code with ${service.serviceName}}:`, error instanceof Error ? error.message : error);
+            console.error(`OAI Interface: Error generating code with ${service.serviceName}}:`, error instanceof Error ? error.message : error);
             analyzeError(error as Error);
-            throw new Error(`Failed to generate code with ${service.serviceName}`);
+            return '';
         }
     }
         
@@ -176,7 +174,8 @@ export class OpenAIInterface extends BaseInterface {
         try {
             const openAiApiClient = new OpenAI({ apiKey: service.apiKey });
             if (!openAiApiClient || !image) {
-                throw new Error('No image file provided');
+                console.error('OAI ImageToImage: No image file provided');
+                return {};
             }
             // Ensure the image is a readable stream
             const imageStream = fs.createReadStream(image);
@@ -194,14 +193,15 @@ export class OpenAIInterface extends BaseInterface {
             });
 
             if (!response.data || response.data.length === 0) {
-                throw new Error(`No image data in ${service.serviceName} response`);
+                console.error(`OAI ImageToImage: No image data in ${service.serviceName} response`);
+                return {};
             }
 
             return response.data[0];
         } catch (error) {
             console.error('Error editing image with OpenAI:', error instanceof Error ? error.message : error);
             analyzeError(error as Error);
-            throw new Error(`Failed to edit image with ${service.serviceName}`);
+            return {};
         }
     }
 
@@ -219,27 +219,30 @@ export class OpenAIInterface extends BaseInterface {
             });
 
             if (!response.choices[0].message?.content) {
-                throw new Error('No content in OpenAI response');
+                console.error('OAI TextToText: No content in OpenAI response');
+                return '';
             }
 
             return response.choices[0].message.content;
         } catch (error) {
-            console.error(`Error generating code with ${service.serviceName}}:`, error instanceof Error ? error.message : error);
+            console.error(`OAI TextToText: Error generating code with ${service.serviceName}}:`, error instanceof Error ? error.message : error);
             analyzeError(error as Error);
-            throw new Error(`Failed to generate code with ${service.serviceName}`);
+            return '';
         }
     }
 
     async convert(service: BaseService, conversionType: LLMConversationType, convertParams: ConvertParamsType): Promise<any> {
         const converter = this.converters.get(conversionType);
         if (!converter) {
-            throw new Error(`Unsupported conversion type: ${conversionType}`);
+            console.error(`OAI convert: Unsupported conversion type: ${conversionType}`);
+            return undefined;
         }
         const requiredParams = converter.requiredParams;
         convertParams.service = service;
         const missingParams = requiredParams.filter(param => !(param in convertParams));
         if (missingParams.length > 0) {
-            throw new Error(`Missing required parameters: ${missingParams.join(', ')}`);
+            console.error(`OAI convert:Missing required parameters: ${missingParams.join(', ')}`);
+            return undefined;
         }
         return converter.converter(convertParams);
     }

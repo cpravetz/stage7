@@ -4,6 +4,7 @@ export enum AgentStatus {
     PAUSED = 'paused',
     COMPLETED = 'completed',
     ABORTED = 'aborted',
-    ERROR = 'error'
+    ERROR = 'error',
+    UNKNOWN = 'unknown'
 }
 

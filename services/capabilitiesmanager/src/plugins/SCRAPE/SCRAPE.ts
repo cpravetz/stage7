@@ -14,8 +14,15 @@ export async function execute(inputs: Map<string, PluginInput>): Promise<PluginO
         try {
             const url = inputs.get('url')?.inputValue || '';
             if (!url) {
-                throw new Error('URL is required for SCRAPE plugin');
-            }
+                return [{
+                    success: false,
+                    name: 'error',
+                    resultType: PluginParameterType.ERROR,
+                    resultDescription: `Url is required for SCRAPE plugin`,
+                    result: null,
+                    error: `Url is required for SCRAPE plugin`
+                }];
+                }
             console.log('SCRAPE Fetching HTML from URL:', url);
             const config = parseConfig(inputs);
             const html = await fetchHtml(url);

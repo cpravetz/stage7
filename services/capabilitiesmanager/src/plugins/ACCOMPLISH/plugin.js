@@ -39,7 +39,15 @@ async function execute(input) {
         const goal = input.args?.goal || input.inputValue;
         
         if (!goal) {
-            throw new Error('Goal is required for ACCOMPLISH plugin');
+            console.log('Goal or description is required for ACCOMPLISH plugin');
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: 'Inputs did not contain a goal.',
+                result: null,
+                error: 'No goal provided to ACCOMPLISH plugin'
+            }];
         }
 
         const prompt = generatePrompt(goal);

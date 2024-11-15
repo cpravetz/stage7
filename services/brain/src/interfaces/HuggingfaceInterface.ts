@@ -56,7 +56,7 @@ export class HuggingfaceInterface extends BaseInterface {
             return response;
         } catch (error) { analyzeError(error as Error);
             console.error('Error generating response from Huggingface:', error instanceof Error ? error.message : error);
-            throw new Error('Failed to generate response from Huggingface');
+            return '';
         }
     }
 
@@ -68,48 +68,6 @@ export class HuggingfaceInterface extends BaseInterface {
             return false;
         }
     }
-
-/* Streaming chat
-    async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string }): Promise<string> {
-        try {
-            const trimmedMessages = this.trimMessages(messages, options.max_length || 4096);
-            const inputTokens = trimmedMessages.reduce((sum, message) => {
-                return sum + Math.ceil(message.content.length / 3.5);
-            }, 0);
-            const max_new_tokens = Math.max(1, (options.max_length || 4096) - inputTokens);
-            console.log(`Huggingface input tokens: ${inputTokens} max_length: ${options.max_length} max_new_tokens: ${max_new_tokens}`);
-    
-            const inference = new HfInference(service.apiKey);
-            let fullResponse: string = "";
-            let chunkCount = 0;
-    
-            for await (const chunk of inference.chatCompletionStream({
-                model: options.modelName || 'meta-llama/llama-3.2-3b-instruct',
-                messages: trimmedMessages,
-                max_new_tokens: max_new_tokens,
-                temperature: options.temperature || 0.2,
-            })) {
-                console.log(`Huggingface chunk ${chunkCount++}: ${JSON.stringify(chunk)}`);
-                const content = chunk.choices[0]?.delta?.content || "";
-                fullResponse += content;
-                if (chunk.choices[0]?.finish_reason === "stop" || chunk.choices[0]?.finish_reason === "length") {
-                    break;
-                }
-            }
-    
-            if (!fullResponse) {
-                throw new Error('No content in Huggingface response');
-            }
-    
-            console.log(`Huggingface full response: ${fullResponse}`);
-            return fullResponse;
-        } catch (error) {
-            analyzeError(error as Error);
-            console.error('Error generating response from Huggingface:', error instanceof Error ? error.message : error);
-            throw new Error('Failed to generate response from Huggingface');
-        }
-    }
-*/
 
     async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string }): Promise<string> {
         try {
@@ -139,46 +97,10 @@ export class HuggingfaceInterface extends BaseInterface {
             
             const generatedText = out;
             return generatedText;
-            /*                    
-            const response = await inference.chatCompletion({
-                model: options.modelName || 'meta-llama/llama-3.2-3b-instruct',
-                messages: trimmedMessages,
-                max_new_tokens: max_new_tokens,
-                temperature: options.temperature || 0.2,
-            });
-
-            if (!response || !response.choices[0].message.content) {
-                console.log('Bad response from Huggingface:', response);
-                throw new Error('No content in Huggingface response');
-            }
-
-            const generatedText = response.choices[0].message;
-            
-
-            // If generatedText is an object, we need to extract the actual text content
-            if (typeof generatedText === 'object' && generatedText !== null) {
-                if (Array.isArray(generatedText)) {
-                    // If it's an array, assume the last element is the response
-                    const lastMessage = generatedText[generatedText.length - 1];
-                    if (typeof lastMessage === 'object' && lastMessage !== null && 'content' in lastMessage) {
-                        return lastMessage.content as string;
-                    }
-                } else if ('content' in generatedText) {
-                    // If it's an object with a 'content' property
-                    return generatedText.content as string;
-                } else {
-                    // If it's some other object structure, stringify it
-                    return JSON.stringify(generatedText);
-                }
-            } else if (typeof generatedText === 'string') {
-                return generatedText;
-            }
-            throw new Error('Unexpected response format from Huggingface');
-            */
         } catch (error) {
             analyzeError(error as Error);
             console.error('Error generating response from Huggingface:', error instanceof Error ? error.message : error);
-            throw new Error('Failed to generate response from Huggingface');
+            return '';
         }
     }
 
@@ -229,7 +151,8 @@ export class HuggingfaceInterface extends BaseInterface {
         const { service, audio, modelName } = args;
         const inference = new HfInference(service.apiKey);
         if (!inference || !audio) {
-            throw new Error('No audio file provided');
+            console.error('No audio file provided');
+            return '';
         }
         const audioBuffer = fs.readFileSync(audio);
         const response = await inference.automaticSpeechRecognition({
@@ -243,7 +166,8 @@ export class HuggingfaceInterface extends BaseInterface {
         const { service, image, modelName } = args;
         const inference = new HfInference(service.apiKey);
         if (!inference || !image) {
-            throw new Error('No image file provided');
+            console.error('No image file provided');
+            return '';
         }
         const imageBuffer = fs.readFileSync(image);
         const response = await inference.imageToText({
@@ -256,13 +180,15 @@ export class HuggingfaceInterface extends BaseInterface {
     async convert(service: BaseService, conversionType: LLMConversationType, convertParams: ConvertParamsType): Promise<any> {
         const converter = this.converters.get(conversionType);
         if (!converter) {
-            throw new Error(`Unsupported conversion type: ${conversionType}`);
+            console.error(`Unsupported conversion type: ${conversionType}`);
+            return '';
         }
         const requiredParams = converter.requiredParams;
         convertParams.service = service;
         const missingParams = requiredParams.filter(param => !(param in convertParams));
         if (missingParams.length > 0) {
-            throw new Error(`Missing required parameters: ${missingParams.join(', ')}`);
+            console.error(`HFinterface:Missing required parameters: ${missingParams.join(', ')}`);
+            return '';
         }
         return converter.converter(convertParams);
     }

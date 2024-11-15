@@ -4,7 +4,6 @@ import axios from 'axios';
 import { agentSetManager } from './utils/agentSetManager';
 import { dependencyManager } from './utils/dependencyManager';
 import { AgentStatus } from './utils/status';
-import Docker from 'dockerode';
 import { Message, MessageType,TrafficManagerStatistics, BaseEntity, PluginInput } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 
@@ -19,8 +18,6 @@ const api = axios.create({
 
 export class TrafficManager extends BaseEntity {
     private app: express.Application;
-    private docker: Docker;
-    private librarianUrl: string = process.env.LIBRARIAN_URL ||  'librarian:5040';
     
     constructor() {
         super('TrafficManager', 'TrafficManager', `trafficmanager`, process.env.PORT || '5080');
@@ -28,7 +25,6 @@ export class TrafficManager extends BaseEntity {
         this.app.use(express.json());
         this.setupRoutes();
         this.startServer();
-        this.docker = new Docker();
     }
 
     private setupRoutes() {
@@ -131,7 +127,8 @@ export class TrafficManager extends BaseEntity {
             const agentSetUrl = await agentSetManager.getAgentSetUrlForAgent(agentId);
     
             if (!agentSetUrl) {
-                throw new Error(`No AgentSet found for agent ${agentId}`);
+                console.error(`No AgentSet found for agent ${agentId}`);
+                return {};
             }
     
             // Make a request to the AgentSet to fetch the agent's output
@@ -140,11 +137,13 @@ export class TrafficManager extends BaseEntity {
             if (response.status === 200 && response.data) {
                 return response.data.output;
             } else {
-                throw new Error(`Failed to fetch output for agent ${agentId}`);
+                console.error(`Failed to fetch output for agent ${agentId}`);
+                return {};
             }
-        } catch (error) { analyzeError(error as Error);
+        } catch (error) { 
+            analyzeError(error as Error);
             console.error(`Error fetching output for agent ${agentId}:`, error instanceof Error ? error.message : error);
-            throw error;
+            return {};
         }
     }    
     private async updateDependentAgents(completedAgentId: string) {
@@ -254,20 +253,20 @@ export class TrafficManager extends BaseEntity {
         const agentSetUrl = await agentSetManager.getAgentSetUrlForAgent(agentId);
     
         if (!agentSetUrl) {
-          throw new Error(`No AgentSet found for agent ${agentId}`);
+            console.error(`No AgentSet found for agent ${agentId}`);
+            return;
         }
     
         try {
-          const response = await api.post(`${this.ensureProtocol(agentSetUrl)}/message`, {
-            ...message,
-            forAgent: agentId
-          });
-    
-          console.log(`Message forwarded to agent ${agentId} via AgentSet at ${agentSetUrl}`);
-          return response.data;
-        } catch (error) { analyzeError(error as Error);
-          console.error(`Error forwarding message to agent ${agentId}:`, error instanceof Error ? error.message : error);
-          throw error;
+            const response = await api.post(`${this.ensureProtocol(agentSetUrl)}/message`, {
+                ...message,
+                forAgent: agentId
+            });
+            console.log(`Message forwarded to agent ${agentId} via AgentSet at ${agentSetUrl}`);
+            return response.data;
+        } catch (error) { 
+            analyzeError(error as Error);
+            console.error(`Error forwarding message to agent ${agentId}:`, error instanceof Error ? error.message : error);
         }
     }
     
@@ -282,7 +281,6 @@ export class TrafficManager extends BaseEntity {
     }
 
     private async createAgent(req: express.Request, res: express.Response) {
-        //this.logAndSay(`Creating new Agent from ${JSON.stringify(req.body)}`);
         const { actionVerb, inputs, dependencies, missionId, missionContext } = req.body;
         let inputsMap: Map<string, PluginInput>;
         
@@ -308,19 +306,17 @@ export class TrafficManager extends BaseEntity {
             if (dependencies) {
                 await dependencyManager.registerDependencies(agentId, dependencies);
             }
-
             const dependenciesSatisfied = await this.checkDependenciesRecursive(agentId);
-            
             if (!dependenciesSatisfied) {
                 await this.captureAgentStatus(agentId, AgentStatus.PAUSED);
                 return res.status(200).send({ message: 'Agent created but waiting for dependencies.', agentId });
             }
-
             const response = await agentSetManager.assignAgentToSet(agentId, actionVerb, inputsMap, missionId, missionContext);
             await this.captureAgentStatus(agentId, AgentStatus.RUNNING);
 
             res.status(200).send({ message: 'Agent created and assigned.', agentId, response });
-        } catch (error) { analyzeError(error as Error);
+        } catch (error) { 
+            analyzeError(error as Error);
             console.error('Error creating agent:', error instanceof Error ? error.message : error);
             res.status(500).send({ error: 'Failed to create agent' });
         }
@@ -367,12 +363,12 @@ export class TrafficManager extends BaseEntity {
                 return status;
             }
     
-            // If the agent is not found, return a default status or throw an error
+            // If the agent is not found, return a default status
             console.warn(`Agent ${agentId} not found. Returning default status.`);
             return AgentStatus.INITIALIZING;
         } catch (error) { analyzeError(error as Error);
             console.error(`Error retrieving status for agent ${agentId}:`, error instanceof Error ? error.message : error);
-            throw new Error(`Failed to retrieve status for agent ${agentId}`);
+            return AgentStatus.UNKNOWN;
         }
     }
     
@@ -444,42 +440,6 @@ export class TrafficManager extends BaseEntity {
             console.error('Error checking dependencies:', error instanceof Error ? error.message : error);
             res.status(500).send({ error: 'Failed to check dependencies' });
         }
-    }
-
-    private async discoverService(type: string): Promise<string> {
-        const response = await axios.get(`http://${this.postOfficeUrl}/requestComponent?type=${type}`);
-        const services = response.data.components;
-        if (services.length === 0) {
-          throw new Error(`No ${type} service available`);
-        }
-        return services[0].url;
-    }
-
-    async createAgentSetContainer() {
-        const container = await this.docker.createContainer({
-          Image: 'agentset:latest',
-          Env: [
-            `POSTOFFICE_URL={${this.postOfficeUrl}}`,
-            `PORT=5090`,
-          ],
-          NetworkingConfig: {
-            EndpointsConfig: {
-              mcs_network: {}
-            }
-          }
-        });
-    
-        await container.start();
-    
-        const containerInfo = await container.inspect();
-        const ipAddress = containerInfo.NetworkSettings.Networks.mcs_network.IPAddress;
-    
-        // Register the new AgentSet with PostOffice
-        await axios.post(`http://${this.postOfficeUrl}/registerComponent`, {
-          type: 'AgentSet',
-          url: `http://${ipAddress}:5090`,
-          name: `AgentSet-${ipAddress}`
-        });
     }
 
     private async checkBlockedAgents(req: express.Request, res: express.Response) {

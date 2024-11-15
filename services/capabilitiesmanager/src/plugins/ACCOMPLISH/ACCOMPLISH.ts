@@ -128,7 +128,15 @@ export async function execute(inputs: Map<string, PluginInput> | Record<string, 
         const goal = inputMap.get('goal')?.inputValue || inputMap.get('description')?.inputValue || false;
 
         if (!goal) {
-            throw new Error('Goal or description is required for ACCOMPLISH plugin');
+            console.log('Goal or description is required for ACCOMPLISH plugin');
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: 'Inputs did not contain a goal.',
+                result: null,
+                error: 'No goal provided to ACCOMPLISH plugin'
+            }];
         }
         const prompt = generatePrompt(goal.toString());
         const messages = [{ role: 'user', content: prompt }];
@@ -215,7 +223,8 @@ async function parseJsonWithErrorCorrection(jsonString: string): Promise<any> {
         });
 
         return parseJSON(correctedJson);
-    } catch (error) { analyzeError(error as Error);
+    } catch (error) { 
+        analyzeError(error as Error);
         console.log('JSON correction failed, attempting to use LLM...');
         console.log('Malformed JSON:', correctedJson);
             
@@ -236,8 +245,9 @@ async function parseJsonWithErrorCorrection(jsonString: string): Promise<any> {
             console.log('LLM corrected JSON:', correctedByLLM);
             return parseJSON(correctedByLLM);
         } catch (llmError) {
+            analyzeError(llmError as Error);
             console.error('LLM correction failed:', llmError);
-            throw new Error(`Failed to parse JSON even with LLM assistance: ${llmError}`);
+            return '';
         }
     }
 }
@@ -254,7 +264,7 @@ async function queryBrain(messages: { role: string, content: string }[]): Promis
         return response.data.response;
     } catch (error) { analyzeError(error as Error);
         console.error('Error querying Brain:', error instanceof Error ? error.message : error);
-        throw new Error('Failed to query Brain');
+        return '';
     }
 }
 

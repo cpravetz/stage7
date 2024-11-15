@@ -7,8 +7,15 @@ export async function execute(inputs: Map<string, PluginInput>): Promise<PluginO
     try {
         const searchTerm = inputs.get('searchTerm')?.inputValue;
         if (!searchTerm) {
-            throw new Error('Search term is required for SEARCH plugin');
-        }
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: `no search term provided to SEARCH plugin`,
+                result: null,
+                error: `no search term provided to SEARCH plugin`
+            }];
+            }
 
         const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(searchTerm)}`;
         const response = await axios.get(url);

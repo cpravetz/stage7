@@ -19,8 +19,8 @@ export async function getServiceUrls(): Promise<{
         const response = await api.get(`http://${POSTOFFICE_URL}/getServices`);
         const { capabilitiesManagerUrl, brainUrl, trafficManagerUrl, librarianUrl } = response.data;
         return { capabilitiesManagerUrl, brainUrl, trafficManagerUrl, librarianUrl };
-    } catch (error) { analyzeError(error as Error);
+    } catch (error) { 
         console.error('Failed to retrieve service URLs from PostOffice:', error instanceof Error ? error.message : error);
-        throw new Error('Failed to retrieve service URLs.');
+        return { capabilitiesManagerUrl: 'capabilitiesmanager:5060', brainUrl: 'brain:5070', trafficManagerUrl: 'trafficmanager:5080', librarianUrl: ''librarian:5040'' };
     }
 }

@@ -38,16 +38,19 @@ export class BaseModel {
 
     chat(messages: ExchangeType, options: { max_length?: number, temperature?: number }): Promise<string> {
         if (!this.llminterface || !this.service) {
-            throw new Error('No interface or service set for model');
+            console.log(`No interface or service set for model ${this.name} `);
+            return Promise.resolve('');
         }
         return this.llminterface.chat(this.service, messages, options);
     }
     convert(conversationType: LLMConversationType, convertParams: ConvertParamsType): Promise<any> {
         if (!this.llminterface || !this.service) {
-            throw new Error('No interface or service set for model');
+            console.log(`No interface or service set for model ${this.name} `);
+            return Promise.resolve('');
         }
         if (!this.llminterface.convert || !this.contentConversation.includes(conversationType)) {
-            throw new Error('No convert function set for interface');
+            console.log(`No convert function set for interface for model ${this.llminterface.interfaceName} `);
+            return Promise.resolve('');
         }
         convertParams.service = this.service;
         return this.llminterface.convert(this.service, conversationType, convertParams);

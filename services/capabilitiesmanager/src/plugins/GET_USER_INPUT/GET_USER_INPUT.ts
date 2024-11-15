@@ -15,7 +15,14 @@ export async function execute(inputs: Map<string, PluginInput>): Promise<PluginO
             const answerType = inputs.get('answerType')?.inputValue || 'text';
 
             if (question === '') {
-                throw new Error('Question is required for GET_USER_INPUT plugin');
+                return [{
+                    success: false,
+                    name: 'error',
+                    resultType: PluginParameterType.ERROR,
+                    resultDescription: 'Error',
+                    result: null,
+                    error: 'Question is required for GET_USER_INPUT plugin'
+                }];
             }
 
             const response = await sendUserInputRequest({ question, choices, answerType });
@@ -44,9 +51,10 @@ async function sendUserInputRequest(request: { question: string; choices?: strin
             const postOfficeUrl = process.env.POSTOFFICE_URL || 'postoffice:5020';
             const response = await axios.post(`http://${postOfficeUrl}/sendUserInputRequest`, request);
             return response.data.result;
-        } catch (error) { analyzeError(error as Error);
+        } catch (error) { 
+            analyzeError(error as Error);
             console.error('Error sending user input request:', error instanceof Error ? error.message : error);
-            throw new Error('Failed to get user input');
+            return '';
         }
     }
 

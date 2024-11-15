@@ -201,7 +201,7 @@ export class SecurityManager extends BaseEntity {
                             authProvider: 'google'
                         });
                     }
-                    return done(null, user);
+                    return done(null, user!);
                 } catch (error) { analyzeError(error as Error);
                     return done(error);
                 }
@@ -431,7 +431,7 @@ export class SecurityManager extends BaseEntity {
         // If headers have already been sent, do nothing
     }
 
-    private async createUserFromOAuth(userData: OAuthUserData): Promise<User> {
+    private async createUserFromOAuth(userData: OAuthUserData): Promise<User | null> {
         try {
             // Generate a unique ID for the new user
             const userId = uuidv4();
@@ -458,7 +458,7 @@ export class SecurityManager extends BaseEntity {
             return newUser;
         } catch (error) { analyzeError(error as Error);
             console.error('Error creating OAuth user:', error instanceof Error ? error.message : error);
-            throw new Error('Failed to create user from OAuth data');
+            return null;
         }
     }
 

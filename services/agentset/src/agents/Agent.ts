@@ -522,8 +522,16 @@ Please consider this context and the available plugins when planning and executi
     
             const response = await axios.post(`http://${this.agentSetUrl}/addAgent`, subAgentConfig);
     
-            if (response.status !== 200) {
-                throw new Error(`Failed to create sub-agent: ${response.data.error || 'Unknown error'}`);
+            if (response.status >= 300) {
+                console.error('Failed to create sub-agent:', response.data.error || 'Unknown error');
+                return [{
+                    success: false,
+                    name: 'error',
+                    resultType: PluginParameterType.ERROR,
+                    resultDescription:'Error',
+                    result: null,
+                    error: `Failed to create sub-agent: ${response.data.error || 'Unknown error'}`
+                }];
             }
     
             return [{

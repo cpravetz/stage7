@@ -110,7 +110,7 @@ export const analyzeError = async (error: Error) => {
     return remediationGuidance;
   } catch (err) {
     console.error('Error analyzing error:', err instanceof Error ? err.message : err);
-    //throw err;
+    return `There is an error analyzing the error: ${err instanceof Error ? err.message : 'Unknown error'}`;
   }
 }
 

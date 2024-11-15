@@ -83,10 +83,9 @@ export class CapabilitiesManager extends BaseEntity {
             console.log('Setting up express server...');
             await this.setupServer();
             console.log('CapabilitiesManager initialization complete');
-        } catch (error) { analyzeError(error as Error);
+        } catch (error) { 
+            analyzeError(error as Error);
             console.error('Failed to start CapabilitiesManager:', error instanceof Error ? error.message : error);
-            // Rethrow to let the process manager handle restart if needed
-            throw error;
         }
     }
 
@@ -217,10 +216,22 @@ export class CapabilitiesManager extends BaseEntity {
     private async executeActionVerb(req: express.Request, res: express.Response) {
         const { step } = MapSerializer.transformFromSerialization(req.body);
         if (!step.actionVerb || typeof step.actionVerb !== 'string') {
-            throw new Error('Invalid or missing verb');
+            res.status(400).send([{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                result: 'Invalid or missing verb',
+                error: 'Invalid or missing verb'
+            }]);
         }
         if (!step.inputs || typeof step.inputs !== 'object') {
-            throw new Error('Invalid or missing inputs');
+            res.status(400).send([{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                result: 'Invalid or missing inputs',
+                error: 'Invalid or missing inputs'
+            }]);
         }
 
         // Validate and standardize inputs for known plugins
@@ -264,9 +275,13 @@ export class CapabilitiesManager extends BaseEntity {
             } else if (pluginDef.language === 'python') {
                 result = await this.executePythonPlugin(pluginDef, step.inputs);
             } else {
-                throw new Error(`Unsupported plugin language: ${pluginDef.language}`);
-            }
-                
+                res.status(402).send({
+                    success: false,
+                    resultType: PluginParameterType.ERROR,
+                    error: `Unsupported plugin language: ${pluginDef.language}`
+                });
+                return;
+            }                
             res.status(200).send(MapSerializer.transformForSerialization(result));
         } catch (error) { analyzeError(error as Error);
             console.error(`Error executing action verb ${step.actionVerb}:`, error instanceof Error ? error.message : error);
@@ -306,7 +321,12 @@ export class CapabilitiesManager extends BaseEntity {
             }
 
             if (!input && inputDef.required ) {
-                throw new Error(`Missing required input "${inputName}" for ${step.actionVerb}`);
+                console.log(`Missing required input "${inputName}" for ${step.actionVerb}`);
+                validInputs.set(inputName, {
+                    inputName,
+                    inputValue: null,
+                    args: {}
+                });
             }
 
             if (input) {
@@ -327,7 +347,15 @@ export class CapabilitiesManager extends BaseEntity {
             const pluginModule = await import(mainFilePath);
             
             if (typeof pluginModule.execute !== 'function') {
-                throw new Error(`Plugin ${plugin.verb} does not export an execute function`);
+                return [{
+                    success: false,
+                    name: 'error',
+                    resultType: PluginParameterType.ERROR,
+                    error: `Plugin ${plugin.verb} does not export an execute function`,
+                    resultDescription: `Plugin ${plugin.verb} does not export an execute function`,
+                    result: null
+                }];
+    
             }
             console.log(`Executing JS plugin <${plugin.verb}> with inputs:`, inputs);
 
@@ -416,6 +444,17 @@ export class CapabilitiesManager extends BaseEntity {
                 console.log(`Brain suggests creating new plugin for ${step.actionVerb}`);
                 try {
                     const newPlugin = await this.requestEngineerForPlugin(step.actionVerb, step.inputs);
+                    if (!newPlugin) {
+                        console.error('Failed to create new plugin');
+                        return {
+                            success: false,
+                            name: 'error',
+                            resultType: PluginParameterType.ERROR,
+                            mimeType: 'text/plain',
+                            resultDescription: `Unable to create plugin for ${step.actionVerb}`,
+                            result: `Unable to create plugin for ${step.actionVerb}. Please try breaking down the task into smaller steps.`
+                        };
+                    }
                     await this.createPluginFiles(newPlugin);
                     this.actionVerbs.set(step.actionVerb, newPlugin);
                     return {
@@ -472,9 +511,9 @@ export class CapabilitiesManager extends BaseEntity {
             await fs.writeFile(path.join(pluginDir, 'plugin.js'), pluginJsContent);
 
             console.log(`Created plugin files for ${plugin.verb}`);
-        } catch (error) { analyzeError(error as Error);
+        } catch (error) { 
+            analyzeError(error as Error);
             console.error(`Error creating plugin files for ${plugin.verb}:`, error instanceof Error ? error.message : error);
-            throw error;
         }
     }
 
@@ -497,20 +536,22 @@ export class CapabilitiesManager extends BaseEntity {
         `;
     }
 
-    private async requestEngineerForPlugin(verb: string, context: Map<string, PluginInput>): Promise<Plugin> {
+    private async requestEngineerForPlugin(verb: string, context: Map<string, PluginInput>): Promise<Plugin | undefined> {
         console.log(`Requesting Engineer to create plugin for ${verb}`);
         try {
             const response = await api.post(`http://${this.engineerUrl}/createPlugin`, MapSerializer.transformForSerialization({ verb, context }));
             const newPlugin = response.data;
             
             if (!newPlugin || !newPlugin.entryPoint) {
-                throw new Error('Engineer returned invalid plugin data');
+                console.error('Engineer returned invalid plugin data');
+                return undefined;
             }
             console.log(`Successfully created new plugin for ${verb}`);
             return newPlugin;
-        } catch (error) { analyzeError(error as Error);
+        } catch (error) { 
+            analyzeError(error as Error);
             console.error(`Engineer plugin creation failed for ${verb}:`, error instanceof Error ? error.message : error);
-            throw new Error(`Plugin creation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+            return undefined;
         }
     }
     

@@ -20,7 +20,7 @@ export class AgentPersistenceManager {
 
     async saveAgent(agent: Agent): Promise<void> {
         const state = MapSerializer.transformForSerialization(agent);
-    
+        
         try {
             const response = await api.post(`http://${agent.librarianUrl}/storeData`, {
                 id: agent.id,
@@ -28,10 +28,8 @@ export class AgentPersistenceManager {
                 storageType: 'mongo'
             });
             console.log('Agent state saved successfully.');
-            return response.data;
         } catch (error) { analyzeError(error as Error);
             console.error('Error saving agent state:', error instanceof Error ? error.message : error);
-            throw new Error('Failed to save agent state.');
         }
     }
 
@@ -61,7 +59,6 @@ export class AgentPersistenceManager {
             });
         } catch (error) { analyzeError(error as Error);
             console.error('Error saving work product:', error instanceof Error ? error.message : String(error));
-            throw new Error('Failed to save work product.');
         }
     }
 

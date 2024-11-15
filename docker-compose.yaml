@@ -11,6 +11,7 @@ services:
       - PORT=5020
       - POSTOFFICE_URL=postoffice:5020
       - SECURITYMANAGER_URL=securitymanager:5010
+      - MISSIONCONTROL_URL=missioncontrol:5030
     ports:
       - "5020:5020"
 
