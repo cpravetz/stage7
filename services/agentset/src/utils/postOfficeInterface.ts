@@ -21,6 +21,6 @@ export async function getServiceUrls(): Promise<{
         return { capabilitiesManagerUrl, brainUrl, trafficManagerUrl, librarianUrl };
     } catch (error) { 
         console.error('Failed to retrieve service URLs from PostOffice:', error instanceof Error ? error.message : error);
-        return { capabilitiesManagerUrl: 'capabilitiesmanager:5060', brainUrl: 'brain:5070', trafficManagerUrl: 'trafficmanager:5080', librarianUrl: ''librarian:5040'' };
+        return { capabilitiesManagerUrl: 'capabilitiesmanager:5060', brainUrl: 'brain:5070', trafficManagerUrl: 'trafficmanager:5080', librarianUrl: 'librarian:5040' };
     }
 }

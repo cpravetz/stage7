@@ -2,7 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import axios from 'axios';
 import express from 'express';
 import { AgentStatus } from '../utils/agentStatus';
-import { getServiceUrls } from '../utils/postOffice';
+import { getServiceUrls } from '../utils/postOfficeInterface';
 import { WorkProduct } from '../utils/WorkProduct';
 import { MapSerializer, BaseEntity } from '@cktmcs/shared';
 import { AgentPersistenceManager } from '../utils/AgentPersistenceManager';
