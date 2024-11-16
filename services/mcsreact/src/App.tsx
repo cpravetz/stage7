@@ -141,6 +141,7 @@ export const App: React.FC = () => {
     if (savedToken) {
         setToken(savedToken);
         setIsAuthenticated(true);
+        connectWebSocket();
     }
 }, []);
 
@@ -149,6 +150,7 @@ const handleLogin = async (email: string, password: string) => {
       await securityClient.login(email, password);
       setToken(securityClient.getAccessToken()!);
       setIsAuthenticated(true);
+      connectWebSocket();
   } catch (error) {
       console.error('Login failed:', error instanceof Error ? error.message : error);
   }
@@ -179,44 +181,48 @@ const handleLogout = async () => {
   }
 };    
 
+const connectWebSocket = () => {
+  const authToken = localStorage.getItem('authToken');
+
+  if (!isAuthenticated || !clientId || !authToken || (authToken === null)) {
+    return;
+  }
+  // Include the token in the WebSocket connection URL
+  const wsUrl = `${WS_URL}?clientId=${clientId}&token=${authToken}`;
+  ws.current = new WebSocket(wsUrl);
+
+  ws.current.onopen = () => {
+    console.log('WebSocket connection established with PostOffice');
+    ws.current?.send(JSON.stringify({ 
+      type: 'CLIENT_CONNECT', 
+      clientId: clientId
+    }));
+  };
+
+  ws.current.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    console.log('Received WebSocket message:', data);
+    if (data.type === 'CONNECTION_CONFIRMED') {
+      console.log('Connection confirmed by server');
+    } else {
+      handleWebSocketMessage(data);
+    }
+  };
+
+  ws.current.onerror = (error) => {
+    console.error('WebSocket error:', error);
+  };
+
+  ws.current.onclose = () => {
+    console.log('WebSocket connection closed. Attempting to reconnect...');
+    setTimeout(connectWebSocket, 5000);
+  };
+};
+
 useEffect(() => {
   const authToken = localStorage.getItem('authToken');
   
-  const connectWebSocket = () => {
-    if (!isAuthenticated || !clientId || !authToken || (authToken === null)) {
-      return;
-    }
-    // Include the token in the WebSocket connection URL
-    const wsUrl = `${WS_URL}?clientId=${clientId}&token=${authToken}`;
-    ws.current = new WebSocket(wsUrl);
 
-    ws.current.onopen = () => {
-      console.log('WebSocket connection established with PostOffice');
-      ws.current?.send(JSON.stringify({ 
-        type: 'CLIENT_CONNECT', 
-        clientId: clientId
-      }));
-    };
-
-    ws.current.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      console.log('Received WebSocket message:', data);
-      if (data.type === 'CONNECTION_CONFIRMED') {
-        console.log('Connection confirmed by server');
-      } else {
-        handleWebSocketMessage(data);
-      }
-    };
-
-    ws.current.onerror = (error) => {
-      console.error('WebSocket error:', error);
-    };
-
-    ws.current.onclose = () => {
-      console.log('WebSocket connection closed. Attempting to reconnect...');
-      setTimeout(connectWebSocket, 5000);
-    };
-  };
   connectWebSocket(); // Connect to WebSocket on mount
 
   return () => {
@@ -358,7 +364,7 @@ useEffect(() => {
         </div>
         <div className="side-panel">
         <div className="side-panel-header">
-            <h3 className="app-name">stage7</h3>
+            <div className="app-name"><h3>stage7</h3></div>
             <button onClick={handleLogout} className="logout-button">Logout</button>
           </div>
           {!showSavedMissions && (

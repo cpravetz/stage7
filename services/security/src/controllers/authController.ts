@@ -17,7 +17,6 @@ export const register = async (req: Request, res: Response, next: NextFunction):
         const hashedPassword = await bcrypt.hash(password, 10);
         const user = await createUser({ email, password: hashedPassword });
         console.log('Registerd User registered successfully:', user);
-        console.log('Secret Key:', process.env.JWT_SECRET);
         const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET || 'your-secret-key', { expiresIn: '1h' });
         res.status(201).json({ token, user: { id: user.id, email: user.email } });
     } catch (error) {
@@ -47,7 +46,6 @@ export const login = (req: Request, res: Response, next: NextFunction): void => 
         res.status(401).json({ message: 'Authentication failed' });
         return;
     }
-    console.log('Secret Key:', process.env.JWT_SECRET);
     const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET || 'your-secret-key', { expiresIn: '1h' });
     console.log('Login successful for user:', user.email);
     res.json({ token, user: { id: user.id, email: user.email } });

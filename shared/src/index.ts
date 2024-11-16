@@ -1,5 +1,5 @@
 export * from './BaseEntity';
-export * from './SecurityMiddleware';
+//export * from './SecurityMiddleware';
 export * from './types/Message';
 export * from './types/Plugin';
 export * from './types/Mission';
