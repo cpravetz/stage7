@@ -1,4 +1,4 @@
-import axios from 'axios';
+/*import axios from 'axios';
 import express, { Request, Response, NextFunction } from 'express';
 
 const securityManagerUrl = process.env.SECURITY_MANAGER_URL || 'securitymanager:5010';
@@ -11,7 +11,7 @@ export const verifyToken = async (req: Request, res: Response, next: NextFunctio
     }
 
     try {
-        const response = await axios.get(`http://${securityManagerUrl}/auth/verify`, {
+        const response = await axios.get(`http://${securityManagerUrl}/verify`, {
             headers: { Authorization: `Bearer ${token}` }
         });
 
@@ -25,4 +25,4 @@ export const verifyToken = async (req: Request, res: Response, next: NextFunctio
         console.error('Error verifying token:', error instanceof Error ? error.message : error);
         res.status(500).json({ error: 'Failed to authenticate token' });
     }
-};
+};*/

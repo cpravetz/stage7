@@ -43,3 +43,7 @@ body {
     align-items: center;
     padding: 10px;
   }
+
+  .app-name {
+    color: violet;
+  }

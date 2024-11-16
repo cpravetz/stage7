@@ -7,6 +7,7 @@ import { Component } from './types/Component';
 import { Message, MessageType } from '@cktmcs/shared';
 import axios from 'axios';
 import { analyzeError } from '@cktmcs/errorhandler';
+import bodyParser from 'body-parser';
 
 
 const api = axios.create({
@@ -47,7 +48,8 @@ export class PostOffice {
 
         this.app.use(cors(corsOptions));
 
-        this.app.use(express.json());
+        this.app.use(bodyParser.json());
+        this.app.use(bodyParser.urlencoded({ extended: true }));
         this.app.use(this.logRequest);
 
         // Explicitly set CORS headers for all routes
@@ -116,11 +118,14 @@ export class PostOffice {
 
     private setupWebSocket() {
         this.wss.on('connection', async (ws: WebSocket, req: http.IncomingMessage) => {
+            console.log('New WebSocket connection attempt');
             const url = new URL(req.url!, `http://${req.headers.host}`);
             const clientId = url.searchParams.get('clientId');
             const token = url.searchParams.get('token');
-    
-            if (!clientId || !token) {
+
+            console.log(`WebSocket connection attempt - ClientID: ${clientId}, Token: ${token}`);
+
+            if (!clientId || !token || (token === null)) {
                 console.error('Client ID or token missing');
                 ws.close(1008, 'Client ID or token missing');
                 return;
@@ -134,7 +139,7 @@ export class PostOffice {
             }
 
             this.clients.set(clientId, ws);
-            console.log(`Client ${clientId} connected`);
+            console.log(`Client ${clientId} connected successfully`);
     
             ws.on('message', (message: string) => {
                 try {
@@ -484,32 +489,40 @@ export class PostOffice {
         }
     
         console.log('Original URL:', req.originalUrl);
+        console.log('Request method:', req.method);
+        console.log('Request body:', req.body);
         
         const securityManagerPath = req.originalUrl.split('/securityManager')[1] || '/';
         const fullUrl = `http://${this.securityManagerUrl}${securityManagerPath}`;
         console.log(`Forwarding request to SecurityManager: ${fullUrl}`);
     
         try {
-            const response = await axios({
-                method: req.method,
+            const requestConfig = {
+                method: req.method as any,
                 url: fullUrl,
                 data: req.body,
-                headers: req.headers,
-                params: req.query
-            });
+                headers: {
+                    ...req.headers,
+                    host: this.securityManagerUrl.split(':')[0],
+                    'Content-Type': 'application/json'
+                },
+                params: req.query,
+                validateStatus: function (status:any) {
+                    return status < 500;
+                }
+            };
     
-            // Log the response from SecurityManager
+            console.log('Request being sent to SecurityManager:', JSON.stringify(requestConfig, null, 2));
+    
+            const response = await axios(requestConfig);
+
             console.log('Response from SecurityManager:', response.data);
-    
-            // Send the response back to the client
             res.status(response.status).json(response.data);
-        } catch (error) { analyzeError(error as Error);
-            console.error(`Error forwarding request to SecurityManager:`, error instanceof Error ? error.message : error);
+        } catch (error) {
+            console.error(`Error forwarding request to SecurityManager:`, error);
             if (axios.isAxiosError(error) && error.response) {
-                // If it's an Axios error with a response, send that response to the client
                 res.status(error.response.status).json(error.response.data);
             } else {
-                // For other types of errors, send a generic error message
                 res.status(500).json({ error: 'Internal server error' });
             }
         }
@@ -517,17 +530,24 @@ export class PostOffice {
 
     private async verifyToken(clientId: string, token: string): Promise<boolean> {
         try {
-          const response = await axios.post(`http://${this.securityManagerUrl}/auth/verify`, { token }, {
-            headers: {
-              'Authorization': `Bearer ${token}`
-            }
-          });
-          return response.data.valid;
+            console.log(`Verifying token ${token} for client ${clientId}`);
+            const response = await axios.post(`http://${this.securityManagerUrl}/verify`, {}, {
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
+            });
+            console.log(`Verification response:`, response.data);
+            return response.data.valid;
         } catch (error) {
-          console.error(`Error verifying token for client ${clientId}:`, error);
-          return false;
+            console.error(`Error verifying token for client ${clientId}:`, error);
+            if (axios.isAxiosError(error)) {
+                console.error('Response data:', error.response?.data);
+                console.error('Response status:', error.response?.status);
+            }
+            return false;
         }
-      }
+    }
+
 }
 
 new PostOffice();

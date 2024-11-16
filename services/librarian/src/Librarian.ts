@@ -68,14 +68,16 @@ export class Librarian extends BaseEntity {
         }
     
         try {
+            let result;
             if (storageType === 'mongo') {
-                const result = await storeInMongo(collection, data);
+                result = await storeInMongo(collection, data);
                 console.log('Result of storeInMongo: ', result);
             } else if (storageType === 'redis') {
-                await storeInRedis(`data:${id}`, JSON.stringify(data));
+                result = await storeInRedis(`data:${id}`, JSON.stringify(data));
             } else {
                 return res.status(400).send({ error: 'Invalid storage type' });
             }
+            return res.status(200).send({ status: 'Data stored successfully', id: result });
         } catch (error) { analyzeError(error as Error);
             console.error('Error in storeData:', error instanceof Error ? error.message : error);
             res.status(500).send({ error: 'Failed to store data', details: error instanceof Error ? error.message : String(error) });

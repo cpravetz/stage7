@@ -1,6 +1,7 @@
 import axios, { AxiosInstance, AxiosError, AxiosRequestConfig } from 'axios';
 
 const AUTH_TOKEN_KEY = 'authToken';
+const ACCESS_TOKEN_KEY = 'accessToken';
 const REFRESH_TOKEN_KEY = 'refreshToken';
 
 interface RetryableRequest extends AxiosRequestConfig {
@@ -10,6 +11,7 @@ interface RetryableRequest extends AxiosRequestConfig {
 export class SecurityClient {
     private postOfficeUrl: string;
     private api: AxiosInstance;
+    private refreshTokenTimeout: NodeJS.Timeout | null = null;
 
     constructor(postOfficeUrl: string) {
         this.postOfficeUrl = postOfficeUrl.startsWith('http://') ? postOfficeUrl : `http://${postOfficeUrl}`;
@@ -25,14 +27,23 @@ export class SecurityClient {
 
         this.api.interceptors.response.use(
             (response) => response,
-            async (error: AxiosError) => {
-                const originalRequest = error.config as RetryableRequest;
-                if (error.response?.status === 401 && originalRequest && !originalRequest._retry) {
+            async (error) => {
+                const originalRequest = error.config;
+                if (error.response.status === 401 && !originalRequest._retry) {
                     originalRequest._retry = true;
-                    const newToken = await this.refreshAccessToken();
-                    if (newToken && originalRequest.headers) {
-                        originalRequest.headers['Authorization'] = `Bearer ${newToken}`;
-                        return this.api(originalRequest);
+                    const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
+                    if (refreshToken) {
+                        try {
+                            const response = await this.api.post(`${this.postOfficeUrl}/securityManager/refresh-token`, { refreshToken });
+                            const { accessToken } = response.data;
+                            localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
+                            this.api.defaults.headers.common['Authorization'] = `Bearer ${accessToken}`;
+                            return this.api(originalRequest);
+                        } catch (refreshError) {
+                            // Refresh token is invalid, logout the user
+                            this.logout();
+                            return Promise.reject(refreshError);
+                        }
                     }
                 }
                 return Promise.reject(error);
@@ -45,23 +56,61 @@ export class SecurityClient {
     }
 
     async login(email: string, password: string): Promise<void> {
-        const response = await this.api.post('/securityManager/login', { email, password });
-        this.storeTokens(response.data.token, response.data.refreshToken);
+        console.log('Logging in user:', email);
+        try {
+            const response = await this.api.post(`${this.postOfficeUrl}/securityManager/login`, 
+                { email, password },
+                {
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                }
+            );
+            const { token, user } = response.data;
+            localStorage.setItem(ACCESS_TOKEN_KEY, token);
+            this.api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+            console.log('Login successful:', user);
+        } catch (error) {
+            console.error('Login error:', error);
+            throw error;
+        }
     }
 
     async logout(): Promise<void> {
-        try {
-            await this.api.post(`/securityManager/logout`, {}, { headers: this.getAuthHeader() });
-            this.clearTokens();
-        } catch (error) {
-            console.error('Logout failed:', error instanceof Error ? error.message : error);
-            throw error;
+        await this.api.post(`${this.postOfficeUrl}/securityManager/logout`);
+        this.clearTokens();
+        delete this.api.defaults.headers.common['Authorization'];
+        if (this.refreshTokenTimeout) {
+            clearTimeout(this.refreshTokenTimeout);
+        }
+    }
+
+    private setupRefreshTokenTimer() {
+        if (this.refreshTokenTimeout) {
+            clearTimeout(this.refreshTokenTimeout);
+        }
+        this.refreshTokenTimeout = setTimeout(() => this.refreshToken(), 50 * 60 * 1000); // Refresh 10 minutes before expiry
+    }
+
+    private async refreshToken() {
+        const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
+        if (refreshToken) {
+            try {
+                const response = await this.api.post(`${this.postOfficeUrl}/securityManager/refresh-token`, { refreshToken });
+                const { accessToken } = response.data;
+                localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
+                this.api.defaults.headers.common['Authorization'] = `Bearer ${accessToken}`;
+                this.setupRefreshTokenTimer();
+            } catch (error) {
+                // If refresh fails, logout the user
+                this.logout();
+            }
         }
     }
 
     async register(name: string, email: string, password: string): Promise<void> {
         try {
-            const response = await this.api.post('/securityManager/register', { name, email, password });
+            const response = await this.api.post(`${this.postOfficeUrl}/securityManager/register`, { name, email, password });
             this.storeTokens(response.data.token, response.data.refreshToken);
         } catch (error) {
             console.error('Registration error:', error instanceof Error ? error.message : error);
@@ -75,8 +124,7 @@ export class SecurityClient {
             if (!refreshToken) {
                 throw new Error('No refresh token available');
             }
-
-            const response = await this.api.post('/securityManager/refreshToken', { refreshToken });
+            const response = await this.api.post(`${this.postOfficeUrl}/securityManager/refresh-token`, { refreshToken });
             this.storeTokens(response.data.token, response.data.refreshToken);
             return response.data.token;
         } catch (error) {

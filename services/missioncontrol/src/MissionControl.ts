@@ -340,30 +340,25 @@ class MissionControl extends BaseEntity {
     private async verifyToken(req: Request, res: Response, next: NextFunction) {
         const clientId = req.body.clientId || req.query.clientId;
         const token = req.headers.authorization?.split(' ')[1];
-
-        if (!token) {
-            return res.status(401).json({ error: 'No token provided' });
-        }
-
-        try {
-            const response = await axios.post(`http://${this.securityManagerUrl}/auth/verify`, { token }, {
-                headers: {
-                    'Authorization': `Bearer ${token}`
+            try {
+                console.log(`Verifying token ${token} for client ${clientId}`);
+                const response = await axios.post(`http://${this.securityManagerUrl}/verify`, {}, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+                console.log(`Verification response:`, response.data);
+                return response.data.valid;
+            } catch (error) {
+                console.error(`Error verifying token for client ${clientId}:`, error);
+                if (axios.isAxiosError(error)) {
+                    console.error('Response data:', error.response?.data);
+                    console.error('Response status:', error.response?.status);
                 }
-            });
-
-            if (response.data.valid) {
-                (req as any).user = response.data.user;
-                next();
-            } else {
-                res.status(401).json({ error: 'Invalid token' });
+                return false;
             }
-        } catch (error) {
-            console.error(`Error verifying token for client ${clientId}:`, error);
-            res.status(401).json({ error: 'Failed to authenticate token' });
         }
     }
 
-}
 
 new MissionControl();

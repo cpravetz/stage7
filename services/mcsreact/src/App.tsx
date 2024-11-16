@@ -183,6 +183,9 @@ useEffect(() => {
   const authToken = localStorage.getItem('authToken');
   
   const connectWebSocket = () => {
+    if (!isAuthenticated || !clientId || !authToken || (authToken === null)) {
+      return;
+    }
     // Include the token in the WebSocket connection URL
     const wsUrl = `${WS_URL}?clientId=${clientId}&token=${authToken}`;
     ws.current = new WebSocket(wsUrl);
@@ -355,7 +358,7 @@ useEffect(() => {
         </div>
         <div className="side-panel">
         <div className="side-panel-header">
-            <h3>stage7</h3>
+            <h3 className="app-name">stage7</h3>
             <button onClick={handleLogout} className="logout-button">Logout</button>
           </div>
           {!showSavedMissions && (
