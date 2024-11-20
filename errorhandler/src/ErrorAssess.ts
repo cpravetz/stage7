@@ -4,6 +4,7 @@ import path from 'path';
 
 
 let processingError: boolean = false;
+const analyzedErrors: Set<string> = new Set();
 
 function serializeError(error: Error): string {
     const seen = new WeakSet();
@@ -67,6 +68,11 @@ function serializeError(error: Error): string {
 export const analyzeError = async (error: Error) => {
   try {
     if (processingError) return;
+    const errorKey = `${error.name}:${error.message}`;
+    if (analyzedErrors.has(errorKey)) {
+      console.log(`Error already analyzed: ${errorKey}`);
+      return;
+    }
     processingError = true;
     const brainUrl = process.env.BRAIN_URL || 'brain:5070';
     const stackTrace = error.stack;
@@ -88,7 +94,7 @@ export const analyzeError = async (error: Error) => {
         "end of response"
 
         The error is:
-        $ ${serializedError} 
+         ${serializedError} 
         
         and the source code is:
          ${sourceCode.substring(0,10000)}` }
@@ -102,6 +108,8 @@ export const analyzeError = async (error: Error) => {
     const remediationGuidance = response.data.response;
 
     processingError = false;
+    analyzedErrors.add(errorKey);
+
     console.log(`\n\n**** REMEDIATION GUIDANCE ****\n\n
     Error: ${error instanceof Error ? error.message : 'Unknown error'}\n\n
     Stack: ${stackTrace}\n\n
@@ -111,8 +119,11 @@ export const analyzeError = async (error: Error) => {
   } catch (err) {
     console.error('Error analyzing error:', err instanceof Error ? err.message : err);
     return `There is an error analyzing the error: ${err instanceof Error ? err.message : 'Unknown error'}`;
+  } finally {
+    processingError = false;
   }
 }
+
 
 async function getSourceCode(stackTrace: string | undefined): Promise<string> {
     if (!stackTrace) return 'No stack trace available';
@@ -187,3 +198,11 @@ async function getSourceCode(stackTrace: string | undefined): Promise<string> {
 
     return sourceCodeSnippets.join('\n\n');
 }
+
+export const clearAnalyzedErrors = (): void => {
+    analyzedErrors.clear();
+  };
+  
+  export const getAnalyzedErrorCount = (): number => {
+    return analyzedErrors.size;
+  };  
