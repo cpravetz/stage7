@@ -6,6 +6,14 @@ import { generateGuid } from './utils/generateGuid';
 import { BaseEntity, TrafficManagerStatistics, MissionStatistics, MessageType, PluginInput } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 
+interface CustomRequest extends Request {
+    user?: {
+      id?: string;
+      iat?: number;
+      exp?: number;
+      // Add any other properties that might be in the user object
+    };
+  }
 
 const api = axios.create({
     headers: {
@@ -35,7 +43,6 @@ class MissionControl extends BaseEntity {
     
         app.use((req: Request, res: Response, next: NextFunction) => {this.verifyToken(req, res, next)});
 
-
         app.post('/message', (req, res) => this.handleMessage(req, res));
 
         app.listen(this.port, () => {
@@ -46,6 +53,7 @@ class MissionControl extends BaseEntity {
     private async handleMessage(req: express.Request, res: express.Response) {
         const { type, sender, content, clientId } = req.body;
         const user = (req as any).user;
+        console.log(`user: `, user);
         const missionId = req.body.missionId ? req.body.missionId : (req.body.content.missionId ? req.body.content.missionId : null);
         console.log(`Received message of type ${type} from ${sender} for mission ${missionId}`);
         try {
@@ -248,8 +256,13 @@ class MissionControl extends BaseEntity {
 
     private async loadMissionState(missionId: string): Promise<Mission | null> {
         try {
-            const response = await api.get(`http://${this.librarianUrl}/loadData/${missionId}?storageType=mongo?collection=missions`);
-            return response.data;
+            const response = await api.get(`http://${this.librarianUrl}/loadData/${missionId}`, {
+                params: {
+                    storageType: 'mongo',
+                    collection: 'missions'
+                }
+            });
+            return response.data.data;
         } catch (error) { analyzeError(error as Error);
             console.error('Error loading mission state:', error instanceof Error ? error.message : error);
             return null;
@@ -337,28 +350,38 @@ class MissionControl extends BaseEntity {
         }
     }
 
-    private async verifyToken(req: Request, res: Response, next: NextFunction) {
+    private async verifyToken(req: CustomRequest, res: Response, next: NextFunction) {
         const clientId = req.body.clientId || req.query.clientId;
         const token = req.headers.authorization?.split(' ')[1];
-            try {
-                console.log(`Verifying token ${token} for client ${clientId}`);
-                const response = await axios.post(`http://${this.securityManagerUrl}/verify`, {}, {
-                    headers: {
-                        'Authorization': `Bearer ${token}`
-                    }
-                });
-                console.log(`Verification response:`, response.data);
-                return response.data.valid;
-            } catch (error) {
-                console.error(`Error verifying token for client ${clientId}:`, error);
-                if (axios.isAxiosError(error)) {
-                    console.error('Response data:', error.response?.data);
-                    console.error('Response status:', error.response?.status);
+        console.log(`Verifying token for client ${clientId}`);
+        console.log(`Token: ${token}`);
+    
+        if (!token) {
+            console.log('No token provided');
+            return res.status(401).json({ message: 'No token provided' });
+        }
+    
+        try {
+            const response = await axios.post(`http://${this.securityManagerUrl}/verify`, {}, {
+                headers: {
+                    'Authorization': `Bearer ${token}`
                 }
-                return false;
+            });
+            console.log('Token verification response:', response.data);
+    
+            if (response.data.valid) {
+                console.log('Token verified successfully');
+                req.user = response.data.user;
+                next();
+            } else {
+                console.log('Token verification failed');
+                res.status(401).json({ message: 'Invalid token' });
             }
+        } catch (error) {
+            console.error('Error during token verification:', error);
+            res.status(500).json({ message: 'Error verifying token' });
         }
     }
-
+}
 
 new MissionControl();

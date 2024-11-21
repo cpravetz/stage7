@@ -59,7 +59,6 @@ export class Librarian extends BaseEntity {
     private async storeData(req: express.Request, res: express.Response) {
     
         let { id, data, storageType, collection } = req.body;
-        console.log('Storing data:', req.body);
         collection = collection || 'mcsdata';
     
   
@@ -71,7 +70,6 @@ export class Librarian extends BaseEntity {
             let result;
             if (storageType === 'mongo') {
                 result = await storeInMongo(collection, data);
-                console.log('Result of storeInMongo: ', result);
             } else if (storageType === 'redis') {
                 result = await storeInRedis(`data:${id}`, JSON.stringify(data));
             } else {
@@ -86,8 +84,7 @@ export class Librarian extends BaseEntity {
 
     private async loadData(req: express.Request, res: express.Response) {
         const { id } = req.params;
-        const { storageType, collection = 'mcsdata' } = req.query;
-
+        const { storageType = 'mongo', collection = 'mcsdata' } = req.query;
         if (!id) {
             return res.status(400).send({ error: 'ID is required' });
         }
@@ -114,7 +111,6 @@ export class Librarian extends BaseEntity {
 
     private async storeWorkProduct(req: express.Request, res: express.Response) {
         const { agentId, stepId, data } = req.body;
-        console.log('Storing work product:', req.body);
     
         if (!agentId || !stepId ) {
             return res.status(400).send({ error: 'AgentId, StepId, and type are required' });
@@ -192,22 +188,18 @@ export class Librarian extends BaseEntity {
 
 
     private async searchData(req: express.Request, res: express.Response) {
-        const collection = req.query.collection;
-        const query = req.query.query || {};
-        const options = req.query.options || {};
+        const {collection, query = {}, options = {}} = req.body;
         const parsedOptions = options ? JSON.parse(JSON.stringify(options)) : {};
         // Convert string '1' to number 1 for MongoDB projection
         Object.keys(parsedOptions).forEach(key => {
             parsedOptions[key] = parsedOptions[key] === '1' ? 1 : parsedOptions[key];
         });
 
-        console.log(`Searching ${collection} for options:`, parsedOptions);
         if (collection === undefined) {
             return res.status(400).send({ error: 'Collection is required' });
         } 
         try {
             const result = await loadManyFromMongo(collection as string, query, parsedOptions);
-            console.log(`Search result:`, result);
             res.status(200).send({ data: result });
         } catch (error) { analyzeError(error as Error);
             res.status(500).send({ error: 'Failed to search data', details: error instanceof Error ? error.message : String(error) });

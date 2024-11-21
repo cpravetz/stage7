@@ -27,6 +27,9 @@ export const register = async (req: Request, res: Response, next: NextFunction):
 export const login = (req: Request, res: Response, next: NextFunction): void => {
     console.log('Login request received');
     console.log('Login Body:', JSON.stringify(req.body, null, 2));
+    
+    const secret = process.env.JWT_SECRET || 'your-secret-key';
+    console.log('Using secret for token generation:', secret);
 
     if (!req.body || typeof req.body !== 'object') {
         console.log('Request body is not an object:', req.body);
@@ -48,6 +51,7 @@ export const login = (req: Request, res: Response, next: NextFunction): void => 
     }
     const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET || 'your-secret-key', { expiresIn: '1h' });
     console.log('Login successful for user:', user.email);
+    console.log(`new token: ${token}`);
     res.json({ token, user: { id: user.id, email: user.email } });
 };
 
@@ -55,7 +59,7 @@ export const logout = (req: Request, res: Response) => {
     console.log('Logging out user:');
 
     // In a stateless JWT setup, logout is typically handled client-side
-    res.json({ message: 'Logout successful' });
+    res.status(200).json({ message: 'Logout successful' });
 };
 
 export const refreshToken = async (req: Request, res: Response, next: NextFunction) => {
@@ -77,9 +81,7 @@ export const refreshToken = async (req: Request, res: Response, next: NextFuncti
 
             // Generate a new access token
             const newToken = jwt.sign({ id: user.id }, process.env.JWT_SECRET!, { expiresIn: '1h' });
-
-            // Optionally, you could also generate a new refresh token here
-            // const newRefreshToken = jwt.sign({ id: user.id }, process.env.REFRESH_TOKEN_SECRET!, { expiresIn: '7d' });
+            console.log(`refreshed token: ${newToken}`);
 
             res.json({ 
                 message: 'Token refreshed successfully',
@@ -93,24 +95,47 @@ export const refreshToken = async (req: Request, res: Response, next: NextFuncti
     })(req, res, next);
 };
 
+
 export const verifyToken = (req: Request, res: Response, next: NextFunction): void => {
     console.log('Verifying token');
     console.log('Headers:', JSON.stringify(req.headers));
-    console.log('Body:', JSON.stringify(req.body));
     
-    const token = req.headers.authorization?.split(' ')[1] || req.body.token;
-    
-    if (!token) {
-        console.log('No token provided to verufyToken');
-        res.status(401).json({ message: 'No token provided' });
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+        console.log('No Authorization header provided');
+        res.status(401).json({ valid: false, message: 'No Authorization header provided' });
         return;
     }
+
+    const token = authHeader.split(' ')[1];
+    if (!token) {
+        console.log('No token provided in Authorization header');
+        res.status(401).json({ valid: false, message: 'No token provided in Authorization header' });
+        return;
+    }
+
+    console.log('Token to verify:', token);
+    console.log('JWT_SECRET:', process.env.JWT_SECRET);
+
     try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
-        console.log('Token verified successfully');
-        res.json({ valid: true, user: decoded });
+        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key') as any;
+        console.log('Token verified successfully. Decoded:', decoded);
+        
+        // Attach the user information to the request object
+        (req as any).user = { id: decoded.id || decoded.iat };
+        
+        res.status(200).json({ valid: true, user: decoded });
     } catch (error) {
         console.error('Token verification failed:', error);
-        res.status(401).json({ valid: false, message: 'Invalid token' });
+        if (error instanceof jwt.JsonWebTokenError) {
+            res.status(401).json({ valid: false, message: 'Invalid token: ' + error.message });
+            return;
+        } else if (error instanceof jwt.TokenExpiredError) {
+            res.status(401).json({ valid: false, message: 'Token expired' });
+            return ;
+        } else {
+            res.status(401).json({ valid: false, message: 'Token verification failed: ' + (error instanceof Error ? error.message : String(error)) });
+            return ;
+        }
     }
 };

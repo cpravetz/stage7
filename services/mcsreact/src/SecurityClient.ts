@@ -1,6 +1,5 @@
 import axios, { AxiosInstance, AxiosError, AxiosRequestConfig } from 'axios';
 
-const AUTH_TOKEN_KEY = 'authToken';
 const ACCESS_TOKEN_KEY = 'accessToken';
 const REFRESH_TOKEN_KEY = 'refreshToken';
 
@@ -52,7 +51,7 @@ export class SecurityClient {
     }
 
     public getAccessToken(): string | null {
-        return localStorage.getItem(AUTH_TOKEN_KEY);
+        return localStorage.getItem(ACCESS_TOKEN_KEY);
     }
 
     async login(email: string, password: string): Promise<void> {
@@ -143,12 +142,12 @@ export class SecurityClient {
     }
 
     private storeTokens(accessToken: string, refreshToken: string): void {
-        localStorage.setItem(AUTH_TOKEN_KEY, accessToken);
+        localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
         localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
     }
 
     private clearTokens(): void {
-        localStorage.removeItem(AUTH_TOKEN_KEY);
+        localStorage.removeItem(ACCESS_TOKEN_KEY);
         localStorage.removeItem(REFRESH_TOKEN_KEY);
     }
 }

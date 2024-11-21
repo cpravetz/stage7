@@ -10,6 +10,33 @@ export enum PluginParameterType {
     ANY = 'any'
 }
 
+export enum ConfigItemType {
+    CREDENTIAL = 'credential',  // Sensitive data like passwords
+    SETTING = 'setting',       // Regular configuration
+    SECRET = 'secret',         // Encrypted values
+    ENVIRONMENT = 'environment' // Environment variables
+}
+
+export interface ConfigItem {
+    key: string;
+    type: ConfigItemType;
+    description: string;
+    required: boolean;
+    default?: string;
+    validation?: {
+        pattern?: string;
+        minLength?: number;
+        maxLength?: number;
+        options?: string[];
+    };
+    value?: string;
+}
+
+export type environmentType = {
+    env: NodeJS.ProcessEnv;
+    credentials: ConfigItem[];
+};
+
 export interface EntryPointType {
     main: string;
     files: Record<string,string>[];
@@ -27,6 +54,15 @@ export interface Step {
     timeout?: number;
 }
 
+export interface MetadataType {
+    category: string[];
+    tags: string[];
+    complexity: number;
+    dependencies: string[];
+    version: string;
+    lastUsed?: Date;
+    usageCount?: number;
+}
 
 export interface Plugin {
     id: string;
@@ -37,6 +73,8 @@ export interface Plugin {
     outputDefinitions: PluginParameter[];
     entryPoint?: EntryPointType;
     language: 'javascript' | 'python';
+    configuration?: ConfigItem[];
+    metadata?: MetadataType;
 }
 
 export interface PluginParameter {

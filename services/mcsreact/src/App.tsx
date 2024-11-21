@@ -1,4 +1,4 @@
-  import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import UserInputModal from './components/UserInputModal';
 import TabbedPanel from './components/TabbedPanel';
 import TextInput from './components/TextInput';
@@ -58,7 +58,7 @@ export const App: React.FC = () => {
     });
   
     api.interceptors.request.use(async (config) => {
-      let token = getToken();
+      let token = securityClient.getAccessToken();
       if (!token) {
         try {
           token = await securityClient.refreshAccessToken();
@@ -67,13 +67,13 @@ export const App: React.FC = () => {
           } else {
             // Redirect to login page or handle authentication failure
             setIsAuthenticated(false);
-            setToken(null);
+            resetToken(null);
           }
         } catch (error) {
           console.error('Error refreshing token:', error);
           // Redirect to login page or handle authentication failure
           setIsAuthenticated(false);
-          setToken(null);
+          resetToken(null);
         }
       } else {
         config.headers['Authorization'] = `Bearer ${token}`;
@@ -86,8 +86,17 @@ export const App: React.FC = () => {
     return api;
   }, [securityClient]);
 
-  
-  const api = useMemo(() => createAPI(() => localStorage.getItem('authToken')), [createAPI]);
+
+  const resetToken = (newToken: string | null) => {
+    if (newToken === null) {
+      localStorage.removeItem('accessToken');
+    } else {
+      localStorage.setItem('accessToken', newToken);
+    }
+    setToken(newToken);
+  }
+
+  const api = useMemo(() => createAPI(() => localStorage.getItem('accessToken')), [createAPI]);
   
   const handleWebSocketMessage = useCallback((data: any) => {
     console.log('Processing WebSocket message:', data);
@@ -137,7 +146,7 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     // Check for existing token in localStorage
-    const savedToken = localStorage.getItem('authToken');
+    const savedToken = securityClient.getAccessToken();
     if (savedToken) {
         setToken(savedToken);
         setIsAuthenticated(true);
@@ -173,22 +182,22 @@ const handleRegister = async (name: string, email: string, password: string) => 
 
 const handleLogout = async () => {
   try {
-    await securityClient.logout();
+    securityClient.logout();
     setIsAuthenticated(false);
-    setToken(null);
+    resetToken(null);
   } catch (error) {
     console.error('Logout failed:', error instanceof Error ? error.message : error);
   }
 };    
 
 const connectWebSocket = () => {
-  const authToken = localStorage.getItem('authToken');
+  const accessToken = securityClient.getAccessToken();
 
-  if (!isAuthenticated || !clientId || !authToken || (authToken === null)) {
+  if (!isAuthenticated || !clientId || !accessToken || (accessToken === null)) {
     return;
   }
   // Include the token in the WebSocket connection URL
-  const wsUrl = `${WS_URL}?clientId=${clientId}&token=${authToken}`;
+  const wsUrl = `${WS_URL}?clientId=${clientId}&token=${accessToken}`;
   ws.current = new WebSocket(wsUrl);
 
   ws.current.onopen = () => {
@@ -220,7 +229,7 @@ const connectWebSocket = () => {
 };
 
 useEffect(() => {
-  const authToken = localStorage.getItem('authToken');
+  const accessToken = securityClient.getAccessToken();
   
 
   connectWebSocket(); // Connect to WebSocket on mount
@@ -240,13 +249,14 @@ useEffect(() => {
     try {
       if (!activeMission) {
         // Include the auth token in the createMission request
-        const authToken = localStorage.getItem('authToken');
+        const accessToken = securityClient.getAccessToken();
+        console.log(`Create mission token: ${accessToken}`);
         await api.post('/createMission', {
           goal: message,
           clientId
         }, {
           headers: {
-            'Authorization': `Bearer ${authToken}`
+            'Authorization': `Bearer ${accessToken}`
           }
         });
         setActiveMission(true);

@@ -73,7 +73,6 @@ export class PostOffice {
         this.app.post('/message', (req, res) => this.handleMessage(req, res));
 
         this.app.post('/sendMessage', (req, res) => {
-            console.log('Received message:', req.body);
             this.handleIncomingMessage(req, res);
         });
 
@@ -252,7 +251,7 @@ export class PostOffice {
         if (!token) {
             return res.status(401).json({ error: 'No authorization token provided' });
         }
-    
+        console.log(`createMission token: ${token}`);
         try {
             const missionControlUrl = this.getComponentUrl('MissionControl') || process.env.MISSIONCONTROL_URL;
             if (!missionControlUrl) {

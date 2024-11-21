@@ -4,7 +4,7 @@ FROM node:20-alpine as build
 # Set the working directory
 WORKDIR /app
 
-# Copy package.json files
+# Copy package.json and package-lock.json to the working directory
 COPY package*.json ./
 COPY shared/package*.json ./shared/
 COPY services/mcsreact/package*.json ./services/mcsreact/
@@ -18,7 +18,6 @@ RUN npm install --verbose --prefix services/mcsreact
 COPY shared ./shared
 COPY services/mcsreact ./services/mcsreact
 
-
 # Build the shared package
 WORKDIR /app/shared
 RUN npm run build
@@ -28,6 +27,7 @@ WORKDIR /app/services/mcsreact
 RUN npm run build
 
 # Set environment variables
+ENV NODE_ENV=production
 ENV REACT_APP_API_BASE_URL=http://localhost:5020
 ENV REACT_APP_WS_URL=ws://localhost:5020
 
@@ -40,5 +40,6 @@ COPY --from=build /app/services/mcsreact/build /usr/share/nginx/html
 # Expose port 80
 EXPOSE 80
 
-# Start nginx
+
+# Start the application
 CMD ["nginx", "-g", "daemon off;"]

@@ -9,7 +9,7 @@
     "test": "jest"
   },
   "dependencies": {
-    "@cktmcs/shared": "file:../../shared",
+    "@cktmcs/shared": "file:../shared",
     "axios": "^1.7.7"
   },
   "devDependencies": {

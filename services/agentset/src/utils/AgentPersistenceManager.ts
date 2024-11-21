@@ -22,10 +22,11 @@ export class AgentPersistenceManager {
         const state = MapSerializer.transformForSerialization(agent);
         
         try {
-            const response = await api.post(`http://${agent.librarianUrl}/storeData`, {
+            await api.post(`http://${this.librarianUrl}/storeData`, {
                 id: agent.id,
                 data: state,
-                storageType: 'mongo'
+                storageType: 'mongo',
+                collection: 'agents'
             });
             console.log('Agent state saved successfully.');
         } catch (error) { analyzeError(error as Error);
@@ -36,9 +37,9 @@ export class AgentPersistenceManager {
     async loadAgent(agentId: string): Promise<any | null> {
         try {
             const response = await axios.get(`http://${this.librarianUrl}/loadData/${agentId}`, {
-                params: { storageType: 'mongo' }
+                params: { storageType: 'mongo', collection: 'agents' }
             });
-            return MapSerializer.transformFromSerialization(response.data);
+            return MapSerializer.transformFromSerialization(response.data.data);
         } catch (error) { analyzeError(error as Error);
             console.error('Error loading agent state:', error instanceof Error ? error.message : error);
             return null;

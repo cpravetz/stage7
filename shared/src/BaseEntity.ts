@@ -11,6 +11,7 @@ export class BaseEntity {
   questions: string[] = [];
   port : string;
   registeredWithPostOffice: boolean = false;
+  lastAnswer: string = '';
 
   constructor(id: string, componentType: string, urlBase: string, port: string) {
     this.id = id;
@@ -55,24 +56,6 @@ export class BaseEntity {
     });
   }
 
-  onAnswer(answer: express.Request) : void { 
-    if (answer.body.questionGuid && this.questions.includes(answer.body.questionGuid)) {
-      this.questions = this.questions.filter(q => q !== answer.body.questionGuid);
-    }
-   };
-
-  ask(content: string, choices?: string[]): void {
-    console.log(`${this.id} asks: ${content}`);
-    const questionGuid = uuidv4();
-    this.questions.push(questionGuid);
-    axios.post(`http://${this.postOfficeUrl}/message`, {
-      type: MessageType.REQUEST,
-      recipient: 'user',
-      content: { question: content, questionGuid: questionGuid, choices: choices, asker: this.id },
-      sender: this.id
-    });
-  }
-
   async handleBaseMessage(message: any): Promise<void> {
     if (message.type === MessageType.ANSWER && this.onAnswer) {
       this.onAnswer(message.answer);
@@ -83,5 +66,39 @@ export class BaseEntity {
     console.log(message);
     this.say(message);
   }
-  
+ 
+  private askPromises: Map<string, Promise<string>> = new Map();
+
+  ask(content: string, choices?: string[]): Promise<string> {
+    return new Promise((resolve) => {
+      const questionGuid = uuidv4();
+      this.questions.push(questionGuid);
+      this.askPromises.set(questionGuid, Promise.resolve(''));
+
+      axios.post(`http://${this.postOfficeUrl}/message`, {
+        type: MessageType.REQUEST,
+        recipient: 'user',
+        content: { question: content, questionGuid: questionGuid, choices: choices, asker: this.id },
+        sender: this.id
+      });
+
+      this.askPromises.set(questionGuid, new Promise((resolve) => {
+        const checkAnswer = setInterval(() => {
+          if (!this.questions.includes(questionGuid)) {
+            clearInterval(checkAnswer);
+            resolve(this.lastAnswer);
+          }
+        }, 100);
+      }));
+
+      this.askPromises.get(questionGuid)!.then(resolve);
+    });
+  }
+
+  onAnswer(answer: express.Request): void {
+    if (answer.body.questionGuid && this.questions.includes(answer.body.questionGuid)) {
+      this.questions = this.questions.filter(q => q !== answer.body.questionGuid);
+      this.lastAnswer = answer.body.answer;
+    }
+  }  
 }
