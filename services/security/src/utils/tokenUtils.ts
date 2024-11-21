@@ -13,7 +13,7 @@ export interface DecodedToken {
 // Generate a JWT token for a user
 export function generateToken(username: string, role: string): string {
     const payload = { username, role };
-    return jwt.sign(payload, SECRET_KEY, { expiresIn: '1h' });
+    return jwt.sign(payload, SECRET_KEY, { expiresIn: '365d' });
 }
 
 // Verify a JWT token

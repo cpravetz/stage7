@@ -9,13 +9,16 @@ import fs from 'fs/promises';
 import os from 'os';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { fileURLToPath } from 'url';
-import { dirname } from 'path';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { ConfigManager } from './utils/configManager.js';
 import { PluginRegistry } from './utils/pluginRegistry.js';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
 
 const configPath = path.join(os.homedir(), '.cktmcs', 'capabilitiesmanager.json');
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const execAsync = promisify(exec);
 

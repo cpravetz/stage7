@@ -17,7 +17,7 @@ export const register = async (req: Request, res: Response, next: NextFunction):
         const hashedPassword = await bcrypt.hash(password, 10);
         const user = await createUser({ email, password: hashedPassword });
         console.log('Registerd User registered successfully:', user);
-        const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET || 'your-secret-key', { expiresIn: '1h' });
+        const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET || 'your-secret-key', { expiresIn: '365d' });
         res.status(201).json({ token, user: { id: user.id, email: user.email } });
     } catch (error) {
         res.status(500).json({ message: 'Error registering user' });
@@ -49,7 +49,7 @@ export const login = (req: Request, res: Response, next: NextFunction): void => 
         res.status(401).json({ message: 'Authentication failed' });
         return;
     }
-    const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET || 'your-secret-key', { expiresIn: '1h' });
+    const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET || 'your-secret-key', { expiresIn: '365d' });
     console.log('Login successful for user:', user.email);
     console.log(`new token: ${token}`);
     res.json({ token, user: { id: user.id, email: user.email } });
@@ -80,7 +80,7 @@ export const refreshToken = async (req: Request, res: Response, next: NextFuncti
             }
 
             // Generate a new access token
-            const newToken = jwt.sign({ id: user.id }, process.env.JWT_SECRET!, { expiresIn: '1h' });
+            const newToken = jwt.sign({ id: user.id }, process.env.JWT_SECRET!, { expiresIn: '365d' });
             console.log(`refreshed token: ${newToken}`);
 
             res.json({ 

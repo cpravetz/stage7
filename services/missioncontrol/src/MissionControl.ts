@@ -301,8 +301,14 @@ class MissionControl extends BaseEntity {
     private async getAndPushAgentStatistics() {
         try {
             const [llmCallsResponse, engineerStatisticsResponse] = await Promise.all([
-                api.get(`http://${this.brainUrl}/getLLMCalls`),
-                api.get(`http://${this.engineerUrl}/statistics`)
+                api.get(`http://${this.brainUrl}/getLLMCalls`).catch(error => {
+                    console.warn('Failed to fetch LLM calls:', error instanceof Error ? error.message : error);
+                    return { data: { llmCalls: null } };
+                }),
+                api.get(`http://${this.engineerUrl}/statistics`).catch(error => {
+                    console.warn('Failed to fetch engineer statistics:', error instanceof Error ? error.message : error);
+                    return { data: null };
+                })
             ]);
 
             for (const [clientId, missionIds] of this.clientMissions.entries()) {
