@@ -1,6 +1,13 @@
 import { BaseService, ExchangeType } from '../services/baseService';
 import { BaseInterface, LLMConversationType, ConvertParamsType } from '../interfaces/baseInterface';
 
+export interface ModelScore {
+    costScore: number;
+    accuracyScore: number;
+    creativityScore: number;
+    speedScore: number;
+}
+
 export class BaseModel {
     public name: string;
     public modelName: string;
@@ -8,10 +15,8 @@ export class BaseModel {
     public service: BaseService | undefined = undefined;
     public interfaceName: string;
     public serviceName: string;
-    public costScore: number;
-    public accuracyScore: number;
-    public creativityScore: number;
-    public speedScore: number;
+    tokenLimit: number;
+    scoresByConversationType: Map<LLMConversationType, ModelScore>;
     public contentConversation: LLMConversationType[];
 
     constructor(options: {
@@ -19,21 +24,50 @@ export class BaseModel {
             modelName: string,
             interfaceName: string,
             serviceName: string,
-            costScore: number,
-            accuracyScore: number,
-            creativityScore: number,
-            speedScore: number,
+            tokenLimit: number,
+            scoresByConversationType: Map<LLMConversationType, ModelScore>,
             contentConversation: LLMConversationType[] }) 
     {
         this.name = options.name;
         this.modelName = options.modelName;
         this.interfaceName = options.interfaceName;
         this.serviceName = options.serviceName;
-        this.costScore = options.costScore;
-        this.accuracyScore = options.accuracyScore;
-        this.creativityScore = options.creativityScore;
-        this.speedScore = options.speedScore;
+        this.tokenLimit = options.tokenLimit;
+        this.scoresByConversationType = options.scoresByConversationType;
         this.contentConversation = options.contentConversation;
+    }
+
+    getScoreForConversationType(conversationType: LLMConversationType): number {
+        return this.getCostScore(conversationType) + this.getAccuracyScore(conversationType) + this.getCreativityScore(conversationType) + this.getSpeedScore(conversationType);
+    }
+
+    getScoresForConversationType(conversationType: LLMConversationType): ModelScore {
+        return this.getScore(conversationType);
+    }
+
+    getScore(conversationType: LLMConversationType): ModelScore {
+        return this.scoresByConversationType.get(conversationType) || {
+            costScore: 0,
+            accuracyScore: 0,
+            creativityScore: 0,
+            speedScore: 0
+        };
+    }
+
+    getCostScore(conversationType: LLMConversationType): number {
+        return this.getScore(conversationType).costScore;
+    }
+
+    getAccuracyScore(conversationType: LLMConversationType): number {
+        return this.getScore(conversationType).accuracyScore;
+    }
+
+    getCreativityScore(conversationType: LLMConversationType): number {
+        return this.getScore(conversationType).creativityScore;
+    }
+
+    getSpeedScore(conversationType: LLMConversationType): number {
+        return this.getScore(conversationType).speedScore;
     }
 
     chat(messages: ExchangeType, options: { max_length?: number, temperature?: number }): Promise<string> {

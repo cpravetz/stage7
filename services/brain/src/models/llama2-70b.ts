@@ -1,17 +1,36 @@
-import { BaseModel } from './baseModel';
+import { BaseModel, ModelScore } from './baseModel';
 import { LLMConversationType } from '../interfaces/baseInterface';
 
 export class Llama270bModel extends BaseModel {
     constructor() {
+        const scoresByConversationType = new Map<LLMConversationType, ModelScore>([
+            [LLMConversationType.TextToText, {
+                costScore: 85,
+                accuracyScore: 88,
+                creativityScore: 85,
+                speedScore: 88
+            }],
+            [LLMConversationType.TextToCode, {
+                costScore: 85,
+                accuracyScore: 88,
+                creativityScore: 85,
+                speedScore: 88
+            }],
+            [LLMConversationType.CodeToText, {
+                costScore: 85,
+                accuracyScore: 88,
+                creativityScore: 85,
+                speedScore: 88
+            }]
+        ]);
+
         super({
             name: "meta-llama/Llama-2-70b-chat-hf",
             modelName: "meta-llama/Llama-2-70b-chat-hf",
             interfaceName: "huggingface",
             serviceName: "HFService",
-            costScore: 85,
-            accuracyScore: 88,
-            creativityScore: 85,
-            speedScore: 88,
+            tokenLimit: 4096, // Adjust this value if needed
+            scoresByConversationType: scoresByConversationType,
             contentConversation: [LLMConversationType.TextToCode, LLMConversationType.CodeToText, LLMConversationType.TextToText]
         });
     }

@@ -1,17 +1,36 @@
-import { BaseModel } from './baseModel';
+import { BaseModel, ModelScore } from './baseModel';
 import { LLMConversationType } from '../interfaces/baseInterface';
 
 export class Claude2Model extends BaseModel {
     constructor() {
+        const scoresByConversationType = new Map<LLMConversationType, ModelScore>([
+            [LLMConversationType.TextToText, {
+                costScore: 70,
+                accuracyScore: 95,
+                creativityScore: 90,
+                speedScore: 85
+            }],
+            [LLMConversationType.TextToCode, {
+                costScore: 70,
+                accuracyScore: 95,
+                creativityScore: 90,
+                speedScore: 85
+            }],
+            [LLMConversationType.CodeToText, {
+                costScore: 70,
+                accuracyScore: 95,
+                creativityScore: 90,
+                speedScore: 85
+            }]
+        ]);
+
         super({
             name: "anthropic/claude-2",
             modelName: "anthropic/claude-2",
             interfaceName: "openrouter",
             serviceName: "ORService",
-            costScore: 70,
-            accuracyScore: 95,
-            creativityScore: 90,
-            speedScore: 85,
+            tokenLimit: 100000, // Adjust this value if you know the exact token limit for Claude 2
+            scoresByConversationType: scoresByConversationType,
             contentConversation: [LLMConversationType.TextToCode, LLMConversationType.CodeToText, LLMConversationType.TextToText]
         });
     }
