@@ -7,10 +7,12 @@ import { WorkProduct } from '../utils/WorkProduct';
 import { MapSerializer, BaseEntity } from '@cktmcs/shared';
 import { AgentPersistenceManager } from '../utils/AgentPersistenceManager';
 import { PluginInput, PluginOutput, PluginParameterType } from '@cktmcs/shared';
-import { Step, ActionVerbTask } from '@cktmcs/shared';
+import { ActionVerbTask } from '@cktmcs/shared';
 import { AgentStatistics } from '@cktmcs/shared';
 import { Message, MessageType } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
+import { Step, StepStatus } from './Step'; // Import the new Step class
+
 
 const api = axios.create({
     headers: {
@@ -63,14 +65,14 @@ export class Agent extends BaseEntity {
         if (config.missionContext) {
             this.missionContext = config.missionContext;
         }
-        const initialStep: Step = {
-            id: uuidv4(),
-            stepNo: 1,
+
+        // Create initial step using the new Step class
+        const initialStep = new Step({
             actionVerb: config.actionVerb,
-            inputs: config.inputs || new Map(),
-            dependencies: new Map<string, string>(),
-            status: 'pending'
-        };
+            stepNo: 1,
+            inputs: config.inputs,
+            description: 'Initial mission step'
+        });
         this.steps.push(initialStep);
 
         this.initializeAgent().then(() => {
@@ -78,11 +80,12 @@ export class Agent extends BaseEntity {
         }).catch(error => {
             this.status = AgentStatus.ERROR;
         });
-
     }
 
     private async runUntilDone() {
-        while (this.status !== AgentStatus.COMPLETED && this.status !== AgentStatus.ERROR && this.status !== AgentStatus.ABORTED) {
+        while (this.status !== AgentStatus.COMPLETED && 
+               this.status !== AgentStatus.ERROR && 
+               this.status !== AgentStatus.ABORTED) {
             await this.runAgent();
         }
         return this.status;
@@ -138,26 +141,50 @@ Please consider this context and the available plugins when planning and executi
                 return;
             }
             this.say(`Agent is starting ...`);
-            while ((this.status === AgentStatus.RUNNING) && (this.steps.some(step => step.status === 'pending' || step.status === 'running'))) {
-                for (const step of this.steps.filter(s => s.status === 'pending')) {
-                    if (this.status === AgentStatus.RUNNING && await this.areStepDependenciesSatisfied(step)) {
-                        await this.processStep(step);
+            
+            while (this.status === AgentStatus.RUNNING && 
+                   this.steps.some(step => step.status === StepStatus.PENDING || step.status === StepStatus.RUNNING)) {
+                
+                for (const step of this.steps.filter(s => s.status === StepStatus.PENDING)) {
+                    if (this.status === AgentStatus.RUNNING && step.areDependenciesSatisfied(this.steps)) {
+                        step.populateInputsFromDependencies(this.steps);
+                        const result = await step.execute(
+                            this.executeActionWithCapabilitiesManager.bind(this),
+                            this.useBrainForReasoning.bind(this),
+                            this.createSubAgent.bind(this),
+                            this.handleAskStep.bind(this)
+                        );
+                        
+                        if (result[0]?.resultType === PluginParameterType.PLAN) {
+                            const plan = result[0].result as ActionVerbTask[];
+                            this.addStepsFromPlan(plan);
+                        }
+    
+                        await this.saveWorkProduct(step.id, result, step.isEndpoint(this.steps));
                     }
                 }
+                
                 await this.checkAndResumeBlockedAgents();
             }
+            
             if (this.status === AgentStatus.RUNNING) {
                 this.output = this.steps[this.steps.length - 1].result;
                 this.status = AgentStatus.COMPLETED;
                 this.say(`Agent has completed its work.`);
-                this.say(`Result ${JSON.stringify(this.output)}`)
+                this.say(`Result ${JSON.stringify(this.output)}`);
             }
+            
             this.notifyTrafficManager();
-        } catch (error) { analyzeError(error as Error);
+        } catch (error) {
             console.error('Error running agent:', error instanceof Error ? error.message : error);
             this.status = AgentStatus.ERROR;
             this.notifyTrafficManager();
         }
+    }
+
+    private addStepsFromPlan(plan: ActionVerbTask[]) {
+        const newSteps = Step.createFromPlan(plan, this.steps.length + 1);
+        this.steps.push(...newSteps);
     }
 
     async getOutput(): Promise<any> {
@@ -209,98 +236,6 @@ Please consider this context and the available plugins when planning and executi
         }
     }
 
-    private async processStep(step: Step): Promise<void> {
-        try {
-            step.status = 'running';
-            step.inputs = step.inputs || new Map();
-            this.logAndSay(`Processing step ${step.stepNo}: ${step.actionVerb} with ${step.inputs.size} inputs`);
-            //console.log('processStep: Details:', MapSerializer.transformForSerialization(step));
-            // Populate inputs from dependent steps
-            if (step.dependencies) {
-                step.dependencies.forEach((depStepId, inputKey) => {
-                    const dependentStep = this.steps.find(s => s.id === depStepId);
-                    if (dependentStep && dependentStep.result) {
-                        step.inputs = step.inputs || new Map();
-                        const inputData = step.inputs.get(inputKey);
-                        if (inputData && inputData.args && inputData.args.outputKey) {
-                            step.inputs.set(inputKey, {
-                                inputName: inputKey,
-                                inputValue: dependentStep.result[inputData.args.outputKey],
-                                args: { ...inputData.args }
-                            });
-                        }
-                    }
-                });
-            }
-            //console.log('Populated Inputs:', MapSerializer.transformForSerialization(step.inputs));
-            let result;
-
-            switch (step.actionVerb) {
-                case 'THINK':
-                    result = await this.useBrainForReasoning(step.inputs);
-                    break;
-                case 'DELEGATE':
-                    result = await this.createSubAgent(step.inputs);
-                    break;
-                case 'ASK':
-                    result = await this.handleAskStep(step.inputs);
-                    break;
-                case MessageType.REQUEST:
-                    result = await this.handleAskStep(step.inputs);
-                    break;
-                default:
-                    result = await this.executeActionWithCapabilitiesManager(step);
-            }
-
-            step.status = 'completed';
-           // Ensure result is always an array of PluginOutput
-           if (!Array.isArray(result)) {
-            result = [result];
-        }
-
-        result = result.map(item => {
-            if (!('success' in item && 'name' in item && 'resultType' in item && 'resultDescription' in item && 'result' in item)) {
-                return {
-                    success: true,
-                    name: 'result',
-                    resultType: typeof item as PluginParameterType,
-                    resultDescription: 'Action result',
-                    result: item,
-                    mimeType: 'text/plain'
-                };
-            }
-            return item;
-        });
-
-        result.forEach(resultItem => {
-            if (resultItem.success && resultItem.resultType === 'plan') {
-                this.addPlanSteps(resultItem.result, step.id);
-            }
-            if (!resultItem.mimeType) { resultItem.mimeType = 'text/plain'; }
-            if (!resultItem.success) { step.status = 'error'; }
-        });
-
-        step.result = result;
-        console.log(`Completed ${step.id}: ${step.status}`);
-        await this.saveWorkProduct(step.id, step.result, this.stepIsEndPoint(step));            
-        } catch (error) { analyzeError(error as Error);
-            this.logAndSay(`There was an error processing step ${step.stepNo}: ${error instanceof Error ? error.message : JSON.stringify(error)}`);
-            step.status = 'error';
-            step.result = [{ 
-                success: false, 
-                name: 'error',
-                resultType: PluginParameterType.ERROR, 
-                resultDescription: 'Error', 
-                result: error instanceof Error ? error.message : String(error) ,
-                error: error instanceof Error ? error.message : String(error) }];
-        }
-    }
-
-    private stepIsEndPoint(step: Step): boolean {
-        const dependents = this.steps.filter(s => [...s.dependencies.values()].some(depId => depId === step.id));
-        return (dependents.length === 0);
-    }
-
     public async handleMessage(message: any): Promise<void> {
         console.log(`Agent ${this.id} received message:`, message);
         // Handle base entity messages (handles ANSWER)
@@ -319,57 +254,6 @@ Please consider this context and the available plugins when planning and executi
         this.conversation.push({ role, content });
     }
 
-    private addPlanSteps(plan: ActionVerbTask[], currentStepId: string) {
-        const newSteps: Step[] = plan.map((task) => {
-            const step: Step = {
-                id: uuidv4(),
-                stepNo: this.steps.length + 1,
-                actionVerb: task.verb,
-                inputs: task.inputs,
-                description: task.description,
-                dependencies: new Map<string, string>(),
-                status: 'pending',
-                result: undefined,
-                timeout: undefined
-            };
-
-            // Set dependencies for this step
-            if (task.dependencies) {
-                Object.entries(task.dependencies).forEach(([inputKey, depStepId]) => {
-                    step.dependencies.set(inputKey, depStepId);
-                });
-            }
-
-            return step;
-        });
-
-        // Add new steps to the main steps array
-        this.steps.push(...newSteps);
-
-        // Find steps in the new plan that have no internal dependencies
-        const endpointSteps = newSteps.filter(step => 
-            ![...step.dependencies.values()].some(depId => 
-                newSteps.some(s => s.id === depId)
-            )
-        );
-
-        // Update the dependencies of the current step
-        const currentStep = this.steps.find(s => s.id === currentStepId);
-        if (currentStep) {
-            endpointSteps.forEach(step => {
-                currentStep.dependencies.set(step.id, step.id);
-            });
-        }
-    }
-
-    private areStepDependenciesSatisfied(step: Step): boolean {
-        return Array.from(step.dependencies.values()).every(depStepId => {
-            const depStep = this.steps.find(s => s.id === depStepId);
-            return depStep && depStep.status === 'completed';
-        });
-    }
-
-    
     private async handleAskStep(inputs: Map<string, PluginInput>): Promise<PluginOutput[]> {
         const input = inputs.get('question');
         if (!input) {
@@ -648,49 +532,19 @@ Please consider this context and the available plugins when planning and executi
         }
     }
 
-    private isPluginOutput(obj: any): obj is PluginOutput {
-        return (
-            typeof obj === 'object' &&
-            obj !== null &&
-            'success' in obj &&
-            'name' in obj &&
-            'resultType' in obj &&
-            'resultDescription' in obj &&
-            'result' in obj
-        );
-    }
-
     private async executeActionWithCapabilitiesManager(step: Step): Promise<PluginOutput[]> {
         this.logAndSay(`Agent: Executing action ${step.actionVerb} with CapabilitiesManager`);
         try {
+            if (step.actionVerb === 'ASK') {
+                return this.handleAskStep(step.inputs);
+            }
+
             const payload = MapSerializer.transformForSerialization({ step });
             const response = await api.post(`http://${this.capabilitiesManagerUrl}/executeAction`, payload);
-            const serializedresponse = MapSerializer.transformFromSerialization(response.data);
-            if (Array.isArray(serializedresponse) && serializedresponse.every(item => this.isPluginOutput(item))) {
-                return serializedresponse;
-            } else if (this.isPluginOutput(serializedresponse)) {
-                return [serializedresponse];
-            } else {
-                console.warn('Unexpected response type from CapabilitiesManager');
-                return [{
-                    success: false,
-                    name: 'error',
-                    resultType: PluginParameterType.ERROR,
-                    resultDescription: 'Unexpected response type',
-                    result: null,
-                    error: 'Unexpected response type from CapabilitiesManager'
-                }];
-            }
-        } catch (error) { analyzeError(error as Error);
-            this.logAndSay(`Error executing action ${step.actionVerb} with CapabilitiesManager: ${error instanceof Error ? error.message : error}`);
-            return [{
-                success: false,
-                name: 'error',
-                resultType: PluginParameterType.ERROR,
-                resultDescription: 'Error executing action',
-                result: null,
-                error: error instanceof Error ? error.message : 'Unknown error occurred'
-            }];
+            return MapSerializer.transformFromSerialization(response.data);
+        } catch (error) {
+            console.error('Error executing action with CapabilitiesManager:', error instanceof Error ? error.message : error);
+            throw error;
         }
     }
 
