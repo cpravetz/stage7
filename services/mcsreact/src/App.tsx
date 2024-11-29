@@ -172,6 +172,7 @@ const handleRegister = async (name: string, email: string, password: string) => 
       if (newToken) {
           setToken(newToken);
           setIsAuthenticated(true);
+          connectWebSocket();  // Add this line
       } else {
           throw new Error('Registration successful but no token received');
       }
@@ -185,20 +186,29 @@ const handleLogout = async () => {
     securityClient.logout();
     setIsAuthenticated(false);
     resetToken(null);
+    if (ws.current) {  // Add these lines
+      ws.current.close();
+      ws.current = null;
+    }
   } catch (error) {
     console.error('Logout failed:', error instanceof Error ? error.message : error);
   }
-};    
+};
 
 const connectWebSocket = () => {
+  console.log('Connecting to WebSocket');
   const accessToken = securityClient.getAccessToken();
-
+  console.log(`Access token: ${accessToken}`);
   if (!isAuthenticated || !clientId || !accessToken || (accessToken === null)) {
+    console.log('Aborting websocket connection')
+    console.log(`isAuthenticated: ${isAuthenticated}, clientId: ${clientId}, accessToken: ${accessToken}`)
     return;
   }
+  console.log(`Connecting to WebSocket with clientId: ${clientId}, accessToken: ${accessToken}`);
   // Include the token in the WebSocket connection URL
   const wsUrl = `${WS_URL}?clientId=${clientId}&token=${accessToken}`;
   ws.current = new WebSocket(wsUrl);
+  console.log('WebSocket connection URL:', wsUrl);
 
   ws.current.onopen = () => {
     console.log('WebSocket connection established with PostOffice');
@@ -243,7 +253,9 @@ useEffect(() => {
 
   const handleSendMessage = async (message: string) => {
     if (!clientId) return;
-  
+    if (!ws.current) { 
+      connectWebSocket(); 
+    }
     setConversationHistory((prev) => [...prev, `User: ${message}`]);
     
     try {

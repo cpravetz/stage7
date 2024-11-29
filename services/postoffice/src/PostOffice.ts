@@ -121,22 +121,22 @@ export class PostOffice {
             const url = new URL(req.url!, `http://${req.headers.host}`);
             const clientId = url.searchParams.get('clientId');
             const token = url.searchParams.get('token');
-
+    
             console.log(`WebSocket connection attempt - ClientID: ${clientId}, Token: ${token}`);
-
+    
             if (!clientId || !token || (token === null)) {
-                console.error('Client ID or token missing');
+                console.log('Client ID or token missing');
                 ws.close(1008, 'Client ID or token missing');
                 return;
             }
     
             const isValid = await this.verifyToken(clientId, token);
             if (!isValid) {
-                console.error(`Invalid token for client ${clientId}`);
+                console.log(`Invalid token for client ${clientId}`);
                 ws.close(1008, 'Invalid token');
                 return;
             }
-
+    
             this.clients.set(clientId, ws);
             console.log(`Client ${clientId} connected successfully`);
     
@@ -206,8 +206,12 @@ export class PostOffice {
         const client = this.clients.get(clientId);
         if (client && client.readyState === WebSocket.OPEN) {
             client.send(JSON.stringify(message));
+            console.log(`Message sent to client ${clientId}`);
         } else {
-            console.error(`Client ${clientId} not found or not ready`);
+            console.error(`Client ${clientId} not found or not ready. ReadyState: ${client ? client.readyState : 'Client not found'}`);
+            if (client) {
+                console.log(`Attempting to reconnect client ${clientId}`);
+            }
         }
     }
 
