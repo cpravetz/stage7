@@ -200,8 +200,6 @@ const connectWebSocket = () => {
   const accessToken = securityClient.getAccessToken();
   console.log(`Access token: ${accessToken}`);
   if (!isAuthenticated || !clientId || !accessToken || (accessToken === null)) {
-    console.log('Aborting websocket connection')
-    console.log(`isAuthenticated: ${isAuthenticated}, clientId: ${clientId}, accessToken: ${accessToken}`)
     return;
   }
   console.log(`Connecting to WebSocket with clientId: ${clientId}, accessToken: ${accessToken}`);

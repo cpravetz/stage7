@@ -71,7 +71,7 @@ export class HuggingfaceInterface extends BaseInterface {
 
     async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string }): Promise<string> {
         try {
-            const trimmedMessages = this.trimMessages(messages, options.max_length || 4096);
+            const trimmedMessages = this.trimMessages(messages, Math.min(options.max_length || 4096, 4096));
             const inputTokens = trimmedMessages.reduce((sum, message) => {
                 return sum + Math.ceil(message.content.length / 3.8);
             }, 0);

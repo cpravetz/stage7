@@ -10,9 +10,9 @@ COPY shared/package*.json ./shared/
 COPY services/mcsreact/package*.json ./services/mcsreact/
 
 # Install dependencies
-RUN npm install --verbose
-RUN npm install --verbose --prefix shared
-RUN npm install --verbose --prefix services/mcsreact
+RUN npm install
+RUN npm install --prefix shared
+RUN npm install --prefix services/mcsreact
 
 # Copy the rest of the code
 COPY shared ./shared

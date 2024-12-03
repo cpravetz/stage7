@@ -32,7 +32,7 @@ class MissionControl extends BaseEntity {
     private securityManagerUrl: string = process.env.SECURITY_MANAGER_URL || 'securitymanager:5010';
     
     constructor() {
-        super(generateGuid(), 'MissionControl', process.env.HOST || 'missioncontrol', process.env.PORT || '5050');
+        super('MissionControl', 'MissionControl', process.env.HOST || 'missioncontrol', process.env.PORT || '5050');
         this.initializeServer();
         setInterval(() => this.getAndPushAgentStatistics(), 5000);
     }

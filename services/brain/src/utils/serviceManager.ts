@@ -43,6 +43,10 @@ export class ServiceManager {
     }
 
     getService(name: string) : BaseService | undefined{
+        if (!name) {
+            console.error('Service name is undefined in getService');
+            return undefined;
+        }
         return this.services.get(name.toLowerCase());
     }
 

@@ -43,7 +43,12 @@ export class InterfaceManager {
     }
 
     getInterface(name: string) : BaseInterface | undefined{
-        return this.interfaces.get(name.toLowerCase());
+        if (name) {
+            return this.interfaces.get(name.toLowerCase());
+        } else {
+            console.error('Interface name is undefined in getInterface');
+            return undefined;
+        }
     }
 }
 

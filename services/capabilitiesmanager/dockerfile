@@ -14,7 +14,7 @@ COPY errorhandler/package*.json ./errorhandler/
 COPY services/capabilitiesmanager/package*.json ./services/capabilitiesmanager/
 
 # Install the application dependencies
-RUN npm install --verbose
+RUN npm install
 
 # Copy the application code to the working directory
 COPY shared ./shared
