@@ -8,6 +8,7 @@ import { errorHandler } from './middleware/errorHandler';
 import bodyParser from 'body-parser';
 import OAuth2Server  from 'oauth2-server';
 import { OAuthModel } from './models/OAuth';
+import rateLimit from 'express-rate-limit';
 
 const app = express();
 export class SecurityManager {
@@ -72,7 +73,13 @@ export class SecurityManager {
     private configureRoutes() {
         app.use('/', authRoutes);
         app.use('/', userRoutes);
-        app.post('/auth/service', (req, res, next) => {
+        const authServiceLimiter = rateLimit({
+            windowMs: 15 * 60 * 1000, // 15 minutes
+            max: 100, // Limit each IP to 100 requests per windowMs
+            message: 'Too many authentication requests, please try again later.'
+        });
+
+        app.post('/auth/service', authServiceLimiter, (req, res, next) => {
             const request = new OAuth2Server.Request(req);
             const response = new OAuth2Server.Response(res);
 
