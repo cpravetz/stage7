@@ -23,5 +23,9 @@
   "jest": {
     "preset": "ts-jest",
     "testEnvironment": "node"
+  },
+  "overrides": {
+    "glob": "^10.4.5",
+    "inflight": "^2.0.0"
   }
 }

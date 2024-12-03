@@ -2,6 +2,7 @@ import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import express from 'express';
 import { MessageType } from './types/Message';
+import { AuthenticatedApiClient } from './AuthenticatedApiClient';
 
 export class BaseEntity {
   id: string;
@@ -12,6 +13,7 @@ export class BaseEntity {
   port : string;
   registeredWithPostOffice: boolean = false;
   lastAnswer: string = '';
+  authenticatedApi: AuthenticatedApiClient;
 
   constructor(id: string, componentType: string, urlBase: string, port: string) {
     this.id = id;
@@ -19,26 +21,25 @@ export class BaseEntity {
     this.postOfficeUrl = process.env.POSTOFFICE_URL || 'postoffice:5020'
     this.port = port;
     this.url = `${urlBase}:${port}` //url;
+    this.authenticatedApi = new AuthenticatedApiClient(this);
     this.registerWithPostOffice();
   }
 
   protected async registerWithPostOffice(retryCount: number = 10) {
     const register = async () => {
       try {
-        const response = await axios.post(`http://${this.postOfficeUrl}/registerComponent`, {
+        const response = await this.authenticatedApi.post(`http://${this.postOfficeUrl}/registerComponent`, {
           id: this.id,
           type: this.componentType,
-          url: this.url,
+          url: this.url
         });
-
-        console.log(`${this.id} registered with PostOffice:`, response.data);
-      } catch (error) { 
-        if (retryCount > 0) {
-          console.log(`Retrying registration in 2 seconds... (${retryCount} attempts left)`);
-          setTimeout(() => this.registerWithPostOffice(retryCount - 1), 3000);
-        } else {
-          console.error(`Failed to register ${this.id} after multiple attempts`);
+        if (response.status === 200) {
+          console.log(`${this.componentType} registered successfully with PostOffice`);
+          this.registeredWithPostOffice = true;
         }
+      } catch (error) {
+        console.error(`Failed to register ${this.componentType} with PostOffice:`, error);
+        throw error;
       }
     };
 

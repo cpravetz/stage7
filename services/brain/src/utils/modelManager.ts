@@ -48,6 +48,10 @@ export class ModelManager {
     }
 
     getModel(name: string): BaseModel | undefined {
+        if (!name) {
+            console.error('Model name is undefined in getModel');
+            return undefined;
+        }
         return this.models.get(name.toLowerCase());
     }
 

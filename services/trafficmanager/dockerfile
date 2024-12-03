@@ -11,7 +11,7 @@ COPY errorhandler/package*.json ./errorhandler/
 COPY services/trafficmanager/package*.json ./services/trafficmanager/
 
 # Install the application dependencies
-RUN npm install --verbose
+RUN npm install
 
 # Copy the application code to the working directory
 COPY shared ./shared
