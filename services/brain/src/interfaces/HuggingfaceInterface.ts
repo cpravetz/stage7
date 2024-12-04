@@ -73,7 +73,7 @@ export class HuggingfaceInterface extends BaseInterface {
         try {
             const trimmedMessages = this.trimMessages(messages, Math.min(options.max_length || 4096, 4096));
             const inputTokens = trimmedMessages.reduce((sum, message) => {
-                return sum + Math.ceil(message.content.length / 4.0);
+                return sum + Math.ceil(message.content.length / 3.7);
             }, 0);
             const max_new_tokens = Math.max(1, (options.max_length || 4096) - inputTokens);
 

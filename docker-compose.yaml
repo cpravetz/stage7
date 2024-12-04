@@ -23,6 +23,7 @@ services:
       dockerfile: services/missioncontrol/dockerfile
     depends_on:
       - postoffice
+      - librarian
     environment:
       NODE_ENV: production
       PORT: &missioncontrolPort 5030
@@ -88,6 +89,7 @@ services:
     depends_on:
       - postoffice
       - brain
+      - librarian
     environment:
       NODE_ENV: =production
       PORT: &engineerPort 5050
