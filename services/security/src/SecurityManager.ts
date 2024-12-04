@@ -6,30 +6,19 @@ import { authRoutes } from './routes/auth';
 import { userRoutes } from './routes/user';
 import { errorHandler } from './middleware/errorHandler';
 import bodyParser from 'body-parser';
-import OAuth2Server  from 'oauth2-server';
-import { OAuthModel } from './models/OAuth';
+import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
+import { verifyComponentCredentials } from './models/jwtAuth';
 
 const app = express();
 export class SecurityManager {
     private port: string;
-    private oauth: OAuth2Server;
 
 
     constructor() {
         this.port = process.env.PORT || '5010';
         this.configureMiddleware();
         this.configurePassport();
-        this.oauth = new OAuth2Server({
-            model: OAuthModel,
-            accessTokenLifetime: 60 * 60, // 1 hour
-            refreshTokenLifetime: 60 * 60 * 24 * 14, // 2 weeks
-            allowBearerTokensInQueryString: false,
-            allowEmptyState: false,
-            allowExtendedTokenAttributes: true,
-            authorizationCodeLifetime: 5 * 60 // 5 minutes
-        });
-        this.configureOAuth();
         this.configureRoutes();
     }
 
@@ -45,52 +34,41 @@ export class SecurityManager {
             console.log('Parsed Body:', JSON.stringify(req.body));
             next();
         });
-        app.use('/', authRoutes);
     }
 
     private configurePassport() {
         configurePassport(passport);
     }
 
-    private configureOAuth() {
-        app.post('/oauth/token', bodyParser.urlencoded({ extended: true }), (req, res, next) => {
-            console.log('Received token request:', req.body);
-            const request = new OAuth2Server.Request(req);
-            const response = new OAuth2Server.Response(res);
-
-            this.oauth.token(request, response)
-                .then((token) => {
-                    console.log('Token generated successfully:', token);
-                    res.json(token);
-                })
-                .catch((error) => {
-                    console.error('Error generating token:', error);
-                    next(error);
-                });
-        });
-    }
-
     private configureRoutes() {
         app.use('/', authRoutes);
         app.use('/', userRoutes);
+
         const authServiceLimiter = rateLimit({
             windowMs: 15 * 60 * 1000, // 15 minutes
             max: 100, // Limit each IP to 100 requests per windowMs
             message: 'Too many authentication requests, please try again later.'
         });
 
-        app.post('/auth/service', authServiceLimiter, (req, res, next) => {
-            const request = new OAuth2Server.Request(req);
-            const response = new OAuth2Server.Response(res);
+        app.post('/auth/service', authServiceLimiter, async (req, res) => {
+            const { componentType, clientSecret } = req.body;
 
-            this.oauth.authenticate(request, response)
-                .then((token) => {
-                    res.json({ authenticated: true, token });
-                })
-                .catch(next);
+            // Verify the component's credentials (you'll need to implement this)
+            if (await verifyComponentCredentials(componentType, clientSecret)) {
+                const token = jwt.sign(
+                    { componentType },
+                    process.env.JWT_SECRET || 'your-secret-key',
+                    { expiresIn: '1h' }
+                );
+                res.json({ authenticated: true, token });
+            } else {
+                res.status(401).json({ authenticated: false, message: 'Invalid credentials' });
+            }
         });
+
         app.use(errorHandler);
     }
+
 
     public start() {
         app.listen(this.port, () => {

@@ -34,31 +34,30 @@ export class AuthenticatedApiClient {
 
   private async refreshToken(): Promise<void> {
     try {
-      const clientId = this.baseEntity.componentType;
+      const componentType = this.baseEntity.componentType;
       const clientSecret = process.env.CLIENT_SECRET;
   
       if (!clientSecret) {
         throw new Error('CLIENT_SECRET is not set in environment variables');
       }
   
-      const params = new URLSearchParams({
-        grant_type: 'client_credentials',
-        client_id: clientId,
-        client_secret: clientSecret,
-      });
-
       const response = await axios.post(
-        `http://${this.securityManagerUrl}/oauth/token`,
-        params,
+        `http://${this.securityManagerUrl}/auth/service`,
+        { componentType, clientSecret },
         {
           headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
+            'Content-Type': 'application/json',
           },
         }
       );
 
-      this.accessToken = response.data.access_token;
-      this.tokenExpirationTime = Date.now() + response.data.expires_in * 1000;
+      if (response.data.authenticated && response.data.token) {
+        this.accessToken = response.data.token;
+        // Set expiration time (e.g., 55 minutes from now if token is valid for 1 hour)
+        this.tokenExpirationTime = Date.now() + 55 * 60 * 1000;
+      } else {
+        throw new Error('Failed to authenticate component');
+      }
     } catch (error) {
       console.error('Failed to refresh token:', error);
       throw error;

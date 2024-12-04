@@ -68,7 +68,7 @@ export class ModelManager {
                 }
             }
         }
-
+        console.log(`Selected model: ${bestModel?.name} with score ${bestScore} for ${optimization} and conversation type ${conversationType}`);
         return bestModel;
     }
 

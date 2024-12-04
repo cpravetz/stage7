@@ -6,7 +6,7 @@ export class HFLlamaModel extends BaseModel {
         const scoresByConversationType = new Map<LLMConversationType, ModelScore>([
             [LLMConversationType.TextToText, {
                 costScore: 100,
-                accuracyScore: 80,
+                accuracyScore: 100,
                 creativityScore: 80,
                 speedScore: 80
             }]

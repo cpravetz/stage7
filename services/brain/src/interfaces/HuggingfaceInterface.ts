@@ -73,7 +73,7 @@ export class HuggingfaceInterface extends BaseInterface {
         try {
             const trimmedMessages = this.trimMessages(messages, Math.min(options.max_length || 4096, 4096));
             const inputTokens = trimmedMessages.reduce((sum, message) => {
-                return sum + Math.ceil(message.content.length / 3.8);
+                return sum + Math.ceil(message.content.length / 4.0);
             }, 0);
             const max_new_tokens = Math.max(1, (options.max_length || 4096) - inputTokens);
 
@@ -81,7 +81,7 @@ export class HuggingfaceInterface extends BaseInterface {
 
             let out = "";
             const stream = inference.chatCompletionStream({
-                model: "meta-llama/Llama-3.2-3B-Instruct",
+                model: options.modelName || "meta-llama/Llama-3.2-3B-Instruct",
                 messages: trimmedMessages,
                 max_tokens: 4096-inputTokens,
                 temperature: 0.5,

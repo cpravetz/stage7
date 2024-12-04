@@ -5,22 +5,22 @@ export class HFNemoModel extends BaseModel {
     constructor() {
         const scoresByConversationType = new Map<LLMConversationType, ModelScore>([
             [LLMConversationType.TextToText, {
-                costScore: 1000,
-                accuracyScore: 800,
-                creativityScore: 800,
-                speedScore: 800
+                costScore: 100,
+                accuracyScore: 80,
+                creativityScore: 80,
+                speedScore: 80
             }],
             [LLMConversationType.TextToCode, {
-                costScore: 1000,
-                accuracyScore: 800,
-                creativityScore: 800,
-                speedScore: 800
+                costScore: 100,
+                accuracyScore: 80,
+                creativityScore: 80,
+                speedScore: 80
             }]
         ]);
 
         super({
-            name: "bigcoder/starcoder",
-            modelName: "bigcoder/starcoder",
+            name: "mistralai/Mistral-Nemo-Instruct-2407",
+            modelName: "mistralai/Mistral-Nemo-Instruct-2407",
             interfaceName: "huggingface",
             serviceName: "HFService",
             tokenLimit: 8192, // Adjust this value if needed
