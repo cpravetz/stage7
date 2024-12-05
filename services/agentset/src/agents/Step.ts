@@ -110,6 +110,36 @@ export class Step {
                 case MessageType.REQUEST:
                     result = await askAction(this.inputs);
                     break;
+                    case 'DECIDE':
+                        result = await this.handleDecide();
+                        break;
+                    case 'REPEAT':
+                        result = await this.handleRepeat();
+                        break;
+                    case 'WHILE':
+                        result = await this.handleWhile();
+                        break;
+                    case 'UNTIL':
+                        result = await this.handleUntil();
+                        break;
+                    case 'SEQUENCE':
+                        result = await this.handleSequence();
+                        break;
+                    case 'TIMEOUT':
+                        result = await this.handleTimeout();
+                        break;
+/*                    case 'TRANSFORM':
+                        result = await this.handleTransform();
+                        break;
+                    case 'MERGE':
+                        result = await this.handleMerge();
+                        break;
+                    case 'FILTER':
+                        result = await this.handleFilter();
+                        break;
+                    case 'MAP':
+                        result = await this.handleMap();
+                        break;*/
                 default:
                     result = await executeAction(this);
             }
@@ -202,6 +232,246 @@ export class Step {
         }
     }
 
+    private async handleDecide(): Promise<PluginOutput[]> {
+        const condition = this.inputs.get('condition')?.inputValue;
+        const trueSteps = this.inputs.get('trueSteps')?.inputValue as ActionVerbTask[];
+        const falseSteps = this.inputs.get('falseSteps')?.inputValue as ActionVerbTask[];
+        
+        let result: boolean;
+        if (typeof condition === 'function') {
+            result = await condition();
+        } else {
+            result = !!condition;
+        }
+
+        const stepsToExecute = result ? trueSteps : falseSteps;
+        if (stepsToExecute) {
+            const newSteps = Step.createFromPlan(stepsToExecute, this.stepNo + 1);
+            // Add these steps to the agent's step queue
+            return [{ 
+                success: true,
+                name: 'steps',
+                resultType: PluginParameterType.PLAN,
+                resultDescription: 'New steps created from decision',
+                result: newSteps
+            }];
+        }
+        return [];
+    }
+
+    private async handleRepeat(): Promise<PluginOutput[]> {
+        const count = this.inputs.get('count')?.inputValue as number;
+        const steps = this.inputs.get('steps')?.inputValue as ActionVerbTask[];
+        const newSteps: Step[] = [];
+
+        for (let i = 0; i < count; i++) {
+            const iterationSteps = Step.createFromPlan(steps, this.stepNo + 1 + (i * steps.length));
+            newSteps.push(...iterationSteps);
+        }
+
+        return [{
+            success: true,
+            name: 'steps',
+            resultType: PluginParameterType.PLAN,
+            resultDescription: 'New steps created from repeat',
+            result: newSteps
+        }];
+    }
+
+    private async handleTimeout(): Promise<PluginOutput[]> {
+        const timeoutMs = this.inputs.get('timeout')?.inputValue as number;
+        const steps = this.inputs.get('steps')?.inputValue as ActionVerbTask[];
+        const newSteps = Step.createFromPlan(steps, this.stepNo + 1);
+        
+        newSteps.forEach(step => {
+            step.timeout = timeoutMs;
+        });
+
+        return [{
+            success: true,
+            name: 'steps',
+            resultType: PluginParameterType.PLAN,
+            resultDescription: 'New steps created with timeout',
+            result: newSteps
+        }];
+    }
+
+    private async handleWhile(): Promise<PluginOutput[]> {
+        const conditionInput = this.inputs.get('condition');
+        const stepsInput = this.inputs.get('steps');
+        const maxIterations = 100; // Safety limit
+        
+        if (!conditionInput || !stepsInput) {
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: 'Error in WHILE step',
+                result: null,
+                error: 'Missing required inputs: condition and steps are required'
+            }];
+        }
+    
+        const steps = stepsInput.inputValue as ActionVerbTask[];
+        const condition = conditionInput.inputValue;
+        
+        let currentIteration = 0;
+        const newSteps: Step[] = [];
+    
+        // Initial condition check step
+        const checkStep = new Step({
+            actionVerb: 'THINK',
+            stepNo: this.stepNo + 1,
+            inputs: new Map([
+                ['prompt', {
+                    inputName: 'prompt',
+                    inputValue: `Evaluate if this condition is true: ${condition}`,
+                    args: {}
+                }]
+            ]),
+            description: 'While loop condition evaluation'
+        });
+    
+        newSteps.push(checkStep);
+    
+        // Create steps for first potential iteration
+        const iterationSteps = Step.createFromPlan(steps, this.stepNo + 2);
+        
+        // Add dependency on condition check for all first iteration steps
+        iterationSteps.forEach(step => {
+            step.dependencies.set('__condition', checkStep.id);
+        });
+    
+        newSteps.push(...iterationSteps);
+    
+        // Add next condition check step that will determine if another iteration is needed
+        const nextCheckStep = new Step({
+            actionVerb: 'THINK',
+            stepNo: this.stepNo + 2 + steps.length,
+            inputs: new Map([
+                ['prompt', {
+                    inputName: 'prompt',
+                    inputValue: `Evaluate if this condition is still true: ${condition}. If true, more steps will be created.`,
+                    args: {}
+                }]
+            ]),
+            description: 'While loop continuation check'
+        });
+    
+        newSteps.push(nextCheckStep);
+    
+        return [{
+            success: true,
+            name: 'steps',
+            resultType: PluginParameterType.PLAN,  
+            resultDescription: 'Initial steps created from while loop',
+            result: newSteps
+        }];
+    
+    }
+    
+    private async handleUntil(): Promise<PluginOutput[]> {
+        const conditionInput = this.inputs.get('condition');
+        const stepsInput = this.inputs.get('steps');
+        
+        if (!conditionInput || !stepsInput) {
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: 'Error in UNTIL step',
+                result: null,
+                error: 'Missing required inputs: condition and steps are required'
+            }];
+        }
+    
+        const steps = stepsInput.inputValue as ActionVerbTask[];
+        const condition = conditionInput.inputValue;
+        
+        const newSteps: Step[] = [];
+    
+        // Create first iteration steps (UNTIL executes at least once)
+        const iterationSteps = Step.createFromPlan(steps, this.stepNo + 1);
+        newSteps.push(...iterationSteps);
+    
+        // Add condition check step after first iteration
+        const checkStep = new Step({
+            actionVerb: 'THINK',
+            stepNo: this.stepNo + 1 + steps.length,
+            inputs: new Map([
+                ['prompt', {
+                    inputName: 'prompt',
+                    inputValue: `Evaluate if this condition is now true: ${condition}. If false, more steps will be created.`,
+                    args: {}
+                }]
+            ]),
+            description: 'Until loop condition evaluation'
+        });
+    
+        // Add dependencies from condition check to all iteration steps
+        iterationSteps.forEach(step => {
+            checkStep.dependencies.set(`__until_${step.id}`, step.id);
+        });
+    
+        newSteps.push(checkStep);
+    
+        return [{
+            success: true,
+            name: 'steps',
+            resultType: PluginParameterType.PLAN,
+            resultDescription: 'Initial steps created from until loop',
+            result: newSteps
+        }];
+    }
+    
+    private async handleSequence(): Promise<PluginOutput[]> {
+        const stepsInput = this.inputs.get('steps');
+        
+        if (!stepsInput) {
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: 'Error in SEQUENCE step',
+                result: null,
+                error: 'Missing required input: steps'
+            }];
+        }
+    
+        const steps = stepsInput.inputValue as ActionVerbTask[];
+        const newSteps: Step[] = [];
+        
+        // Create steps with explicit dependencies to force sequential execution
+        let previousStepId: string | undefined;
+        
+        steps.forEach((task, index) => {
+            const newStep = new Step({
+                actionVerb: task.verb,
+                stepNo: this.stepNo + 1 + index,
+                inputs: task.inputs || new Map(),
+                description: task.description || `Sequential step ${index + 1}`
+            });
+    
+            if (previousStepId) {
+                // Add dependency on previous step
+                newStep.dependencies.set('__sequence', previousStepId);
+            }
+    
+            previousStepId = newStep.id;
+            newSteps.push(newStep);
+        });
+    
+        return [{
+            success: true,
+            name: 'steps',
+            resultType: PluginParameterType.PLAN,
+            resultDescription: 'New steps created in sequence',
+            result: newSteps
+        }];
+    }
+
+
+   
     /**
      * Converts the step to a simple JSON-serializable object
      * @returns Simplified representation of the step
