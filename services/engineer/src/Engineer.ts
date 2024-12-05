@@ -61,18 +61,104 @@ export class Engineer extends BaseEntity {
             const contextString = JSON.stringify(Array.from(context.entries()));
             const engineeringPrompt = `
             Create a javascript or python based plugin for the action verb "${verb}" with the following context: ${explanation}
-    
+            
             The plugin should expect inputs structured as a Map<string, PluginInput>, where PluginInput is defined as:
-    
+            
             interface PluginInput {
                 inputValue: string | number | boolean | any[] | object | null;
                 args: Record<string, any>;
                 dependencyOutputs: Record<string, any>;
                 agentDependencies?: Record<string, any>;
             }
-    
+            
+            Control Flow Action Verbs available in plans:
+            
+            1. DECIDE:
+               - Purpose: Conditional branching based on a condition
+               - Inputs:
+                 - condition: The condition to evaluate
+                 - trueSteps: Array of steps to execute if condition is true
+                 - falseSteps: Array of steps to execute if condition is false
+               Example:
+               {
+                 "verb": "DECIDE",
+                 "inputs": {
+                   "condition": { "inputValue": "the temperature is above 30 degrees" },
+                   "trueSteps": { "inputValue": [/* steps for hot weather */] },
+                   "falseSteps": { "inputValue": [/* steps for cool weather */] }
+                 }
+               }
+            
+            2. WHILE:
+               - Purpose: Repeat steps while a condition is true
+               - Inputs:
+                 - condition: The condition to evaluate before each iteration
+                 - steps: Array of steps to repeat
+               Example:
+               {
+                 "verb": "WHILE",
+                 "inputs": {
+                   "condition": { "inputValue": "there are more pages to process" },
+                   "steps": { "inputValue": [/* steps to process a page */] }
+                 }
+               }
+            
+            3. UNTIL:
+               - Purpose: Repeat steps until a condition becomes true
+               - Inputs:
+                 - condition: The condition to evaluate after each iteration
+                 - steps: Array of steps to repeat
+               Example:
+               {
+                 "verb": "UNTIL",
+                 "inputs": {
+                   "condition": { "inputValue": "a valid solution is found" },
+                   "steps": { "inputValue": [/* steps to find solution */] }
+                 }
+               }
+            
+            4. SEQUENCE:
+               - Purpose: Execute steps in strict sequential order
+               - Inputs:
+                 - steps: Array of steps to execute sequentially
+               Example:
+               {
+                 "verb": "SEQUENCE",
+                 "inputs": {
+                   "steps": { "inputValue": [/* steps to execute in order */] }
+                 }
+               }
+            
+            5. TIMEOUT:
+               - Purpose: Set a timeout for a group of steps
+               - Inputs:
+                 - timeout: Timeout duration in milliseconds
+                 - steps: Array of steps to execute with timeout
+               Example:
+               {
+                 "verb": "TIMEOUT",
+                 "inputs": {
+                   "timeout": { "inputValue": 5000 },
+                   "steps": { "inputValue": [/* time-sensitive steps */] }
+                 }
+               }
+            
+            6. REPEAT:
+               - Purpose: Repeat steps a specific number of times
+               - Inputs:
+                 - count: Number of iterations
+                 - steps: Array of steps to repeat
+               Example:
+               {
+                 "verb": "REPEAT",
+                 "inputs": {
+                   "count": { "inputValue": 3 },
+                   "steps": { "inputValue": [/* steps to repeat */] }
+                 }
+               }
+            
             Use this context to determine the required inputs: ${contextString}
-    
+
             Provide a JSON object with the following structure:
             {
                 id: 'plugin-{verb}',
