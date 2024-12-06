@@ -91,7 +91,7 @@ services:
       - brain
       - librarian
     environment:
-      NODE_ENV: =production
+      NODE_ENV: production
       PORT: &engineerPort 5050
       ENGINEER_URL: *engineerUrl
       POSTOFFICE_URL: *postofficeUrl
@@ -125,8 +125,10 @@ services:
     depends_on:
       - postoffice
     environment:
-      MONGO_URL: mongodb:mongo:27017
-      REDIS_URL: redis:redis:6379
+      MONGO_URI: mongodb://mongo:27017
+      MONGO_DB: librarianDB
+      REDIS_HOST: redis:redis
+      REDIS_PORT: 6379
       NODE_ENV: production
       PORT: &librarianPort 5040
       LIBRARIAN_URL: *librarianUrl
