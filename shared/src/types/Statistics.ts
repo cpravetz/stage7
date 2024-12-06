@@ -1,7 +1,7 @@
 export interface MissionStatistics {
     llmCalls: number;
     agentCountByStatus: Object;
-    runningAgents: Array<AgentStatistics>;
+    agentStatistics: Map<string, Array<AgentStatistics>>,
     engineerStatistics: EngineerStatistics;
 }
 
@@ -24,8 +24,16 @@ export interface AgentStatistics {
     id: string;
     status: string;
     taskCount : number;
-    currenTaskNo : number;
+    currentTaskNo : number;
     currentTaskVerb: string;
+    steps: Array<{
+        id: string;
+        verb: string;
+        status: string;
+        dependencies: string[];
+        stepNo: number;
+    }>;
+    color: string; 
 }
 
 export interface TrafficManagerStatistics {
@@ -34,8 +42,5 @@ export interface TrafficManagerStatistics {
         agentCountByStatus: Object,
         agentSetCount: Number
     },
-    runningAgentStatistics: {
-        runningAgentsCount: Number,
-        runningAgents: Array<AgentStatistics>
-    }
+    agentStatisticsByStatus: Map<string, Array<AgentStatistics>>
 }

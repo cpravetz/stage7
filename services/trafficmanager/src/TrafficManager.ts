@@ -4,7 +4,8 @@ import axios from 'axios';
 import { agentSetManager } from './utils/agentSetManager';
 import { dependencyManager } from './utils/dependencyManager';
 import { AgentStatus } from './utils/status';
-import { Message, MessageType,TrafficManagerStatistics, BaseEntity, PluginInput } from '@cktmcs/shared';
+import { Message, MessageType,TrafficManagerStatistics, 
+        BaseEntity, PluginInput, MapSerializer } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 
 
@@ -201,22 +202,16 @@ export class TrafficManager extends BaseEntity {
                     .map(([status, agents]) => [status, agents.length])
             );
 
-            // Filter for running agents and collect their details
-            const runningAgents = agentSetManagerStatistics.agentsByStatus.get('running') || [];
-    
             const trafficManagerStatistics: TrafficManagerStatistics = {
                 agentStatisticsByType: {
                     totalAgents: agentSetManagerStatistics.totalAgentsCount,
                     agentCountByStatus: Object.fromEntries(agentCountByStatus),
                     agentSetCount: agentSetManagerStatistics.agentSetsCount
                 },
-                runningAgentStatistics: {
-                    runningAgentsCount: runningAgents.length,
-                    runningAgents: runningAgents
-                }
+                agentStatisticsByStatus: agentSetManagerStatistics.agentsByStatus
             };
-    
-            res.status(200).json(trafficManagerStatistics);
+
+            res.status(200).json(MapSerializer.transformForSerialization(trafficManagerStatistics));
         } catch (error) { analyzeError(error as Error);
             console.error('Error fetching agent statistics:', error instanceof Error ? error.message : error);
             res.status(500).json({ error: 'Failed to fetch agent statistics' });

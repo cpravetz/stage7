@@ -25,18 +25,23 @@ export class MapSerializer {
 
     // Recursively transforms Maps in an object for serialization
     static transformForSerialization(obj: any): any {
-        if (obj instanceof Map) {
-            return MapSerializer.serialize(obj);
-        } else if (Array.isArray(obj)) {
-            return obj.map(item => MapSerializer.transformForSerialization(item));
-        } else if (obj && typeof obj === 'object') {
-            const transformed: Record<string, any> = {};
-            for (const [key, value] of Object.entries(obj)) {
-                transformed[key] = MapSerializer.transformForSerialization(value);
+        try {
+            if (obj instanceof Map) {
+                return MapSerializer.serialize(obj);
+            } else if (Array.isArray(obj)) {
+                return obj.map(item => MapSerializer.transformForSerialization(item));
+            } else if (obj && typeof obj === 'object') {
+                const transformed: Record<string, any> = {};
+                for (const [key, value] of Object.entries(obj)) {
+                    transformed[key] = MapSerializer.transformForSerialization(value);
+                }
+                return transformed;
             }
-            return transformed;
+            return obj;
+        } catch (error) {
+            console.error('Error transforming object for serialization:', error);
+            return '';
         }
-        return obj;
     }
 
     // Recursively restores Maps in a deserialized object

@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { PluginInput, PluginParameterType, PluginOutput } from '@cktmcs/shared';
+import { PluginInput, PluginParameterType, PluginOutput, PlanDependency, StepDependency } from '@cktmcs/shared';
 import { MapSerializer } from '@cktmcs/shared';
 import { MessageType, ActionVerbTask } from '@cktmcs/shared';
 
@@ -16,7 +16,7 @@ export class Step {
     readonly actionVerb: string;
     inputs: Map<string, PluginInput>;
     description?: string;
-    dependencies: Map<string, string>;
+    dependencies: StepDependency[];
     status: StepStatus;
     result?: PluginOutput[];
     timeout?: number;
@@ -26,7 +26,7 @@ export class Step {
         stepNo: number,
         inputs?: Map<string, PluginInput>,
         description?: string,
-        dependencies?: Map<string, string>,
+        dependencies?: StepDependency[],
         status?: StepStatus
     }) {
         this.id = uuidv4();
@@ -34,7 +34,7 @@ export class Step {
         this.actionVerb = params.actionVerb;
         this.inputs = params.inputs || new Map();
         this.description = params.description;
-        this.dependencies = params.dependencies || new Map();
+        this.dependencies = params.dependencies || [];
         this.status = params.status || StepStatus.PENDING;
     }
 
@@ -45,36 +45,73 @@ export class Step {
      * @returns Array of Step instances
      */
     static createFromPlan(plan: ActionVerbTask[], startingStepNo: number = 1): Step[] {
-        return plan.map((task, index) => {
-            const inputs = task.inputs || new Map();
-            const dependencies = new Map<string, string>();
-
-            // Set dependencies for this step
-            if (task.dependencies) {
-                Object.entries(task.dependencies).forEach(([inputKey, depStepId]) => {
-                    dependencies.set(inputKey, depStepId);
-                });
+        const steps = plan.map((task, index) => {
+            const inputs = new Map<string, PluginInput>();
+            if (task.inputs) {
+                if (task.inputs instanceof Map) {
+                    task.inputs.forEach((value, key) => inputs.set(key, value));
+                } else {
+                    Object.entries(task.inputs).forEach(([key, value]) => {
+                        inputs.set(key, {
+                            inputName: key,
+                            inputValue: value,
+                            args: {}
+                        } as PluginInput);
+                    });
+                }
             }
-
+            
             return new Step({
                 actionVerb: task.verb,
                 stepNo: startingStepNo + index,
                 inputs: inputs,
                 description: task.description,
-                dependencies: dependencies
+                dependencies: []
             });
+        });
+
+        // Convert PlanDependency to StepDependency using step numbers
+        steps.forEach((step, index) => {
+            const task = plan[index];
+            if (task.dependencies) {
+                task.dependencies.forEach((dep: PlanDependency) => {
+                    const sourceStep = steps.find(s => 
+                        s.stepNo === (startingStepNo + dep.sourceStepNo)
+                    );
+                    if (sourceStep) {
+                        step.dependencies.push({
+                            inputName: dep.inputName,
+                            sourceStepId: sourceStep.id,
+                            outputName: dep.outputName
+                        });
+                    }
+                });
+            }
+        });
+
+        return steps;
+    }
+
+    populateInputsFromDependencies(allSteps: Step[]): void {
+        this.dependencies.forEach(dep => {
+            const sourceStep = allSteps.find(s => s.id === dep.sourceStepId);
+            if (sourceStep?.result) {
+                const outputValue = sourceStep.result.find(r => r.name === dep.outputName)?.result;
+                if (outputValue !== undefined) {
+                    this.inputs.set(dep.inputName, {
+                        inputName: dep.inputName,
+                        inputValue: outputValue,
+                        args: { outputKey: dep.outputName }
+                    });
+                }
+            }
         });
     }
 
-    /**
-     * Checks if all dependencies of this step are satisfied
-     * @param allSteps All steps in the current process
-     * @returns Boolean indicating if dependencies are satisfied
-     */
     areDependenciesSatisfied(allSteps: Step[]): boolean {
-        return Array.from(this.dependencies.values()).every(depStepId => {
-            const depStep = allSteps.find(s => s.id === depStepId);
-            return depStep && depStep.status === StepStatus.COMPLETED;
+        return this.dependencies.every(dep => {
+            const sourceStep = allSteps.find(s => s.id === dep.sourceStepId);
+            return sourceStep && sourceStep.status === StepStatus.COMPLETED;
         });
     }
 
@@ -85,7 +122,7 @@ export class Step {
      */
     isEndpoint(allSteps: Step[]): boolean {
         const dependents = allSteps.filter(s => 
-            [...s.dependencies.values()].some(depId => depId === this.id)
+            s.dependencies.some(dep => dep.sourceStepId === this.id)
         );
         return dependents.length === 0;
     }
@@ -192,43 +229,6 @@ export class Step {
         this.status = newStatus;
         if (result) {
             this.result = result;
-        }
-    }
-
-    /**
-     * Populates step inputs from dependent steps
-     * @param allSteps All steps in the current process
-     */
-    populateInputsFromDependencies(allSteps: Step[]): void {
-        if (this.dependencies) {
-            this.dependencies.forEach((depStepId, inputKey) => {
-                const dependentStep = allSteps.find(s => s.id === depStepId);
-                if (dependentStep && dependentStep.result) {
-                    const inputData = this.inputs.get(inputKey);
-                    if (inputData && inputData.args && inputData.args.outputKey) {
-                        const outputKey = inputData.args.outputKey;
-                        let inputValue: any = undefined;
-    
-                        // Safely search for the output key in the result array
-                        for (const resultItem of dependentStep.result) {
-                            if (resultItem.name === outputKey) {
-                                inputValue = resultItem.result;
-                                break;
-                            }
-                        }
-    
-                        this.inputs.set(inputKey, {
-                            inputName: inputKey,
-                            inputValue: inputValue,
-                            args: { ...inputData.args }
-                        });
-    
-                        if (inputValue === undefined) {
-                            console.warn(`Output key '${outputKey}' not found in the result of step ${dependentStep.id}`);
-                        }
-                    }
-                }
-            });
         }
     }
 
@@ -339,7 +339,11 @@ export class Step {
         
         // Add dependency on condition check for all first iteration steps
         iterationSteps.forEach(step => {
-            step.dependencies.set('__condition', checkStep.id);
+            step.dependencies.push({
+                inputName: '__condition',
+                sourceStepId: checkStep.id,
+                outputName: 'result'
+            });
         });
     
         newSteps.push(...iterationSteps);
@@ -410,7 +414,11 @@ export class Step {
     
         // Add dependencies from condition check to all iteration steps
         iterationSteps.forEach(step => {
-            checkStep.dependencies.set(`__until_${step.id}`, step.id);
+            checkStep.dependencies.push({
+                inputName: `__until_${step.id}`,
+                sourceStepId: step.id,
+                outputName: 'result'
+            });
         });
     
         newSteps.push(checkStep);
@@ -454,7 +462,11 @@ export class Step {
     
             if (previousStepId) {
                 // Add dependency on previous step
-                newStep.dependencies.set('__sequence', previousStepId);
+                newStep.dependencies.push({
+                    inputName: '__sequence',
+                    sourceStepId: previousStepId,
+                    outputName: 'result'
+                });
             }
     
             previousStepId = newStep.id;
@@ -470,8 +482,7 @@ export class Step {
         }];
     }
 
-
-   
+  
     /**
      * Converts the step to a simple JSON-serializable object
      * @returns Simplified representation of the step

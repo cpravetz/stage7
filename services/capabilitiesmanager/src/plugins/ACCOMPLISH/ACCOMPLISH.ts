@@ -1,7 +1,7 @@
 import axios from 'axios';
 // @ts-ignore
 import { parseJSON } from 'json-alexander';
-import { MapSerializer, PluginInput, PluginOutput, PluginParameterType, ActionVerbTask } from '@cktmcs/shared';
+import { MapSerializer, PluginInput, PluginOutput, PluginParameterType, ActionVerbTask, PlanDependency } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 
 interface JsonPlanStep {
@@ -69,7 +69,7 @@ Guidelines for creating a plan:
 4. For inputs, use the expected input names for the action verb as the input names. 
 Each input should be an object with either a 'value' property for predetermined values or an 'outputKey' property referencing an output from a previous step. So 
 an input would be defined as: {"inputName1": {value: "predeterminedValue"}} or {"inputName2": {outputKey: "outputKeyFromPreviousStep"}}
-5. List dependencies for each step, referencing the step numbers that provide the required inputs.
+5. List dependencies for each step, as an object with the property names being the outputs needed and the values being the step number that provides the required inputlike: {outputname: stepNumber}
 6. Specify the outputs of each step that may be used by dependent steps.
 7. Aim for 5-10 steps in the plan, breaking down complex tasks if necessary.
 8. Be thorough in your description fields. This is the only instruction the performer will have.
@@ -173,7 +173,7 @@ export async function execute(inputs: Map<string, PluginInput> | Record<string, 
                     resultType: PluginParameterType.ERROR,
                     resultDescription: 'Failed to parse Brain response',
                     result: null,
-                    error: 'Response type not PLAN or DIRECT_ANSWER'
+                    error: `Response type not PLAN or DIRECT_ANSWER: ${parsedResponse.type}`
             }];
             }
         } catch (error) { analyzeError(error as Error);
@@ -269,7 +269,7 @@ async function queryBrain(messages: { role: string, content: string }[]): Promis
 }
 
 function convertJsonToTasks(jsonPlan: JsonPlanStep[]): ActionVerbTask[] {
-    return jsonPlan.map(step => {
+    return jsonPlan.map((step, index) => {
         const inputs = new Map<string, PluginInput>();
         for (const [key, inputData] of Object.entries(step.inputs)) {
             inputs.set(key, {
@@ -279,9 +279,15 @@ function convertJsonToTasks(jsonPlan: JsonPlanStep[]): ActionVerbTask[] {
             });
         }
 
-        const dependencies = new Map<string, number>();
-        for (const [key, value] of Object.entries(step.dependencies)) {
-            dependencies.set(key, value);
+        const planDependencies: PlanDependency[] = [];
+        for (const [inputName, depInfo] of Object.entries(step.dependencies)) {
+            planDependencies.push({
+                inputName,
+                sourceStepNo: depInfo,  // Using step number during planning
+                outputName: step.outputs && Object.keys(step.outputs).length > 0 
+                ? Object.keys(step.outputs)[0] 
+                : (step.inputs[inputName]?.args?.outputKey || 'result')
+            });
         }
 
         return {
@@ -289,7 +295,7 @@ function convertJsonToTasks(jsonPlan: JsonPlanStep[]): ActionVerbTask[] {
             inputs: inputs,
             expectedOutputs: new Map(Object.entries(step.outputs)),
             description: step.description,
-            dependencies: dependencies
+            dependencies: planDependencies
         };
     });
 }

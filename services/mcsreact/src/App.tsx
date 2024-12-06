@@ -7,7 +7,7 @@ import StatisticsWindow from './components/StatisticsWindow';
 import SavedMissionsList from './components/SavedMissionsList';
 import ErrorBoundary from './components/ErrorBoundary';
 import LoginComponent from './components/Login';
-import { MissionStatistics, MessageType } from '@cktmcs/shared';
+import { AgentStatistics, MissionStatistics, MessageType } from '@cktmcs/shared';
 import { SecurityClient } from './SecurityClient';
 import axios, { AxiosInstance } from 'axios';
 import { v4 as uuidv4 } from 'uuid';
@@ -41,9 +41,11 @@ export const App: React.FC = () => {
   const [statistics, setStatistics] = useState<MissionStatistics>({
     llmCalls: 0,
     agentCountByStatus: Object,
-    runningAgents: [],
+    agentStatistics: new Map(),
     engineerStatistics: { newPlugins: [] }
   });
+
+  const [agentStatistics, setAgentStatistics] = useState<Map<string, Array<AgentStatistics>>>(new Map());
 
   const ws = useRef<WebSocket | null>(null);  
 
@@ -118,6 +120,9 @@ export const App: React.FC = () => {
             break;
         case MessageType.STATISTICS:
             setStatistics(data.content);
+            if (data.content.agentStatistics) {
+              setAgentStatistics(data.content.agentStatistics);
+            }
             break;
         case MessageType.STATUS_UPDATE :
             console.log('Received mission status update:', data.data.content);
@@ -369,6 +374,7 @@ useEffect(() => {
             <TabbedPanel 
               conversationHistory={conversationHistory}
               workProducts={workProducts}
+              agentStatistics={agentStatistics}
             />
           </div>
           <TextInput onSend={handleSendMessage} />

@@ -18,7 +18,9 @@
     "react-dom": "^18.3.1",
     "react-scripts": "^5.0.1",
     "typescript": "^5.6.3",
-    "uuid": "^11.0.3"
+    "uuid": "^11.0.3",
+    "vis-data": "^7.1.9",
+    "vis-network": "^9.1.9"
   },
   "devDependencies": {
     "@babel/plugin-proposal-private-property-in-object": "^7.21.11",
@@ -34,7 +36,8 @@
   "overrides": {
     "typescript": "^5.6.3",
     "glob": "^10.4.5",
-    "inflight": "^2.0.0"
+    "inflight": "^2.0.0",
+    "uuid": "^11.0.3"
   },
   "resolutions": {
     "typescript": "^5.6.3",

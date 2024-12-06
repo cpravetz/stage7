@@ -606,16 +606,47 @@ Please consider this context and the available plugins when planning and executi
     }
 
     async getStatistics(): Promise<AgentStatistics> {
+        // Add debug logging to see each step's dependencies
+        this.steps.forEach(step => {
+            console.log(`Step ${step.stepNo} (${step.actionVerb}) dependencies:`, 
+                step.dependencies
+            );
+        });
+
+        const totalDeps = this.steps.reduce((sum, step) => sum + step.dependencies.length, 0);
+        console.log(`Total dependencies across all steps: ${totalDeps}`);
+
+        const stepStats = this.steps.map(step => ({
+            id: step.id,
+            verb: step.actionVerb,
+            status: step.status,
+            dependencies: step.dependencies.map(dep => dep.sourceStepId), // Extract only sourceStepIds
+            stepNo: step.stepNo
+        }));
+    
         const statistics: AgentStatistics = {
-            id : this.id,
+            id: this.id,
             status: this.status,
             taskCount: this.steps.length,
-            currenTaskNo: this.steps.length,
-            currentTaskVerb: this.steps[this.steps.length - 1]?.actionVerb || 'Unknown'
+            currentTaskNo: this.steps.length,
+            currentTaskVerb: this.steps[this.steps.length - 1]?.actionVerb || 'Unknown',
+            steps: stepStats,
+            color: this.getAgentColor()
         };
+
         return statistics;
     }
 
+    private getAgentColor(): string {
+        // Generate a consistent color based on agent ID
+        let hash = 0;
+        for (let i = 0; i < this.id.length; i++) {
+            hash = this.id.charCodeAt(i) + ((hash << 5) - hash);
+        }
+        const hue = hash % 360;
+        return `hsl(${hue}, 70%, 50%)`;
+    }
+    
     private async notifyTrafficManager(): Promise<void> {
         try {
             const message: Message = {

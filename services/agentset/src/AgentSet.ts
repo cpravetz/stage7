@@ -233,7 +233,6 @@ export class AgentSet extends BaseEntity {
 
     private async getAgentStatistics(req: express.Request, res: express.Response) {
         const { missionId } = req.params;
-        console.log(`AgentSet:Getting statistics for mission ${missionId}`);
         if (!missionId) {
             console.log(`AgentSet:Missing missionId parameter`);
             return res.status(400).send('Missing missionId parameter');
@@ -247,22 +246,18 @@ export class AgentSet extends BaseEntity {
         for (const agent of this.agents.values()) {
             if (agent.getMissionId() === missionId) {
                 const status = agent.getStatus();
-                console.log(`AgentSet:Getting statistics for agent ${agent.id} status: ${status}`);
+                const agentStats = await agent.getStatistics();
                 if (!stats.agentsByStatus.has(status)) {
                     // If the status doesn't exist in the Map, create a new array with this agent's stats
-                    stats.agentsByStatus.set(status, [await agent.getStatistics()]);
+                    stats.agentsByStatus.set(status, [agentStats]);
                 } else {
                     // If the status already exists, append this agent's stats to the existing array
-                    stats.agentsByStatus.get(status)!.push(await agent.getStatistics());
+                    stats.agentsByStatus.get(status)!.push(agentStats);
                 }
                 stats.agentsCount++;
             }
         }
-        const serializedStats = {
-            ...stats,
-            agentsByStatus: Object.fromEntries(stats.agentsByStatus)
-        };
-    
+        const serializedStats = MapSerializer.transformForSerialization(stats);
         res.status(200).json(serializedStats);
         }
 

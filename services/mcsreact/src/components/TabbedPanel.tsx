@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import ConversationHistory from './ConversationHistory';
+import { AgentStatistics } from '@cktmcs/shared';
+import { NetworkGraph } from './NetworkGraph';
 import './TabbedPanel.css';
 
 interface WorkProduct {
@@ -8,12 +10,17 @@ interface WorkProduct {
   url: string;
 }
 
-interface Props {
+interface TabbedPanelProps {
   conversationHistory: string[];
   workProducts: WorkProduct[];
+  agentStatistics: Map<string, Array<AgentStatistics>>;
 }
 
-const TabbedPanel: React.FC<Props> = ({ conversationHistory, workProducts }) => {
+export const TabbedPanel: React.FC<TabbedPanelProps> = ({ 
+  conversationHistory, 
+  workProducts,
+  agentStatistics 
+}) => {
   const [activeTab, setActiveTab] = useState('conversation');
 
   return (
@@ -30,6 +37,12 @@ const TabbedPanel: React.FC<Props> = ({ conversationHistory, workProducts }) => 
           onClick={() => setActiveTab('results')}
         >
           Results
+        </button>
+        <button 
+          className={activeTab === 'network' ? 'active' : ''} 
+          onClick={() => setActiveTab('network')}
+        >
+          Agent Network
         </button>
       </div>
       <div className="tab-content">
@@ -59,6 +72,9 @@ const TabbedPanel: React.FC<Props> = ({ conversationHistory, workProducts }) => 
               </tbody>
             </table>
           </div>
+        )}
+        {activeTab === 'network' && (
+          <NetworkGraph agentStatistics={agentStatistics} />
         )}
       </div>
     </div>

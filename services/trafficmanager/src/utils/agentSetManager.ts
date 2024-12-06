@@ -1,7 +1,7 @@
 import Docker from 'dockerode';
 import express from 'express';
 import axios from 'axios';
-import { MapSerializer, AgentSetManagerStatistics, AgentSetStatistics, AgentStatistics, PluginInput, MessageType } from '@cktmcs/shared';
+import { MapSerializer, AgentSetManagerStatistics, AgentStatistics, PluginInput, MessageType } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 
 const api = axios.create({
@@ -324,34 +324,45 @@ class AgentSetManager {
     }
 
     public async getAgentStatistics(missionId: string): Promise<AgentSetManagerStatistics> {
-
-        let stats : AgentSetManagerStatistics = {
+        let stats: AgentSetManagerStatistics = {
             agentSetsCount: 0,
             totalAgentsCount: 0,
-            agentsByStatus: new Map()
+            agentsByStatus: new Map(),
         };
         try {
             console.log(`AgentSetManager getting statistics from ${this.agentSets.size} AgentSets}`);
             for (const agentSet of this.agentSets.values()) {
                 stats.agentSetsCount++;
-                console.log(`AgentSetManager getting statistics from AgentSet ${agentSet.url}`);
                 const response = await axios.get(`http://${agentSet.url}/statistics/${missionId}`);
-                const serializedStats = response.data;
+                const serializedStats = MapSerializer.transformFromSerialization(response.data);
                 stats.totalAgentsCount += serializedStats.agentsCount;
-            // Merge agentCountByStatus
-                Object.entries(serializedStats.agentsByStatus).forEach(([status, agents]) => {
-                    if (!stats.agentsByStatus.has(status)) {
-                        stats.agentsByStatus.set(status, [...agents as Array<AgentStatistics>]);
-                    } else {
-                        stats.agentsByStatus.get(status)!.push(...agents as Array<AgentStatistics>);
-                    }
-                });
+
+                // Merge agentsByStatus maps properly
+                if (serializedStats.agentsByStatus instanceof Map) {
+                    serializedStats.agentsByStatus.forEach((agents: AgentStatistics[], status: string) => {
+                        if (!stats.agentsByStatus.has(status)) {
+                            stats.agentsByStatus.set(status, [...agents]);
+                        } else {
+                            stats.agentsByStatus.get(status)!.push(...agents);
+                        }
+                    });
+                } else {
+                    // Handle case where it might be a plain object
+                    Object.entries(serializedStats.agentsByStatus).forEach(([status, agents]) => {
+                        if (!stats.agentsByStatus.has(status)) {
+                            stats.agentsByStatus.set(status, [...agents as AgentStatistics[]]);
+                        } else {
+                            stats.agentsByStatus.get(status)!.push(...agents as AgentStatistics[]);
+                        }
+                    });
+                }
             }
-        } catch (error) { analyzeError(error as Error);
+            return stats;
+        } catch (error) {
+            analyzeError(error as Error);
             console.error('Error fetching agent statistics:', error instanceof Error ? error.message : error);
+            return stats;
         }
-        
-        return stats;
     }
 
     async loadOneAgent(agentId: string): Promise<boolean> {

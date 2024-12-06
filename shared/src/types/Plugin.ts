@@ -48,7 +48,7 @@ export interface Step {
     actionVerb: string;
     description?: string;
     inputs: Map<string, PluginInput>;
-    dependencies: Map<string, string>;
+    dependencies: StepDependency[];
     status: 'pending' | 'running' | 'completed' | 'error';
     result?: PluginOutput[];
     timeout?: number;
@@ -102,10 +102,23 @@ export interface PluginOutput {
     mimeType?: string
 }
 
+export interface StepDependency {
+    inputName: string;      // The input variable that needs the value
+    sourceStepId: string;   // The step that provides the value
+    outputName: string;     // The specific output to use from the source step
+}
+
+export interface PlanDependency {
+    inputName: string;
+    sourceStepNo: number;  // Using step number instead of ID during planning
+    outputName: string;
+}
+
+
 export interface ActionVerbTask {
     verb: string;
     inputs: Map<string, PluginInput>;
     expectedOutputs?: Map<string, string>;
     description?: string;
-    dependencies?: Map<string, number>;
+    dependencies?: PlanDependency[];
 }

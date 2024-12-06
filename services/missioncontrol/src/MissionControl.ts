@@ -1,9 +1,10 @@
 import axios from 'axios';
 import express from 'express';
 import { Request, Response, NextFunction } from 'express';
-import { Mission, Status } from '@cktmcs/shared';
+import { AgentStatistics, Mission, Status } from '@cktmcs/shared';
 import { generateGuid } from './utils/generateGuid';
-import { BaseEntity, TrafficManagerStatistics, MissionStatistics, MessageType, PluginInput } from '@cktmcs/shared';
+import { BaseEntity, MessageType, PluginInput, MapSerializer } from '@cktmcs/shared';
+import { MissionStatistics } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 
 interface CustomRequest extends Request {
@@ -317,12 +318,22 @@ class MissionControl extends BaseEntity {
                     if (!mission) continue;
 
                     const trafficManagerResponse = await api.get(`http://${this.trafficManagerUrl}/getAgentStatistics/${missionId}`);
-                    const trafficManagerStatistics: TrafficManagerStatistics = trafficManagerResponse.data;
+                    const trafficManagerStatistics = MapSerializer.transformFromSerialization(trafficManagerResponse.data);
+
+
+                    const totalDependencies = Array.from(trafficManagerStatistics.agentStatisticsByStatus.values())
+                    .flat()
+                    .reduce<number>((totalCount, agent) => 
+                        totalCount + (agent as AgentStatistics).steps.reduce<number>((stepCount, step) => 
+                            stepCount + (step.dependencies?.length || 0), 0
+                        ), 0);
+                    
+                    console.log(`Total step dependencies across all agents: ${totalDependencies}`);
 
                     const missionStats: MissionStatistics = {
                         llmCalls: llmCallsResponse.data.llmCalls,
                         agentCountByStatus: trafficManagerStatistics.agentStatisticsByType.agentCountByStatus,
-                        runningAgents: trafficManagerStatistics.runningAgentStatistics.runningAgents,
+                        agentStatistics: trafficManagerStatistics.agentStatisticsByStatus,
                         engineerStatistics: engineerStatisticsResponse.data
                     };
 
@@ -331,7 +342,7 @@ class MissionControl extends BaseEntity {
                         sender: this.id,
                         recipient: 'user',
                         clientId: clientId,
-                        content: missionStats
+                        content: MapSerializer.transformForSerialization(missionStats)
                     });
                 }
             }
