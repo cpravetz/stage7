@@ -8,7 +8,7 @@ stage7 is an advanced, self-modifying system designed to manage and execute comp
 
 1. **MissionControl**: Manages the overall operation of the system, initializing and controlling missions.
 2. **PostOffice**: Central message routing component that maintains a registry of available components and routes messages between entities.
-3. **Brain**: Handles conversations and selects the best LLM for processing based on the context.
+3. **Brain**: Handles chat conversations, LLM content conversions, and selects the best LLM for processing based on the context.
 4. **Frontend**: A React application that provides a user interface for interacting with the system.
 5. **Engineer**: Responsible for creating and managing plugins.
 6. **Librarian**: Manages data storage using Redis and MongoDB servers.
@@ -28,19 +28,16 @@ stage7 is an advanced, self-modifying system designed to manage and execute comp
 
 ### Prerequisites
 
-- Node.js (v18 or later)
 - Docker and Docker Compose
-- MongoDB
-- Redis
 
 ### Installation
 
 1. Clone the repository:
    `git clone https://github.com/cpravetz/stage7.git`
-2. Install dependencies:
-   `npm install`
-3. Start the development server:
-   `npm start`
+2. Build the system containers, in the root directory (likely /stage7):
+   `docker compose build`
+3. Start the containers:
+   `docker compose up`
 4. The application will be available at [http://localhost:80](http://localhost:80).
 
 
