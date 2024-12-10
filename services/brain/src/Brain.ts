@@ -92,7 +92,7 @@ export class Brain extends BaseEntity {
             const modelName = req.body.modelName;
             const optimization = req.body.optimization;
             const conversationType = req.body.conversationType;
-            const model = this.modelManager.getModel(modelName) || this.modelManager.selectModel(optimization, conversationType);
+            const model = modelName ? this.modelManager.getModel(modelName) : this.modelManager.selectModel(optimization, conversationType);
             if (!model || !model.isAvailable() || !model.service) {
                 res.json({ response: 'No suitable model found.', mimeType: 'text/plain' });
                 console.log('No suitable model found.');

@@ -73,16 +73,7 @@ export abstract class BaseInterface {
 
             if (typeof message.content === 'string') {
                 messageTokens = estimateTokens(message.content);
-            }/* else if (Array.isArray(message.content)) {
-                messageTokens = message.content.reduce((sum, item) => {
-                    if (typeof item === 'string') {
-                        return sum + estimateTokens(item);
-                    } else if (item.type === 'text') {
-                        return sum + estimateTokens(item.text);
-                    }
-                    return sum;
-                }, 0);
-            }*/
+            } 
 
             if (estimatedTokens + messageTokens <= targetTokens) {
                 trimmedMessages.unshift(message);
