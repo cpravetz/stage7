@@ -14,6 +14,7 @@ export class ConfigManager {
     private static instance: ConfigManager;
     private librarianUrl: string;
     private configId: string = 'capabilitiesmanager';
+    private initialized: boolean = false;
 
     private constructor(librarianUrl: string) {
         this.librarianUrl = librarianUrl;
@@ -28,7 +29,6 @@ export class ConfigManager {
     static async initialize(librarianUrl: string): Promise<ConfigManager> {
         if (!ConfigManager.instance) {
             const instance = new ConfigManager(librarianUrl);
-            await instance.loadConfig();
             ConfigManager.instance = instance;
         }
         return ConfigManager.instance;
@@ -65,6 +65,13 @@ export class ConfigManager {
         }
     }
 
+    private async ensureInitialized() {
+        if (!this.initialized) {
+            await this.loadConfig();
+            this.initialized = true;
+        }
+    }
+
     private async saveConfig() {
         try {
             await axios.post(`http://${this.librarianUrl}/storeData`, {
@@ -80,21 +87,25 @@ export class ConfigManager {
     }
 
     public async updatePluginConfig(pluginId: string, configSet: ConfigItem[]) {
+        await this.ensureInitialized();
         this.config.pluginConfigurations[pluginId] = configSet || [];
         await this.saveConfig();
     }
 
     async updatePluginMetadata(pluginId: string, metadata: Partial<MetadataType>) {
+        await this.ensureInitialized();
         const existingMetadata = this.config.pluginMetadatas[pluginId] || {};
         this.config.pluginMetadatas[pluginId] = { ...existingMetadata, ...metadata };
         await this.saveConfig();
     }
 
     public async getPluginConfig(pluginId: string): Promise<ConfigItem[]> {
+        await this.ensureInitialized();
         return this.config.pluginConfigurations[pluginId] || [];
     }
 
     async getPluginMetadata(pluginId: string): Promise<MetadataType | undefined> {
+        await this.ensureInitialized();
         await this.ensurePluginMetadata(pluginId);
         return this.config.pluginMetadatas[pluginId] || undefined;
     }
@@ -104,7 +115,8 @@ export class ConfigManager {
         await this.saveConfig();
     }
 
-    getEnvironmentVariable(key: string): string | undefined {
+    async getEnvironmentVariable(key: string): Promise<string | undefined> {
+        await this.ensureInitialized();
         return this.config.environment[key];
     }
 
