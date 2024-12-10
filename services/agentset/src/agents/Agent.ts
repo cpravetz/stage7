@@ -57,7 +57,9 @@ export class Agent extends BaseEntity {
         super(config.id, 'Agent', `agentset`, process.env.PORT || '9000');
         console.log(`Agent ${config.id} created. missionId=${config.missionId}. Inputs: ${JSON.stringify(config.inputs)}` );
         this.agentPersistenceManager = new AgentPersistenceManager();
-        this.inputs = config.inputs;
+        this.inputs = config.inputs instanceof Map ? 
+        new Map(config.inputs) : 
+        new Map(Object.entries(config.inputs||{}));
         this.missionId = config.missionId;
         this.agentSetUrl = config.agentSetUrl;
         this.status = AgentStatus.INITIALIZING;
@@ -70,8 +72,9 @@ export class Agent extends BaseEntity {
         const initialStep = new Step({
             actionVerb: config.actionVerb,
             stepNo: 1,
-            inputs: config.inputs,
-            description: 'Initial mission step'
+            inputs: this.inputs,
+            description: 'Initial mission step',
+            status: StepStatus.PENDING
         });
         this.steps.push(initialStep);
 
@@ -398,7 +401,7 @@ Please consider this context and the available plugins when planning and executi
             const subAgentConfig = {
                 agentId: subAgentId,
                 actionVerb: 'ACCOMPLISH',
-                inputs: Object.fromEntries(newInputs),
+                inputs: MapSerializer.transformForSerialization(newInputs),
                 missionId: this.missionId,
                 dependencies: [this.id, ...(this.dependencies || [])],
                 missionContext: this.missionContext
@@ -538,8 +541,8 @@ Please consider this context and the available plugins when planning and executi
             if (step.actionVerb === 'ASK') {
                 return this.handleAskStep(step.inputs);
             }
-
-            const payload = MapSerializer.transformForSerialization({ step });
+            console.log('Executing step: ', step);
+            const payload = step;//MapSerializer.transformForSerialization({ step });
             const response = await api.post(`http://${this.capabilitiesManagerUrl}/executeAction`, payload);
             return MapSerializer.transformFromSerialization(response.data);
         } catch (error) {

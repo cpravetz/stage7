@@ -186,6 +186,8 @@ class AgentSetManager {
 
     async assignAgentToSet(agentId: string, actionVerb: string, inputs: Map<string, PluginInput>,  missionId: string, missionContext: string): Promise<string> {
         console.log('Assigning agent to set...');
+        console.log('actionVerb: ', actionVerb);
+        console.log('inputs: ', inputs);
         let availableSet = await this.getAvailableAgentSet();
         if (!availableSet) {
             console.log('No available agent set found. Attempting to create a new one...');
@@ -206,13 +208,13 @@ class AgentSetManager {
         this.agentToSetMap.set(agentId, availableSet.id);
         
         try {
-            const response = await api.post(`http://${availableSet.url}/addAgent`, MapSerializer.transformForSerialization({
+            const response = await api.post(`http://${availableSet.url}/addAgent`, {
                 agentId,
                 actionVerb,
-                inputs,
+                inputs:MapSerializer.transformForSerialization(inputs),
                 missionId,
                 missionContext
-            }));
+            });
     
             availableSet.agentCount++;
             return response.data;

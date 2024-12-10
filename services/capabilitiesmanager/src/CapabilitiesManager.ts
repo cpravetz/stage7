@@ -11,9 +11,10 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { ConfigManager } from './utils/configManager.js';
-import { PluginRegistry } from './utils/pluginRegistry.js';
+import { initializeExistingPlugins, PluginRegistry } from './utils/pluginRegistry.js';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
+import { PluginSandbox } from './utils/PluginSandbox.js';
 
 const configPath = path.join(os.homedir(), '.cktmcs', 'capabilitiesmanager.json');
 
@@ -78,7 +79,54 @@ export class CapabilitiesManager extends BaseEntity {
                 app.post('/executeAction', (req, res) => this.executeActionVerb(req, res));
                 app.post('/message', (req, res) => this.handleMessage(req, res));
                 app.get('/availablePlugins', (req, res) => this.pluginRegistry.getAvailablePlugins(req, res));
+
+
                 // New endpoints for plugin management
+                app.post('/registerPlugin', async (req, res) => {
+                    try {
+                        const plugin = req.body.plugin;
+                        await this.pluginRegistry.registerPlugin(plugin);
+                        res.status(200).json({ message: 'Plugin registered successfully' });
+                    } catch (error) {
+                        analyzeError(error as Error);
+                        res.status(500).json({ 
+                            error: `Failed to register plugin: ${error instanceof Error ? error.message : String(error)}` 
+                        });
+                    }
+                });
+        
+                app.get('/plugins/:pluginId', async (req, res) => {
+                    try {
+                        const plugin = await this.pluginRegistry.getPlugin(req.params.pluginId);
+                        if (plugin) {
+                            res.status(200).json(plugin);
+                        } else {
+                            res.status(404).json({ error: 'Plugin not found' });
+                        }
+                    } catch (error) {
+                        analyzeError(error as Error);
+                        res.status(500).json({ 
+                            error: `Failed to get plugin: ${error instanceof Error ? error.message : String(error)}` 
+                        });
+                    }
+                });
+        
+                app.get('/plugins/:pluginId/metadata', async (req, res) => {
+                    try {
+                        const metadata = await this.pluginRegistry.getPluginMetadata(req.params.pluginId);
+                        if (metadata) {
+                            res.status(200).json(metadata);
+                        } else {
+                            res.status(404).json({ error: 'Plugin metadata not found' });
+                        }
+                    } catch (error) {
+                        analyzeError(error as Error);
+                        res.status(500).json({ 
+                            error: `Failed to get plugin metadata: ${error instanceof Error ? error.message : String(error)}` 
+                        });
+                    }
+                });
+
                 app.get('/plugins/category/:category', async (req, res) => {
                     const plugins = await this.pluginRegistry.getPluginsByCategory(req.params.category);
                     res.json(plugins);
@@ -149,7 +197,10 @@ export class CapabilitiesManager extends BaseEntity {
     }
 
     private async executeActionVerb(req: express.Request, res: express.Response) {
-        const { step } = MapSerializer.transformFromSerialization(req.body);
+        console.log('executing ActionVerb req.body: ',req.body);
+        const  step  = req.body;
+        step.inputs = MapSerializer.transformFromSerialization(step.inputs);
+
         if (!step.actionVerb || typeof step.actionVerb !== 'string') {
             res.status(400).send([{
                 success: false,
@@ -220,12 +271,17 @@ export class CapabilitiesManager extends BaseEntity {
     private validateAndStandardizeInputs(step: Step) {
         const pluginDef = this.pluginRegistry.actionVerbs.get(step.actionVerb);
 
+        console.log(`Validating inputs for ${step.actionVerb}`);
         if (!pluginDef) {
-            // If there's no plugin for this actionVerb, consider inputs validated
             return;
         }
+        console.log('Validating inputs:', step.inputs);
+        console.log('Deserialized inputs:', MapSerializer.transformFromSerialization(step.inputs));
 
-        const inputs = step.inputs as Map<string, PluginInput>;
+        // Convert inputs to Map if necessary
+        let inputs: Map<string, PluginInput>;
+        inputs = step.inputs;
+
         const validInputs = new Map<string, PluginInput>();
 
         for (const inputDef of pluginDef.inputDefinitions) {
@@ -242,7 +298,7 @@ export class CapabilitiesManager extends BaseEntity {
                 }
             }
 
-            if (!input && inputDef.required ) {
+            if (!input && inputDef.required) {
                 console.log(`Missing required input "${inputName}" for ${step.actionVerb}`);
                 validInputs.set(inputName, {
                     inputName,
@@ -260,40 +316,39 @@ export class CapabilitiesManager extends BaseEntity {
         step.inputs = validInputs;
     }
 
-    protected async executePlugin(plugin: Plugin, inputs: Map<string, PluginInput>): Promise<PluginOutput[]> {
-        // Load plugin-specific configuration
-        let configSet = await this.configManager.getPluginConfig(plugin.id);
-        
-        // Check for missing required configuration
-        if (configSet.length === 0) {
-            for (const configItem of configSet) {
-                if (configItem.required && !configItem.value) {
-                    const answer = await this.ask(`Please provide a value for ${configItem.key} - ${configItem.description}`);
-                    configItem.value = answer;
-                }
+    protected async executePlugin(plugin: Plugin, inputs: Map<string, PluginInput> | Record<string, any>): Promise<PluginOutput[]> {
+        let sandbox: PluginSandbox | null = null;
+        try {
+            // Convert inputs to Map if it's a plain object
+            const inputsMap = inputs instanceof Map ? inputs : new Map(Object.entries(inputs));
+            
+            // Verify plugin security before execution
+            if (!plugin.security) {
+                throw new Error('Plugin security configuration is required');
+            }
+    
+            // Load plugin-specific configuration
+            const configSet = await this.configManager.getPluginConfig(plugin.id);
+
+            // Create sandbox with security settings
+            sandbox = new PluginSandbox(plugin);
+            console.log('sandbox defined');
+            // Execute plugin in sandbox with converted inputs
+            const execResult = await sandbox.executePlugin(inputsMap, {
+                config: configSet,
+                environment: process.env
+            });
+            console.log('execResult:', execResult);
+            return execResult;
+        } catch (error) {
+            analyzeError(error as Error);
+            throw new Error(`Plugin execution failed: ${error instanceof Error ? error.message : String(error)}`);
+        } finally {
+            if (sandbox) {
+                await sandbox.dispose();
             }
         }
-    
-        // Record usage
-        this.pluginRegistry.recordPluginUsage(plugin.verb);
-        await this.configManager.updatePluginConfig(plugin.id, configSet);
-        
-        // Inject configuration into plugin environment
-        const environment: environmentType = {
-            env: process.env,
-            credentials: configSet ?? []
-        };
-    
-        // Execute with environment
-        if (plugin.language === 'javascript') {
-            return this.executeJavaScriptPlugin(plugin, inputs, environment);
-        } else if (plugin.language === 'python') {
-            return this.executePythonPlugin(plugin, inputs, environment);
-        }
-        
-        throw new Error(`Unsupported plugin language: ${plugin.language}`);
     }
-
 
     private async executeJavaScriptPlugin(plugin: Plugin, inputs: Map<string, PluginInput>, environment: environmentType): Promise<PluginOutput[]> {
         const pluginDir = path.join(__dirname, 'plugins', plugin.verb);
@@ -428,7 +483,6 @@ export class CapabilitiesManager extends BaseEntity {
     async getCapabilitiesSummary(): Promise<string> {
         return this.pluginRegistry.getSummarizedCapabilities();
     }
-
 }
 
 // Create and start the CapabilitiesManager

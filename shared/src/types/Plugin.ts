@@ -72,9 +72,24 @@ export interface Plugin {
     inputDefinitions: PluginParameter[];
     outputDefinitions: PluginParameter[];
     entryPoint?: EntryPointType;
-    language: 'javascript' | 'python';
+    language: 'javascript' | 'python' | 'typescript';
     configuration?: ConfigItem[];
     metadata?: MetadataType;
+    security: {
+        permissions: string[];        // Required permissions like 'fs.read', 'net.fetch'
+        sandboxOptions: {            // VM sandbox configuration
+            allowEval: boolean;
+            timeout: number;
+            memory: number;
+            allowedModules: string[];
+            allowedAPIs: string[];
+        };
+        trust: {                     // Trust and verification
+            signature?: string;      // Code signature
+            publisher?: string;      // Verified publisher
+            certificateHash?: string;// Certificate hash for verification
+        };
+    };
 }
 
 export interface PluginParameter {

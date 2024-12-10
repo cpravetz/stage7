@@ -4,6 +4,7 @@ import { analyzeError } from '@cktmcs/errorhandler';
 import express from 'express';
 import path from 'path';
 import fs from 'fs/promises';
+import { createHash } from 'crypto';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import { ConfigManager } from './configManager';
@@ -12,7 +13,68 @@ import { MapSerializer } from '@cktmcs/shared';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+/**
+ * Initializes existing plugins by loading them from the specified directory
+ * and registering them with the provided plugin registry.
+ *
+ * @param pluginRegistry - The registry where plugins will be registered. It is expected to manage plugin lifecycle and interactions.
+ * @param librarianUrl - The URL of the librarian service used to fetch additional plugin metadata or configurations.
+ * @returns A promise that resolves when all plugins have been initialized and registered.
+ */
+export async function initializeExistingPlugins(pluginRegistry: any, librarianUrl: string): Promise<void> {
+    const pluginsDir = path.join(__dirname, '..', 'plugins');
+    
+    try {
+        // Read all directories in the plugins folder
+        const pluginDirs = await fs.readdir(pluginsDir);
+        
+        for (const dir of pluginDirs) {
+            try {
+                // Read plugin.js file which contains the plugin definition
+                const pluginPath = path.join(pluginsDir, dir, 'plugin.js');
+                const pluginModule = await import(pluginPath);
+                const plugin: Plugin = pluginModule.default;
 
+                // Add default security settings if not present
+                if (!plugin.security) {
+                    plugin.security = {
+                        permissions: [],
+                        sandboxOptions: {
+                            allowEval: false,
+                            timeout: 5000,
+                            memory: 128 * 1024 * 1024,
+                            allowedModules: ['fs', 'path', 'http', 'https'],
+                            allowedAPIs: ['fetch', 'console']
+                        },
+                        trust: {
+                            publisher: 'system',
+                            signature: 'built-in-plugin'
+                        }
+                    };
+                }
+
+                // Store in Librarian
+                await axios.post(`http://${librarianUrl}/storeData`, {
+                    id: plugin.id,
+                    data: plugin,
+                    collection: 'plugins',
+                    storageType: 'mongo'
+                });
+                
+                // Register with PluginRegistry
+                await pluginRegistry.registerPlugin(plugin);
+                
+                console.log(`Built-in plugin ${plugin.verb} initialized successfully`);
+            } catch (error) {
+                analyzeError(error as Error);
+                console.error(`Failed to initialize plugin in directory ${dir}:`, error instanceof Error ? error.message : error);
+            }
+        }
+    } catch (error) {
+        analyzeError(error as Error);
+        console.error('Failed to initialize existing plugins:', error instanceof Error ? error.message : error);
+    }
+}
 
 export class PluginRegistry {
     private plugins: Map<string, Plugin & { metadata: MetadataType }> = new Map();
@@ -44,6 +106,12 @@ export class PluginRegistry {
                 await this.loadLocalPlugins();
                 await this.loadLibrarianPlugins();
                 console.log('Action verbs loaded:', Array.from(this.actionVerbs.keys()));
+                
+                // Register plugins with their metadata
+                for (const [verb, plugin] of this.actionVerbs.entries()) {
+                    const metadata = await this.configManager.getPluginMetadata(plugin.id);
+                    await this.registerPlugin(plugin, metadata);
+                }
             } catch (error) {
                 analyzeError(error as Error);
                 console.error('Error loading action verbs:', error instanceof Error ? error.message : error);
@@ -51,12 +119,86 @@ export class PluginRegistry {
                 console.log('Initialized with empty action verbs map');
             }
             this.pluginsLoaded = true;
-
-            for (const [verb, plugin] of this.actionVerbs.entries()) {
-                const metadata = await this.configManager.getPluginMetadata(plugin.id);
-                await this.registerPlugin(plugin, metadata);
-            }
         }
+    }
+    
+    private async loadLocalPlugins() {
+        const pluginsDir = path.join(this.currentDir, '..', 'plugins');
+        try {
+            const entries = await fs.readdir(pluginsDir, { withFileTypes: true });
+            const pluginDirs = entries.filter(entry => entry.isDirectory());
+            
+            for (const dirEntry of pluginDirs) {
+                try {
+                    const pluginPath = path.join(pluginsDir, dirEntry.name, 'plugin.js');
+                    const pluginModule = await import(pluginPath);
+                    const plugin: Plugin = pluginModule.default;
+    
+                    // Generate signature for built-in plugins
+                    const content = JSON.stringify({
+                        id: plugin.id,
+                        verb: plugin.verb,
+                        entryPoint: plugin.entryPoint,
+                        security: {
+                            permissions: plugin.security?.permissions || [],
+                            sandboxOptions: plugin.security?.sandboxOptions || {
+                                allowEval: false,
+                                timeout: 5000,
+                                memory: 128 * 1024 * 1024,
+                                allowedModules: ['fs', 'path', 'http', 'https'],
+                                allowedAPIs: ['fetch', 'console']
+                            }
+                        }
+                    });
+    
+                    const signature = createHash('sha256').update(content).digest('hex');
+    
+                    // Ensure security configuration with proper signature
+                    plugin.security = {
+                        permissions: plugin.security?.permissions || [],
+                        sandboxOptions: plugin.security?.sandboxOptions || {
+                            allowEval: false,
+                            timeout: 5000,
+                            memory: 128 * 1024 * 1024,
+                            allowedModules: ['fs', 'path', 'http', 'https'],
+                            allowedAPIs: ['fetch', 'console']
+                        },
+                        trust: {
+                            publisher: 'system',
+                            signature: signature,
+                            certificateHash: signature // For built-in plugins, we can use the same hash
+                        }
+                    };
+    
+                    // Store in Librarian
+                    await axios.post(`http://${this.librarianUrl}/storeData`, {
+                        id: plugin.id,
+                        data: plugin,
+                        collection: 'plugins',
+                        storageType: 'mongo'
+                    });
+    
+                    this.actionVerbs.set(plugin.verb, plugin);
+                    console.log(`Loaded plugin ${plugin.verb} from ${pluginPath}`);
+                } catch (error) {
+                    analyzeError(error as Error);
+                    console.error(`Failed to load plugin in directory ${dirEntry.name}:`, error instanceof Error ? error.message : error);
+                }
+            }
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error('Failed to load local plugins:', error instanceof Error ? error.message : error);
+        }
+    }
+
+    public async getPlugin(verb: string): Promise<Plugin | undefined> {
+        return this.plugins.get(verb);
+    }
+
+    public async getPluginMetadata(verb: string): Promise<MetadataType | undefined> {
+        const plugin = this.plugins.get(verb);
+        if (!plugin) { return undefined; }
+        return await this.configManager.getPluginMetadata(plugin.id);
     }
 
     public async getAvailablePlugins(req: express.Request, res: express.Response) {
@@ -69,7 +211,6 @@ export class PluginRegistry {
             res.status(500).send({ error: 'Failed to get available plugins' });
         }
     }
-
 
     async registerPlugin(plugin: Plugin, metadata?: MetadataType) {
         const defaultMetadata: MetadataType = {
@@ -151,12 +292,7 @@ export class PluginRegistry {
         this.configManager.updatePluginMetadata(plugin.id, pluginMetadata);
     }
 
-    private async loadLocalPlugins() {
-        const projectRoot = path.resolve(__dirname, '..');
-        const pluginsDir = path.join(projectRoot, 'plugins');
-        await this.recursivelyLoadPlugins(pluginsDir);
-    }
-    
+   
     private async recursivelyLoadPlugins(dir: string) {
         const entries = await fs.readdir(dir, { withFileTypes: true });
     

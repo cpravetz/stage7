@@ -195,12 +195,16 @@ export class TrafficManager extends BaseEntity {
         }
         try {
             const agentSetManagerStatistics = await agentSetManager.getAgentStatistics(missionId);
-            
+            let agentCountByStatus: Map<string, number>;
             // Convert agentsByStatus to a map of [status, count] records
-            const agentCountByStatus = new Map(
-                Array.from(agentSetManagerStatistics.agentsByStatus.entries())
-                    .map(([status, agents]) => [status, agents.length])
-            );
+            if (agentSetManagerStatistics.agentsByStatus.entries()) {
+                agentCountByStatus = new Map(
+                    Array.from(agentSetManagerStatistics.agentsByStatus.entries())
+                        .map(([status, agents]) => [status, agents.length])
+                );
+            } else {
+                agentCountByStatus = new Map();
+            }
 
             const trafficManagerStatistics: TrafficManagerStatistics = {
                 agentStatisticsByType: {
@@ -212,7 +216,7 @@ export class TrafficManager extends BaseEntity {
             };
 
             res.status(200).json(MapSerializer.transformForSerialization(trafficManagerStatistics));
-        } catch (error) { analyzeError(error as Error);
+        } catch (error) { //analyzeError(error as Error);
             console.error('Error fetching agent statistics:', error instanceof Error ? error.message : error);
             res.status(500).json({ error: 'Failed to fetch agent statistics' });
         }
@@ -276,14 +280,16 @@ export class TrafficManager extends BaseEntity {
     }
 
     private async createAgent(req: express.Request, res: express.Response) {
+        console.log('createAgent req.body: ', req.body);
         const { actionVerb, inputs, dependencies, missionId, missionContext } = req.body;
+        const inputsDeserialized = MapSerializer.transformFromSerialization(inputs);
         let inputsMap: Map<string, PluginInput>;
         
-        if (inputs instanceof Map) {
-            inputsMap = inputs;
+        if (inputsDeserialized instanceof Map) {
+            inputsMap = inputsDeserialized;
         } else {
             inputsMap = new Map();
-            for (const [key, value] of Object.entries(inputs)) {
+            for (const [key, value] of Object.entries(inputsDeserialized)) {
                 if (typeof value === 'object' && value !== null && 'inputValue' in value) {
                     inputsMap.set(key, value as PluginInput);
                 } else {

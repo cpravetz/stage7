@@ -120,8 +120,18 @@ class MissionControl extends BaseEntity {
         this.sendStatusUpdate(mission, 'Mission created');
 
         try {
-            const inputs: Object = { goal: {inputName: 'goal', inputValue: mission.goal, args: {} }};
-            await api.post(`http://${this.trafficManagerUrl}/createAgent`, { actionVerb: 'ACCOMPLISH', inputs, missionId: mission.id, dependencies: [] });
+            const inputs = new Map<string, PluginInput>();
+            inputs.set('goal', {
+                inputName: 'goal',
+                inputValue: mission.goal,
+                args: {}
+            });
+            console.log('Serializing inputs: ', inputs);
+            console.log('Serialized: ', MapSerializer.transformForSerialization(inputs));
+            await api.post(`http://${this.trafficManagerUrl}/createAgent`, { actionVerb: 'ACCOMPLISH', 
+                inputs: MapSerializer.transformForSerialization(inputs), 
+                missionId: mission.id, 
+                dependencies: [] });
             mission.status = Status.RUNNING;
             this.sendStatusUpdate(mission, 'Mission started');
         } catch (error) { analyzeError(error as Error);
@@ -320,8 +330,8 @@ class MissionControl extends BaseEntity {
                     const trafficManagerResponse = await api.get(`http://${this.trafficManagerUrl}/getAgentStatistics/${missionId}`);
                     const trafficManagerStatistics = MapSerializer.transformFromSerialization(trafficManagerResponse.data);
 
-
-                    const totalDependencies = Array.from(trafficManagerStatistics.agentStatisticsByStatus.values())
+                    const valueMap = trafficManagerStatistics.agentStatisticsByStatus instanceof Map ? trafficManagerStatistics.agentStatisticsByStatus : new Map(Object.entries(trafficManagerStatistics.agentStatisticsByStatus));
+                    const totalDependencies = Array.from(valueMap)
                     .flat()
                     .reduce<number>((totalCount, agent) => 
                         totalCount + (agent as AgentStatistics).steps.reduce<number>((stepCount, step) => 

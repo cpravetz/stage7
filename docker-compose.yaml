@@ -59,6 +59,7 @@ services:
       dockerfile: services/brain/dockerfile
     depends_on:
       - postoffice
+      - librarian
     environment:
       NODE_ENV: production
       PORT: &brainPort 5070
@@ -107,6 +108,7 @@ services:
     depends_on:
       - postoffice
       - engineer
+      - librarian
     environment:
       NODE_ENV: production
       PORT: &capabilitiesmanagerPort 5060
@@ -127,7 +129,7 @@ services:
     environment:
       MONGO_URI: mongodb://mongo:27017
       MONGO_DB: librarianDB
-      REDIS_HOST: redis:redis
+      REDIS_HOST: redis
       REDIS_PORT: 6379
       NODE_ENV: production
       PORT: &librarianPort 5040
