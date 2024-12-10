@@ -208,10 +208,10 @@ export class TrafficManager extends BaseEntity {
                     agentCountByStatus: Object.fromEntries(agentCountByStatus),
                     agentSetCount: agentSetManagerStatistics.agentSetsCount
                 },
-                agentStatisticsByStatus: agentSetManagerStatistics.agentsByStatus
+                agentStatisticsByStatus: MapSerializer.transformForSerialization(agentSetManagerStatistics.agentsByStatus)
             };
 
-            res.status(200).json(MapSerializer.transformForSerialization(trafficManagerStatistics));
+            res.status(200).json(trafficManagerStatistics);
         } catch (error) { analyzeError(error as Error);
             console.error('Error fetching agent statistics:', error instanceof Error ? error.message : error);
             res.status(500).json({ error: 'Failed to fetch agent statistics' });
@@ -277,6 +277,7 @@ export class TrafficManager extends BaseEntity {
 
     private async createAgent(req: express.Request, res: express.Response) {
         const { actionVerb, inputs, dependencies, missionId, missionContext } = req.body;
+        console.log('Creating agent with inputs', inputs);
         let inputsMap: Map<string, PluginInput>;
         
         if (inputs instanceof Map) {
@@ -295,6 +296,7 @@ export class TrafficManager extends BaseEntity {
                 }
             }
         }
+        console.log('Inputs converted to InputsMap', inputsMap);
         try {
             const agentId = uuidv4();
             

@@ -1,5 +1,5 @@
 import axios from 'axios';
-import cheerio from 'cheerio';
+import { load } from 'cheerio';
 import { PluginInput, PluginOutput, PluginParameterType } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 
@@ -19,9 +19,9 @@ export async function execute(inputs: Map<string, PluginInput>): Promise<PluginO
 
         const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(searchTerm)}`;
         const response = await axios.get(url);
-        const $ = cheerio.load(response.data);
+        const $ = load(response.data);
 
-        const results = $('.result__url').map((_, element) => {
+        const results = $('.result__url').map((_: number, element: any) => {
             return {
                 title: $(element).parent().find('.result__title').text().trim(),
                 url: $(element).attr('href')

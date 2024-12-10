@@ -206,13 +206,15 @@ class AgentSetManager {
         this.agentToSetMap.set(agentId, availableSet.id);
         
         try {
-            const response = await api.post(`http://${availableSet.url}/addAgent`, MapSerializer.transformForSerialization({
+            const payload = {
                 agentId,
                 actionVerb,
-                inputs,
+                inputs: MapSerializer.transformForSerialization(inputs),
                 missionId,
                 missionContext
-            }));
+            };
+            console.log('Adding agent to set with payload:', payload);
+            const response = await api.post(`http://${availableSet.url}/addAgent`, payload);
     
             availableSet.agentCount++;
             return response.data;
@@ -333,30 +335,37 @@ class AgentSetManager {
             console.log(`AgentSetManager getting statistics from ${this.agentSets.size} AgentSets}`);
             for (const agentSet of this.agentSets.values()) {
                 stats.agentSetsCount++;
-                const response = await axios.get(`http://${agentSet.url}/statistics/${missionId}`);
-                const serializedStats = MapSerializer.transformFromSerialization(response.data);
-                stats.totalAgentsCount += serializedStats.agentsCount;
+                try {
+                    const response = await axios.get(`http://${agentSet.url}/statistics/${missionId}`);
+                    const serializedStats = response.data;
+                    serializedStats.agentsByStatus = MapSerializer.transformFromSerialization(serializedStats.agentsByStatus);
+                    console.log(`AgentSetManager:AgentSet `,agentSet.url,` stats: `, serializedStats);
+                    stats.totalAgentsCount += serializedStats.agentsCount;
 
-                // Merge agentsByStatus maps properly
-                if (serializedStats.agentsByStatus instanceof Map) {
-                    serializedStats.agentsByStatus.forEach((agents: AgentStatistics[], status: string) => {
-                        if (!stats.agentsByStatus.has(status)) {
-                            stats.agentsByStatus.set(status, [...agents]);
-                        } else {
-                            stats.agentsByStatus.get(status)!.push(...agents);
-                        }
-                    });
-                } else {
-                    // Handle case where it might be a plain object
-                    Object.entries(serializedStats.agentsByStatus).forEach(([status, agents]) => {
-                        if (!stats.agentsByStatus.has(status)) {
-                            stats.agentsByStatus.set(status, [...agents as AgentStatistics[]]);
-                        } else {
-                            stats.agentsByStatus.get(status)!.push(...agents as AgentStatistics[]);
-                        }
-                    });
+                    // Merge agentsByStatus maps properly
+                    if (serializedStats.agentsByStatus instanceof Map) {
+                        serializedStats.agentsByStatus.forEach((agents: AgentStatistics[], status: string) => {
+                            if (!stats.agentsByStatus.has(status)) {
+                                stats.agentsByStatus.set(status, [...agents]);
+                            } else {
+                                stats.agentsByStatus.get(status)!.push(...agents);
+                            }
+                        });
+                    } else {
+                        // Handle case where it might be a plain object
+                        Object.entries(serializedStats.agentsByStatus).forEach(([status, agents]) => {
+                            if (!stats.agentsByStatus.has(status)) {
+                                stats.agentsByStatus.set(status, [...agents as AgentStatistics[]]);
+                            } else {
+                                stats.agentsByStatus.get(status)!.push(...agents as AgentStatistics[]);
+                            }
+                        });
+                    }
+                } catch (error) { 
+                    console.error(`Error fetching agent statistics from ${agentSet.url}:`, error instanceof Error ? error.message : error);
                 }
             }
+            console.log(`AgentSetManager:Total stats:`, stats);
             return stats;
         } catch (error) {
             analyzeError(error as Error);

@@ -215,7 +215,7 @@ async function parseJsonWithErrorCorrection(jsonString: string): Promise<any> {
          // Handle string concatenation in JSON
          correctedJson = correctedJson.replace(/"\s*\+\s*JSON\.stringify\((.*?)\)\s*\+\s*"/g, (match, p1) => {
             try {
-                const parsed = JSON.parse(p1);
+                const parsed = parseJSON(p1);
                 return JSON.stringify(parsed);
             } catch (e) {
                 return match; // If parsing fails, leave it as is
@@ -271,25 +271,27 @@ async function queryBrain(messages: { role: string, content: string }[]): Promis
 function convertJsonToTasks(jsonPlan: JsonPlanStep[]): ActionVerbTask[] {
     return jsonPlan.map((step, index) => {
         const inputs = new Map<string, PluginInput>();
-        for (const [key, inputData] of Object.entries(step.inputs)) {
-            inputs.set(key, {
-                inputName: key,
-                inputValue: inputData.value !== undefined ? inputData.value : undefined,
-                args: { outputKey: inputData.outputKey }
-            });
+        if (step.inputs) {
+            for (const [key, inputData] of Object.entries(step.inputs)) {
+                inputs.set(key, {
+                    inputName: key,
+                    inputValue: inputData.value !== undefined ? inputData.value : undefined,
+                    args: { outputKey: inputData.outputKey }
+                });
+            }
         }
-
         const planDependencies: PlanDependency[] = [];
-        for (const [inputName, depInfo] of Object.entries(step.dependencies)) {
-            planDependencies.push({
-                inputName,
-                sourceStepNo: depInfo,  // Using step number during planning
-                outputName: step.outputs && Object.keys(step.outputs).length > 0 
-                ? Object.keys(step.outputs)[0] 
-                : (step.inputs[inputName]?.args?.outputKey || 'result')
-            });
+        if (step.dependencies) {
+            for (const [inputName, depInfo] of Object.entries(step.dependencies)) {
+                planDependencies.push({
+                    inputName,
+                    sourceStepNo: depInfo,  // Using step number during planning
+                    outputName: step.outputs && Object.keys(step.outputs).length > 0 
+                    ? Object.keys(step.outputs)[0] 
+                    : (step.inputs[inputName]?.args?.outputKey || 'result')
+                });
+            }
         }
-
         return {
             verb: step.verb,
             inputs: inputs,

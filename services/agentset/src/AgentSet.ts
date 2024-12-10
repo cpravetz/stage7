@@ -129,22 +129,28 @@ export class AgentSet extends BaseEntity {
     }
 
     private async addAgent(req: express.Request, res: express.Response) {
-        const { agentId, actionVerb, inputs, missionId, missionContext } = MapSerializer.transformFromSerialization(req.body);
+        const { agentId, actionVerb, inputs, missionId, missionContext } = req.body;
+        console.log('Adding agent with req.body', req.body);
+        console.log('Adding agent with inputs', inputs);
         let inputsMap: Map<string, PluginInput>;
         
-        if (inputs instanceof Map) {
-            inputsMap = inputs;
-        } else {
-            inputsMap = new Map();
-            for (const [key, value] of Object.entries(inputs)) {
-                if (typeof value === 'object' && value !== null && 'inputValue' in value) {
-                    inputsMap.set(key, value as PluginInput);
-                } else {
-                    inputsMap.set(key, {
-                        inputName: key,
-                        inputValue: value,
-                        args: { [key]: value }
-                    });
+        if (inputs?._type === 'Map') {
+            inputsMap = MapSerializer.transformFromSerialization(inputs);
+        }else {
+            if (inputs instanceof Map) {
+                inputsMap = inputs;
+            } else {
+                inputsMap = new Map();
+                for (const [key, value] of Object.entries(inputs)) {
+                    if (typeof value === 'object' && value !== null && 'inputValue' in value) {
+                        inputsMap.set(key, value as PluginInput);
+                    } else {
+                        inputsMap.set(key, {
+                            inputName: key,
+                            inputValue: value,
+                            args: { [key]: value }
+                        });
+                    }
                 }
             }
         }
@@ -242,11 +248,13 @@ export class AgentSet extends BaseEntity {
             agentsByStatus: new Map(),
             agentsCount: 0
         };
+        console.log(`AgentSet:Getting statistics for mission ${missionId}`);
 
         for (const agent of this.agents.values()) {
             if (agent.getMissionId() === missionId) {
                 const status = agent.getStatus();
                 const agentStats = await agent.getStatistics();
+                console.log(`AgentSet:Agent `,agent.id,` has stats `, agentStats);
                 if (!stats.agentsByStatus.has(status)) {
                     // If the status doesn't exist in the Map, create a new array with this agent's stats
                     stats.agentsByStatus.set(status, [agentStats]);
@@ -257,9 +265,14 @@ export class AgentSet extends BaseEntity {
                 stats.agentsCount++;
             }
         }
-        const serializedStats = MapSerializer.transformForSerialization(stats);
-        res.status(200).json(serializedStats);
-        }
+        const serializedStats = {
+            agentsByStatus: MapSerializer.transformForSerialization(stats.agentsByStatus),
+            agentsCount: stats.agentsCount
+        };
+        
+        console.log(`AgentSet:Sending statistics for mission ${missionId}`, JSON.stringify(serializedStats, null, 2));
+        res.status(200).send(serializedStats);
+    }
 
         private updateFromAgent(req: express.Request, res: express.Response) {
             const { agentId, status } = req.body;

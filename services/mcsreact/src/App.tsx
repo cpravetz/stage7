@@ -7,7 +7,7 @@ import StatisticsWindow from './components/StatisticsWindow';
 import SavedMissionsList from './components/SavedMissionsList';
 import ErrorBoundary from './components/ErrorBoundary';
 import LoginComponent from './components/Login';
-import { AgentStatistics, MissionStatistics, MessageType } from '@cktmcs/shared';
+import { AgentStatistics, MissionStatistics, MessageType, MapSerializer } from '@cktmcs/shared';
 import { SecurityClient } from './SecurityClient';
 import axios, { AxiosInstance } from 'axios';
 import { v4 as uuidv4 } from 'uuid';
@@ -121,6 +121,9 @@ export const App: React.FC = () => {
         case MessageType.STATISTICS:
             setStatistics(data.content);
             if (data.content.agentStatistics) {
+              if( data.content.agentStatistics._type === 'Map') {
+                data.content.agentStatistics = MapSerializer.transformFromSerialization(data.content.agentStatistics);
+              }
               setAgentStatistics(data.content.agentStatistics);
             }
             break;

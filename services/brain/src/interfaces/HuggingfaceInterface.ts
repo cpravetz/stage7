@@ -45,9 +45,9 @@ export class HuggingfaceInterface extends BaseInterface {
         try {
             let response: string = "";
             for await (const chunk of inference.chatCompletionStream({
-                model: options.modelName || 'meta-llama/llama-3.2-3b-instruct',
+                model: options.modelName || 'HuggingFaceH4/zephyr-7b-beta',
                 messages: messages,
-                max_tokens: options.max_length || 4096,
+                max_tokens: options.max_length || 4000,
                 temperature: options.temperature || 0.2,
             })) {
                 response += chunk.choices[0]?.delta?.content || "";
@@ -71,36 +71,62 @@ export class HuggingfaceInterface extends BaseInterface {
 
     async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string }): Promise<string> {
         try {
-            const trimmedMessages = this.trimMessages(messages, Math.min(options.max_length || 4096, 4096));
+            const MODEL_MAX_TOKENS = 4096;
+            const SAFETY_MARGIN = 200;
+            
+            const trimmedMessages = this.trimMessages(messages, MODEL_MAX_TOKENS);
             const inputTokens = trimmedMessages.reduce((sum, message) => {
                 return sum + Math.ceil(message.content.length / 3.7);
             }, 0);
-            const max_new_tokens = Math.max(1, (options.max_length || 4096) - inputTokens);
-
-            const inference = new HfInference(service.apiKey);
-
-            let out = "";
-            const stream = inference.chatCompletionStream({
-                model: options.modelName || "meta-llama/Llama-3.2-3B-Instruct",
-                messages: trimmedMessages,
-                max_tokens: 4096-inputTokens,
-                temperature: 0.5,
-                top_p: 0.7
-            });
+    
+            const availableTokens = MODEL_MAX_TOKENS - inputTokens - SAFETY_MARGIN;
             
-            for await (const chunk of stream) {
-                if (chunk.choices && chunk.choices.length > 0) {
-                    const newContent = chunk.choices[0].delta.content;
-                    out += newContent;
-                }  
+            if (availableTokens < 100) {
+                return `Error: Input too long: ${inputTokens} tokens used, only ${availableTokens} tokens available for response`;
             }
+    
+            const max_new_tokens = Math.min(
+                availableTokens,
+                options.max_length || MODEL_MAX_TOKENS,
+                MODEL_MAX_TOKENS - inputTokens - SAFETY_MARGIN
+            );
+    
+            console.log(`Token allocation: input=${inputTokens}, max_new=${max_new_tokens}, total=${inputTokens + max_new_tokens}`);
+    
+            const inference = new HfInference(service.apiKey);
+            let out = "";
             
-            const generatedText = out;
-            return generatedText;
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 30000);
+    
+            try {
+                const stream = await inference.chatCompletionStream({
+                    model: options.modelName || "HuggingFaceH4/zephyr-7b-beta",
+                    messages: trimmedMessages,
+                    max_tokens: max_new_tokens,
+                    temperature: options.temperature || 0.5,
+                    top_p: 0.7
+                }, {
+                    signal: controller.signal
+                });
+    
+                for await (const chunk of stream) {
+                    if (chunk.choices && chunk.choices.length > 0) {
+                        const newContent = chunk.choices[0].delta.content;
+                        out += newContent;
+                    }
+                }
+            } finally {
+                clearTimeout(timeoutId);
+            }
+    
+            return out || 'No response generated';
         } catch (error) {
             analyzeError(error as Error);
-            console.error('Error generating response from Huggingface:', error instanceof Error ? error.message : error);
-            return '';
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            console.error('Error generating response from Huggingface:', errorMessage);
+            // Return error message instead of throwing to prevent loops
+            return `Error: ${errorMessage}`;
         }
     }
 
