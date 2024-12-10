@@ -215,7 +215,7 @@ async function parseJsonWithErrorCorrection(jsonString: string): Promise<any> {
          // Handle string concatenation in JSON
          correctedJson = correctedJson.replace(/"\s*\+\s*JSON\.stringify\((.*?)\)\s*\+\s*"/g, (match, p1) => {
             try {
-                const parsed = JSON.parse(p1);
+                const parsed = parseJSON(p1);
                 return JSON.stringify(parsed);
             } catch (e) {
                 return match; // If parsing fails, leave it as is

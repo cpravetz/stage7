@@ -337,7 +337,9 @@ class AgentSetManager {
                 stats.agentSetsCount++;
                 try {
                     const response = await axios.get(`http://${agentSet.url}/statistics/${missionId}`);
-                    const serializedStats = MapSerializer.transformFromSerialization(response.data);
+                    const serializedStats = response.data;
+                    serializedStats.agentsByStatus = MapSerializer.transformFromSerialization(serializedStats.agentsByStatus);
+                    console.log(`AgentSetManager:AgentSet `,agentSet.url,` stats: `, serializedStats);
                     stats.totalAgentsCount += serializedStats.agentsCount;
 
                     // Merge agentsByStatus maps properly
@@ -363,6 +365,7 @@ class AgentSetManager {
                     console.error(`Error fetching agent statistics from ${agentSet.url}:`, error instanceof Error ? error.message : error);
                 }
             }
+            console.log(`AgentSetManager:Total stats:`, stats);
             return stats;
         } catch (error) {
             analyzeError(error as Error);

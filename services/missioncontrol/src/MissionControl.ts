@@ -319,7 +319,8 @@ class MissionControl extends BaseEntity {
                     if (!mission) continue;
 
                     const trafficManagerResponse = await api.get(`http://${this.trafficManagerUrl}/getAgentStatistics/${missionId}`);
-                    const trafficManagerStatistics = MapSerializer.transformFromSerialization(trafficManagerResponse.data);
+                    const trafficManagerStatistics = trafficManagerResponse.data;
+                    trafficManagerStatistics.agentStatisticsByStatus = MapSerializer.transformFromSerialization(trafficManagerStatistics.agentStatisticsByStatus);
 
                     let totalDependencies = 0;
                     if (trafficManagerStatistics.agentStatisticsByStatus?.values) {
@@ -335,7 +336,7 @@ class MissionControl extends BaseEntity {
                     const missionStats: MissionStatistics = {
                         llmCalls: llmCallsResponse.data.llmCalls,
                         agentCountByStatus: trafficManagerStatistics.agentStatisticsByType.agentCountByStatus,
-                        agentStatistics: trafficManagerStatistics.agentStatisticsByStatus,
+                        agentStatistics: MapSerializer.transformForSerialization(trafficManagerStatistics.agentStatisticsByStatus),
                         engineerStatistics: engineerStatisticsResponse.data
                     };
 
@@ -344,7 +345,7 @@ class MissionControl extends BaseEntity {
                         sender: this.id,
                         recipient: 'user',
                         clientId: clientId,
-                        content: MapSerializer.transformForSerialization(missionStats)
+                        content: missionStats
                     });
                 }
             }

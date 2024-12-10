@@ -633,7 +633,7 @@ Please consider this context and the available plugins when planning and executi
             steps: stepStats,
             color: this.getAgentColor()
         };
-
+        console.log(`Agent ${this.id} statistics:`, statistics);
         return statistics;
     }
 

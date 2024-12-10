@@ -208,10 +208,10 @@ export class TrafficManager extends BaseEntity {
                     agentCountByStatus: Object.fromEntries(agentCountByStatus),
                     agentSetCount: agentSetManagerStatistics.agentSetsCount
                 },
-                agentStatisticsByStatus: agentSetManagerStatistics.agentsByStatus
+                agentStatisticsByStatus: MapSerializer.transformForSerialization(agentSetManagerStatistics.agentsByStatus)
             };
 
-            res.status(200).json(MapSerializer.transformForSerialization(trafficManagerStatistics));
+            res.status(200).json(trafficManagerStatistics);
         } catch (error) { analyzeError(error as Error);
             console.error('Error fetching agent statistics:', error instanceof Error ? error.message : error);
             res.status(500).json({ error: 'Failed to fetch agent statistics' });
