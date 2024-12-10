@@ -51,13 +51,14 @@ export class Engineer extends BaseEntity {
         res.status(200).json({ newPlugins: this.newPlugins });
     }
     async createPlugin(verb: string, context: Map<string, PluginInput>): Promise<Plugin | undefined> {
-        this.newPlugins.push(verb);
-        const explanation = await this.generateExplanation(verb, context);
-        let pluginStructure: Plugin;
-        let configItems: ConfigItem[];
-        let metadata: MetadataType;
-
-        try {
+      this.newPlugins.push(verb);
+      const explanation = await this.generateExplanation(verb, context);
+      let pluginStructure: Plugin;
+      let configItems: ConfigItem[];
+      let metadata: MetadataType;
+  
+      try {
+        console            
             const contextString = JSON.stringify(Array.from(context.entries()));
             const engineeringPrompt = `
             Create a javascript or python based plugin for the action verb "${verb}" with the following context: ${explanation}
@@ -279,8 +280,23 @@ Types used in the plugin structure are:
             },
             language: pluginStructure.language,
             configuration: configItems,
-            metadata: metadata
+            metadata: metadata,
+            security: {
+                permissions: this.determineRequiredPermissions(pluginStructure),
+                sandboxOptions: {
+                    allowEval: false,
+                    timeout: 5000,
+                    memory: 128 * 1024 * 1024, // 128MB
+                    allowedModules: ['fs', 'path', 'http', 'https'],
+                    allowedAPIs: ['fetch', 'console']
+                },
+                trust: {
+                    publisher: 'system-generated'
+                }
+            }
         };
+
+        newPlugin.security.trust.signature = await this.signPlugin(newPlugin);        
 
         try {
             // Save the plugin to the librarian
@@ -310,6 +326,25 @@ Types used in the plugin structure are:
         res.status(200).send({ status: 'Message received and processed' });
     }
     
+    private determineRequiredPermissions(plugin: Plugin): string[] {
+        const permissions: string[] = [];
+        
+        // Analyze plugin code and dependencies to determine required permissions
+        for (const file of plugin.entryPoint?.files || []) {
+            if (file.toString().includes('fs.')) permissions.push('fs.read', 'fs.write');
+            if (file.toString().includes('fetch(')) permissions.push('net.fetch');
+            if (file.toString().includes('http.')) permissions.push('net.http');
+            // Add more permission checks as needed
+        }
+        
+        return [...new Set(permissions)]; // Remove duplicates
+    }
+    
+    private async signPlugin(plugin: Plugin): Promise<string> {
+        // Implementation of plugin signing
+        // This would use a private key to sign the plugin code
+        return 'signature-placeholder';
+    }    
 
     private async generateExplanation(verb: string, context: Map<string, PluginInput>): Promise<string> {
         const prompt = `Given the action verb "${verb}" and the context "${context}", provide a detailed explanation of what a plugin for this verb should do. Include expected inputs and outputs.`;

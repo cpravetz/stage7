@@ -1,9 +1,6 @@
 # Use an official Node.js runtime as the base image
 FROM node:20-alpine
 
-# Install Python and pip
-RUN apk add --no-cache python3 py3-pip
-
 # Set the working directory in the container
 WORKDIR /usr/src/app
 
@@ -21,23 +18,10 @@ COPY shared ./shared
 COPY errorhandler ./errorhandler
 COPY services/capabilitiesmanager ./services/capabilitiesmanager
 
-# Ensure plugins directory exists and copy plugins
-RUN mkdir -p ./services/capabilitiesmanager/src/plugins 
-COPY services/capabilitiesmanager/src/plugins ./services/capabilitiesmanager/src/plugins
-
-# Ensure utils directory exists and copy utils
-RUN mkdir -p ./services/capabilitiesmanager/src/utils 
-COPY services/capabilitiesmanager/src/utils ./services/capabilitiesmanager/src/utils
-
 # Build the TypeScript code
 RUN npm run build --workspace=shared
 RUN npm run build --workspace=errorhandler
 RUN npm run build --workspace=services/capabilitiesmanager
-
-# List contents of dist directory
-RUN ls -R /usr/src/app/services/capabilitiesmanager/dist
-
-RUN find ./services/capabilitiesmanager/src/plugins -name "plugin.js" -exec cp {} ./services/capabilitiesmanager/dist/plugins \;
 
 # Set the working directory to the service
 WORKDIR /usr/src/app/services/capabilitiesmanager
@@ -46,4 +30,4 @@ WORKDIR /usr/src/app/services/capabilitiesmanager
 EXPOSE 5060
 
 # Define the command to run the application
-CMD ["node", "--experimental-specifier-resolution=node", "dist/CapabilitiesManager.js"]
+CMD ["node", "--experimental-specifier-resolution=node", "--experimental-vm-modules", "dist/CapabilitiesManager.js"]

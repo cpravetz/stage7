@@ -154,7 +154,8 @@ export class AgentSet extends BaseEntity {
                 }
             }
         }
-        console.log(`addAgent inputs:`, inputsMap);
+        console.log(`addAgent provided inputs:`, inputs);
+        console.log(`addAgent inputsMap:`, inputsMap);
         const agentConfig = { 
             actionVerb, 
             inputs: inputsMap, 

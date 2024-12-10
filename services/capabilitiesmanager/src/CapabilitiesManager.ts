@@ -5,22 +5,18 @@ import path from 'path';
 import { Step, MapSerializer, BaseEntity  } from '@cktmcs/shared';
 import { PluginInput, PluginOutput, Plugin, PluginParameterType, environmentType } from '@cktmcs/shared';
 import { execute as AccomplishPlugin } from './plugins/ACCOMPLISH/ACCOMPLISH.js';
-import fs from 'fs/promises';
 import os from 'os';
-import { exec } from 'child_process';
-import { promisify } from 'util';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { ConfigManager } from './utils/configManager.js';
-import { PluginRegistry } from './utils/pluginRegistry.js';
+import { initializeExistingPlugins, PluginRegistry } from './utils/pluginRegistry.js';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
+import { PluginSandbox } from './utils/PluginSandbox.js';
 
 const configPath = path.join(os.homedir(), '.cktmcs', 'capabilitiesmanager.json');
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-
-const execAsync = promisify(exec);
 
 const api = axios.create({
     headers: {
@@ -78,7 +74,54 @@ export class CapabilitiesManager extends BaseEntity {
                 app.post('/executeAction', (req, res) => this.executeActionVerb(req, res));
                 app.post('/message', (req, res) => this.handleMessage(req, res));
                 app.get('/availablePlugins', (req, res) => this.pluginRegistry.getAvailablePlugins(req, res));
+
+
                 // New endpoints for plugin management
+                app.post('/registerPlugin', async (req, res) => {
+                    try {
+                        const plugin = req.body.plugin;
+                        await this.pluginRegistry.registerPlugin(plugin);
+                        res.status(200).json({ message: 'Plugin registered successfully' });
+                    } catch (error) {
+                        analyzeError(error as Error);
+                        res.status(500).json({ 
+                            error: `Failed to register plugin: ${error instanceof Error ? error.message : String(error)}` 
+                        });
+                    }
+                });
+        
+                app.get('/plugins/:pluginId', async (req, res) => {
+                    try {
+                        const plugin = await this.pluginRegistry.getPlugin(req.params.pluginId);
+                        if (plugin) {
+                            res.status(200).json(plugin);
+                        } else {
+                            res.status(404).json({ error: 'Plugin not found' });
+                        }
+                    } catch (error) {
+                        analyzeError(error as Error);
+                        res.status(500).json({ 
+                            error: `Failed to get plugin: ${error instanceof Error ? error.message : String(error)}` 
+                        });
+                    }
+                });
+        
+                app.get('/plugins/:pluginId/metadata', async (req, res) => {
+                    try {
+                        const metadata = await this.pluginRegistry.getPluginMetadata(req.params.pluginId);
+                        if (metadata) {
+                            res.status(200).json(metadata);
+                        } else {
+                            res.status(404).json({ error: 'Plugin metadata not found' });
+                        }
+                    } catch (error) {
+                        analyzeError(error as Error);
+                        res.status(500).json({ 
+                            error: `Failed to get plugin metadata: ${error instanceof Error ? error.message : String(error)}` 
+                        });
+                    }
+                });
+
                 app.get('/plugins/category/:category', async (req, res) => {
                     const plugins = await this.pluginRegistry.getPluginsByCategory(req.params.category);
                     res.json(plugins);
@@ -224,8 +267,8 @@ export class CapabilitiesManager extends BaseEntity {
     private validateAndStandardizeInputs(step: Step) {
         const pluginDef = this.pluginRegistry.actionVerbs.get(step.actionVerb);
 
+        console.log(`Validating inputs for ${step.actionVerb}`);
         if (!pluginDef) {
-            // If there's no plugin for this actionVerb, consider inputs validated
             return;
         }
 
@@ -247,7 +290,7 @@ export class CapabilitiesManager extends BaseEntity {
                 }
             }
 
-            if (!input && inputDef.required ) {
+            if (!input && inputDef.required) {
                 console.log(`Missing required input "${inputName}" for ${step.actionVerb}`);
                 validInputs.set(inputName, {
                     inputName,
@@ -266,113 +309,37 @@ export class CapabilitiesManager extends BaseEntity {
         step.inputs = validInputs;
     }
 
-    protected async executePlugin(plugin: Plugin, inputs: Map<string, PluginInput>): Promise<PluginOutput[]> {
-        // Load plugin-specific configuration
-        let configSet = await this.configManager.getPluginConfig(plugin.id);
-        
-        // Check for missing required configuration
-        if (configSet.length === 0) {
-            for (const configItem of configSet) {
-                if (configItem.required && !configItem.value) {
-                    const answer = await this.ask(`Please provide a value for ${configItem.key} - ${configItem.description}`);
-                    configItem.value = answer;
-                }
-            }
-        }
-    
-        // Record usage
-        this.pluginRegistry.recordPluginUsage(plugin.verb);
-        await this.configManager.updatePluginConfig(plugin.id, configSet);
-        
-        // Inject configuration into plugin environment
-        const environment: environmentType = {
-            env: process.env,
-            credentials: configSet ?? []
-        };
-    
-        // Execute with environment
-        if (plugin.language === 'javascript') {
-            return this.executeJavaScriptPlugin(plugin, inputs, environment);
-        } else if (plugin.language === 'python') {
-            return this.executePythonPlugin(plugin, inputs, environment);
-        }
-        
-        throw new Error(`Unsupported plugin language: ${plugin.language}`);
-    }
-
-
-    private async executeJavaScriptPlugin(plugin: Plugin, inputs: Map<string, PluginInput>, environment: environmentType): Promise<PluginOutput[]> {
-        const pluginDir = path.join(__dirname, 'plugins', plugin.verb);
-        const mainFilePath = path.join(pluginDir, plugin.entryPoint!.main);
-    
+    protected async executePlugin(plugin: Plugin, inputs: Map<string, PluginInput> | Record<string, any>): Promise<PluginOutput[]> {
+        let sandbox: PluginSandbox | null = null;
         try {
-            // Dynamically import the main file
-            const pluginModule = await import(mainFilePath);
+            // Convert inputs to Map if it's a plain object
+            const inputsMap = inputs instanceof Map ? inputs : new Map(Object.entries(inputs));
             
-            if (typeof pluginModule.execute !== 'function') {
-                return [{
-                    success: false,
-                    name: 'error',
-                    resultType: PluginParameterType.ERROR,
-                    resultDescription: `Plugin ${plugin.verb} does not export an execute function`,
-                    result: null
-                }];
+            // Verify plugin security before execution
+            if (!plugin.security) {
+                throw new Error('Plugin security configuration is required');
             }
     
-            // Execute the plugin
-            return await pluginModule.execute(inputs, environment);
-        } catch (error) {
-            console.error(`Error executing plugin ${plugin.verb}:`, error);
-            return [{
-                success: false,
-                name: 'error',
-                resultType: PluginParameterType.ERROR,
-                resultDescription: `Error executing plugin ${plugin.verb}: ${error instanceof Error ? error.message : String(error)}`,
-                result: null
-            }];
-        }
-    }
-    private async executePythonPlugin(plugin: Plugin, inputs: Map<string, PluginInput>, environment: environmentType): Promise<PluginOutput[]> {
-        const pluginDir = path.join(this.pluginRegistry.currentDir, 'plugins', plugin.verb);
-        const mainFilePath = path.join(pluginDir, plugin.entryPoint!.main);
+            // Load plugin-specific configuration
+            const configSet = await this.configManager.getPluginConfig(plugin.id);
 
-        try {
-            // Create a temporary file for the input
-            const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'plugin-input-'));
-            const inputFilePath = path.join(tmpDir, 'input.json');
-            const pluginExecuteParams = {
-                inputs,
-                environment
-            };
-            await fs.writeFile(inputFilePath, JSON.stringify(pluginExecuteParams));
-
-            // Execute Python script
-            const { stdout, stderr } = await execAsync(`python3 ${mainFilePath} ${inputFilePath}`, {
-                cwd: pluginDir,
-                env: { ...process.env, PYTHONPATH: pluginDir }
+            // Create sandbox with security settings
+            sandbox = new PluginSandbox(plugin);
+            console.log('sandbox defined');
+            // Execute plugin in sandbox with converted inputs
+            const execResult = await sandbox.executePlugin(inputsMap, {
+                config: configSet,
+                environment: process.env
             });
-
-            // Clean up the temporary file
-            await fs.rm(tmpDir, { recursive: true, force: true });
-
-            if (stderr) {
-                console.error(`Python plugin ${plugin.verb} stderr:`, stderr);
+            console.log('execResult:', execResult);
+            return execResult;
+        } catch (error) {
+            analyzeError(error as Error);
+            throw new Error(`Plugin execution failed: ${error instanceof Error ? error.message : String(error)}`);
+        } finally {
+            if (sandbox) {
+                await sandbox.dispose();
             }
-
-            // Parse the output
-            const result: PluginOutput = JSON.parse(stdout);
-
-            return [result];
-        } catch (error) { //analyzeError(error as Error);
-            console.error(`Error executing Python plugin ${plugin.verb}:`, error instanceof Error ? error.message : error);
-            return [{
-                success: false,
-                name: 'error',
-                resultType: PluginParameterType.ERROR,
-                error: error instanceof Error ? error.message : 'Unknown error occurred',
-                resultDescription: `Error executing plugin ${plugin.verb}`,
-                result: null
-            }];
         }
     }
 
@@ -434,7 +401,6 @@ export class CapabilitiesManager extends BaseEntity {
     async getCapabilitiesSummary(): Promise<string> {
         return this.pluginRegistry.getSummarizedCapabilities();
     }
-
 }
 
 // Create and start the CapabilitiesManager
