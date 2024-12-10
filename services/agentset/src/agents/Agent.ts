@@ -539,7 +539,7 @@ Please consider this context and the available plugins when planning and executi
                 return this.handleAskStep(step.inputs);
             }
 
-            const payload = MapSerializer.transformForSerialization({ step });
+            const payload = MapSerializer.transformForSerialization(step);
             const response = await api.post(`http://${this.capabilitiesManagerUrl}/executeAction`, payload);
             return MapSerializer.transformFromSerialization(response.data);
         } catch (error) {

@@ -149,7 +149,8 @@ export class CapabilitiesManager extends BaseEntity {
     }
 
     private async executeActionVerb(req: express.Request, res: express.Response) {
-        const { step } = MapSerializer.transformFromSerialization(req.body);
+        const step = MapSerializer.transformFromSerialization(req.body);
+
         if (!step.actionVerb || typeof step.actionVerb !== 'string') {
             res.status(400).send([{
                 success: false,
@@ -167,6 +168,9 @@ export class CapabilitiesManager extends BaseEntity {
                 result: 'Invalid or missing inputs',
                 error: 'Invalid or missing inputs'
             }]);
+        }
+        if (step.inputs._type === 'Map') {
+            step.inputs = new Map(step.inputs.entries);
         }
 
         // Validate and standardize inputs for known plugins
@@ -225,6 +229,7 @@ export class CapabilitiesManager extends BaseEntity {
             return;
         }
 
+        console.log('Validating step inputs', step.inputs);
         const inputs = step.inputs as Map<string, PluginInput>;
         const validInputs = new Map<string, PluginInput>();
 
@@ -255,6 +260,7 @@ export class CapabilitiesManager extends BaseEntity {
                 validInputs.set(inputName, input);
             }
         }
+        console.log('Validated inputs', validInputs);
 
         // Replace the step's inputs with the validated inputs
         step.inputs = validInputs;

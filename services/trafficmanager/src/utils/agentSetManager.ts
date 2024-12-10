@@ -206,13 +206,15 @@ class AgentSetManager {
         this.agentToSetMap.set(agentId, availableSet.id);
         
         try {
-            const response = await api.post(`http://${availableSet.url}/addAgent`, MapSerializer.transformForSerialization({
+            const payload = {
                 agentId,
                 actionVerb,
-                inputs,
+                inputs: MapSerializer.transformForSerialization(inputs),
                 missionId,
                 missionContext
-            }));
+            };
+            console.log('Adding agent to set with payload:', payload);
+            const response = await api.post(`http://${availableSet.url}/addAgent`, payload);
     
             availableSet.agentCount++;
             return response.data;

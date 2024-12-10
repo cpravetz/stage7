@@ -277,6 +277,7 @@ export class TrafficManager extends BaseEntity {
 
     private async createAgent(req: express.Request, res: express.Response) {
         const { actionVerb, inputs, dependencies, missionId, missionContext } = req.body;
+        console.log('Creating agent with inputs', inputs);
         let inputsMap: Map<string, PluginInput>;
         
         if (inputs instanceof Map) {
@@ -295,6 +296,7 @@ export class TrafficManager extends BaseEntity {
                 }
             }
         }
+        console.log('Inputs converted to InputsMap', inputsMap);
         try {
             const agentId = uuidv4();
             

@@ -127,7 +127,7 @@ services:
     environment:
       MONGO_URI: mongodb://mongo:27017
       MONGO_DB: librarianDB
-      REDIS_HOST: redis:redis
+      REDIS_HOST: redis
       REDIS_PORT: 6379
       NODE_ENV: production
       PORT: &librarianPort 5040

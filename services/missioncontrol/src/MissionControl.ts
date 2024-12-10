@@ -121,6 +121,7 @@ class MissionControl extends BaseEntity {
 
         try {
             const inputs: Object = { goal: {inputName: 'goal', inputValue: mission.goal, args: {} }};
+            console.log('Creating mission with goal', mission.goal);
             await api.post(`http://${this.trafficManagerUrl}/createAgent`, { actionVerb: 'ACCOMPLISH', inputs, missionId: mission.id, dependencies: [] });
             mission.status = Status.RUNNING;
             this.sendStatusUpdate(mission, 'Mission started');
@@ -320,14 +321,15 @@ class MissionControl extends BaseEntity {
                     const trafficManagerResponse = await api.get(`http://${this.trafficManagerUrl}/getAgentStatistics/${missionId}`);
                     const trafficManagerStatistics = MapSerializer.transformFromSerialization(trafficManagerResponse.data);
 
-
-                    const totalDependencies = Array.from(trafficManagerStatistics.agentStatisticsByStatus.values())
-                    .flat()
-                    .reduce<number>((totalCount, agent) => 
-                        totalCount + (agent as AgentStatistics).steps.reduce<number>((stepCount, step) => 
-                            stepCount + (step.dependencies?.length || 0), 0
-                        ), 0);
-                    
+                    let totalDependencies = 0;
+                    if (trafficManagerStatistics.agentStatisticsByStatus?.values) {
+                        totalDependencies = Array.from(trafficManagerStatistics.agentStatisticsByStatus.values())
+                        .flat()
+                        .reduce<number>((totalCount, agent) => 
+                            totalCount + (agent as AgentStatistics).steps.reduce<number>((stepCount, step) => 
+                                stepCount + (step.dependencies?.length || 0), 0
+                            ), 0);
+                    }
                     console.log(`Total step dependencies across all agents: ${totalDependencies}`);
 
                     const missionStats: MissionStatistics = {

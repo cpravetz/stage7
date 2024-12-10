@@ -98,6 +98,7 @@ export class Brain extends BaseEntity {
                 console.log('No suitable model found.');
             } else {
                 const convertParams =  req.body.convertParams;
+                convertParams.max_length = convertParams.max_length ? Math.min(convertParams.max_length, model.tokenLimit) : model.tokenLimit;
                 model.llminterface?.convert(model.service, conversationType, convertParams);
             }
         } catch (error) {

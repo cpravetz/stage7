@@ -129,22 +129,28 @@ export class AgentSet extends BaseEntity {
     }
 
     private async addAgent(req: express.Request, res: express.Response) {
-        const { agentId, actionVerb, inputs, missionId, missionContext } = MapSerializer.transformFromSerialization(req.body);
+        const { agentId, actionVerb, inputs, missionId, missionContext } = req.body;
+        console.log('Adding agent with req.body', req.body);
+        console.log('Adding agent with inputs', inputs);
         let inputsMap: Map<string, PluginInput>;
         
-        if (inputs instanceof Map) {
-            inputsMap = inputs;
-        } else {
-            inputsMap = new Map();
-            for (const [key, value] of Object.entries(inputs)) {
-                if (typeof value === 'object' && value !== null && 'inputValue' in value) {
-                    inputsMap.set(key, value as PluginInput);
-                } else {
-                    inputsMap.set(key, {
-                        inputName: key,
-                        inputValue: value,
-                        args: { [key]: value }
-                    });
+        if (inputs?._type === 'Map') {
+            inputsMap = MapSerializer.transformFromSerialization(inputs);
+        }else {
+            if (inputs instanceof Map) {
+                inputsMap = inputs;
+            } else {
+                inputsMap = new Map();
+                for (const [key, value] of Object.entries(inputs)) {
+                    if (typeof value === 'object' && value !== null && 'inputValue' in value) {
+                        inputsMap.set(key, value as PluginInput);
+                    } else {
+                        inputsMap.set(key, {
+                            inputName: key,
+                            inputValue: value,
+                            args: { [key]: value }
+                        });
+                    }
                 }
             }
         }

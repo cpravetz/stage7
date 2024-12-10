@@ -109,7 +109,7 @@ should not be changed.
       NODE_ENV: production
       PORT: &librarianPort 5040
       LIBRARIAN_CLIENT_SECRET: &librarianSecret librarianAuthSecret
-      REDIS_HOST=redis:redis
+      REDIS_HOST=redis
       REDIS_PORT=6379
       MONGO_URI=mongodb://mongo:27017
       MONGO_DB=librarianDB

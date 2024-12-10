@@ -1,3 +1,3 @@
 docker compose down
-docker compose build > build.log
+docker compose build
 docker compose up -d
