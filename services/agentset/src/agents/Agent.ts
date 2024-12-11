@@ -60,6 +60,9 @@ export class Agent extends BaseEntity {
         this.inputs = config.inputs instanceof Map ? 
         new Map(config.inputs) : 
         new Map(Object.entries(config.inputs||{}));
+        this.inputs = config.inputs instanceof Map ? 
+        new Map(config.inputs) : 
+        new Map(Object.entries(config.inputs||{}));
         this.missionId = config.missionId;
         this.agentSetUrl = config.agentSetUrl;
         this.status = AgentStatus.INITIALIZING;
