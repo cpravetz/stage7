@@ -18,13 +18,15 @@ function generatePrompt(goal: string): string {
     return `
 Accomplish the following goal: ${goal}
 
-If you can provide a complete and direct answer or solution, respond with a JSON object in this format:
+You MUST respond with ONLY a JSON object in ONE of these two formats:
+
+1. If you have a full and complete answer to the goal, respond with a JSON object in this format:
 {
-"type": "DIRECT_ANSWER",
-"answer": "Your direct answer here"
+    "type": "DIRECT_ANSWER",
+    "answer": "Your direct answer here"
 }
 
-Otherwise, if a plan is needed, respond with a JSON object in this format:
+2. If more work is needed to accomplish the goal, respond with a plan as a JSON object in this format:
 {
 "type": "PLAN",
 "context": "Any overarching points or introduction to the plan you want to share",
@@ -96,12 +98,33 @@ SCRAPE - this plugin scrapes content from a given URL
 GET_USER_INPUT - this plugin requests input from the user
     (required inputs: question, answerType) (optional input: choices)
 
-You can use the actionVerb DELEGATE to create a sub-agent with a goal of it's own.
-
 Ensure your response is a valid JSON object starting with either "type": "DIRECT_ANSWER" or "type": "PLAN". 
 Double check that you are returning valid JSON. Remove any leading or trailing characters that might invalidate the response as a JSON object.
 `}
 
+function validateResponse(response: any): boolean {
+    if (!response || typeof response !== 'object') return false;
+    
+    if (!response.type || !['PLAN', 'DIRECT_ANSWER'].includes(response.type)) return false;
+    
+    if (response.type === 'DIRECT_ANSWER') {
+        return typeof response.answer === 'string';
+    }
+    
+    if (response.type === 'PLAN') {
+        return Array.isArray(response.plan) && 
+               response.plan.every((step: any) => 
+                   typeof step.number === 'number' &&
+                   typeof step.verb === 'string' &&
+                   typeof step.description === 'string' &&
+                   step.inputs && typeof step.inputs === 'object' &&
+                   step.dependencies && typeof step.dependencies === 'object' &&
+                   step.outputs && typeof step.outputs === 'object'
+               );
+    }
+    
+    return false;
+}
 export async function execute(inputs: Map<string, PluginInput> | Record<string, any>): Promise<PluginOutput[]> {
     try {
         console.log('ACCOMPLISH plugin inputs:', inputs);
@@ -208,6 +231,11 @@ async function parseJsonWithErrorCorrection(jsonString: string): Promise<any> {
         // Remove any leading or trailing quotation marks
         correctedJson = jsonString.trim().replace(/^"|"$/g, '');
 
+        // Remove all characters before first opening brace
+        correctedJson = correctedJson.substring(correctedJson.indexOf('{'));
+        // Remove all characters after last closing brace
+        correctedJson = correctedJson.substring(0, correctedJson.lastIndexOf('}') + 1);
+        // Remove all triple backticks
         correctedJson = correctedJson.replace(/```/g, '');        
         // Replace 'undefined' with null
         correctedJson = correctedJson.replace(/: undefined/gi, ': null');
@@ -226,7 +254,7 @@ async function parseJsonWithErrorCorrection(jsonString: string): Promise<any> {
     } catch (error) { 
         analyzeError(error as Error);
         console.log('JSON correction failed, attempting to use LLM...');
-        console.log('Malformed JSON:', correctedJson);
+        console.log('Malformed JSON: -->', correctedJson,'<--');
             
         const brainUrl = process.env.BRAIN_URL || 'brain:5070';
         const prompt = `The following JSON is malformed. Please correct it and return only the corrected JSON:\n\n${correctedJson}`;
@@ -258,7 +286,7 @@ async function queryBrain(messages: { role: string, content: string }[]): Promis
         const response = await axios.post(`http://${brainUrl}/chat`, {
             exchanges: messages,
             optimization: 'accuracy',
-            optionals: { temperature: 0.5, response_format: { "type": "json_object" }}
+            optionals: { temperature: 0.2, response_format: { "type": "json_object" }}
         });
         console.log('Brain raw response:', response.data.response);
         return response.data.response;
@@ -301,4 +329,3 @@ function convertJsonToTasks(jsonPlan: JsonPlanStep[]): ActionVerbTask[] {
         };
     });
 }
-
