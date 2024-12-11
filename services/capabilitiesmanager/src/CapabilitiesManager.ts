@@ -115,7 +115,7 @@ export class CapabilitiesManager extends BaseEntity {
                     reject(error);
                 });
 
-            } catch (error) { analyzeError(error as Error);
+            } catch (error) { //analyzeError(error as Error);
                 console.error('Error in server setup:', error instanceof Error ? error.message : error);
                 reject(error);
             }
@@ -128,7 +128,7 @@ export class CapabilitiesManager extends BaseEntity {
             await this.setupServer();
             console.log('CapabilitiesManager initialization complete');
         } catch (error) { 
-            analyzeError(error as Error);
+            //analyzeError(error as Error);
             console.error('Failed to start CapabilitiesManager:', error instanceof Error ? error.message : error);
         }
     }
@@ -139,7 +139,7 @@ export class CapabilitiesManager extends BaseEntity {
             console.log('Received message:', message);
             await super.handleBaseMessage(message);
             res.status(200).send({ status: 'Message received and processed' });
-        } catch (error) { analyzeError(error as Error);
+        } catch (error) { //analyzeError(error as Error);
             console.error('Error handling message:', error instanceof Error ? error.message : error);
             res.status(500).send({ 
                 status: 'Error processing message', 
@@ -209,7 +209,7 @@ export class CapabilitiesManager extends BaseEntity {
             let result: PluginOutput[];
             result = await this.executePlugin(pluginDef, step.inputs);
             res.status(200).send(MapSerializer.transformForSerialization(result));
-        } catch (error) { analyzeError(error as Error);
+        } catch (error) { //analyzeError(error as Error);
             console.error(`Error executing action verb ${step.actionVerb}:`, error instanceof Error ? error.message : error);
             res.status(400).send([{
                 success: false,
@@ -363,7 +363,7 @@ export class CapabilitiesManager extends BaseEntity {
             const result: PluginOutput = JSON.parse(stdout);
 
             return [result];
-        } catch (error) { analyzeError(error as Error);
+        } catch (error) { //analyzeError(error as Error);
             console.error(`Error executing Python plugin ${plugin.verb}:`, error instanceof Error ? error.message : error);
             return [{
                 success: false,
@@ -418,7 +418,7 @@ export class CapabilitiesManager extends BaseEntity {
             }
 
             return result[0];
-        } catch (error) { analyzeError(error as Error);
+        } catch (error) { //analyzeError(error as Error);
             console.error('Error handling unknown verb:', error instanceof Error ? error.message : error);
             return {
                 success: false,
