@@ -3,7 +3,7 @@ import bodyParser from 'body-parser';
 import axios from 'axios';
 import path from 'path';
 import { Step, MapSerializer, BaseEntity  } from '@cktmcs/shared';
-import { PluginInput, PluginOutput, Plugin, PluginParameterType, environmentType } from '@cktmcs/shared';
+import { PluginInput, PluginOutput, PluginDefinition, PluginParameterType, environmentType } from '@cktmcs/shared';
 import { execute as AccomplishPlugin } from './plugins/ACCOMPLISH/ACCOMPLISH.js';
 import fs from 'fs/promises';
 import os from 'os';
@@ -312,7 +312,7 @@ export class CapabilitiesManager extends BaseEntity {
         step.inputs = validInputs;
     }
 
-    protected async executePlugin(plugin: Plugin, inputs: Map<string, PluginInput>): Promise<PluginOutput[]> {
+    protected async executePlugin(plugin: PluginDefinition, inputs: Map<string, PluginInput>): Promise<PluginOutput[]> {
         // Load plugin-specific configuration
         let configSet = await this.configManager.getPluginConfig(plugin.id);
         
@@ -347,7 +347,7 @@ export class CapabilitiesManager extends BaseEntity {
     }
 
 
-    private async executeJavaScriptPlugin(plugin: Plugin, inputs: Map<string, PluginInput>, environment: environmentType): Promise<PluginOutput[]> {
+    private async executeJavaScriptPlugin(plugin: PluginDefinition, inputs: Map<string, PluginInput>, environment: environmentType): Promise<PluginOutput[]> {
         const pluginDir = path.join(__dirname, 'plugins', plugin.verb);
         const mainFilePath = path.join(pluginDir, plugin.entryPoint!.main);
     
@@ -378,7 +378,7 @@ export class CapabilitiesManager extends BaseEntity {
             }];
         }
     }
-    private async executePythonPlugin(plugin: Plugin, inputs: Map<string, PluginInput>, environment: environmentType): Promise<PluginOutput[]> {
+    private async executePythonPlugin(plugin: PluginDefinition, inputs: Map<string, PluginInput>, environment: environmentType): Promise<PluginOutput[]> {
         const pluginDir = path.join(this.pluginRegistry.currentDir, 'plugins', plugin.verb);
         const mainFilePath = path.join(pluginDir, plugin.entryPoint!.main);
 

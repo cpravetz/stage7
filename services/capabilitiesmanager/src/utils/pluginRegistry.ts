@@ -1,4 +1,4 @@
-import { Plugin, PluginParameterType, PluginInput, PluginOutput, MetadataType, MapSerializer } from '@cktmcs/shared';
+import { PluginDefinition, PluginParameterType, PluginInput, PluginOutput, MetadataType, MapSerializer } from '@cktmcs/shared';
 import axios from 'axios';
 import { analyzeError } from '@cktmcs/errorhandler';
 import express from 'express';
@@ -32,7 +32,7 @@ export async function initializeExistingPlugins(pluginRegistry: any, librarianUr
                 // Read plugin.js file which contains the plugin definition
                 const pluginPath = path.join(pluginsDir, dir, 'plugin.js');
                 const pluginModule = await import(pluginPath);
-                const plugin: Plugin = pluginModule.default;
+                const plugin: PluginDefinition = pluginModule.default;
 
                 // Add default security settings if not present
                 if (!plugin.security) {
@@ -76,11 +76,12 @@ export async function initializeExistingPlugins(pluginRegistry: any, librarianUr
 }
 
 export class PluginRegistry {
-    private plugins: Map<string, Plugin>;
+    private plugins: Map<string, PluginDefinition>;
     private categories: Map<string, Set<string>>;
     private tags: Map<string, Set<string>>;
     private configManager: ConfigManager;
-    private pluginMarketplace: PluginMarketplace;    public actionVerbs: Map<string, Plugin> = new Map();
+    private pluginMarketplace: PluginMarketplace;    
+    public actionVerbs: Map<string, PluginDefinition> = new Map();
     private pluginsLoaded: boolean = false;
     public currentDir = dirname(fileURLToPath(import.meta.url));
 
@@ -99,13 +100,13 @@ export class PluginRegistry {
     }
 
         // Plugin Query Methods
-        async getPluginByVerb(verb: string): Promise<Plugin | undefined> {
+        async getPluginByVerb(verb: string): Promise<PluginDefinition | undefined> {
             return this.plugins.get(verb);
         }
     
-        async getPluginsByCategory(category: string): Promise<Plugin[]> {
+        async getPluginsByCategory(category: string): Promise<PluginDefinition[]> {
             const pluginIds = this.categories.get(category) || new Set();
-            return Array.from(pluginIds).map(id => this.plugins.get(id)).filter(Boolean) as Plugin[];
+            return Array.from(pluginIds).map(id => this.plugins.get(id)).filter(Boolean) as PluginDefinition[];
         }
     
         // Plugin Usage Tracking
@@ -149,7 +150,7 @@ export class PluginRegistry {
         }
     }
 
-    private async loadLocalPlugin(pluginDirName: string): Promise<Plugin | undefined> {
+    private async loadLocalPlugin(pluginDirName: string): Promise<PluginDefinition | undefined> {
         try {
             const pluginDir = path.join(this.currentDir, '..', 'plugins', pluginDirName);
             const pluginFilePath = path.join(pluginDir, 'plugin.js');
@@ -163,7 +164,7 @@ export class PluginRegistry {
             }
     
             // Load and validate plugin
-            let plugin: Plugin;
+            let plugin: PluginDefinition;
             try {
                 const module = await import(pluginFilePath);
                 plugin = module.default;
@@ -208,7 +209,7 @@ export class PluginRegistry {
         }
     }
     
-    private validatePlugin(plugin: any): plugin is Plugin {
+    private validatePlugin(plugin: any): plugin is PluginDefinition {
         const requiredFields = ['id', 'verb', 'name', 'description', 'version'];
         const hasRequiredFields = requiredFields.every(field => plugin && plugin[field]);
         
@@ -239,7 +240,7 @@ export class PluginRegistry {
         return true;
     }    
 
-    public async getPlugin(verb: string): Promise<Plugin | undefined> {
+    public async getPlugin(verb: string): Promise<PluginDefinition | undefined> {
         return this.plugins.get(verb);
     }
 
@@ -260,7 +261,7 @@ export class PluginRegistry {
         }
     }
 
-    async registerPlugin(plugin: Plugin, metadata?: MetadataType) {
+    async registerPlugin(plugin: PluginDefinition, metadata?: MetadataType) {
         const defaultMetadata: MetadataType = {
             category: [],
             tags: [],
@@ -293,7 +294,7 @@ export class PluginRegistry {
         this.actionVerbs.set(plugin.verb, plugin);
     }
 
-    async getPluginsByTags(tags: string[]): Promise<(Plugin & { metadata: MetadataType })[]> {
+    async getPluginsByTags(tags: string[]): Promise<(PluginDefinition & { metadata: MetadataType })[]> {
         const pluginVerbs = new Set<string>();
         tags.forEach(tag => {
             const verbs = this.tags.get(tag);
@@ -303,7 +304,7 @@ export class PluginRegistry {
         });
         return Array.from(pluginVerbs)
             .map(verb => this.plugins.get(verb))
-            .filter((plugin): plugin is Plugin & { metadata: MetadataType } => plugin !== undefined);
+            .filter((plugin): plugin is PluginDefinition & { metadata: MetadataType } => plugin !== undefined);
     }
 
     async getSummarizedCapabilities(): Promise<string> {
@@ -390,7 +391,7 @@ export class PluginRegistry {
         };
     }
 
-    private async createPluginFiles(plugin: Plugin): Promise<void> {
+    private async createPluginFiles(plugin: PluginDefinition): Promise<void> {
         const pluginDir = path.join(this.currentDir, '..','plugins', plugin.verb);
     
         try {
@@ -416,7 +417,7 @@ export class PluginRegistry {
         }
     }
 
-    private generatePluginJsContent(plugin: Plugin): string {
+    private generatePluginJsContent(plugin: PluginDefinition): string {
         return `
         import { Plugin, PluginParameterType } from '@cktmcs/shared';
 
@@ -435,7 +436,7 @@ export class PluginRegistry {
         `;
     }
 
-    private async requestEngineerForPlugin(verb: string, context: Map<string, PluginInput>): Promise<Plugin | undefined> {
+    private async requestEngineerForPlugin(verb: string, context: Map<string, PluginInput>): Promise<PluginDefinition | undefined> {
         console.log(`Requesting Engineer to create plugin for ${verb}`);
         try {
             const engineerUrl = process.env.ENGINEER_URL || 'engineer:5050';

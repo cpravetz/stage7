@@ -1,4 +1,4 @@
-import { Plugin } from '@cktmcs/shared';
+import { PluginDefinition } from '@cktmcs/shared';
 import { PluginRepositoryLink, PluginManifest } from '@cktmcs/shared';
 import { createHash } from 'crypto';
 import axios from 'axios';
@@ -18,7 +18,7 @@ export class PluginMarketplace {
         this.trustedPublishers = new Set(['system-generated', 'trusted-publisher']);
     }
 
-    async publishPlugin(plugin: Plugin, repositoryDef: PluginRepositoryLink): Promise<void> {
+    async publishPlugin(plugin: PluginDefinition, repositoryDef: PluginRepositoryLink): Promise<void> {
         try {
             await this.verifyPlugin(plugin);
             const signature = await this.signPlugin(plugin);
@@ -51,7 +51,7 @@ export class PluginMarketplace {
         }
     }
 
-    async getPlugin(id: string): Promise<Plugin | undefined> {
+    async getPlugin(id: string): Promise<PluginDefinition | undefined> {
         try {
             const response = await axios.get(`http://${this.librarianUrl}/getData`, {
                 params: {
@@ -67,7 +67,7 @@ export class PluginMarketplace {
         }
     }
 
-    public async getAllPlugins(): Promise<Plugin[]> {
+    public async getAllPlugins(): Promise<PluginDefinition[]> {
         try {
             const response = await axios.get(`http://${this.capabilitiesManagerUrl}/plugins`);
             return response.data;
@@ -77,7 +77,7 @@ export class PluginMarketplace {
         }
     }
 
-    private async verifyPlugin(plugin: Plugin): Promise<void> {
+    private async verifyPlugin(plugin: PluginDefinition): Promise<void> {
         // Verify plugin structure
         if (!plugin.id || !plugin.verb || !plugin.entryPoint) {
             throw new Error('Invalid plugin structure');
@@ -94,7 +94,7 @@ export class PluginMarketplace {
         }
     }
 
-    private async verifyPluginCode(plugin: Plugin): Promise<boolean> {
+    private async verifyPluginCode(plugin: PluginDefinition): Promise<boolean> {
         try {
             // Check for malicious patterns
             const code = JSON.stringify(plugin.entryPoint?.files);
@@ -122,7 +122,7 @@ export class PluginMarketplace {
         }
     }
 
-    private async signPlugin(plugin: Plugin): Promise<string> {
+    private async signPlugin(plugin: PluginDefinition): Promise<string> {
         try {
             const content = JSON.stringify({
                 id: plugin.id,
@@ -141,7 +141,7 @@ export class PluginMarketplace {
     }
 
     private async createPluginManifest(
-        plugin: Plugin,
+        plugin: PluginDefinition,
         repository: PluginRepositoryLink,
         signature: string
     ): Promise<PluginManifest> {
@@ -254,12 +254,12 @@ export class PluginMarketplace {
         }
     }
 
-    private convertManifestToPlugin(manifest: PluginManifest): Plugin {
+    private convertManifestToPlugin(manifest: PluginManifest): PluginDefinition {
         const { repository, distribution, ...plugin } = manifest;
-        return plugin as Plugin;
+        return plugin as PluginDefinition;
     }
 
-    private async generateCertificateHash(plugin: Plugin): Promise<string> {
+    private async generateCertificateHash(plugin: PluginDefinition): Promise<string> {
         // In production, implement proper certificate hash generation
         const content = JSON.stringify(plugin);
         return createHash('sha256').update(content).digest('hex');

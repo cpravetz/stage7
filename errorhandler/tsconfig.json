@@ -6,7 +6,6 @@
     "declarationMap": true,
     "outDir": "./dist",
     "moduleResolution": "node",
-    "composite": true,
     "strict": true,
     "paths": {
       "@cktmcs/errorhandler/*": ["./src/*"]  

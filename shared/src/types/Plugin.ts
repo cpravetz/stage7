@@ -64,7 +64,7 @@ export interface MetadataType {
     usageCount?: number;
 }
 
-export interface Plugin {
+export interface PluginDefinition {
     id: string;
     verb: string;
     description?: string;

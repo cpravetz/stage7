@@ -1,6 +1,6 @@
 import axios from 'axios';
 import express from 'express';
-import { MapSerializer, BaseEntity, PluginInput, Plugin, PluginParameter, ConfigItem, MetadataType } from '@cktmcs/shared';
+import { MapSerializer, BaseEntity, PluginInput, PluginDefinition, PluginParameter, ConfigItem, MetadataType } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { PluginMarketplace } from '@cktmcs/marketplace';
 
@@ -54,10 +54,10 @@ export class Engineer extends BaseEntity {
     private getStatistics(req: express.Request, res: express.Response) {
         res.status(200).json({ newPlugins: this.newPlugins });
     }
-    async createPlugin(verb: string, context: Map<string, PluginInput>): Promise<Plugin | undefined> {
+    async createPlugin(verb: string, context: Map<string, PluginInput>): Promise<PluginDefinition | undefined> {
       this.newPlugins.push(verb);
       const explanation = await this.generateExplanation(verb, context);
-      let pluginStructure: Plugin;
+      let pluginStructure: PluginDefinition;
       let configItems: ConfigItem[];
       let metadata: MetadataType;
   
@@ -271,7 +271,7 @@ Types used in the plugin structure are:
             return undefined;
         }
     
-        const newPlugin: Plugin = {
+        const newPlugin: PluginDefinition = {
             id: `plugin-${verb}`,
             verb: verb,
             description: pluginStructure.description,
@@ -328,7 +328,7 @@ Types used in the plugin structure are:
         res.status(200).send({ status: 'Message received and processed' });
     }
     
-    private determineRequiredPermissions(plugin: Plugin): string[] {
+    private determineRequiredPermissions(plugin: PluginDefinition): string[] {
         const permissions: string[] = [];
         
         // Analyze plugin code and dependencies to determine required permissions
@@ -342,7 +342,7 @@ Types used in the plugin structure are:
         return [...new Set(permissions)]; // Remove duplicates
     }
     
-    private async signPlugin(plugin: Plugin): Promise<string> {
+    private async signPlugin(plugin: PluginDefinition): Promise<string> {
         // Implementation of plugin signing
         // This would use a private key to sign the plugin code
         return 'signature-placeholder';

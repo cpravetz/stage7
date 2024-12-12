@@ -1,4 +1,4 @@
-import { Plugin } from './Plugin';
+import { PluginDefinition } from './Plugin';
 
 export interface PluginRepositoryLink {
     type: 'git' | 'npm' | 'local' | 'mongo';
@@ -7,7 +7,7 @@ export interface PluginRepositoryLink {
     dependencies?: Record<string, string>;
 }
 
-export interface PluginManifest extends Omit<Plugin, 'security'> {
+export interface PluginManifest extends Omit<PluginDefinition, 'security'> {
     repository: PluginRepositoryLink;
     security: {
         permissions: string[];
