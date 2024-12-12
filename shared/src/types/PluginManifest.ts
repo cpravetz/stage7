@@ -1,15 +1,14 @@
 import { Plugin } from './Plugin';
 
-export interface PluginRepository {
+export interface PluginRepositoryLink {
     type: 'git' | 'npm' | 'local' | 'mongo';
-    url: string;
-    version: string;
+    url?: string;
     signature?: string;  // For security verification
     dependencies?: Record<string, string>;
 }
 
 export interface PluginManifest extends Omit<Plugin, 'security'> {
-    repository: PluginRepository;
+    repository: PluginRepositoryLink;
     security: {
         permissions: string[];
         sandboxOptions: {
@@ -26,7 +25,6 @@ export interface PluginManifest extends Omit<Plugin, 'security'> {
         };
     };
     distribution: {
-        registry: string;
         downloads: number;
         rating: number;
     };

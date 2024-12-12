@@ -4,6 +4,7 @@
   "workspaces": [
     "shared",
     "errorhandler",
+    "marketplace",
     "services/*"
   ],
   "scripts": {

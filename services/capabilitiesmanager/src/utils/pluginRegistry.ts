@@ -1,14 +1,13 @@
-import { Plugin, PluginParameterType, PluginInput, PluginOutput, MetadataType } from '@cktmcs/shared';
+import { Plugin, PluginParameterType, PluginInput, PluginOutput, MetadataType, MapSerializer } from '@cktmcs/shared';
 import axios from 'axios';
 import { analyzeError } from '@cktmcs/errorhandler';
 import express from 'express';
 import path from 'path';
 import fs from 'fs/promises';
-import { createHash } from 'crypto';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import { ConfigManager } from './configManager';
-import { MapSerializer } from '@cktmcs/shared';
+import { PluginMarketplace } from '@cktmcs/marketplace';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -77,21 +76,20 @@ export async function initializeExistingPlugins(pluginRegistry: any, librarianUr
 }
 
 export class PluginRegistry {
-    private plugins: Map<string, Plugin & { metadata: MetadataType }> = new Map();
-    private categories: Map<string, Set<string>> = new Map();
-    private tags: Map<string, Set<string>> = new Map();
-    public actionVerbs: Map<string, Plugin> = new Map();
-    private pluginsLoaded: boolean = false;
-    private librarianUrl: string;
+    private plugins: Map<string, Plugin>;
+    private categories: Map<string, Set<string>>;
+    private tags: Map<string, Set<string>>;
     private configManager: ConfigManager;
+    private pluginMarketplace: PluginMarketplace;    public actionVerbs: Map<string, Plugin> = new Map();
+    private pluginsLoaded: boolean = false;
     public currentDir = dirname(fileURLToPath(import.meta.url));
-    private engineerUrl: string;
 
     constructor(configManager: ConfigManager) {
-        this.actionVerbs = new Map();
+        this.plugins = new Map();
+        this.categories = new Map();
+        this.tags = new Map();
         this.configManager = configManager;
-        this.librarianUrl = process.env.LIBRARIAN_URL || 'librarian:5040';
-        this.engineerUrl = process.env.ENGINEER_URL || 'engineer:5050';
+        this.pluginMarketplace = new PluginMarketplace();
     }
 
     static async initialize(configManager: ConfigManager): Promise<PluginRegistry> {
@@ -100,96 +98,146 @@ export class PluginRegistry {
         return instance;
     }
 
+        // Plugin Query Methods
+        async getPluginByVerb(verb: string): Promise<Plugin | undefined> {
+            return this.plugins.get(verb);
+        }
+    
+        async getPluginsByCategory(category: string): Promise<Plugin[]> {
+            const pluginIds = this.categories.get(category) || new Set();
+            return Array.from(pluginIds).map(id => this.plugins.get(id)).filter(Boolean) as Plugin[];
+        }
+    
+        // Plugin Usage Tracking
+        async recordPluginUsage(pluginId: string): Promise<void> {
+            await this.configManager.recordPluginUsage(pluginId);
+        }
+    
     protected async loadActionVerbs() {
         if (!this.pluginsLoaded) {
             try {
                 await this.loadLocalPlugins();
-                await this.loadLibrarianPlugins();
-                console.log('Action verbs loaded:', Array.from(this.actionVerbs.keys()));
-                
-                // Register plugins with their metadata
-                for (const [verb, plugin] of this.actionVerbs.entries()) {
-                    const metadata = await this.configManager.getPluginMetadata(plugin.id);
-                    await this.registerPlugin(plugin, metadata);
+                // Load plugins from marketplace
+                const plugins = await this.pluginMarketplace.getAllPlugins();
+                for (const plugin of plugins) {
+                    this.actionVerbs.set(plugin.verb, plugin);
+                    console.log(`Loaded plugin ${plugin.verb} from marketplace`);
                 }
+                
+                this.pluginsLoaded = true;
             } catch (error) {
                 analyzeError(error as Error);
-                console.error('Error loading action verbs:', error instanceof Error ? error.message : error);
-                this.actionVerbs = new Map();
-                console.log('Initialized with empty action verbs map');
+                console.error('Failed to load plugins:', error instanceof Error ? error.message : error);
             }
-            this.pluginsLoaded = true;
         }
     }
     
-    private async loadLocalPlugins() {
+    private async loadLocalPlugins(): Promise<void> {
         const pluginsDir = path.join(this.currentDir, '..', 'plugins');
-        try {
-            const entries = await fs.readdir(pluginsDir, { withFileTypes: true });
-            const pluginDirs = entries.filter(entry => entry.isDirectory());
-            
-            for (const dirEntry of pluginDirs) {
-                try {
-                    const pluginPath = path.join(pluginsDir, dirEntry.name, 'plugin.js');
-                    const pluginModule = await import(pluginPath);
-                    const plugin: Plugin = pluginModule.default;
-    
-                    // Generate signature for built-in plugins
-                    const content = JSON.stringify({
-                        id: plugin.id,
-                        verb: plugin.verb,
-                        entryPoint: plugin.entryPoint,
-                        security: {
-                            permissions: plugin.security?.permissions || [],
-                            sandboxOptions: plugin.security?.sandboxOptions || {
-                                allowEval: false,
-                                timeout: 5000,
-                                memory: 128 * 1024 * 1024,
-                                allowedModules: ['fs', 'path', 'http', 'https'],
-                                allowedAPIs: ['fetch', 'console']
-                            }
-                        }
+        const entries = await fs.readdir(pluginsDir, { withFileTypes: true });
+        
+        for (const entry of entries) {
+            if (entry.isDirectory()) {
+                const plugin = await this.loadLocalPlugin(entry.name);
+                if (plugin) {
+                    await this.pluginMarketplace.publishPlugin(plugin, {
+                        type: 'local',
+                        url: pluginsDir
                     });
-    
-                    const signature = createHash('sha256').update(content).digest('hex');
-    
-                    // Ensure security configuration with proper signature
-                    plugin.security = {
-                        permissions: plugin.security?.permissions || [],
-                        sandboxOptions: plugin.security?.sandboxOptions || {
-                            allowEval: false,
-                            timeout: 5000,
-                            memory: 128 * 1024 * 1024,
-                            allowedModules: ['fs', 'path', 'http', 'https'],
-                            allowedAPIs: ['fetch', 'console']
-                        },
-                        trust: {
-                            publisher: 'system',
-                            signature: signature,
-                            certificateHash: signature // For built-in plugins, we can use the same hash
-                        }
-                    };
-    
-                    // Store in Librarian
-                    await axios.post(`http://${this.librarianUrl}/storeData`, {
-                        id: plugin.id,
-                        data: plugin,
-                        collection: 'plugins',
-                        storageType: 'mongo'
-                    });
-    
-                    this.actionVerbs.set(plugin.verb, plugin);
-                    console.log(`Loaded plugin ${plugin.verb} from ${pluginPath}`);
-                } catch (error) {
-                    analyzeError(error as Error);
-                    console.error(`Failed to load plugin in directory ${dirEntry.name}:`, error instanceof Error ? error.message : error);
                 }
             }
-        } catch (error) {
-            analyzeError(error as Error);
-            console.error('Failed to load local plugins:', error instanceof Error ? error.message : error);
         }
     }
+
+    private async loadLocalPlugin(pluginDirName: string): Promise<Plugin | undefined> {
+        try {
+            const pluginDir = path.join(this.currentDir, '..', 'plugins', pluginDirName);
+            const pluginFilePath = path.join(pluginDir, 'plugin.js');
+    
+            // Check if plugin.js exists
+            try {
+                await fs.access(pluginFilePath);
+            } catch {
+                console.warn(`No plugin.js found in ${pluginDir}`);
+                return undefined;
+            }
+    
+            // Load and validate plugin
+            let plugin: Plugin;
+            try {
+                const module = await import(pluginFilePath);
+                plugin = module.default;
+            } catch (error) {
+                console.error(`Error importing plugin from ${pluginFilePath}:`, error instanceof Error ? error.message : error);
+                return undefined;
+            }
+    
+            // Validate required plugin fields
+            if (!this.validatePlugin(plugin)) {
+                console.error(`Invalid plugin format in ${pluginFilePath}`);
+                return undefined;
+            }
+    
+            // Add default security settings if not present
+            if (!plugin.security) {
+                plugin.security = {
+                    permissions: [],
+                    sandboxOptions: {
+                        allowEval: false,
+                        timeout: 5000,
+                        memory: 128 * 1024 * 1024, // 128MB
+                        allowedModules: ['fs', 'path', 'http', 'https'],
+                        allowedAPIs: ['fetch', 'console']
+                    },
+                    trust: {
+                        publisher: 'local',
+                        signature: 'local-plugin'
+                    }
+                };
+            }
+    
+            // Register plugin in memory
+            await this.registerPlugin(plugin);
+            console.log(`Successfully loaded local plugin: ${plugin.verb}`);
+            
+            return plugin;
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error(`Failed to load local plugin ${pluginDirName}:`, error instanceof Error ? error.message : error);
+            return undefined;
+        }
+    }
+    
+    private validatePlugin(plugin: any): plugin is Plugin {
+        const requiredFields = ['id', 'verb', 'name', 'description', 'version'];
+        const hasRequiredFields = requiredFields.every(field => plugin && plugin[field]);
+        
+        if (!hasRequiredFields) {
+            console.error('Plugin missing required fields:', 
+                requiredFields.filter(field => !plugin[field]).join(', '));
+            return false;
+        }
+    
+        // Validate plugin structure
+        if (!Array.isArray(plugin.inputs) || !Array.isArray(plugin.outputs)) {
+            console.error('Plugin inputs/outputs must be arrays');
+            return false;
+        }
+    
+        // Validate inputs and outputs have required fields
+        const validateIO = (io: any) => io.every((item: any) => 
+            item.name && 
+            item.description && 
+            item.parameterType !== undefined
+        );
+    
+        if (!validateIO(plugin.inputs) || !validateIO(plugin.outputs)) {
+            console.error('Plugin inputs/outputs missing required fields');
+            return false;
+        }
+    
+        return true;
+    }    
 
     public async getPlugin(verb: string): Promise<Plugin | undefined> {
         return this.plugins.get(verb);
@@ -245,13 +293,6 @@ export class PluginRegistry {
         this.actionVerbs.set(plugin.verb, plugin);
     }
 
-    async getPluginsByCategory(category: string): Promise<(Plugin & { metadata: MetadataType })[]> {
-        const pluginVerbs = this.categories.get(category) || new Set();
-        return Array.from(pluginVerbs)
-            .map(verb => this.plugins.get(verb))
-            .filter((plugin): plugin is Plugin & { metadata: MetadataType } => plugin !== undefined);
-    }
-
     async getPluginsByTags(tags: string[]): Promise<(Plugin & { metadata: MetadataType })[]> {
         const pluginVerbs = new Set<string>();
         tags.forEach(tag => {
@@ -280,16 +321,6 @@ export class PluginRegistry {
                 .sort((a, b) => b[1].size - a[1].size)
                 .slice(0, 10)
         });
-    }
-
-    async recordPluginUsage(verb: string) {
-        const plugin = this.plugins.get(verb);
-        if (!plugin) { return;}
-        const pluginMetadata = await this.configManager.getPluginMetadata(plugin.id);
-        if (!pluginMetadata) { return;}
-        pluginMetadata.lastUsed = new Date();
-        pluginMetadata.usageCount? pluginMetadata.usageCount++ : pluginMetadata.usageCount = 1;
-        this.configManager.updatePluginMetadata(plugin.id, pluginMetadata);
     }
 
    
@@ -332,36 +363,6 @@ export class PluginRegistry {
             }
         } catch (error) { analyzeError(error as Error);
             console.error(`Error loading plugin from ${filePath}:`, error instanceof Error ? error.message : error);
-        }
-    }
-
-    private async loadLibrarianPlugins() {
-        try {
-            console.log(`Attempting to fetch plugins from Librarian at ${this.librarianUrl}`);
-            const response = await axios.post(`http://${this.librarianUrl}/searchData`, {
-                    collection: 'plugins', 
-                    query: {}, 
-                    options: { id: 1, name: 1, description: 1, version: 1, type: 1, verb: 1 
-                },
-                timeout: 5000 // Set a 5-second timeout
-            });
-            if (response.data) {
-                const pluginList = response.data.data || response.data;
-                if (pluginList && Array.isArray(pluginList)) {
-                    for (const plugin of pluginList) {
-                        if (plugin.verb && !this.actionVerbs.has(plugin.verb)) {
-                            this.actionVerbs.set(plugin.verb, plugin);
-                            console.log(`Loaded plugin ${plugin.verb} from Librarian`);
-                        }
-                    }
-                    console.log(`Successfully loaded ${pluginList.length} plugins from Librarian`);
-                } else {
-                    console.warn('Unexpected response format from Librarian:', pluginList);
-                }
-            }
-        } catch (error) { analyzeError(error as Error);
-            // Continue execution even if Librarian plugins couldn't be loaded
-            console.warn('Continuing without Librarian plugins');
         }
     }
 
@@ -437,7 +438,8 @@ export class PluginRegistry {
     private async requestEngineerForPlugin(verb: string, context: Map<string, PluginInput>): Promise<Plugin | undefined> {
         console.log(`Requesting Engineer to create plugin for ${verb}`);
         try {
-            const response = await axios.post(`http://${this.engineerUrl}/createPlugin`, MapSerializer.transformForSerialization({ verb, context }));
+            const engineerUrl = process.env.ENGINEER_URL || 'engineer:5050';
+            const response = await axios.post(`http://${engineerUrl}/createPlugin`, MapSerializer.transformForSerialization({ verb, context }));
             const newPlugin = response.data;
             
             if (!newPlugin || !newPlugin.entryPoint) {

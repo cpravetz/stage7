@@ -1,4 +1,5 @@
-import { Plugin, PluginRepository, PluginManifest } from '@cktmcs/shared';
+import { Plugin } from '@cktmcs/shared';
+import { PluginRepositoryLink, PluginManifest } from '@cktmcs/shared';
 import { createHash } from 'crypto';
 import axios from 'axios';
 import { analyzeError } from '@cktmcs/errorhandler';
@@ -17,75 +18,65 @@ export class PluginMarketplace {
         this.trustedPublishers = new Set(['system-generated', 'trusted-publisher']);
     }
 
-    async publishPlugin(plugin: Plugin, repository: PluginRepository): Promise<void> {
+    async publishPlugin(plugin: Plugin, repositoryDef: PluginRepositoryLink): Promise<void> {
         try {
             await this.verifyPlugin(plugin);
             const signature = await this.signPlugin(plugin);
-            const manifest = await this.createPluginManifest(plugin, repository, signature);
-            await this.pushToRepository(manifest, repository);
+            const manifest = await this.createPluginManifest(plugin, repositoryDef, signature);
+            await this.pushToRepository(manifest, repositoryDef);
             
-            // Register plugin with CapabilitiesManager
-            await this.registerPluginWithCapabilitiesManager(manifest);
-            
-            console.log(`Successfully published plugin ${plugin.id} to ${repository.type} repository`);
+            // Notify CapabilitiesManager of new plugin
+            await this.notifyCapabilitiesManager(manifest);
         } catch (error) {
             analyzeError(error as Error);
             throw new Error(`Failed to publish plugin: ${error instanceof Error ? error.message : String(error)}`);
         }
     }
 
-    async installPlugin(pluginId: string, version: string): Promise<Plugin> {
+    private async notifyCapabilitiesManager(manifest: PluginManifest): Promise<void> {
         try {
-            const manifest = await this.fetchPluginManifest(pluginId, version);
-            
-            if (!await this.verifyManifest(manifest)) {
-                throw new Error('Plugin manifest verification failed');
-            }
-
-            await this.installDependencies(manifest);
-
-            // Register with CapabilitiesManager
-            const plugin = this.convertManifestToPlugin(manifest);
-            await this.registerPluginWithCapabilitiesManager(manifest);
-
-            console.log(`Successfully installed plugin ${pluginId} version ${version}`);
-            return plugin;
-        } catch (error) {
-            analyzeError(error as Error);
-            throw new Error(`Failed to install plugin: ${error instanceof Error ? error.message : String(error)}`);
-        }
-    }
-
-    private async registerPluginWithCapabilitiesManager(manifest: PluginManifest): Promise<void> {
-        try {
-            await axios.post(`http://${this.capabilitiesManagerUrl}/registerPlugin`, {
-                plugin: this.convertManifestToPlugin(manifest)
+            await axios.post(`http://${this.capabilitiesManagerUrl}/plugins/notify`, {
+                plugin: this.convertManifestToPlugin(manifest),
+                action: 'published',
+                timestamp: new Date().toISOString(),
+                manifest: {
+                    id: manifest.id,
+                    signature: manifest.security.trust.signature
+                }
             });
         } catch (error) {
             analyzeError(error as Error);
-            throw new Error(`Failed to register plugin with CapabilitiesManager: ${error instanceof Error ? error.message : String(error)}`);
+            console.warn(`Failed to notify CapabilitiesManager of new plugin: ${error instanceof Error ? error.message : String(error)}`);
+            // Don't throw error as this is a non-critical operation
         }
     }
 
-    private async verifyPluginAvailability(pluginId: string): Promise<boolean> {
+    async getPlugin(id: string): Promise<Plugin | undefined> {
         try {
-            const response = await axios.get(`http://${this.capabilitiesManagerUrl}/plugins/${pluginId}`);
-            return response.status === 200;
-        } catch (error) {
-            return false;
-        }
-    }
-
-    private async getPluginMetadata(pluginId: string): Promise<any> {
-        try {
-            const response = await axios.get(`http://${this.capabilitiesManagerUrl}/plugins/${pluginId}/metadata`);
+            const response = await axios.get(`http://${this.librarianUrl}/getData`, {
+                params: {
+                    id,
+                    collection: 'plugins',
+                    storageType: 'mongo'
+                }
+            });
             return response.data;
         } catch (error) {
             analyzeError(error as Error);
-            throw new Error(`Failed to get plugin metadata: ${error instanceof Error ? error.message : String(error)}`);
+            throw new Error(`Failed to fetch plugin: ${error instanceof Error ? error.message : String(error)}`);
         }
     }
-        
+
+    public async getAllPlugins(): Promise<Plugin[]> {
+        try {
+            const response = await axios.get(`http://${this.capabilitiesManagerUrl}/plugins`);
+            return response.data;
+        } catch (error) {
+            analyzeError(error as Error);
+            throw new Error(`Failed to get all plugins: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+
     private async verifyPlugin(plugin: Plugin): Promise<void> {
         // Verify plugin structure
         if (!plugin.id || !plugin.verb || !plugin.entryPoint) {
@@ -151,7 +142,7 @@ export class PluginMarketplace {
 
     private async createPluginManifest(
         plugin: Plugin,
-        repository: PluginRepository,
+        repository: PluginRepositoryLink,
         signature: string
     ): Promise<PluginManifest> {
         return {
@@ -166,7 +157,6 @@ export class PluginMarketplace {
                 }
             },
             distribution: {
-                registry: repository.url,
                 downloads: 0,
                 rating: 0
             }
@@ -175,7 +165,7 @@ export class PluginMarketplace {
 
     private async pushToRepository(
         manifest: PluginManifest,
-        repository: PluginRepository
+        repository: PluginRepositoryLink
     ): Promise<void> {
         try {
             switch (repository.type) {
@@ -281,3 +271,5 @@ export class PluginMarketplace {
         return manifest.security.trust.certificateHash === expectedHash;
     }
 }
+
+export default PluginMarketplace;

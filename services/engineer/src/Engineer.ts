@@ -2,6 +2,8 @@ import axios from 'axios';
 import express from 'express';
 import { MapSerializer, BaseEntity, PluginInput, Plugin, PluginParameter, ConfigItem, MetadataType } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
+import { PluginMarketplace } from '@cktmcs/marketplace';
+
 const api = axios.create({
     headers: {
       'Content-Type': 'application/json',
@@ -13,9 +15,11 @@ export class Engineer extends BaseEntity {
     private brainUrl: string = process.env.BRAIN_URL || 'brain:5070';
     private librarianUrl: string = process.env.LIBRARIAN_URL || 'librarian:5040';
     private newPlugins: Array<string> = [];
+    private pluginMarketplace: PluginMarketplace;
 
     constructor() {
         super('Engineer', 'Engineer', `engineer`, process.env.PORT || '5050');
+        this.pluginMarketplace = new PluginMarketplace();
         this.initialize();
     }
 
@@ -299,12 +303,10 @@ Types used in the plugin structure are:
         newPlugin.security.trust.signature = await this.signPlugin(newPlugin);        
 
         try {
-            // Save the plugin to the librarian
-            await axios.post(`http://${this.librarianUrl}/storeData`, {
-                id: newPlugin.id,
-                data: newPlugin,
-                collection: 'plugins',
-                storageType: 'mongo'
+            // Use PluginMarketplace instead of direct Librarian access
+            await this.pluginMarketplace.publishPlugin(newPlugin, {
+                type: 'mongo',
+                url: this.librarianUrl
             });
     
             return newPlugin;
