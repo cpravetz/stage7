@@ -1,7 +1,9 @@
 import axios from 'axios';
 import express from 'express';
-import { MapSerializer, BaseEntity, PluginInput, Plugin, PluginParameter, ConfigItem, MetadataType } from '@cktmcs/shared';
+import { MapSerializer, BaseEntity, PluginInput, PluginDefinition, PluginParameter, ConfigItem, MetadataType } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
+import { PluginMarketplace } from '@cktmcs/marketplace';
+
 const api = axios.create({
     headers: {
       'Content-Type': 'application/json',
@@ -13,9 +15,11 @@ export class Engineer extends BaseEntity {
     private brainUrl: string = process.env.BRAIN_URL || 'brain:5070';
     private librarianUrl: string = process.env.LIBRARIAN_URL || 'librarian:5040';
     private newPlugins: Array<string> = [];
+    private pluginMarketplace: PluginMarketplace;
 
     constructor() {
         super('Engineer', 'Engineer', `engineer`, process.env.PORT || '5050');
+        this.pluginMarketplace = new PluginMarketplace();
         this.initialize();
     }
 
@@ -50,14 +54,15 @@ export class Engineer extends BaseEntity {
     private getStatistics(req: express.Request, res: express.Response) {
         res.status(200).json({ newPlugins: this.newPlugins });
     }
-    async createPlugin(verb: string, context: Map<string, PluginInput>): Promise<Plugin | undefined> {
-        this.newPlugins.push(verb);
-        const explanation = await this.generateExplanation(verb, context);
-        let pluginStructure: Plugin;
-        let configItems: ConfigItem[];
-        let metadata: MetadataType;
-
-        try {
+    async createPlugin(verb: string, context: Map<string, PluginInput>): Promise<PluginDefinition | undefined> {
+      this.newPlugins.push(verb);
+      const explanation = await this.generateExplanation(verb, context);
+      let pluginStructure: PluginDefinition;
+      let configItems: ConfigItem[];
+      let metadata: MetadataType;
+  
+      try {
+        console            
             const contextString = JSON.stringify(Array.from(context.entries()));
             const engineeringPrompt = `
             Create a javascript or python based plugin for the action verb "${verb}" with the following context: ${explanation}
@@ -266,7 +271,7 @@ Types used in the plugin structure are:
             return undefined;
         }
     
-        const newPlugin: Plugin = {
+        const newPlugin: PluginDefinition = {
             id: `plugin-${verb}`,
             verb: verb,
             description: pluginStructure.description,
@@ -279,16 +284,29 @@ Types used in the plugin structure are:
             },
             language: pluginStructure.language,
             configuration: configItems,
-            metadata: metadata
+            metadata: metadata,
+            security: {
+                permissions: this.determineRequiredPermissions(pluginStructure),
+                sandboxOptions: {
+                    allowEval: false,
+                    timeout: 5000,
+                    memory: 128 * 1024 * 1024, // 128MB
+                    allowedModules: ['fs', 'path', 'http', 'https'],
+                    allowedAPIs: ['fetch', 'console']
+                },
+                trust: {
+                    publisher: 'system-generated'
+                }
+            }
         };
 
+        newPlugin.security.trust.signature = await this.signPlugin(newPlugin);        
+
         try {
-            // Save the plugin to the librarian
-            await axios.post(`http://${this.librarianUrl}/storeData`, {
-                id: newPlugin.id,
-                data: newPlugin,
-                collection: 'plugins',
-                storageType: 'mongo'
+            // Use PluginMarketplace instead of direct Librarian access
+            await this.pluginMarketplace.publishPlugin(newPlugin, {
+                type: 'mongo',
+                url: this.librarianUrl
             });
     
             return newPlugin;
@@ -310,6 +328,25 @@ Types used in the plugin structure are:
         res.status(200).send({ status: 'Message received and processed' });
     }
     
+    private determineRequiredPermissions(plugin: PluginDefinition): string[] {
+        const permissions: string[] = [];
+        
+        // Analyze plugin code and dependencies to determine required permissions
+        for (const file of plugin.entryPoint?.files || []) {
+            if (file.toString().includes('fs.')) permissions.push('fs.read', 'fs.write');
+            if (file.toString().includes('fetch(')) permissions.push('net.fetch');
+            if (file.toString().includes('http.')) permissions.push('net.http');
+            // Add more permission checks as needed
+        }
+        
+        return [...new Set(permissions)]; // Remove duplicates
+    }
+    
+    private async signPlugin(plugin: PluginDefinition): Promise<string> {
+        // Implementation of plugin signing
+        // This would use a private key to sign the plugin code
+        return 'signature-placeholder';
+    }    
 
     private async generateExplanation(verb: string, context: Map<string, PluginInput>): Promise<string> {
         const prompt = `Given the action verb "${verb}" and the context "${context}", provide a detailed explanation of what a plugin for this verb should do. Include expected inputs and outputs.`;

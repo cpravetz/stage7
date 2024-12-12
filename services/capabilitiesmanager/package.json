@@ -6,12 +6,13 @@
     "type": "module",
     "scripts": {
         "start": "ts-node src/CapabilitiesManager.ts",
-        "build": "tsc && cp -r src/plugins dist/plugins",
+        "build": "tsc",
         "test": "jest"
     },
     "dependencies": {
         "@cktmcs/errorhandler": "file:../../errorhandler",
         "@cktmcs/shared": "file:../../shared",
+        "@cktmcs/marketplace": "file:../../marketplace",
         "axios": "^1.7.7",
         "body-parser": "^1.19.0",
         "cheerio": "^1.0.0",
@@ -20,6 +21,7 @@
         "ws": "^8.18.0"
     },
     "devDependencies": {
+        "@types/cheerio": "^0.22.35",
         "@types/express": "^5.0.0",
         "@types/jest": "^29.5.14",
         "@types/mocha": "^10.0.9",

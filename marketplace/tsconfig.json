@@ -8,7 +8,7 @@
     "moduleResolution": "node",
     "strict": true,
     "paths": {
-      "@cktmcs/errorhandler/*": ["./src/*"]  
+      "@cktmcs/marketplace/*": ["./src/*"]  
     },
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
