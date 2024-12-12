@@ -186,6 +186,8 @@ class AgentSetManager {
 
     async assignAgentToSet(agentId: string, actionVerb: string, inputs: Map<string, PluginInput>,  missionId: string, missionContext: string): Promise<string> {
         console.log('Assigning agent to set...');
+        console.log('actionVerb: ', actionVerb);
+        console.log('inputs: ', inputs);
         let availableSet = await this.getAvailableAgentSet();
         if (!availableSet) {
             console.log('No available agent set found. Attempting to create a new one...');

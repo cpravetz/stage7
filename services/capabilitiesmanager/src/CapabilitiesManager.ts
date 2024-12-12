@@ -3,7 +3,7 @@ import bodyParser from 'body-parser';
 import axios from 'axios';
 import path from 'path';
 import { Step, MapSerializer, BaseEntity  } from '@cktmcs/shared';
-import { PluginInput, PluginOutput, Plugin, PluginParameterType, environmentType } from '@cktmcs/shared';
+import { PluginInput, PluginOutput, PluginDefinition, PluginParameterType, environmentType } from '@cktmcs/shared';
 import { execute as AccomplishPlugin } from './plugins/ACCOMPLISH/ACCOMPLISH.js';
 import fs from 'fs/promises';
 import os from 'os';
@@ -30,8 +30,6 @@ const api = axios.create({
 });
 
 export class CapabilitiesManager extends BaseEntity {
-    private engineerUrl: string = process.env.ENGINEER_URL || 'engineer:5050';
-    private brainUrl: string = process.env.BRAIN_URL || 'brain:5070';
     private librarianUrl: string = process.env.LIBRARIAN_URL || 'librarian:5040';
     private server: any;
     private configManager: ConfigManager;
@@ -51,6 +49,7 @@ export class CapabilitiesManager extends BaseEntity {
             process.exit(1);
         });
     }
+
 
     private async initialize() {
         try {
@@ -78,7 +77,54 @@ export class CapabilitiesManager extends BaseEntity {
                 app.post('/executeAction', (req, res) => this.executeActionVerb(req, res));
                 app.post('/message', (req, res) => this.handleMessage(req, res));
                 app.get('/availablePlugins', (req, res) => this.pluginRegistry.getAvailablePlugins(req, res));
+
+
                 // New endpoints for plugin management
+                app.post('/registerPlugin', async (req, res) => {
+                    try {
+                        const plugin = req.body.plugin;
+                        await this.pluginRegistry.registerPlugin(plugin);
+                        res.status(200).json({ message: 'Plugin registered successfully' });
+                    } catch (error) {
+                        analyzeError(error as Error);
+                        res.status(500).json({ 
+                            error: `Failed to register plugin: ${error instanceof Error ? error.message : String(error)}` 
+                        });
+                    }
+                });
+        
+                app.get('/plugins/:pluginId', async (req, res) => {
+                    try {
+                        const plugin = await this.pluginRegistry.getPlugin(req.params.pluginId);
+                        if (plugin) {
+                            res.status(200).json(plugin);
+                        } else {
+                            res.status(404).json({ error: 'Plugin not found' });
+                        }
+                    } catch (error) {
+                        analyzeError(error as Error);
+                        res.status(500).json({ 
+                            error: `Failed to get plugin: ${error instanceof Error ? error.message : String(error)}` 
+                        });
+                    }
+                });
+        
+                app.get('/plugins/:pluginId/metadata', async (req, res) => {
+                    try {
+                        const metadata = await this.pluginRegistry.getPluginMetadata(req.params.pluginId);
+                        if (metadata) {
+                            res.status(200).json(metadata);
+                        } else {
+                            res.status(404).json({ error: 'Plugin metadata not found' });
+                        }
+                    } catch (error) {
+                        analyzeError(error as Error);
+                        res.status(500).json({ 
+                            error: `Failed to get plugin metadata: ${error instanceof Error ? error.message : String(error)}` 
+                        });
+                    }
+                });
+
                 app.get('/plugins/category/:category', async (req, res) => {
                     const plugins = await this.pluginRegistry.getPluginsByCategory(req.params.category);
                     res.json(plugins);
@@ -224,8 +270,8 @@ export class CapabilitiesManager extends BaseEntity {
     private validateAndStandardizeInputs(step: Step) {
         const pluginDef = this.pluginRegistry.actionVerbs.get(step.actionVerb);
 
+        console.log(`Validating inputs for ${step.actionVerb}`);
         if (!pluginDef) {
-            // If there's no plugin for this actionVerb, consider inputs validated
             return;
         }
 
@@ -247,7 +293,7 @@ export class CapabilitiesManager extends BaseEntity {
                 }
             }
 
-            if (!input && inputDef.required ) {
+            if (!input && inputDef.required) {
                 console.log(`Missing required input "${inputName}" for ${step.actionVerb}`);
                 validInputs.set(inputName, {
                     inputName,
@@ -266,7 +312,7 @@ export class CapabilitiesManager extends BaseEntity {
         step.inputs = validInputs;
     }
 
-    protected async executePlugin(plugin: Plugin, inputs: Map<string, PluginInput>): Promise<PluginOutput[]> {
+    protected async executePlugin(plugin: PluginDefinition, inputs: Map<string, PluginInput>): Promise<PluginOutput[]> {
         // Load plugin-specific configuration
         let configSet = await this.configManager.getPluginConfig(plugin.id);
         
@@ -301,7 +347,7 @@ export class CapabilitiesManager extends BaseEntity {
     }
 
 
-    private async executeJavaScriptPlugin(plugin: Plugin, inputs: Map<string, PluginInput>, environment: environmentType): Promise<PluginOutput[]> {
+    private async executeJavaScriptPlugin(plugin: PluginDefinition, inputs: Map<string, PluginInput>, environment: environmentType): Promise<PluginOutput[]> {
         const pluginDir = path.join(__dirname, 'plugins', plugin.verb);
         const mainFilePath = path.join(pluginDir, plugin.entryPoint!.main);
     
@@ -332,7 +378,7 @@ export class CapabilitiesManager extends BaseEntity {
             }];
         }
     }
-    private async executePythonPlugin(plugin: Plugin, inputs: Map<string, PluginInput>, environment: environmentType): Promise<PluginOutput[]> {
+    private async executePythonPlugin(plugin: PluginDefinition, inputs: Map<string, PluginInput>, environment: environmentType): Promise<PluginOutput[]> {
         const pluginDir = path.join(this.pluginRegistry.currentDir, 'plugins', plugin.verb);
         const mainFilePath = path.join(pluginDir, plugin.entryPoint!.main);
 
@@ -434,7 +480,6 @@ export class CapabilitiesManager extends BaseEntity {
     async getCapabilitiesSummary(): Promise<string> {
         return this.pluginRegistry.getSummarizedCapabilities();
     }
-
 }
 
 // Create and start the CapabilitiesManager

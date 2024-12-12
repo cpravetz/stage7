@@ -4,9 +4,8 @@ import axios from 'axios';
 
 interface SystemConfig {
     environment: Record<string, string>;
-    featureFlags: Record<string, boolean>;
     pluginConfigurations: Record<string, ConfigItem[]>; // Plugin configurations for each plugin ID
-    pluginMetadatas: Record<string, MetadataType>; // Plugin metadata for each plugin ID
+    pluginMetadata: Record<string, MetadataType>; // Plugin metadata for each plugin ID
 }
 
 export class ConfigManager {
@@ -20,9 +19,8 @@ export class ConfigManager {
         this.librarianUrl = librarianUrl;
         this.config = {
             environment: {},
-            featureFlags: {},
             pluginConfigurations: {},
-            pluginMetadatas: {}
+            pluginMetadata: {}
         };
     }
 
@@ -34,6 +32,37 @@ export class ConfigManager {
         return ConfigManager.instance;
     }
     
+        // Plugin Configuration Management
+        async getPluginConfig(pluginId: string): Promise<ConfigItem[]> {
+            return this.config.pluginConfigurations[pluginId] || [];
+        }
+    
+        async updatePluginConfig(pluginId: string, config: ConfigItem[]): Promise<void> {
+            this.config.pluginConfigurations[pluginId] = config;
+            await this.saveConfig();
+        }
+    
+        // Plugin Metadata Management
+        async getPluginMetadata(pluginId: string): Promise<MetadataType | undefined> {
+            return this.config.pluginMetadata[pluginId];
+        }
+    
+        async updatePluginMetadata(pluginId: string, metadata: Partial<MetadataType>): Promise<void> {
+            this.config.pluginMetadata[pluginId] = {
+                ...this.config.pluginMetadata[pluginId],
+                ...metadata
+            };
+            await this.saveConfig();
+        }
+    
+        // Usage Tracking
+        async recordPluginUsage(pluginId: string): Promise<void> {
+            const metadata = this.config.pluginMetadata[pluginId] || {};
+            metadata.usageCount = (metadata.usageCount || 0) + 1;
+            metadata.lastUsed = new Date();
+            await this.updatePluginMetadata(pluginId, metadata);
+        }
+
     static getInstance(): ConfigManager {
         if (!ConfigManager.instance) {
             throw new Error('ConfigManager not initialized. Call initialize() first.');
@@ -51,9 +80,8 @@ export class ConfigManager {
                 }
             });
             this.config.environment = response.data.data.environment ? response.data.data.environment || this.config.environment : {};
-            this.config.featureFlags = response.data.data.featureFlags ? response.data.data.featureFlags || this.config.featureFlags : {};
             this.config.pluginConfigurations = response.data.data.pluginConfigurations ? response.data.data.pluginConfigurations || this.config.pluginConfigurations : {};
-            this.config.pluginMetadatas = response.data.data.pluginMetadatas ? response.data.data.pluginMetadatas || this.config.pluginMetadatas || {} : {};
+            this.config.pluginMetadata = response.data.data.pluginMetadata ? response.data.data.pluginMetadata || this.config.pluginMetadata || {} : {};
 
         } catch (error) {
             if (error instanceof Error && error.message.includes('404')) {
@@ -86,30 +114,6 @@ export class ConfigManager {
         }
     }
 
-    public async updatePluginConfig(pluginId: string, configSet: ConfigItem[]) {
-        await this.ensureInitialized();
-        this.config.pluginConfigurations[pluginId] = configSet || [];
-        await this.saveConfig();
-    }
-
-    async updatePluginMetadata(pluginId: string, metadata: Partial<MetadataType>) {
-        await this.ensureInitialized();
-        const existingMetadata = this.config.pluginMetadatas[pluginId] || {};
-        this.config.pluginMetadatas[pluginId] = { ...existingMetadata, ...metadata };
-        await this.saveConfig();
-    }
-
-    public async getPluginConfig(pluginId: string): Promise<ConfigItem[]> {
-        await this.ensureInitialized();
-        return this.config.pluginConfigurations[pluginId] || [];
-    }
-
-    async getPluginMetadata(pluginId: string): Promise<MetadataType | undefined> {
-        await this.ensureInitialized();
-        await this.ensurePluginMetadata(pluginId);
-        return this.config.pluginMetadatas[pluginId] || undefined;
-    }
-
     async setEnvironmentVariable(key: string, value: string) {
         this.config.environment[key] = value;
         await this.saveConfig();
@@ -121,8 +125,8 @@ export class ConfigManager {
     }
 
     async ensurePluginMetadata(pluginId: string): Promise<void> {
-        if (!this.config.pluginMetadatas[pluginId]) {
-            this.config.pluginMetadatas[pluginId] = {
+        if (!this.config.pluginMetadata[pluginId]) {
+            this.config.pluginMetadata[pluginId] = {
                 category: [],
                 tags: [],
                 complexity: 1,
