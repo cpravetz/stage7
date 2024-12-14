@@ -129,6 +129,11 @@ export interface PlanDependency {
     outputName: string;
 }
 
+export type PluginChangeEvent = {
+    type: 'PUBLISHED' | 'UPDATED' | 'DELETED';
+    plugin: PluginDefinition;
+    signature?: string;
+};
 
 export interface ActionVerbTask {
     verb: string;

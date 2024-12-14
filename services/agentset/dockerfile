@@ -30,4 +30,4 @@ WORKDIR /usr/src/app/services/agentset
 EXPOSE 9000
 
 # Define the command to run the application
-CMD ["node", "dist/AgentSet.js"]
+CMD ["node", "--expose-gc","dist/AgentSet.js"]

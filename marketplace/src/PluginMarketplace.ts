@@ -1,4 +1,4 @@
-import { PluginDefinition } from '@cktmcs/shared';
+import { PluginDefinition, PluginChangeEvent } from '@cktmcs/shared';
 import { PluginRepositoryLink, PluginManifest } from '@cktmcs/shared';
 import { createHash } from 'crypto';
 import axios from 'axios';
@@ -19,30 +19,44 @@ export class PluginMarketplace {
     }
 
     async publishPlugin(plugin: PluginDefinition, repositoryDef: PluginRepositoryLink): Promise<void> {
-        try {
-            await this.verifyPlugin(plugin);
-            const signature = await this.signPlugin(plugin);
-            const manifest = await this.createPluginManifest(plugin, repositoryDef, signature);
-            await this.pushToRepository(manifest, repositoryDef);
-            
-            // Notify CapabilitiesManager of new plugin
-            await this.notifyCapabilitiesManager(manifest);
-        } catch (error) {
-            analyzeError(error as Error);
-            throw new Error(`Failed to publish plugin: ${error instanceof Error ? error.message : String(error)}`);
+
+        const existingPlugin = await this.getPluginByVerb(plugin.verb);
+        if (existingPlugin) {
+            console.log(`Plugin with verb ${plugin.verb} already exists. Skipping publication.`);
+            return;
         }
+
+        // Verify plugin before publishing
+        const verified = await this.verifyPlugin(plugin);
+        
+        if (!verified) {
+            console.log('Marketplace: Verification failed, skipping publication');
+            return;
+        }
+        // Sign the plugin
+        const signature = await this.signPlugin(plugin);
+        
+        // Create manifest with security info
+        const manifest = await this.createPluginManifest(plugin, repositoryDef, signature);
+        
+        // Store signed plugin
+        await this.pushToRepository(manifest, repositoryDef);
+        
+        // Notify about new plugin with signature
+        await this.notifyPluginChange({ 
+            type: 'PUBLISHED', 
+            plugin: manifest,
+            signature 
+        });
     }
 
-    private async notifyCapabilitiesManager(manifest: PluginManifest): Promise<void> {
+    private async notifyPluginChange(event: PluginChangeEvent): Promise<void> {
         try {
-            await axios.post(`http://${this.capabilitiesManagerUrl}/plugins/notify`, {
-                plugin: this.convertManifestToPlugin(manifest),
-                action: 'published',
+            axios.post(`http://${this.capabilitiesManagerUrl}/notify`, {
+                plugin: event.plugin,
+                type: event.type,
                 timestamp: new Date().toISOString(),
-                manifest: {
-                    id: manifest.id,
-                    signature: manifest.security.trust.signature
-                }
+                signature: event.signature
             });
         } catch (error) {
             analyzeError(error as Error);
@@ -55,43 +69,110 @@ export class PluginMarketplace {
         try {
             const response = await axios.get(`http://${this.librarianUrl}/getData`, {
                 params: {
-                    id,
+                    id: id,
                     collection: 'plugins',
                     storageType: 'mongo'
                 }
             });
-            return response.data;
+
+            if (!response.data) {
+                return undefined;
+            }
+
+            const plugin = response.data as PluginDefinition;
+        
+            // Verify signature before returning
+            const expectedSignature = await this.signPlugin(plugin);
+            if (plugin.security.trust.signature !== expectedSignature) {
+                throw new Error('Plugin signature verification failed');
+            }
+            return plugin;
         } catch (error) {
             analyzeError(error as Error);
             throw new Error(`Failed to fetch plugin: ${error instanceof Error ? error.message : String(error)}`);
         }
     }
 
+    public async getPluginByVerb(verb: string): Promise<PluginDefinition | undefined> {
+        try {
+            console.log(`Marketplace seeking plugin for verb ${verb}`);
+            const response = await axios.get(`http://${this.librarianUrl}/getData`, {
+                params: {
+                    query: { verb: verb },
+                    collection: 'plugins',
+                    storageType: 'mongo',
+                    limit: 1
+                }
+            });
+
+            if (!response.data || !response.data.length) {
+                console.log(`Marketplace: No plugin found for verb ${verb}`);
+                return undefined;
+            }
+            console.log(`Marketplace: getData Response data:`, response.data);
+            const plugin = response.data[0] as PluginDefinition;
+            console.log(`Marketplace: Found plugin ${plugin.id} for verb ${verb}`);
+            // Verify signature before returning
+            const expectedSignature = await this.signPlugin(plugin);
+            if (plugin.security.trust.signature !== expectedSignature) {
+                throw new Error('Plugin signature verification failed');
+            }
+
+            return plugin;
+        } catch (error) {
+            return undefined;
+        }
+    }
+
     public async getAllPlugins(): Promise<PluginDefinition[]> {
         try {
-            const response = await axios.get(`http://${this.capabilitiesManagerUrl}/plugins`);
-            return response.data;
+            const response = await axios.get(`http://${this.librarianUrl}/getData`, {
+                params: {
+                    collection: 'plugins',
+                    storageType: 'mongo'
+                }
+            });
+
+            if (!response.data) {
+                return [];
+            }
+
+            const plugins = response.data as PluginDefinition[];
+            
+            // Verify signatures
+            for (const plugin of plugins) {
+                const expectedSignature = await this.signPlugin(plugin);
+                if (plugin.security.trust.signature !== expectedSignature) {
+                    throw new Error(`Plugin signature verification failed for plugin ${plugin.id}`);
+                }
+            }
+
+            return plugins;
         } catch (error) {
             analyzeError(error as Error);
             throw new Error(`Failed to get all plugins: ${error instanceof Error ? error.message : String(error)}`);
         }
     }
 
-    private async verifyPlugin(plugin: PluginDefinition): Promise<void> {
+    private async verifyPlugin(plugin: PluginDefinition): Promise<boolean> {
         // Verify plugin structure
         if (!plugin.id || !plugin.verb || !plugin.entryPoint) {
-            throw new Error('Invalid plugin structure');
+            console.log('Invalid plugin structure');
+            return false;
         }
 
         // Verify security settings
         if (!plugin.security || !plugin.security.permissions || !plugin.security.sandboxOptions) {
-            throw new Error('Invalid security configuration');
+            console.log('Invalid security configuration');
+            return false;
         }
 
         // Verify plugin code
         if (!await this.verifyPluginCode(plugin)) {
-            throw new Error('Plugin code verification failed');
+            console.log('Plugin code verification failed');
+            return false;
         }
+        return true;        
     }
 
     private async verifyPluginCode(plugin: PluginDefinition): Promise<boolean> {
@@ -107,17 +188,19 @@ export class PluginMarketplace {
             ];
 
             if (maliciousPatterns.some(pattern => code.includes(pattern))) {
+                console.log('Malicious pattern detected in plugin code');
                 return false;
             }
 
             // Verify file structure
             if (!plugin.entryPoint?.main || !plugin.entryPoint.files) {
+                console.log('Invalid plugin file structure', plugin.entryPoint);
                 return false;
             }
 
             return true;
         } catch (error) {
-            analyzeError(error as Error);
+            //analyzeError(error as Error);
             return false;
         }
     }
@@ -152,7 +235,7 @@ export class PluginMarketplace {
                 ...plugin.security,
                 trust: {
                     signature: signature,
-                    publisher: 'system-generated',
+                    publisher: plugin.security.trust.publisher || 'system-generated',
                     certificateHash: await this.generateCertificateHash(plugin)
                 }
             },

@@ -546,11 +546,20 @@ Please consider this context and the available plugins when planning and executi
             }
 
             const payload = MapSerializer.transformForSerialization(step);
+            console.log('Agent: Executing serialized action with CapabilitiesManager:', payload);
             const response = await api.post(`http://${this.capabilitiesManagerUrl}/executeAction`, payload);
             return MapSerializer.transformFromSerialization(response.data);
         } catch (error) {
             console.error('Error executing action with CapabilitiesManager:', error instanceof Error ? error.message : error);
-            throw error;
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: 'Error',
+                result: null,
+                error: error instanceof Error ? error.message : `Unknown error occurred ${error}`
+            }];
+            
         }
     }
 
