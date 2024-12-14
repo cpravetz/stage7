@@ -39,7 +39,7 @@ export type environmentType = {
 
 export interface EntryPointType {
     main: string;
-    files: Record<string,string>[];
+    files: Record<string,string>;
 }
 
 export interface Step {
@@ -73,6 +73,7 @@ export interface PluginDefinition {
     outputDefinitions: PluginParameter[];
     entryPoint?: EntryPointType;
     language: 'javascript' | 'python' | 'typescript';
+    version : string;
     configuration?: ConfigItem[];
     metadata?: MetadataType;
     security: {

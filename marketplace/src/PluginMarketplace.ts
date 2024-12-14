@@ -1,22 +1,74 @@
 import { PluginDefinition, PluginChangeEvent } from '@cktmcs/shared';
-import { PluginRepositoryLink, PluginManifest } from '@cktmcs/shared';
+import { PluginRepositoryLink, PluginManifest, PluginRepository, RepositoryConfig } from '@cktmcs/shared';
 import { createHash } from 'crypto';
 import axios from 'axios';
 import { analyzeError } from '@cktmcs/errorhandler';
+import fs from 'fs/promises';
+import path from 'path';
+import { MongoRepository } from './repositories/MongoRepository';
+import { GitRepository } from './repositories/GitRepository';
+//import { NpmRepository } from './repositories/NpmRepository';
+import { LocalRepository } from './repositories/LocalRepository';
+import { repositoryConfig } from '../src/config/repository.config';
+
 
 export class PluginMarketplace {
     private librarianUrl: string;
     private capabilitiesManagerUrl: string;
     private trustedPublishers: Set<string>;
+    private defaultRepository: PluginRepository | undefined;
+    private repositories: Map<string, PluginRepository>;
+    private pluginsBaseDir: string;
 
     constructor(
         librarianUrl: string = process.env.LIBRARIAN_URL || 'librarian:5040',
-        capabilitiesManagerUrl: string = process.env.CAPABILITIES_MANAGER_URL || 'capabilitiesmanager:5060'
+        capabilitiesManagerUrl: string = process.env.CAPABILITIESMANAGER_URL || 'capabilitiesmanager:5060'
     ) {
         this.librarianUrl = librarianUrl;
         this.capabilitiesManagerUrl = capabilitiesManagerUrl;
         this.trustedPublishers = new Set(['system-generated', 'trusted-publisher']);
+        this.defaultRepository = this.createRepository({
+            ...repositoryConfig.defaultRepository,
+            type: repositoryConfig.defaultRepository.type as 'git' | 'npm' | 'local' | 'mongo'
+        });
+        if (!this.defaultRepository) {
+            throw new Error(`Failed to create default repository of type ${repositoryConfig.defaultRepository.type}`);
+        }
+
+        this.repositories = new Map();
+        this.repositories.set(this.defaultRepository.type, this.defaultRepository);
+        
+        if (repositoryConfig.additionalRepositories) {
+            for (const repoConfig of repositoryConfig.additionalRepositories) {
+                const repository = this.createRepository({
+                    ...repoConfig,
+                    type: repoConfig.type as 'git' | 'npm' | 'local' | 'mongo'
+                });
+                if (repository) {
+                    this.repositories.set(repoConfig.type, repository);
+                } else {
+                    console.warn(`Failed to create repository of type ${repoConfig.type}`);
+                }
+            }
+        }
+        this.pluginsBaseDir = path.join(process.cwd(), 'plugins');
     }
+
+    private createRepository(config: RepositoryConfig): PluginRepository | undefined {
+        switch (config.type) {
+            case 'git':
+                return new GitRepository(config);
+            case 'mongo':
+                return new MongoRepository(config);
+            //case 'npm':
+            //    return new NpmPluginRepository(config);
+            case 'local':
+                return new LocalRepository(config);
+                default:
+                    console.log(`Unsupported repository type: ${config.type}`);
+                    return undefined;
+            }
+        }
 
     async publishPlugin(plugin: PluginDefinition, repositoryDef: PluginRepositoryLink): Promise<void> {
 
@@ -39,8 +91,15 @@ export class PluginMarketplace {
         // Create manifest with security info
         const manifest = await this.createPluginManifest(plugin, repositoryDef, signature);
         
-        // Store signed plugin
-        await this.pushToRepository(manifest, repositoryDef);
+        // Store in specified repository
+        const repository = this.repositories.get(repositoryDef.type);
+        if (!repository) {
+            console.log(`Repository type ${repositoryDef.type} not configured`);
+            return;
+        }
+
+        await repository.publish(manifest);
+        await this.ensureLocalPluginFiles(manifest);
         
         // Notify about new plugin with signature
         await this.notifyPluginChange({ 
@@ -67,7 +126,23 @@ export class PluginMarketplace {
 
     async getPlugin(id: string): Promise<PluginDefinition | undefined> {
         try {
-            const response = await axios.get(`http://${this.librarianUrl}/getData`, {
+            for (const repository of this.repositories.values()) {
+                try {
+                    const plugin = await repository.fetch(id);
+                    if (plugin) {
+                        // Ensure plugin files are available locally
+                        await this.ensureLocalPluginFiles(plugin);
+                        return plugin;
+                    }
+                } catch (error) {
+                    console.warn(`Error fetching from repository: ${error}`);
+                    continue;
+                }
+            }
+
+            return undefined;
+    
+/*            const response = await axios.get(`http://${this.librarianUrl}/getData`, {
                 params: {
                     id: id,
                     collection: 'plugins',
@@ -86,7 +161,7 @@ export class PluginMarketplace {
             if (plugin.security.trust.signature !== expectedSignature) {
                 throw new Error('Plugin signature verification failed');
             }
-            return plugin;
+            return plugin;*/
         } catch (error) {
             analyzeError(error as Error);
             throw new Error(`Failed to fetch plugin: ${error instanceof Error ? error.message : String(error)}`);
@@ -95,30 +170,28 @@ export class PluginMarketplace {
 
     public async getPluginByVerb(verb: string): Promise<PluginDefinition | undefined> {
         try {
-            console.log(`Marketplace seeking plugin for verb ${verb}`);
-            const response = await axios.get(`http://${this.librarianUrl}/getData`, {
-                params: {
-                    query: { verb: verb },
-                    collection: 'plugins',
-                    storageType: 'mongo',
-                    limit: 1
+            for (const repository of this.repositories.values()) {
+                try {
+                    const plugin = await repository.fetchByVerb(verb);
+                    if (plugin) {
+                        console.log(`Marketplace: Found plugin ${plugin.id} for verb ${verb}`);
+                        // Verify signature before returning
+                        const expectedSignature = await this.signPlugin(plugin);
+                        if (plugin.security.trust.signature !== expectedSignature) {
+                            console.log('Plugin signature verification failed');
+                            return undefined;
+                        }
+                        // Ensure plugin files are available locally
+                        await this.ensureLocalPluginFiles(plugin);
+                        return plugin;
+                    }
+                } catch (error) {
+                    console.warn(`Error fetching from repository: ${error}`);
+                    continue;
                 }
-            });
-
-            if (!response.data || !response.data.length) {
-                console.log(`Marketplace: No plugin found for verb ${verb}`);
-                return undefined;
-            }
-            console.log(`Marketplace: getData Response data:`, response.data);
-            const plugin = response.data[0] as PluginDefinition;
-            console.log(`Marketplace: Found plugin ${plugin.id} for verb ${verb}`);
-            // Verify signature before returning
-            const expectedSignature = await this.signPlugin(plugin);
-            if (plugin.security.trust.signature !== expectedSignature) {
-                throw new Error('Plugin signature verification failed');
             }
 
-            return plugin;
+            return undefined;
         } catch (error) {
             return undefined;
         }
@@ -242,8 +315,49 @@ export class PluginMarketplace {
             distribution: {
                 downloads: 0,
                 rating: 0
-            }
+            },
+            version: '1.0.0'
+
         };
+    }
+
+    private async ensureLocalPluginFiles(plugin: PluginDefinition): Promise<void> {
+        const pluginDir = path.join(this.pluginsBaseDir, plugin.verb);
+
+        // Check if files already exist and are up to date
+        if (await this.isPluginUpToDate(plugin, pluginDir)) {
+            return;
+        }
+
+        // Create plugin directory
+        await fs.mkdir(pluginDir, { recursive: true });
+
+        // Write plugin files
+        if (plugin.entryPoint?.files) {
+            for (const [filename, content] of Object.entries(plugin.entryPoint.files)) {
+                const filePath = path.join(pluginDir, filename);
+                await fs.mkdir(path.dirname(filePath), { recursive: true });
+                await fs.writeFile(filePath, content);
+            }
+        }
+
+        // Write manifest for version tracking
+        await fs.writeFile(
+            path.join(pluginDir, 'plugin-manifest.json'),
+            JSON.stringify(plugin, null, 2)
+        );
+    }
+
+    private async isPluginUpToDate(plugin: PluginDefinition, pluginDir: string): Promise<boolean> {
+        try {
+            const manifestPath = path.join(pluginDir, 'plugin-manifest.json');
+            const manifestContent = await fs.readFile(manifestPath, 'utf-8');
+            const existingManifest = JSON.parse(manifestContent);
+            
+            return existingManifest.version === plugin.version;
+        } catch {
+            return false;
+        }
     }
 
     private async pushToRepository(
@@ -251,24 +365,13 @@ export class PluginMarketplace {
         repository: PluginRepositoryLink
     ): Promise<void> {
         try {
-            switch (repository.type) {
-                case 'mongo':
-                    await axios.post(`http://${this.librarianUrl}/storeData`, {
-                        id: manifest.id,
-                        data: manifest,
-                        collection: 'plugins',
-                        storageType: 'mongo'
-                    });
-                    break;
-                case 'git':
-                    // Implement Git repository publishing
-                    throw new Error('Git repository publishing not implemented');
-                case 'npm':
-                    // Implement NPM repository publishing
-                    throw new Error('NPM repository publishing not implemented');
-                default:
-                    throw new Error(`Unsupported repository type: ${repository.type}`);
+            const targetRepo = this.repositories.get(repository.type);
+            
+            if (!targetRepo) {
+                throw new Error(`Repository type ${repository.type} not found`);
             }
+
+            await targetRepo.publish(manifest);
         } catch (error) {
             analyzeError(error as Error);
             throw new Error(`Failed to push to repository: ${error instanceof Error ? error.message : String(error)}`);
@@ -277,69 +380,28 @@ export class PluginMarketplace {
 
     private async fetchPluginManifest(pluginId: string, version: string): Promise<PluginManifest> {
         try {
-            const response = await axios.get(`http://${this.librarianUrl}/getData`, {
-                params: {
-                    id: pluginId,
-                    collection: 'plugins',
-                    storageType: 'mongo'
+            // Try each repository until we find the plugin
+            for (const repository of this.repositories.values()) {
+                try {
+                    const manifest = await repository.fetch(pluginId);
+                    if (manifest) {
+                        // If version is specified, check it matches
+                        if (version && manifest.version !== version) {
+                            continue;
+                        }
+                        return manifest;
+                    }
+                } catch (error) {
+                    console.warn(`Error fetching from repository: ${error}`);
+                    continue;
                 }
-            });
-
-            if (!response.data) {
-                throw new Error(`Plugin ${pluginId} not found`);
             }
-
-            return response.data as PluginManifest;
+            
+            throw new Error(`Plugin ${pluginId} not found`);
         } catch (error) {
             analyzeError(error as Error);
             throw new Error(`Failed to fetch plugin manifest: ${error instanceof Error ? error.message : String(error)}`);
         }
-    }
-
-    private async verifyManifest(manifest: PluginManifest): Promise<boolean> {
-        try {
-            // Verify publisher
-            if (!this.trustedPublishers.has(manifest.security.trust.publisher || '')) {
-                return false;
-            }
-
-            // Verify signature
-            const expectedSignature = await this.signPlugin(manifest);
-            if (manifest.security.trust.signature !== expectedSignature) {
-                return false;
-            }
-
-            // Verify certificate hash
-            if (!await this.verifyCertificateHash(manifest)) {
-                return false;
-            }
-
-            return true;
-        } catch (error) {
-            analyzeError(error as Error);
-            return false;
-        }
-    }
-
-    private async installDependencies(manifest: PluginManifest): Promise<void> {
-        if (!manifest.repository.dependencies) {
-            return;
-        }
-
-        try {
-            for (const [dep, version] of Object.entries(manifest.repository.dependencies)) {
-                // In production, implement proper dependency installation
-                console.log(`Installing dependency ${dep}@${version}`);
-            }
-        } catch (error) {
-            analyzeError(error as Error);
-            throw new Error(`Failed to install dependencies: ${error instanceof Error ? error.message : String(error)}`);
-        }
-    }
-
-    private convertManifestToPlugin(manifest: PluginManifest): PluginDefinition {
-        const { repository, distribution, ...plugin } = manifest;
-        return plugin as PluginDefinition;
     }
 
     private async generateCertificateHash(plugin: PluginDefinition): Promise<string> {

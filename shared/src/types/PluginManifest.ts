@@ -28,4 +28,5 @@ export interface PluginManifest extends Omit<PluginDefinition, 'security'> {
         downloads: number;
         rating: number;
     };
+    version: string;
 }

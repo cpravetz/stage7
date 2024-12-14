@@ -17,7 +17,8 @@ export class PluginRegistry {
     private verbIndex: Map<string, string>;  // verb -> id mapping
     private categoryIndex: Map<string, Set<string>>;  // category -> ids mapping
     private tagIndex: Map<string, Set<string>>;  // tag -> ids mapping
-    private pluginMarketplace: PluginMarketplace;    
+    private pluginMarketplace: PluginMarketplace;
+    private pluginsDir: string;
     public currentDir = dirname(fileURLToPath(import.meta.url));
 
     constructor() {
@@ -26,6 +27,7 @@ export class PluginRegistry {
         this.categoryIndex = new Map();
         this.tagIndex = new Map();
         this.pluginMarketplace = new PluginMarketplace();
+        this.pluginsDir = path.join(__dirname, 'plugins');
         InitializeExistingPlugins(this, 'librarian:5040');
     }
 

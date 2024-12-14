@@ -229,8 +229,8 @@ Types used in the plugin structure are:
     }
     
     export interface EntryPointType {
-        main: string;
-        files: Record<string,string>[];
+        main: string; //Name of entry point file
+        files: Record<string,string>; //files defined as filename: filecontent
     }
     
     export interface PluginParameter {
@@ -330,9 +330,8 @@ Types used in the plugin structure are:
     
     private determineRequiredPermissions(plugin: PluginDefinition): string[] {
         const permissions: string[] = [];
-        
-        // Analyze plugin code and dependencies to determine required permissions
-        for (const file of plugin.entryPoint?.files || []) {
+        if (!plugin.entryPoint?.files) return permissions;
+        for (const [_, file] of Object.entries(plugin.entryPoint?.files || {})) {
             if (file.toString().includes('fs.')) permissions.push('fs.read', 'fs.write');
             if (file.toString().includes('fetch(')) permissions.push('net.fetch');
             if (file.toString().includes('http.')) permissions.push('net.http');
