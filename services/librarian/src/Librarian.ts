@@ -124,7 +124,6 @@ export class Librarian extends BaseEntity {
             data: MapSerializer.transformForSerialization(data || null),
             timestamp: new Date().toISOString()
         };
-        console.log('Storing work product:', workProduct);
         try {
             const id = await storeInMongo('workProducts', {...workProduct, _id: workProduct.id});
             res.status(200).send({ status: 'Work product stored', id: id });
@@ -136,7 +135,6 @@ export class Librarian extends BaseEntity {
 
     private async loadWorkProduct(req: express.Request, res: express.Response) {
         const { stepId } = req.params;
-        console.log('Loading work product:', req.params);
 
         if (!stepId) {
             return res.status(400).send({ error: 'ID is required' });
