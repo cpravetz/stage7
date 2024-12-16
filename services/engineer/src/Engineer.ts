@@ -32,9 +32,9 @@ export class Engineer extends BaseEntity {
         app.use(express.json());
 
         app.post('/createPlugin', async (req, res) => {
-            const { verb, context } = MapSerializer.transformFromSerialization(req.body);
+            const { verb, context, guidance } = MapSerializer.transformFromSerialization(req.body);
             try {
-                const plugin = await this.createPlugin(verb, context);
+                const plugin = await this.createPlugin(verb, context, guidance);
                 res.json(plugin || {});
             } catch (error) {
                 analyzeError(error as Error);
@@ -54,7 +54,7 @@ export class Engineer extends BaseEntity {
     private getStatistics(req: express.Request, res: express.Response) {
         res.status(200).json({ newPlugins: this.newPlugins });
     }
-    async createPlugin(verb: string, context: Map<string, PluginInput>): Promise<PluginDefinition | undefined> {
+    async createPlugin(verb: string, context: Map<string, PluginInput>, guidance: string): Promise<PluginDefinition | undefined> {
         console.log('Creating plugin for verb:', verb);
         this.newPlugins.push(verb);
         const explanation = await this.generateExplanation(verb, context);
@@ -67,6 +67,8 @@ export class Engineer extends BaseEntity {
             const engineeringPrompt = `
             Create a javascript or python based plugin for the action verb "${verb}" with the following context: ${explanation}
             
+            The planner provides this additional guidance: ${guidance}
+
             The plugin should expect inputs structured as a Map<string, PluginInput>, where PluginInput is defined as:
             
             interface PluginInput {

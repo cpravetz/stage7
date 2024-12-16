@@ -117,7 +117,7 @@ export class CapabilitiesManager extends BaseEntity {
     private async handleMessage(req: express.Request, res: express.Response) {
         try {
             const message = req.body;
-            console.log('Received message:', message);
+            //console.log('Received message:', message);
             await super.handleBaseMessage(message);
             res.status(200).send({ status: 'Message received and processed' });
         } catch (error) { //analyzeError(error as Error);
@@ -149,7 +149,7 @@ export class CapabilitiesManager extends BaseEntity {
     }
 
     private async executeActionVerb(req: express.Request, res: express.Response) {
-        console.log('CM: Executing action verb with req.body:', JSON.stringify(req.body, null, 2));
+        //console.log('CM: Executing action verb with req.body:', JSON.stringify(req.body, null, 2));
         const step = {
             ...req.body,
             inputs: MapSerializer.transformFromSerialization(req.body.inputs)
@@ -157,7 +157,7 @@ export class CapabilitiesManager extends BaseEntity {
         console.log('CM: Executing action verb:', step.actionVerb);
         if (!step.actionVerb || typeof step.actionVerb !== 'string') {
             console.log('CM: Invalid or missing verb', step.actionVerb);
-            res.status(400).send([{
+            res.status(200).send([{
                 success: false,
                 name: 'error',
                 resultType: PluginParameterType.ERROR,
@@ -169,7 +169,7 @@ export class CapabilitiesManager extends BaseEntity {
 
         if (!step.inputs || !(step.inputs instanceof Map)) {
             console.log('CM: Invalid or missing inputs', step.inputs);
-            res.status(400).send([{
+            res.status(200).send([{
                 success: false,
                 name: 'error',
                 resultType: PluginParameterType.ERROR,
@@ -182,35 +182,65 @@ export class CapabilitiesManager extends BaseEntity {
         try {
             // First check registry cache
             let plugin = await this.pluginRegistry.fetchOneByVerb(step.actionVerb);
-            console.log('CM: The plugin found in cache is:', plugin?.id);
+            console.log('CM: The plugin returned from cache is:', plugin?.id);
             if (!plugin) {
                 // If not in cache, handle unknown verb
+                console.log('CM: Plugin not found in Registry cache, handling unknown verb');
                 const result = await this.handleUnknownVerb(step);
                 if (!result.success) {
                     console.error('CM: Error handling unknown verb:', result.error);
-                    res.status(400).send(MapSerializer.transformForSerialization(result));
+                    res.status(200).send(MapSerializer.transformForSerialization([result]));
                     return;
                 }
-                console.log('CM: Plugin created:', result.result);
-                // Try to get the plugin again after handling unknown verb
-                plugin = await this.pluginRegistry.fetchOneByVerb(step.actionVerb);
-                if (!plugin) {
-                    console.log('CM: Newly created plugin not found in Registry cache');
-                    res.status(404).send({
-                        success: false,
-                        resultType: PluginParameterType.ERROR,
-                        error: `Plugin not found for verb: ${step.actionVerb}`
-                    });
-                    return;
+
+                // Handle different response types
+                switch (result.resultType) {
+                    case PluginParameterType.PLAN:
+                        console.log('CM: Returning plan for execution');
+                        res.status(200).send(MapSerializer.transformForSerialization([result]));
+                        return;
+
+                    case PluginParameterType.STRING:
+                    case PluginParameterType.NUMBER:
+                    case PluginParameterType.BOOLEAN:
+                        console.log('CM: Returning direct answer');
+                        res.status(200).send(MapSerializer.transformForSerialization([result]));
+                        return;
+
+                    case PluginParameterType.PLUGIN:
+                        console.log('CM: Plugin created:', result.result);
+                        // Try to get the plugin again after handling unknown verb
+                        plugin = await this.pluginRegistry.fetchOneByVerb(step.actionVerb);
+                        if (!plugin) {
+                            console.log('CM: Newly created plugin not found in Registry cache');
+                            res.status(200).send(MapSerializer.transformForSerialization([{
+                                success: false,
+                                name: 'error',
+                                resultType: PluginParameterType.ERROR,
+                                error: `Plugin not found for verb: ${step.actionVerb}`,
+                                resultDescription: 'Plugin creation failed'
+                            }]));
+                            return;
+                        }
+                        break; // Continue with plugin execution
+
+                    default:
+                        res.status(200).send(MapSerializer.transformForSerialization([{
+                            success: false,
+                            name: 'error',
+                            resultType: PluginParameterType.ERROR,
+                            error: `Unexpected result type: ${result.resultType}`,
+                            resultDescription: 'Unknown response type from handleUnknownVerb'
+                        }]));
+                        return;
                 }
             }
-
-            console.log('CM: capabilitiesManager validating inputs', step.inputs);
+            //console.log('CM: capabilitiesManager validating inputs', step.inputs);
             // Validate and standardize inputs
             const validatedInputs = await this.validateAndStandardizeInputs(plugin, step.inputs);
             if (!validatedInputs.success) {
-                console.log('Error validating inputs:', validatedInputs.error);
-                res.status(400).send([{
+                console.log('CM: Error validating inputs:', validatedInputs.error);
+                res.status(200).send([{
                     success: false,
                     name: 'error',
                     resultType: PluginParameterType.ERROR,
@@ -222,7 +252,7 @@ export class CapabilitiesManager extends BaseEntity {
 
             // Execute plugin with validated inputs
             const result = await this.executePlugin(plugin, validatedInputs.inputs || new Map<string, PluginInput>());
-            console.log('CM: Plugin executed successfully:', result);
+            console.log('CM: Plugin executed successfully');//:, result);
             res.status(200).send(MapSerializer.transformForSerialization(result));
 
         } catch (error) {
@@ -240,7 +270,6 @@ export class CapabilitiesManager extends BaseEntity {
     private async validateAndStandardizeInputs(plugin: PluginDefinition, inputs: Map<string, PluginInput>): 
     Promise<{ success: boolean; inputs?: Map<string, PluginInput>; error?: string }> {
         const validInputs = new Map<string, PluginInput>();
-        console.log('Validating inputs:', inputs);  
         try {
             for (const inputDef of plugin.inputDefinitions) {
                 const inputName = inputDef.name;
@@ -412,49 +441,83 @@ export class CapabilitiesManager extends BaseEntity {
     private async handleUnknownVerb(step: Step): Promise<PluginOutput> {
         try {
             const context = ` ${step.description || ''} with inputs ${MapSerializer.transformForSerialization(step.inputs)}`;
-            const goal = `How should I handle the action verb "${step.actionVerb}" with the following context: ${context}
-            Can we accomplish it with one or more steps using existing verbs?
-            Should we create a plugin for this action verb, or should we break down the task into smaller steps?`;
-
-            // Use ACCOMPLISH plugin to determine course of action
+            const goal = `How should I handle the action verb "${step.actionVerb}" in our plan with the following context: ${context}
+            Can we accomplish it with a subplan using one or more steps or should we create a plugin that can run code to accomplish it?
+            `;
+            console.log('CM: handleUnknownVerb goal:', step.actionVerb);
+            
             const accomplishResult = await this.executeAccomplishPlugin(goal);
             
             if (!accomplishResult.success) {
-                console.error(`Error executing ACCOMPLISH for new verb ${step.actionVerb}plugin:`, accomplishResult.error);
+                console.error(`CM: Error executing ACCOMPLISH for verb ${step.actionVerb}:`, accomplishResult.error);
                 return accomplishResult;
             }
-
-            if (accomplishResult.resultType === PluginParameterType.PLUGIN) {
-                // Request new plugin creation from Engineer
-                const engineerResult = await this.requestPluginFromEngineer(step);
-                if (!engineerResult.success) {
-                    return engineerResult;
-                }
-                
-                // Plugin should now be available in regitry
-                const plugin = await this.pluginRegistry.fetchOneByVerb(step.actionVerb); 
-                if (!plugin) {
+    
+            console.log('CM: accomplishResult:', accomplishResult);
+    
+            // Handle different response types from ACCOMPLISH
+            switch (accomplishResult.resultType) {
+                case PluginParameterType.PLUGIN:
+                    // Need to create a new plugin
+                    console.log('CM: Creating new plugin for unknown verb:', step.actionVerb);
+                    const engineerResult = await this.requestPluginFromEngineer(step, JSON.stringify(accomplishResult.result));
+                    if (!engineerResult.success) {
+                        return engineerResult;
+                    }
+                    
+                    const plugin = await this.pluginRegistry.fetchOneByVerb(step.actionVerb);
+                    if (!plugin) {
+                        return {
+                            success: false,
+                            name: 'error',
+                            resultType: PluginParameterType.ERROR,
+                            error: 'Failed to create plugin',
+                            resultDescription: 'Failed to create plugin',
+                            result: null
+                        };
+                    }
+                    return {
+                        success: true,
+                        name: 'plugin_created',
+                        resultType: PluginParameterType.PLUGIN,
+                        result: plugin,
+                        resultDescription: `Created new plugin for ${step.actionVerb}`
+                    };
+    
+                case PluginParameterType.PLAN:
+                    // Return the plan for execution
+                    console.log('CM: Returning plan for execution:', accomplishResult.result);
+                    return {
+                        success: true,
+                        name: 'plan_created',
+                        resultType: PluginParameterType.PLAN,
+                        result: accomplishResult.result,
+                        resultDescription: `Created plan to handle ${step.actionVerb}`
+                    };
+    
+                case PluginParameterType.STRING:
+                case PluginParameterType.NUMBER:
+                case PluginParameterType.BOOLEAN:
+                    // Direct answer or simple result
+                    console.log('CM: Returning direct result for:', step.actionVerb);
+                    return {
+                        success: true,
+                        name: 'direct_result',
+                        resultType: accomplishResult.resultType,
+                        result: accomplishResult.result,
+                        resultDescription: `Direct result for ${step.actionVerb}`
+                    };
+    
+                default:
                     return {
                         success: false,
                         name: 'error',
                         resultType: PluginParameterType.ERROR,
-                        error: 'Failed to create plugin',
-                        resultDescription: 'Failed to create plugin',
+                        error: `Unexpected result type: ${accomplishResult.resultType}`,
+                        resultDescription: 'Unexpected response from ACCOMPLISH plugin',
                         result: null
                     };
-                }
-
-                return {
-                    success: true,
-                    name: 'plugin_created',
-                    resultType: PluginParameterType.PLUGIN,
-                    result: plugin,
-                    resultDescription: 'Created new plugin for ' + step.actionVerb
-                };
             }
-
-            return accomplishResult;
-
         } catch (error) {
             console.error('Error handling unknown verb:', error instanceof Error ? error.message : error);
             return {
@@ -469,36 +532,50 @@ export class CapabilitiesManager extends BaseEntity {
     }
 
     private async executeAccomplishPlugin(goal: string): Promise<PluginOutput> {
-        const accomplishInputs = new Map<string, PluginInput>([
-            ['goal', { inputName: 'goal', inputValue: goal, args: {} }]
-        ]);
+        try {
+            const accomplishInputs = new Map<string, PluginInput>([
+                ['goal', { inputName: 'goal', inputValue: goal, args: {} }]
+            ]);
 
-        const plugin = await this.pluginRegistry.fetchOneByVerb('ACCOMPLISH');
-        if (!plugin) {
-            console.error('ACCOMPLISH plugin not found for new verb assessment');
+            const plugin = await this.pluginRegistry.fetchOneByVerb('ACCOMPLISH');
+            if (!plugin) {
+                console.error('ACCOMPLISH plugin not found for new verb assessment');
+                return {
+                    success: false,
+                    name: 'error',
+                    resultType: PluginParameterType.ERROR,
+                    error: 'ACCOMPLISH plugin not found',
+                    resultDescription: 'ACCOMPLISH plugin not found',
+                    result: null
+                };
+            }
+
+            const results = await this.executePlugin(plugin, accomplishInputs);
+            return results[0];
+        } catch (error) {
+            console.error('Error executing ACCOMPLISH for Verb analysis:', error instanceof Error ? error.message : error);
             return {
                 success: false,
                 name: 'error',
                 resultType: PluginParameterType.ERROR,
-                error: 'ACCOMPLISH plugin not found',
-                resultDescription: 'ACCOMPLISH plugin not found',
+                error: error instanceof Error ? error.message : 'Unknown error occurred',
+                resultDescription: 'Error executing ACCOMPLISH plugin',
                 result: null
             };
         }
-
-        const results = await this.executePlugin(plugin, accomplishInputs);
-        return results[0];
     }
 
-    private async requestPluginFromEngineer(step: Step): Promise<PluginOutput> {
+    private async requestPluginFromEngineer(step: Step, accomplishGuidance: String): Promise<PluginOutput> {
         try {
             const engineerUrl = process.env.ENGINEER_URL || 'engineer:5070';
             const response = await axios.post(`http://${engineerUrl}/createPlugin`, {
                 verb: step.actionVerb,
-                context: step.inputs
+                context: step.inputs,
+                accomplishGuidance: accomplishGuidance
             });
 
             if (response.data.success) {
+                console.log('Engineer created new plugin:', response.data.plugin);
                 return {
                     success: true,
                     name: 'plugin_created',
@@ -507,7 +584,7 @@ export class CapabilitiesManager extends BaseEntity {
                     resultDescription: 'Created new plugin for ' + step.actionVerb
                 };
             }
-
+            console.error('Failed to create plugin:', response.data.error);
             return {
                 success: false,
                 name: 'error',
@@ -517,6 +594,7 @@ export class CapabilitiesManager extends BaseEntity {
                 result: null
             };
         } catch (error) {
+            console.error('Failed to create plugin:', error instanceof Error ? error.message : error);
             return {
                 success: false,
                 name: 'error',
