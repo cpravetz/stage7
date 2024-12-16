@@ -18,15 +18,39 @@ function generatePrompt(goal: string): string {
     return `
 Accomplish the following goal: ${goal}
 
-You MUST respond with ONLY a JSON object in ONE of these two formats:
+You MUST respond with ONLY a JSON object in ONLY ONE of these three formats:
 
 1. If you have a full and complete answer to the goal, respond with a JSON object in this format:
+
 {
     "type": "DIRECT_ANSWER",
     "answer": "Your direct answer here"
 }
 
-2. If more work is needed to accomplish the goal, respond with a plan as a JSON object in this format:
+2. When the goal is discrete and can be accomplished most efficiently with a new plugin, defined one.  Creating a plugin should be avoided
+when the goal can be accomplished with a plan.  If you determine a plugin is needed, respond with a JSON object in this format:
+
+{
+    "type": "PLUGIN",
+    "plugin": {
+        "id": "plugin-{verb}",
+        "verb": "{verb}",
+        "description": "A short description of the plugin",
+        "explanation": "A more complete description including inputs, process overview, and outputs than a software engineer can use to build the plugin",
+        "inputDefinitions": [
+            {
+                "name": "{input name}",
+                "required": true/false,
+                "type": "string",
+                "description": "Brief explanation of the input"
+            },
+            // ... more inputs ...
+        ],
+}
+
+
+3. If the goal can be sub-divided into smaller steps, respond with a plan as a JSON object in this format:
+
 {
 "type": "PLAN",
 "context": "Any overarching points or introduction to the plan you want to share",
@@ -68,11 +92,11 @@ Guidelines for creating a plan:
 1. Number each step sequentially, starting from 1.
 2. Use specific, actionable verbs for each step (e.g., SCRAPE, ANALYZE, PREDICT).
 3. Ensure each step has a clear, concise description.
-4. For inputs, use the expected input names for the action verb as the input names. 
-Each input should be an object with either a 'value' property for predetermined values or an 'outputKey' property referencing an output from a previous step. So 
+4. For inputs, each input should be an object with either a 'value' property for predetermined values or an 'outputKey' property referencing an output from a previous step. So 
 an input would be defined as: {"inputName1": {value: "predeterminedValue"}} or {"inputName2": {outputKey: "outputKeyFromPreviousStep"}}
 5. List dependencies for each step, as an object with the property names being the outputs needed and the values being the step number that provides the required inputlike: {outputname: stepNumber}
-6. Specify the outputs of each step that may be used by dependent steps.
+There must be a dependency entry for every input that comes from a previous step output.
+6. Specify the outputs of each step.
 7. Aim for 5-10 steps in the plan, breaking down complex tasks if necessary.
 8. Be thorough in your description fields. This is the only instruction the performer will have.
 9. Ensure the final step produces the desired outcome or prediction.
@@ -98,18 +122,14 @@ SCRAPE - this plugin scrapes content from a given URL
 GET_USER_INPUT - this plugin requests input from the user
     (required inputs: question, answerType) (optional input: choices)
 
-Ensure your response is a valid JSON object starting with either "type": "DIRECT_ANSWER" or "type": "PLAN". 
-Double check that you are returning valid JSON. Remove any leading or trailing characters that might invalidate the response as a JSON object.
+Ensure your response is a valid JSON object starting with either "type": "DIRECT_ANSWER", "type": "PLAN", or "type": "PLUGIN". 
+Double check that you are returning valid JSON and only valid JSON. Remove any leading or trailing characters that might invalidate the response as a JSON object. 
 `}
 
 function validateResponse(response: any): boolean {
     if (!response || typeof response !== 'object') return false;
     
-    if (!response.type || !['PLAN', 'DIRECT_ANSWER'].includes(response.type)) return false;
-    
-    if (response.type === 'DIRECT_ANSWER') {
-        return typeof response.answer === 'string';
-    }
+    if (!response.type || !['PLAN', 'PLUGIN', 'DIRECT_ANSWER'].includes(response.type)) return false;
     
     if (response.type === 'PLAN') {
         return Array.isArray(response.plan) && 
@@ -122,9 +142,11 @@ function validateResponse(response: any): boolean {
                    step.outputs && typeof step.outputs === 'object'
                );
     }
+
+    return typeof response.answer === 'string';
     
-    return false;
 }
+
 export async function execute(inputs: Map<string, PluginInput> | Record<string, any>): Promise<PluginOutput[]> {
     try {
         console.log('ACCOMPLISH plugin inputs:', inputs);
@@ -180,7 +202,7 @@ export async function execute(inputs: Map<string, PluginInput> | Record<string, 
                     resultDescription: `A plan to: ${goal}`,
                     result: MapSerializer.transformForSerialization(tasks)
                 }];
-            } else if (parsedResponse.type === 'DIRECT_ANSWER') {
+            } else if (parsedResponse.type === 'DIRECT_ANSWER' || parsedResponse.type === 'PLUGIN') {
                 return [{
                     success: true,
                     name: 'answer',
@@ -297,35 +319,77 @@ async function queryBrain(messages: { role: string, content: string }[]): Promis
 }
 
 function convertJsonToTasks(jsonPlan: JsonPlanStep[]): ActionVerbTask[] {
-    return jsonPlan.map((step, index) => {
-        const inputs = new Map<string, PluginInput>();
-        if (step.inputs) {
-            for (const [key, inputData] of Object.entries(step.inputs)) {
-                inputs.set(key, {
-                    inputName: key,
-                    inputValue: inputData.value !== undefined ? inputData.value : undefined,
-                    args: { outputKey: inputData.outputKey }
+    try{
+        //console.log('convertJsonToTasks: jsonPlan:', jsonPlan);
+        if (!jsonPlan || !Array.isArray(jsonPlan)) {
+            console.log('ACCOMPLISH:Cannot convert JSON to tasks. Invalid JSON plan format');
+            return [];
+        }
+
+        // First pass: Create a map of output keys to step numbers
+        const outputToStepMap = new Map<string, number>();
+        jsonPlan.forEach((step, index) => {
+            if (step.outputs) {
+                Object.keys(step.outputs).forEach(outputKey => {
+                    outputToStepMap.set(outputKey, step.number || index + 1);
                 });
             }
-        }
-        const planDependencies: PlanDependency[] = [];
-        if (step.dependencies) {
-            for (const [inputName, depInfo] of Object.entries(step.dependencies)) {
-                planDependencies.push({
-                    inputName,
-                    sourceStepNo: depInfo,  // Using step number during planning
-                    outputName: step.outputs && Object.keys(step.outputs).length > 0 
-                    ? Object.keys(step.outputs)[0] 
-                    : (step.inputs[inputName]?.args?.outputKey || 'result')
-                });
+        });
+
+        return jsonPlan.map((step, index) => {
+            const inputs = new Map<string, PluginInput>();
+            const planDependencies: PlanDependency[] = [];
+
+            // Process inputs and create initial dependencies from explicit declarations
+            if (step.inputs) {
+                for (const [key, inputData] of Object.entries(step.inputs)) {
+                    inputs.set(key, {
+                        inputName: key,
+                        inputValue: inputData.value !== undefined ? inputData.value : undefined,
+                        args: { outputKey: inputData.outputKey }
+                    });
+
+                    // If this input references an output key but has no explicit dependency
+                    if (inputData.outputKey && 
+                        (!step.dependencies || !Object.entries(step.dependencies).some(([depKey]) => depKey === key))) {
+                        const sourceStepNo = outputToStepMap.get(inputData.outputKey);
+                        if (sourceStepNo !== undefined && sourceStepNo < (step.number || index + 1)) {
+                            planDependencies.push({
+                                inputName: key,
+                                sourceStepNo: sourceStepNo,
+                                outputName: inputData.outputKey
+                            });
+                        }
+                    }
+                }
             }
-        }
-        return {
-            verb: step.verb,
-            inputs: inputs,
-            expectedOutputs: new Map(Object.entries(step.outputs)),
-            description: step.description,
-            dependencies: planDependencies
-        };
-    });
+
+            // Add explicit dependencies from the step definition
+            if (step.dependencies) {
+                for (const [inputName, depInfo] of Object.entries(step.dependencies)) {
+                    // Only add if we haven't already added a dependency for this input
+                    if (!planDependencies.some(dep => dep.inputName === inputName)) {
+                        planDependencies.push({
+                            inputName,
+                            sourceStepNo: depInfo,
+                            outputName: step.outputs && Object.keys(step.outputs).length > 0 
+                                ? Object.keys(step.outputs)[0] 
+                                : (step.inputs[inputName]?.args?.outputKey || 'result')
+                        });
+                    }
+                }
+            }            
+
+            return {
+                verb: step.verb,
+                inputs: inputs,
+                expectedOutputs: new Map(Object.entries(step.outputs)),
+                description: step.description,
+                dependencies: planDependencies
+            };
+        });
+    } catch (error) { analyzeError(error as Error);
+        console.error('Error converting JSON to tasks:', error instanceof Error ? error.message : error);
+        return [];
+    }
 }

@@ -39,7 +39,7 @@ export type environmentType = {
 
 export interface EntryPointType {
     main: string;
-    files: Record<string,string>[];
+    files: Record<string,string>;
 }
 
 export interface Step {
@@ -73,6 +73,7 @@ export interface PluginDefinition {
     outputDefinitions: PluginParameter[];
     entryPoint?: EntryPointType;
     language: 'javascript' | 'python' | 'typescript';
+    version : string;
     configuration?: ConfigItem[];
     metadata?: MetadataType;
     security: {
@@ -129,6 +130,11 @@ export interface PlanDependency {
     outputName: string;
 }
 
+export type PluginChangeEvent = {
+    type: 'PUBLISHED' | 'UPDATED' | 'DELETED';
+    plugin: PluginDefinition;
+    signature?: string;
+};
 
 export interface ActionVerbTask {
     verb: string;

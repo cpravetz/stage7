@@ -34,6 +34,7 @@ services:
       LIBRARIAN_URL: &librarianUrl librarian:5040
       BRAIN_URL: &brainUrl brain:5070
       ENGINEER_URL: &engineerUrl engineer:5050
+
       MISSIONCONTROL_CLIENT_SECRET: &missioncontrolSecret missionControlAuthSecret
       CLIENT_SECRET: *missioncontrolSecret
 
@@ -98,8 +99,21 @@ services:
       POSTOFFICE_URL: *postofficeUrl
       BRAIN_URL: *brainUrl
       LIBRARIAN_URL: *librarianUrl
+      CAPABILITIESMANAGER_URL: *capabilitiesmanagerUrl
       ENGINEER_CLIENT_SECRET: &engineerSecret engineerAuthSecret
       CLIENT_SECRET: *engineerSecret
+      GITHUB_TOKEN: &githubToken ''
+      GITHUB_USERNAME: &githubUsername ''
+      GIT_DEFAULT_BRANCH: &gitDefaultBranch main
+      GIT_REPOSITORY_URL: &gitRepositoryUrl
+      GITHUB_EMAIL: &githubEmail
+      DEFAULT_PLUGIN_REPOSITORY: &defaultPluginRepository mongo
+      DEFAULT_REPOSITORY_URL: &defaultRepositoryUrl
+      REPOSITORY_USERNAME: &repositoryUserName
+      REPOSITORY_TOKEN: &repositoryToken
+      REPOSITORY_EMAIL: &repositoryEmail
+      MONGO_COLLECTION: &mongoCollection plugins
+
 
   capabilitiesmanager:
     build: 
@@ -119,6 +133,18 @@ services:
       ENGINEER_URL: &engineerUrl
       CAPABILITIESMANAGER_CLIENT_SECRET: &capabilitiesmanagerSecret capabilitiesManagerAuthSecret
       CLIENT_SECRET: *capabilitiesmanagerSecret
+      LOCAL_PLUGIN_PATH: /usr/src/app/services//capabilitiesmanager/src/plugins
+      GITHUB_TOKEN: *githubToken
+      GITHUB_USERNAME: *githubUsername
+      GIT_DEFAULT_BRANCH: *gitDefaultBranch
+      GIT_REPOSITORY_URL: *gitRepositoryUrl
+      GITHUB_EMAIL: *githubEmail
+      DEFAULT_PLUGIN_REPOSITORY: *defaultPluginRepository
+      DEFAULT_REPOSITORY_URL: *defaultRepositoryUrl
+      REPOSITORY_USERNAME: *repositoryUserName
+      REPOSITORY_TOKEN: *repositoryToken
+      REPOSITORY_EMAIL: *repositoryEmail
+      MONGO_COLLECTION: *mongoCollection
 
   librarian:
     build: 

@@ -1,0 +1,51 @@
+{
+    "id": "plugin-ACCOMPLISH",
+    "verb": "ACCOMPLISH",
+    "description": "Accomplishes a given goal or creates a plan to achieve it",
+    "explanation": "This plugin takes a goal statement and either returns the result of accomplishing the goal or a plan of tasks to achieve it",
+    "inputDefinitions": [
+        {
+            "name": "goal",
+            "required": true,
+            "type": "string",
+            "description": "The goal to be accomplished or planned for"
+        }
+    ],
+    "outputDefinitions": [
+        {
+            "name": "plan",
+            "required": false,
+            "type": "plan",
+            "description": "A plan of tasks to achieve the goal, or a direct answer if the goal can be immediately accomplished"
+        },
+        {
+            "name": "answer",
+            "required": false,
+            "type": "string",
+            "description": "A solution that matches or achieves the goal"
+        }
+    ],
+    "language": "javascript",
+    "entryPoint": {
+        "main": "ACCOMPLISH.js",
+        "files": {
+            "ACCOMPLISH.js": "const axios = require('axios');\n\nasync function execute(input) {\n    try {\n        const goal = input.args?.goal || input.inputValue;\n        \n        if (!goal) {\n            console.log('Goal or description is required for ACCOMPLISH plugin');\n            return [{\n                success: false,\n                name: 'error',\n                resultType: PluginParameterType.ERROR,\n                resultDescription: 'Inputs did not contain a goal.',\n                result: null,\n                error: 'No goal provided to ACCOMPLISH plugin'\n            }];\n        }\n\n        const prompt = generatePrompt(goal);\n        const response = await queryBrain(prompt);\n        \n        try {\n            const parsedResponse = JSON.parse(response);\n            if (parsedResponse.type === 'PLAN') {\n                const tasks = convertJsonToTasks(parsedResponse.plan);\n                return {\n                    success: true,\n                    resultType: 'plan',\n                    resultDescription: `A plan to: ${goal}`,\n                    result: tasks,\n                    mimeType: 'application/json'\n                };\n            } else if (parsedResponse.type === 'DIRECT_ANSWER') {\n                return {\n                    success: true,\n                    resultType: 'string',\n                    resultDescription: 'LLM Response',\n                    result: parsedResponse.answer,\n                    mimeType: 'text/plain'\n                };\n            } else {\n                throw new Error('Invalid response format from Brain');\n            }\n        } catch (parseError) {\n            let errorMessage = 'Failed to parse Brain response';\n            if (parseError instanceof Error) {\n                errorMessage += `: ${parseError.message}`;\n            } else if (typeof parseError === 'string') {\n                errorMessage += `: ${parseError}`;\n            } else {\n                errorMessage += ': Unknown error occurred during parsing';\n            }\n            throw new Error(errorMessage);\n        }\n    \n    } catch (error) {\n        console.error('ACCOMPLISH plugin failed', error instanceof Error ? error.message : error);\n        return {\n            success: false,\n            resultType: 'error',\n            resultDescription: 'Error',\n            result: null,\n            error: error instanceof Error ? error.message : 'An unknown error occurred',\n            mimeType: 'text/plain'\n        };\n    }\n}\n\nfunction generatePrompt(goal) {\n    return `\nAccomplish the following goal: ${goal}\n\nIf you can provide a complete and direct answer or solution, respond with a JSON object in this format:\n{\n    \"type\": \"DIRECT_ANSWER\",\n    \"answer\": \"Your direct answer here\"\n}\n\nIf a plan is needed, respond with a JSON object in this format:\n{\n    \"type\": \"PLAN\",\n    \"plan\": [\n        {\n            \"number\": 1,\n            \"verb\": \"ACTION_VERB\",\n            \"description\": \"Brief description of the step\",\n            \"args\": {\n                \"key1\": \"value1\",\n                \"key2\": \"value2\"\n            },\n            \"dependencies\": [0],\n            \"outputs\": {\n                \"output1\": \"Description of output1\",\n                \"output2\": \"Description of output2\"\n            }\n        },\n        {\n            \"number\": 2,\n            \"verb\": \"ANOTHER_ACTION\",\n            \"description\": \"Description of another step\",\n            \"args\": {\n                \"key3\": \"value3\"\n            },\n            \"dependencies\": [1],\n            \"outputs\": {\n                \"output3\": \"Description of output3\"\n            }\n        }\n    ]\n}\n\nGuidelines for creating a plan:\n1. Number each step sequentially, starting from 1.\n2. Use specific, actionable verbs for each step (e.g., SCRAPE, ANALYZE, PREDICT).\n3. Ensure each step has a clear, concise description.\n4. Provide detailed arguments for each step, including data sources or specific parameters.\n5. List dependencies as an array of step numbers. Use [0] if the step has no dependencies.\n6. Specify the outputs of each step that may be used by dependent steps.\n7. Aim for 5-10 steps in the plan, breaking down complex tasks if necessary.\n8. Be thorough in your description fields. This is the only instruction the performer will have.\n9. Ensure the final step produces the desired outcome or prediction.\n10. The actionVerb DELEGATE is available to use to create sub-agents with goals of their own.\n\nEnsure your response is a valid JSON object starting with either \"type\": \"DIRECT_ANSWER\" or \"type\": \"PLAN\".\n`;\n}\n\nasync function queryBrain(prompt) {\n    try {\n        const brainUrl = process.env.BRAIN_URL || 'brain:5070';\n        const response = await axios.post(`http://${brainUrl}/chat`, {\n            exchanges: [{ role: 'user', message: prompt }],\n            optimization: 'accuracy'\n        });\n        return response.data.response;\n    } catch (error) {\n        console.error('Error querying Brain:', error instanceof Error ? error.message : error);\n        throw new Error('Failed to query Brain');\n    }\n}\n\nfunction convertJsonToTasks(jsonPlan) {\n    return jsonPlan.map(step => ({\n        verb: step.verb,\n        args: {\n            ...step.args,\n            description: step.description,\n            expectedOutputs: step.outputs\n        },\n        dependencies: step.dependencies\n    }));\n}\n\nmodule.exports = { execute };"
+        }
+    },
+    "repository": {
+        "type": "local"
+    },
+    "security": {
+        "permissions": [],
+        "sandboxOptions": {
+        },
+        "trust": {
+            "signature": "1"
+        }
+    },
+    "distribution": {
+        "downloads": 0,
+        "rating": 0
+    },
+    "version": "1.0.0"
+}

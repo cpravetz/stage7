@@ -1,0 +1,58 @@
+{
+    "id": "plugin-GET_USER_INPUT",
+    "verb": "GET_USER_INPUT",
+    "description": "Requests input from the user",
+    "explanation": "This plugin sends a question to the user and returns their response",
+    "inputDefinitions": [
+        {
+            "name": "question",
+            "required": true,
+            "type": "string",
+            "description": "The question to ask the user"
+        },
+        {
+            "name": "choices",
+            "required": false,
+            "type": "array",
+            "description": "Optional array of choices for multiple choice questions"
+        },
+        {
+            "name": "answerType",
+            "required": false,
+            "type": "string",
+            "description": "Type of answer expected (text, number, boolean, or multipleChoice)"
+        }
+    ],
+    "outputDefinitions": [
+        {
+            "name": "answer",
+            "required": false,
+            "type": "string",
+            "description": "The user's response"
+        }
+    ],
+    "language": "javascript",
+    "entryPoint": {
+        "main": "GET_USER_INPUT.js",
+        "files": {
+            "GET_USER_INPUT.js": "const axios = require('axios');\n\nasync function execute(input) {\n    try {\n        const { question, choices, answerType } = input.args;\n\n        if (!question) {\n            throw new Error('Question is required for GET_USER_INPUT plugin');\n        }\n\n        const postOfficeUrl = process.env.POSTOFFICE_URL || 'postoffice:5020';\n        const response = await sendUserInputRequest(postOfficeUrl, { question, choices, answerType });\n\n        return {\n            success: true,\n            resultType: 'string',\n            resultDescription: 'User response',\n            result: response,\n            mimeType: 'text/plain'\n        };\n    } catch (error) {\n        console.error('GET_USER_INPUT plugin failed', error instanceof Error ? error.message : error);\n        return {\n            success: false,\n            resultType: 'error',\n            resultDescription: 'Error getting user input',\n            result: null,\n            error: error instanceof Error ? error.message : 'An unknown error occurred',\n            mimeType: 'text/plain'\n        };\n    }\n}\n\nasync function sendUserInputRequest(postOfficeUrl, request) {\n    try {\n        const response = await axios.post(`http://${postOfficeUrl}/sendUserInputRequest`, request);\n        return response.data.result;\n    } catch (error) {\n        console.error('Error sending user input request:', error instanceof Error ? error.message : error);\n        throw new Error('Failed to get user input');\n    }\n}\n\nmodule.exports = { execute };"
+        }
+    },
+    "repository": {
+        "type": "local"
+    },
+    "security": {
+        "permissions": [],
+        "sandboxOptions": {
+        },
+        "trust": {
+            "signature": "1"
+        }
+    },
+    "distribution": {
+        "downloads": 0,
+        "rating": 0
+    },
+    "version": "1.0.0"
+
+}

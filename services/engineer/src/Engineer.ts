@@ -32,9 +32,9 @@ export class Engineer extends BaseEntity {
         app.use(express.json());
 
         app.post('/createPlugin', async (req, res) => {
-            const { verb, context } = MapSerializer.transformFromSerialization(req.body);
+            const { verb, context, guidance } = MapSerializer.transformFromSerialization(req.body);
             try {
-                const plugin = await this.createPlugin(verb, context);
+                const plugin = await this.createPlugin(verb, context, guidance);
                 res.json(plugin || {});
             } catch (error) {
                 analyzeError(error as Error);
@@ -54,19 +54,21 @@ export class Engineer extends BaseEntity {
     private getStatistics(req: express.Request, res: express.Response) {
         res.status(200).json({ newPlugins: this.newPlugins });
     }
-    async createPlugin(verb: string, context: Map<string, PluginInput>): Promise<PluginDefinition | undefined> {
-      this.newPlugins.push(verb);
-      const explanation = await this.generateExplanation(verb, context);
-      let pluginStructure: PluginDefinition;
-      let configItems: ConfigItem[];
-      let metadata: MetadataType;
+    async createPlugin(verb: string, context: Map<string, PluginInput>, guidance: string): Promise<PluginDefinition | undefined> {
+        console.log('Creating plugin for verb:', verb);
+        this.newPlugins.push(verb);
+        const explanation = await this.generateExplanation(verb, context);
+        let pluginStructure: PluginDefinition;
+        let configItems: ConfigItem[];
+        let metadata: MetadataType;
   
-      try {
-        console            
+        try {
             const contextString = JSON.stringify(Array.from(context.entries()));
             const engineeringPrompt = `
             Create a javascript or python based plugin for the action verb "${verb}" with the following context: ${explanation}
             
+            The planner provides this additional guidance: ${guidance}
+
             The plugin should expect inputs structured as a Map<string, PluginInput>, where PluginInput is defined as:
             
             interface PluginInput {
@@ -229,8 +231,8 @@ Types used in the plugin structure are:
     }
     
     export interface EntryPointType {
-        main: string;
-        files: Record<string,string>[];
+        main: string; //Name of entry point file
+        files: Record<string,string>; //files defined as filename: filecontent
     }
     
     export interface PluginParameter {
@@ -284,6 +286,7 @@ Types used in the plugin structure are:
             },
             language: pluginStructure.language,
             configuration: configItems,
+            version: '1.0.0',
             metadata: metadata,
             security: {
                 permissions: this.determineRequiredPermissions(pluginStructure),
@@ -298,22 +301,8 @@ Types used in the plugin structure are:
                     publisher: 'system-generated'
                 }
             }
-        };
-
-        newPlugin.security.trust.signature = await this.signPlugin(newPlugin);        
-
-        try {
-            // Use PluginMarketplace instead of direct Librarian access
-            await this.pluginMarketplace.publishPlugin(newPlugin, {
-                type: 'mongo',
-                url: this.librarianUrl
-            });
-    
-            return newPlugin;
-        } catch (error) {
-            analyzeError(error as Error);
-            console.error('Error saving or creating plugin:', error instanceof Error ? error.message : error);
         }
+        return newPlugin;
     }
 
     
@@ -330,9 +319,8 @@ Types used in the plugin structure are:
     
     private determineRequiredPermissions(plugin: PluginDefinition): string[] {
         const permissions: string[] = [];
-        
-        // Analyze plugin code and dependencies to determine required permissions
-        for (const file of plugin.entryPoint?.files || []) {
+        if (!plugin.entryPoint?.files) return permissions;
+        for (const [_, file] of Object.entries(plugin.entryPoint?.files || {})) {
             if (file.toString().includes('fs.')) permissions.push('fs.read', 'fs.write');
             if (file.toString().includes('fetch(')) permissions.push('net.fetch');
             if (file.toString().includes('http.')) permissions.push('net.http');

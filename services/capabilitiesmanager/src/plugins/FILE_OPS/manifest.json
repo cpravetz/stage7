@@ -1,0 +1,58 @@
+{
+    "id": "plugin-FILE_OPS",
+    "verb": "FILE_OPS",
+    "description": "Provides services for file operations read, write, append",
+    "explanation": "This plugin takes a path and optional content and executes the selected operation",
+    "inputDefinitions": [
+        {
+            "name": "path",
+            "required": true,
+            "type": "string",
+            "description": "The path for the filename to read, write, or append content"
+        },
+        {
+            "name": "operation",
+            "required": true,
+            "type": "string",
+            "description": "'read', 'write' or 'append'"
+        },
+        {
+            "name": "content",
+            "required": false,
+            "type": "any",
+            "description": "For write and append operations, the content to write or append"
+        }
+    ],
+    "outputDefinitions": [
+        {
+            "name": "result",
+            "required": false,
+            "type": "any",
+            "description": "Content for read operations"
+        }
+    ],
+    "language": "javascript",
+    "entryPoint": {
+        "main": "FILE_OPS.js",
+        "files": {
+            "FILE_OPS.js": "import fs from 'fs/promises';\nimport { PluginInput, PluginOutput, PluginParameterType } from '@cktmcs/shared';\n\nexport async function execute(operation: 'read' | 'write' | 'append', path: string, content?: string): Promise<PluginOutput> {\n    try {\n        switch (operation) {\n            case 'read':\n                const data = await fs.readFile(path, 'utf-8');\n                return {\n                    success: true,\n                    resultType: PluginParameterType.ANY,\n                    resultDescription: `Read content from ${path}`,\n                    result: data\n                };\n\n            case 'write':\n                await fs.writeFile(path, content || '');\n                return {\n                    success: true,\n                    resultType: PluginParameterType.ANY,\n                    resultDescription: `Saved content to ${path}`,\n                    result: null\n                };\n            case 'append':\n                await fs.appendFile(path, content || '');\n                return {\n                    success: true,\n                    resultType: PluginParameterType.ANY,\n                    resultDescription: `Appended content to ${path}`,\n                    result: null\n                };\n            default:\n                return {\n                    success: false,\n                    resultType: PluginParameterType.ERROR,\n                    resultDescription: `Unknown operation ${operation}`,\n                    result: null,\n                    error: `Unknown operation ${operation}`\n                };\n        }\n    } catch (error) {\n        return {\n            success: false,\n            resultType: PluginParameterType.ERROR,\n            resultDescription: `An error occurred for operation ${operation}`,\n            result: null,\n            error: error instanceof Error ? error.message : 'An unknown error occurred'\n        };\n    }\n}"
+        }
+    },
+        "repository": {
+        "type": "local"
+    },
+    "security": {
+        "permissions": [],
+        "sandboxOptions": {
+        },
+        "trust": {
+            "signature": "1"
+        }
+    },
+    "distribution": {
+        "downloads": 0,
+        "rating": 0
+    },
+    "version": "1.0.0"
+
+}

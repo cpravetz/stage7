@@ -21,8 +21,12 @@ const searchPlugin = {
     ],
     language: 'javascript',
     entryPoint: {
+        files: [],
         main: 'SEARCH.js'
     }
+    
+    
+
 };
 
 export default searchPlugin;

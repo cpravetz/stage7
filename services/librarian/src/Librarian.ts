@@ -44,7 +44,7 @@ export class Librarian extends BaseEntity {
         this.app.post('/searchData', (req: express.Request, res: express.Response) => {this.searchData(req, res)});
         this.app.delete('/deleteData/:id', (req: express.Request, res: express.Response) => { this.deleteData(req, res)});
         this.app.post('/storeWorkProduct', (req: express.Request, res: express.Response) => { this.storeWorkProduct(req, res) });
-        this.app.get('/loadWorkProduct/:id', (req: express.Request, res: express.Response) => { this.loadWorkProduct(req, res) });    
+        this.app.get('/loadWorkProduct/:stepId', (req: express.Request, res: express.Response) => { this.loadWorkProduct(req, res) });    
         this.app.get('/getSavedMissions', (req: express.Request, res: express.Response) => { this.getSavedMissions(req, res) });
         
       }
@@ -69,6 +69,7 @@ export class Librarian extends BaseEntity {
         try {
             let result;
             if (storageType === 'mongo') {
+                data._id = id;
                 result = await storeInMongo(collection, data);
             } else if (storageType === 'redis') {
                 result = await storeInRedis(`data:${id}`, JSON.stringify(data));
@@ -123,9 +124,8 @@ export class Librarian extends BaseEntity {
             data: MapSerializer.transformForSerialization(data || null),
             timestamp: new Date().toISOString()
         };
-    
         try {
-            const id = await storeInMongo('workProducts', workProduct);
+            const id = await storeInMongo('workProducts', {...workProduct, _id: workProduct.id});
             res.status(200).send({ status: 'Work product stored', id: id });
         } catch (error) { analyzeError(error as Error);
             console.error('Error storing work product:', error instanceof Error ? error.message : error);
