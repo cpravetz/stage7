@@ -105,8 +105,8 @@ export class PostOffice {
         }
         catch (error) { 
             analyzeError(error as Error);
-            console.error('Error retrieving work product:', error instanceof Error ? error.message : error);
-            res.status(500).send({ error: 'Failed to retrieve work product' });
+            console.error('Error retrieving work product:', error instanceof Error ? error.message : error, 'id:',req.params.id);
+            res.status(500).send({ error: `Failed to retrieve work product id:${req.params.id}`});
         }
     }
 

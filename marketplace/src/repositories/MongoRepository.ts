@@ -1,4 +1,4 @@
-import { PluginManifest, PluginRepository, RepositoryConfig } from '@cktmcs/shared';
+import { PluginManifest, PluginRepository, RepositoryConfig, PluginLocator } from '@cktmcs/shared';
 import axios from 'axios';
 import { analyzeError } from '@cktmcs/errorhandler';
 
@@ -12,7 +12,7 @@ export class MongoRepository implements PluginRepository {
         this.collection = config.options?.collection || 'plugins';
     }
 
-    async publish(manifest: PluginManifest): Promise<void> {
+    async store(manifest: PluginManifest): Promise<void> {
         try {
             await axios.post(`http://${this.librarianUrl}/storeData`, {
                 id: manifest.id,
@@ -79,13 +79,13 @@ export class MongoRepository implements PluginRepository {
         }
     }
 
-    async list(): Promise<PluginManifest[]> {
+    async list(): Promise<PluginLocator[]> {
         try {
             const response = await axios.post(`http://${this.librarianUrl}/searchData`, {
                 collection: this.collection,
                 query: {},
                 options: {
-                    sort: { 'distribution.downloads': -1 }
+                    projection: { id: 1, verb: 1, repository: 1 }
                 }
             });
 

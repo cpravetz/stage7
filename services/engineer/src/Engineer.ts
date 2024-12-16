@@ -55,14 +55,14 @@ export class Engineer extends BaseEntity {
         res.status(200).json({ newPlugins: this.newPlugins });
     }
     async createPlugin(verb: string, context: Map<string, PluginInput>): Promise<PluginDefinition | undefined> {
-      this.newPlugins.push(verb);
-      const explanation = await this.generateExplanation(verb, context);
-      let pluginStructure: PluginDefinition;
-      let configItems: ConfigItem[];
-      let metadata: MetadataType;
+        console.log('Creating plugin for verb:', verb);
+        this.newPlugins.push(verb);
+        const explanation = await this.generateExplanation(verb, context);
+        let pluginStructure: PluginDefinition;
+        let configItems: ConfigItem[];
+        let metadata: MetadataType;
   
-      try {
-        console            
+        try {
             const contextString = JSON.stringify(Array.from(context.entries()));
             const engineeringPrompt = `
             Create a javascript or python based plugin for the action verb "${verb}" with the following context: ${explanation}
@@ -284,6 +284,7 @@ Types used in the plugin structure are:
             },
             language: pluginStructure.language,
             configuration: configItems,
+            version: '1.0.0',
             metadata: metadata,
             security: {
                 permissions: this.determineRequiredPermissions(pluginStructure),
@@ -298,22 +299,8 @@ Types used in the plugin structure are:
                     publisher: 'system-generated'
                 }
             }
-        };
-
-        newPlugin.security.trust.signature = await this.signPlugin(newPlugin);        
-
-        try {
-            // Use PluginMarketplace instead of direct Librarian access
-            await this.pluginMarketplace.publishPlugin(newPlugin, {
-                type: 'mongo',
-                url: this.librarianUrl
-            });
-    
-            return newPlugin;
-        } catch (error) {
-            analyzeError(error as Error);
-            console.error('Error saving or creating plugin:', error instanceof Error ? error.message : error);
         }
+        return newPlugin;
     }
 
     

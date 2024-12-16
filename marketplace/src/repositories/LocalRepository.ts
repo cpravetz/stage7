@@ -1,4 +1,4 @@
-import { PluginManifest, PluginRepository, RepositoryConfig } from '@cktmcs/shared';
+import { PluginLocator, PluginManifest, PluginRepository, RepositoryConfig } from '@cktmcs/shared';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -7,32 +7,35 @@ export class LocalRepository implements PluginRepository {
     private baseDir: string;
 
     constructor(config: RepositoryConfig) {
-        this.baseDir = config.options?.localPath || path.join(process.cwd(), 'local-plugins');
+        this.baseDir = config.options?.localPath || path.join(process.cwd(), '/plugins');
     }
 
-    async publish(manifest: PluginManifest): Promise<void> {
+    async store(manifest: PluginManifest): Promise<void> {
         const pluginDir = path.join(this.baseDir, manifest.verb);
         
         try {
             // Create plugin directory
             await fs.mkdir(pluginDir, { recursive: true });
-
-            // Write manifest
+    
+            // Write manifest as stringified JSON
             await fs.writeFile(
                 path.join(pluginDir, 'manifest.json'),
                 JSON.stringify(manifest, null, 2)
             );
-
-            // Write plugin files
+    
+            // Write plugin files if they exist
             if (manifest.entryPoint?.files) {
                 for (const [filename, content] of Object.entries(manifest.entryPoint.files)) {
                     const filePath = path.join(pluginDir, filename);
                     await fs.mkdir(path.dirname(filePath), { recursive: true });
-                    await fs.writeFile(filePath, content);
+                    // Ensure content is string before writing
+                    const fileContent = typeof content === 'string' ? content : JSON.stringify(content, null, 2);
+                    await fs.writeFile(filePath, fileContent);
                 }
             }
         } catch (error) {
-            throw new Error(`Failed to publish plugin to local repository: ${error instanceof Error ? error.message : String(error)}`);
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            throw new Error(`Failed to publish plugin to local repository: ${errorMessage}`);
         }
     }
 
@@ -103,27 +106,39 @@ export class LocalRepository implements PluginRepository {
         }
     }
 
-    async list(): Promise<PluginManifest[]> {
-        const plugins: PluginManifest[] = [];
-        
+    async list(): Promise<PluginLocator[]> {
+        const locators: PluginLocator[] = [];
+        console.log('LocalRepo: Loading from ', this.baseDir);
         try {
             const dirs = await fs.readdir(this.baseDir);
-            
+            console.log('LocalRepo: Loading from ', dirs)
             for (const dir of dirs) {
                 try {
                     const manifestPath = path.join(this.baseDir, dir, 'manifest.json');
+                    console.log('LocalRepo: Loading from ', manifestPath)
                     const manifestContent = await fs.readFile(manifestPath, 'utf-8');
-                    plugins.push(JSON.parse(manifestContent));
-                } catch {
+                    const manifest = JSON.parse(manifestContent);
+                    locators.push({
+                        id: manifest.id,
+                        verb: manifest.verb,
+                        repository: {
+                            type: this.type,
+                            signature: manifest.repository.signature,
+                            dependencies: manifest.repository.dependencies
+                        }
+                    });
+                } catch (error) {
+                   console.log('Error loading from ', dir, error instanceof Error ? error.message : error);
                     continue;
                 }
             }
         } catch (error) {
+            console.log('LocalRepo: Error loading from ', error);
             if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
                 throw error;
             }
         }
-
-        return plugins;
+        console.log('LocalRepo: Locators count',locators.length);
+        return locators;
     }
 }

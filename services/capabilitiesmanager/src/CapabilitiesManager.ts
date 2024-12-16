@@ -13,7 +13,6 @@ import { ConfigManager } from './utils/configManager.js';
 import { PluginRegistry } from './utils/pluginRegistry.js';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
-import { PluginMarketplace } from '@cktmcs/marketplace';
 
 const configPath = path.join(os.homedir(), '.cktmcs', 'capabilitiesmanager.json');
 
@@ -34,14 +33,12 @@ export class CapabilitiesManager extends BaseEntity {
     private server: any;
     private configManager: ConfigManager;
     private pluginRegistry: PluginRegistry;
-    private pluginMarketplace: PluginMarketplace;
 
 
     constructor() {
         super('CapabilitiesManager', 'CapabilitiesManager', `capabilitiesmanager`, process.env.PORT || '5060');
         console.log('Starting CapabilitiesManager initialization...');
         // Initialize with placeholder objects
-        this.pluginMarketplace = new PluginMarketplace(this.librarianUrl);
         this.configManager = {} as ConfigManager;
         this.pluginRegistry = new PluginRegistry();
         
@@ -76,14 +73,8 @@ export class CapabilitiesManager extends BaseEntity {
 
                 app.post('/executeAction', (req, res) => this.executeActionVerb(req, res));
                 app.post('/message', (req, res) => this.handleMessage(req, res));
-                app.get('/availablePlugins', (req, res) => this.pluginRegistry.getAvailablePlugins(req, res));
-                app.post('/notify', (req, res) => this.pluginRegistry.handlePluginChange(req.body));
-                app.post('/registerPlugin', async (req, res) => this.registerPlugin(req, res));
-                app.get('/plugins/:pluginId', async (req, res) => this.getPluginById(req, res));
-                app.get('/plugins/:pluginId/metadata', async (req, res) => this.getPluginMetadata(req, res));
-                app.get('/plugins/category/:category', async (req, res) => {res.json(await this.pluginRegistry.getPluginsByCategory(req.params.category))});
-                app.get('/plugins/capabilities', async (req, res) => {res.json(await this.pluginRegistry.getSummarizedCapabilities())});
-                app.get('/plugins/tags', async (req, res) => {res.json(await this.pluginRegistry.getPluginsByTags(req.query.tags as string[]))});
+                app.get('/availablePlugins', async (req, res) => {res.json(await this.pluginRegistry.list())});
+                app.post('/storeNewPlugin', async (req, res) => this.storeNewPlugin(req, res));
 
                 // Error handling middleware
                 app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -138,86 +129,34 @@ export class CapabilitiesManager extends BaseEntity {
         }
     }
 
-    private async registerPlugin(req: express.Request, res: express.Response) {
+    private async storeNewPlugin(req: express.Request, res: express.Response) {
         try {
             const plugin = req.body;
-            // Publish plugin to marketplace
-            await this.pluginMarketplace.publishPlugin(plugin, {
-                type: 'mongo',
-                url: this.librarianUrl
-            });
-            console.log('CapabilitiesManager: Plugin registered:', plugin.id);
+            this.pluginRegistry.store(plugin);
+    
+            console.log('CapabilitiesManager: New plugin registered:', plugin.id);
             res.status(200).json({ 
                 message: 'Plugin registered successfully',
                 pluginId: plugin.id 
             });
-
+    
         } catch (error) {
             analyzeError(error as Error);
             res.status(500).json({ 
-                error: `Failed to register plugin: ${error instanceof Error ? error.message : String(error)}` 
-            });
-        }
-    }
-
-    private validatePluginStructure(plugin: any): plugin is PluginDefinition {
-        return (
-            typeof plugin.id === 'string' &&
-            typeof plugin.verb === 'string' &&
-            typeof plugin.description === 'string' &&
-            Array.isArray(plugin.inputDefinitions) &&
-            Array.isArray(plugin.outputDefinitions) &&
-            plugin.entryPoint &&
-            typeof plugin.entryPoint.main === 'string' &&
-            (plugin.language === 'javascript' || plugin.language === 'python')
-        );
-    }
-
-    private async getPluginById(req: express.Request, res: express.Response) {
-        try {
-            const plugin = await this.pluginMarketplace.getPlugin(req.params.pluginId);
-            if (plugin) {
-                res.status(200).json(plugin);
-            } else {
-                res.status(404).json({ error: 'Plugin not found' });
-            }
-        } catch (error) {
-            res.status(500).json({ error: `Failed to get plugin: ${error instanceof Error ? error.message : String(error)}` });
-        }
-    }
-
-    private async getPluginMetadata(req: express.Request, res: express.Response) {
-        const { pluginId } = req.params;
-        try {
-            const plugin = await this.pluginMarketplace.getPlugin(pluginId);
-            if (!plugin) {
-                res.status(404).json({ error: 'Plugin not found' });
-                return;
-            }
-            res.status(200).json({
-                id: plugin.id,
-                verb: plugin.verb,
-                description: plugin.description,
-                metadata: plugin.metadata,
-                inputDefinitions: plugin.inputDefinitions,
-                outputDefinitions: plugin.outputDefinitions
-            });
-        } catch (error) {
-            res.status(500).json({ 
-                error: `Failed to get plugin metadata: ${error instanceof Error ? error.message : String(error)}` 
+                error: error instanceof Error ? error.message : 'Unknown error registering plugin'
             });
         }
     }
 
     private async executeActionVerb(req: express.Request, res: express.Response) {
-        console.log('Executing action verb with req.body:', JSON.stringify(req.body, null, 2));
+        console.log('CM: Executing action verb with req.body:', JSON.stringify(req.body, null, 2));
         const step = {
             ...req.body,
             inputs: MapSerializer.transformFromSerialization(req.body.inputs)
         };
-        console.log('Executing action verb:', step.actionVerb);
+        console.log('CM: Executing action verb:', step.actionVerb);
         if (!step.actionVerb || typeof step.actionVerb !== 'string') {
-            console.log('Invalid or missing verb', step.actionVerb);
+            console.log('CM: Invalid or missing verb', step.actionVerb);
             res.status(400).send([{
                 success: false,
                 name: 'error',
@@ -229,7 +168,7 @@ export class CapabilitiesManager extends BaseEntity {
         }
 
         if (!step.inputs || !(step.inputs instanceof Map)) {
-            console.log('Invalid or missing inputs', step.inputs);
+            console.log('CM: Invalid or missing inputs', step.inputs);
             res.status(400).send([{
                 success: false,
                 name: 'error',
@@ -242,21 +181,21 @@ export class CapabilitiesManager extends BaseEntity {
 
         try {
             // First check registry cache
-            let plugin = await this.pluginRegistry.getPluginByVerb(step.actionVerb);
-            console.log('Plugin found in cache:', plugin?.id);
+            let plugin = await this.pluginRegistry.fetchOneByVerb(step.actionVerb);
+            console.log('CM: The plugin found in cache is:', plugin?.id);
             if (!plugin) {
                 // If not in cache, handle unknown verb
                 const result = await this.handleUnknownVerb(step);
                 if (!result.success) {
-                    console.error('Error handling unknown verb:', result.error);
+                    console.error('CM: Error handling unknown verb:', result.error);
                     res.status(400).send(MapSerializer.transformForSerialization(result));
                     return;
                 }
-                console.log('Plugin created:', result.result);
+                console.log('CM: Plugin created:', result.result);
                 // Try to get the plugin again after handling unknown verb
-                plugin = await this.pluginRegistry.getPluginByVerb(step.actionVerb);
+                plugin = await this.pluginRegistry.fetchOneByVerb(step.actionVerb);
                 if (!plugin) {
-                    console.log('Newly created plugin not found in Registry cache');
+                    console.log('CM: Newly created plugin not found in Registry cache');
                     res.status(404).send({
                         success: false,
                         resultType: PluginParameterType.ERROR,
@@ -266,7 +205,7 @@ export class CapabilitiesManager extends BaseEntity {
                 }
             }
 
-            console.log('capabilitiesManager validating inputs', step.inputs);
+            console.log('CM: capabilitiesManager validating inputs', step.inputs);
             // Validate and standardize inputs
             const validatedInputs = await this.validateAndStandardizeInputs(plugin, step.inputs);
             if (!validatedInputs.success) {
@@ -279,11 +218,11 @@ export class CapabilitiesManager extends BaseEntity {
                 }]);
                 return;
             }
-            console.log('Inputs validated successfully:', validatedInputs.inputs);
+            //console.log('CM: Inputs validated successfully:', validatedInputs.inputs);
 
             // Execute plugin with validated inputs
             const result = await this.executePlugin(plugin, validatedInputs.inputs || new Map<string, PluginInput>());
-            console.log('Plugin executed successfully:', result);
+            console.log('CM: Plugin executed successfully:', result);
             res.status(200).send(MapSerializer.transformForSerialization(result));
 
         } catch (error) {
@@ -384,7 +323,13 @@ export class CapabilitiesManager extends BaseEntity {
             
             throw new Error(`Unsupported plugin language: ${plugin.language}`);
         } catch (error) {
-            throw error;
+            return [{
+                success: false,
+                name: 'error in CM:executePlugin',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: error instanceof Error ? error.message : JSON.stringify(error),
+                result: null
+            }];
         }
     }
 
@@ -415,7 +360,7 @@ export class CapabilitiesManager extends BaseEntity {
                 success: false,
                 name: 'error',
                 resultType: PluginParameterType.ERROR,
-                resultDescription: `Error executing plugin ${plugin.verb}: ${error instanceof Error ? error.message : String(error)}`,
+                resultDescription: `Error in executeJavaScriptPlugin for ${plugin.verb}: ${error instanceof Error ? error.message : JSON.stringify(error)}`,
                 result: null
             }];
         }
@@ -475,7 +420,7 @@ export class CapabilitiesManager extends BaseEntity {
             const accomplishResult = await this.executeAccomplishPlugin(goal);
             
             if (!accomplishResult.success) {
-                console.error('Error executing ACCOMPLISH plugin:', accomplishResult.error);
+                console.error(`Error executing ACCOMPLISH for new verb ${step.actionVerb}plugin:`, accomplishResult.error);
                 return accomplishResult;
             }
 
@@ -486,8 +431,8 @@ export class CapabilitiesManager extends BaseEntity {
                     return engineerResult;
                 }
                 
-                // Plugin should now be available in marketplace
-                const plugin = await this.pluginMarketplace.getPluginByVerb(step.actionVerb);
+                // Plugin should now be available in regitry
+                const plugin = await this.pluginRegistry.fetchOneByVerb(step.actionVerb); 
                 if (!plugin) {
                     return {
                         success: false,
@@ -528,7 +473,7 @@ export class CapabilitiesManager extends BaseEntity {
             ['goal', { inputName: 'goal', inputValue: goal, args: {} }]
         ]);
 
-        const plugin = await this.pluginRegistry.getPluginByVerb('ACCOMPLISH');
+        const plugin = await this.pluginRegistry.fetchOneByVerb('ACCOMPLISH');
         if (!plugin) {
             console.error('ACCOMPLISH plugin not found for new verb assessment');
             return {
@@ -600,9 +545,6 @@ export class CapabilitiesManager extends BaseEntity {
         }
     }
 
-    async getCapabilitiesSummary(): Promise<string> {
-        return this.pluginRegistry.getSummarizedCapabilities();
-    }
 }
 
 // Create and start the CapabilitiesManager

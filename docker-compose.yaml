@@ -133,6 +133,7 @@ services:
       ENGINEER_URL: &engineerUrl
       CAPABILITIESMANAGER_CLIENT_SECRET: &capabilitiesmanagerSecret capabilitiesManagerAuthSecret
       CLIENT_SECRET: *capabilitiesmanagerSecret
+      LOCAL_PLUGIN_PATH: /usr/src/app/services//capabilitiesmanager/src/plugins
       GITHUB_TOKEN: *githubToken
       GITHUB_USERNAME: *githubUsername
       GIT_DEFAULT_BRANCH: *gitDefaultBranch

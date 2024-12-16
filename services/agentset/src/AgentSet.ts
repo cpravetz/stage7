@@ -255,7 +255,7 @@ export class AgentSet extends BaseEntity {
             if (agent.getMissionId() === missionId) {
                 const status = agent.getStatus();
                 const agentStats = await agent.getStatistics();
-                console.log(`AgentSet:Agent `,agent.id,` has stats `, agentStats);
+                //console.log(`AgentSet:Agent `,agent.id,` has stats `, agentStats);
                 if (!stats.agentsByStatus.has(status)) {
                     // If the status doesn't exist in the Map, create a new array with this agent's stats
                     stats.agentsByStatus.set(status, [agentStats]);
@@ -271,7 +271,7 @@ export class AgentSet extends BaseEntity {
             agentsCount: stats.agentsCount
         };
         
-        console.log(`AgentSet:Sending statistics for mission ${missionId}`, JSON.stringify(serializedStats, null, 2));
+        //console.log(`AgentSet:Sending statistics for mission ${missionId}`, JSON.stringify(serializedStats, null, 2));
         res.status(200).send(serializedStats);
     }
 

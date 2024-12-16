@@ -297,35 +297,51 @@ async function queryBrain(messages: { role: string, content: string }[]): Promis
 }
 
 function convertJsonToTasks(jsonPlan: JsonPlanStep[]): ActionVerbTask[] {
-    return jsonPlan.map((step, index) => {
-        const inputs = new Map<string, PluginInput>();
-        if (step.inputs) {
-            for (const [key, inputData] of Object.entries(step.inputs)) {
-                inputs.set(key, {
-                    inputName: key,
-                    inputValue: inputData.value !== undefined ? inputData.value : undefined,
-                    args: { outputKey: inputData.outputKey }
-                });
-            }
+    try{
+        if (!jsonPlan) {
+            return [];
         }
-        const planDependencies: PlanDependency[] = [];
-        if (step.dependencies) {
-            for (const [inputName, depInfo] of Object.entries(step.dependencies)) {
-                planDependencies.push({
-                    inputName,
-                    sourceStepNo: depInfo,  // Using step number during planning
-                    outputName: step.outputs && Object.keys(step.outputs).length > 0 
-                    ? Object.keys(step.outputs)[0] 
-                    : (step.inputs[inputName]?.args?.outputKey || 'result')
-                });
-            }
+    
+        console.log('convertJsonToTasks: jsonPlan:', jsonPlan);
+        if (!Array.isArray(jsonPlan)) {
+            console.log('ACCOMPLISH:Cannot convert JSON to tasks. Invalid JSON plan format');
+            return [];
         }
-        return {
-            verb: step.verb,
-            inputs: inputs,
-            expectedOutputs: new Map(Object.entries(step.outputs)),
-            description: step.description,
-            dependencies: planDependencies
-        };
-    });
+        return jsonPlan.map((step, index) => {
+            const inputs = new Map<string, PluginInput>();
+            if (step.inputs) {
+                for (const [key, inputData] of Object.entries(step.inputs)) {
+                    inputs.set(key, {
+                        inputName: key,
+                        inputValue: inputData.value !== undefined ? inputData.value : undefined,
+                        args: { outputKey: inputData.outputKey }
+                    });
+                }
+            }
+            console.log('convertJsonToTasks: inputs:', inputs);
+            const planDependencies: PlanDependency[] = [];
+            if (step.dependencies) {
+                for (const [inputName, depInfo] of Object.entries(step.dependencies)) {
+                    planDependencies.push({
+                        inputName,
+                        sourceStepNo: depInfo,  // Using step number during planning
+                        outputName: step.outputs && Object.keys(step.outputs).length > 0 
+                        ? Object.keys(step.outputs)[0] 
+                        : (step.inputs[inputName]?.args?.outputKey || 'result')
+                    });
+                }
+            }
+            console.log('convertJsonToTasks: planDependencies:', planDependencies);
+            return {
+                verb: step.verb,
+                inputs: inputs,
+                expectedOutputs: new Map(Object.entries(step.outputs)),
+                description: step.description,
+                dependencies: planDependencies
+            };
+        });
+    } catch (error) { analyzeError(error as Error);
+        console.error('Error converting JSON to tasks:', error instanceof Error ? error.message : error);
+        return [];
+    }
 }

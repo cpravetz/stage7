@@ -1,4 +1,4 @@
-import { PluginManifest, PluginRepository, RepositoryConfig } from '@cktmcs/shared';
+import { PluginManifest, PluginRepository, RepositoryConfig, PluginLocator } from '@cktmcs/shared';
 import simpleGit, { SimpleGit } from 'simple-git';
 import fs from 'fs/promises';
 import path from 'path';
@@ -24,7 +24,7 @@ export class GitRepository implements PluginRepository {
         this.baseDir = path.join(process.cwd(), 'git-plugins');
     }
     
-    async publish(manifest: PluginManifest): Promise<void> {
+    async store(manifest: PluginManifest): Promise<void> {
         if (!this.githubToken || !this.githubUsername) {
             console.log('GitHub credentials not found in environment variables');
             return;
@@ -225,10 +225,10 @@ export class GitRepository implements PluginRepository {
         }
     }
 
-    async list(): Promise<PluginManifest[]> {
+    async list(): Promise<PluginLocator[]> {
         const git: SimpleGit = simpleGit();
         const tempDir = path.join(process.cwd(), 'temp', 'list-plugins');
-        const plugins: PluginManifest[] = [];
+        const locators: PluginLocator[] = [];
 
         try {
             // Clone repository
@@ -245,7 +245,16 @@ export class GitRepository implements PluginRepository {
                         const fullPath = path.join(tempDir, file);
                         const content = await fs.readFile(fullPath, 'utf-8');
                         const manifest = JSON.parse(content);
-                        plugins.push(manifest);
+                        locators.push({
+                            id: manifest.id,
+                            verb: manifest.verb,
+                            repository: {
+                                type: this.type,
+                                url: this.config.url,
+                                signature: manifest.repository.signature,
+                                dependencies: manifest.repository.dependencies
+                            }
+                        });
                     } catch (error) {
                         console.warn(`Failed to parse manifest file ${file}:`, error);
                         continue;
@@ -253,7 +262,7 @@ export class GitRepository implements PluginRepository {
                 }
             }
 
-            return plugins;
+            return locators;
         } catch (error) {
             console.error(`Failed to list plugins from Git repository: ${error instanceof Error ? error.message : String(error)}`);
             return [];
