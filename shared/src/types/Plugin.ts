@@ -40,6 +40,7 @@ export type environmentType = {
 export interface EntryPointType {
     main: string;
     files: Record<string,string>;
+    test: Record<string,string>;
 }
 
 export interface Step {

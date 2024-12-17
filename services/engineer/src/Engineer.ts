@@ -3,6 +3,7 @@ import express from 'express';
 import { MapSerializer, BaseEntity, PluginInput, PluginDefinition, PluginParameter, ConfigItem, MetadataType } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { PluginMarketplace } from '@cktmcs/marketplace';
+import { createHash } from 'crypto';
 
 const api = axios.create({
     headers: {
@@ -78,93 +79,17 @@ export class Engineer extends BaseEntity {
                 agentDependencies?: Record<string, any>;
             }
             
-            Control Flow Action Verbs available in plans:
-            
-            1. DECIDE:
-               - Purpose: Conditional branching based on a condition
-               - Inputs:
-                 - condition: The condition to evaluate
-                 - trueSteps: Array of steps to execute if condition is true
-                 - falseSteps: Array of steps to execute if condition is false
-               Example:
-               {
-                 "verb": "DECIDE",
-                 "inputs": {
-                   "condition": { "inputValue": "the temperature is above 30 degrees" },
-                   "trueSteps": { "inputValue": [/* steps for hot weather */] },
-                   "falseSteps": { "inputValue": [/* steps for cool weather */] }
-                 }
-               }
-            
-            2. WHILE:
-               - Purpose: Repeat steps while a condition is true
-               - Inputs:
-                 - condition: The condition to evaluate before each iteration
-                 - steps: Array of steps to repeat
-               Example:
-               {
-                 "verb": "WHILE",
-                 "inputs": {
-                   "condition": { "inputValue": "there are more pages to process" },
-                   "steps": { "inputValue": [/* steps to process a page */] }
-                 }
-               }
-            
-            3. UNTIL:
-               - Purpose: Repeat steps until a condition becomes true
-               - Inputs:
-                 - condition: The condition to evaluate after each iteration
-                 - steps: Array of steps to repeat
-               Example:
-               {
-                 "verb": "UNTIL",
-                 "inputs": {
-                   "condition": { "inputValue": "a valid solution is found" },
-                   "steps": { "inputValue": [/* steps to find solution */] }
-                 }
-               }
-            
-            4. SEQUENCE:
-               - Purpose: Execute steps in strict sequential order
-               - Inputs:
-                 - steps: Array of steps to execute sequentially
-               Example:
-               {
-                 "verb": "SEQUENCE",
-                 "inputs": {
-                   "steps": { "inputValue": [/* steps to execute in order */] }
-                 }
-               }
-            
-            5. TIMEOUT:
-               - Purpose: Set a timeout for a group of steps
-               - Inputs:
-                 - timeout: Timeout duration in milliseconds
-                 - steps: Array of steps to execute with timeout
-               Example:
-               {
-                 "verb": "TIMEOUT",
-                 "inputs": {
-                   "timeout": { "inputValue": 5000 },
-                   "steps": { "inputValue": [/* time-sensitive steps */] }
-                 }
-               }
-            
-            6. REPEAT:
-               - Purpose: Repeat steps a specific number of times
-               - Inputs:
-                 - count: Number of iterations
-                 - steps: Array of steps to repeat
-               Example:
-               {
-                 "verb": "REPEAT",
-                 "inputs": {
-                   "count": { "inputValue": 3 },
-                   "steps": { "inputValue": [/* steps to repeat */] }
-                 }
-               }
-            
             Use this context to determine the required inputs: ${contextString}
+
+             Important requirements:
+              1. The plugin MUST include comprehensive error handling
+              2. All external dependencies must be explicitly declared
+              3. Include input validation for all parameters
+              4. Add logging for important operations
+              5. If the plugin might generate a plan, include PLAN in outputDefinitions
+              6. Include unit tests in a separate file
+              7. Add retry logic for external service calls
+              8. Include proper TypeScript types/interfaces
 
             Provide a JSON object with the following structure:
             {
@@ -172,24 +97,29 @@ export class Engineer extends BaseEntity {
                 verb: '{verb}',
                 description: A short description of the plugin,
                 explanation: A more complete description including inputs, process overview, and outputs,
-                inputDefinitions: array of inputs definitions formed like
-                {
-                    name: {input name},
-                    required: true/false,
-                    type: input javascript data type,
-                    description: {brief explanation of the input}
-                },
-                outputDefinitions: array of output definitions formed like
-                {
-                    name: {output name},
-                    required: false/true,
-                    type: 'PLAN', 'DIRECT_ANSWER' or javascript type,
-                    description: An overview of the type of output this plugin will create
-                },
+                inputDefinitions: [{
+                  name: string,
+                  required: boolean,
+                  type: PluginParameterType,
+                  description: string,
+                  validation?: {
+                      pattern?: string,
+                      min?: number,
+                      max?: number,
+                      allowedValues?: any[]
+                  }
+                }],
+                outputDefinitions: [{
+                  name: string,
+                  required: boolean,
+                  type: PluginParameterType,
+                  description: string
+                }],
                 language: 'javascript',
                 entryPoint: {
                     main: {name of primary code file to run},
-                    files:  array of objects {filename: filecontent}
+                    files: Record<filename, code>,
+                    test:  Record<filename, code>,
                 },
                 configuration: array of configuration items formed like
                 {
@@ -253,20 +183,19 @@ Types used in the plugin structure are:
                 exchanges: [{ role: 'user', message: engineeringPrompt }],
                 optimization: 'accuracy'
             });
-            const result = JSON.parse(response.data.result);
-            pluginStructure = result;
-            configItems = result.configuration || [];
-            metadata = result.metadata || {
-                category: [],
-                tags: [],
-                complexity: 1,
-                dependencies: [],
-                version: '1.0.0'
-            };
-            
-            if (!pluginStructure || !pluginStructure.entryPoint) {
-                return undefined;
+            const pluginStructure = JSON.parse(response.data.result);
+        
+            // Validate the generated plugin structure
+            if (!this.validatePluginStructure(pluginStructure)) {
+                throw new Error('Generated plugin structure is invalid');
             }
+    
+            // Run basic syntax validation on the generated code
+            if (!await this.validatePluginCode(pluginStructure.entryPoint)) {
+                throw new Error('Generated plugin code contains syntax errors');
+            }
+    
+            return this.finalizePlugin(pluginStructure, explanation);
         } catch (error) { 
             analyzeError(error as Error);
             console.error('Error querying Brain for plugin structure:', error instanceof Error ? error.message : error);
@@ -280,10 +209,7 @@ Types used in the plugin structure are:
             explanation: explanation,
             inputDefinitions: pluginStructure.inputDefinitions,
             outputDefinitions: pluginStructure.outputDefinitions,
-            entryPoint: {
-                main: pluginStructure.entryPoint.main,
-                files: pluginStructure.entryPoint.files
-            },
+            entryPoint: pluginStructure.entryPoint,
             language: pluginStructure.language,
             configuration: configItems,
             version: '1.0.0',
@@ -330,11 +256,76 @@ Types used in the plugin structure are:
         return [...new Set(permissions)]; // Remove duplicates
     }
     
-    private async signPlugin(plugin: PluginDefinition): Promise<string> {
-        // Implementation of plugin signing
-        // This would use a private key to sign the plugin code
-        return 'signature-placeholder';
-    }    
+    private validatePluginStructure(plugin: any): boolean {
+      const requiredFields = ['id', 'verb', 'inputDefinitions', 'outputDefinitions', 'entryPoint'];
+      return requiredFields.every(field => plugin[field]) &&
+             plugin.entryPoint.files &&
+             Object.keys(plugin.entryPoint.files).length > 0;
+    }
+  
+    private async validatePluginCode(entryPoint: any): Promise<boolean> {
+      try {
+          // Basic syntax check for JavaScript/TypeScript files
+          for (const [filename, content] of Object.entries(entryPoint.files)) {
+              if (filename.endsWith('.js') || filename.endsWith('.ts')) {
+                  new Function(content as string);
+              }
+          }
+          return true;
+      } catch (error) {
+          console.error('Code validation error:', error);
+          return false;
+      }
+    }
+
+    private finalizePlugin(pluginStructure: any, explanation: string): PluginDefinition {
+      return {
+          ...pluginStructure,
+          explanation,
+          version: '1.0.0',
+          security: {
+              permissions: this.determineRequiredPermissions(pluginStructure),
+              sandboxOptions: {
+                  allowEval: false,
+                  timeout: 5000,
+                  memory: 128 * 1024 * 1024,
+                  allowedModules: ['fs', 'path', 'http', 'https'],
+                  allowedAPIs: ['fetch', 'console']
+              },
+              trust: {
+                  publisher: 'system-generated',
+                  signature: this.signPlugin(pluginStructure)
+              }
+          }
+      };
+  }
+
+
+  private signPlugin(plugin: PluginDefinition): string {
+    try {
+        // Create a deterministic subset of plugin properties for signing
+        const contentToSign = {
+            id: plugin.id,
+            verb: plugin.verb,
+            version: plugin.version,
+            entryPoint: plugin.entryPoint,
+            security: {
+                permissions: plugin.security.permissions,
+                sandboxOptions: plugin.security.sandboxOptions
+            }
+        };
+
+        // Create a deterministic string representation
+        const content = JSON.stringify(contentToSign, Object.keys(contentToSign).sort());
+
+        // Generate SHA-256 hash
+        return createHash('sha256').update(content).digest('hex');
+    } catch (error) {
+        console.error('Error signing plugin:', error instanceof Error ? error.message : error);
+        // Return a null signature that will fail verification
+        return '';
+    }
+}
 
     private async generateExplanation(verb: string, context: Map<string, PluginInput>): Promise<string> {
         const prompt = `Given the action verb "${verb}" and the context "${context}", provide a detailed explanation of what a plugin for this verb should do. Include expected inputs and outputs.`;
