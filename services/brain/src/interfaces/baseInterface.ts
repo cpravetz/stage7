@@ -75,7 +75,7 @@ export abstract class BaseInterface {
                 messageTokens = estimateTokens(message.content);
             } 
 
-            if (estimatedTokens + messageTokens <= targetTokens) {
+            if (i === messages.length - 1 || estimatedTokens + messageTokens <= targetTokens) {
                 trimmedMessages.unshift(message);
                 estimatedTokens += messageTokens;
             } else {

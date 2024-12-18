@@ -539,18 +539,43 @@ Please consider this context and the available plugins when planning and executi
     }
 
     private async executeActionWithCapabilitiesManager(step: Step): Promise<PluginOutput[]> {
-        this.logAndSay(`Agent: Executing action ${step.actionVerb} with CapabilitiesManager`);
+        const controller = new AbortController();
+        step.registerPendingOperation(controller);
+    
         try {
             if (step.actionVerb === 'ASK') {
                 return this.handleAskStep(step.inputs);
             }
-
+    
             const payload = MapSerializer.transformForSerialization(step);
+            step.storeTempData('payload', payload);
+            
             console.log('Agent: Executing serialized action with CapabilitiesManager:', payload);
-            const response = await api.post(`http://${this.capabilitiesManagerUrl}/executeAction`, payload);
+            
+            // Add timeout and abort signal to the request
+            const response = await api.post(
+                `http://${this.capabilitiesManagerUrl}/executeAction`, 
+                payload,
+                { 
+                    timeout: 30000,
+                    signal: controller.signal 
+                }
+            );
+            
             return MapSerializer.transformFromSerialization(response.data);
         } catch (error) {
             console.error('Error executing action with CapabilitiesManager:', error instanceof Error ? error.message : error);
+            
+            step.status = StepStatus.ERROR;
+            
+            if (axios.isAxiosError(error) && (error.code === 'ECONNABORTED' || !error.response)) {
+                this.status = AgentStatus.ERROR;
+                await this.notifyTrafficManager();
+                await this.saveAgentState();
+            }
+    
+            await this.cleanupFailedStep(step);
+                
             return [{
                 success: false,
                 name: 'error',
@@ -559,7 +584,106 @@ Please consider this context and the available plugins when planning and executi
                 result: null,
                 error: error instanceof Error ? error.message : `Unknown error occurred ${error}`
             }];
+        } finally {
+            // Always clean up the controller
+            controller.abort();
+        }
+    }
+    
+    // Add new method to handle cleanup
+    private async notifyDependents(failedStepId: string, status: StepStatus): Promise<void> {
+        try {
+            // First, notify dependent steps within the same agent
+            const dependentSteps = this.steps.filter(step => 
+                step.dependencies.some(dep => dep.sourceStepId === failedStepId)
+            );
+    
+            for (const step of dependentSteps) {
+                step.status = status;
+                await this.cleanupFailedStep(step);
+                console.log(`Notified dependent step ${step.id} about failure of step ${failedStepId}`);
+            }
+    
+            // Then, check and notify dependent agents
+            const hasDependents = await this.hasDependentAgents();
+            if (hasDependents) {
+                try {
+                    // Notify TrafficManager about the failure so it can handle dependent agents
+                    const message: Message = {
+                        type: MessageType.STEP_FAILURE,
+                        sender: this.id,
+                        recipient: 'trafficmanager',
+                        content: {
+                            failedStepId,
+                            agentId: this.id,
+                            status: this.status,
+                            error: `Step ${failedStepId} failed with status ${status}`
+                        }
+                    };
+    
+                    // Send message to TrafficManager
+                    await axios.post(`http://${this.trafficManagerUrl}/handleStepFailure`, {
+                        agentId: this.id,
+                        stepId: failedStepId,
+                        status: status
+                    });
+    
+                    this.sendMessage(message);
+                    console.log(`Notified TrafficManager about step failure: ${failedStepId}`);
+                } catch (error) {
+                    console.error('Failed to notify TrafficManager about step failure:', 
+                        error instanceof Error ? error.message : error
+                    );
+                }
+            }
+    
+            // Update agent state after notifying dependents
+            await this.saveAgentState();
+    
+        } catch (error) {
+            console.error('Error in notifyDependents:', 
+                error instanceof Error ? error.message : error
+            );
+            // Don't throw here - we don't want notification failures to cause additional issues
+        }
+    }
+    
+    // Helper method to check if a step has any dependent steps
+    private hasDependendentSteps(stepId: string): boolean {
+        return this.steps.some(step => 
+            step.dependencies.some(dep => dep.sourceStepId === stepId)
+        );
+    }
+    
+    // Update the cleanupFailedStep method to include proper error handling
+    private async cleanupFailedStep(step: Step): Promise<void> {
+        try {
+            console.log(`Starting cleanup for failed step ${step.id}`);
             
+            // Cancel any pending operations
+            step.cancelPendingOperations?.();
+            
+            // Clear any temporary data
+            step.clearTempData?.();
+            
+            // If this step's failure affects the entire agent, update agent status
+            if (!this.hasDependendentSteps(step.id)) {
+                this.status = AgentStatus.ERROR;
+                await this.notifyTrafficManager();
+            }
+            
+            // Save the updated state
+            await this.saveAgentState();
+            
+            // Notify any dependent steps/agents
+            await this.notifyDependents(step.id, StepStatus.ERROR);
+            
+            console.log(`Completed cleanup for failed step ${step.id}`);
+        } catch (cleanupError) {
+            console.error(`Error during step ${step.id} cleanup:`, 
+                cleanupError instanceof Error ? cleanupError.message : cleanupError
+            );
+            // Log the error but don't throw - we want to continue with other cleanup tasks
         }
     }
 

@@ -20,6 +20,8 @@ export class Step {
     status: StepStatus;
     result?: PluginOutput[];
     timeout?: number;
+    private pendingOperations: AbortController[] = [];
+    private tempData: Map<string, any> = new Map();
 
     constructor(params: {
         actionVerb: string,
@@ -482,7 +484,57 @@ export class Step {
         }];
     }
 
-  
+    public cancelPendingOperations(): void {
+        this.pendingOperations.forEach(controller => {
+            try {
+                controller.abort();
+            } catch (error) {
+                console.error(`Error aborting operation in step ${this.id}:`, error);
+            }
+        });
+        this.pendingOperations = [];
+    }
+
+    /**
+     * Clears any temporary data stored during step execution
+     */
+    public clearTempData(): void {
+        this.tempData.clear();
+        // Clear any large objects or buffers
+        if (this.result) {
+            // Keep only essential data in results
+            this.result = this.result.map(output => ({
+                ...output,
+                result: typeof output.result === 'string' ? output.result : null
+            }));
+        }
+    }
+
+    /**
+     * Registers a pending operation that can be cancelled
+     * @param controller AbortController for the operation
+     */
+    public registerPendingOperation(controller: AbortController): void {
+        this.pendingOperations.push(controller);
+    }
+
+    /**
+     * Stores temporary data during step execution
+     * @param key Identifier for the temp data
+     * @param data The data to store
+     */
+    public storeTempData(key: string, data: any): void {
+        this.tempData.set(key, data);
+    }
+
+    /**
+     * Retrieves temporary data
+     * @param key Identifier for the temp data
+     */
+    public getTempData(key: string): any {
+        return this.tempData.get(key);
+    }
+    
     /**
      * Converts the step to a simple JSON-serializable object
      * @returns Simplified representation of the step

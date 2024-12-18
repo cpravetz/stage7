@@ -53,7 +53,7 @@ when the goal can be accomplished with a plan.  If you determine a plugin is nee
 
 {
 "type": "PLAN",
-"context": "Any overarching points or introduction to the plan you want to share",
+"context": "{string, Any overarching points or introduction to the plan you want to share}",
 "plan": [
     {
         "number": 1,
@@ -63,7 +63,9 @@ when the goal can be accomplished with a plan.  If you determine a plugin is nee
             "inputName1": {"value": "predeterminedValue"},
             "inputName2": {"outputKey": "outputKeyFromPreviousStep"}
         },
-        "dependencies": {},
+        "dependencies": {
+        //Whay inputName2 depends on an external source, do not provide a dependency
+        },
         "outputs": {
             "outputKey1": "Description of output1",
             "outputKey2": "Description of output2"
@@ -81,135 +83,55 @@ when the goal can be accomplished with a plan.  If you determine a plugin is nee
             "outputKey3": "Description of output3"
         }
     }
-    // ... more steps ...
+    ... 
     ]
 }
 
-
-This is important:  Your response needs to be fully formed JSON with minimal whitespace.
-
 Guidelines for creating a plan:
-1. Number each step sequentially, starting from 1.
+1. Number each step sequentially.
 2. Use specific, actionable verbs for each step (e.g., SCRAPE, ANALYZE, PREDICT).
-3. Ensure each step has a clear, concise description.
-4. For inputs, each input should be an object with either a 'value' property for predetermined values or an 'outputKey' property referencing an output from a previous step. So 
-an input would be defined as: {"inputName1": {value: "predeterminedValue"}} or {"inputName2": {outputKey: "outputKeyFromPreviousStep"}}
-5. List dependencies for each step, as an object with the property names being the outputs needed and the values being the step number that provides the required inputlike: {outputname: stepNumber}
-There must be a dependency entry for every input that comes from a previous step output.
-6. Specify the outputs of each step.
+3. Ensure each step has a concise description.
+4. Each step input should be an object with either a 'value' property for predetermined values or an 'outputKey' property referencing an output from a previous step. 
+5. List dependencies for each step as an object with the property names being the outputs needed and the values being the step number that provides the required inputlike: {outputname: stepNumber}
+There MUST be a dependency entry for every input that comes from a previous step output.
+6. Specify the outputs of each step. At least one output is mandatory.
 7. Aim for 5-10 steps in the plan, breaking down complex tasks if necessary.
 8. Be thorough in your description fields. This is the only instruction the performer will have.
-9. Ensure the final step produces the desired outcome or prediction.
+9. Ensure the final step produces the desired outcome or mission of the goal.
 10. The actionVerb DELEGATE is available to use to create sub-agents with goals of their own.
-11. input values may be determined by preceeding steps.  In those instances set the value to 'undefined'
+11. Input values may be determined by preceeding steps.  In those instances set the value to 'undefined'
 
-A number of plugins are available to execute steps of the plan. Some have required inputs - required properties for the inputs object.  These plugins include:
+Plugins are available to execute steps of the plan. Some have required inputs - required properties for the inputs object.  These plugins include:
 
-ACCOMPLISH - this plugin takes a specific goal and either achieves it or returns a plan to achieve it.
+ACCOMPLISH - takes a specific goal and either achieves it or returns a plan to achieve it.
     (required input: goal)
-THINK - this plugin sends prompts to the chat function of the LLMs attached to the system in order to generate content from a conversation.
-    (required input: prompt) (optional inputs: optimization, ConversationType)
-    if included, optimization must be one of 'cost', 'accuracy', 'creativity', 'speed', or 'continuity'
-    accuracy is the default
-GENERATE - this plugin uses LLM services to generate content from a prompt or other content. Services include image creation, audio transscription, image editing, etc.
+THINK - sends prompts to the chat function of the LLMs attached to the system in order to generate content from a conversation.
+    (required input: prompt) (optional inputs: optimization ('cost'|'accuracy'|'creativity'|'speed'|'continuity'), ConversationType)
+    accuracy is the default optimization
+GENERATE - uses LLM services to generate content from a prompt or other content. Services include image creation, audio transscription, image editing, etc.
     (required input: COnversationType) (optional inputs: modelName, optimization, prompt, file, audio, video, image...)
-FILE_OPS - this plugin provides services for file operations read, write, append
+FILE_OPS - provides services for file operations read, write, append
     (required inputs: path, operation, content)
-SEARCH - this plugin searches DuckDuckGo for a given term and returns a list of links
+SEARCH - searches DuckDuckGo for a given term and returns a list of links
     (required input: searchTerm)
-SCRAPE - this plugin scrapes content from a given URL
+SCRAPE - scrapes content from a given URL
     (required inputs: url, selector, attribute, limit)
-GET_USER_INPUT - this plugin requests input from the user
+GET_USER_INPUT - requests input from the user
     (required inputs: question, answerType) (optional input: choices)
+DECIDE - Conditional branching based on a condition
+    (required inputs: condition: {"inputName": "value"}, trueSteps[], falseSteps[])
+WHILE - Repeat steps while a condition is true
+    (required inputs: condition: {"inputName": "value"}, steps[])
+UNTIL - Repeat steps until a condition becomes true
+    (required inputs: condition: {"inputName": "value"}, steps[])
+SEQUENCE - Execute steps in strict sequential order / no concurrency
+    (required inputs: steps[])
+TIMEOUT - Set a timeout for a group of steps
+    (required inputs: timeout, steps[])
+REPEAT - Repeat steps a specific number of times
+    (required inputs: count, steps[])
 
-            Control Flow Action Verbs available in plans:
-            
-            1. DECIDE:
-               - Purpose: Conditional branching based on a condition
-               - Inputs:
-                 - condition: The condition to evaluate
-                 - trueSteps: Array of steps to execute if condition is true
-                 - falseSteps: Array of steps to execute if condition is false
-               Example:
-               {
-                 "verb": "DECIDE",
-                 "inputs": {
-                   "condition": { "inputValue": "the temperature is above 30 degrees" },
-                   "trueSteps": { "inputValue": [/* steps for hot weather */] },
-                   "falseSteps": { "inputValue": [/* steps for cool weather */] }
-                 }
-               }
-            
-            2. WHILE:
-               - Purpose: Repeat steps while a condition is true
-               - Inputs:
-                 - condition: The condition to evaluate before each iteration
-                 - steps: Array of steps to repeat
-               Example:
-               {
-                 "verb": "WHILE",
-                 "inputs": {
-                   "condition": { "inputValue": "there are more pages to process" },
-                   "steps": { "inputValue": [/* steps to process a page */] }
-                 }
-               }
-            
-            3. UNTIL:
-               - Purpose: Repeat steps until a condition becomes true
-               - Inputs:
-                 - condition: The condition to evaluate after each iteration
-                 - steps: Array of steps to repeat
-               Example:
-               {
-                 "verb": "UNTIL",
-                 "inputs": {
-                   "condition": { "inputValue": "a valid solution is found" },
-                   "steps": { "inputValue": [/* steps to find solution */] }
-                 }
-               }
-            
-            4. SEQUENCE:
-               - Purpose: Execute steps in strict sequential order
-               - Inputs:
-                 - steps: Array of steps to execute sequentially
-               Example:
-               {
-                 "verb": "SEQUENCE",
-                 "inputs": {
-                   "steps": { "inputValue": [/* steps to execute in order */] }
-                 }
-               }
-            
-            5. TIMEOUT:
-               - Purpose: Set a timeout for a group of steps
-               - Inputs:
-                 - timeout: Timeout duration in milliseconds
-                 - steps: Array of steps to execute with timeout
-               Example:
-               {
-                 "verb": "TIMEOUT",
-                 "inputs": {
-                   "timeout": { "inputValue": 5000 },
-                   "steps": { "inputValue": [/* time-sensitive steps */] }
-                 }
-               }
-            
-            6. REPEAT:
-               - Purpose: Repeat steps a specific number of times
-               - Inputs:
-                 - count: Number of iterations
-                 - steps: Array of steps to repeat
-               Example:
-               {
-                 "verb": "REPEAT",
-                 "inputs": {
-                   "count": { "inputValue": 3 },
-                   "steps": { "inputValue": [/* steps to repeat */] }
-                 }
-               }
-
-Ensure your response is a valid JSON object starting with either "type": "DIRECT_ANSWER", "type": "PLAN", or "type": "PLUGIN". 
-Double check that you are returning valid JSON and only valid JSON. Remove any leading or trailing characters that might invalidate the response as a JSON object. 
+Ensure your response is a valid JSON object starting with either "type": "DIRECT_ANSWER", "type": "PLAN", or "type": "PLUGIN".
 `}
 
 function validateResponse(response: any): boolean {
@@ -304,7 +226,7 @@ export async function execute(inputs: Map<string, PluginInput> | Record<string, 
                     resultType: PluginParameterType.ERROR,
                     resultDescription: 'Failed to parse Brain response',
                     result: null,
-                    error: `Response type not PLAN or DIRECT_ANSWER: ${parsedResponse.type}`
+                    error: `Response type not PLAN, PLUGIN or DIRECT_ANSWER: ${parsedResponse.type}`
             }];
             }
         } catch (error) { analyzeError(error as Error);
