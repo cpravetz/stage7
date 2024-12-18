@@ -449,7 +449,7 @@ export class CapabilitiesManager extends BaseEntity {
             const accomplishResult = await this.executeAccomplishPlugin(goal);
             
             if (!accomplishResult.success) {
-                console.error(`CM: Error executing ACCOMPLISH for verb ${step.actionVerb}:`, accomplishResult.error);
+                console.error('CM: Error executing ACCOMPLISH for verb %s:', step.actionVerb, accomplishResult.error);
                 return accomplishResult;
             }
     

@@ -4,7 +4,9 @@ import passport from 'passport';
 import bcrypt from 'bcrypt';
 import { createUser, findUserByEmail, findUserById } from '../services/userService';
 import { User } from '../models/User';
+import {v4 as uuidv4} from 'uuid';
 
+const SECRET_KEY = process.env.JWT_SECRET || uuidv4();
 
 export const register = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
@@ -17,7 +19,7 @@ export const register = async (req: Request, res: Response, next: NextFunction):
         const hashedPassword = await bcrypt.hash(password, 10);
         const user = await createUser({ email, password: hashedPassword });
         console.log('Registerd User registered successfully:', user);
-        const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET || 'your-secret-key', { expiresIn: '365d' });
+        const token = jwt.sign({ id: user.id }, SECRET_KEY, { expiresIn: '365d' });
         res.status(201).json({ token, user: { id: user.id, email: user.email } });
     } catch (error) {
         res.status(500).json({ message: 'Error registering user' });
@@ -28,7 +30,7 @@ export const login = (req: Request, res: Response, next: NextFunction): void => 
     console.log('Login request received');
     console.log('Login Body:', JSON.stringify(req.body, null, 2));
     
-    const secret = process.env.JWT_SECRET || 'your-secret-key';
+    const secret = process.env.JWT_SECRET;
     console.log('Using secret for token generation:', secret);
 
     if (!req.body || typeof req.body !== 'object') {
@@ -49,7 +51,7 @@ export const login = (req: Request, res: Response, next: NextFunction): void => 
         res.status(401).json({ message: 'Authentication failed' });
         return;
     }
-    const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET || 'your-secret-key', { expiresIn: '365d' });
+    const token = jwt.sign({ id: user.id }, SECRET_KEY, { expiresIn: '365d' });
     console.log('Login successful for user:', user.email);
     console.log(`new token: ${token}`);
     res.json({ token, user: { id: user.id, email: user.email } });
@@ -114,11 +116,8 @@ export const verifyToken = (req: Request, res: Response, next: NextFunction): vo
         return;
     }
 
-    console.log('Token to verify:', token);
-    console.log('JWT_SECRET:', process.env.JWT_SECRET);
-
     try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key') as any;
+        const decoded = jwt.verify(token, SECRET_KEY) as any;
         console.log('Token verified successfully. Decoded:', decoded);
         
         // Attach the user information to the request object

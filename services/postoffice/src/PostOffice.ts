@@ -8,7 +8,7 @@ import { Message, MessageType } from '@cktmcs/shared';
 import axios from 'axios';
 import { analyzeError } from '@cktmcs/errorhandler';
 import bodyParser from 'body-parser';
-
+import rateLimit from 'express-rate-limit';
 
 const api = axios.create({
     headers: {
@@ -46,6 +46,12 @@ export class PostOffice {
             credentials: true,
         };
 
+        const limiter = rateLimit({
+            windowMs: 15 * 60 * 1000, // 15 minutes
+            max: 1000, // max 100 requests per windowMs
+        });
+
+        this.app.use(limiter);        
         this.app.use(cors(corsOptions));
 
         this.app.use(bodyParser.json());
@@ -448,7 +454,7 @@ export class PostOffice {
         const { requestId, response } = req.body;
         const resolver = this.userInputRequests.get(requestId);
 
-        if (resolver) {
+        if (resolver && typeof resolver === 'function')  {
             resolver(response);
             this.userInputRequests.delete(requestId);
             res.status(200).send({ message: 'User input received' });

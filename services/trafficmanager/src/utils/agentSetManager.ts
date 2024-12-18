@@ -327,6 +327,12 @@ class AgentSetManager {
         }
     }
 
+    isValidUrl(url: string): boolean {
+        // Implement validation logic, e.g., regex pattern check
+        const urlPattern = /^(?!:\/\/)([a-zA-Z0-9-_]+\.)+[a-zA-Z]{2,6}$/;
+        return urlPattern.test(url);
+    }
+
     public async getAgentStatistics(missionId: string): Promise<AgentSetManagerStatistics> {
         let stats: AgentSetManagerStatistics = {
             agentSetsCount: 0,
@@ -338,6 +344,9 @@ class AgentSetManager {
             for (const agentSet of this.agentSets.values()) {
                 stats.agentSetsCount++;
                 try {
+                    if (!this.isValidUrl(agentSet.url)) {
+                        return stats;
+                    }
                     const response = await axios.get(`http://${agentSet.url}/statistics/${missionId}`);
                     const serializedStats = response.data;
                     serializedStats.agentsByStatus = MapSerializer.transformFromSerialization(serializedStats.agentsByStatus);

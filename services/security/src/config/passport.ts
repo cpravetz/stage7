@@ -3,6 +3,9 @@ import { Strategy as LocalStrategy } from 'passport-local';
 import { PassportStatic } from 'passport';
 import bcrypt from 'bcrypt';
 import { findUserByEmail, findUserById } from '../services/userService';
+import {v4 as uuidv4} from 'uuid';
+
+const SECRET_KEY = process.env.JWT_SECRET || uuidv4();
 
 export const configurePassport = (passport: PassportStatic) => {
     passport.use(new LocalStrategy(
@@ -27,7 +30,7 @@ export const configurePassport = (passport: PassportStatic) => {
 
     passport.use(new JwtStrategy({
         jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
-        secretOrKey: process.env.JWT_SECRET || 'your-very-secret-key'
+        secretOrKey: SECRET_KEY
     }, async (jwtPayload, done) => {
         try {
             const user = await findUserById(jwtPayload.id);
