@@ -3,6 +3,7 @@ import axios from 'axios';
 import { parseJSON } from 'json-alexander';
 import { MapSerializer, PluginInput, PluginOutput, PluginParameterType, ActionVerbTask, PlanDependency } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
+import { v4 as uuidv4 } from 'uuid';
 
 interface JsonPlanStep {
     number: number;
@@ -388,7 +389,18 @@ function convertJsonToTasks(jsonPlan: JsonPlanStep[]): ActionVerbTask[] {
                 }
             }            
 
+            if (planDependencies.length > 0) {
+                console.log(`Created task for step ${step.number || index + 1}:`, {
+                    verb: step.verb,
+                    inputs: Object.fromEntries(inputs),
+                    expectedOutputs: step.outputs,
+                    description: step.description,
+                    dependencies: planDependencies
+                });
+            }
+
             return {
+                id: uuidv4(),
                 verb: step.verb,
                 inputs: inputs,
                 expectedOutputs: new Map(Object.entries(step.outputs)),

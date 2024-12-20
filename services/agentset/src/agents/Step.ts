@@ -10,6 +10,7 @@ export enum StepStatus {
     ERROR = 'error'
 }
 
+
 export class Step {
     readonly id: string;
     readonly stepNo: number;
@@ -23,6 +24,7 @@ export class Step {
     private tempData: Map<string, any> = new Map();
 
     constructor(params: {
+        id?: string,
         actionVerb: string,
         stepNo: number,
         inputs?: Map<string, PluginInput>,
@@ -30,67 +32,14 @@ export class Step {
         dependencies?: StepDependency[],
         status?: StepStatus
     }) {
-        this.id = uuidv4();
+        this.id = params.id || uuidv4();
         this.stepNo = params.stepNo;
         this.actionVerb = params.actionVerb;
         this.inputs = params.inputs || new Map();
         this.description = params.description;
         this.dependencies = params.dependencies || [];
         this.status = params.status || StepStatus.PENDING;
-    }
-
-    /**
-     * Creates steps from a plan of action verb tasks
-     * @param plan Array of action verb tasks
-     * @param startingStepNo The starting step number
-     * @returns Array of Step instances
-     */
-    static createFromPlan(plan: ActionVerbTask[], startingStepNo: number = 1): Step[] {
-        const steps = plan.map((task, index) => {
-            const inputs = new Map<string, PluginInput>();
-            if (task.inputs) {
-                if (task.inputs instanceof Map) {
-                    task.inputs.forEach((value, key) => inputs.set(key, value));
-                } else {
-                    Object.entries(task.inputs).forEach(([key, value]) => {
-                        inputs.set(key, {
-                            inputName: key,
-                            inputValue: value,
-                            args: {}
-                        } as PluginInput);
-                    });
-                }
-            }
-            
-            return new Step({
-                actionVerb: task.verb,
-                stepNo: startingStepNo + index,
-                inputs: inputs,
-                description: task.description,
-                dependencies: []
-            });
-        });
-
-        // Convert PlanDependency to StepDependency using step numbers
-        steps.forEach((step, index) => {
-            const task = plan[index];
-            if (task.dependencies) {
-                task.dependencies.forEach((dep: PlanDependency) => {
-                    const sourceStep = steps.find(s => 
-                        s.stepNo === (startingStepNo + dep.sourceStepNo)
-                    );
-                    if (sourceStep) {
-                        step.dependencies.push({
-                            inputName: dep.inputName,
-                            sourceStepId: sourceStep.id,
-                            outputName: dep.outputName
-                        });
-                    }
-                });
-            }
-        });
-
-        return steps;
+        //console.log(`Constructing new step ${this.id} created. Dependencies ${this.dependencies.map(dep => dep.sourceStepId).join(', ')}`);
     }
 
     populateInputsFromDependencies(allSteps: Step[]): void {
@@ -247,7 +196,7 @@ export class Step {
 
         const stepsToExecute = result ? trueSteps : falseSteps;
         if (stepsToExecute) {
-            const newSteps = Step.createFromPlan(stepsToExecute, this.stepNo + 1);
+            const newSteps = createFromPlan(stepsToExecute, this.stepNo + 1);
             // Add these steps to the agent's step queue
             return [{ 
                 success: true,
@@ -266,7 +215,7 @@ export class Step {
         const newSteps: Step[] = [];
 
         for (let i = 0; i < count; i++) {
-            const iterationSteps = Step.createFromPlan(steps, this.stepNo + 1 + (i * steps.length));
+            const iterationSteps = createFromPlan(steps, this.stepNo + 1 + (i * steps.length));
             newSteps.push(...iterationSteps);
         }
 
@@ -282,7 +231,7 @@ export class Step {
     private async handleTimeout(): Promise<PluginOutput[]> {
         const timeoutMs = this.inputs.get('timeout')?.inputValue as number;
         const steps = this.inputs.get('steps')?.inputValue as ActionVerbTask[];
-        const newSteps = Step.createFromPlan(steps, this.stepNo + 1);
+        const newSteps = createFromPlan(steps, this.stepNo + 1);
         
         newSteps.forEach(step => {
             step.timeout = timeoutMs;
@@ -336,7 +285,7 @@ export class Step {
         newSteps.push(checkStep);
     
         // Create steps for first potential iteration
-        const iterationSteps = Step.createFromPlan(steps, this.stepNo + 2);
+        const iterationSteps = createFromPlan(steps, this.stepNo + 2);
         
         // Add dependency on condition check for all first iteration steps
         iterationSteps.forEach(step => {
@@ -396,7 +345,7 @@ export class Step {
         const newSteps: Step[] = [];
     
         // Create first iteration steps (UNTIL executes at least once)
-        const iterationSteps = Step.createFromPlan(steps, this.stepNo + 1);
+        const iterationSteps = createFromPlan(steps, this.stepNo + 1);
         newSteps.push(...iterationSteps);
     
         // Add condition check step after first iteration
@@ -532,3 +481,52 @@ export class Step {
         };
     }
 }
+
+
+    /**
+     * Creates steps from a plan of action verb tasks
+     * @param plan Array of action verb tasks
+     * @param startingStepNo The starting step number
+     * @returns Array of Step instances
+     */
+    export function createFromPlan(plan: ActionVerbTask[], startingStepNo: number = 1): Step[] {
+        //ensure all ActionVerbTasks have an id property
+        plan.forEach(task => {
+            if (!task.id) {
+                task.id = uuidv4();
+            }
+        });
+
+        const steps = plan.map((task, index) => {
+            const inputs = new Map<string, PluginInput>();
+            if (task.inputs) {
+                if (task.inputs instanceof Map) {
+                    task.inputs.forEach((value, key) => inputs.set(key, value));
+                } else {
+                    Object.entries(task.inputs).forEach(([key, value]) => {
+                        inputs.set(key, {
+                            inputName: key,
+                            inputValue: value,
+                            args: {}
+                        } as PluginInput);
+                    });
+                }
+            }
+
+            const dependencies = (task.dependencies || []).map(dep => ({
+                inputName: dep.inputName,
+                sourceStepId: plan[dep.sourceStepNo - 1]?.id || '', // This should now always be present
+                outputName: dep.outputName
+            }));
+            
+            return new Step({
+                actionVerb: task.verb,
+                stepNo: startingStepNo + index,
+                inputs: inputs,
+                description: task.description,
+                dependencies: dependencies
+            });
+        });
+
+        return steps;
+    }

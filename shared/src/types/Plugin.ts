@@ -128,6 +128,7 @@ export interface StepDependency {
 export interface PlanDependency {
     inputName: string;
     sourceStepNo: number;  // Using step number instead of ID during planning
+    sourceStepId?: string;
     outputName: string;
 }
 
@@ -138,6 +139,7 @@ export type PluginChangeEvent = {
 };
 
 export interface ActionVerbTask {
+    id?: string;
     verb: string;
     inputs: Map<string, PluginInput>;
     expectedOutputs?: Map<string, string>;

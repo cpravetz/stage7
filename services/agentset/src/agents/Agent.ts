@@ -11,7 +11,7 @@ import { ActionVerbTask } from '@cktmcs/shared';
 import { AgentStatistics } from '@cktmcs/shared';
 import { Message, MessageType } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
-import { Step, StepStatus } from './Step'; // Import the new Step class
+import { Step, StepStatus, createFromPlan } from './Step'; // Import the new Step class
 
 
 const api = axios.create({
@@ -189,7 +189,7 @@ Please consider this context and the available plugins when planning and executi
     }
 
     private addStepsFromPlan(plan: ActionVerbTask[]) {
-        const newSteps = Step.createFromPlan(plan, this.steps.length + 1);
+        const newSteps = createFromPlan(plan, this.steps.length + 1);
         this.steps.push(...newSteps);
     }
 
@@ -547,7 +547,7 @@ Please consider this context and the available plugins when planning and executi
             const payload = MapSerializer.transformForSerialization(step);
             step.storeTempData('payload', payload);
             
-            console.log('Agent: Executing serialized action with CapabilitiesManager:', payload);
+            //console.log('Agent: Executing serialized action with CapabilitiesManager:', payload);
             
             // Add timeout and abort signal to the request
             const response = await api.post(
@@ -591,7 +591,7 @@ Please consider this context and the available plugins when planning and executi
             for (const step of dependentSteps) {
                 step.status = status;
                 await this.cleanupFailedStep(step);
-                console.log(`Notified dependent step ${step.id} about failure of step ${failedStepId}`);
+                //console.log(`Notified dependent step ${step.id} about failure of step ${failedStepId}`);
             }
     
             // Then, check and notify dependent agents
@@ -619,7 +619,7 @@ Please consider this context and the available plugins when planning and executi
                     });
     
                     this.sendMessage(message);
-                    console.log(`Notified TrafficManager about step failure: ${failedStepId}`);
+                    //console.log(`Notified TrafficManager about step failure: ${failedStepId}`);
                 } catch (error) {
                     console.error('Failed to notify TrafficManager about step failure:', 
                         error instanceof Error ? error.message : error
@@ -732,15 +732,8 @@ Please consider this context and the available plugins when planning and executi
     }
 
     async getStatistics(): Promise<AgentStatistics> {
-        // Add debug logging to see each step's dependencies
-        this.steps.forEach(step => {
-            console.log(`Step ${step.stepNo} (${step.actionVerb}) dependencies:`, 
-                step.dependencies
-            );
-        });
-
         const totalDeps = this.steps.reduce((sum, step) => sum + step.dependencies.length, 0);
-        console.log(`Total dependencies across all steps: ${totalDeps}`);
+        //console.log(`Total dependencies across all steps: ${totalDeps}`);
 
         const stepStats = this.steps.map(step => ({
             id: step.id,
@@ -759,7 +752,7 @@ Please consider this context and the available plugins when planning and executi
             steps: stepStats,
             color: this.getAgentColor()
         };
-        console.log(`Agent ${this.id} statistics:`, statistics);
+        //console.log(`Agent ${this.id} statistics:`, statistics);
         return statistics;
     }
 
