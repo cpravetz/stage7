@@ -20,7 +20,7 @@ export class AnthropicInterface extends BaseInterface {
         });        
     }
 
-    async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, model?: string }): Promise<string> {
+    async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string, timeout?: number }): Promise<string> {
         const max_tokens = options.max_length || 4000;
         const trimmedMessages = this.trimMessages(messages, max_tokens);
     
@@ -28,11 +28,12 @@ export class AnthropicInterface extends BaseInterface {
             const response = await axios.post(
                 service.apiUrl,
                 {
-                    model: options?.model || 'claude-3-haiku-20240307',
+                    model: options?.modelName || 'claude-3-haiku-20240307',
                     max_tokens: max_tokens,
                     temperature: options?.temperature ?? 0.7,
                     messages: trimmedMessages,
                     stream: true,
+                    timeout: options?.timeout || 60000, // 60 seconds
                 },
                 {
                     headers: {
@@ -72,7 +73,7 @@ export class AnthropicInterface extends BaseInterface {
     async convertTextToText(args: ConvertParamsType): Promise<string> {
         const { service, prompt, modelName } = args;
         const messages = [{ role: 'user', content: prompt || '' }];
-        return this.chat(service, messages, { model: modelName });
+        return this.chat(service, messages, { modelName: modelName });
     }
 
     async convertTextToCode(args: ConvertParamsType): Promise<string> {
@@ -81,7 +82,7 @@ export class AnthropicInterface extends BaseInterface {
             { role: 'system', content: 'You are a code generation assistant. Provide only code without explanations.' },
             { role: 'user', content: prompt || ''}
         ];
-        return this.chat(service, messages, { model: modelName });
+        return this.chat(service, messages, { modelName: modelName });
     }
 
     async convert(service: BaseService, conversionType: LLMConversationType, convertParams: ConvertParamsType): Promise<any> {

@@ -125,16 +125,16 @@ export class Brain extends BaseEntity {
                 // Extract only the message content from the exchanges
                 const messages = thread.exchanges;
                 this.llmCalls++;
-    
-                const brainResponse = await selectedModel.chat(messages, 
-                    {
-                        max_length: thread.optionals?.max_length,
-                        temperature: thread.optionals?.temperature
-                    });
-                console.log('Brain response:', brainResponse);
-                const mimeType = this.determineMimeType(brainResponse);
+                thread.optionals.modelName = selectedModel.modelName;
+                const modelResponse = await selectedModel.chat(messages, thread.optionals || {});
+                this.logAndSay(`Model response: ${modelResponse}`);
+                if (!modelResponse || modelResponse == 'No response generated') {
+                    res.json({ response: 'No response generated.', mimeType: 'text/plain' });
+                    return;
+                }
+                const mimeType = this.determineMimeType(modelResponse);
                 res.json({
-                    response: brainResponse,
+                    response: modelResponse,
                     mimeType: mimeType
                 });
             }

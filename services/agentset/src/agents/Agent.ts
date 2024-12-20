@@ -539,9 +539,6 @@ Please consider this context and the available plugins when planning and executi
     }
 
     private async executeActionWithCapabilitiesManager(step: Step): Promise<PluginOutput[]> {
-        const controller = new AbortController();
-        step.registerPendingOperation(controller);
-    
         try {
             if (step.actionVerb === 'ASK') {
                 return this.handleAskStep(step.inputs);
@@ -555,11 +552,7 @@ Please consider this context and the available plugins when planning and executi
             // Add timeout and abort signal to the request
             const response = await api.post(
                 `http://${this.capabilitiesManagerUrl}/executeAction`, 
-                payload,
-                { 
-                    timeout: 30000,
-                    signal: controller.signal 
-                }
+                payload
             );
             
             return MapSerializer.transformFromSerialization(response.data);
@@ -584,9 +577,6 @@ Please consider this context and the available plugins when planning and executi
                 result: null,
                 error: error instanceof Error ? error.message : `Unknown error occurred ${error}`
             }];
-        } finally {
-            // Always clean up the controller
-            controller.abort();
         }
     }
     
@@ -659,9 +649,6 @@ Please consider this context and the available plugins when planning and executi
     private async cleanupFailedStep(step: Step): Promise<void> {
         try {
             console.log(`Starting cleanup for failed step ${step.id}`);
-            
-            // Cancel any pending operations
-            step.cancelPendingOperations?.();
             
             // Clear any temporary data
             step.clearTempData?.();

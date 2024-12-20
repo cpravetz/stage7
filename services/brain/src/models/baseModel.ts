@@ -70,11 +70,12 @@ export class BaseModel {
         return this.getScore(conversationType).speedScore;
     }
 
-    chat(messages: ExchangeType, options: { max_length?: number, temperature?: number }): Promise<string> {
+    chat(messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName: string, timeout?: number }): Promise<string> {
         if (!this.llminterface || !this.service) {
             console.log(`No interface or service set for model ${this.name} `);
             return Promise.resolve('');
         }
+        options.modelName = options.modelName || this.modelName;
         return this.llminterface.chat(this.service, messages, options);
     }
     convert(conversationType: LLMConversationType, convertParams: ConvertParamsType): Promise<any> {

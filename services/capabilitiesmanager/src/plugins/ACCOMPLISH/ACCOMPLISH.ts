@@ -90,7 +90,7 @@ when the goal can be accomplished with a plan.  If you determine a plugin is nee
 Guidelines for creating a plan:
 1. Number each step sequentially.
 2. Use specific, actionable verbs for each step (e.g., SCRAPE, ANALYZE, PREDICT).
-3. Ensure each step has a concise description.
+3. Ensure each step has a description.
 4. Each step input should be an object with either a 'value' property for predetermined values or an 'outputKey' property referencing an output from a previous step. 
 5. List dependencies for each step as an object with the property names being the outputs needed and the values being the step number that provides the required inputlike: {outputname: stepNumber}
 There MUST be a dependency entry for every input that comes from a previous step output.

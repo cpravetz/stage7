@@ -56,7 +56,7 @@ export class OpenAIInterface extends BaseInterface {
                 messages: trimmedMessages as ChatCompletionMessageParam[],
                 temperature,
                 max_tokens: max_length,
-                stream: true,
+                stream: true
             });
     
             let fullResponse = '';

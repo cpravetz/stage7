@@ -20,7 +20,6 @@ export class Step {
     status: StepStatus;
     result?: PluginOutput[];
     timeout?: number;
-    private pendingOperations: AbortController[] = [];
     private tempData: Map<string, any> = new Map();
 
     constructor(params: {
@@ -484,17 +483,6 @@ export class Step {
         }];
     }
 
-    public cancelPendingOperations(): void {
-        this.pendingOperations.forEach(controller => {
-            try {
-                controller.abort();
-            } catch (error) {
-                console.error(`Error aborting operation in step ${this.id}:`, error);
-            }
-        });
-        this.pendingOperations = [];
-    }
-
     /**
      * Clears any temporary data stored during step execution
      */
@@ -508,14 +496,6 @@ export class Step {
                 result: typeof output.result === 'string' ? output.result : null
             }));
         }
-    }
-
-    /**
-     * Registers a pending operation that can be cancelled
-     * @param controller AbortController for the operation
-     */
-    public registerPendingOperation(controller: AbortController): void {
-        this.pendingOperations.push(controller);
     }
 
     /**

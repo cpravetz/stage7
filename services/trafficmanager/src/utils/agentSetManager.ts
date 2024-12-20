@@ -328,8 +328,8 @@ class AgentSetManager {
     }
 
     isValidUrl(url: string): boolean {
-        // Implement validation logic, e.g., regex pattern check
-        const urlPattern = /^(?!:\/\/)([a-zA-Z0-9-_]+\.)+[a-zA-Z]{2,6}$/;
+        // This regex pattern allows for hostnames with optional port numbers
+        const urlPattern = /^(?!:\/\/)([a-zA-Z0-9-_]+)(:\d+)?$/;
         return urlPattern.test(url);
     }
 
@@ -344,7 +344,9 @@ class AgentSetManager {
             for (const agentSet of this.agentSets.values()) {
                 stats.agentSetsCount++;
                 try {
+                    console.log(`AgentSetManager:AgentSet `,agentSet.url,` getting statistics`);
                     if (!this.isValidUrl(agentSet.url)) {
+                        console.error(`Invalid URL: ${agentSet.url}`);
                         return stats;
                     }
                     const response = await axios.get(`http://${agentSet.url}/statistics/${missionId}`);
