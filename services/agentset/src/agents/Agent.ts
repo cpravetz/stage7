@@ -46,9 +46,7 @@ export class Agent extends BaseEntity {
     brainUrl: string = '';
     trafficManagerUrl: string = '';
     librarianUrl: string = '';
-    workProducts: Map<string, WorkProduct> = new Map();
     conversation: Array<{ role: string, content: string }> = [];
-
 
     private currentQuestionResolve: ((value: string) => void) | null = null;
     private currentQuestionReject: ((reason?: any) => void) | null = null;
@@ -58,11 +56,11 @@ export class Agent extends BaseEntity {
         console.log(`Agent ${config.id} created. missionId=${config.missionId}. Inputs: ${JSON.stringify(config.inputs)}` );
         this.agentPersistenceManager = new AgentPersistenceManager();
         this.inputs = config.inputs instanceof Map ? 
-        new Map(config.inputs) : 
-        new Map(Object.entries(config.inputs||{}));
+            new Map(config.inputs) : 
+            new Map(Object.entries(config.inputs||{}));
         this.inputs = config.inputs instanceof Map ? 
-        new Map(config.inputs) : 
-        new Map(Object.entries(config.inputs||{}));
+            new Map(config.inputs) : 
+            new Map(Object.entries(config.inputs||{}));
         this.missionId = config.missionId;
         this.agentSetUrl = config.agentSetUrl;
         this.status = AgentStatus.INITIALIZING;
@@ -77,7 +75,8 @@ export class Agent extends BaseEntity {
             stepNo: 1,
             inputs: this.inputs,
             description: 'Initial mission step',
-            status: StepStatus.PENDING
+            status: StepStatus.PENDING,
+            persistenceManager: this.agentPersistenceManager
         });
         this.steps.push(initialStep);
 
@@ -153,7 +152,7 @@ Please consider this context and the available plugins when planning and executi
                 
                 for (const step of this.steps.filter(s => s.status === StepStatus.PENDING)) {
                     if (this.status === AgentStatus.RUNNING && step.areDependenciesSatisfied(this.steps)) {
-                        step.populateInputsFromDependencies(this.steps);
+                        await this.populateInputsFromLibrarian(step);
                         const result = await step.execute(
                             this.executeActionWithCapabilitiesManager.bind(this),
                             this.useBrainForReasoning.bind(this),
@@ -174,8 +173,8 @@ Please consider this context and the available plugins when planning and executi
             }
             
             if (this.status === AgentStatus.RUNNING) {
-                this.output = this.steps[this.steps.length - 1].result;
-                this.status = AgentStatus.COMPLETED;
+                const finalStep = this.steps[this.steps.length - 1];
+                this.output = await this.getWorkProduct(finalStep.id);                this.status = AgentStatus.COMPLETED;
                 this.say(`Agent has completed its work.`);
                 this.say(`Result ${JSON.stringify(this.output)}`);
             }
@@ -188,8 +187,34 @@ Please consider this context and the available plugins when planning and executi
         }
     }
 
+    private async getWorkProduct(stepId: string): Promise<WorkProduct | null> {
+        try {
+            return await this.agentPersistenceManager.loadWorkProduct(this.id, stepId);
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error('Error loading work product:', error instanceof Error ? error.message : error);
+            return null;
+        }
+    }
+
+    private async populateInputsFromLibrarian(step: Step) {
+        for (const dep of step.dependencies) {
+            const workProduct = await this.getWorkProduct(dep.sourceStepId);
+            if (workProduct) {
+                const outputValue = workProduct.data.find(r => r.name === dep.outputName)?.result;
+                if (outputValue !== undefined) {
+                    step.inputs.set(dep.inputName, {
+                        inputName: dep.inputName,
+                        inputValue: outputValue,
+                        args: { outputKey: dep.outputName }
+                    });
+                }
+            }
+        }
+    }
+
     private addStepsFromPlan(plan: ActionVerbTask[]) {
-        const newSteps = createFromPlan(plan, this.steps.length + 1);
+        const newSteps = createFromPlan(plan, this.steps.length + 1, this.agentPersistenceManager);
         this.steps.push(...newSteps);
     }
 
@@ -215,7 +240,7 @@ Please consider this context and the available plugins when planning and executi
             };
         }
     
-        const finalWorkProduct = this.workProducts.get(lastCompletedStep.id);
+        const finalWorkProduct = await this.getWorkProduct(lastCompletedStep.id);
     
         if (!finalWorkProduct) {
             return {
@@ -330,24 +355,6 @@ Please consider this context and the available plugins when planning and executi
             this.currentQuestionReject = null;
         }
     }
-    
-    async loadDependencyWorkProducts(dependencies: string[]): Promise<void> {
-        for (const depId of dependencies) {
-            const depWorkProducts = await this.agentPersistenceManager.loadAllWorkProducts(depId);
-            for (const wp of depWorkProducts) {
-                this.workProducts.set(`${depId}_${wp.stepId}`, wp);
-            }
-        }
-        return Promise.resolve();
-    }
-
-    async loadWorkProduct(stepId: string): Promise<WorkProduct | null> {
-        const workProduct = await this.agentPersistenceManager.loadWorkProduct(this.id, stepId);
-        if (workProduct) {
-            this.workProducts.set(stepId, workProduct);
-        }
-        return workProduct;
-    }    
 
     private async sendMessage(message: Message): Promise<void> {
         try {
@@ -359,7 +366,6 @@ Please consider this context and the available plugins when planning and executi
       }
 
       private async saveWorkProduct(stepId: string, data: PluginOutput[], isFinal: boolean): Promise<void> {
-        const workProductId = stepId;
         const workProduct = new WorkProduct(this.id, stepId, data);
         try {
             // Save to Librarian
@@ -374,7 +380,7 @@ Please consider this context and the available plugins when planning and executi
                 sender: this.id,
                 recipient: 'user',
                 content: {
-                    id: workProductId,
+                    id: stepId,
                     type: isFinal ? 'Final' : 'Interim',
                     scope: isMissionOutput ? 'MissionOutput' : (isFinal ? 'AgentOutput' : 'AgentStep'),
                     name: data[0]? data[0].resultDescription :  'Step Output',
@@ -697,7 +703,6 @@ Please consider this context and the available plugins when planning and executi
             this.librarianUrl = state.librarianUrl;
             this.questions = state.questions;
             this.conversation = state.conversation || [];
-            this.workProducts = new Map(JSON.parse(state.workProducts));
         }
         console.log('Agent state loaded successfully.');
     }

@@ -51,7 +51,7 @@ export class AgentPersistenceManager {
     }
 
     async saveWorkProduct(workProduct: WorkProduct): Promise<void> {
-        console.log('Saving work product for step:', workProduct.stepId);
+        //console.log('Saving work product for step:', workProduct.stepId);
         try {
             return await axios.post(`http://${this.librarianUrl}/storeWorkProduct`, {
                 agentId: workProduct.agentId,
