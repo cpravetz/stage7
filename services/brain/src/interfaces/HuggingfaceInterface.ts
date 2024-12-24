@@ -69,7 +69,7 @@ export class HuggingfaceInterface extends BaseInterface {
         }
     }
 
-    async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string }): Promise<string> {
+    async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string, timeout?: number }): Promise<string> {
         try {
             const MODEL_MAX_TOKENS = 4096;
             const SAFETY_MARGIN = 200;
@@ -96,28 +96,20 @@ export class HuggingfaceInterface extends BaseInterface {
             const inference = new HfInference(service.apiKey);
             let out = "";
             
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 30000);
+            const stream = await inference.chatCompletionStream({
+                model: options.modelName || "HuggingFaceH4/zephyr-7b-beta",
+                messages: trimmedMessages,
+                max_tokens: max_new_tokens,
+                temperature: options.temperature || 0.5,
+                top_p: 0.7,
+                timeout: options.timeout || 450000, // Use the timeout option here
+            });
     
-            try {
-                const stream = await inference.chatCompletionStream({
-                    model: options.modelName || "HuggingFaceH4/zephyr-7b-beta",
-                    messages: trimmedMessages,
-                    max_tokens: max_new_tokens,
-                    temperature: options.temperature || 0.5,
-                    top_p: 0.7
-                }, {
-                    signal: controller.signal
-                });
-    
-                for await (const chunk of stream) {
-                    if (chunk.choices && chunk.choices.length > 0) {
-                        const newContent = chunk.choices[0].delta.content;
-                        out += newContent;
-                    }
+            for await (const chunk of stream) {
+                if (chunk.choices && chunk.choices.length > 0) {
+                    const newContent = chunk.choices[0].delta.content;
+                    out += newContent;
                 }
-            } finally {
-                clearTimeout(timeoutId);
             }
     
             return out || 'No response generated';

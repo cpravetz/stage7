@@ -46,15 +46,17 @@ export class BaseEntity {
     await register();
   }
 
-
-  say(content: string): void {
-    console.log(`${this.id} says: ${content}`);
+  sendMessage(type: string, recipient: string, content: any): void {
     axios.post(`http://${this.postOfficeUrl}/message`, {
-      type: 'say',
+      type: type``,
       content,
       sender: this.id,
-      recipient: 'user'
+      recipient
     });
+  }
+
+  say(content: string): void {
+    this.sendMessage('say', 'user', content);
   }
 
   async handleBaseMessage(message: any): Promise<void> {
@@ -76,12 +78,7 @@ export class BaseEntity {
       this.questions.push(questionGuid);
       this.askPromises.set(questionGuid, Promise.resolve(''));
 
-      axios.post(`http://${this.postOfficeUrl}/message`, {
-        type: MessageType.REQUEST,
-        recipient: 'user',
-        content: { question: content, questionGuid: questionGuid, choices: choices, asker: this.id },
-        sender: this.id
-      });
+      this.sendMessage(MessageType.REQUEST, 'user', { question: content, questionGuid: questionGuid, choices: choices, asker: this.id });
 
       this.askPromises.set(questionGuid, new Promise((resolve) => {
         const checkAnswer = setInterval(() => {

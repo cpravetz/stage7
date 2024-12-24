@@ -1,7 +1,8 @@
 import jwt from 'jsonwebtoken';
 import { analyzeError } from '@cktmcs/errorhandler';
+import {v4 as uuidv4} from 'uuid';
 
-const SECRET_KEY = 'your-very-secret-key'; // Replace with an actual secret key
+const SECRET_KEY = process.env.JWT_SECRET || uuidv4();
 
 export interface DecodedToken {
     username: string;

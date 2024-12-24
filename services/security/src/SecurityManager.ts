@@ -23,6 +23,11 @@ export class SecurityManager {
     }
 
     private configureMiddleware() {
+        const limiter = rateLimit({
+            windowMs: 15 * 60 * 1000, // 15 minutes
+            max: 1000, // max 100 requests per windowMs
+        });
+        app.use(limiter);        
         app.use(cors());
         app.use(bodyParser.json());
         app.use(bodyParser.urlencoded({ extended: true }));
@@ -54,10 +59,10 @@ export class SecurityManager {
             const { componentType, clientSecret } = req.body;
 
             // Verify the component's credentials (you'll need to implement this)
-            if (await verifyComponentCredentials(componentType, clientSecret)) {
+            if (process.env.JWT_SECRET && await verifyComponentCredentials(componentType, clientSecret)) {
                 const token = jwt.sign(
                     { componentType },
-                    process.env.JWT_SECRET || 'your-secret-key',
+                    process.env.JWT_SECRET,
                     { expiresIn: '1h' }
                 );
                 res.json({ authenticated: true, token });

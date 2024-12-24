@@ -22,7 +22,7 @@ export async function storeInMongo(collectionName: string, document: any) {
             await connectMongo();
         }
         const collection: Collection = db.collection(collectionName);
-        const filter = { _id: document._id };
+        const filter = { _id: { $eq: document._id } };
         const result = await collection.updateOne(
             filter,
             { $set: document },
@@ -47,7 +47,12 @@ export async function loadManyFromMongo(collectionName: string, query: any, opti
         await connectMongo();
     }
     const collection: Collection = db.collection(collectionName);
-    const cursor = collection.find(query, options);
+    const sanitizedQuery: Record<string, any> = {};
+    for (const key in query) {
+        sanitizedQuery[key] = { $eq: query[key] };
+    }
+    const cursor = collection.find(sanitizedQuery, options);
+    
     return await cursor.toArray();
 }
 

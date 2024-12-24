@@ -443,13 +443,14 @@ export class CapabilitiesManager extends BaseEntity {
             const context = ` ${step.description || ''} with inputs ${MapSerializer.transformForSerialization(step.inputs)}`;
             const goal = `How should I handle the action verb "${step.actionVerb}" in our plan with the following context: ${context}
             Can we accomplish it with a subplan using one or more steps or should we create a plugin that can run code to accomplish it?
+            Avoid using this action verb, ${step.actionVerb}, in the plan.
             `;
             console.log('CM: handleUnknownVerb goal:', step.actionVerb);
             
             const accomplishResult = await this.executeAccomplishPlugin(goal);
             
             if (!accomplishResult.success) {
-                console.error(`CM: Error executing ACCOMPLISH for verb ${step.actionVerb}:`, accomplishResult.error);
+                console.error('CM: Error executing ACCOMPLISH for verb %s:', step.actionVerb, accomplishResult.error);
                 return accomplishResult;
             }
     

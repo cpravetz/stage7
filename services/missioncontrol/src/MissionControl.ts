@@ -6,6 +6,7 @@ import { generateGuid } from './utils/generateGuid';
 import { BaseEntity, MessageType, PluginInput, MapSerializer } from '@cktmcs/shared';
 import { MissionStatistics } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
+import { rateLimit } from 'express-rate-limit';
 
 interface CustomRequest extends Request {
     user?: {
@@ -40,6 +41,11 @@ class MissionControl extends BaseEntity {
     
     private initializeServer() {
         const app = express();
+
+        app.use(rateLimit({
+            windowMs: 15 * 60 * 1000, // 15 minutes
+            max: 1000, // max 100 requests per windowMs
+        }));
         app.use(express.json());
     
         app.use((req: Request, res: Response, next: NextFunction) => {this.verifyToken(req, res, next)});

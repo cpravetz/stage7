@@ -2,6 +2,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { PluginInput, PluginParameterType, PluginOutput, PlanDependency, StepDependency } from '@cktmcs/shared';
 import { MapSerializer } from '@cktmcs/shared';
 import { MessageType, ActionVerbTask } from '@cktmcs/shared';
+import { AgentPersistenceManager } from '../utils/AgentPersistenceManager';
+
 
 export enum StepStatus {
     PENDING = 'pending',
@@ -9,6 +11,7 @@ export enum StepStatus {
     COMPLETED = 'completed',
     ERROR = 'error'
 }
+
 
 export class Step {
     readonly id: string;
@@ -20,76 +23,28 @@ export class Step {
     status: StepStatus;
     result?: PluginOutput[];
     timeout?: number;
+    private tempData: Map<string, any> = new Map();
+    private persistenceManager: AgentPersistenceManager;
 
     constructor(params: {
+        id?: string,
         actionVerb: string,
         stepNo: number,
         inputs?: Map<string, PluginInput>,
         description?: string,
         dependencies?: StepDependency[],
-        status?: StepStatus
+        status?: StepStatus,
+        persistenceManager: AgentPersistenceManager
     }) {
-        this.id = uuidv4();
+        this.id = params.id || uuidv4();
         this.stepNo = params.stepNo;
         this.actionVerb = params.actionVerb;
         this.inputs = params.inputs || new Map();
         this.description = params.description;
         this.dependencies = params.dependencies || [];
         this.status = params.status || StepStatus.PENDING;
-    }
-
-    /**
-     * Creates steps from a plan of action verb tasks
-     * @param plan Array of action verb tasks
-     * @param startingStepNo The starting step number
-     * @returns Array of Step instances
-     */
-    static createFromPlan(plan: ActionVerbTask[], startingStepNo: number = 1): Step[] {
-        const steps = plan.map((task, index) => {
-            const inputs = new Map<string, PluginInput>();
-            if (task.inputs) {
-                if (task.inputs instanceof Map) {
-                    task.inputs.forEach((value, key) => inputs.set(key, value));
-                } else {
-                    Object.entries(task.inputs).forEach(([key, value]) => {
-                        inputs.set(key, {
-                            inputName: key,
-                            inputValue: value,
-                            args: {}
-                        } as PluginInput);
-                    });
-                }
-            }
-            
-            return new Step({
-                actionVerb: task.verb,
-                stepNo: startingStepNo + index,
-                inputs: inputs,
-                description: task.description,
-                dependencies: []
-            });
-        });
-
-        // Convert PlanDependency to StepDependency using step numbers
-        steps.forEach((step, index) => {
-            const task = plan[index];
-            if (task.dependencies) {
-                task.dependencies.forEach((dep: PlanDependency) => {
-                    const sourceStep = steps.find(s => 
-                        s.stepNo === (startingStepNo + dep.sourceStepNo)
-                    );
-                    if (sourceStep) {
-                        step.dependencies.push({
-                            inputName: dep.inputName,
-                            sourceStepId: sourceStep.id,
-                            outputName: dep.outputName
-                        });
-                    }
-                });
-            }
-        });
-
-        return steps;
+        this.persistenceManager = params.persistenceManager;
+        //console.log(`Constructing new step ${this.id} created. Dependencies ${this.dependencies.map(dep => dep.sourceStepId).join(', ')}`);
     }
 
     populateInputsFromDependencies(allSteps: Step[]): void {
@@ -204,12 +159,16 @@ export class Step {
                 if (!resultItem.mimeType) { resultItem.mimeType = 'text/plain'; }
             });
 
-            this.result = result;
             this.status = StepStatus.COMPLETED;
+            await this.persistenceManager.saveWorkProduct({
+                agentId: this.id.split('_')[0], // Assuming the step ID is in the format 'agentId_stepId'
+                stepId: this.id,
+                data: result
+            });
             return result;
         } catch (error) {
             this.status = StepStatus.ERROR;
-            return [{
+            const errorResult = [{
                 success: false,
                 name: 'error',
                 resultType: PluginParameterType.ERROR,
@@ -217,6 +176,15 @@ export class Step {
                 result: error instanceof Error ? error.message : String(error),
                 error: error instanceof Error ? error.message : String(error)
             }];
+
+            // Push error output to Librarian
+            await this.persistenceManager.saveWorkProduct({
+                agentId: this.id.split('_')[0],
+                stepId: this.id,
+                data: errorResult
+            });
+
+            return errorResult;
         }
     }
 
@@ -246,7 +214,7 @@ export class Step {
 
         const stepsToExecute = result ? trueSteps : falseSteps;
         if (stepsToExecute) {
-            const newSteps = Step.createFromPlan(stepsToExecute, this.stepNo + 1);
+            const newSteps = createFromPlan(stepsToExecute, this.stepNo + 1, this.persistenceManager);
             // Add these steps to the agent's step queue
             return [{ 
                 success: true,
@@ -265,7 +233,7 @@ export class Step {
         const newSteps: Step[] = [];
 
         for (let i = 0; i < count; i++) {
-            const iterationSteps = Step.createFromPlan(steps, this.stepNo + 1 + (i * steps.length));
+            const iterationSteps = createFromPlan(steps, this.stepNo + 1 + (i * steps.length), this.persistenceManager);
             newSteps.push(...iterationSteps);
         }
 
@@ -281,7 +249,7 @@ export class Step {
     private async handleTimeout(): Promise<PluginOutput[]> {
         const timeoutMs = this.inputs.get('timeout')?.inputValue as number;
         const steps = this.inputs.get('steps')?.inputValue as ActionVerbTask[];
-        const newSteps = Step.createFromPlan(steps, this.stepNo + 1);
+        const newSteps = createFromPlan(steps, this.stepNo + 1, this.persistenceManager);
         
         newSteps.forEach(step => {
             step.timeout = timeoutMs;
@@ -329,13 +297,14 @@ export class Step {
                     args: {}
                 }]
             ]),
-            description: 'While loop condition evaluation'
+            description: 'While loop condition evaluation',
+            persistenceManager: this.persistenceManager
         });
     
         newSteps.push(checkStep);
     
         // Create steps for first potential iteration
-        const iterationSteps = Step.createFromPlan(steps, this.stepNo + 2);
+        const iterationSteps = createFromPlan(steps, this.stepNo + 2, this.persistenceManager);
         
         // Add dependency on condition check for all first iteration steps
         iterationSteps.forEach(step => {
@@ -359,7 +328,9 @@ export class Step {
                     args: {}
                 }]
             ]),
-            description: 'While loop continuation check'
+            description: 'While loop continuation check',
+            persistenceManager: this.persistenceManager
+
         });
     
         newSteps.push(nextCheckStep);
@@ -395,7 +366,7 @@ export class Step {
         const newSteps: Step[] = [];
     
         // Create first iteration steps (UNTIL executes at least once)
-        const iterationSteps = Step.createFromPlan(steps, this.stepNo + 1);
+        const iterationSteps = createFromPlan(steps, this.stepNo + 1, this.persistenceManager);
         newSteps.push(...iterationSteps);
     
         // Add condition check step after first iteration
@@ -409,7 +380,9 @@ export class Step {
                     args: {}
                 }]
             ]),
-            description: 'Until loop condition evaluation'
+            description: 'Until loop condition evaluation',
+            persistenceManager: this.persistenceManager
+
         });
     
         // Add dependencies from condition check to all iteration steps
@@ -457,7 +430,8 @@ export class Step {
                 actionVerb: task.verb,
                 stepNo: this.stepNo + 1 + index,
                 inputs: task.inputs || new Map(),
-                description: task.description || `Sequential step ${index + 1}`
+                description: task.description || `Sequential step ${index + 1}`,
+                persistenceManager: this.persistenceManager
             });
     
             if (previousStepId) {
@@ -482,7 +456,38 @@ export class Step {
         }];
     }
 
-  
+    /**
+     * Clears any temporary data stored during step execution
+     */
+    public clearTempData(): void {
+        this.tempData.clear();
+        // Clear any large objects or buffers
+        if (this.result) {
+            // Keep only essential data in results
+            this.result = this.result.map(output => ({
+                ...output,
+                result: typeof output.result === 'string' ? output.result : null
+            }));
+        }
+    }
+
+    /**
+     * Stores temporary data during step execution
+     * @param key Identifier for the temp data
+     * @param data The data to store
+     */
+    public storeTempData(key: string, data: any): void {
+        this.tempData.set(key, data);
+    }
+
+    /**
+     * Retrieves temporary data
+     * @param key Identifier for the temp data
+     */
+    public getTempData(key: string): any {
+        return this.tempData.get(key);
+    }
+    
     /**
      * Converts the step to a simple JSON-serializable object
      * @returns Simplified representation of the step
@@ -500,3 +505,53 @@ export class Step {
         };
     }
 }
+
+
+    /**
+     * Creates steps from a plan of action verb tasks
+     * @param plan Array of action verb tasks
+     * @param startingStepNo The starting step number
+     * @returns Array of Step instances
+     */
+    export function createFromPlan(plan: ActionVerbTask[], startingStepNo: number = 1, persistenceManager: AgentPersistenceManager): Step[] {
+        //ensure all ActionVerbTasks have an id property
+        plan.forEach(task => {
+            if (!task.id) {
+                task.id = uuidv4();
+            }
+        });
+
+        const steps = plan.map((task, index) => {
+            const inputs = new Map<string, PluginInput>();
+            if (task.inputs) {
+                if (task.inputs instanceof Map) {
+                    task.inputs.forEach((value, key) => inputs.set(key, value));
+                } else {
+                    Object.entries(task.inputs).forEach(([key, value]) => {
+                        inputs.set(key, {
+                            inputName: key,
+                            inputValue: value,
+                            args: {}
+                        } as PluginInput);
+                    });
+                }
+            }
+
+            const dependencies = (task.dependencies || []).map(dep => ({
+                inputName: dep.inputName,
+                sourceStepId: plan[dep.sourceStepNo - 1]?.id || '', // This should now always be present
+                outputName: dep.outputName
+            }));
+            
+            return new Step({
+                actionVerb: task.verb,
+                stepNo: startingStepNo + index,
+                inputs: inputs,
+                description: task.description,
+                dependencies: dependencies,
+                persistenceManager: persistenceManager
+            });
+        });
+
+        return steps;
+    }

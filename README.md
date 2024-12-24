@@ -279,3 +279,874 @@ the library of initial plugins.
 - Wiki: Detailed documentation and guides
 - Discord: Community chat and support
 
+# API Documentation
+
+## AgentSet
+
+### POST /message
+**Description:** Handles messages for the AgentSet or specific agents.
+
+**Input:**
+```json
+{
+  "forAgent?": "string",
+  "content": {
+    "missionId": "string"
+  },
+  "[other message properties]": "any"
+}
+```
+
+**Output:**
+- 200: `{ "status": "string" }`
+- 404: `{ "error": "string" }` (if agent not found)
+- 500: `{ "error": "string" }` (if message delivery fails)
+
+### POST /addAgent
+**Description:** Adds a new agent to the set.
+
+**Input:**
+```json
+{
+  "agentId": "string",
+  "actionVerb": "string",
+  "inputs": "object",
+  "missionId": "string",
+  "missionContext": "string"
+}
+```
+
+**Output:**
+- 200: `{ "message": "string", "agentId": "string" }`
+
+### POST /agent/:agentId/message
+**Description:** Sends a message to a specific agent.
+
+**Parameters:**
+- agentId: string (in URL)
+
+**Input:**
+- Body: [message object]
+
+**Output:**
+- 200: `{ "status": "string" }`
+- 404: `{ "error": "string" }` (if agent not found)
+- 500: `{ "error": "string" }` (if message delivery fails)
+
+### GET /agent/:agentId/output
+**Description:** Retrieves the output of a specific agent.
+
+**Parameters:**
+- agentId: string (in URL)
+
+**Output:**
+- 200: `{ "output": "any" }`
+- 404: `{ "error": "string" }` (if agent not found)
+- 500: `{ "error": "string" }` (if fetching output fails)
+
+### POST /pauseAgents
+**Description:** Pauses all agents for a specific mission.
+
+**Input:**
+```json
+{
+  "missionId": "string"
+}
+```
+
+**Output:**
+- 200: `{ "message": "string" }`
+
+### POST /resumeAgents
+**Description:** Resumes all agents for a specific mission.
+
+**Input:**
+```json
+{
+  "missionId": "string"
+}
+```
+
+**Output:**
+- 200: `{ "message": "string" }`
+
+### POST /resumeAgent
+**Description:** Resumes a specific agent.
+
+**Input:**
+```json
+{
+  "agentId": "string"
+}
+```
+
+**Output:**
+- 200: `{ "message": "string" }`
+- 404: `{ "error": "string" }` (if agent not found)
+
+### POST /abortAgent
+**Description:** Aborts a specific agent.
+
+**Input:**
+```json
+{
+  "agentId": "string"
+}
+```
+
+**Output:**
+- 200: `{ "message": "string" }`
+- 404: `{ "error": "string" }` (if agent not found)
+
+### GET /statistics/:missionId
+**Description:** Retrieves statistics for all agents in a mission.
+
+**Parameters:**
+- missionId: string (in URL)
+
+**Output:**
+- 200: `{ "agentsByStatus": "object", "agentsCount": "number" }`
+- 400: "Missing missionId parameter" (if missionId is not provided)
+
+### POST /updateFromAgent
+**Description:** Updates agent status in the persistence layer.
+
+**Input:**
+```json
+{
+  "agentId": "string",
+  "status": "string"
+}
+```
+
+**Output:**
+- 200: `{ "message": "string" }`
+- 201: `{ "error": "string" }` (if agent not found)
+
+### POST /saveAgent
+**Description:** Saves the current state of an agent to the persistence layer.
+
+**Input:**
+```json
+{
+  "agentId": "string"
+}
+```
+
+**Output:**
+- 200: `{ "message": "string", "agentId": "string" }`
+- 404: `{ "error": "string" }` (if agent not found)
+- 500: `{ "error": "string" }` (if saving fails)
+
+## Brain
+
+### POST /chat
+**Description:** Processes a chat request using a suitable LLM model.
+
+**Input:**
+```json
+{
+  "exchanges": "ExchangeType[]",
+  "optimization?": "OptimizationType",
+  "optionals?": "Record<string, any>",
+  "ConversationType?": "LLMConversationType",
+  "model?": "string"
+}
+```
+
+**Output:**
+- 200: `{ "response": "string", "mimeType": "string" }`
+- 500: `{ "error": "string" }`
+
+### POST /generate
+**Description:** Generates content using a specified or automatically selected LLM model.
+
+**Input:**
+```json
+{
+  "modelName?": "string",
+  "optimization?": "OptimizationType",
+  "conversationType": "LLMConversationType",
+  "convertParams": {
+    "max_length?": "number",
+    "[other conversion parameters]": "any"
+  }
+}
+```
+
+**Output:**
+- 200: `{ "response": "string", "mimeType": "string" }`
+- 400: `{ "error": "string" }`
+
+### GET /getLLMCalls
+**Description:** Retrieves the total number of LLM calls made.
+
+**Output:**
+- 200: `{ "llmCalls": "number" }`
+
+### GET /models
+**Description:** Retrieves a list of all available LLM models.
+
+**Output:**
+- 200: `{ "models": "string[]" }`
+
+## CapabilitiesManager
+
+### POST /executeAction
+**Description:** Executes a specific action verb (plugin).
+
+**Input:**
+```json
+{
+  "actionVerb": "string",
+  "inputs": "Map<string, PluginInput>"
+}
+```
+
+**Output:**
+- 200: Array of PluginOutput objects (serialized)
+- 500: `{ "success": false, "name": "error", "resultType": "PluginParameterType.ERROR", "result": "Error", "error": "string" }`
+
+### POST /message
+**Description:** Handles incoming messages for the CapabilitiesManager.
+
+**Input:**
+- Body: Message object (structure depends on the message type)
+
+**Output:**
+- 200: `{ "status": "Message received and processed" }`
+- 500: `{ "status": "Error processing message", "error": "string" }`
+
+### GET /availablePlugins
+**Description:** Retrieves a list of all available plugins.
+
+**Output:**
+- 200: Array of PluginDefinition objects
+
+### POST /storeNewPlugin
+**Description:** Stores a new plugin in the registry.
+
+**Input:**
+- Body: PluginDefinition object
+
+**Output:**
+- 200: `{ "message": "Plugin registered successfully", "pluginId": "string" }`
+- 500: `{ "error": "string" }`
+
+**Error Handling:**
+For any unhandled errors in the above endpoints:
+- 500: `{ "success": false, "resultType": "error", "error": "string" }`
+
+## Engineer
+
+### POST /createPlugin
+**Description:** Creates a new plugin based on the provided verb, context, and guidance.
+
+**Input:**
+```json
+{
+  "verb": "string",
+  "context": "Map<string, PluginInput>",
+  "guidance": "string"
+}
+```
+Note: The body should be serialized, as it's deserialized using MapSerializer.transformFromSerialization
+
+**Output:**
+- 200: PluginDefinition object or empty object `{}`
+- 500: `{ "error": "string" }`
+
+### POST /message
+**Description:** Handles incoming messages for the Engineer.
+
+**Input:**
+- Body: Message object (structure depends on the message type)
+
+**Output:**
+- 200: `{ "status": "Message received and processed" }`
+
+### GET /statistics
+**Description:** Retrieves statistics about newly created plugins.
+
+**Output:**
+- 200: `{ "newPlugins": "string[]" }`
+
+## Librarian
+
+### POST /storeData
+**Description:** Stores data in either MongoDB or Redis.
+
+**Input:**
+```json
+{
+  "id": "string",
+  "data": "any",
+  "storageType": "'mongo' | 'redis'",
+  "collection?": "string"
+}
+```
+
+**Output:**
+- 200: `{ "status": "string", "id": "string" }`
+- 400: `{ "error": "string" }` (if id or data is missing, or if storage type is invalid)
+- 500: `{ "error": "string", "details": "string" }`
+
+### GET /loadData/:id
+**Description:** Loads data from either MongoDB or Redis.
+
+**Parameters:**
+- id: string (in URL)
+
+**Query:**
+- storageType: 'mongo' | 'redis' (default: 'mongo')
+- collection: string (default: 'mcsdata')
+
+**Output:**
+- 200: `{ "data": "any" }`
+- 400: `{ "error": "string" }` (if id is missing or storage type is invalid)
+- 404: `{ "error": "string" }` (if data is not found)
+- 500: `{ "error": "string", "details": "string" }`
+
+### POST /queryData
+**Description:** Queries data from MongoDB.
+
+**Input:**
+```json
+{
+  "collection": "string",
+  "query": "object",
+  "limit?": "number"
+}
+```
+
+**Output:**
+- 200: `{ "data": "any[]" }`
+- 400: `{ "error": "string" }` (if collection or query is missing)
+- 500: `{ "error": "string", "details": "string" }`
+
+### GET /getDataHistory/:id
+**Description:** Retrieves the version history of data.
+
+**Parameters:**
+- id: string (in URL)
+
+**Output:**
+- 200: `{ "history": "DataVersion[]" }`
+- 400: `{ "error": "string" }` (if id is missing)
+- 500: `{ "error": "string", "details": "string" }`
+
+### POST /searchData
+**Description:** Searches data in MongoDB with advanced options.
+
+**Input:**
+```json
+{
+  "collection": "string",
+  "query?": "object",
+  "options?": "object"
+}
+```
+
+**Output:**
+- 200: `{ "data": "any[]" }`
+- 400: `{ "error": "string" }` (if collection is missing)
+- 500: `{ "error": "string", "details": "string" }`
+
+### DELETE /deleteData/:id
+**Description:** Deletes data from both MongoDB and Redis.
+
+**Parameters:**
+- id: string (in URL)
+
+**Output:**
+- 200: `{ "message": "string" }`
+- 400: `{ "error": "string" }` (if id is missing)
+- 500: `{ "error": "string", "details": "string" }`
+
+### POST /storeWorkProduct
+**Description:** Stores a work product in MongoDB.
+
+**Input:**
+```json
+{
+  "agentId": "string",
+  "stepId": "string",
+  "data": "any"
+}
+```
+
+**Output:**
+- 200: `{ "status": "string", "id": "string" }`
+- 400: `{ "error": "string" }` (if agentId or stepId is missing)
+- 500: `{ "error": "string", "details": "string" }`
+
+### GET /loadWorkProduct/:stepId
+**Description:** Loads a work product from MongoDB.
+
+**Parameters:**
+- stepId: string (in URL)
+
+**Output:**
+- 200: `{ "data": "WorkProduct" }`
+- 400: `{ "error": "string" }` (if stepId is missing)
+- 404: `{ "error": "string" }` (if work product is not found)
+- 500: `{ "error": "string", "details": "string" }`
+
+### GET /getSavedMissions
+**Description:** Retrieves saved missions for a user.
+
+**Input:**
+```json
+{
+  "userId": "string"
+}
+```
+
+**Output:**
+- 200: `{ "id": "string", "name": "string" }[]`
+- 500: `{ "error": "string", "details": "string" }`
+
+## MissionControl
+
+### POST /message
+**Description:** Handles various types of messages for mission control operations.
+
+**Input:**
+```json
+{
+  "type": "MessageType",
+  "sender": "string",
+  "content": "any",
+  "clientId": "string",
+  "missionId?": "string"
+}
+```
+
+**Output:**
+- 200: `{ "message": "Message processed successfully" }`
+- 502: `{ "error": "Internal server error" }`
+
+**Message Types and their corresponding actions:**
+
+**MessageType.CREATE_MISSION**
+- Creates a new mission
+- Required content: `{ "goal": "string", "name?": "string", "missionContext?": "string" }`
+
+**MessageType.PAUSE**
+- Pauses an existing mission
+- Required: missionId in the request body
+
+**MessageType.RESUME**
+- Resumes a paused mission
+- Required: missionId in the request body
+
+**MessageType.ABORT**
+- Aborts an existing mission
+- Required: missionId in the request body
+
+**MessageType.SAVE**
+- Saves the current state of a mission
+- Required: missionId in the request body
+- Optional: missionName in the request body
+
+**MessageType.LOAD**
+- Loads a previously saved mission
+- Required: missionId in the request body
+
+**MessageType.USER_MESSAGE**
+- Handles a user message for a specific mission
+- Required content: `{ "missionId": "string", "message": "string" }`
+
+## PostOffice
+
+### POST /message
+**Description:** Handles incoming messages for routing.
+
+**Input:**
+- Body: Message object (structure depends on the message type)
+
+**Output:**
+- 200: `{ "status": "string" }`
+
+### POST /sendMessage
+**Description:** Handles incoming messages from clients.
+
+**Input:**
+- Body: Message object
+
+**Output:**
+- 200: `{ "status": "string" }`
+- 404: `{ "error": "string" }` (if recipient not found)
+- 500: `{ "error": "string" }`
+
+### POST /securityManager/*
+**Description:** Routes security-related requests to the SecurityManager.
+
+**Input:** Varies based on the specific security request
+
+**Output:** Depends on the SecurityManager's response
+
+### POST /registerComponent
+**Description:** Registers a new component with the PostOffice.
+
+**Input:**
+```json
+{
+  "id": "string",
+  "type": "string",
+  "url": "string"
+}
+```
+
+**Output:**
+- 200: `{ "status": "string" }`
+- 500: `{ "error": "string" }`
+
+### GET /requestComponent
+**Description:** Requests information about registered components.
+
+**Query Parameters:**
+- guid?: string
+- type?: string
+
+**Output:**
+- 200: `{ "components": "Component[]" }`
+- 400: `{ "error": "string" }`
+- 404: `{ "error": "string" }`
+
+### GET /getServices
+**Description:** Retrieves URLs of registered services.
+
+**Output:**
+- 200: `{ "[serviceName: string]": "string" }`
+
+### POST /submitUserInput
+**Description:** Submits user input for a specific request.
+
+**Input:**
+```json
+{
+  "requestId": "string",
+  "response": "any"
+}
+```
+
+**Output:**
+- 200: `{ "message": "string" }`
+- 404: `{ "error": "string" }`
+
+### POST /createMission
+**Description:** Creates a new mission.
+
+**Input:**
+```json
+{
+  "goal": "string",
+  "clientId": "string"
+}
+```
+
+**Headers:**
+- Authorization: string
+
+**Output:**
+- 200: Response from MissionControl
+- 401: `{ "error": "string" }`
+- 404: `{ "error": "string" }`
+
+### POST /loadMission
+**Description:** Loads a previously saved mission.
+
+**Input:**
+```json
+{
+  "missionId": "string",
+  "clientId": "string"
+}
+```
+
+**Output:**
+- 200: Response from MissionControl
+- 500: `{ "error": "string" }`
+
+### GET /librarian/retrieve/:id
+**Description:** Retrieves a work product from the Librarian.
+
+**Parameters:**
+- id: string (in URL)
+
+**Output:**
+- 200: Work product data
+- 404: `{ "error": "string" }`
+- 500: `{ "error": "string" }`
+
+### GET /getSavedMissions
+**Description:** Retrieves saved missions for the authenticated user.
+
+**Headers:**
+- Authorization: string
+
+**Output:**
+- 200: Array of saved mission objects
+- 401: `{ "error": "string" }`
+- 500: `{ "error": "string" }`
+
+## SecurityManager
+
+### POST /register
+**Description:** Registers a new user.
+
+**Input:**
+```json
+{
+  "email": "string",
+  "password": "string",
+  "name?": "string"
+}
+```
+
+**Output:**
+- 201: `{ "token": "string", "user": { "id": "string", "email": "string" } }`
+- 400: `{ "message": "string" }` (if user already exists)
+- 500: `{ "message": "string" }`
+
+### POST /login
+**Description:** Authenticates a user and returns a JWT token.
+
+**Input:**
+```json
+{
+  "email": "string",
+  "password": "string"
+}
+```
+
+**Output:**
+- 200: `{ "token": "string", "user": { "id": "string", "email": "string" } }`
+- 401: `{ "message": "string" }` (if authentication fails)
+
+### POST /logout
+**Description:** Logs out a user (client-side handled).
+
+**Output:**
+- 200: `{ "message": "Logout successful" }`
+
+### POST /refresh-token
+**Description:** Refreshes an expired JWT token.
+
+**Input:**
+```json
+{
+  "refreshToken": "string"
+}
+```
+
+**Output:**
+- 200: `{ "token": "string", "user": { "id": "string", "email": "string" } }`
+- 401: `{ "message": "string" }` (if refresh token is invalid)
+
+### POST /verify
+**Description:** Verifies a JWT token.
+
+**Headers:**
+- Authorization: "Bearer [token]"
+
+**Output:**
+- 200: `{ "valid": true, "user": "DecodedToken" }`
+- 401: `{ "valid": false, "message": "string" }`
+
+### POST /auth/service
+**Description:** Authenticates a service component and issues a JWT token.
+
+**Input:**
+```json
+{
+  "componentType": "string",
+  "clientSecret": "string"
+}
+```
+
+**Output:**
+- 200: `{ "authenticated": true, "token": "string" }`
+- 401: `{ "authenticated": false, "message": "string" }`
+
+### GET /profile
+**Description:** Retrieves the profile information of the authenticated user.
+
+**Authentication:** Required (JWT token)
+
+**Headers:**
+- Authorization: "Bearer [token]"
+
+**Output:**
+- 200: `{ "user": { "id": "string", "email": "string", "username": "string" } }`
+- 401: Unauthorized (if JWT authentication fails)
+
+### PUT /profile
+**Description:** Updates the profile information of the authenticated user.
+
+**Authentication:** Required (JWT token)
+
+**Headers:**
+- Authorization: "Bearer [token]"
+
+**Input:**
+```json
+{
+  "username": "string"
+}
+```
+Note: Other fields may be added as needed
+
+**Output:**
+- 200: `{ "user": { "id": "string", "email": "string" } }`
+- 401: Unauthorized (if JWT authentication fails)
+- 500: `{ "message": "Error updating profile" }`
+
+## TrafficManager
+
+### POST /message
+**Description:** Handles incoming messages for the TrafficManager.
+
+**Input:**
+```json
+{
+  "type": "MessageType",
+  "sender": "string",
+  "content": "any",
+  "forAgent?": "string"
+}
+```
+
+**Output:**
+- 200: `{ "status": "Message forwarded to agent" }` or `{ "status": "Message received and processed by TrafficManager" }`
+- 500: `{ "error": "Failed to forward message to agent" }`
+
+### POST /createAgent
+**Description:** Creates a new agent and assigns it to an AgentSet.
+
+**Input:**
+```json
+{
+  "actionVerb": "string",
+  "inputs": "Map<string, PluginInput>",
+  "dependencies": "string[]",
+  "missionId": "string",
+  "missionContext": "string"
+}
+```
+
+**Output:**
+- 200: `{ "message": "Agent created and assigned.", "agentId": "string", "response": "any" }`
+- 200: `{ "message": "Agent created but waiting for dependencies.", "agentId": "string" }`
+- 500: `{ "error": "Failed to create agent" }`
+
+### POST /checkDependencies
+**Description:** Checks dependencies for an agent.
+
+**Input:**
+```json
+{
+  "agentId": "string"
+}
+```
+
+**Output:** Response depends on implementation details
+
+### POST /pauseAgents
+**Description:** Pauses agents for a specific mission.
+
+**Input:**
+```json
+{
+  "missionId": "string"
+}
+```
+
+**Output:**
+- 200: Success response
+- 500: Error response
+
+### POST /abortAgents
+**Description:** Aborts agents for a specific mission.
+
+**Input:**
+```json
+{
+  "missionId": "string"
+}
+```
+
+**Output:** Response depends on implementation details
+
+### POST /resumeAgents
+**Description:** Resumes paused agents for a specific mission.
+
+**Input:**
+```json
+{
+  "missionId": "string"
+}
+```
+
+**Output:** Response depends on implementation details
+
+### GET /getAgentStatistics/:missionId
+**Description:** Retrieves agent statistics for a specific mission.
+
+**Parameters:**
+- missionId: string (in URL)
+
+**Output:**
+- 200: TrafficManagerStatistics object:
+```json
+{
+  "agentStatisticsByType": {
+    "totalAgents": "number",
+    "agentCountByStatus": "Object",
+    "agentSetCount": "number"
+  },
+  "agentStatisticsByStatus": "Map<string, Array>"
+}
+```
+- 400: `{ "error": "Missing missionId parameter" }`
+- 500: `{ "error": "Failed to fetch agent statistics" }`
+
+### POST /checkBlockedAgents
+**Description:** Checks for blocked agents.
+
+**Input:** Details not specified in the file
+
+**Output:** Response depends on implementation details
+
+### GET /dependentAgents/:agentId
+**Description:** Retrieves dependent agents for a specific agent.
+
+**Parameters:**
+- agentId: string (in URL)
+
+**Output:**
+- 200: string[] (array of dependent agent IDs)
+- 500: `{ "error": "Failed to get dependent agents" }`
+
+### POST /distributeUserMessage
+**Description:** Distributes a user message to relevant agents.
+
+**Input:**
+```json
+{
+  "type": "MessageType.USER_MESSAGE",
+  "sender": "user",
+  "recipient": "agents",
+  "content": {
+    "missionId": "string",
+    "message": "string"
+  },
+  "clientId": "string"
+}
+```
+
+**Output:**
+- 200: `{ "message": "User message distributed successfully" }`
+- 500: `{ "error": "Failed to distribute user message" }`
+  

@@ -8,11 +8,12 @@
         "build": "tsc"
     },
     "dependencies": {
-        "@cktmcs/shared": "file:../../shared",
         "@cktmcs/errorhandler": "file:../../errorhandler",
+        "@cktmcs/shared": "file:../../shared",
         "axios": "^1.7.7",
         "body-parser": "^1.19.0",
         "express": "^4.18.2",
+        "express-rate-limit": "^7.5.0",
         "uuid": "^10.0.0",
         "ws": "^8.18.0"
     },

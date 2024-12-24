@@ -1,17 +1,13 @@
 import express from 'express';
 import { Agent } from './agents/Agent';
-import { AgentStatus } from './utils/agentStatus';
 import { MapSerializer, BaseEntity } from '@cktmcs/shared';
 import { v4 as uuidv4 } from 'uuid';
-import { AgentConfig } from './agents/Agent';
-import axios from 'axios';
 import { AgentSetStatistics, AgentStatistics, PluginInput } from '@cktmcs/shared';
 import { AgentPersistenceManager } from './utils/AgentPersistenceManager';
 import { analyzeError } from '@cktmcs/errorhandler';
-
+import { setInterval } from 'timers';
 
 const app = express();
-
 
 export class AgentSet extends BaseEntity {
     agents: Map<string, Agent> = new Map(); // Store agents by their ID
@@ -21,6 +17,11 @@ export class AgentSet extends BaseEntity {
     constructor() {
         super(uuidv4(), 'AgentSet', process.env.HOST || 'agentset', process.env.PORT || '9000');
         this.initializeServer();
+        setInterval(() => {
+            if (global.gc) {
+                global.gc();
+            }
+        }, 5 * 60 * 1000);
     }
 
 

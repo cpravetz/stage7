@@ -8,10 +8,11 @@ import { MapSerializer, BaseEntity } from '@cktmcs/shared';
 import { AgentPersistenceManager } from '../utils/AgentPersistenceManager';
 import { PluginInput, PluginOutput, PluginParameterType } from '@cktmcs/shared';
 import { ActionVerbTask } from '@cktmcs/shared';
-import { AgentStatistics } from '@cktmcs/shared';
+import { AgentConfig } from '@cktmcs/shared';
 import { Message, MessageType } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
-import { Step, StepStatus } from './Step'; // Import the new Step class
+import { Step, StepStatus, createFromPlan } from './Step';
+import { StateManager } from '../utils/StateManager';
 
 
 const api = axios.create({
@@ -21,21 +22,11 @@ const api = axios.create({
     },
   });
 
-export interface AgentConfig {
-    actionVerb: string;
-    inputs? : Map<string, PluginInput>;
-    missionId: string;
-    dependencies?: string[];
-    postOfficeUrl: string;
-    agentSetUrl: string;
-    id: string;
-    missionContext: string;
-}
-
 export class Agent extends BaseEntity {
     private missionContext: string = '';
     private agentSetUrl: string;
     private agentPersistenceManager: AgentPersistenceManager;
+    private stateManager: StateManager;
     inputs: Map<string, PluginInput> | undefined;
     status: AgentStatus;
     steps: Step[] = [];
@@ -46,9 +37,7 @@ export class Agent extends BaseEntity {
     brainUrl: string = '';
     trafficManagerUrl: string = '';
     librarianUrl: string = '';
-    workProducts: Map<string, WorkProduct> = new Map();
     conversation: Array<{ role: string, content: string }> = [];
-
 
     private currentQuestionResolve: ((value: string) => void) | null = null;
     private currentQuestionReject: ((reason?: any) => void) | null = null;
@@ -57,12 +46,10 @@ export class Agent extends BaseEntity {
         super(config.id, 'Agent', `agentset`, process.env.PORT || '9000');
         console.log(`Agent ${config.id} created. missionId=${config.missionId}. Inputs: ${JSON.stringify(config.inputs)}` );
         this.agentPersistenceManager = new AgentPersistenceManager();
+        this.stateManager = new StateManager(config.id, this.agentPersistenceManager);
         this.inputs = config.inputs instanceof Map ? 
-        new Map(config.inputs) : 
-        new Map(Object.entries(config.inputs||{}));
-        this.inputs = config.inputs instanceof Map ? 
-        new Map(config.inputs) : 
-        new Map(Object.entries(config.inputs||{}));
+            new Map(config.inputs) : 
+            new Map(Object.entries(config.inputs||{}));
         this.missionId = config.missionId;
         this.agentSetUrl = config.agentSetUrl;
         this.status = AgentStatus.INITIALIZING;
@@ -77,7 +64,8 @@ export class Agent extends BaseEntity {
             stepNo: 1,
             inputs: this.inputs,
             description: 'Initial mission step',
-            status: StepStatus.PENDING
+            status: StepStatus.PENDING,
+            persistenceManager: this.agentPersistenceManager
         });
         this.steps.push(initialStep);
 
@@ -118,7 +106,7 @@ export class Agent extends BaseEntity {
     }
 
     private async prepareOpeningInstruction() {
-        const availablePlugins : Array<String >= await this.getAvailablePlugins();
+        const availablePlugins : Array<String> = await this.getAvailablePlugins();
         const openingInstruction = `
 Mission Context: ${this.missionContext}
 
@@ -153,7 +141,7 @@ Please consider this context and the available plugins when planning and executi
                 
                 for (const step of this.steps.filter(s => s.status === StepStatus.PENDING)) {
                     if (this.status === AgentStatus.RUNNING && step.areDependenciesSatisfied(this.steps)) {
-                        step.populateInputsFromDependencies(this.steps);
+                        await this.populateInputsFromLibrarian(step);
                         const result = await step.execute(
                             this.executeActionWithCapabilitiesManager.bind(this),
                             this.useBrainForReasoning.bind(this),
@@ -174,8 +162,8 @@ Please consider this context and the available plugins when planning and executi
             }
             
             if (this.status === AgentStatus.RUNNING) {
-                this.output = this.steps[this.steps.length - 1].result;
-                this.status = AgentStatus.COMPLETED;
+                const finalStep = this.steps[this.steps.length - 1];
+                this.output = await this.getWorkProduct(finalStep.id);                this.status = AgentStatus.COMPLETED;
                 this.say(`Agent has completed its work.`);
                 this.say(`Result ${JSON.stringify(this.output)}`);
             }
@@ -188,8 +176,34 @@ Please consider this context and the available plugins when planning and executi
         }
     }
 
+    private async getWorkProduct(stepId: string): Promise<WorkProduct | null> {
+        try {
+            return await this.agentPersistenceManager.loadWorkProduct(this.id, stepId);
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error('Error loading work product:', error instanceof Error ? error.message : error);
+            return null;
+        }
+    }
+
+    private async populateInputsFromLibrarian(step: Step) {
+        for (const dep of step.dependencies) {
+            const workProduct = await this.getWorkProduct(dep.sourceStepId);
+            if (workProduct) {
+                const outputValue = workProduct.data.find(r => r.name === dep.outputName)?.result;
+                if (outputValue !== undefined) {
+                    step.inputs.set(dep.inputName, {
+                        inputName: dep.inputName,
+                        inputValue: outputValue,
+                        args: { outputKey: dep.outputName }
+                    });
+                }
+            }
+        }
+    }
+
     private addStepsFromPlan(plan: ActionVerbTask[]) {
-        const newSteps = Step.createFromPlan(plan, this.steps.length + 1);
+        const newSteps = createFromPlan(plan, this.steps.length + 1, this.agentPersistenceManager);
         this.steps.push(...newSteps);
     }
 
@@ -215,7 +229,7 @@ Please consider this context and the available plugins when planning and executi
             };
         }
     
-        const finalWorkProduct = this.workProducts.get(lastCompletedStep.id);
+        const finalWorkProduct = await this.getWorkProduct(lastCompletedStep.id);
     
         if (!finalWorkProduct) {
             return {
@@ -330,36 +344,8 @@ Please consider this context and the available plugins when planning and executi
             this.currentQuestionReject = null;
         }
     }
-    
-    async loadDependencyWorkProducts(dependencies: string[]): Promise<void> {
-        for (const depId of dependencies) {
-            const depWorkProducts = await this.agentPersistenceManager.loadAllWorkProducts(depId);
-            for (const wp of depWorkProducts) {
-                this.workProducts.set(`${depId}_${wp.stepId}`, wp);
-            }
-        }
-        return Promise.resolve();
-    }
 
-    async loadWorkProduct(stepId: string): Promise<WorkProduct | null> {
-        const workProduct = await this.agentPersistenceManager.loadWorkProduct(this.id, stepId);
-        if (workProduct) {
-            this.workProducts.set(stepId, workProduct);
-        }
-        return workProduct;
-    }    
-
-    private async sendMessage(message: Message): Promise<void> {
-        try {
-          return await axios.post(`http://${this.postOfficeUrl}/message`, message);
-        } catch (error) { analyzeError(error as Error);
-          console.error('Error sending message:', error instanceof Error ? error.message : error);
-          return Promise.reject(error);
-        }
-      }
-
-      private async saveWorkProduct(stepId: string, data: PluginOutput[], isFinal: boolean): Promise<void> {
-        const workProductId = stepId;
+    private async saveWorkProduct(stepId: string, data: PluginOutput[], isFinal: boolean): Promise<void> {
         const workProduct = new WorkProduct(this.id, stepId, data);
         try {
             // Save to Librarian
@@ -367,24 +353,18 @@ Please consider this context and the available plugins when planning and executi
     
             // Determine if this is a mission output
             const isMissionOutput = this.steps.length === 1 || (isFinal && !(await this.hasDependentAgents()));
-    
+   
             // Send message to client
-            const message: Message = {
-                type: MessageType.WORK_PRODUCT_UPDATE,
-                sender: this.id,
-                recipient: 'user',
-                content: {
-                    id: workProductId,
-                    type: isFinal ? 'Final' : 'Interim',
-                    scope: isMissionOutput ? 'MissionOutput' : (isFinal ? 'AgentOutput' : 'AgentStep'),
-                    name: data[0]? data[0].resultDescription :  'Step Output',
-                    agentId: this.id,
-                    stepId: stepId,
-                    missionId: this.missionId,
-                    mimeType: data[0]?.mimeType || 'text/plain'
-                }
-            };
-            await this.sendMessage(message);
+            await this.sendMessage(MessageType.WORK_PRODUCT_UPDATE,'user',{
+                id: stepId,
+                type: isFinal ? 'Final' : 'Interim',
+                scope: isMissionOutput ? 'MissionOutput' : (isFinal ? 'AgentOutput' : 'AgentStep'),
+                name: data[0]? data[0].resultDescription :  'Step Output',
+                agentId: this.id,
+                stepId: stepId,
+                missionId: this.missionId,
+                mimeType: data[0]?.mimeType || 'text/plain'
+            }
         } catch (error) { analyzeError(error as Error);
             console.error('Error saving work product:', error instanceof Error ? error.message : error);
         }
@@ -539,18 +519,36 @@ Please consider this context and the available plugins when planning and executi
     }
 
     private async executeActionWithCapabilitiesManager(step: Step): Promise<PluginOutput[]> {
-        this.logAndSay(`Agent: Executing action ${step.actionVerb} with CapabilitiesManager`);
         try {
             if (step.actionVerb === 'ASK') {
                 return this.handleAskStep(step.inputs);
             }
-
+    
             const payload = MapSerializer.transformForSerialization(step);
-            console.log('Agent: Executing serialized action with CapabilitiesManager:', payload);
-            const response = await api.post(`http://${this.capabilitiesManagerUrl}/executeAction`, payload);
+            step.storeTempData('payload', payload);
+            
+            //console.log('Agent: Executing serialized action with CapabilitiesManager:', payload);
+            
+            // Add timeout and abort signal to the request
+            const response = await api.post(
+                `http://${this.capabilitiesManagerUrl}/executeAction`, 
+                payload
+            );
+            
             return MapSerializer.transformFromSerialization(response.data);
         } catch (error) {
             console.error('Error executing action with CapabilitiesManager:', error instanceof Error ? error.message : error);
+            
+            step.status = StepStatus.ERROR;
+            
+            if (axios.isAxiosError(error) && (error.code === 'ECONNABORTED' || !error.response)) {
+                this.status = AgentStatus.ERROR;
+                await this.notifyTrafficManager();
+                await this.saveAgentState();
+            }
+    
+            await this.cleanupFailedStep(step);
+                
             return [{
                 success: false,
                 name: 'error',
@@ -559,36 +557,102 @@ Please consider this context and the available plugins when planning and executi
                 result: null,
                 error: error instanceof Error ? error.message : `Unknown error occurred ${error}`
             }];
+        }
+    }
+    
+    // Add new method to handle cleanup
+    private async notifyDependents(failedStepId: string, status: StepStatus): Promise<void> {
+        try {
+            // First, notify dependent steps within the same agent
+            const dependentSteps = this.steps.filter(step => 
+                step.dependencies.some(dep => dep.sourceStepId === failedStepId)
+            );
+    
+            for (const step of dependentSteps) {
+                step.status = status;
+                await this.cleanupFailedStep(step);
+                //console.log(`Notified dependent step ${step.id} about failure of step ${failedStepId}`);
+            }
+    
+            // Then, check and notify dependent agents
+            const hasDependents = await this.hasDependentAgents();
+            if (hasDependents) {
+                try {
+                    this.sendMessage(MessageType.STEP_FAILURE, 'trafficmanager', {
+                        failedStepId,
+                        agentId: this.id,
+                        status: this.status,
+                        error: `Step ${failedStepId} failed with status ${status}`
+                    });
+
+                    // Send message to TrafficManager
+                    await axios.post(`http://${this.trafficManagerUrl}/handleStepFailure`, {
+                        agentId: this.id,
+                        stepId: failedStepId,
+                        status: status
+                    });
+    
+                    //console.log(`Notified TrafficManager about step failure: ${failedStepId}`);
+                } catch (error) {
+                    console.error('Failed to notify TrafficManager about step failure:', 
+                        error instanceof Error ? error.message : error
+                    );
+                }
+            }
+    
+            // Update agent state after notifying dependents
+            await this.saveAgentState();
+    
+        } catch (error) {
+            console.error('Error in notifyDependents:', 
+                error instanceof Error ? error.message : error
+            );
+            // Don't throw here - we don't want notification failures to cause additional issues
+        }
+    }
+    
+    // Helper method to check if a step has any dependent steps
+    private hasDependendentSteps(stepId: string): boolean {
+        return this.steps.some(step => 
+            step.dependencies.some(dep => dep.sourceStepId === stepId)
+        );
+    }
+    
+    // Update the cleanupFailedStep method to include proper error handling
+    private async cleanupFailedStep(step: Step): Promise<void> {
+        try {
+            console.log(`Starting cleanup for failed step ${step.id}`);
             
+            // Clear any temporary data
+            step.clearTempData?.();
+            
+            // If this step's failure affects the entire agent, update agent status
+            if (!this.hasDependendentSteps(step.id)) {
+                this.status = AgentStatus.ERROR;
+                await this.notifyTrafficManager();
+            }
+            
+            // Save the updated state
+            await this.saveAgentState();
+            
+            // Notify any dependent steps/agents
+            await this.notifyDependents(step.id, StepStatus.ERROR);
+            
+            console.log(`Completed cleanup for failed step ${step.id}`);
+        } catch (cleanupError) {
+            console.error(`Error during step ${step.id} cleanup:`, 
+                cleanupError instanceof Error ? cleanupError.message : cleanupError
+            );
+            // Log the error but don't throw - we want to continue with other cleanup tasks
         }
     }
 
     async saveAgentState(): Promise<void> {
-        await this.agentPersistenceManager.saveAgent({
-            ...this,
-            conversation: this.conversation
-        });
+        await this.stateManager.saveState(this);
     }
 
     async loadAgentState(): Promise<void> {
-        const state = await this.agentPersistenceManager.loadAgent(this.id);
-        if (state) {
-            // Restore all properties
-            this.status = state.status;
-            this.output = state.output;
-            this.inputs = state.inputs;
-            this.missionId = state.missionId;
-            this.steps = state.steps;
-            this.dependencies = state.dependencies;
-            this.capabilitiesManagerUrl = state.capabilitiesManagerUrl;
-            this.brainUrl = state.brainUrl;
-            this.trafficManagerUrl = state.trafficManagerUrl;
-            this.librarianUrl = state.librarianUrl;
-            this.questions = state.questions;
-            this.conversation = state.conversation || [];
-            this.workProducts = new Map(JSON.parse(state.workProducts));
-        }
-        console.log('Agent state loaded successfully.');
+        await this.stateManager.loadState(this);
     }
 
     async pause() {
@@ -621,15 +685,8 @@ Please consider this context and the available plugins when planning and executi
     }
 
     async getStatistics(): Promise<AgentStatistics> {
-        // Add debug logging to see each step's dependencies
-        this.steps.forEach(step => {
-            console.log(`Step ${step.stepNo} (${step.actionVerb}) dependencies:`, 
-                step.dependencies
-            );
-        });
-
         const totalDeps = this.steps.reduce((sum, step) => sum + step.dependencies.length, 0);
-        console.log(`Total dependencies across all steps: ${totalDeps}`);
+        //console.log(`Total dependencies across all steps: ${totalDeps}`);
 
         const stepStats = this.steps.map(step => ({
             id: step.id,
@@ -648,7 +705,7 @@ Please consider this context and the available plugins when planning and executi
             steps: stepStats,
             color: this.getAgentColor()
         };
-        console.log(`Agent ${this.id} statistics:`, statistics);
+        //console.log(`Agent ${this.id} statistics:`, statistics);
         return statistics;
     }
 
@@ -664,15 +721,10 @@ Please consider this context and the available plugins when planning and executi
     
     private async notifyTrafficManager(): Promise<void> {
         try {
-            const message: Message = {
-                type: MessageType.AGENT_UPDATE,
-                sender: this.id,
-                recipient: 'trafficmanager',
-                content: {
-                  status: this.status,
-                }
-              };
-              this.sendMessage(message);
+
+              this.sendMessage(MessageType.AGENT_UPDATE, 'trafficmanager', {
+                status: this.status,
+              });
               axios.post(`http://${this.agentSetUrl}/updateFromAgent`, { agentId: this.id, status: this.status });
         } catch (error) { analyzeError(error as Error);
             console.error(`Failed to notify TrafficManager about agent ${this.id}:`, error instanceof Error ? error.message : error);
