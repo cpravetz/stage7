@@ -11,7 +11,8 @@ import { ActionVerbTask } from '@cktmcs/shared';
 import { AgentConfig } from '@cktmcs/shared';
 import { Message, MessageType } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
-import { Step, StepStatus, createFromPlan } from './Step'; // Import the new Step class
+import { Step, StepStatus, createFromPlan } from './Step';
+import { StateManager } from '../utils/StateManager';
 
 
 const api = axios.create({
@@ -25,6 +26,7 @@ export class Agent extends BaseEntity {
     private missionContext: string = '';
     private agentSetUrl: string;
     private agentPersistenceManager: AgentPersistenceManager;
+    private stateManager: StateManager;
     inputs: Map<string, PluginInput> | undefined;
     status: AgentStatus;
     steps: Step[] = [];
@@ -44,9 +46,7 @@ export class Agent extends BaseEntity {
         super(config.id, 'Agent', `agentset`, process.env.PORT || '9000');
         console.log(`Agent ${config.id} created. missionId=${config.missionId}. Inputs: ${JSON.stringify(config.inputs)}` );
         this.agentPersistenceManager = new AgentPersistenceManager();
-        this.inputs = config.inputs instanceof Map ? 
-            new Map(config.inputs) : 
-            new Map(Object.entries(config.inputs||{}));
+        this.stateManager = new StateManager(config.id, this.agentPersistenceManager);
         this.inputs = config.inputs instanceof Map ? 
             new Map(config.inputs) : 
             new Map(Object.entries(config.inputs||{}));
@@ -106,7 +106,7 @@ export class Agent extends BaseEntity {
     }
 
     private async prepareOpeningInstruction() {
-        const availablePlugins : Array<String >= await this.getAvailablePlugins();
+        const availablePlugins : Array<String> = await this.getAvailablePlugins();
         const openingInstruction = `
 Mission Context: ${this.missionContext}
 
@@ -345,16 +345,7 @@ Please consider this context and the available plugins when planning and executi
         }
     }
 
-    private async sendMessage(message: Message): Promise<void> {
-        try {
-          return await axios.post(`http://${this.postOfficeUrl}/message`, message);
-        } catch (error) { analyzeError(error as Error);
-          console.error('Error sending message:', error instanceof Error ? error.message : error);
-          return Promise.reject(error);
-        }
-      }
-
-      private async saveWorkProduct(stepId: string, data: PluginOutput[], isFinal: boolean): Promise<void> {
+    private async saveWorkProduct(stepId: string, data: PluginOutput[], isFinal: boolean): Promise<void> {
         const workProduct = new WorkProduct(this.id, stepId, data);
         try {
             // Save to Librarian
@@ -362,24 +353,18 @@ Please consider this context and the available plugins when planning and executi
     
             // Determine if this is a mission output
             const isMissionOutput = this.steps.length === 1 || (isFinal && !(await this.hasDependentAgents()));
-    
+   
             // Send message to client
-            const message: Message = {
-                type: MessageType.WORK_PRODUCT_UPDATE,
-                sender: this.id,
-                recipient: 'user',
-                content: {
-                    id: stepId,
-                    type: isFinal ? 'Final' : 'Interim',
-                    scope: isMissionOutput ? 'MissionOutput' : (isFinal ? 'AgentOutput' : 'AgentStep'),
-                    name: data[0]? data[0].resultDescription :  'Step Output',
-                    agentId: this.id,
-                    stepId: stepId,
-                    missionId: this.missionId,
-                    mimeType: data[0]?.mimeType || 'text/plain'
-                }
-            };
-            await this.sendMessage(message);
+            await this.sendMessage(MessageType.WORK_PRODUCT_UPDATE,'user',{
+                id: stepId,
+                type: isFinal ? 'Final' : 'Interim',
+                scope: isMissionOutput ? 'MissionOutput' : (isFinal ? 'AgentOutput' : 'AgentStep'),
+                name: data[0]? data[0].resultDescription :  'Step Output',
+                agentId: this.id,
+                stepId: stepId,
+                missionId: this.missionId,
+                mimeType: data[0]?.mimeType || 'text/plain'
+            }
         } catch (error) { analyzeError(error as Error);
             console.error('Error saving work product:', error instanceof Error ? error.message : error);
         }
@@ -593,19 +578,13 @@ Please consider this context and the available plugins when planning and executi
             const hasDependents = await this.hasDependentAgents();
             if (hasDependents) {
                 try {
-                    // Notify TrafficManager about the failure so it can handle dependent agents
-                    const message: Message = {
-                        type: MessageType.STEP_FAILURE,
-                        sender: this.id,
-                        recipient: 'trafficmanager',
-                        content: {
-                            failedStepId,
-                            agentId: this.id,
-                            status: this.status,
-                            error: `Step ${failedStepId} failed with status ${status}`
-                        }
-                    };
-    
+                    this.sendMessage(MessageType.STEP_FAILURE, 'trafficmanager', {
+                        failedStepId,
+                        agentId: this.id,
+                        status: this.status,
+                        error: `Step ${failedStepId} failed with status ${status}`
+                    });
+
                     // Send message to TrafficManager
                     await axios.post(`http://${this.trafficManagerUrl}/handleStepFailure`, {
                         agentId: this.id,
@@ -613,7 +592,6 @@ Please consider this context and the available plugins when planning and executi
                         status: status
                     });
     
-                    this.sendMessage(message);
                     //console.log(`Notified TrafficManager about step failure: ${failedStepId}`);
                 } catch (error) {
                     console.error('Failed to notify TrafficManager about step failure:', 
@@ -670,30 +648,11 @@ Please consider this context and the available plugins when planning and executi
     }
 
     async saveAgentState(): Promise<void> {
-        await this.agentPersistenceManager.saveAgent({
-            ...this,
-            conversation: this.conversation
-        });
+        await this.stateManager.saveState(this);
     }
 
     async loadAgentState(): Promise<void> {
-        const state = await this.agentPersistenceManager.loadAgent(this.id);
-        if (state) {
-            // Restore all properties
-            this.status = state.status;
-            this.output = state.output;
-            this.inputs = state.inputs;
-            this.missionId = state.missionId;
-            this.steps = state.steps;
-            this.dependencies = state.dependencies;
-            this.capabilitiesManagerUrl = state.capabilitiesManagerUrl;
-            this.brainUrl = state.brainUrl;
-            this.trafficManagerUrl = state.trafficManagerUrl;
-            this.librarianUrl = state.librarianUrl;
-            this.questions = state.questions;
-            this.conversation = state.conversation || [];
-        }
-        console.log('Agent state loaded successfully.');
+        await this.stateManager.loadState(this);
     }
 
     async pause() {
@@ -762,15 +721,10 @@ Please consider this context and the available plugins when planning and executi
     
     private async notifyTrafficManager(): Promise<void> {
         try {
-            const message: Message = {
-                type: MessageType.AGENT_UPDATE,
-                sender: this.id,
-                recipient: 'trafficmanager',
-                content: {
-                  status: this.status,
-                }
-              };
-              this.sendMessage(message);
+
+              this.sendMessage(MessageType.AGENT_UPDATE, 'trafficmanager', {
+                status: this.status,
+              });
               axios.post(`http://${this.agentSetUrl}/updateFromAgent`, { agentId: this.id, status: this.status });
         } catch (error) { analyzeError(error as Error);
             console.error(`Failed to notify TrafficManager about agent ${this.id}:`, error instanceof Error ? error.message : error);
