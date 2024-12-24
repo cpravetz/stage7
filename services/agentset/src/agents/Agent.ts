@@ -8,7 +8,7 @@ import { MapSerializer, BaseEntity } from '@cktmcs/shared';
 import { AgentPersistenceManager } from '../utils/AgentPersistenceManager';
 import { PluginInput, PluginOutput, PluginParameterType } from '@cktmcs/shared';
 import { ActionVerbTask } from '@cktmcs/shared';
-import { AgentStatistics } from '@cktmcs/shared';
+import { AgentConfig } from '@cktmcs/shared';
 import { Message, MessageType } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { Step, StepStatus, createFromPlan } from './Step'; // Import the new Step class
@@ -20,17 +20,6 @@ const api = axios.create({
       'Access-Control-Allow-Origin': '*',
     },
   });
-
-export interface AgentConfig {
-    actionVerb: string;
-    inputs? : Map<string, PluginInput>;
-    missionId: string;
-    dependencies?: string[];
-    postOfficeUrl: string;
-    agentSetUrl: string;
-    id: string;
-    missionContext: string;
-}
 
 export class Agent extends BaseEntity {
     private missionContext: string = '';
