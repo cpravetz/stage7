@@ -445,9 +445,11 @@ export class CapabilitiesManager extends BaseEntity {
             Can we accomplish it with a subplan using one or more steps or should we create a plugin that can run code to accomplish it?
             Avoid using this action verb, ${step.actionVerb}, in the plan.
             `;
+            const verbToAvoid = step.actionVerb;
+
             console.log('CM: handleUnknownVerb goal:', step.actionVerb);
             
-            const accomplishResult = await this.executeAccomplishPlugin(goal);
+            const accomplishResult = await this.executeAccomplishPlugin(goal, verbToAvoid);
             
             if (!accomplishResult.success) {
                 console.error('CM: Error executing ACCOMPLISH for verb %s:', step.actionVerb, accomplishResult.error);
@@ -532,10 +534,11 @@ export class CapabilitiesManager extends BaseEntity {
         }
     }
 
-    private async executeAccomplishPlugin(goal: string): Promise<PluginOutput> {
+    private async executeAccomplishPlugin(goal: string, verbToAvoid: string): Promise<PluginOutput> {
         try {
             const accomplishInputs = new Map<string, PluginInput>([
-                ['goal', { inputName: 'goal', inputValue: goal, args: {} }]
+                ['goal', { inputName: 'goal', inputValue: goal, args: {} }],
+                ['verbToAvoid', { inputName: 'verbToAvoid', inputValue: verbToAvoid, args: {} }]
             ]);
 
             const plugin = await this.pluginRegistry.fetchOneByVerb('ACCOMPLISH');

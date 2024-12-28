@@ -48,7 +48,7 @@ export class BaseEntity {
 
   sendMessage(type: string, recipient: string, content: any): void {
     axios.post(`http://${this.postOfficeUrl}/message`, {
-      type: type``,
+      type: type,
       content,
       sender: this.id,
       recipient
