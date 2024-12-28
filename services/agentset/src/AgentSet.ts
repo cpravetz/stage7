@@ -115,7 +115,7 @@ export class AgentSet extends BaseEntity {
                     res.status(404).send({ error: 'Agent not found' });
                     return;
                 }
-                await this.persistenceManager.saveAgent(agent);
+                await agent.saveAgentState();
                 res.status(200).send({ message: 'Agent saved successfully', agentId: agent.id });
             } catch (error) { analyzeError(error as Error);
                 console.error('Error saving agent:', error instanceof Error ? error.message : error);
@@ -280,7 +280,7 @@ export class AgentSet extends BaseEntity {
             const { agentId, status } = req.body;
             const agent = this.agents.get(agentId);
             if (agent) {
-                this.persistenceManager.saveAgent(agent);
+                agent.saveAgentState();
                 res.status(200).send({ message: 'Agent updated' });
             } else {
                 res.status(201).send({ error: 'Agent not found' });
