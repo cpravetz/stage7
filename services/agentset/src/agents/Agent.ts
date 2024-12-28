@@ -8,8 +8,8 @@ import { MapSerializer, BaseEntity } from '@cktmcs/shared';
 import { AgentPersistenceManager } from '../utils/AgentPersistenceManager';
 import { PluginInput, PluginOutput, PluginParameterType } from '@cktmcs/shared';
 import { ActionVerbTask } from '@cktmcs/shared';
-import { AgentConfig } from '@cktmcs/shared';
-import { Message, MessageType } from '@cktmcs/shared';
+import { AgentConfig, AgentStatistics } from '@cktmcs/shared';
+import { MessageType } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { Step, StepStatus, createFromPlan } from './Step';
 import { StateManager } from '../utils/StateManager';
@@ -355,7 +355,7 @@ Please consider this context and the available plugins when planning and executi
             const isMissionOutput = this.steps.length === 1 || (isFinal && !(await this.hasDependentAgents()));
    
             // Send message to client
-            await this.sendMessage(MessageType.WORK_PRODUCT_UPDATE,'user',{
+            await this.sendMessage(MessageType.WORK_PRODUCT_UPDATE,'user', {
                 id: stepId,
                 type: isFinal ? 'Final' : 'Interim',
                 scope: isMissionOutput ? 'MissionOutput' : (isFinal ? 'AgentOutput' : 'AgentStep'),
@@ -364,7 +364,7 @@ Please consider this context and the available plugins when planning and executi
                 stepId: stepId,
                 missionId: this.missionId,
                 mimeType: data[0]?.mimeType || 'text/plain'
-            }
+            });
         } catch (error) { analyzeError(error as Error);
             console.error('Error saving work product:', error instanceof Error ? error.message : error);
         }
