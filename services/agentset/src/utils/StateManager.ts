@@ -1,6 +1,4 @@
-import { AgentPersistenceManager } from './AgentPersistenceManager';
-import { AgentStatus } from './agentStatus';
-import { Step } from '../agents/Step';
+import { AgentState, AgentPersistenceManager } from './AgentPersistenceManager';
 
 export class StateManager {
     private agentPersistenceManager: AgentPersistenceManager;
@@ -25,7 +23,8 @@ export class StateManager {
                 brainUrl: agent.brainUrl,
                 trafficManagerUrl: agent.trafficManagerUrl,
                 librarianUrl: agent.librarianUrl,
-                conversation: agent.conversation
+                conversation: agent.conversation,
+                missionContext: agent.missionContext
             });
             console.log('Agent state saved successfully.');
         } catch (error) {
@@ -48,6 +47,7 @@ export class StateManager {
                 agent.trafficManagerUrl = state.trafficManagerUrl;
                 agent.librarianUrl = state.librarianUrl;
                 agent.conversation = state.conversation || [];
+                agent.missionContext = state.missionContext;
                 console.log('Agent state loaded successfully.');
             }
         } catch (error) {

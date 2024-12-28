@@ -11,6 +11,23 @@ const api = axios.create({
     },
   });
 
+
+export interface AgentState {
+    id: string;
+    status: string;
+    output: any;
+    inputs: Map<string, any>;
+    missionId: string;
+    steps: any[];
+    dependencies: string[];
+    capabilitiesManagerUrl: string;
+    brainUrl: string;
+    trafficManagerUrl: string;
+    librarianUrl: string;
+    conversation: any[];
+    missionContext: string;
+}  
+
 export class AgentPersistenceManager {
     private librarianUrl: string;
 
@@ -18,7 +35,7 @@ export class AgentPersistenceManager {
         this.librarianUrl = librarianUrl;
     }
 
-    async saveAgent(agent: Agent): Promise<void> {
+    async saveAgent(agent: AgentState): Promise<void> {
         const state = MapSerializer.transformForSerialization(agent);
         
         try {
