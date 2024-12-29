@@ -17,7 +17,7 @@ interface JsonPlanStep {
 
 function generatePrompt(goal: string, verbToAvoid: string): string {
     return `
-Accomplish the following goal: ${goal}
+Resolve the following goal or develop a plan to do so: ${goal}
 IMPORTANT: Do NOT use the action verb "${verbToAvoid}" in your plan or response.
 
 You MUST respond with ONLY a JSON object in ONLY ONE of these three formats:
@@ -91,7 +91,7 @@ when the goal can be accomplished with a plan.  If you determine a plugin is nee
 
 Guidelines for creating a plan:
 1. Number each step sequentially.
-2. Use specific, actionable verbs for each step (e.g., SCRAPE, ANALYZE, PREDICT).
+2. Use specific, actionable verbs (or phrases) for each step (e.g., SCRAPE, ANALYZE, ANALYZEAUDIOFILE, PREDICT).
 3. Ensure each step has a description.
 4. Each step input should be an object with either a 'value' property for predetermined values or an 'outputKey' property referencing an output from a previous step. 
 5. List dependencies for each step as an object with the property names being the outputs needed and the values being the step number that provides the required inputlike: {outputname: stepNumber}

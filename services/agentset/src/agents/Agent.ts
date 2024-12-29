@@ -205,6 +205,10 @@ Please consider this context and the available plugins when planning and executi
     private addStepsFromPlan(plan: ActionVerbTask[]) {
         const newSteps = createFromPlan(plan, this.steps.length + 1, this.agentPersistenceManager);
         this.steps.push(...newSteps);
+    
+        // Optional: Add logging for verification
+        //console.log('Original plan:', plan.map(step => ({ id: step.id, dependencies: step.dependencies })));
+        //console.log('New steps:', newSteps.map(step => ({ id: step.id, dependencies: step.dependencies })));
     }
 
     async getOutput(): Promise<any> {
@@ -692,7 +696,7 @@ Please consider this context and the available plugins when planning and executi
             id: step.id,
             verb: step.actionVerb,
             status: step.status,
-            dependencies: step.dependencies.map(dep => dep.sourceStepId), // Extract only sourceStepIds
+            dependencies: step.dependencies.map(dep => dep.sourceStepId) || [],
             stepNo: step.stepNo
         }));
     

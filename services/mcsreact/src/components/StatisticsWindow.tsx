@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import './StatisticsWindow.css';
 import { MissionStatistics } from '@cktmcs/shared';
 
@@ -16,6 +16,20 @@ const StatisticsWindow: React.FC<Props> = ({ statistics, activeMissionName, acti
     return "Unsaved mission";
   };
 
+  const stepStatusTotals: Record<string, number> = useMemo(() => {
+    const totals: Record<string, number> = {};
+    if (statistics.agentStatistics instanceof Map) {
+      for (const agents of statistics.agentStatistics.values()) {
+        for (const agent of agents) {
+          for (const step of agent.steps) {
+            totals[step.status] = (totals[step.status] || 0) + 1;
+          }
+        }
+      }
+    }
+    return totals;
+  }, [statistics.agentStatistics]);
+
   return (
     <div className="statistics-window">
       <h2>Statistics</h2>
@@ -23,6 +37,12 @@ const StatisticsWindow: React.FC<Props> = ({ statistics, activeMissionName, acti
       <h3>Agents by Status:</h3>
       <ul>
         {Object.entries(statistics.agentCountByStatus).map(([status, count]) => (
+          <li key={status}>{status}: {count}</li>
+        ))}
+      </ul>
+      <h3>Steps by Status:</h3>
+      <ul>
+        {Object.entries(stepStatusTotals).map(([status, count]: [string, number]) => (
           <li key={status}>{status}: {count}</li>
         ))}
       </ul>
