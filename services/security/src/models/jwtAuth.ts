@@ -30,7 +30,7 @@ async function retryOperation<T>(operation: () => Promise<T>, retries: number = 
     return await operation();
   } catch (error) {
     if (retries > 0) {
-      console.log(`Operation failed. Retrying in ${delay}ms. Retries left: ${retries}`);
+      console.error(`Operation failed. Retrying in ${delay}ms. Retries left: ${retries}`);
       await setTimeout(delay);
       return retryOperation(operation, retries - 1, delay * 2);
     } else {
@@ -42,23 +42,23 @@ async function retryOperation<T>(operation: () => Promise<T>, retries: number = 
 export async function verifyComponentCredentials(componentType: string, clientSecret: string): Promise<boolean> {
   const client = getClientFromEnv(componentType);
   if (!client) {
-      console.log(`Client not found for componentType: ${componentType}`);
+      console.error(`Client not found for componentType: ${componentType}`);
       return false;
   }
 
   if (client.clientSecret !== clientSecret) {
-      console.log(`Invalid client secret for componentType: ${componentType}`);
+      console.error(`Invalid client secret for componentType: ${componentType}`);
       return false;
   }
 
-  console.log(`Client verified for componentType: ${componentType}`);
+  console.error(`Client verified for componentType: ${componentType}`);
   return true;
 }
 
 function getClientFromEnv(componentType: string): { clientId: string, clientSecret: string } | null {
   const clientSecret = process.env[`${componentType.toUpperCase()}_CLIENT_SECRET`];
   if (!clientSecret) {
-      console.log(`No client secret found for componentType: ${componentType}`);
+      console.error(`No client secret found for componentType: ${componentType}`);
       return null;
   }
   return {
@@ -111,7 +111,7 @@ async function storeTokenInMongoDB(token: string, tokenData: any): Promise<void>
           await storeTokenOperation();
           return;
       } catch (error) {
-          console.log(`Operation failed. Retrying in ${delay}ms. Retries left: ${retries}`);
+          console.error(`Operation failed. Retrying in ${delay}ms. Retries left: ${retries}`);
           await setTimeout(delay);
           retries--;
           delay *= 2;
