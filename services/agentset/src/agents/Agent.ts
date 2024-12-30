@@ -8,8 +8,8 @@ import { MapSerializer, BaseEntity } from '@cktmcs/shared';
 import { AgentPersistenceManager } from '../utils/AgentPersistenceManager';
 import { PluginInput, PluginOutput, PluginParameterType } from '@cktmcs/shared';
 import { ActionVerbTask } from '@cktmcs/shared';
-import { AgentConfig } from '@cktmcs/shared';
-import { Message, MessageType } from '@cktmcs/shared';
+import { AgentConfig, AgentStatistics } from '@cktmcs/shared';
+import { MessageType } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { Step, StepStatus, createFromPlan } from './Step';
 import { StateManager } from '../utils/StateManager';
@@ -163,8 +163,8 @@ Please consider this context and the available plugins when planning and executi
             
             if (this.status === AgentStatus.RUNNING) {
                 const finalStep = this.steps[this.steps.length - 1];
-                this.output = await this.getWorkProduct(finalStep.id);                this.status = AgentStatus.COMPLETED;
-                this.say(`Agent has completed its work.`);
+                this.output = await this.agentPersistenceManager.loadWorkProduct(this.id, finalStep.id);                this.status = AgentStatus.COMPLETED;
+                this.say(`Agent ${this.id} has completed its work.`);
                 this.say(`Result ${JSON.stringify(this.output)}`);
             }
             
@@ -176,20 +176,10 @@ Please consider this context and the available plugins when planning and executi
         }
     }
 
-    private async getWorkProduct(stepId: string): Promise<WorkProduct | null> {
-        try {
-            return await this.agentPersistenceManager.loadWorkProduct(this.id, stepId);
-        } catch (error) {
-            analyzeError(error as Error);
-            console.error('Error loading work product:', error instanceof Error ? error.message : error);
-            return null;
-        }
-    }
-
     private async populateInputsFromLibrarian(step: Step) {
         for (const dep of step.dependencies) {
-            const workProduct = await this.getWorkProduct(dep.sourceStepId);
-            if (workProduct) {
+            const workProduct = await this.agentPersistenceManager.loadWorkProduct(this.id, dep.sourceStepId);
+            if (workProduct && workProduct.data) {
                 const outputValue = workProduct.data.find(r => r.name === dep.outputName)?.result;
                 if (outputValue !== undefined) {
                     step.inputs.set(dep.inputName, {
@@ -205,6 +195,10 @@ Please consider this context and the available plugins when planning and executi
     private addStepsFromPlan(plan: ActionVerbTask[]) {
         const newSteps = createFromPlan(plan, this.steps.length + 1, this.agentPersistenceManager);
         this.steps.push(...newSteps);
+    
+        // Optional: Add logging for verification
+        //console.log('Original plan:', plan.map(step => ({ id: step.id, dependencies: step.dependencies })));
+        //console.log('New steps:', newSteps.map(step => ({ id: step.id, dependencies: step.dependencies })));
     }
 
     async getOutput(): Promise<any> {
@@ -229,7 +223,7 @@ Please consider this context and the available plugins when planning and executi
             };
         }
     
-        const finalWorkProduct = await this.getWorkProduct(lastCompletedStep.id);
+        const finalWorkProduct = await this.agentPersistenceManager.loadWorkProduct(this.id, lastCompletedStep.id);
     
         if (!finalWorkProduct) {
             return {
@@ -355,7 +349,7 @@ Please consider this context and the available plugins when planning and executi
             const isMissionOutput = this.steps.length === 1 || (isFinal && !(await this.hasDependentAgents()));
    
             // Send message to client
-            await this.sendMessage(MessageType.WORK_PRODUCT_UPDATE,'user',{
+            await this.sendMessage(MessageType.WORK_PRODUCT_UPDATE,'user', {
                 id: stepId,
                 type: isFinal ? 'Final' : 'Interim',
                 scope: isMissionOutput ? 'MissionOutput' : (isFinal ? 'AgentOutput' : 'AgentStep'),
@@ -364,7 +358,7 @@ Please consider this context and the available plugins when planning and executi
                 stepId: stepId,
                 missionId: this.missionId,
                 mimeType: data[0]?.mimeType || 'text/plain'
-            }
+            });
         } catch (error) { analyzeError(error as Error);
             console.error('Error saving work product:', error instanceof Error ? error.message : error);
         }
@@ -692,7 +686,7 @@ Please consider this context and the available plugins when planning and executi
             id: step.id,
             verb: step.actionVerb,
             status: step.status,
-            dependencies: step.dependencies.map(dep => dep.sourceStepId), // Extract only sourceStepIds
+            dependencies: step.dependencies.map(dep => dep.sourceStepId) || [],
             stepNo: step.stepNo
         }));
     

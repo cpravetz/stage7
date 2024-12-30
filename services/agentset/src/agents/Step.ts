@@ -513,15 +513,8 @@ export class Step {
      * @param startingStepNo The starting step number
      * @returns Array of Step instances
      */
-    export function createFromPlan(plan: ActionVerbTask[], startingStepNo: number = 1, persistenceManager: AgentPersistenceManager): Step[] {
-        //ensure all ActionVerbTasks have an id property
-        plan.forEach(task => {
-            if (!task.id) {
-                task.id = uuidv4();
-            }
-        });
-
-        const steps = plan.map((task, index) => {
+    export function createFromPlan(plan: ActionVerbTask[], startingStepNo: number, persistenceManager: AgentPersistenceManager): Step[] {
+        return plan.map((task, index) => {
             const inputs = new Map<string, PluginInput>();
             if (task.inputs) {
                 if (task.inputs instanceof Map) {
@@ -542,8 +535,9 @@ export class Step {
                 sourceStepId: plan[dep.sourceStepNo - 1]?.id || '', // This should now always be present
                 outputName: dep.outputName
             }));
-            
-            return new Step({
+
+            const step = new Step({
+                id: task.id, // Preserve the original ID from the plan
                 actionVerb: task.verb,
                 stepNo: startingStepNo + index,
                 inputs: inputs,
@@ -551,7 +545,7 @@ export class Step {
                 dependencies: dependencies,
                 persistenceManager: persistenceManager
             });
-        });
 
-        return steps;
+            return step;
+        });
     }

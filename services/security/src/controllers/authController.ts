@@ -10,7 +10,6 @@ const SECRET_KEY = process.env.JWT_SECRET || uuidv4();
 
 export const register = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-        console.log('Registering user:', req.body);
         const { email, password } = req.body;
         const existingUser = await findUserByEmail(email);
         if (existingUser) {
@@ -18,7 +17,6 @@ export const register = async (req: Request, res: Response, next: NextFunction):
         }
         const hashedPassword = await bcrypt.hash(password, 10);
         const user = await createUser({ email, password: hashedPassword });
-        console.log('Registerd User registered successfully:', user);
         const token = jwt.sign({ id: user.id }, SECRET_KEY, { expiresIn: '365d' });
         res.status(201).json({ token, user: { id: user.id, email: user.email } });
     } catch (error) {
@@ -27,11 +25,8 @@ export const register = async (req: Request, res: Response, next: NextFunction):
 };
 
 export const login = (req: Request, res: Response, next: NextFunction): void => {
-    console.log('Login request received');
-    console.log('Login Body:', JSON.stringify(req.body, null, 2));
     
     const secret = process.env.JWT_SECRET;
-    console.log('Using secret for token generation:', secret);
 
     if (!req.body || typeof req.body !== 'object') {
         console.log('Request body is not an object:', req.body);
@@ -53,19 +48,15 @@ export const login = (req: Request, res: Response, next: NextFunction): void => 
     }
     const token = jwt.sign({ id: user.id }, SECRET_KEY, { expiresIn: '365d' });
     console.log('Login successful for user:', user.email);
-    console.log(`new token: ${token}`);
     res.json({ token, user: { id: user.id, email: user.email } });
 };
 
 export const logout = (req: Request, res: Response) => {
-    console.log('Logging out user:');
-
     // In a stateless JWT setup, logout is typically handled client-side
     res.status(200).json({ message: 'Logout successful' });
 };
 
 export const refreshToken = async (req: Request, res: Response, next: NextFunction) => {
-    console.log('Refreshing token:', req.body);
     passport.authenticate('jwt', { session: false }, async (err: Error, user: User | false, info: any) => {
         if (err) {
             return next(err);
@@ -83,7 +74,6 @@ export const refreshToken = async (req: Request, res: Response, next: NextFuncti
 
             // Generate a new access token
             const newToken = jwt.sign({ id: user.id }, process.env.JWT_SECRET!, { expiresIn: '365d' });
-            console.log(`refreshed token: ${newToken}`);
 
             res.json({ 
                 message: 'Token refreshed successfully',
@@ -99,9 +89,6 @@ export const refreshToken = async (req: Request, res: Response, next: NextFuncti
 
 
 export const verifyToken = (req: Request, res: Response, next: NextFunction): void => {
-    console.log('Verifying token');
-    console.log('Headers:', JSON.stringify(req.headers));
-    
     const authHeader = req.headers.authorization;
     if (!authHeader) {
         console.log('No Authorization header provided');
@@ -118,8 +105,6 @@ export const verifyToken = (req: Request, res: Response, next: NextFunction): vo
 
     try {
         const decoded = jwt.verify(token, SECRET_KEY) as any;
-        console.log('Token verified successfully. Decoded:', decoded);
-        
         // Attach the user information to the request object
         (req as any).user = { id: decoded.id || decoded.iat };
         

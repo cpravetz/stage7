@@ -15,9 +15,10 @@ interface JsonPlanStep {
 }
 
 
-function generatePrompt(goal: string): string {
+function generatePrompt(goal: string, verbToAvoid: string): string {
     return `
-Accomplish the following goal: ${goal}
+Resolve the following goal or develop a plan to do so: ${goal}
+IMPORTANT: Do NOT use the action verb "${verbToAvoid}" in your plan or response.
 
 You MUST respond with ONLY a JSON object in ONLY ONE of these three formats:
 
@@ -90,7 +91,7 @@ when the goal can be accomplished with a plan.  If you determine a plugin is nee
 
 Guidelines for creating a plan:
 1. Number each step sequentially.
-2. Use specific, actionable verbs for each step (e.g., SCRAPE, ANALYZE, PREDICT).
+2. Use specific, actionable verbs (or phrases) for each step (e.g., SCRAPE, ANALYZE, ANALYZEAUDIOFILE, PREDICT).
 3. Ensure each step has a description.
 4. Each step input should be an object with either a 'value' property for predetermined values or an 'outputKey' property referencing an output from a previous step. 
 5. List dependencies for each step as an object with the property names being the outputs needed and the values being the step number that provides the required inputlike: {outputname: stepNumber}
@@ -180,6 +181,8 @@ export async function execute(inputs: Map<string, PluginInput> | Record<string, 
         }
 
         const goal = inputMap.get('goal')?.inputValue || inputMap.get('description')?.inputValue || false;
+        const verbToAvoid = inputs.get('verbToAvoid')?.inputValue as string || '';
+
 
         if (!goal) {
             console.log('Goal or description is required for ACCOMPLISH plugin');
@@ -192,7 +195,7 @@ export async function execute(inputs: Map<string, PluginInput> | Record<string, 
                 error: 'No goal provided to ACCOMPLISH plugin'
             }];
         }
-        const prompt = generatePrompt(goal.toString());
+        const prompt = generatePrompt(goal.toString(), verbToAvoid);
         const messages = [{ role: 'user', content: prompt }];
 
         const response = await queryBrain(messages);
@@ -203,6 +206,18 @@ export async function execute(inputs: Map<string, PluginInput> | Record<string, 
             //console.log('Parsed Brain response:', parsedResponse);
             if (parsedResponse.type === 'PLAN') {
                 const tasks = convertJsonToTasks(parsedResponse.plan);
+                tasks.forEach(task => {
+                    if (task.verb === verbToAvoid) {
+                        return [{
+                            success: false,
+                            name: 'error',
+                            resultType: PluginParameterType.ERROR,
+                            resultDescription: `Generted plan contains ${verbToAvoid} verb`,
+                            result: null,
+                            error: `Plan contains ${verbToAvoid} verb`
+                        }];
+                    }
+                });
                 //console.log('ACCOMPLISH: ACCOMPLISH plugin succeeded creating a plan',  MapSerializer.transformForSerialization(tasks));
                 return [{
                     success: true,

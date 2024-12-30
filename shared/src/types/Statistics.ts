@@ -23,17 +23,17 @@ export interface AgentSetStatistics {
 export interface AgentStatistics {
     id: string;
     status: string;
-    taskCount : number;
-    currentTaskNo : number;
+    taskCount: number;
+    currentTaskNo: number;
     currentTaskVerb: string;
-    steps: Array<{
+    steps: {
         id: string;
         verb: string;
         status: string;
         dependencies: string[];
         stepNo: number;
-    }>;
-    color: string; 
+    }[];
+    color: string;
 }
 
 export interface TrafficManagerStatistics {

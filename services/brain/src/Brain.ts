@@ -112,7 +112,7 @@ export class Brain extends BaseEntity {
             const thread = {
                 exchanges: req.body.exchanges,
                 optimization: req.body.optimization,
-                optionals: req.body.optionals || null,
+                optionals: req.body.optionals || {},
                 conversationType: req.body.ConversationType || LLMConversationType.TextToText
             };
             const selectedModel = this.modelManager.getModel(req.body.model) || this.modelManager.selectModel(thread.optimization, thread.conversationType);

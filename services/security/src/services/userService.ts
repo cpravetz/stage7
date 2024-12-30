@@ -20,7 +20,7 @@ export const findUserByEmail = async (email: string): Promise<User | undefined> 
         }
         return undefined;
     } catch (error) { analyzeError(error as Error);
-        console.log('Error finding user by email:', email, error instanceof Error ? error.message : '');
+        console.error('Error finding user by email:', email, error instanceof Error ? error.message : '');
         return undefined;
     }
 }
@@ -39,7 +39,7 @@ export const findUserById = async (id: string): Promise<User | undefined> => {
         }
         return undefined;
     } catch (error) { analyzeError(error as Error);
-        console.log('Error finding user by id:', id, error instanceof Error ? error.message : '');
+        console.error('Error finding user by id:', id, error instanceof Error ? error.message : '');
         return undefined;
     }
 }
@@ -58,7 +58,7 @@ export const findUserByProviderId = async (provider: string, providerId: string)
         }
         return undefined;
     } catch (error) { analyzeError(error as Error);
-        console.log('Error finding user by provider:', provider, providerId, error instanceof Error ? error.message : '');
+        console.error('Error finding user by provider:', provider, providerId, error instanceof Error ? error.message : '');
         return undefined;
     }
 }        

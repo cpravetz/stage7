@@ -31,14 +31,6 @@ export class SecurityManager {
         app.use(cors());
         app.use(bodyParser.json());
         app.use(bodyParser.urlencoded({ extended: true }));
-        app.use((req, res, next) => {
-            console.log('Received request:');
-            console.log('Method:', req.method);
-            console.log('URL:', req.url);
-            console.log('Headers:', JSON.stringify(req.headers));
-            console.log('Parsed Body:', JSON.stringify(req.body));
-            next();
-        });
     }
 
     private configurePassport() {
