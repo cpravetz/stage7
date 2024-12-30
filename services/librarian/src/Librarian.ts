@@ -137,7 +137,7 @@ export class Librarian extends BaseEntity {
         const { stepId } = req.params;
 
         if (!stepId) {
-            return res.status(400).send({ error: 'ID is required' });
+            return res.status(400).send({ error: `ID is required in params ${req.params}` });
         }
 
         try {

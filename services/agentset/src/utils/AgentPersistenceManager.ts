@@ -89,7 +89,7 @@ export class AgentPersistenceManager {
                     MapSerializer.transformFromSerialization(response.data) as PluginOutput[]
                     );
         } catch (error) { analyzeError(error as Error);
-            console.error('Error loading work product:', error instanceof Error ? error.message : error);
+            console.error(`Error loading work product ${agentId}-${stepId}:`, error instanceof Error ? error.message : error);
             return null;
         }
     }

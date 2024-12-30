@@ -163,8 +163,8 @@ Please consider this context and the available plugins when planning and executi
             
             if (this.status === AgentStatus.RUNNING) {
                 const finalStep = this.steps[this.steps.length - 1];
-                this.output = await this.getWorkProduct(finalStep.id);                this.status = AgentStatus.COMPLETED;
-                this.say(`Agent has completed its work.`);
+                this.output = await this.agentPersistenceManager.loadWorkProduct(this.id, finalStep.id);                this.status = AgentStatus.COMPLETED;
+                this.say(`Agent ${this.id} has completed its work.`);
                 this.say(`Result ${JSON.stringify(this.output)}`);
             }
             
@@ -176,20 +176,10 @@ Please consider this context and the available plugins when planning and executi
         }
     }
 
-    private async getWorkProduct(stepId: string): Promise<WorkProduct | null> {
-        try {
-            return await this.agentPersistenceManager.loadWorkProduct(this.id, stepId);
-        } catch (error) {
-            analyzeError(error as Error);
-            console.error('Error loading work product:', error instanceof Error ? error.message : error);
-            return null;
-        }
-    }
-
     private async populateInputsFromLibrarian(step: Step) {
         for (const dep of step.dependencies) {
-            const workProduct = await this.getWorkProduct(dep.sourceStepId);
-            if (workProduct) {
+            const workProduct = await this.agentPersistenceManager.loadWorkProduct(this.id, dep.sourceStepId);
+            if (workProduct && workProduct.data) {
                 const outputValue = workProduct.data.find(r => r.name === dep.outputName)?.result;
                 if (outputValue !== undefined) {
                     step.inputs.set(dep.inputName, {
@@ -233,7 +223,7 @@ Please consider this context and the available plugins when planning and executi
             };
         }
     
-        const finalWorkProduct = await this.getWorkProduct(lastCompletedStep.id);
+        const finalWorkProduct = await this.agentPersistenceManager.loadWorkProduct(this.id, lastCompletedStep.id);
     
         if (!finalWorkProduct) {
             return {
