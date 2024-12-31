@@ -56,7 +56,7 @@ export class TrafficManager extends BaseEntity {
         try {
             await this.updateAgentStatusInStorage(agentId, status);
         } catch (error) { analyzeError(error as Error);
-            console.error(`Error capturing agent status for agent ${agentId}:`, error instanceof Error ? error.message : error);
+            console.error('Error capturing agent status for agent %s:', agentId, error instanceof Error ? error.message : error);
         }
     }
 
@@ -92,7 +92,7 @@ export class TrafficManager extends BaseEntity {
 
             return { message: `Agent ${agentId} status updated to ${status}` }
         } catch (error) { analyzeError(error as Error);
-            console.error(`Error updating status for agent ${agentId}:`, error instanceof Error ? error.message : error);
+            console.error(`Error updating status for agent %s:`, agentId, error instanceof Error ? error.message : error);
             return { error: 'Failed to update agent status' };
         }
     }
@@ -143,7 +143,7 @@ export class TrafficManager extends BaseEntity {
             }
         } catch (error) { 
             analyzeError(error as Error);
-            console.error(`Error fetching output for agent ${agentId}:`, error instanceof Error ? error.message : error);
+            console.error(`Error fetching output for agent %s:`, agentId, error instanceof Error ? error.message : error);
             return {};
         }
     }    
@@ -265,7 +265,7 @@ export class TrafficManager extends BaseEntity {
             return response.data;
         } catch (error) { 
             analyzeError(error as Error);
-            console.error(`Error forwarding message to agent ${agentId}:`, error instanceof Error ? error.message : error);
+            console.error(`Error forwarding message to agent %s:`, agentId, error instanceof Error ? error.message : error);
         }
     }
     
@@ -369,7 +369,7 @@ export class TrafficManager extends BaseEntity {
             console.warn(`Agent ${agentId} not found. Returning default status.`);
             return AgentStatus.INITIALIZING;
         } catch (error) { analyzeError(error as Error);
-            console.error(`Error retrieving status for agent ${agentId}:`, error instanceof Error ? error.message : error);
+            console.error(`Error retrieving status for agent %s:`, agentId, error instanceof Error ? error.message : error);
             return AgentStatus.UNKNOWN;
         }
     }

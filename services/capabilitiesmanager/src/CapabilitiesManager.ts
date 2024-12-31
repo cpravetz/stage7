@@ -256,7 +256,7 @@ export class CapabilitiesManager extends BaseEntity {
             res.status(200).send(MapSerializer.transformForSerialization(result));
 
         } catch (error) {
-            console.error(`Error executing action verb ${step.actionVerb}:`, error instanceof Error ? error.message : error);
+            console.error('Error executing action verb %s:', step.actionVerb, error instanceof Error ? error.message : error);
             res.status(500).send([{
                 success: false,
                 name: 'error',

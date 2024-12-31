@@ -132,7 +132,7 @@ async function getSourceCode(stackTrace: string | undefined): Promise<string> {
     const sourceCodeSnippets: string[] = [];
 
     for (const line of stackLines) {
-        const match = line.match(/at .+ \((.+):(\d+):(\d+)\)/);
+        const match = line.match(/^at\s+(?:\w+\s+)?\(([^:]+):(\d+):(\d+)\)/);
         if (match) {
             const [, filePath, lineNumber, columnNumber] = match;
             let absolutePath;
