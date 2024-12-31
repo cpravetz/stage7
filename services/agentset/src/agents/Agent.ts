@@ -47,9 +47,7 @@ export class Agent extends BaseEntity {
         console.log(`Agent ${config.id} created. missionId=${config.missionId}. Inputs: ${JSON.stringify(config.inputs)}` );
         this.agentPersistenceManager = new AgentPersistenceManager();
         this.stateManager = new StateManager(config.id, this.agentPersistenceManager);
-        this.inputs = config.inputs instanceof Map ? 
-            new Map(config.inputs) : 
-            new Map(Object.entries(config.inputs||{}));
+        this.inputs = new Map(config.inputs instanceof Map ? config.inputs : Object.entries(config.inputs||{}));
         this.missionId = config.missionId;
         this.agentSetUrl = config.agentSetUrl;
         this.status = AgentStatus.INITIALIZING;
@@ -195,10 +193,6 @@ Please consider this context and the available plugins when planning and executi
     private addStepsFromPlan(plan: ActionVerbTask[]) {
         const newSteps = createFromPlan(plan, this.steps.length + 1, this.agentPersistenceManager);
         this.steps.push(...newSteps);
-    
-        // Optional: Add logging for verification
-        //console.log('Original plan:', plan.map(step => ({ id: step.id, dependencies: step.dependencies })));
-        //console.log('New steps:', newSteps.map(step => ({ id: step.id, dependencies: step.dependencies })));
     }
 
     async getOutput(): Promise<any> {
@@ -349,7 +343,7 @@ Please consider this context and the available plugins when planning and executi
             const isMissionOutput = this.steps.length === 1 || (isFinal && !(await this.hasDependentAgents()));
    
             // Send message to client
-            await this.sendMessage(MessageType.WORK_PRODUCT_UPDATE,'user', {
+            this.sendMessage(MessageType.WORK_PRODUCT_UPDATE,'user', {
                 id: stepId,
                 type: isFinal ? 'Final' : 'Interim',
                 scope: isMissionOutput ? 'MissionOutput' : (isFinal ? 'AgentOutput' : 'AgentStep'),
@@ -606,7 +600,7 @@ Please consider this context and the available plugins when planning and executi
     }
     
     // Helper method to check if a step has any dependent steps
-    private hasDependendentSteps(stepId: string): boolean {
+    private hasDependentSteps(stepId: string): boolean {
         return this.steps.some(step => 
             step.dependencies.some(dep => dep.sourceStepId === stepId)
         );
@@ -621,7 +615,7 @@ Please consider this context and the available plugins when planning and executi
             step.clearTempData?.();
             
             // If this step's failure affects the entire agent, update agent status
-            if (!this.hasDependendentSteps(step.id)) {
+            if (!this.hasDependentSteps(step.id)) {
                 this.status = AgentStatus.ERROR;
                 await this.notifyTrafficManager();
             }
