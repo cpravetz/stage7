@@ -39,34 +39,24 @@ export class PostOffice {
         this.wss = new WebSocket.Server({ server: this.server });
         this.url = process.env.POSTOFFICE_URL || 'postoffice:5020';
         this.setupWebSocket();
+
+        const limiter = rateLimit({
+            windowMs: 15 * 60 * 1000, // 15 minutes
+            max: 1000, // max 100 requests per windowMs
+        });
+        this.app.use(limiter);
+
         const corsOptions = {
             origin: true, // This allows all origins
             methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
             allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin', 'Access-Control-Allow-Origin', 'Access-Control-Allow-Headers'],
             credentials: true,
         };
-
-        const limiter = rateLimit({
-            windowMs: 15 * 60 * 1000, // 15 minutes
-            max: 1000, // max 100 requests per windowMs
-        });
-
-        this.app.use(limiter);        
         this.app.use(cors(corsOptions));
 
         this.app.use(bodyParser.json());
         this.app.use(bodyParser.urlencoded({ extended: true }));
         this.app.use(this.logRequest);
-
-        // Explicitly set CORS headers for all routes
-        this.app.use((req, res, next) => {
-            const origin = req.headers.origin || '*'; // This allows all origins
-            res.header('Access-Control-Allow-Origin', origin); // Replace with your frontend's actual origin
-            res.header('Access-Control-Allow-Credentials', 'true');
-            res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-            res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-            next();
-        });        
 
         // Add OPTIONS handler for preflight requests
         this.app.options('*', cors(corsOptions));
