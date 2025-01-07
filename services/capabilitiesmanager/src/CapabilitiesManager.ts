@@ -13,6 +13,8 @@ import { ConfigManager } from './utils/configManager.js';
 import { PluginRegistry } from './utils/pluginRegistry.js';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
+import { validateAndStandardizeInputs } from './utils/validator';
+import { requestPluginFromEngineer } from './utils/engineer';
 
 const configPath = path.join(os.homedir(), '.cktmcs', 'capabilitiesmanager.json');
 
@@ -237,7 +239,7 @@ export class CapabilitiesManager extends BaseEntity {
             }
             //console.log('CM: capabilitiesManager validating inputs', step.inputs);
             // Validate and standardize inputs
-            const validatedInputs = await this.validateAndStandardizeInputs(plugin, step.inputs);
+            const validatedInputs = await validateAndStandardizeInputs(plugin, step.inputs);
             if (!validatedInputs.success) {
                 console.log('CM: Error validating inputs:', validatedInputs.error);
                 res.status(200).send([{
@@ -256,7 +258,7 @@ export class CapabilitiesManager extends BaseEntity {
             res.status(200).send(MapSerializer.transformForSerialization(result));
 
         } catch (error) {
-            console.error(`Error executing action verb ${step.actionVerb}:`, error instanceof Error ? error.message : error);
+            console.error('Error executing action verb %s:', step.actionVerb, error instanceof Error ? error.message : error);
             res.status(500).send([{
                 success: false,
                 name: 'error',
@@ -264,57 +266,6 @@ export class CapabilitiesManager extends BaseEntity {
                 result: error,
                 error: error instanceof Error ? error.message : 'Unknown error occurred'
             }]);
-        }
-    }
-
-    private async validateAndStandardizeInputs(plugin: PluginDefinition, inputs: Map<string, PluginInput>): 
-    Promise<{ success: boolean; inputs?: Map<string, PluginInput>; error?: string }> {
-        const validInputs = new Map<string, PluginInput>();
-        try {
-            for (const inputDef of plugin.inputDefinitions) {
-                const inputName = inputDef.name;
-                let input = inputs.get(inputName);
-
-                if (!input) {
-                    // Look for case-insensitive match
-                    for (const [key, value] of inputs) {
-                        if (key.toLowerCase() === inputName.toLowerCase()) {
-                            input = value;
-                            break;
-                        }
-                    }
-                }
-
-                // Handle required inputs
-                if (!input && inputDef.required) {
-                    return {
-                        success: false,
-                        error: `Missing required input "${inputName}" for ${plugin.verb}`
-                    };
-                }
-
-                // Validate input type if present
-                if (input && inputDef.type) {
-                    const isValid = await this.validateInputType(input.inputValue, inputDef.type);
-                    if (!isValid) {
-                        return {
-                            success: false,
-                            error: `Invalid type for input "${inputName}". Expected ${inputDef.type}`
-                        };
-                    }
-                }
-
-                if (input) {
-                    validInputs.set(inputName, input);
-                }
-            }
-
-            return { success: true, inputs: validInputs };
-        } catch (error) {
-            return {
-                success: false,
-                error: `Input validation error: ${error instanceof Error ? error.message : String(error)}`
-            };
         }
     }
 
@@ -463,7 +414,7 @@ export class CapabilitiesManager extends BaseEntity {
                 case PluginParameterType.PLUGIN:
                     // Need to create a new plugin
                     console.log('CM: Creating new plugin for unknown verb:', step.actionVerb);
-                    const engineerResult = await this.requestPluginFromEngineer(step, JSON.stringify(accomplishResult.result));
+                    const engineerResult = await requestPluginFromEngineer(step, JSON.stringify(accomplishResult.result));
                     if (!engineerResult.success) {
                         return engineerResult;
                     }
@@ -566,64 +517,6 @@ export class CapabilitiesManager extends BaseEntity {
                 resultDescription: 'Error executing ACCOMPLISH plugin',
                 result: null
             };
-        }
-    }
-
-    private async requestPluginFromEngineer(step: Step, accomplishGuidance: String): Promise<PluginOutput> {
-        try {
-            const engineerUrl = process.env.ENGINEER_URL || 'engineer:5070';
-            const response = await axios.post(`http://${engineerUrl}/createPlugin`, {
-                verb: step.actionVerb,
-                context: step.inputs,
-                accomplishGuidance: accomplishGuidance
-            });
-
-            if (response.data.success) {
-                console.log('Engineer created new plugin:', response.data.plugin);
-                return {
-                    success: true,
-                    name: 'plugin_created',
-                    resultType: PluginParameterType.PLUGIN,
-                    result: response.data.plugin,
-                    resultDescription: 'Created new plugin for ' + step.actionVerb
-                };
-            }
-            console.error('Failed to create plugin:', response.data.error);
-            return {
-                success: false,
-                name: 'error',
-                resultType: PluginParameterType.ERROR,
-                error: response.data.error || 'Failed to create plugin',
-                resultDescription: 'Failed to create plugin',
-                result: null
-            };
-        } catch (error) {
-            console.error('Failed to create plugin:', error instanceof Error ? error.message : error);
-            return {
-                success: false,
-                name: 'error',
-                resultType: PluginParameterType.ERROR,
-                error: error instanceof Error ? error.message : 'Failed to create plugin',
-                resultDescription: 'Failed to create plugin',
-                result: null
-            };
-        }
-    }
-
-    private async validateInputType(value: any, expectedType: string): Promise<boolean> {
-        switch (expectedType.toLowerCase()) {
-            case 'string':
-                return typeof value === 'string';
-            case 'number':
-                return typeof value === 'number';
-            case 'boolean':
-                return typeof value === 'boolean';
-            case 'array':
-                return Array.isArray(value);
-            case 'object':
-                return typeof value === 'object' && value !== null && !Array.isArray(value);
-            default:
-                return true; // Allow unknown types to pass validation
         }
     }
 

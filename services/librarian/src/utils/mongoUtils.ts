@@ -23,9 +23,13 @@ export async function storeInMongo(collectionName: string, document: any) {
         }
         const collection: Collection = db.collection(collectionName);
         const filter = { _id: { $eq: document._id } };
+        const sanitizedDocument: Record<string, any> = {};
+        for (const key in document) {
+            sanitizedDocument[key] = { $eq: document[key] };
+        }
         const result = await collection.updateOne(
             filter,
-            { $set: document },
+            { $set: sanitizedDocument },
             { upsert: true }
         );
         return result;

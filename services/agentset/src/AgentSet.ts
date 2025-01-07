@@ -100,7 +100,7 @@ export class AgentSet extends BaseEntity {
                     const output = await agent.getOutput();
                     res.status(200).send({ output });
                 } catch (error) { analyzeError(error as Error);
-                    console.error(`Error fetching output for agent ${agentId}:`, error instanceof Error ? error.message : error);
+                    console.error('Error fetching output for agent %s:', agentId, error instanceof Error ? error.message : error);
                     res.status(500).send({ error: `Failed to fetch output for agent ${agentId}` });
                 }
             }
@@ -182,7 +182,7 @@ export class AgentSet extends BaseEntity {
                 await agent.handleMessage(message);
                 res.status(200).send({ status: 'Message delivered to agent' });
             } catch (error) { analyzeError(error as Error);
-                console.error(`Error delivering message to agent ${agentId}:`, error instanceof Error ? error.message : error);
+                console.error('Error delivering message to agent %s:', agentId, error instanceof Error ? error.message : error);
                 res.status(500).send({ error: 'Failed to deliver message to agent' });
             }
         } else {
@@ -199,7 +199,7 @@ export class AgentSet extends BaseEntity {
                 const output = await agent.getOutput();
                 res.status(200).send(output);
             } catch (error) { analyzeError(error as Error);
-                console.error(`Error fetching output for agent ${agentId}:`, error instanceof Error ? error.message : error);
+                console.error('Error fetching output for agent %s:', agentId, error instanceof Error ? error.message : error);
                 res.status(500).send({ error: 'Failed to fetch agent output' });
             }
         } else {
@@ -217,11 +217,11 @@ export class AgentSet extends BaseEntity {
     
           if (agent) {
             try {
-              await agent.handleMessage(message);
-              res.status(200).send({ status: 'Message delivered to agent' });
+                await agent.handleMessage(message);
+                res.status(200).send({ status: 'Message delivered to agent' });
             } catch (error) { analyzeError(error as Error);
-              console.error(`Error delivering message to agent ${agentId}:`, error instanceof Error ? error.message : error);
-              res.status(500).send({ error: 'Failed to deliver message to agent' });
+                console.error('Error delivering message to agent %s:', agentId, error instanceof Error ? error.message : error);
+                res.status(500).send({ error: 'Failed to deliver message to agent' });
             }
           } else {
             res.status(404).send({ error: `Agent ${agentId} not found in this AgentSet` });
