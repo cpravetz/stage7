@@ -65,20 +65,19 @@ export class Engineer extends BaseEntity {
   
         try {
             const contextString = JSON.stringify(Array.from(context.entries()));
-            const engineeringPrompt = `
-            Create a javascript or python based plugin for the action verb "${verb}" with the following context: ${explanation}
-            
+            const engineeringPrompt = `Create a javascript or python based plugin for the action verb "${verb}" with the following context: ${explanation}
+
             The planner provides this additional guidance: ${guidance}
 
             The plugin should expect inputs structured as a Map<string, PluginInput>, where PluginInput is defined as:
-            
+
             interface PluginInput {
                 inputValue: string | number | boolean | any[] | object | null;
                 args: Record<string, any>;
                 dependencyOutputs: Record<string, any>;
                 agentDependencies?: Record<string, any>;
             }
-            
+
             Use this context to determine the required inputs: ${contextString}
 
              Important requirements:
@@ -175,9 +174,10 @@ Types used in the plugin structure are:
             Ensure the plugin's 'inputDefinitions' field accurately defines the expected PluginInputs based on the provided context.
             The main file should implement the plugin logic and handle the inputs correctly, expecting a Map<string, PluginInput>.
             Include appropriate error handling and logging.
+            Use publicly available web services where possible.
             The code should be immediately executable without any compilation step.
             Determine any necessary environment variables or configuration items needed for the plugin to function correctly.
-            `;
+`;
     
             const response = await axios.post(`http://${this.brainUrl}/chat`, {
                 exchanges: [{ role: 'user', message: engineeringPrompt }],
