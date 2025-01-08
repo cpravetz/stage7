@@ -144,7 +144,6 @@ export class MapSerializer {
                         frame.result = new Array(frame.current.length);
                         frame.isArray = true;
                     }
-
                     if (frame.index < frame.current.length) {
                         stack.push({
                             current: frame.current[frame.index],
@@ -155,21 +154,19 @@ export class MapSerializer {
                         stack.pop();
                     }
                 }
-                else if (frame.current && typeof frame.current === 'object') {
-                    if (!frame.keys) {
+                else if (typeof frame.current === 'object' && frame.current !== null) {
+                    if (frame.keys === undefined) {
                         frame.keys = Object.keys(frame.current);
                         frame.result = {};
-                        frame.index = 0;
                     }
 
-                    if (frame.index! < frame.keys.length) {
-                        const key = frame.keys[frame.index!];
+                    if (frame.keys.length > 0) {
+                        const key = frame.keys.pop()!;
+                        frame.currentKey = key;
                         stack.push({
                             current: frame.current[key],
-                            result: undefined,
-                            currentKey: key
+                            result: undefined
                         });
-                        frame.index!++;
                     } else {
                         stack.pop();
                     }
@@ -188,11 +185,12 @@ export class MapSerializer {
                     }
                 }
             } catch (error) {
-                console.error('Error transforming from serialization:', error);
+                console.error('Error transforming object from serialization:', error);
                 return obj;
             }
         }
 
         return stack[0]?.result ?? obj;
     }
+    
 }
