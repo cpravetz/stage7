@@ -13,8 +13,8 @@ import { ConfigManager } from './utils/configManager.js';
 import { PluginRegistry } from './utils/pluginRegistry.js';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
-import { validateAndStandardizeInputs } from './utils/validator';
-import { requestPluginFromEngineer } from './utils/engineer';
+import { validateAndStandardizeInputs } from './utils/validator.js';
+import { requestPluginFromEngineer } from './utils/engineer.js';
 
 const configPath = path.join(os.homedir(), '.cktmcs', 'capabilitiesmanager.json');
 
