@@ -82,14 +82,14 @@ export class AgentPersistenceManager {
 
     async loadWorkProduct(agentId: string, stepId: string): Promise<WorkProduct | null> {
         try {
-            const response = await axios.get(`http://${this.librarianUrl}/loadWorkProduct/${agentId}/${stepId}`);
+            const response = await axios.get(`http://${this.librarianUrl}/loadWorkProduct/${stepId}`);
             return new WorkProduct(
                     agentId, 
                     stepId, 
                     MapSerializer.transformFromSerialization(response.data) as PluginOutput[]
                     );
         } catch (error) { analyzeError(error as Error);
-            console.error(`Error loading work product ${agentId}-${stepId}:`, error instanceof Error ? error.message : error);
+            console.error(`Error loading work product ${agentId}_${stepId}:`, error instanceof Error ? error.message : error);
             return null;
         }
     }
