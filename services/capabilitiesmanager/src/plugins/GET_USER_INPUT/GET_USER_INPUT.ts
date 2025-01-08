@@ -19,7 +19,7 @@ export async function execute(inputs: Map<string, PluginInput>): Promise<PluginO
                     success: false,
                     name: 'error',
                     resultType: PluginParameterType.ERROR,
-                    resultDescription: 'Error',
+                    resultDescription: 'Error in execute',
                     result: null,
                     error: 'Question is required for GET_USER_INPUT plugin'
                 }];
@@ -39,7 +39,7 @@ export async function execute(inputs: Map<string, PluginInput>): Promise<PluginO
                 success: false,
                 name: 'error',
                 resultType: PluginParameterType.ERROR,
-                resultDescription: 'Error',
+                resultDescription: 'Error in execute',
                 result: null,
                 error: error instanceof Error ? error.message : 'An unknown error occurred'
             }];

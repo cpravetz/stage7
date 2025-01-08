@@ -7,6 +7,6 @@ export async function execute(input: PluginInput): Promise<PluginOutput[]> {
     name: 'error',
     resultType: PluginParameterType.ERROR,
     result: 'This plugin is just a stub',
-    resultDescription: ''
+    resultDescription: 'Called stub instead of real plugin'
   }];
 }

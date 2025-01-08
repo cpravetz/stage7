@@ -270,7 +270,7 @@ Please consider this context and the available plugins when planning and executi
                 success: false,
                 name: 'error',
                 resultType: PluginParameterType.ERROR,
-                resultDescription: 'Error',
+                resultDescription: 'Error in handleAskStep',
                 result: null,
                 error: 'Question is required for ASK plugin'
             }]
@@ -309,7 +309,7 @@ Please consider this context and the available plugins when planning and executi
                 name: 'error',
                 resultType: PluginParameterType.ERROR,
                 result: null,
-                resultDescription: 'Error',
+                resultDescription: 'Error in handleAskStep',
                 error: error instanceof Error ? error.message : 'Unknown error occurred'
             }];
         }
@@ -386,7 +386,7 @@ Please consider this context and the available plugins when planning and executi
                     success: false,
                     name: 'error',
                     resultType: PluginParameterType.ERROR,
-                    resultDescription:'Error',
+                    resultDescription:'Error in createSubAgent',
                     result: null,
                     error: `Failed to create sub-agent: ${response.data.error || 'Unknown error'}`
                 }];
@@ -408,7 +408,7 @@ Please consider this context and the available plugins when planning and executi
                 success: false,
                 name: 'error',
                 resultType: PluginParameterType.ERROR,
-                resultDescription:'Error',
+                resultDescription:'Error in createSubAgent',
                 result: null,
                 error: error instanceof Error ? error.message : 'Unknown error occurred while creating sub-agent'
             }];
@@ -422,7 +422,7 @@ Please consider this context and the available plugins when planning and executi
                 success: false,
                 name: 'error',
                 resultType: PluginParameterType.ERROR,
-                resultDescription: 'Error',
+                resultDescription: 'Error in useBrainForReasoning',
                 result: null,
                 error: 'Prompt is required for THINK plugin'
             }];
@@ -439,7 +439,7 @@ Please consider this context and the available plugins when planning and executi
                 success: false,
                 name: 'error',
                 resultType: PluginParameterType.ERROR,
-                resultDescription: 'Error',
+                resultDescription: 'Error in useBrainForReasoning',
                 result: null,
                 error: `Invalid optimization: ${optimization}. Must be one of ${validOptimizations.join(', ')}`
             }];
@@ -450,7 +450,7 @@ Please consider this context and the available plugins when planning and executi
                 success: false,
                 name: 'error',
                 resultType: PluginParameterType.ERROR,
-                resultDescription: 'Error',
+                resultDescription: 'Error in useBrainForReasoning',
                 result: null,
                 error: `Invalid ConversationType: ${ConversationType}. Must be one of ${validConversationTypes.join(', ')}`
             }];
@@ -499,7 +499,7 @@ Please consider this context and the available plugins when planning and executi
                 success: false,
                 name: 'error',
                 resultType: PluginParameterType.ERROR,
-                resultDescription: 'Error',
+                resultDescription: 'Error in useBrainForReasoning',
                 result: null,
                 error: error instanceof Error ? error.message : 'Unknown error occurred'
             }];
@@ -541,7 +541,7 @@ Please consider this context and the available plugins when planning and executi
                 success: false,
                 name: 'error',
                 resultType: PluginParameterType.ERROR,
-                resultDescription: 'Error',
+                resultDescription: 'Error in executeActionWithCapabilitiesManager',
                 result: null,
                 error: error instanceof Error ? error.message : `Unknown error occurred ${error}`
             }];
