@@ -24,18 +24,25 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics }) =
     const networkRef = useRef<Network | null>(null);
 
     const { nodes, edges } = useMemo(() => {
-        const statsMap = MapSerializer.transformFromSerialization(agentStatistics);
+        let statsMap;
+        if (agentStatistics instanceof Map) {
+            statsMap = agentStatistics;
+        } else {
+            statsMap = MapSerializer.transformFromSerialization(agentStatistics);
+        }
 
-        if (!statsMap?.values) {
-            console.error('Invalid agentStatistics data');
+        if (!statsMap || typeof statsMap.get !== 'function') {
+            console.error('Invalid agentStatistics data', statsMap);
             return { nodes: new DataSet<Node>(), edges: new DataSet<Edge>() };
         }
 
-        const nodes = new DataSet<Node>(
-            Array.from(statsMap.values() as Iterable<AgentStatistics[]>)
-                .flat()
-                .flatMap((agent: AgentStatistics) => 
-                    agent.steps.map(step => ({
+        const nodes = new DataSet<Node>();
+        const edges = new DataSet<Edge>();
+
+        for (const [status, agents] of statsMap.entries()) {
+            agents.forEach((agent: AgentStatistics) => {
+                agent.steps.forEach(step => {
+                    nodes.add({
                         id: step.id,
                         label: `${step.verb}\n(${step.status})`,
                         color: {
@@ -44,25 +51,20 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics }) =
                         },
                         borderWidth: 2,
                         group: agent.id
-                    }))
-                )
-        );
+                    });
 
-        const edges = new DataSet<Edge>(
-            Array.from(statsMap.values() as Iterable<AgentStatistics[]>)
-                .flat()
-                .flatMap((agent: AgentStatistics) =>
-                    agent.steps.flatMap(step =>
-                        step.dependencies.map(depId => ({
+                    step.dependencies.forEach(depId => {
+                        edges.add({
                             from: depId,
                             to: step.id,
                             arrows: 'to',
                             color: agent.color,
                             width: 2
-                        }))
-                    )
-                )
-        );
+                        });
+                    });
+                });
+            });
+        }
 
         return { nodes, edges };
     }, [agentStatistics]);

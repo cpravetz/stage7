@@ -59,7 +59,7 @@ when the goal can be accomplished with a plan.  If you determine a plugin is nee
 "plan": [
     {
         "number": 1,
-        "verb": "ACTION_VERB",
+        "verb": "DESCRIPTTIVE_ACTION_VERB",
         "description": "Brief description of the step",
         "inputs": {
             "inputName1": {"value": "predeterminedValue"},
@@ -91,7 +91,7 @@ when the goal can be accomplished with a plan.  If you determine a plugin is nee
 
 Guidelines for creating a plan:
 1. Number each step sequentially.
-2. Use specific, actionable verbs (or phrases) for each step (e.g., SCRAPE, ANALYZE, ANALYZEAUDIOFILE, PREDICT).
+2. Use specific, actionable verbs or phrases for each step (e.g.  ANALYZE_CSV, ANALYZE_AUDIOFILE, PREDICT, WRITE_TEXT, WRITE_CODE, BOOK_A_CAR).
 3. Ensure each step has a description.
 4. Each step input should be an object with either a 'value' property for predetermined values or an 'outputKey' property referencing an output from a previous step. 
 5. List dependencies for each step as an object with the property names being the outputs needed and the values being the step number that provides the required inputlike: {outputname: stepNumber}

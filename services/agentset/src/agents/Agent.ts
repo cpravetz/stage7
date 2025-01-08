@@ -178,7 +178,10 @@ Please consider this context and the available plugins when planning and executi
         for (const dep of step.dependencies) {
             const workProduct = await this.agentPersistenceManager.loadWorkProduct(this.id, dep.sourceStepId);
             if (workProduct && workProduct.data) {
-                const outputValue = workProduct.data.find(r => r.name === dep.outputName)?.result;
+                const deserializedData = MapSerializer.transformFromSerialization(workProduct.data);
+                const outputValue = Array.isArray(deserializedData) 
+                    ? deserializedData.find(r => r.name === dep.outputName)?.result
+                    : deserializedData[dep.outputName];
                 if (outputValue !== undefined) {
                     step.inputs.set(dep.inputName, {
                         inputName: dep.inputName,
@@ -334,11 +337,11 @@ Please consider this context and the available plugins when planning and executi
     }
 
     private async saveWorkProduct(stepId: string, data: PluginOutput[], isFinal: boolean): Promise<void> {
-        const workProduct = new WorkProduct(this.id, stepId, data);
+        const serializedData = MapSerializer.transformForSerialization(data);
+        const workProduct = new WorkProduct(this.id, stepId, serializedData);
         try {
-            // Save to Librarian
             await this.agentPersistenceManager.saveWorkProduct(workProduct);
-    
+
             // Determine if this is a mission output
             const isMissionOutput = this.steps.length === 1 || (isFinal && !(await this.hasDependentAgents()));
    
