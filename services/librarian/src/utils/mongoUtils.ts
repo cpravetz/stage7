@@ -22,10 +22,12 @@ export async function storeInMongo(collectionName: string, document: any) {
             await connectMongo();
         }
         const collection: Collection = db.collection(collectionName);
-        const filter = { _id: { $eq: document._id } };
+        const filter = { _id: document._id };
         const sanitizedDocument: Record<string, any> = {};
         for (const key in document) {
-            sanitizedDocument[key] = { $eq: document[key] };
+            if (key !== '_id') {  // Exclude _id from the update
+                sanitizedDocument[key] = document[key];
+            }
         }
         const result = await collection.updateOne(
             filter,
@@ -33,7 +35,8 @@ export async function storeInMongo(collectionName: string, document: any) {
             { upsert: true }
         );
         return result;
-    } catch (error) { analyzeError(error as Error);
+    } catch (error) {
+        analyzeError(error as Error);
         console.log('StoreInMongo error:', error instanceof Error ? error.message : error);
     }
 }
