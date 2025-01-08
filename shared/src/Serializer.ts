@@ -12,14 +12,14 @@ export class MapSerializer {
         };
     }
 
-    static deserialize(serialized: SerializedMap): Map<string, any> {
-        if (serialized._type !== 'Map') {
-            return new Map(); // this won't happen, we check before calling this method
+    static deserialize(obj: any): Map<any, any> {
+        if (obj._type === 'Map' && Array.isArray(obj.entries)) {
+            return new Map(obj.entries);
         }
-        return new Map(serialized.entries);
+        return new Map();
     }
 
-    static isSerializedMap(obj: any): obj is SerializedMap {
+    static isSerializedMap(obj: any): any {
         return obj && obj._type === 'Map' && Array.isArray(obj.entries);
     }
 
@@ -27,170 +27,35 @@ export class MapSerializer {
     static transformForSerialization(obj: any): any {
         if (obj === null || obj === undefined) return obj;
         
-        // Handle top-level Map specifically
         if (obj instanceof Map) {
-            return MapSerializer.serialize(obj);
-        }
-    
-        const stack: Array<{
-            current: any,
-            result: any,
-            keys?: string[],
-            currentKey?: string,
-            index?: number,
-            isArray?: boolean
-        }> = [];
-       
-        stack.push({ current: obj, result: undefined });
-       
-        while (stack.length > 0) {
-            const frame = stack[stack.length - 1];
-           
-            try {
-                if (frame.current instanceof Map) {
-                    frame.result = MapSerializer.serialize(frame.current);
-                    stack.pop();
-                }
-                else if (Array.isArray(frame.current)) {
-                    if (frame.index === undefined) {
-                        frame.index = 0;
-                        frame.result = new Array(frame.current.length);
-                        frame.isArray = true;
-                    }
-                   
-                    if (frame.index < frame.current.length) {
-                        stack.push({
-                            current: frame.current[frame.index],
-                            result: undefined
-                        });
-                        frame.index++;
-                    } else {
-                        stack.pop();
-                    }
-                }
-                else if (frame.current && typeof frame.current === 'object') {
-                    if (!frame.keys) {
-                        frame.keys = Object.keys(frame.current);
-                        frame.result = {};
-                        frame.index = 0;
-                    }
-                   
-                    if (frame.index! < frame.keys.length) {
-                        const key = frame.keys[frame.index!];
-                        stack.push({
-                            current: frame.current[key],
-                            result: undefined,
-                            currentKey: key
-                        });
-                        frame.index!++;
-                    } else {
-                        stack.pop();
-                    }
-                }
-                else {
-                    frame.result = frame.current;
-                    stack.pop();
-                }
-               
-                if (stack.length > 1) {
-                    const parent = stack[stack.length - 2];
-                    if (parent.isArray) {
-                        parent.result[parent.index! - 1] = frame.result;
-                    } else if (parent.keys) {
-                        parent.result[frame.currentKey!] = frame.result;
-                    }
-                }
-            } catch (error) {
-                console.error('Error transforming object for serialization:', error);
-                return obj;
+            return this.serialize(obj);
+        } else if (Array.isArray(obj)) {
+            return obj.map(item => this.transformForSerialization(item));
+        } else if (typeof obj === 'object' && obj !== null) {
+            const result: any = {};
+            for (const [key, value] of Object.entries(obj)) {
+                result[key] = this.transformForSerialization(value);
             }
+            return result;
         }
-       
-        return stack[0]?.result ?? obj;
+        return obj;
     }
 
     
     // Recursively restores Maps in a deserialized object
     static transformFromSerialization(obj: any): any {
-        if (obj === null || obj === undefined) return obj;
-
-        // Handle top-level SerializedMap
-        if (MapSerializer.isSerializedMap(obj)) {
-            return MapSerializer.deserialize(obj);
-        }
-
-        const stack: Array<{
-            current: any,
-            result: any,
-            keys?: string[],
-            currentKey?: string,
-            index?: number,
-            isArray?: boolean
-        }> = [];
-
-        stack.push({ current: obj, result: undefined });
-
-        while (stack.length > 0) {
-            const frame = stack[stack.length - 1];
-
-            try {
-                if (MapSerializer.isSerializedMap(frame.current)) {
-                    frame.result = MapSerializer.deserialize(frame.current);
-                    stack.pop();
-                }
-                else if (Array.isArray(frame.current)) {
-                    if (frame.index === undefined) {
-                        frame.index = 0;
-                        frame.result = new Array(frame.current.length);
-                        frame.isArray = true;
-                    }
-                    if (frame.index < frame.current.length) {
-                        stack.push({
-                            current: frame.current[frame.index],
-                            result: undefined
-                        });
-                        frame.index++;
-                    } else {
-                        stack.pop();
-                    }
-                }
-                else if (typeof frame.current === 'object' && frame.current !== null) {
-                    if (frame.keys === undefined) {
-                        frame.keys = Object.keys(frame.current);
-                        frame.result = {};
-                    }
-
-                    if (frame.keys.length > 0) {
-                        const key = frame.keys.pop()!;
-                        frame.currentKey = key;
-                        stack.push({
-                            current: frame.current[key],
-                            result: undefined
-                        });
-                    } else {
-                        stack.pop();
-                    }
-                }
-                else {
-                    frame.result = frame.current;
-                    stack.pop();
-                }
-
-                if (stack.length > 1) {
-                    const parent = stack[stack.length - 2];
-                    if (parent.isArray) {
-                        parent.result[parent.index! - 1] = frame.result;
-                    } else if (parent.keys) {
-                        parent.result[frame.currentKey!] = frame.result;
-                    }
-                }
-            } catch (error) {
-                console.error('Error transforming object from serialization:', error);
-                return obj;
+        if (obj && obj._type === 'Map') {
+            return this.deserialize(obj);
+        } else if (Array.isArray(obj)) {
+            return obj.map(item => this.transformFromSerialization(item));
+        } else if (typeof obj === 'object' && obj !== null) {
+            const result: any = {};
+            for (const [key, value] of Object.entries(obj)) {
+                result[key] = this.transformFromSerialization(value);
             }
+            return result;
         }
-
-        return stack[0]?.result ?? obj;
+        return obj;
     }
-    
+
 }
