@@ -108,6 +108,10 @@ class MissionControl extends BaseEntity {
 
     private async createMission(content: any, clientId: string, userId: string) {
         this.logAndSay(`Creating mission with goal: ${content.goal}`);
+
+        // Clear action plan cache before creating new mission
+        await this.clearActionPlanCache();
+
         const mission: Mission = {
             id: generateGuid(),
             userId: userId,
@@ -159,6 +163,20 @@ class MissionControl extends BaseEntity {
         }
     }
 
+    private async clearActionPlanCache() {
+        try {
+            await api.delete(`http://${this.librarianUrl}/deleteCollection`, {
+                params: {
+                    collection: 'actionPlans'
+                }
+            });
+            console.log('Action plan cache cleared successfully');
+        } catch (error) {
+            console.error('Error clearing action plan cache:', error instanceof Error ? error.message : error);
+            // Don't throw - we don't want to block mission creation if cache clear fails
+        }
+    }
+    
     private async resumeMission(missionId: string) {
         const mission = this.missions.get(missionId);
         if (mission) {

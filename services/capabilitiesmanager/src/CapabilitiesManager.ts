@@ -151,12 +151,12 @@ export class CapabilitiesManager extends BaseEntity {
     }
 
     private async executeActionVerb(req: express.Request, res: express.Response) {
-        //console.log('CM: Executing action verb with req.body:', JSON.stringify(req.body, null, 2));
         const step = {
             ...req.body,
             inputs: MapSerializer.transformFromSerialization(req.body.inputs)
         };
         console.log('CM: Executing action verb:', step.actionVerb);
+        
         if (!step.actionVerb || typeof step.actionVerb !== 'string') {
             console.log('CM: Invalid or missing verb', step.actionVerb);
             res.status(200).send([{
@@ -168,24 +168,21 @@ export class CapabilitiesManager extends BaseEntity {
             }]);
             return;
         }
-
-        if (!step.inputs || !(step.inputs instanceof Map)) {
-            console.log('CM: Invalid or missing inputs', step.inputs);
-            res.status(200).send([{
-                success: false,
-                name: 'error',
-                resultType: PluginParameterType.ERROR,
-                result: 'Invalid or missing inputs',
-                error: 'Invalid or missing inputs'
-            }]);
-            return;
-        }
-
+    
         try {
             // First check registry cache
             let plugin = await this.pluginRegistry.fetchOneByVerb(step.actionVerb);
             console.log('CM: The plugin returned from cache is:', plugin?.id);
+            
             if (!plugin) {
+                // Check for cached plan before handling unknown verb
+                const cachedPlan = await this.checkCachedPlan(step.actionVerb);
+                if (cachedPlan) {
+                    console.log('CM: Using cached plan for verb:', step.actionVerb);
+                    res.status(200).send(cachedPlan);
+                    return;
+                }
+    
                 // If not in cache, handle unknown verb
                 console.log('CM: Plugin not found in Registry cache, handling unknown verb');
                 const result = await this.handleUnknownVerb(step);
@@ -194,14 +191,18 @@ export class CapabilitiesManager extends BaseEntity {
                     res.status(200).send(MapSerializer.transformForSerialization([result]));
                     return;
                 }
-
+    
+                // If we got a plan back from ACCOMPLISH, cache it
+                if (result.resultType === PluginParameterType.PLAN) {
+                    await this.cachePlan(step.actionVerb, result);
+                }
+    
                 // Handle different response types
                 switch (result.resultType) {
                     case PluginParameterType.PLAN:
                         console.log('CM: Returning plan for execution');
                         res.status(200).send(MapSerializer.transformForSerialization([result]));
                         return;
-
                     case PluginParameterType.STRING:
                     case PluginParameterType.NUMBER:
                     case PluginParameterType.BOOLEAN:
@@ -517,6 +518,39 @@ export class CapabilitiesManager extends BaseEntity {
                 resultDescription: 'Error executing ACCOMPLISH plugin',
                 result: null
             };
+        }
+    }
+
+    private async checkCachedPlan(actionVerb: string): Promise<PluginOutput | null> {
+        try {
+            const cachedPlan = await axios.get(`http://${this.librarianUrl}/loadData`, {
+                params: {
+                    collection: 'actionPlans',
+                    id: actionVerb
+                }
+            });
+            
+            if (cachedPlan.data?.data) {
+                console.log('CM: Found cached plan for verb:', actionVerb);
+                return cachedPlan.data.data;
+            }
+            return null;
+        } catch (error) {
+            console.log('CM: No cached plan found for verb:', actionVerb);
+            return null;
+        }
+    }
+    
+    private async cachePlan(actionVerb: string, plan: PluginOutput): Promise<void> {
+        try {
+            await axios.post(`http://${this.librarianUrl}/storeData`, {
+                collection: 'actionPlans',
+                id: actionVerb,
+                data: plan
+            });
+            console.log('CM: Cached plan for verb:', actionVerb);
+        } catch (error) {
+            console.error('CM: Error caching plan:', error);
         }
     }
 

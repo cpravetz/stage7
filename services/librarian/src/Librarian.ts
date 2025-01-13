@@ -46,6 +46,7 @@ export class Librarian extends BaseEntity {
         this.app.post('/storeWorkProduct', (req: express.Request, res: express.Response) => { this.storeWorkProduct(req, res) });
         this.app.get('/loadWorkProduct/:stepId', (req: express.Request, res: express.Response) => { this.loadWorkProduct(req, res) });    
         this.app.get('/getSavedMissions', (req: express.Request, res: express.Response) => { this.getSavedMissions(req, res) });
+        this.app.delete('/deleteCollection', (req: express.Request, res: express.Response) => { this.deleteCollection(req, res) });
         
       }
 
@@ -244,6 +245,18 @@ export class Librarian extends BaseEntity {
         }
     }
     
+    private async deleteCollection(req: express.Request, res: express.Response) {
+        const { collection } = req.query;
+        if (!collection) {
+            return res.status(400).send({ error: 'Collection is required' });
+        }
+        try {
+            await deleteManyFromMongo(collection as string, {});
+            res.status(200).send({ message: 'Collection deleted successfully' });
+        } catch (error) { analyzeError(error as Error);
+            res.status(500).send({ error: 'Failed to delete collection', details: error instanceof Error ? error.message : String(error) });
+        }
+    }
 }
 
 // Instantiate the Librarian
