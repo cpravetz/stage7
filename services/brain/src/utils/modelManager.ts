@@ -6,14 +6,19 @@ import { interfaceManager } from './interfaceManager';
 import { BaseInterface, LLMConversationType } from '../interfaces/baseInterface';
 import { BaseService } from '../services/baseService';
 import { analyzeError } from '@cktmcs/errorhandler';
+import { ModelPerformanceTracker } from './performanceTracker';
+import { v4 as uuidv4 } from 'uuid';
 
 
 export type OptimizationType = 'cost' | 'accuracy' | 'creativity' | 'speed' | 'continuity';
 
 export class ModelManager {
     private models: Map<string, BaseModel> = new Map();
+    private performanceTracker: ModelPerformanceTracker;
+    private activeRequests: Map<string, { modelName: string, conversationType: LLMConversationType, startTime: number }> = new Map();
 
     constructor() {
+        this.performanceTracker = new ModelPerformanceTracker();
         this.loadModels();
     }
 
@@ -75,24 +80,109 @@ export class ModelManager {
         const scores = model.getScoresForConversationType(conversationType);
         if (!scores) return -Infinity;
 
+        let baseScore: number;
         switch (optimization) {
             case 'speed':
-                return scores.speedScore;
+                baseScore = scores.speedScore;
+                break;
             case 'accuracy':
-                return scores.accuracyScore;
+                baseScore = scores.accuracyScore;
+                break;
             case 'creativity':
-                return scores.creativityScore;
+                baseScore = scores.creativityScore;
+                break;
             case 'cost':
-                return -scores.costScore; // Invert cost score so lower cost is better
+                baseScore = -scores.costScore; // Invert cost score so lower cost is better
+                break;
             case 'continuity':
                 // You might want to define how to calculate continuity score
-                return (scores.speedScore + scores.accuracyScore + scores.creativityScore - scores.costScore) / 4;
+                baseScore = (scores.speedScore + scores.accuracyScore + scores.creativityScore - scores.costScore) / 4;
+                break;
             default:
-                return (scores.speedScore + scores.accuracyScore + scores.creativityScore - scores.costScore) / 4;
+                baseScore = (scores.speedScore + scores.accuracyScore + scores.creativityScore - scores.costScore) / 4;
         }
-    }    
+
+        // Adjust score based on actual performance
+        return this.performanceTracker.adjustModelScore(baseScore, model.name, conversationType);
+    }
 
     getAvailableModels(): string[] {
         return Array.from(this.models.keys());
+    }
+
+    // getModel is already defined above
+
+    /**
+     * Track a request to a model
+     * @param modelName Model name
+     * @param conversationType Conversation type
+     * @param prompt Prompt
+     * @returns Request ID
+     */
+    trackModelRequest(modelName: string, conversationType: LLMConversationType, prompt: string): string {
+        const requestId = uuidv4();
+
+        // Track request in performance tracker
+        this.performanceTracker.trackRequest(requestId, modelName, conversationType, prompt);
+
+        // Store active request
+        this.activeRequests.set(requestId, {
+            modelName,
+            conversationType,
+            startTime: Date.now()
+        });
+
+        return requestId;
+    }
+
+    /**
+     * Track a response from a model
+     * @param requestId Request ID
+     * @param response Response
+     * @param tokenCount Token count
+     * @param success Success flag
+     * @param error Error message
+     */
+    trackModelResponse(requestId: string, response: string, tokenCount: number, success: boolean, error?: string): void {
+        // Get active request
+        const request = this.activeRequests.get(requestId);
+        if (!request) {
+            console.error(`No active request found for request ID ${requestId}`);
+            return;
+        }
+
+        // Track response in performance tracker
+        this.performanceTracker.trackResponse(requestId, response, tokenCount, success, error);
+
+        // Remove active request
+        this.activeRequests.delete(requestId);
+    }
+
+    /**
+     * Get performance metrics for a model
+     * @param modelName Model name
+     * @param conversationType Conversation type
+     * @returns Performance metrics
+     */
+    getModelPerformanceMetrics(modelName: string, conversationType: LLMConversationType) {
+        return this.performanceTracker.getPerformanceMetrics(modelName, conversationType);
+    }
+
+    /**
+     * Get model rankings for a conversation type
+     * @param conversationType Conversation type
+     * @param metric Metric to rank by
+     * @returns Ranked models
+     */
+    getModelRankings(conversationType: LLMConversationType, metric: 'successRate' | 'averageLatency' | 'overall' = 'overall') {
+        return this.performanceTracker.getModelRankings(conversationType, metric);
+    }
+
+    /**
+     * Get all performance data
+     * @returns Performance data for all models
+     */
+    getAllPerformanceData() {
+        return this.performanceTracker.getAllPerformanceData();
     }
 }
