@@ -15,4 +15,9 @@ export * from './messaging/queueClient';
 export * from './utils/asyncLLM';
 export * from './discovery/serviceDiscovery';
 export * from './config/configClient';
+export * from './versioning/semver';
+export * from './versioning/compatibilityChecker';
+export * from './security/pluginPermissions';
+export * from './security/pluginSandbox';
+export * from './security/pluginSigning';
 // Add any other exports here

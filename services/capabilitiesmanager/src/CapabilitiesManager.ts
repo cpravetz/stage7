@@ -4,6 +4,11 @@ import axios from 'axios';
 import path from 'path';
 import { Step, MapSerializer, BaseEntity  } from '@cktmcs/shared';
 import { PluginInput, PluginOutput, PluginDefinition, PluginParameterType, environmentType } from '@cktmcs/shared';
+import { executePluginInSandbox } from '@cktmcs/shared/dist/security/pluginSandbox';
+import { verifyPluginSignature, verifyTrustCertificate } from '@cktmcs/shared/dist/security/pluginSigning';
+import { validatePluginPermissions, hasDangerousPermissions } from '@cktmcs/shared/dist/security/pluginPermissions';
+import { checkPluginCompatibility } from '@cktmcs/shared/dist/versioning/compatibilityChecker';
+import { compareVersions } from '@cktmcs/shared/dist/versioning/semver';
 import fs from 'fs/promises';
 import os from 'os';
 import { exec } from 'child_process';
@@ -43,7 +48,7 @@ export class CapabilitiesManager extends BaseEntity {
         // Initialize with placeholder objects
         this.configManager = {} as ConfigManager;
         this.pluginRegistry = new PluginRegistry();
-        
+
         // Start async initialization
         this.initialize().catch(error => {
             console.error('Failed to initialize CapabilitiesManager:', error);
@@ -76,7 +81,7 @@ export class CapabilitiesManager extends BaseEntity {
                 app.post('/executeAction', (req, res) => this.executeActionVerb(req, res));
                 app.post('/message', (req, res) => this.handleMessage(req, res));
                 app.get('/availablePlugins', async (req, res) => {res.json(await this.pluginRegistry.list())});
-                app.post('/storeNewPlugin', async (req, res) => this.storeNewPlugin(req, res));
+                app.post('/storeNewPlugin', (req, res) => this.storeNewPlugin(req, res));
 
                 // Error handling middleware
                 app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -110,7 +115,7 @@ export class CapabilitiesManager extends BaseEntity {
             console.log('Setting up express server...');
             await this.setupServer();
             console.log('CapabilitiesManager initialization complete');
-        } catch (error) { 
+        } catch (error) {
             //analyzeError(error as Error);
             console.error('Failed to start CapabilitiesManager:', error instanceof Error ? error.message : error);
         }
@@ -124,27 +129,70 @@ export class CapabilitiesManager extends BaseEntity {
             res.status(200).send({ status: 'Message received and processed' });
         } catch (error) { //analyzeError(error as Error);
             console.error('Error handling message:', error instanceof Error ? error.message : error);
-            res.status(500).send({ 
-                status: 'Error processing message', 
-                error: error instanceof Error ? error.message : 'Unknown error' 
+            res.status(500).send({
+                status: 'Error processing message',
+                error: error instanceof Error ? error.message : 'Unknown error'
             });
         }
     }
 
     private async storeNewPlugin(req: express.Request, res: express.Response) {
         try {
-            const plugin = req.body;
-            this.pluginRegistry.store(plugin);
-    
-            console.log('CapabilitiesManager: New plugin registered:', plugin.id);
-            res.status(200).json({ 
+            const newPlugin = req.body;
+
+            // Check if this is an update to an existing plugin
+            const existingPlugin = await this.pluginRegistry.fetchOneByVerb(newPlugin.verb);
+
+            if (existingPlugin) {
+                // Check version compatibility
+                if (compareVersions(newPlugin.version, existingPlugin.version) <= 0) {
+                    return res.status(400).json({
+                        error: `New plugin version ${newPlugin.version} is not newer than existing version ${existingPlugin.version}`
+                    });
+                }
+
+                // Perform compatibility check
+                const compatibilityResult = checkPluginCompatibility(existingPlugin, newPlugin);
+
+                if (!compatibilityResult.compatible) {
+                    return res.status(400).json({
+                        error: 'Plugin is not compatible with the existing version',
+                        issues: compatibilityResult.issues
+                    });
+                }
+
+                console.log(`CapabilitiesManager: Updating plugin ${newPlugin.id} from version ${existingPlugin.version} to ${newPlugin.version}`);
+            }
+
+            // Verify plugin signature
+            if (!verifyPluginSignature(newPlugin)) {
+                return res.status(400).json({
+                    error: 'Plugin signature verification failed'
+                });
+            }
+
+            // Validate plugin permissions
+            const permissionErrors = validatePluginPermissions(newPlugin);
+            if (permissionErrors.length > 0) {
+                return res.status(400).json({
+                    error: `Plugin permission validation failed: ${permissionErrors.join(', ')}`
+                });
+            }
+
+            // Store the plugin
+            await this.pluginRegistry.store(newPlugin);
+
+            console.log('CapabilitiesManager: New plugin registered:', newPlugin.id);
+            res.status(200).json({
                 message: 'Plugin registered successfully',
-                pluginId: plugin.id 
+                pluginId: newPlugin.id,
+                version: newPlugin.version,
+                isUpdate: !!existingPlugin
             });
-    
+
         } catch (error) {
             analyzeError(error as Error);
-            res.status(500).json({ 
+            res.status(500).json({
                 error: error instanceof Error ? error.message : 'Unknown error registering plugin'
             });
         }
@@ -156,7 +204,7 @@ export class CapabilitiesManager extends BaseEntity {
             inputs: MapSerializer.transformFromSerialization(req.body.inputs)
         };
         console.log('CM: Executing action verb:', step.actionVerb);
-        
+
         if (!step.actionVerb || typeof step.actionVerb !== 'string') {
             console.log('CM: Invalid or missing verb', step.actionVerb);
             res.status(200).send([{
@@ -168,12 +216,12 @@ export class CapabilitiesManager extends BaseEntity {
             }]);
             return;
         }
-    
+
         try {
             // First check registry cache
             let plugin = await this.pluginRegistry.fetchOneByVerb(step.actionVerb);
             console.log('CM: The plugin returned from cache is:', plugin?.id);
-            
+
             if (!plugin) {
                 // Check for cached plan before handling unknown verb
                 const cachedPlan = await this.checkCachedPlan(step.actionVerb);
@@ -182,7 +230,7 @@ export class CapabilitiesManager extends BaseEntity {
                     res.status(200).send(cachedPlan);
                     return;
                 }
-    
+
                 // If not in cache, handle unknown verb
                 console.log('CM: Plugin not found in Registry cache, handling unknown verb');
                 const result = await this.handleUnknownVerb(step);
@@ -191,12 +239,12 @@ export class CapabilitiesManager extends BaseEntity {
                     res.status(200).send(MapSerializer.transformForSerialization([result]));
                     return;
                 }
-    
+
                 // If we got a plan back from ACCOMPLISH, cache it
                 if (result.resultType === PluginParameterType.PLAN) {
                     await this.cachePlan(step.actionVerb, result);
                 }
-    
+
                 // Handle different response types
                 switch (result.resultType) {
                     case PluginParameterType.PLAN:
@@ -272,9 +320,39 @@ export class CapabilitiesManager extends BaseEntity {
 
     protected async executePlugin(plugin: PluginDefinition, inputs: Map<string, PluginInput>): Promise<PluginOutput[]> {
         try {
+            // Verify plugin signature
+            if (!verifyPluginSignature(plugin)) {
+                return [{
+                    success: false,
+                    name: 'security_error',
+                    resultType: PluginParameterType.ERROR,
+                    resultDescription: 'Plugin signature verification failed',
+                    result: null
+                }];
+            }
+
+            // Validate plugin permissions
+            const permissionErrors = validatePluginPermissions(plugin);
+            if (permissionErrors.length > 0) {
+                return [{
+                    success: false,
+                    name: 'security_error',
+                    resultType: PluginParameterType.ERROR,
+                    resultDescription: `Plugin permission validation failed: ${permissionErrors.join(', ')}`,
+                    result: null
+                }];
+            }
+
+            // Check for dangerous permissions
+            if (hasDangerousPermissions(plugin)) {
+                console.warn(`Plugin ${plugin.id} has dangerous permissions`);
+                // In a production environment, we might want to prompt the user for confirmation
+                // or restrict execution based on user permissions
+            }
+
             // Load plugin-specific configuration
             const configSet = await this.configManager.getPluginConfig(plugin.id);
-            
+
             // Check for missing required configuration
             if (configSet.length === 0) {
                 for (const configItem of configSet) {
@@ -284,24 +362,30 @@ export class CapabilitiesManager extends BaseEntity {
                     }
                 }
             }
-        
+
             // Record usage
             await this.configManager.recordPluginUsage(plugin.id);
             await this.configManager.updatePluginConfig(plugin.id, configSet);
-            
+
             // Inject configuration into plugin environment
             const environment: environmentType = {
                 env: process.env,
                 credentials: configSet ?? []
             };
-        
-            // Execute with environment
+
+            // Execute with environment based on language
             if (plugin.language === 'javascript') {
-                return this.executeJavaScriptPlugin(plugin, inputs, environment);
+                // Use sandbox for JavaScript plugins
+                try {
+                    return await executePluginInSandbox(plugin, inputs, environment);
+                } catch (sandboxError) {
+                    console.error(`Sandbox execution failed, falling back to direct execution: ${sandboxError instanceof Error ? sandboxError.message : String(sandboxError)}`);
+                    return this.executeJavaScriptPlugin(plugin, inputs, environment);
+                }
             } else if (plugin.language === 'python') {
                 return this.executePythonPlugin(plugin, inputs, environment);
             }
-            
+
             throw new Error(`Unsupported plugin language: ${plugin.language}`);
         } catch (error) {
             return [{
@@ -318,11 +402,11 @@ export class CapabilitiesManager extends BaseEntity {
     private async executeJavaScriptPlugin(plugin: PluginDefinition, inputs: Map<string, PluginInput>, environment: environmentType): Promise<PluginOutput[]> {
         const pluginDir = path.join(__dirname, 'plugins', plugin.verb);
         const mainFilePath = path.join(pluginDir, plugin.entryPoint!.main);
-    
+
         try {
             // Dynamically import the main file
             const pluginModule = await import(mainFilePath);
-            
+
             if (typeof pluginModule.execute !== 'function') {
                 return [{
                     success: false,
@@ -332,7 +416,7 @@ export class CapabilitiesManager extends BaseEntity {
                     result: null
                 }];
             }
-    
+
             // Execute the plugin
             return await pluginModule.execute(inputs, environment);
         } catch (error) {
@@ -400,16 +484,16 @@ export class CapabilitiesManager extends BaseEntity {
             const verbToAvoid = step.actionVerb;
 
             console.log('CM: handleUnknownVerb goal:', step.actionVerb);
-            
+
             const accomplishResult = await this.executeAccomplishPlugin(goal, verbToAvoid);
-            
+
             if (!accomplishResult.success) {
                 console.error('CM: Error executing ACCOMPLISH for verb %s:', step.actionVerb, accomplishResult.error);
                 return accomplishResult;
             }
-    
+
             console.log('CM: accomplishResult:', accomplishResult);
-    
+
             // Handle different response types from ACCOMPLISH
             switch (accomplishResult.resultType) {
                 case PluginParameterType.PLUGIN:
@@ -419,7 +503,7 @@ export class CapabilitiesManager extends BaseEntity {
                     if (!engineerResult.success) {
                         return engineerResult;
                     }
-                    
+
                     const plugin = await this.pluginRegistry.fetchOneByVerb(step.actionVerb);
                     if (!plugin) {
                         return {
@@ -438,7 +522,7 @@ export class CapabilitiesManager extends BaseEntity {
                         result: plugin,
                         resultDescription: `Created new plugin for ${step.actionVerb}`
                     };
-    
+
                 case PluginParameterType.PLAN:
                     // Return the plan for execution
                     console.log('CM: Returning plan for execution:', accomplishResult.result);
@@ -449,7 +533,7 @@ export class CapabilitiesManager extends BaseEntity {
                         result: accomplishResult.result,
                         resultDescription: `Created plan to handle ${step.actionVerb}`
                     };
-    
+
                 case PluginParameterType.STRING:
                 case PluginParameterType.NUMBER:
                 case PluginParameterType.BOOLEAN:
@@ -462,7 +546,7 @@ export class CapabilitiesManager extends BaseEntity {
                         result: accomplishResult.result,
                         resultDescription: `Direct result for ${step.actionVerb}`
                     };
-    
+
                 default:
                     return {
                         success: false,
@@ -529,7 +613,7 @@ export class CapabilitiesManager extends BaseEntity {
                     id: actionVerb
                 }
             });
-            
+
             if (cachedPlan.data?.data) {
                 console.log('CM: Found cached plan for verb:', actionVerb);
                 return cachedPlan.data.data;
@@ -540,7 +624,7 @@ export class CapabilitiesManager extends BaseEntity {
             return null;
         }
     }
-    
+
     private async cachePlan(actionVerb: string, plan: PluginOutput): Promise<void> {
         try {
             await axios.post(`http://${this.librarianUrl}/storeData`, {
