@@ -1,0 +1,28 @@
+{
+  "name": "@cktmcs/configservice",
+  "version": "1.0.0",
+  "description": "Configuration service for Stage7",
+  "main": "dist/ConfigService.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/ConfigService.js",
+    "dev": "ts-node src/ConfigService.ts",
+    "test": "jest"
+  },
+  "dependencies": {
+    "@cktmcs/errorhandler": "file:../../errorhandler",
+    "@cktmcs/shared": "file:../../shared",
+    "axios": "^1.7.7",
+    "body-parser": "^1.20.2",
+    "express": "^4.19.2"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/jest": "^29.5.14",
+    "@types/node": "^20.14.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.2",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.6.3"
+  }
+}

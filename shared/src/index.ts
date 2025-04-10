@@ -13,4 +13,6 @@ export * from './types/Statistics';
 export * from './Serializer';
 export * from './messaging/queueClient';
 export * from './utils/asyncLLM';
+export * from './discovery/serviceDiscovery';
+export * from './config/configClient';
 // Add any other exports here

@@ -13,6 +13,8 @@ services:
       SECURITYMANAGER_URL: &securitymanagerUrl securitymanager:5010
       MISSIONCONTROL_URL: &missioncontrolUrl missioncontrol:5030
       RABBITMQ_URL: &rabbitmqUrl amqp://stage7:stage7password@rabbitmq:5672
+      CONSUL_URL: &consulUrl consul:8500
+      CONFIG_SERVICE_URL: &configserviceUrl configservice:5090
       POSTOFFICE_CLIENT_SECRET: &postofficeSecret postOfficeAuthSecret
       CLIENT_SECRET: *postofficeSecret
     ports:
@@ -32,6 +34,8 @@ services:
       SECURITYMANAGER_URL: *securitymanagerUrl
       POSTOFFICE_URL: *postofficeUrl
       RABBITMQ_URL: *rabbitmqUrl
+      CONSUL_URL: *consulUrl
+      CONFIG_SERVICE_URL: *configserviceUrl
       TRAFFICMANAGER_URL: &trafficmanagerUrl trafficmanager:5080
       LIBRARIAN_URL: &librarianUrl librarian:5040
       BRAIN_URL: &brainUrl brain:5070
@@ -53,6 +57,8 @@ services:
       TRAFFICMANAGER_URL: *trafficmanagerUrl
       POSTOFFICE_URL: *postofficeUrl
       RABBITMQ_URL: *rabbitmqUrl
+      CONSUL_URL: *consulUrl
+      CONFIG_SERVICE_URL: *configserviceUrl
       LIBRARIAN_URL: *librarianUrl
       TRAFFICMANAGER_CLIENT_SECRET: &trafficmanagerSecret trafficManagerAuthSecret
       CLIENT_SECRET: *trafficmanagerSecret
@@ -70,6 +76,8 @@ services:
       BRAIN_URL: *brainUrl
       POSTOFFICE_URL: *postofficeUrl
       RABBITMQ_URL: *rabbitmqUrl
+      CONSUL_URL: *consulUrl
+      CONFIG_SERVICE_URL: *configserviceUrl
       BRAIN_CLIENT_SECRET: &brainSecret brainAuthSecret
       CLIENT_SECRET: *brainSecret
 
@@ -103,6 +111,8 @@ services:
       ENGINEER_URL: *engineerUrl
       POSTOFFICE_URL: *postofficeUrl
       RABBITMQ_URL: *rabbitmqUrl
+      CONSUL_URL: *consulUrl
+      CONFIG_SERVICE_URL: *configserviceUrl
       BRAIN_URL: *brainUrl
       LIBRARIAN_URL: *librarianUrl
       CAPABILITIESMANAGER_URL: *capabilitiesmanagerUrl
@@ -135,6 +145,8 @@ services:
       CAPABILITIESMANAGER_URL: *capabilitiesmanagerUrl
       POSTOFFICE_URL: *postofficeUrl
       RABBITMQ_URL: *rabbitmqUrl
+      CONSUL_URL: *consulUrl
+      CONFIG_SERVICE_URL: *configserviceUrl
       LIBRARIAN_URL: *librarianUrl
       BRAIN_URL: *brainUrl
       ENGINEER_URL: &engineerUrl
@@ -169,6 +181,8 @@ services:
       LIBRARIAN_URL: *librarianUrl
       POSTOFFICE_URL: *postofficeUrl
       RABBITMQ_URL: *rabbitmqUrl
+      CONSUL_URL: *consulUrl
+      CONFIG_SERVICE_URL: *configserviceUrl
       LIBRARIAN_CLIENT_SECRET: &librarianSecret librarianAuthSecret
       CLIENT_SECRET: *librarianSecret
 
@@ -182,19 +196,30 @@ services:
       SECURITYMANAGER_URL: *securitymanagerUrl
       POSTOFFICE_URL: *postofficeUrl
       RABBITMQ_URL: *rabbitmqUrl
+      CONSUL_URL: *consulUrl
+      CONFIG_SERVICE_URL: &configserviceUrl configservice:5090
       JWT_SECRET: your-secret-key
       ADMIN_SECRET: adminSecret
       LIBRARIAN_URL: *librarianUrl
       SECURITYMANAGER_CLIENT_SECRET: &securitymanagerSecret securityManagerAuthSecret
       CLIENT_SECRET: *securitymanagerSecret
-      AGENTSET_CLIENT_SECRET: *agentsetSecret
-      AGENT_CLIENT_SECRET: *agentsetSecret
-      BRAIN_CLIENT_SECRET: *brainSecret
-      CAPABILITIESMANAGER_CLIENT_SECRET: *capabilitiesmanagerSecret
-      ENGINEER_CLIENT_SECRET: *engineerSecret
-      LIBRARIAN_CLIENT_SECRET: *librarianSecret
-      MISSIONCONTROL_CLIENT_SECRET: *missioncontrolSecret
-      TRAFFICMANAGER_CLIENT_SECRET: *trafficmanagerSecret
+
+  configservice:
+    build:
+      context: .
+      dockerfile: services/configservice/dockerfile
+    environment:
+      NODE_ENV: production
+      PORT: &configservicePort 5090
+      CONFIG_SERVICE_URL: *configserviceUrl
+      POSTOFFICE_URL: *postofficeUrl
+      RABBITMQ_URL: *rabbitmqUrl
+      CONSUL_URL: *consulUrl
+      CONFIG_DIR: /usr/src/app/config
+      CONFIGSERVICE_CLIENT_SECRET: &configserviceSecret configServiceAuthSecret
+      CLIENT_SECRET: *configserviceSecret
+    volumes:
+      - config_data:/usr/src/app/config
 
   frontend:
     build:
@@ -234,10 +259,21 @@ services:
       - RABBITMQ_DEFAULT_USER=stage7
       - RABBITMQ_DEFAULT_PASS=stage7password
 
+  consul:
+    image: consul:1.15
+    ports:
+      - "8500:8500"  # HTTP API and UI
+      - "8600:8600/udp"  # DNS interface
+    volumes:
+      - consul_data:/consul/data
+    command: agent -server -ui -bootstrap-expect=1 -client=0.0.0.0
+
 volumes:
   mongo_data:
   redis_data:
   rabbitmq_data:
+  consul_data:
+  config_data:
 
 networks:
   default:

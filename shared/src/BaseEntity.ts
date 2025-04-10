@@ -4,6 +4,7 @@ import express from 'express';
 import { MessageType } from './types/Message';
 import { AuthenticatedApiClient } from './AuthenticatedApiClient';
 import { MessageQueueClient } from './messaging/queueClient';
+import { ServiceDiscovery } from './discovery/serviceDiscovery';
 
 export class BaseEntity {
   id: string;
@@ -16,6 +17,7 @@ export class BaseEntity {
   lastAnswer: string = '';
   authenticatedApi: AuthenticatedApiClient;
   protected mqClient: MessageQueueClient | null = null;
+  protected serviceDiscovery: ServiceDiscovery | null = null;
 
   constructor(id: string, componentType: string, urlBase: string, port: string) {
     this.id = id;
@@ -24,7 +26,12 @@ export class BaseEntity {
     this.port = port;
     this.url = `${urlBase}:${port}` //url;
     this.authenticatedApi = new AuthenticatedApiClient(this);
+
+    // Initialize services
     this.initializeMessageQueue();
+    this.initializeServiceDiscovery();
+
+    // Register with service registry and PostOffice
     this.registerWithPostOffice();
   }
 
@@ -49,6 +56,65 @@ export class BaseEntity {
     } catch (error) {
       console.error(`Failed to initialize message queue for ${this.componentType}:`, error);
       // Continue without message queue - will fall back to HTTP
+    }
+  }
+
+  protected async initializeServiceDiscovery() {
+    try {
+      const consulUrl = process.env.CONSUL_URL || 'consul:8500';
+      this.serviceDiscovery = new ServiceDiscovery(consulUrl);
+
+      // Register this service with Consul
+      const serviceUrl = this.url;
+      await this.serviceDiscovery.registerService(
+        this.id,
+        this.componentType,
+        serviceUrl,
+        [this.componentType.toLowerCase()],
+        parseInt(this.port)
+      );
+
+      // Set up a health check endpoint if it doesn't exist
+      this.setupHealthCheck();
+
+      console.log(`${this.componentType} registered with service discovery`);
+
+      // Set up cleanup on process exit
+      process.on('SIGINT', async () => {
+        await this.cleanup();
+        process.exit(0);
+      });
+
+      process.on('SIGTERM', async () => {
+        await this.cleanup();
+        process.exit(0);
+      });
+    } catch (error) {
+      console.error(`Failed to initialize service discovery for ${this.componentType}:`, error);
+      // Continue without service discovery - will fall back to environment variables
+    }
+  }
+
+  protected setupHealthCheck() {
+    // This method should be overridden by subclasses to set up a health check endpoint
+    // Default implementation does nothing
+  }
+
+  protected async cleanup() {
+    try {
+      // Deregister from service discovery
+      if (this.serviceDiscovery) {
+        await this.serviceDiscovery.deregisterService(this.id);
+        console.log(`${this.componentType} deregistered from service discovery`);
+      }
+
+      // Close message queue connection
+      if (this.mqClient) {
+        await this.mqClient.close();
+        console.log(`${this.componentType} disconnected from message queue`);
+      }
+    } catch (error) {
+      console.error(`Error during cleanup for ${this.componentType}:`, error);
     }
   }
 
@@ -103,11 +169,34 @@ export class BaseEntity {
       }
     }
 
+    // Try to discover PostOffice service via service discovery
+    let postOfficeUrl = this.postOfficeUrl;
+    if (this.serviceDiscovery) {
+      try {
+        const discoveredUrl = await this.serviceDiscovery.discoverService('PostOffice');
+        if (discoveredUrl) {
+          postOfficeUrl = discoveredUrl;
+        }
+      } catch (error) {
+        console.error('Failed to discover PostOffice service, using default URL:', error);
+        // Continue with default URL
+      }
+    }
+
     // Fall back to HTTP
     try {
-      await axios.post(`http://${this.postOfficeUrl}/message`, message);
+      await axios.post(`http://${postOfficeUrl}/message`, message);
     } catch (error) {
-      console.error(`Failed to send message to ${recipient}:`, error);
+      console.error(`Failed to send message to ${recipient} via ${postOfficeUrl}:`, error);
+
+      // If service discovery failed, try with the default URL as a last resort
+      if (postOfficeUrl !== this.postOfficeUrl) {
+        try {
+          await axios.post(`http://${this.postOfficeUrl}/message`, message);
+        } catch (fallbackError) {
+          console.error(`Failed to send message to ${recipient} via fallback URL:`, fallbackError);
+        }
+      }
     }
   }
 

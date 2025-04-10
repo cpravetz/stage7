@@ -4,7 +4,7 @@ import cors from 'cors';
 import WebSocket from 'ws';
 import http from 'http';
 import { Component } from './types/Component';
-import { Message, MessageType, MessageQueueClient } from '@cktmcs/shared';
+import { Message, MessageType, MessageQueueClient, ServiceDiscovery } from '@cktmcs/shared';
 import axios from 'axios';
 import { analyzeError } from '@cktmcs/errorhandler';
 import bodyParser from 'body-parser';
@@ -32,6 +32,7 @@ export class PostOffice {
     private securityManagerUrl: string = process.env.SECURITYMANAGER_URL || 'securitymanager:5010';
     private url: string;
     private mqClient: MessageQueueClient;
+    private serviceDiscovery: ServiceDiscovery;
 
 
     constructor() {
@@ -39,8 +40,16 @@ export class PostOffice {
         this.server = http.createServer(this.app);
         this.wss = new WebSocket.Server({ server: this.server });
         this.url = process.env.POSTOFFICE_URL || 'postoffice:5020';
+
+        // Initialize message queue
         this.mqClient = new MessageQueueClient();
         this.initializeMessageQueue();
+
+        // Initialize service discovery
+        const consulUrl = process.env.CONSUL_URL || 'consul:8500';
+        this.serviceDiscovery = new ServiceDiscovery(consulUrl);
+        this.initializeServiceDiscovery();
+
         this.setupWebSocket();
 
         const limiter = rateLimit({
@@ -131,6 +140,58 @@ export class PostOffice {
             console.log('PostOffice connected to message queue');
         } catch (error) {
             console.error('Failed to initialize message queue:', error);
+        }
+    }
+
+    private async initializeServiceDiscovery() {
+        try {
+            // Register this service with Consul
+            const [host, port] = this.url.split(':');
+            await this.serviceDiscovery.registerService(
+                'PostOffice',
+                'PostOffice',
+                this.url,
+                ['postoffice', 'service-registry'],
+                parseInt(port)
+            );
+
+            // Set up a health check endpoint
+            this.setupHealthCheck();
+
+            console.log('PostOffice registered with service discovery');
+
+            // Set up cleanup on process exit
+            process.on('SIGINT', async () => {
+                await this.cleanup();
+                process.exit(0);
+            });
+
+            process.on('SIGTERM', async () => {
+                await this.cleanup();
+                process.exit(0);
+            });
+        } catch (error) {
+            console.error('Failed to initialize service discovery:', error);
+        }
+    }
+
+    private setupHealthCheck() {
+        this.app.get('/health', (req, res) => {
+            res.status(200).json({ status: 'ok' });
+        });
+    }
+
+    private async cleanup() {
+        try {
+            // Deregister from service discovery
+            await this.serviceDiscovery.deregisterService('PostOffice');
+            console.log('PostOffice deregistered from service discovery');
+
+            // Close message queue connection
+            await this.mqClient.close();
+            console.log('PostOffice disconnected from message queue');
+        } catch (error) {
+            console.error('Error during cleanup:', error);
         }
     }
 
@@ -449,14 +510,40 @@ export class PostOffice {
     }
 
     private async discoverService(type: string): Promise<string | undefined> {
+        // First try to discover the service using Consul
+        try {
+            if (this.serviceDiscovery) {
+                const discoveredUrl = await this.serviceDiscovery.discoverService(type);
+                if (discoveredUrl) {
+                    console.log(`Service ${type} discovered via Consul: ${discoveredUrl}`);
+                    return discoveredUrl;
+                }
+            }
+        } catch (error) {
+            console.error(`Error discovering service ${type} via Consul:`, error);
+            // Continue with fallback methods
+        }
+
+        // Fall back to the local registry
         const services = Array.from(this.components.entries())
             .filter(([_, service]) => service.type === type)
             .map(([gid, service]) => ({ gid, ...service }));
 
-        if (services.length === 0) {
-            return undefined;
+        if (services.length > 0) {
+            console.log(`Service ${type} found in local registry: ${services[0].url}`);
+            return services[0].url;
         }
-        return services[0].url;
+
+        // Fall back to environment variables as a last resort
+        const envVarName = `${type.toUpperCase()}_URL`;
+        const envUrl = process.env[envVarName];
+        if (envUrl) {
+            console.log(`Service ${type} found in environment variables: ${envUrl}`);
+            return envUrl;
+        }
+
+        console.error(`Service ${type} not found in any registry`);
+        return undefined;
     }
 
     private async sendToComponent(url: string, message: Message, token: string): Promise<void> {
