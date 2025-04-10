@@ -9,10 +9,12 @@
     "test": "jest"
   },
   "dependencies": {
+    "amqplib": "^0.10.3",
     "axios": "^1.7.7",
     "uuid": "^10.0.0"
   },
   "devDependencies": {
+    "@types/amqplib": "^0.10.4",
     "@types/jest": "^29.5.14",
     "@types/uuid": "^10.0.0",
     "jest": "^29.7.0",

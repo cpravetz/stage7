@@ -13,7 +13,7 @@ export class HFLlamaModel extends BaseModel {
         ]);
 
         super({
-            name: "hf/meta-lamma/llama-3.2-3b-instruct",
+            name: "hf/meta-llama/llama-3.2-3b-instruct",
             modelName: "meta-llama/llama-3.2-3b-instruct",
             interfaceName: "huggingface",
             serviceName: "HFService",

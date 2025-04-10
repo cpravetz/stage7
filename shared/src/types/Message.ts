@@ -16,7 +16,16 @@ export enum MessageType {
     CREATE_MISSION = "createMission",
     STATUS_UPDATE = "statusUpdate",
     STEP_FAILURE = "stepFailure",
-    USER_MESSAGE = "userMessage"
+    USER_MESSAGE = "userMessage",
+    CHAT_REQUEST = "chatRequest",
+    CHAT_RESPONSE = "chatResponse",
+    GENERATE_REQUEST = "generateRequest",
+    GENERATE_RESPONSE = "generateResponse",
+    PLUGIN_EXECUTION = "pluginExecution",
+    PLUGIN_RESULT = "pluginResult",
+    PLUGIN_ERROR = "pluginError",
+    PLUGIN_PROGRESS = "pluginProgress",
+    PLUGIN_CANCEL = "pluginCancel"
 }
 
 export interface Message {
@@ -24,6 +33,8 @@ export interface Message {
     sender: string;
     recipient: string;
     content?: any;
-    clientId?: string;  
-    data?: any;  
+    clientId?: string;
+    data?: any;
+    requiresSync?: boolean; // Indicates if the message requires a synchronous response
+    timestamp?: string; // ISO timestamp for message tracking
   }

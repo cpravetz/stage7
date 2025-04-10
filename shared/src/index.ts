@@ -11,4 +11,6 @@ export * from './types/Mission';
 export * from './types/Agent';
 export * from './types/Statistics';
 export * from './Serializer';
+export * from './messaging/queueClient';
+export * from './utils/asyncLLM';
 // Add any other exports here

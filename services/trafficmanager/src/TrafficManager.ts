@@ -4,7 +4,7 @@ import axios from 'axios';
 import { agentSetManager } from './utils/agentSetManager';
 import { dependencyManager } from './utils/dependencyManager';
 import { AgentStatus } from './utils/status';
-import { Message, MessageType,TrafficManagerStatistics, 
+import { Message, MessageType,TrafficManagerStatistics,
         BaseEntity, PluginInput, MapSerializer } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 
@@ -19,7 +19,7 @@ const api = axios.create({
 
 export class TrafficManager extends BaseEntity {
     private app: express.Application;
-    
+
     constructor() {
         super('TrafficManager', 'TrafficManager', `trafficmanager`, process.env.PORT || '5080');
         this.app = express();
@@ -32,8 +32,8 @@ export class TrafficManager extends BaseEntity {
         this.app.post('/message', (req, res) => this.handleMessage(req, res));
         this.app.post('/createAgent', async (req, res, next) => { this.createAgent(req, res).catch(next) });
         this.app.post('/checkDependencies', (req, res) => this.checkDependencies(req, res));
-        this.app.post('/pauseAgents', async (req, res, next) => { 
-            try {    
+        this.app.post('/pauseAgents', async (req, res, next) => {
+            try {
                 await this.pauseAgents(req, res);
             } catch (error) { analyzeError(error as Error);
                 next(error);
@@ -97,56 +97,56 @@ export class TrafficManager extends BaseEntity {
         }
     }
 
-       
+
     private async handleAgentCompletion(agentId: string) {
         console.log(`Agent ${agentId} has completed its task`);
-    
+
         try {
             // Fetch the agent's final output
             const agentOutput = await this.fetchAgentOutput(agentId);
-    
+
             // Send the results to the user
             this.say(`Agent ${agentId} has completed its task. Result: ${JSON.stringify(agentOutput)}`);
-    
+
             // Update the agent's status in storage
             await this.updateAgentStatusInStorage(agentId, AgentStatus.COMPLETED);
-    
+
             // Check and update dependent agents
             await this.updateDependentAgents(agentId);
-    
+
             // Clean up any resources associated with this agent
             await this.cleanupAgentResources(agentId);
-    
+
         } catch (error) { analyzeError(error as Error);
             this.logAndSay(`An error occurred while processing the completion of agent ${agentId}`);
         }
     }
-    
+
     private async fetchAgentOutput(agentId: string): Promise<any> {
         try {
             // Get the AgentSet URL for the given agent
             const agentSetUrl = await agentSetManager.getAgentSetUrlForAgent(agentId);
-    
+
             if (!agentSetUrl) {
                 console.error(`No AgentSet found for agent ${agentId}`);
                 return {};
             }
-    
+
             // Make a request to the AgentSet to fetch the agent's output
             const response = await api.get(`http://${this.ensureProtocol(agentSetUrl)}/agent/${agentId}/output`);
-    
+
             if (response.status === 200 && response.data) {
                 return response.data.output;
             } else {
                 console.error(`Failed to fetch output for agent ${agentId}`);
                 return {};
             }
-        } catch (error) { 
+        } catch (error) {
             analyzeError(error as Error);
             console.error(`Error fetching output for agent %s:`, agentId, error instanceof Error ? error.message : error);
             return {};
         }
-    }    
+    }
     private async updateDependentAgents(completedAgentId: string) {
         const dependentAgents = await dependencyManager.getDependencies(completedAgentId);
         for (const depAgentId of dependentAgents) {
@@ -157,7 +157,7 @@ export class TrafficManager extends BaseEntity {
             }
         }
     }
-    
+
     private async cleanupAgentResources(agentId: string) {
         // Implement any necessary cleanup logic
         // This could include removing temporary files, freeing up memory, etc.
@@ -223,39 +223,60 @@ export class TrafficManager extends BaseEntity {
     }
 
     private async handleMessage(req: express.Request, res: express.Response) {
-        const message = req.body;
-        console.log('Received message:', message);
-        super.handleBaseMessage(message);
-    
-        if (message.forAgent) {
-          // This message is intended for a specific agent
-          try {
-            await this.forwardMessageToAgent(message);
-            res.status(200).send({ status: 'Message forwarded to agent' });
-          } catch (error) { analyzeError(error as Error);
-            console.error('Error forwarding message to agent:', error instanceof Error ? error.message : error);
-            res.status(500).send({ error: 'Failed to forward message to agent' });
-          }
-        } else {
-          // Process the message based on its content
-          // This might involve managing agent traffic or assignments
-          if (message.type === MessageType.AGENT_UPDATE) {
-            res.status(200).send(await this.updateAgentStatus(message));
-          }
-          console.log('Processing message in TrafficManager');
-          res.status(200).send({ status: 'Message received and processed by TrafficManager' });
+        try {
+            const message = req.body;
+            const result = await this.processMessage(message);
+            res.status(200).send(result || { status: 'Message received and processed by TrafficManager' });
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error processing message:', error instanceof Error ? error.message : error);
+            res.status(500).send({ error: 'Failed to process message' });
         }
     }
-        
+
+    // Override the handleQueueMessage method from BaseEntity
+    protected async handleQueueMessage(message: any) {
+        try {
+            await this.processMessage(message);
+            console.log(`Queue message of type ${message.type} processed successfully`);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error processing queue message:', error instanceof Error ? error.message : error);
+        }
+    }
+
+    // Common message processing logic for both HTTP and queue messages
+    private async processMessage(message: any): Promise<any> {
+        console.log('Processing message:', message);
+        await super.handleBaseMessage(message);
+
+        if (message.forAgent) {
+            // This message is intended for a specific agent
+            try {
+                await this.forwardMessageToAgent(message);
+                return { status: 'Message forwarded to agent' };
+            } catch (error) { analyzeError(error as Error);
+                console.error('Error forwarding message to agent:', error instanceof Error ? error.message : error);
+                throw error; // Re-throw to be caught by the caller
+            }
+        } else {
+            // Process the message based on its content
+            if (message.type === MessageType.AGENT_UPDATE) {
+                return await this.updateAgentStatus(message);
+            }
+
+            console.log('Processing message in TrafficManager');
+            return { status: 'Message processed by TrafficManager' };
+        }
+    }
+
     private async forwardMessageToAgent(message: any) {
         const agentId = message.forAgent;
         const agentSetUrl = await agentSetManager.getAgentSetUrlForAgent(agentId);
-    
+
         if (!agentSetUrl) {
             console.error(`No AgentSet found for agent ${agentId}`);
             return;
         }
-    
+
         try {
             const response = await api.post(`${this.ensureProtocol(agentSetUrl)}/message`, {
                 ...message,
@@ -263,16 +284,16 @@ export class TrafficManager extends BaseEntity {
             });
             console.log(`Message forwarded to agent ${agentId} via AgentSet at ${agentSetUrl}`);
             return response.data;
-        } catch (error) { 
+        } catch (error) {
             analyzeError(error as Error);
             console.error(`Error forwarding message to agent %s:`, agentId, error instanceof Error ? error.message : error);
         }
     }
-    
+
     private ensureProtocol(url: string): string {
         return url.startsWith('http://') || url.startsWith('https://') ? url : `http://${url}`;
     }
-    
+
     private startServer() {
         this.app.listen(this.port, () => {
             console.log(`TrafficManager running on port ${this.port}`);
@@ -284,7 +305,7 @@ export class TrafficManager extends BaseEntity {
         const { actionVerb, inputs, dependencies, missionId, missionContext } = req.body;
         const inputsDeserialized = MapSerializer.transformFromSerialization(inputs);
         let inputsMap: Map<string, PluginInput>;
-        
+
         if (inputsDeserialized instanceof Map) {
             inputsMap = inputsDeserialized;
         } else {
@@ -304,7 +325,7 @@ export class TrafficManager extends BaseEntity {
         console.log('Inputs converted to InputsMap', inputsMap);
         try {
             const agentId = uuidv4();
-            
+
             if (dependencies) {
                 await dependencyManager.registerDependencies(agentId, dependencies);
             }
@@ -317,7 +338,7 @@ export class TrafficManager extends BaseEntity {
             await this.captureAgentStatus(agentId, AgentStatus.RUNNING);
 
             res.status(200).send({ message: 'Agent created and assigned.', agentId, response });
-        } catch (error) { 
+        } catch (error) {
             analyzeError(error as Error);
             console.error('Error creating agent:', error instanceof Error ? error.message : error);
             res.status(500).send({ error: 'Failed to create agent' });
@@ -326,17 +347,17 @@ export class TrafficManager extends BaseEntity {
 
     private async checkDependenciesRecursive(agentId: string): Promise<boolean> {
         const dependencies = await dependencyManager.getDependencies(agentId);
-        
+
         if (!dependencies || dependencies.length === 0) {
             return true;
         }
 
         for (const depAgentId of dependencies) {
             const depStatus = await this.getAgentStatus(depAgentId);
-            
+
             if (depStatus !== AgentStatus.COMPLETED) {
                 const depDependenciesSatisfied = await this.checkDependenciesRecursive(depAgentId);
-                
+
                 if (!depDependenciesSatisfied) {
                     return false;
                 }
@@ -355,16 +376,16 @@ export class TrafficManager extends BaseEntity {
             if (this.agentStatusMap.has(agentId)) {
                 return this.agentStatusMap.get(agentId)!;
             }
-    
+
             // If not in cache, try to fetch from a persistent storage (e.g., database)
             const status = await this.fetchAgentStatusFromStorage(agentId);
-    
+
             if (status) {
                 // Update the cache
                 this.agentStatusMap.set(agentId, status);
                 return status;
             }
-    
+
             // If the agent is not found, return a default status
             console.warn(`Agent ${agentId} not found. Returning default status.`);
             return AgentStatus.INITIALIZING;
@@ -373,7 +394,7 @@ export class TrafficManager extends BaseEntity {
             return AgentStatus.UNKNOWN;
         }
     }
-    
+
     private async fetchAgentStatusFromStorage(agentId: string): Promise<AgentStatus | null> {
         // This is a placeholder for fetching the status from a persistent storage
         // In a real implementation, you would query your database or storage service here
@@ -383,7 +404,7 @@ export class TrafficManager extends BaseEntity {
         const statuses = Object.values(AgentStatus);
         return statuses[Math.floor(Math.random() * statuses.length)] as AgentStatus;
     }
-    
+
     // Update this method to use the new agentStatusMap
     private async updateAgentStatusInStorage(agentId: string, status: AgentStatus): Promise<void> {
         // This is a placeholder for updating the status in a persistent storage
@@ -431,7 +452,7 @@ export class TrafficManager extends BaseEntity {
 
         try {
             const dependenciesSatisfied = await dependencyManager.areDependenciesSatisfied(agentId);
-            
+
             if (dependenciesSatisfied) {
                 await this.captureAgentStatus(agentId, AgentStatus.RUNNING);
                 res.status(200).send({ message: 'Dependencies satisfied. Agent resumed.' });
@@ -453,7 +474,7 @@ export class TrafficManager extends BaseEntity {
 
         try {
             const blockedAgents = await dependencyManager.getDependencies(completedAgentId);
-            
+
             for (const blockedAgentId of blockedAgents) {
                 const canResume = await this.checkDependenciesRecursive(blockedAgentId);
                 if (canResume) {
@@ -470,16 +491,16 @@ export class TrafficManager extends BaseEntity {
 
     private async getDependentAgents(req: express.Request, res: express.Response) {
         const { agentId } = req.params;
-    
+
         try {
             // Get all dependencies from the dependencyManager
             const allDependencies = await dependencyManager.getAllDependencies();
-    
+
             // Filter for agents that depend on the given agentId
             const dependentAgents = Object.entries(allDependencies)
                 .filter(([_, dependency]) => dependency.dependencies.includes(agentId))
                 .map(([dependentAgentId, _]) => dependentAgentId);
-    
+
             res.status(200).json(dependentAgents);
         } catch (error) { analyzeError(error as Error);
             console.error('Error getting dependent agents:', error instanceof Error ? error.message : error);
@@ -488,7 +509,7 @@ export class TrafficManager extends BaseEntity {
     }
 
     private async distributeUserMessage(req: express.Request, res: express.Response) {
-    
+
         try {
             await agentSetManager.distributeUserMessage(req);
             res.status(200).send({ message: 'User message distributed successfully' });

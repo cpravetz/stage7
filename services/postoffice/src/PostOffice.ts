@@ -4,7 +4,7 @@ import cors from 'cors';
 import WebSocket from 'ws';
 import http from 'http';
 import { Component } from './types/Component';
-import { Message, MessageType } from '@cktmcs/shared';
+import { Message, MessageType, MessageQueueClient } from '@cktmcs/shared';
 import axios from 'axios';
 import { analyzeError } from '@cktmcs/errorhandler';
 import bodyParser from 'body-parser';
@@ -17,7 +17,7 @@ const api = axios.create({
     },
   });
 
-  
+
 export class PostOffice {
     private app: express.Express;
     private server: http.Server;
@@ -31,6 +31,7 @@ export class PostOffice {
     private messageProcessingInterval: NodeJS.Timeout;
     private securityManagerUrl: string = process.env.SECURITYMANAGER_URL || 'securitymanager:5010';
     private url: string;
+    private mqClient: MessageQueueClient;
 
 
     constructor() {
@@ -38,6 +39,8 @@ export class PostOffice {
         this.server = http.createServer(this.app);
         this.wss = new WebSocket.Server({ server: this.server });
         this.url = process.env.POSTOFFICE_URL || 'postoffice:5020';
+        this.mqClient = new MessageQueueClient();
+        this.initializeMessageQueue();
         this.setupWebSocket();
 
         const limiter = rateLimit({
@@ -75,7 +78,7 @@ export class PostOffice {
         this.app.use('/securityManager/*', async (req, res, next) => { this.routeSecurityRequest(req, res, next); });
         this.app.post('/registerComponent', (req, res) => this.registerComponent(req, res));
         this.app.get('/requestComponent', (req, res) => this.requestComponent(req, res));
-        this.app.get('/getServices', (req, res) => this.getServices(req, res)); 
+        this.app.get('/getServices', (req, res) => this.getServices(req, res));
         this.app.post('/submitUserInput', (req, res) => this.submitUserInput(req, res));
         this.app.post('/createMission', (req, res) => { this.createMission(req, res) });
         this.app.post('/loadMission', (req, res) => this.loadMission(req, res));
@@ -99,7 +102,7 @@ export class PostOffice {
             const response = await api.get(`http://${librarianUrl}/loadWorkProduct/${req.params.id}`);
             res.status(200).send(response.data);
         }
-        catch (error) { 
+        catch (error) {
             analyzeError(error as Error);
             console.error('Error retrieving work product:', error instanceof Error ? error.message : error, 'id:',req.params.id);
             res.status(500).send({ error: `Failed to retrieve work product id:${req.params.id}`});
@@ -111,31 +114,60 @@ export class PostOffice {
         next();
     }
 
+    private async initializeMessageQueue() {
+        try {
+            await this.mqClient.connect();
+
+            // Create and bind a queue for this service
+            const queueName = 'postoffice';
+            await this.mqClient.subscribeToQueue(queueName, async (message) => {
+                await this.processQueueMessage(message);
+            });
+
+            // Bind the queue to the exchange with appropriate routing patterns
+            await this.mqClient.bindQueueToExchange(queueName, 'stage7', 'message.postoffice');
+            await this.mqClient.bindQueueToExchange(queueName, 'stage7', 'message.all');
+
+            console.log('PostOffice connected to message queue');
+        } catch (error) {
+            console.error('Failed to initialize message queue:', error);
+        }
+    }
+
+    private async processQueueMessage(message: any) {
+        console.log('Received message from queue:', message);
+        if (message.type && message.recipient) {
+            await this.routeMessage(message);
+        } else {
+            console.error('Invalid message format received from queue:', message);
+        }
+    }
+
     private setupWebSocket() {
         this.wss.on('connection', async (ws: WebSocket, req: http.IncomingMessage) => {
             console.log('New WebSocket connection attempt');
             const url = new URL(req.url!, `http://${req.headers.host}`);
             const clientId = url.searchParams.get('clientId');
             const token = url.searchParams.get('token');
-    
+
             console.log(`WebSocket connection attempt - ClientID: ${clientId}, Token: ${token}`);
-    
+
             if (!clientId || !token || (token === null)) {
                 console.log('Client ID or token missing');
                 ws.close(1008, 'Client ID or token missing');
                 return;
             }
-    
+
             const isValid = await this.verifyToken(clientId, token);
             if (!isValid) {
                 console.log(`Invalid token for client ${clientId}`);
                 ws.close(1008, 'Invalid token');
                 return;
             }
-    
+
             this.clients.set(clientId, ws);
             console.log(`Client ${clientId} connected successfully`);
-    
+
             ws.on('message', (message: string) => {
                 try {
                     const parsedMessage = JSON.parse(message);
@@ -148,12 +180,12 @@ export class PostOffice {
                     console.error('Error parsing WebSocket message:', error instanceof Error ? error.message : error);
                 }
             });
-    
+
             ws.on('close', () => {
                 console.log(`Client ${clientId} disconnected`);
                 this.clients.delete(clientId);
             });
-    
+
             // Send a connection confirmation message
             ws.send(JSON.stringify({ type: 'CONNECTION_CONFIRMED', clientId }));
         });
@@ -168,6 +200,8 @@ export class PostOffice {
     private async routeMessage(message: Message) {
         console.log('Routing message:', message);
         const { clientId } = message;
+
+        // Handle statistics messages (always sent directly to clients)
         if (message.type === MessageType.STATISTICS) {
             if (!clientId) {
                 console.error('No clientId in statistics update message:', message);
@@ -177,24 +211,50 @@ export class PostOffice {
             this.sendToClient(clientId, message);
             return;
         }
-        
+
+        // Handle messages to users (via WebSocket)
         if (message.recipient === 'user') {
             if (clientId) {
                 this.sendToClient(clientId, message);
                 return;
             } else {
                 this.broadcastToClients(message);
-            }
-        } else {
-            const recipientId = message.recipient;
-            if (!recipientId) {
-                console.error('No recipient specified for message:', message);
                 return;
             }
+        }
+
+        // Handle messages to services
+        const recipientId = message.recipient;
+        if (!recipientId) {
+            console.error('No recipient specified for message:', message);
+            return;
+        }
+
+        // Check if this is a synchronous message that requires immediate response
+        const requiresSync = message.requiresSync ||
+                            message.type === MessageType.REQUEST ||
+                            message.type === MessageType.RESPONSE;
+
+        if (requiresSync) {
+            // Use the traditional HTTP-based queue for synchronous messages
             if (!this.messageQueue.has(recipientId)) {
                 this.messageQueue.set(recipientId, []);
             }
             this.messageQueue.get(recipientId)!.push(message);
+        } else {
+            // Use RabbitMQ for asynchronous messages
+            try {
+                const routingKey = `message.${recipientId}`;
+                await this.mqClient.publishMessage('stage7', routingKey, message);
+                console.log(`Published message to queue with routing key: ${routingKey}`);
+            } catch (error) {
+                console.error('Failed to publish message to queue:', error);
+                // Fallback to traditional queue if RabbitMQ fails
+                if (!this.messageQueue.has(recipientId)) {
+                    this.messageQueue.set(recipientId, []);
+                }
+                this.messageQueue.get(recipientId)!.push(message);
+            }
         }
     }
 
@@ -217,7 +277,7 @@ export class PostOffice {
                 client.send(JSON.stringify(message));
             }
         });
-    }    
+    }
 
 
     private async processMessageQueue() {
@@ -245,9 +305,9 @@ export class PostOffice {
     private async createMission(req: express.Request, res: express.Response) {
         const { goal, clientId } = req.body;
         const token = req.headers.authorization;
-    
+
         console.log(`PostOffice has request to createMission for goal`, goal);
-        
+
         if (!token) {
             return res.status(401).json({ error: 'No authorization token provided' });
         }
@@ -257,13 +317,13 @@ export class PostOffice {
             if (!missionControlUrl) {
                 res.status(404).send('Failed to create mission');
             }
-    
+
             // Pass the exact same token format received from the client
             const headers = {
                 'Content-Type': 'application/json',
                 'Authorization': token  // Don't modify the token, pass it as-is
             };
-    
+
             const response = await api.post(`http://${missionControlUrl}/message`, {
                 type: MessageType.CREATE_MISSION,
                 sender: 'PostOffice',
@@ -274,9 +334,9 @@ export class PostOffice {
                 },
                 timestamp: new Date().toISOString()
             }, { headers });
-    
+
             res.status(200).send(response.data);
-        } catch (error) { 
+        } catch (error) {
             analyzeError(error as Error);
             console.error('Error creating mission:', error instanceof Error ? error.message : error);
             res.status(503).json({ error: `Could not create mission, error: ${error instanceof Error ? error.message : 'Unknown' }`});
@@ -300,7 +360,7 @@ export class PostOffice {
 
     private async registerComponent(req: express.Request, res: express.Response) {
         const { id, type, url } = req.body;
-        
+
         try {
 
             const component: Component = { id, type, url };
@@ -318,7 +378,7 @@ export class PostOffice {
             res.status(500).send({ error: 'Failed to register component' });
         }
     }
-    
+
     private requestComponent(req: express.Request, res: express.Response) {
         const { id, type } = req.query;
 
@@ -361,11 +421,11 @@ export class PostOffice {
             res.status(500).send({ error: 'Failed to send message' });
         }
     }
-    
+
     private async handleWebSocketMessage(message: string, token: string) {
         try {
             let parsedMessage: Message;
-            
+
             // Check if the message is already an object
             if (typeof message === 'object' && message !== null) {
                 parsedMessage = message as Message;
@@ -373,7 +433,7 @@ export class PostOffice {
                 // If it's a string, try to parse it
                 parsedMessage = JSON.parse(message);
             }
-    
+
             console.log('WebSocket message received:', parsedMessage);
             console.log('Looking for client:', parsedMessage.recipient);
             const recipientUrl = await this.discoverService(parsedMessage.recipient);
@@ -387,18 +447,18 @@ export class PostOffice {
             console.error('Raw message:', message);
         }
     }
-    
+
     private async discoverService(type: string): Promise<string | undefined> {
         const services = Array.from(this.components.entries())
             .filter(([_, service]) => service.type === type)
             .map(([gid, service]) => ({ gid, ...service }));
-        
+
         if (services.length === 0) {
             return undefined;
         }
         return services[0].url;
     }
-    
+
     private async sendToComponent(url: string, message: Message, token: string): Promise<void> {
         try {
             // Ensure the URL has a protocol
@@ -406,14 +466,14 @@ export class PostOffice {
                 url = `http://${url}`;
             }
             message.type = message.type || message.content.type;
-            console.log(`Sending message to: ${url}: ${message}`);            
+            console.log(`Sending message to: ${url}: ${message}`);
             await api.post(url, message, {
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': token // Forward the token
                 }
             });
-        } catch (error) { 
+        } catch (error) {
             analyzeError(error as Error);
             console.error(`Failed to send message to ${url}:`, error instanceof Error ? error.message : error);
         }
@@ -459,42 +519,42 @@ export class PostOffice {
                 res.status(200).send([]);
                 return;
             }
-            
+
             // Extract user ID from the JWT token
             const token = req.headers.authorization?.split(' ')[1];
             if (!token) {
                 res.status(401).send({ error: 'No token provided' });
                 return;
             }
-    
+
             const decodedToken = jwt.verify(token, process.env.JWT_SECRET as string) as { id: string };
             const userId = decodedToken.id;
-    
+
             const response = await api.get(`http://${librarianUrl}/getSavedMissions`, {
                 params: { userId }
             });
             res.status(200).send(response.data);
-        } catch (error) { 
+        } catch (error) {
             analyzeError(error as Error);
             console.error('Error getting saved missions:', error instanceof Error ? error.message : error);
             res.status(500).send({ error: 'Failed to get saved missions' });
         }
     }
-   
+
     private async routeSecurityRequest(req: express.Request, res: express.Response, next: express.NextFunction) {
         if (!this.securityManagerUrl) {
             res.status(503).json({ error: 'SecurityManager not registered yet' });
             return next();
         }
-    
+
         console.log('Original URL:', req.originalUrl);
         console.log('Request method:', req.method);
         console.log('Request body:', req.body);
-        
+
         const securityManagerPath = req.originalUrl.split('/securityManager')[1] || '/';
         const fullUrl = `http://${this.securityManagerUrl}${securityManagerPath}`;
         console.log(`Forwarding request to SecurityManager: ${fullUrl}`);
-    
+
         try {
             const requestConfig = {
                 method: req.method as any,
@@ -510,9 +570,9 @@ export class PostOffice {
                     return status < 500;
                 }
             };
-    
+
             console.log('Request being sent to SecurityManager:', JSON.stringify(requestConfig, null, 2));
-    
+
             const response = await axios(requestConfig);
 
             console.log('Response from SecurityManager:', response.data);

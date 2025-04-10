@@ -32,13 +32,13 @@ class MissionControl extends BaseEntity {
     private brainUrl: string = process.env.BRAIN_URL || 'brain:5060';
     private engineerUrl: string = process.env.ENGINEER_URL || 'engineer:5050';
     private securityManagerUrl: string = process.env.SECURITY_MANAGER_URL || 'securitymanager:5010';
-    
+
     constructor() {
         super('MissionControl', 'MissionControl', process.env.HOST || 'missioncontrol', process.env.PORT || '5050');
         this.initializeServer();
         setInterval(() => this.getAndPushAgentStatistics(), 5000);
     }
-    
+
     private initializeServer() {
         const app = express();
 
@@ -47,7 +47,7 @@ class MissionControl extends BaseEntity {
             max: 1000, // max 100 requests per windowMs
         }));
         app.use(express.json());
-    
+
         app.use((req: Request, res: Response, next: NextFunction) => {this.verifyToken(req, res, next)});
 
         app.post('/message', (req, res) => this.handleMessage(req, res));
@@ -58,51 +58,72 @@ class MissionControl extends BaseEntity {
     }
 
     private async handleMessage(req: express.Request, res: express.Response) {
-        const { type, sender, content, clientId } = req.body;
-        const user = (req as any).user;
-        console.log(`user: `, user);
-        const missionId = req.body.missionId ? req.body.missionId : (req.body.content.missionId ? req.body.content.missionId : null);
-        console.log(`Received message of type ${type} from ${sender} for mission ${missionId}`);
         try {
-            switch (type) {
-                case MessageType.CREATE_MISSION:
-                    await this.createMission(content, clientId, user.id);
-                    break;
-                case MessageType.PAUSE:
-                    if (missionId) {
-                        await this.pauseMission(missionId);
-                    }
-                    break;
-                case MessageType.RESUME:
-                    if (missionId) {
-                        await this.resumeMission(missionId);
-                    }
-                    break;
-                case MessageType.ABORT:
-                    if (missionId) {
-                        await this.abortMission(missionId);
-                    }
-                    break;
-                case MessageType.SAVE:
-                    const mission = missionId ? this.missions.get(missionId) : null;
-                    if (mission) {
-                        const missionName = req.body.missionName ? req.body.missionName : (mission.name ? mission.name : `mission ${new Date()}`);
-                        await this.saveMission(missionId, missionName);
-                    }
-                    break;
-                case MessageType.LOAD:
-                    await this.loadMission(missionId, clientId, user.id);
-                    break;
-                case MessageType.USER_MESSAGE:
-                    await this.handleUserMessage(content, clientId, missionId);
-                    break;
-                default:
-                    console.log(`Unhandled message type: ${type}`);
-            }
+            await this.processMessage(req.body, (req as any).user);
             res.status(200).send({ message: 'Message processed successfully' });
         } catch (error) { analyzeError(error as Error);
             console.error('Error processing message:', error instanceof Error ? error.message : error);
             res.status(502).send({ error: 'Internal server error' });
+        }
+    }
+
+    // Override the handleQueueMessage method from BaseEntity
+    protected async handleQueueMessage(message: any) {
+        try {
+            // For queue messages, we don't have user info from JWT
+            // We'll need to handle authorization differently or get user info another way
+            const userId = message.userId || 'system';
+            const user = { id: userId };
+
+            await this.processMessage(message, user);
+            console.log(`Queue message of type ${message.type} processed successfully`);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error processing queue message:', error instanceof Error ? error.message : error);
+        }
+    }
+
+    // Common message processing logic for both HTTP and queue messages
+    private async processMessage(message: any, user: any) {
+        const { type, sender, content, clientId } = message;
+        console.log(`user: `, user);
+        const missionId = message.missionId ? message.missionId : (message.content?.missionId ? message.content.missionId : null);
+        console.log(`Processing message of type ${type} from ${sender} for mission ${missionId}`);
+
+        switch (type) {
+            case MessageType.CREATE_MISSION:
+                await this.createMission(content, clientId, user.id);
+                break;
+            case MessageType.PAUSE:
+                if (missionId) {
+                    await this.pauseMission(missionId);
+                }
+                break;
+            case MessageType.RESUME:
+                if (missionId) {
+                    await this.resumeMission(missionId);
+                }
+                break;
+            case MessageType.ABORT:
+                if (missionId) {
+                    await this.abortMission(missionId);
+                }
+                break;
+            case MessageType.SAVE:
+                const mission = missionId ? this.missions.get(missionId) : null;
+                if (mission) {
+                    const missionName = message.missionName ? message.missionName : (mission.name ? mission.name : `mission ${new Date()}`);
+                    await this.saveMission(missionId, missionName);
+                }
+                break;
+            case MessageType.LOAD:
+                await this.loadMission(missionId, clientId, user.id);
+                break;
+            case MessageType.USER_MESSAGE:
+                await this.handleUserMessage(content, clientId, missionId);
+                break;
+            default:
+                // Call the base class handler for standard message types
+                await super.handleBaseMessage(message);
         }
     }
 
@@ -138,9 +159,9 @@ class MissionControl extends BaseEntity {
             });
             console.log('Serializing inputs: ', inputs);
             console.log('Serialized: ', MapSerializer.transformForSerialization(inputs));
-            await api.post(`http://${this.trafficManagerUrl}/createAgent`, { actionVerb: 'ACCOMPLISH', 
-                inputs: MapSerializer.transformForSerialization(inputs), 
-                missionId: mission.id, 
+            await api.post(`http://${this.trafficManagerUrl}/createAgent`, { actionVerb: 'ACCOMPLISH',
+                inputs: MapSerializer.transformForSerialization(inputs),
+                missionId: mission.id,
                 dependencies: [] });
             mission.status = Status.RUNNING;
             this.sendStatusUpdate(mission, 'Mission started');
@@ -176,7 +197,7 @@ class MissionControl extends BaseEntity {
             // Don't throw - we don't want to block mission creation if cache clear fails
         }
     }
-    
+
     private async resumeMission(missionId: string) {
         const mission = this.missions.get(missionId);
         if (mission) {
@@ -216,7 +237,7 @@ class MissionControl extends BaseEntity {
                 console.error('User not authorized to load this mission');
                 return;
             }
-    
+
             this.missions.set(missionId, mission);
             await api.post(`http://${this.trafficManagerUrl}/loadAgents`, { missionId });
             this.addClientMission(clientId, missionId);
@@ -250,7 +271,7 @@ class MissionControl extends BaseEntity {
             console.error('Mission not found:', missionId);
             return;
         }
-    
+
         try {
             // Send the user message to the TrafficManager for distribution
             await api.post(`http://${this.trafficManagerUrl}/distributeUserMessage`, {
@@ -263,13 +284,13 @@ class MissionControl extends BaseEntity {
                 },
                 clientId: clientId
             });
-    
+
             console.log(`User message for mission ${missionId} sent to TrafficManager for distribution`);
-    
+
             // Update mission status
             mission.updatedAt = new Date();
             this.sendStatusUpdate(mission, 'User message received and sent to agents');
-    
+
         } catch (error) { analyzeError(error as Error);
             console.error('Error handling user message:', error instanceof Error ? error.message : error);
         }
@@ -359,8 +380,8 @@ class MissionControl extends BaseEntity {
                     if (trafficManagerStatistics.agentStatisticsByStatus?.values) {
                         totalDependencies = Array.from(trafficManagerStatistics.agentStatisticsByStatus.values())
                         .flat()
-                        .reduce<number>((totalCount, agent) => 
-                            totalCount + (agent as AgentStatistics).steps.reduce<number>((stepCount, step) => 
+                        .reduce<number>((totalCount, agent) =>
+                            totalCount + (agent as AgentStatistics).steps.reduce<number>((stepCount, step) =>
                                 stepCount + (step.dependencies?.length || 0), 0
                             ), 0);
                     }
@@ -408,12 +429,12 @@ class MissionControl extends BaseEntity {
         const token = req.headers.authorization?.split(' ')[1];
         console.log(`Verifying token for client ${clientId}`);
         console.log(`Token: ${token}`);
-    
+
         if (!token) {
             console.log('No token provided');
             return res.status(401).json({ message: 'No token provided' });
         }
-    
+
         try {
             const response = await axios.post(`http://${this.securityManagerUrl}/verify`, {}, {
                 headers: {
@@ -421,7 +442,7 @@ class MissionControl extends BaseEntity {
                 }
             });
             console.log('Token verification response:', response.data);
-    
+
             if (response.data.valid) {
                 console.log('Token verified successfully');
                 req.user = response.data.user;

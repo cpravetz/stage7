@@ -1,7 +1,7 @@
 
 services:
   postoffice:
-    build: 
+    build:
       context: .
       dockerfile: services/postoffice/dockerfile
     depends_on:
@@ -12,13 +12,14 @@ services:
       POSTOFFICE_URL: &postofficeUrl postoffice:5020
       SECURITYMANAGER_URL: &securitymanagerUrl securitymanager:5010
       MISSIONCONTROL_URL: &missioncontrolUrl missioncontrol:5030
+      RABBITMQ_URL: &rabbitmqUrl amqp://stage7:stage7password@rabbitmq:5672
       POSTOFFICE_CLIENT_SECRET: &postofficeSecret postOfficeAuthSecret
       CLIENT_SECRET: *postofficeSecret
     ports:
       - "5020:5020"
 
   missioncontrol:
-    build: 
+    build:
       context: .
       dockerfile: services/missioncontrol/dockerfile
     depends_on:
@@ -30,6 +31,7 @@ services:
       MISSIONCONTROL_URL: *missioncontrolUrl
       SECURITYMANAGER_URL: *securitymanagerUrl
       POSTOFFICE_URL: *postofficeUrl
+      RABBITMQ_URL: *rabbitmqUrl
       TRAFFICMANAGER_URL: &trafficmanagerUrl trafficmanager:5080
       LIBRARIAN_URL: &librarianUrl librarian:5040
       BRAIN_URL: &brainUrl brain:5070
@@ -39,7 +41,7 @@ services:
       CLIENT_SECRET: *missioncontrolSecret
 
   trafficmanager:
-    build: 
+    build:
       context: .
       dockerfile: services/trafficmanager/dockerfile
     depends_on:
@@ -50,12 +52,13 @@ services:
       PORT: &trafficmanagerPort 5080
       TRAFFICMANAGER_URL: *trafficmanagerUrl
       POSTOFFICE_URL: *postofficeUrl
+      RABBITMQ_URL: *rabbitmqUrl
       LIBRARIAN_URL: *librarianUrl
       TRAFFICMANAGER_CLIENT_SECRET: &trafficmanagerSecret trafficManagerAuthSecret
       CLIENT_SECRET: *trafficmanagerSecret
 
   brain:
-    build: 
+    build:
       context: .
       dockerfile: services/brain/dockerfile
     depends_on:
@@ -66,6 +69,7 @@ services:
       PORT: &brainPort 5070
       BRAIN_URL: *brainUrl
       POSTOFFICE_URL: *postofficeUrl
+      RABBITMQ_URL: *rabbitmqUrl
       BRAIN_CLIENT_SECRET: &brainSecret brainAuthSecret
       CLIENT_SECRET: *brainSecret
 
@@ -79,7 +83,8 @@ services:
     environment:
       NODE_ENV: production
       POSTOFFICE_URL: *postofficeUrl
-      TRAFFICMANAGER_URL: &trafficmanagerUrl
+      RABBITMQ_URL: *rabbitmqUrl
+      TRAFFICMANAGER_URL: *trafficmanagerUrl
       CAPABILITIESMANAGER_URL: &capabilitiesmanagerUrl capabilitiesmanager:5060
       AGENTSET_CLIENT_SECRET: &agentsetSecret agentSetAuthSecret
       CLIENT_SECRET: *agentsetSecret
@@ -97,6 +102,7 @@ services:
       PORT: &engineerPort 5050
       ENGINEER_URL: *engineerUrl
       POSTOFFICE_URL: *postofficeUrl
+      RABBITMQ_URL: *rabbitmqUrl
       BRAIN_URL: *brainUrl
       LIBRARIAN_URL: *librarianUrl
       CAPABILITIESMANAGER_URL: *capabilitiesmanagerUrl
@@ -116,7 +122,7 @@ services:
 
 
   capabilitiesmanager:
-    build: 
+    build:
       context: .
       dockerfile: services/capabilitiesmanager/dockerfile
     depends_on:
@@ -128,6 +134,7 @@ services:
       PORT: &capabilitiesmanagerPort 5060
       CAPABILITIESMANAGER_URL: *capabilitiesmanagerUrl
       POSTOFFICE_URL: *postofficeUrl
+      RABBITMQ_URL: *rabbitmqUrl
       LIBRARIAN_URL: *librarianUrl
       BRAIN_URL: *brainUrl
       ENGINEER_URL: &engineerUrl
@@ -147,7 +154,7 @@ services:
       MONGO_COLLECTION: *mongoCollection
 
   librarian:
-    build: 
+    build:
       context: .
       dockerfile: services/librarian/dockerfile
     depends_on:
@@ -161,6 +168,7 @@ services:
       PORT: &librarianPort 5040
       LIBRARIAN_URL: *librarianUrl
       POSTOFFICE_URL: *postofficeUrl
+      RABBITMQ_URL: *rabbitmqUrl
       LIBRARIAN_CLIENT_SECRET: &librarianSecret librarianAuthSecret
       CLIENT_SECRET: *librarianSecret
 
@@ -173,6 +181,7 @@ services:
       PORT:  &securitymanagerPort 5010
       SECURITYMANAGER_URL: *securitymanagerUrl
       POSTOFFICE_URL: *postofficeUrl
+      RABBITMQ_URL: *rabbitmqUrl
       JWT_SECRET: your-secret-key
       ADMIN_SECRET: adminSecret
       LIBRARIAN_URL: *librarianUrl
@@ -198,7 +207,7 @@ services:
     environment:
       - ENV REACT_APP_API_BASE_URL=http://localhost:5020
       - ENV REACT_APP_WS_URL=ws://localhost:5020
-      
+
 
   mongo:
     image: mongo:latest
@@ -214,9 +223,21 @@ services:
     volumes:
       - redis_data:/data
 
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"  # AMQP port
+      - "15672:15672"  # Management UI
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    environment:
+      - RABBITMQ_DEFAULT_USER=stage7
+      - RABBITMQ_DEFAULT_PASS=stage7password
+
 volumes:
   mongo_data:
   redis_data:
+  rabbitmq_data:
 
 networks:
   default:
