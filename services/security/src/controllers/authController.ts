@@ -1,125 +1,466 @@
 import { Request, Response, NextFunction } from 'express';
-import jwt from 'jsonwebtoken';
-import passport from 'passport';
-import bcrypt from 'bcrypt';
-import { createUser, findUserByEmail, findUserById } from '../services/userService';
+import { AuthenticationService } from '../services/AuthenticationService';
+import { TokenService } from '../services/TokenService';
+import { AuthorizationService } from '../services/AuthorizationService';
 import { User } from '../models/User';
-import {v4 as uuidv4} from 'uuid';
+import { TokenType } from '../models/Token';
+import { analyzeError } from '@cktmcs/errorhandler';
 
-const SECRET_KEY = process.env.JWT_SECRET || uuidv4();
+// Initialize services
+const tokenService = new TokenService();
+const authenticationService = new AuthenticationService(null, tokenService);
+const authorizationService = new AuthorizationService();
 
 export const register = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-        const { email, password } = req.body;
-        const existingUser = await findUserByEmail(email);
-        if (existingUser) {
-            res.status(400).json({ message: 'User already exists' });
-        }
-        const hashedPassword = await bcrypt.hash(password, 10);
-        const user = await createUser({ email, password: hashedPassword });
-        const token = jwt.sign({ id: user.id }, SECRET_KEY, { expiresIn: '365d' });
-        res.status(201).json({ token, user: { id: user.id, email: user.email } });
+        const { email, password, firstName, lastName, username } = req.body;
+
+        // Get client info for token
+        const clientInfo = {
+            ip: req.ip,
+            userAgent: req.headers['user-agent'],
+        };
+
+        // Register user
+        const result = await authenticationService.register({
+            email,
+            password,
+            firstName,
+            lastName,
+            username: username || email.split('@')[0], // Use email username as default
+            roles: ['user'], // Default role
+            isActive: true,
+            isEmailVerified: false, // Require email verification
+            mfaEnabled: false,
+            failedLoginAttempts: 0
+        }, true); // Send verification email
+
+        // Return tokens and user info
+        res.status(201).json({
+            message: 'Registration successful',
+            accessToken: result.accessToken.token,
+            refreshToken: result.refreshToken.token,
+            user: {
+                id: result.user.id,
+                email: result.user.email,
+                username: result.user.username,
+                firstName: result.user.firstName,
+                lastName: result.user.lastName,
+                isEmailVerified: result.user.isEmailVerified,
+                roles: result.user.roles
+            }
+        });
     } catch (error) {
+        analyzeError(error as Error);
+
+        if ((error as Error).message === 'Email is already registered') {
+            return res.status(400).json({ message: 'Email is already registered' });
+        }
+
+        console.error('Registration error:', error);
         res.status(500).json({ message: 'Error registering user' });
     }
 };
 
-export const login = (req: Request, res: Response, next: NextFunction): void => {
-    
-    const secret = process.env.JWT_SECRET;
-
-    if (!req.body || typeof req.body !== 'object') {
-        console.log('Request body is not an object:', req.body);
-        res.status(400).json({ message: 'Invalid request body' });
-        return;
-    }
-
-    if (!req.body.email || !req.body.password) {
-        console.log('Missing email or password in request body');
-        res.status(400).json({ message: 'Missing email or password' });
-        return;
-    }
-
-    const user = req.user as User;
-    if (!user) {
-        console.log('User not authenticated');
-        res.status(401).json({ message: 'Authentication failed' });
-        return;
-    }
-    const token = jwt.sign({ id: user.id }, SECRET_KEY, { expiresIn: '365d' });
-    console.log('Login successful for user:', user.email);
-    res.json({ token, user: { id: user.id, email: user.email } });
-};
-
-export const logout = (req: Request, res: Response) => {
-    // In a stateless JWT setup, logout is typically handled client-side
-    res.status(200).json({ message: 'Logout successful' });
-};
-
-export const refreshToken = async (req: Request, res: Response, next: NextFunction) => {
-    passport.authenticate('jwt', { session: false }, async (err: Error, user: User | false, info: any) => {
-        if (err) {
-            return next(err);
-        }
-        if (!user) {
-            return res.status(401).json({ message: 'Invalid refresh token', info });
+export const login = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+        // Validate request
+        if (!req.body || typeof req.body !== 'object') {
+            return res.status(400).json({ message: 'Invalid request body' });
         }
 
-        try {
-            // Verify the user still exists and is active
-            const currentUser = await findUserById(user.id);
-            if (!currentUser) {
-                return res.status(401).json({ message: 'User no longer exists' });
+        const { email, password } = req.body;
+
+        if (!email || !password) {
+            return res.status(400).json({ message: 'Missing email or password' });
+        }
+
+        // Get client info for token
+        const clientInfo = {
+            ip: req.ip,
+            userAgent: req.headers['user-agent'],
+        };
+
+        // Login user
+        const result = await authenticationService.login(email, password, clientInfo);
+
+        // Check if MFA is enabled
+        if (result.user.mfaEnabled) {
+            return res.status(200).json({
+                message: 'MFA required',
+                requireMfa: true,
+                userId: result.user.id,
+                tempToken: result.accessToken.token, // Temporary token for MFA verification
+            });
+        }
+
+        // Return tokens and user info
+        res.status(200).json({
+            message: 'Login successful',
+            accessToken: result.accessToken.token,
+            refreshToken: result.refreshToken.token,
+            user: {
+                id: result.user.id,
+                email: result.user.email,
+                username: result.user.username,
+                firstName: result.user.firstName,
+                lastName: result.user.lastName,
+                isEmailVerified: result.user.isEmailVerified,
+                roles: result.user.roles
             }
+        });
 
-            // Generate a new access token
-            const newToken = jwt.sign({ id: user.id }, process.env.JWT_SECRET!, { expiresIn: '365d' });
+        console.log('Login successful for user:', result.user.email);
+    } catch (error) {
+        analyzeError(error as Error);
 
-            res.json({ 
-                message: 'Token refreshed successfully',
-                token: newToken,
-                // refreshToken: newRefreshToken, // If you decide to issue a new refresh token
-                user: { id: user.id, email: user.email }
+        if ((error as Error).message === 'Invalid email or password') {
+            return res.status(401).json({ message: 'Invalid email or password' });
+        }
+
+        if ((error as Error).message.includes('Account is locked')) {
+            return res.status(403).json({ message: (error as Error).message });
+        }
+
+        console.error('Login error:', error);
+        res.status(500).json({ message: 'Error during login' });
+    }
+};
+
+export const logout = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+        // Check if user is authenticated
+        if (!req.user) {
+            return res.status(401).json({ message: 'Authentication required' });
+        }
+
+        // Get token ID from request
+        const tokenId = req.user.jti;
+        const userId = req.user.sub;
+
+        // Get logout options
+        const { revokeAll = false } = req.body;
+
+        // Logout user
+        await authenticationService.logout(userId, tokenId, revokeAll);
+
+        res.status(200).json({ message: 'Logout successful' });
+    } catch (error) {
+        analyzeError(error as Error);
+        console.error('Logout error:', error);
+        res.status(500).json({ message: 'Error during logout' });
+    }
+};
+
+export const refreshToken = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+        // Get refresh token from request
+        const { refreshToken: token } = req.body;
+
+        if (!token) {
+            return res.status(400).json({ message: 'Refresh token is required' });
+        }
+
+        // Get client info for token
+        const clientInfo = {
+            ip: req.ip,
+            userAgent: req.headers['user-agent'],
+        };
+
+        // Refresh token
+        const result = await authenticationService.refreshToken(token, clientInfo);
+
+        // Return new access token
+        res.status(200).json({
+            message: 'Token refreshed successfully',
+            accessToken: result.accessToken.token
+        });
+    } catch (error) {
+        analyzeError(error as Error);
+
+        if ((error as Error).message === 'Invalid or expired token') {
+            return res.status(401).json({ message: 'Invalid or expired refresh token' });
+        }
+
+        console.error('Token refresh error:', error);
+        res.status(500).json({ message: 'Error refreshing token' });
+    }
+};
+
+
+export const verifyToken = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+        // Get token from header
+        const authHeader = req.headers.authorization;
+        if (!authHeader) {
+            return res.status(401).json({ valid: false, message: 'No Authorization header provided' });
+        }
+
+        const token = authHeader.split(' ')[1];
+        if (!token) {
+            return res.status(401).json({ valid: false, message: 'No token provided in Authorization header' });
+        }
+
+        // Verify token
+        try {
+            const payload = await tokenService.verifyToken(token, TokenType.ACCESS);
+
+            // Return user info
+            res.status(200).json({
+                valid: true,
+                user: {
+                    id: payload.sub,
+                    roles: payload.roles,
+                    permissions: payload.permissions
+                }
             });
         } catch (error) {
-            next(error);
+            analyzeError(error as Error);
+
+            if ((error as Error).message === 'Token is blacklisted') {
+                return res.status(401).json({ valid: false, message: 'Token has been revoked' });
+            }
+
+            if ((error as Error).message === 'Token is revoked') {
+                return res.status(401).json({ valid: false, message: 'Token has been revoked' });
+            }
+
+            if ((error as Error).message.includes('jwt expired')) {
+                return res.status(401).json({ valid: false, message: 'Token has expired' });
+            }
+
+            return res.status(401).json({ valid: false, message: 'Invalid token' });
         }
-    })(req, res, next);
+    } catch (error) {
+        analyzeError(error as Error);
+        console.error('Token verification error:', error);
+        res.status(500).json({ valid: false, message: 'Error verifying token' });
+    }
 };
 
-
-export const verifyToken = (req: Request, res: Response, next: NextFunction): void => {
-    const authHeader = req.headers.authorization;
-    if (!authHeader) {
-        console.log('No Authorization header provided');
-        res.status(401).json({ valid: false, message: 'No Authorization header provided' });
-        return;
-    }
-
-    const token = authHeader.split(' ')[1];
-    if (!token) {
-        console.log('No token provided in Authorization header');
-        res.status(401).json({ valid: false, message: 'No token provided in Authorization header' });
-        return;
-    }
-
+/**
+ * Verify MFA token
+ */
+export const verifyMfaToken = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-        const decoded = jwt.verify(token, SECRET_KEY) as any;
-        // Attach the user information to the request object
-        (req as any).user = { id: decoded.id || decoded.iat };
-        
-        res.status(200).json({ valid: true, user: decoded });
-    } catch (error) {
-        console.error('Token verification failed:', error);
-        if (error instanceof jwt.JsonWebTokenError) {
-            res.status(401).json({ valid: false, message: 'Invalid token: ' + error.message });
-            return;
-        } else if (error instanceof jwt.TokenExpiredError) {
-            res.status(401).json({ valid: false, message: 'Token expired' });
-            return ;
-        } else {
-            res.status(401).json({ valid: false, message: 'Token verification failed: ' + (error instanceof Error ? error.message : String(error)) });
-            return ;
+        const { userId, token } = req.body;
+
+        if (!userId || !token) {
+            return res.status(400).json({ message: 'User ID and MFA token are required' });
         }
+
+        // Get client info for token
+        const clientInfo = {
+            ip: req.ip,
+            userAgent: req.headers['user-agent'],
+        };
+
+        // Verify MFA token
+        const result = await authenticationService.verifyMfaToken(userId, token);
+
+        // Return tokens and user info
+        res.status(200).json({
+            message: 'MFA verification successful',
+            accessToken: result.accessToken.token,
+            refreshToken: result.refreshToken.token,
+            user: {
+                id: result.user.id,
+                email: result.user.email,
+                username: result.user.username,
+                firstName: result.user.firstName,
+                lastName: result.user.lastName,
+                isEmailVerified: result.user.isEmailVerified,
+                roles: result.user.roles
+            }
+        });
+    } catch (error) {
+        analyzeError(error as Error);
+
+        if ((error as Error).message === 'Invalid MFA token') {
+            return res.status(401).json({ message: 'Invalid MFA token' });
+        }
+
+        console.error('MFA verification error:', error);
+        res.status(500).json({ message: 'Error verifying MFA token' });
+    }
+};
+
+/**
+ * Request password reset
+ */
+export const requestPasswordReset = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+        const { email } = req.body;
+
+        if (!email) {
+            return res.status(400).json({ message: 'Email is required' });
+        }
+
+        // Request password reset
+        await authenticationService.requestPasswordReset(email);
+
+        // Always return success to prevent email enumeration
+        res.status(200).json({ message: 'Password reset email sent' });
+    } catch (error) {
+        analyzeError(error as Error);
+        console.error('Password reset request error:', error);
+
+        // Always return success to prevent email enumeration
+        res.status(200).json({ message: 'Password reset email sent' });
+    }
+};
+
+/**
+ * Reset password
+ */
+export const resetPassword = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+        const { token, newPassword } = req.body;
+
+        if (!token || !newPassword) {
+            return res.status(400).json({ message: 'Token and new password are required' });
+        }
+
+        // Reset password
+        await authenticationService.resetPassword(token, newPassword);
+
+        res.status(200).json({ message: 'Password reset successful' });
+    } catch (error) {
+        analyzeError(error as Error);
+
+        if ((error as Error).message === 'Invalid password reset token') {
+            return res.status(401).json({ message: 'Invalid or expired password reset token' });
+        }
+
+        if ((error as Error).message === 'Password reset token has expired') {
+            return res.status(401).json({ message: 'Password reset token has expired' });
+        }
+
+        console.error('Password reset error:', error);
+        res.status(500).json({ message: 'Error resetting password' });
+    }
+};
+
+/**
+ * Change password
+ */
+export const changePassword = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+        // Check if user is authenticated
+        if (!req.user) {
+            return res.status(401).json({ message: 'Authentication required' });
+        }
+
+        const { currentPassword, newPassword } = req.body;
+
+        if (!currentPassword || !newPassword) {
+            return res.status(400).json({ message: 'Current password and new password are required' });
+        }
+
+        // Change password
+        await authenticationService.changePassword(req.user.sub, currentPassword, newPassword);
+
+        res.status(200).json({ message: 'Password changed successfully' });
+    } catch (error) {
+        analyzeError(error as Error);
+
+        if ((error as Error).message === 'Current password is incorrect') {
+            return res.status(401).json({ message: 'Current password is incorrect' });
+        }
+
+        console.error('Password change error:', error);
+        res.status(500).json({ message: 'Error changing password' });
+    }
+};
+
+/**
+ * Enable MFA
+ */
+export const enableMfa = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+        // Check if user is authenticated
+        if (!req.user) {
+            return res.status(401).json({ message: 'Authentication required' });
+        }
+
+        // Enable MFA
+        const mfaSecret = await authenticationService.enableMfa(req.user.sub);
+
+        // Generate QR code URL (this would typically be done with a library like qrcode)
+        const qrCodeUrl = `otpauth://totp/Stage7:${req.user.sub}?secret=${mfaSecret}&issuer=Stage7`;
+
+        res.status(200).json({
+            message: 'MFA setup initiated',
+            mfaSecret,
+            qrCodeUrl
+        });
+    } catch (error) {
+        analyzeError(error as Error);
+        console.error('MFA setup error:', error);
+        res.status(500).json({ message: 'Error setting up MFA' });
+    }
+};
+
+/**
+ * Verify MFA setup
+ */
+export const verifyMfaSetup = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+        // Check if user is authenticated
+        if (!req.user) {
+            return res.status(401).json({ message: 'Authentication required' });
+        }
+
+        const { token } = req.body;
+
+        if (!token) {
+            return res.status(400).json({ message: 'MFA token is required' });
+        }
+
+        // Verify MFA setup
+        await authenticationService.verifyMfaSetup(req.user.sub, token);
+
+        res.status(200).json({ message: 'MFA setup verified successfully' });
+    } catch (error) {
+        analyzeError(error as Error);
+
+        if ((error as Error).message === 'Invalid MFA token') {
+            return res.status(401).json({ message: 'Invalid MFA token' });
+        }
+
+        console.error('MFA setup verification error:', error);
+        res.status(500).json({ message: 'Error verifying MFA setup' });
+    }
+};
+
+/**
+ * Disable MFA
+ */
+export const disableMfa = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+        // Check if user is authenticated
+        if (!req.user) {
+            return res.status(401).json({ message: 'Authentication required' });
+        }
+
+        const { token } = req.body;
+
+        if (!token) {
+            return res.status(400).json({ message: 'MFA token is required' });
+        }
+
+        // Disable MFA
+        await authenticationService.disableMfa(req.user.sub, token);
+
+        res.status(200).json({ message: 'MFA disabled successfully' });
+    } catch (error) {
+        analyzeError(error as Error);
+
+        if ((error as Error).message === 'Invalid MFA token') {
+            return res.status(401).json({ message: 'Invalid MFA token' });
+        }
+
+        console.error('MFA disable error:', error);
+        res.status(500).json({ message: 'Error disabling MFA' });
     }
 };

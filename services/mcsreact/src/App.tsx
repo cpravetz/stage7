@@ -1,4 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { Box, Container, Paper, Typography, useTheme as useMuiTheme, Drawer, AppBar, Toolbar, IconButton } from '@mui/material';
+import MenuIcon from '@mui/icons-material/Menu';
+import CloseIcon from '@mui/icons-material/Close';
 import UserInputModal from './components/UserInputModal';
 import TabbedPanel from './components/TabbedPanel';
 import TextInput from './components/TextInput';
@@ -7,10 +10,14 @@ import StatisticsWindow from './components/StatisticsWindow';
 import SavedMissionsList from './components/SavedMissionsList';
 import ErrorBoundary from './components/ErrorBoundary';
 import LoginComponent from './components/Login';
+import { ThemeToggle } from './components/ThemeToggle';
+import { AppThemeProvider } from './theme/AppThemeProvider';
+import { useTheme } from './theme/ThemeContext';
 import { AgentStatistics, MissionStatistics, MessageType, MapSerializer } from '@cktmcs/shared';
 import { SecurityClient } from './SecurityClient';
 import axios, { AxiosInstance } from 'axios';
 import { v4 as uuidv4 } from 'uuid';
+import { useSnackbar } from 'notistack';
 import './App.css';
 
 const API_BASE_URL = `${window.location.protocol}//${window.location.hostname}:5020`;
@@ -22,7 +29,7 @@ interface WorkProduct {
   url: string;
 }
 
-export const App: React.FC = () => {
+const AppContent: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [token, setToken] = useState<string | null>(null);
   const securityClient = useMemo(() => new SecurityClient(API_BASE_URL), []);
@@ -47,7 +54,13 @@ export const App: React.FC = () => {
 
   const [agentStatistics, setAgentStatistics] = useState<Map<string, Array<AgentStatistics>>>(new Map());
 
-  const ws = useRef<WebSocket | null>(null);  
+  // Responsive layout state
+  const [drawerOpen, setDrawerOpen] = useState<boolean>(false);
+  const muiTheme = useMuiTheme();
+  const { mode } = useTheme();
+  const { enqueueSnackbar } = useSnackbar();
+
+  const ws = useRef<WebSocket | null>(null);
 
   const createAPI = useCallback((getToken: () => string | null): AxiosInstance => {
     const api = axios.create({
@@ -58,7 +71,7 @@ export const App: React.FC = () => {
       },
       withCredentials: true,
     });
-  
+
     api.interceptors.request.use(async (config) => {
       let token = securityClient.getAccessToken();
       if (!token) {
@@ -84,7 +97,7 @@ export const App: React.FC = () => {
     }, (error) => {
       return Promise.reject(error);
     });
-  
+
     return api;
   }, [securityClient]);
 
@@ -99,7 +112,7 @@ export const App: React.FC = () => {
   }
 
   const api = useMemo(() => createAPI(() => localStorage.getItem('accessToken')), [createAPI]);
-  
+
   const handleWebSocketMessage = useCallback((data: any) => {
     console.log('Processing WebSocket message:', data);
 
@@ -168,8 +181,10 @@ const handleLogin = async (email: string, password: string) => {
       setToken(securityClient.getAccessToken()!);
       setIsAuthenticated(true);
       connectWebSocket();
+      enqueueSnackbar('Login successful', { variant: 'success' });
   } catch (error) {
       console.error('Login failed:', error instanceof Error ? error.message : error);
+      enqueueSnackbar(`Login failed: ${error instanceof Error ? error.message : 'Unknown error'}`, { variant: 'error' });
   }
 };
 
@@ -180,12 +195,14 @@ const handleRegister = async (name: string, email: string, password: string) => 
       if (newToken) {
           setToken(newToken);
           setIsAuthenticated(true);
-          connectWebSocket();  // Add this line
+          connectWebSocket();
+          enqueueSnackbar('Registration successful', { variant: 'success' });
       } else {
           throw new Error('Registration successful but no token received');
       }
   } catch (error) {
       console.error('Registration failed:', error instanceof Error ? error.message : error);
+      enqueueSnackbar(`Registration failed: ${error instanceof Error ? error.message : 'Unknown error'}`, { variant: 'error' });
   }
 };
 
@@ -194,12 +211,14 @@ const handleLogout = async () => {
     securityClient.logout();
     setIsAuthenticated(false);
     resetToken(null);
-    if (ws.current) {  // Add these lines
+    if (ws.current) {
       ws.current.close();
       ws.current = null;
     }
+    enqueueSnackbar('Logged out successfully', { variant: 'success' });
   } catch (error) {
     console.error('Logout failed:', error instanceof Error ? error.message : error);
+    enqueueSnackbar(`Logout failed: ${error instanceof Error ? error.message : 'Unknown error'}`, { variant: 'error' });
   }
 };
 
@@ -218,8 +237,9 @@ const connectWebSocket = () => {
 
   ws.current.onopen = () => {
     console.log('WebSocket connection established with PostOffice');
-    ws.current?.send(JSON.stringify({ 
-      type: 'CLIENT_CONNECT', 
+    enqueueSnackbar('Connected to server', { variant: 'success' });
+    ws.current?.send(JSON.stringify({
+      type: 'CLIENT_CONNECT',
       clientId: clientId
     }));
   };
@@ -236,17 +256,19 @@ const connectWebSocket = () => {
 
   ws.current.onerror = (error) => {
     console.error('WebSocket error:', error);
+    enqueueSnackbar('Connection error. Please try again.', { variant: 'error' });
   };
 
   ws.current.onclose = () => {
     console.log('WebSocket connection closed. Attempting to reconnect...');
+    enqueueSnackbar('Disconnected from server. Attempting to reconnect...', { variant: 'warning' });
     setTimeout(connectWebSocket, 5000);
   };
 };
 
 useEffect(() => {
   const accessToken = securityClient.getAccessToken();
-  
+
 
   connectWebSocket(); // Connect to WebSocket on mount
 
@@ -259,11 +281,11 @@ useEffect(() => {
 
   const handleSendMessage = async (message: string) => {
     if (!clientId) return;
-    if (!ws.current) { 
-      connectWebSocket(); 
+    if (!ws.current) {
+      connectWebSocket();
     }
     setConversationHistory((prev) => [...prev, `User: ${message}`]);
-    
+
     try {
       if (!activeMission) {
         // Include the auth token in the createMission request
@@ -299,7 +321,7 @@ useEffect(() => {
           });
         }
       }
-    } catch (error) { 
+    } catch (error) {
       console.error('Failed to send message:', error instanceof Error ? error.message : error);
       setConversationHistory((prev) => [...prev, 'System: Failed to send message. Please try again.']);
     }
@@ -348,7 +370,7 @@ useEffect(() => {
         setActiveMissionName(null);
         setActiveMissionId(null);
       }
-    } catch (error) { 
+    } catch (error) {
       console.error('Failed to send control action:', error instanceof Error ? error.message : error);
       setConversationHistory((prev) => [...prev, `System: Failed to send ${action} request to MissionControl. Please try again.`]);
     }
@@ -359,7 +381,7 @@ useEffect(() => {
       await api.post('/loadMission', { missionId });
       setConversationHistory((prev) => [...prev, `System: Mission ${missionId} loaded.`]);
       setShowSavedMissions(false);
-    } catch (error) { 
+    } catch (error) {
       console.error('Failed to load mission:', error instanceof Error ? error.message : error);
       setConversationHistory((prev) => [...prev, 'System: Failed to load mission. Please try again.']);
     }
@@ -371,47 +393,131 @@ useEffect(() => {
 
   return (
     <ErrorBoundary>
-      <div className="app">
-        <div className="main-panel">
-          <div className="tabbed-panel-container">
-            <TabbedPanel 
-              conversationHistory={conversationHistory}
-              workProducts={workProducts}
-              agentStatistics={agentStatistics}
-            />
-          </div>
-          <TextInput onSend={handleSendMessage} />
-          <div className="mission-controls-container">
-            <MissionControls 
-              onControl={handleControlAction} 
-              activeMission={activeMission} 
-              missionName={activeMissionName}
-              activeMissionId={activeMissionId}
-              isPaused={isPaused}
-            />
-          </div>
-        </div>
-        <div className="side-panel">
-        <div className="side-panel-header">
-            <div className="app-name"><h3>stage7</h3></div>
-            <button onClick={handleLogout} className="logout-button">Logout</button>
-          </div>
-          {!showSavedMissions && (
-            <StatisticsWindow 
-              statistics={statistics} 
-              activeMissionName={activeMissionName} 
-              activeMission={activeMission}
-            />
-          )}
-          {showSavedMissions && (
-            <SavedMissionsList 
-              onMissionSelect={handleLoadMission} 
-              onClose={() => setShowSavedMissions(false)}
-            />
-          )}
-        </div>
-      </div>
+      <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh', bgcolor: 'background.default' }}>
+        <AppBar position="static" color="primary" elevation={1}>
+          <Toolbar>
+            <IconButton
+              edge="start"
+              color="inherit"
+              aria-label="menu"
+              sx={{ mr: 2, display: { sm: 'none' } }}
+              onClick={() => setDrawerOpen(true)}
+            >
+              <MenuIcon />
+            </IconButton>
+            <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
+              Stage7
+            </Typography>
+            <ThemeToggle />
+            <IconButton color="inherit" onClick={handleLogout} aria-label="logout">
+              <Typography variant="body2" sx={{ mr: 1 }}>
+                Logout
+              </Typography>
+            </IconButton>
+          </Toolbar>
+        </AppBar>
+
+        {/* Mobile drawer */}
+        <Drawer
+          anchor="left"
+          open={drawerOpen}
+          onClose={() => setDrawerOpen(false)}
+          sx={{ display: { sm: 'none' } }}
+        >
+          <Box sx={{ width: 250, p: 2 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+              <Typography variant="h6">Menu</Typography>
+              <IconButton onClick={() => setDrawerOpen(false)}>
+                <CloseIcon />
+              </IconButton>
+            </Box>
+            {!showSavedMissions ? (
+              <StatisticsWindow
+                statistics={statistics}
+                activeMissionName={activeMissionName}
+                activeMission={activeMission}
+              />
+            ) : (
+              <SavedMissionsList
+                onMissionSelect={handleLoadMission}
+                onClose={() => setShowSavedMissions(false)}
+              />
+            )}
+          </Box>
+        </Drawer>
+
+        {/* Main content */}
+        <Box sx={{ display: 'flex', flexGrow: 1, overflow: 'hidden' }}>
+          <Box sx={{
+            flexGrow: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            p: 2,
+            overflow: 'hidden'
+          }}>
+            <Paper
+              elevation={2}
+              sx={{
+                flexGrow: 1,
+                display: 'flex',
+                flexDirection: 'column',
+                overflow: 'hidden',
+                mb: 2
+              }}
+            >
+              <TabbedPanel
+                conversationHistory={conversationHistory}
+                workProducts={workProducts}
+                agentStatistics={agentStatistics}
+              />
+            </Paper>
+            <TextInput onSend={handleSendMessage} />
+            <Box sx={{ mt: 2 }}>
+              <MissionControls
+                onControl={handleControlAction}
+                activeMission={activeMission}
+                missionName={activeMissionName}
+                activeMissionId={activeMissionId}
+                isPaused={isPaused}
+              />
+            </Box>
+          </Box>
+
+          {/* Side panel - hidden on mobile */}
+          <Box
+            sx={{
+              width: 300,
+              p: 2,
+              display: { xs: 'none', sm: 'block' },
+              bgcolor: 'background.paper',
+              borderLeft: 1,
+              borderColor: 'divider'
+            }}
+          >
+            {!showSavedMissions ? (
+              <StatisticsWindow
+                statistics={statistics}
+                activeMissionName={activeMissionName}
+                activeMission={activeMission}
+              />
+            ) : (
+              <SavedMissionsList
+                onMissionSelect={handleLoadMission}
+                onClose={() => setShowSavedMissions(false)}
+              />
+            )}
+          </Box>
+        </Box>
+      </Box>
     </ErrorBoundary>
+  );
+};
+
+const App: React.FC = () => {
+  return (
+    <AppThemeProvider>
+      <AppContent />
+    </AppThemeProvider>
   );
 };
 

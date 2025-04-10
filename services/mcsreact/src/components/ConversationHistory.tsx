@@ -1,5 +1,8 @@
 import React, { useEffect, useRef } from 'react';
-import './ConversationHistory.css';
+import { Box, Typography, Paper, Divider, useTheme } from '@mui/material';
+import ReactMarkdown from 'react-markdown';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { materialDark, materialLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
 interface Props {
   history: string[];
@@ -14,17 +17,138 @@ const ConversationHistory: React.FC<Props> = ({ history }) => {
     }
   }, [history]);
 
+  const theme = useTheme();
+  const codeStyle = theme.palette.mode === 'dark' ? materialDark : materialLight;
+
+  // Function to determine if a message is from the user or the system
+  const isUserMessage = (message: string): boolean => {
+    return message.startsWith('User:') || message.startsWith('You:');
+  };
+
+  // Function to format the message for display
+  const formatMessage = (message: string): string => {
+    // Remove the prefix (User: or System:) for display
+    if (message.startsWith('User:') || message.startsWith('You:') || message.startsWith('System:')) {
+      return message.substring(message.indexOf(':') + 1).trim();
+    }
+    return message;
+  };
+
   return (
-    <div className="conversation-history">
-      <h3>Conversation History</h3>
-      <div className="history-list" ref={historyListRef}>
-        {history.map((message, index) => (
-          <div key={index} className="history-item">
-            {message}
-          </div>
-        ))}
-      </div>
-    </div>
+    <Box
+      sx={{
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden'
+      }}
+    >
+      <Typography variant="h6" sx={{ mb: 2, px: 2 }}>
+        Conversation History
+      </Typography>
+      <Box
+        ref={historyListRef}
+        sx={{
+          flexGrow: 1,
+          overflowY: 'auto',
+          px: 2,
+          pb: 2,
+          '&::-webkit-scrollbar': {
+            width: '8px',
+          },
+          '&::-webkit-scrollbar-track': {
+            backgroundColor: theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)',
+            borderRadius: '4px',
+          },
+          '&::-webkit-scrollbar-thumb': {
+            backgroundColor: theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.2)',
+            borderRadius: '4px',
+            '&:hover': {
+              backgroundColor: theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.3)' : 'rgba(0, 0, 0, 0.3)',
+            },
+          },
+        }}
+      >
+        {history.map((message, index) => {
+          const isUser = isUserMessage(message);
+          const formattedMessage = formatMessage(message);
+
+          return (
+            <Paper
+              key={index}
+              elevation={1}
+              sx={{
+                p: 2,
+                mb: 2,
+                maxWidth: '85%',
+                borderRadius: 2,
+                bgcolor: isUser ?
+                  (theme.palette.mode === 'dark' ? 'primary.dark' : 'primary.light') :
+                  (theme.palette.mode === 'dark' ? 'background.paper' : 'background.default'),
+                color: isUser ? 'primary.contrastText' : 'text.primary',
+                alignSelf: isUser ? 'flex-end' : 'flex-start',
+                ml: isUser ? 'auto' : 0,
+                position: 'relative',
+                '&::after': isUser ? {
+                  content: '""',
+                  position: 'absolute',
+                  right: '-10px',
+                  top: '10px',
+                  width: 0,
+                  height: 0,
+                  borderTop: '10px solid transparent',
+                  borderBottom: '10px solid transparent',
+                  borderLeft: `10px solid ${theme.palette.mode === 'dark' ? theme.palette.primary.dark : theme.palette.primary.light}`,
+                } : {},
+                '&::before': !isUser ? {
+                  content: '""',
+                  position: 'absolute',
+                  left: '-10px',
+                  top: '10px',
+                  width: 0,
+                  height: 0,
+                  borderTop: '10px solid transparent',
+                  borderBottom: '10px solid transparent',
+                  borderRight: `10px solid ${theme.palette.mode === 'dark' ? theme.palette.background.paper : theme.palette.background.default}`,
+                } : {},
+              }}
+            >
+              <Typography
+                variant="subtitle2"
+                color={isUser ? 'primary.contrastText' : 'text.secondary'}
+                sx={{ mb: 1, fontWeight: 'bold' }}
+              >
+                {isUser ? 'You' : 'System'}
+              </Typography>
+              <Divider sx={{ mb: 1 }} />
+              <ReactMarkdown
+                components={{
+                  code({ node, inline, className, children, ...props }) {
+                    const match = /language-(\w+)/.exec(className || '');
+                    return !inline && match ? (
+                      <SyntaxHighlighter
+                        style={codeStyle}
+                        language={match[1]}
+                        PreTag="div"
+                        {...props}
+                      >
+                        {String(children).replace(/\n$/, '')}
+                      </SyntaxHighlighter>
+                    ) : (
+                      <code className={className} {...props}>
+                        {children}
+                      </code>
+                    );
+                  },
+                }}
+              >
+                {formattedMessage}
+              </ReactMarkdown>
+            </Paper>
+          );
+        })}
+      </Box>
+    </Box>
   );
 };
 
