@@ -19,9 +19,9 @@ COPY errorhandler ./errorhandler
 COPY services/agentset ./services/agentset
 
 # Build the TypeScript code
-RUN npm run build --workspace=shared
-RUN npm run build --workspace=errorhandler
-RUN npm run build --workspace=services/agentset
+RUN cd shared && npm run build
+RUN cd errorhandler && npm run build
+RUN npm run build --workspace=@cktmcs/agentset
 
 # Set the working directory to the service
 WORKDIR /usr/src/app/services/agentset

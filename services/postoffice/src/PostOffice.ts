@@ -129,7 +129,7 @@ export class PostOffice {
 
             // Create and bind a queue for this service
             const queueName = 'postoffice';
-            await this.mqClient.subscribeToQueue(queueName, async (message) => {
+            await this.mqClient.subscribeToQueue(queueName, async (message: Message) => {
                 await this.processQueueMessage(message);
             });
 
@@ -195,7 +195,7 @@ export class PostOffice {
         }
     }
 
-    private async processQueueMessage(message: any) {
+    private async processQueueMessage(message: Message) {
         console.log('Received message from queue:', message);
         if (message.type && message.recipient) {
             await this.routeMessage(message);
@@ -470,7 +470,7 @@ export class PostOffice {
         const token = req.headers.authorization || '';
 
         try {
-            const recipientUrl = await this.discoverService(message.recipient);
+            const recipientUrl = await this.discoverService(message.recipient || '');
             if (!recipientUrl) {
                 res.status(404).send({ error: `Recipient not found for ${JSON.stringify(message.recipient)}` });
                 return;
@@ -497,7 +497,7 @@ export class PostOffice {
 
             console.log('WebSocket message received:', parsedMessage);
             console.log('Looking for client:', parsedMessage.recipient);
-            const recipientUrl = await this.discoverService(parsedMessage.recipient);
+            const recipientUrl = await this.discoverService(parsedMessage.recipient || '');
             if (!recipientUrl) {
                 console.error(`(ws)Recipient not found for ${JSON.stringify(parsedMessage)}`);
                 return;

@@ -1,3 +1,6 @@
+/**
+ * Message types used throughout the system
+ */
 export enum MessageType {
     STATEMENT = "statement",
     REQUEST = "request",
@@ -13,6 +16,7 @@ export enum MessageType {
     WORK_PRODUCT_UPDATE = "workProductUpdate",
     REGISTER="REGISTER",
     AGENT_UPDATE = "agentUpdate",
+    AGENT_MESSAGE = "agentMessage",
     CREATE_MISSION = "createMission",
     STATUS_UPDATE = "statusUpdate",
     STEP_FAILURE = "stepFailure",
@@ -28,10 +32,13 @@ export enum MessageType {
     PLUGIN_CANCEL = "pluginCancel"
 }
 
+/**
+ * Standard message interface used for communication between services
+ */
 export interface Message {
     type: MessageType;
     sender: string;
-    recipient: string;
+    recipient?: string;
     content?: any;
     clientId?: string;
     data?: any;

@@ -324,12 +324,12 @@ export class DomainKnowledge {
         return []; // No relevant items
       }
       
-      const indices = indexMatch[1].split(',').map(index => parseInt(index.trim()) - 1);
+      const indices = indexMatch[1].split(',').map((index: string) => parseInt(index.trim()) - 1);
       
       // Filter items by indices
       return indices
-        .filter(index => index >= 0 && index < items.length)
-        .map(index => items[index]);
+        .filter((index: number) => index >= 0 && index < items.length)
+        .map((index: number) => items[index]);
     } catch (error) {
       analyzeError(error as Error);
       console.error('Error filtering items by relevance:', error);

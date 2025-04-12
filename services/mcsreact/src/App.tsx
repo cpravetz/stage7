@@ -13,7 +13,7 @@ import LoginComponent from './components/Login';
 import { ThemeToggle } from './components/ThemeToggle';
 import { AppThemeProvider } from './theme/AppThemeProvider';
 import { useTheme } from './theme/ThemeContext';
-import { AgentStatistics, MissionStatistics, MessageType, MapSerializer } from '@cktmcs/shared';
+import { AgentStatistics, MissionStatistics, MessageType, MapSerializer } from './shared-browser';
 import { SecurityClient } from './SecurityClient';
 import axios, { AxiosInstance } from 'axios';
 import { v4 as uuidv4 } from 'uuid';
@@ -47,7 +47,7 @@ const AppContent: React.FC = () => {
   const [isPaused, setIsPaused] = useState<boolean>(false);
   const [statistics, setStatistics] = useState<MissionStatistics>({
     llmCalls: 0,
-    agentCountByStatus: Object,
+    agentCountByStatus: {},
     agentStatistics: new Map(),
     engineerStatistics: { newPlugins: [] }
   });

@@ -1,6 +1,6 @@
 import { Agent } from '../agents/Agent';
 import { SharedMemory } from './SharedMemory';
-import { TaskDelegation } from './TaskDelegation';
+import { TaskDelegation, TaskStatus } from './TaskDelegation';
 import { ConflictResolution } from './ConflictResolution';
 import { CollaborationMessage, CollaborationMessageType, CollaborationProtocol, TaskDelegationRequest, TaskDelegationResponse, ConflictResolutionRequest, ConflictResolutionResponse, KnowledgeSharing, createCollaborationMessage } from './CollaborationProtocol';
 import { v4 as uuidv4 } from 'uuid';
@@ -171,7 +171,7 @@ export class CollaborationManager implements CollaborationProtocol {
     }
     
     // Update task status to in progress
-    await this.taskDelegation.updateTaskStatus(task.id, 'in_progress');
+    await this.taskDelegation.updateTaskStatus(task.id, 'in_progress' as TaskStatus);
     
     // Create a step for the task
     await recipientAgent.createStepForTask(task);

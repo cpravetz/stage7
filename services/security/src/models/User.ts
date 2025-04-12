@@ -21,6 +21,9 @@ export interface User {
     mfaSecret?: string;
     failedLoginAttempts: number;
     lockoutUntil?: Date;
+    // JWT-related properties
+    sub?: string; // Subject (user ID)
+    jti?: string; // JWT ID (token ID)
     componentRegistrations?: string[];
     preferences?: Record<string, any>;
 }

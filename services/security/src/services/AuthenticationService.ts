@@ -511,12 +511,12 @@ export class AuthenticationService {
     }
 
     /**
-     * Verify MFA token
+     * Verify MFA token for authentication
      * @param userId User ID
      * @param token MFA token
      * @returns User and tokens
      */
-    async verifyMfaToken(
+    async verifyMfaTokenForAuth(
         userId: string,
         token: string
     ): Promise<{ user: User; accessToken: Token; refreshToken: Token }> {

@@ -4,26 +4,28 @@ FROM node:20-alpine
 # Set the working directory in the container
 WORKDIR /usr/src/app
 
-# Copy package.json and package-lock.json to the working directory
+# Copy package.json and package-lock.json to the container
 COPY package*.json ./
-COPY shared/package*.json ./shared/
-COPY errorhandler/package*.json ./errorhandler/
 COPY services/librarian/package*.json ./services/librarian/
+COPY shared/package*.json ./shared/
 
-# Install the application dependencies
-RUN npm install
+# Install dependencies
+RUN npm install --workspace=shared
+RUN npm install --workspace=services/librarian
 
-# Copy the application code to the working directory
-COPY shared ./shared
+# Copy the shared module
+COPY shared/ ./shared/
 COPY errorhandler ./errorhandler
 COPY services/librarian ./services/librarian
 
-# Build the TypeScript code
-RUN npm run build --workspace=shared
-RUN npm run build --workspace=errorhandler
-RUN npm run build --workspace=services/librarian
+# Build the TypeScript code - ensure shared is built first
+RUN cd shared && npm run build
+RUN cd errorhandler && npm run build
+# Make sure the shared package is properly built before building the postoffice service
+RUN npm run build --workspace=@cktmcs/librarian
 
-# Set the working directory to the service
+# Set the working directory to the librarian service
+
 WORKDIR /usr/src/app/services/librarian
 
 # Expose the port the app runs on

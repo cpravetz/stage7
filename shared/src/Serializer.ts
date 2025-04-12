@@ -26,7 +26,7 @@ export class MapSerializer {
     // Recursively transforms Maps in an object for serialization
     static transformForSerialization(obj: any): any {
         if (obj === null || obj === undefined) return obj;
-        
+
         if (obj instanceof Map) {
             return this.serialize(obj);
         } else if (Array.isArray(obj)) {
@@ -41,11 +41,11 @@ export class MapSerializer {
         return obj;
     }
 
-    
+
     // Recursively restores Maps in a deserialized object
     static transformFromSerialization(obj: any): any {
         if (obj && obj._type === 'Map') {
-            return this.deserialize(obj);
+            return new Map(obj.entries);
         } else if (Array.isArray(obj)) {
             return obj.map(item => this.transformFromSerialization(item));
         } else if (typeof obj === 'object' && obj !== null) {

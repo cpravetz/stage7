@@ -1,8 +1,8 @@
 import express from 'express';
 import { Agent } from './agents/Agent';
-import { MapSerializer, BaseEntity } from '@cktmcs/shared';
+import { MapSerializer, BaseEntity } from '@cktmcs/shared/index.js';
 import { v4 as uuidv4 } from 'uuid';
-import { AgentSetStatistics, AgentStatistics, PluginInput } from '@cktmcs/shared';
+import { AgentSetStatistics, AgentStatistics, PluginInput } from '@cktmcs/shared/index.js';
 import { AgentPersistenceManager } from './utils/AgentPersistenceManager';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { setInterval } from 'timers';
@@ -17,6 +17,10 @@ export class AgentSet extends BaseEntity {
     agents: Map<string, Agent> = new Map(); // Store agents by their ID
     maxAgents: number = 10; // Example limit for agents in this set
     persistenceManager: AgentPersistenceManager = new AgentPersistenceManager();
+    private trafficManagerUrl: string = process.env.TRAFFIC_MANAGER_URL || 'trafficmanager:5080';
+    private librarianUrl: string = process.env.LIBRARIAN_URL || 'librarian:5040';
+    private brainUrl: string = process.env.BRAIN_URL || 'brain:5060';
+
 
     // Agent systems
     private lifecycleManager: AgentLifecycleManager;
@@ -31,7 +35,9 @@ export class AgentSet extends BaseEntity {
         this.lifecycleManager = new AgentLifecycleManager(this.persistenceManager, this.trafficManagerUrl);
         this.collaborationManager = new CollaborationManager(this.agents, this.librarianUrl, this.trafficManagerUrl, this.brainUrl);
         this.specializationFramework = new SpecializationFramework(this.agents, this.librarianUrl, this.brainUrl);
-        this.domainKnowledge = new DomainKnowledge(this.specializationFramework.getAllKnowledgeDomains(), this.librarianUrl, this.brainUrl);
+        const knowledgeDomainsArray = this.specializationFramework.getAllKnowledgeDomains();
+        const knowledgeDomainsMap = new Map(knowledgeDomainsArray.map(domain => [domain.id, domain]));
+        this.domainKnowledge = new DomainKnowledge(knowledgeDomainsMap, this.librarianUrl, this.brainUrl);
 
         this.initializeServer();
 

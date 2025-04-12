@@ -1,0 +1,56 @@
+FROM node:20-alpine AS builder
+
+WORKDIR /usr/src/app
+
+# Copy package.json files
+COPY package*.json ./
+COPY shared/package*.json ./shared/
+COPY errorhandler/package*.json ./errorhandler/
+COPY services/configservice/package*.json ./services/configservice/
+
+# Install all dependencies
+RUN npm install
+RUN cd shared && npm install
+RUN cd errorhandler && npm install
+RUN cd services/configservice && npm install
+
+# Copy source code
+COPY shared ./shared
+COPY errorhandler ./errorhandler
+COPY services/configservice ./services/configservice
+
+# Build TypeScript
+RUN cd shared && npm run build
+RUN cd errorhandler && npm run build
+RUN cd services/configservice && npm run build
+
+# Second stage: create production image
+FROM node:20-alpine
+
+WORKDIR /usr/src/app
+
+# Copy package.json files
+COPY package*.json ./
+COPY shared/package*.json ./shared/
+COPY errorhandler/package*.json ./errorhandler/
+COPY services/configservice/package*.json ./services/configservice/
+
+# Install production dependencies only
+RUN npm install --omit=dev
+RUN cd shared && npm install --omit=dev
+RUN cd errorhandler && npm install --omit=dev
+RUN cd services/configservice && npm install --omit=dev
+
+# Copy built files from builder stage
+COPY --from=builder /usr/src/app/shared/dist ./shared/dist
+COPY --from=builder /usr/src/app/errorhandler/dist ./errorhandler/dist
+COPY --from=builder /usr/src/app/services/configservice/dist ./services/configservice/dist
+
+# Create config directory
+RUN mkdir -p /usr/src/app/config
+
+# Expose port
+EXPOSE 5090
+
+# Start the service
+CMD ["node", "services/configservice/dist/ConfigService.js"]

@@ -25,7 +25,7 @@ const api = axios.create({
   });
 
 export class Agent extends BaseEntity {
-    private missionContext: string = '';
+    missionContext: string = '';
     private agentSetUrl: string;
     private agentPersistenceManager: AgentPersistenceManager;
     private stateManager: StateManager;
@@ -548,7 +548,7 @@ Please consider this context and the available plugins when planning and executi
         } catch (error) {
             console.error('Error executing action with CapabilitiesManager:', error instanceof Error ? error.message : error);
 
-            step.status = StepStatus.ERROR;
+            step.updateStatus(StepStatus.ERROR, undefined, undefined, error instanceof Error ? error.message : String(error));
 
             if (axios.isAxiosError(error) && (error.code === 'ECONNABORTED' || !error.response)) {
                 this.status = AgentStatus.ERROR;
@@ -578,7 +578,7 @@ Please consider this context and the available plugins when planning and executi
             );
 
             for (const step of dependentSteps) {
-                step.status = status;
+                step.updateStatus(status, undefined, undefined, `Dependent on failed step ${failedStepId}`);
                 await this.cleanupFailedStep(step);
                 //console.log(`Notified dependent step ${step.id} about failure of step ${failedStepId}`);
             }
@@ -664,33 +664,15 @@ Please consider this context and the available plugins when planning and executi
         await this.stateManager.loadState(this);
     }
 
-    async pause() {
-        console.log(`Pausing agent ${this.id}`);
-        this.status = AgentStatus.PAUSED;
-        await this.notifyTrafficManager();
-        await this.saveAgentState();
-    }
-
     async abort() {
         this.status = AgentStatus.ABORTED;
         await this.notifyTrafficManager();
         await this.saveAgentState();
     }
 
-    async resume() {
-        if (this.status === AgentStatus.PAUSED || this.status === AgentStatus.INITIALIZING) {
-            this.status = AgentStatus.RUNNING;
-            await this.notifyTrafficManager();
-            this.runAgent();
-        }
-    }
 
     getMissionId(): string {
         return this.missionId;
-    }
-
-    getStatus(): string {
-        return this.status;
     }
 
     async getStatistics(): Promise<AgentStatistics> {
@@ -969,8 +951,8 @@ Please consider this context and the available plugins when planning and executi
         // Check if any steps are waiting for this resolution
         for (const step of this.steps) {
             if (step.status === StepStatus.WAITING && step.waitingFor === `conflict:${resolution.conflictId}`) {
-                step.status = StepStatus.PENDING;
-                step.waitingFor = undefined;
+                // Update step status using the enhanced updateStatus method
+                step.updateStatus(StepStatus.PENDING);
 
                 // Store resolution in step data
                 step.storeTempData('conflictResolution', resolution);
@@ -1063,13 +1045,11 @@ Please consider this context and the available plugins when planning and executi
         const step = this.steps.find(s => s.id === result.taskId);
 
         if (step) {
-            // Update step status
+            // Update step status using the enhanced updateStatus method
             if (result.success) {
-                step.status = StepStatus.COMPLETED;
-                step.result = result.result;
+                step.updateStatus(StepStatus.COMPLETED, result.result);
             } else {
-                step.status = StepStatus.ERROR;
-                step.error = result.error;
+                step.updateStatus(StepStatus.ERROR, undefined, undefined, result.error);
             }
 
             // Save state
@@ -1096,7 +1076,16 @@ Please consider this context and the available plugins when planning and executi
         // Check if resource is a work product
         if (request.resourceType === 'work_product') {
             try {
-                const workProduct = await this.agentPersistenceManager.loadWorkProduct(request.resourceId);
+                // Extract agentId and stepId from the resourceId (format: agentId_stepId)
+                const [agentId, stepId] = request.resourceId.split('_');
+                if (!agentId || !stepId) {
+                    return {
+                        success: false,
+                        error: `Invalid resource ID format: ${request.resourceId}. Expected format: agentId_stepId`
+                    };
+                }
+
+                const workProduct = await this.agentPersistenceManager.loadWorkProduct(agentId, stepId);
 
                 if (workProduct) {
                     return {
@@ -1217,13 +1206,5 @@ Please consider this context and the available plugins when planning and executi
      */
     async getTaskHistory(): Promise<Array<{ id: string, type: string, success: boolean, duration: number }>> {
         return this.taskHistory;
-    }
-
-    /**
-     * Get mission ID
-     * @returns Mission ID
-     */
-    getMissionId(): string {
-        return this.missionId;
     }
 }

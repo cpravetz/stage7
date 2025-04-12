@@ -88,7 +88,8 @@ export function securityHeaders() {
         crossOriginOpenerPolicy: { policy: 'same-origin' },
         crossOriginResourcePolicy: { policy: 'same-site' },
         dnsPrefetchControl: { allow: false },
-        expectCt: { maxAge: 86400, enforce: true },
+        // expectCt is deprecated in newer versions of helmet
+        // expectCt: { maxAge: 86400, enforce: true },
         frameguard: { action: 'deny' },
         hidePoweredBy: true,
         hsts: { maxAge: 31536000, includeSubDomains: true, preload: true },

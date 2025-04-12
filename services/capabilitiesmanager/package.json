@@ -3,7 +3,7 @@
     "version": "1.0.0",
     "description": "Capabilities Manager component to handle ActionVerbs and Plugins",
     "main": "dist/CapabilitiesManager.js",
-    "type": "module",
+    "type": "commonjs",
     "scripts": {
         "start": "ts-node src/CapabilitiesManager.ts",
         "build": "tsc",
@@ -16,6 +16,7 @@
         "axios": "^1.7.7",
         "body-parser": "^1.19.0",
         "cheerio": "^1.0.0",
+        "cors": "^2.8.5",
         "express": "^4.21.1",
         "json-alexander": "^0.1.13",
         "simple-git": "^3.27.0",
@@ -23,6 +24,7 @@
     },
     "devDependencies": {
         "@types/cheerio": "^0.22.35",
+        "@types/cors": "^2.8.17",
         "@types/express": "^5.0.0",
         "@types/jest": "^29.5.14",
         "@types/mocha": "^10.0.9",

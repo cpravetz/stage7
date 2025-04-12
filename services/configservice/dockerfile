@@ -9,10 +9,10 @@ COPY errorhandler/package*.json ./errorhandler/
 COPY services/configservice/package*.json ./services/configservice/
 
 # Install dependencies
-RUN npm install --omit=dev
-RUN cd shared && npm install --omit=dev
-RUN cd errorhandler && npm install --omit=dev
-RUN cd services/configservice && npm install --omit=dev
+RUN npm install
+RUN cd shared && npm install
+RUN cd errorhandler && npm install
+RUN cd services/configservice && npm install
 
 # Copy source code
 COPY shared ./shared
@@ -20,7 +20,7 @@ COPY errorhandler ./errorhandler
 COPY services/configservice ./services/configservice
 
 # Build TypeScript
-RUN cd shared && npm run build
+RUN cd shared && npm run build:verbose
 RUN cd errorhandler && npm run build
 RUN cd services/configservice && npm run build
 

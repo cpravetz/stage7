@@ -20,6 +20,7 @@
         "express-jwt": "^8.4.1",
         "express-rate-limit": "^7.5.0",
         "express-session": "^1.18.1",
+        "helmet": "^7.1.0",
         "jsonwebtoken": "^9.0.2",
         "passport": "^0.7.0",
         "passport-google-oauth20": "^2.0.0",

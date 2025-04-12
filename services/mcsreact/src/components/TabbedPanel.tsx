@@ -4,7 +4,7 @@ import ChatIcon from '@mui/icons-material/Chat';
 import AssessmentIcon from '@mui/icons-material/Assessment';
 import AccountTreeIcon from '@mui/icons-material/AccountTree';
 import ConversationHistory from './ConversationHistory';
-import { AgentStatistics } from '@cktmcs/shared';
+import { AgentStatistics } from '../shared-browser';
 import { NetworkGraph } from './NetworkGraph';
 
 interface WorkProduct {

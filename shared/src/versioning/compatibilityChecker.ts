@@ -1,5 +1,5 @@
 import { PluginDefinition, PluginParameter } from '../types/Plugin';
-import { compareVersions, areVersionsCompatible } from './semver';
+import { compareVersions, areVersionsCompatible } from './semver.js';
 
 /**
  * Interface for compatibility check results
@@ -29,7 +29,7 @@ export function checkPluginCompatibility(
   newPlugin: PluginDefinition
 ): CompatibilityCheckResult {
   const issues: CompatibilityIssue[] = [];
-  
+
   // Check version compatibility
   if (!areVersionsCompatible(oldPlugin.version, newPlugin.version)) {
     issues.push({
@@ -38,7 +38,7 @@ export function checkPluginCompatibility(
       message: `Major version change from ${oldPlugin.version} to ${newPlugin.version} indicates breaking changes`
     });
   }
-  
+
   // Check if the new version is actually newer
   if (compareVersions(newPlugin.version, oldPlugin.version) < 0) {
     issues.push({
@@ -47,16 +47,16 @@ export function checkPluginCompatibility(
       message: `New plugin version ${newPlugin.version} is older than existing version ${oldPlugin.version}`
     });
   }
-  
+
   // Check input parameters compatibility
   checkInputCompatibility(oldPlugin, newPlugin, issues);
-  
+
   // Check output parameters compatibility
   checkOutputCompatibility(oldPlugin, newPlugin, issues);
-  
+
   // Check security compatibility
   checkSecurityCompatibility(oldPlugin, newPlugin, issues);
-  
+
   return {
     compatible: !issues.some(issue => issue.severity === 'error'),
     issues
@@ -77,7 +77,7 @@ function checkInputCompatibility(
   // Create maps for quick lookup
   const oldInputs = new Map(oldPlugin.inputDefinitions.map(input => [input.name, input]));
   const newInputs = new Map(newPlugin.inputDefinitions.map(input => [input.name, input]));
-  
+
   // Check for removed inputs
   for (const [name, input] of oldInputs.entries()) {
     if (!newInputs.has(name)) {
@@ -88,11 +88,11 @@ function checkInputCompatibility(
       });
     }
   }
-  
+
   // Check for changed inputs
   for (const [name, newInput] of newInputs.entries()) {
     const oldInput = oldInputs.get(name);
-    
+
     if (oldInput) {
       // Check for type changes
       if (oldInput.type !== newInput.type) {
@@ -102,7 +102,7 @@ function checkInputCompatibility(
           message: `Input parameter '${name}' changed type from '${oldInput.type}' to '${newInput.type}'`
         });
       }
-      
+
       // Check for required changes (making an optional parameter required is a breaking change)
       if (!oldInput.required && newInput.required) {
         issues.push({
@@ -145,7 +145,7 @@ function checkOutputCompatibility(
   // Create maps for quick lookup
   const oldOutputs = new Map(oldPlugin.outputDefinitions.map(output => [output.name, output]));
   const newOutputs = new Map(newPlugin.outputDefinitions.map(output => [output.name, output]));
-  
+
   // Check for removed outputs
   for (const [name, output] of oldOutputs.entries()) {
     if (!newOutputs.has(name)) {
@@ -156,11 +156,11 @@ function checkOutputCompatibility(
       });
     }
   }
-  
+
   // Check for changed outputs
   for (const [name, newOutput] of newOutputs.entries()) {
     const oldOutput = oldOutputs.get(name);
-    
+
     if (oldOutput) {
       // Check for type changes
       if (oldOutput.type !== newOutput.type) {
@@ -195,7 +195,7 @@ function checkSecurityCompatibility(
   // Check for new permissions
   const oldPermissions = new Set(oldPlugin.security.permissions);
   const newPermissions = new Set(newPlugin.security.permissions);
-  
+
   for (const permission of newPermissions) {
     if (!oldPermissions.has(permission)) {
       issues.push({
@@ -205,11 +205,11 @@ function checkSecurityCompatibility(
       });
     }
   }
-  
+
   // Check for changes in sandbox options
   const oldSandbox = oldPlugin.security.sandboxOptions;
   const newSandbox = newPlugin.security.sandboxOptions;
-  
+
   // Check for eval permission change
   if (!oldSandbox.allowEval && newSandbox.allowEval) {
     issues.push({
@@ -218,11 +218,11 @@ function checkSecurityCompatibility(
       message: 'Plugin now requests eval permission, which is a security risk'
     });
   }
-  
+
   // Check for new allowed modules
   const oldModules = new Set(oldSandbox.allowedModules || []);
   const newModules = new Set(newSandbox.allowedModules || []);
-  
+
   for (const module of newModules) {
     if (!oldModules.has(module)) {
       issues.push({
@@ -232,11 +232,11 @@ function checkSecurityCompatibility(
       });
     }
   }
-  
+
   // Check for new allowed APIs
   const oldAPIs = new Set(oldSandbox.allowedAPIs || []);
   const newAPIs = new Set(newSandbox.allowedAPIs || []);
-  
+
   for (const api of newAPIs) {
     if (!oldAPIs.has(api)) {
       issues.push({

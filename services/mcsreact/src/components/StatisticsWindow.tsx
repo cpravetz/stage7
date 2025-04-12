@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
-import { Box, Typography, Paper, List, ListItem, ListItemText, Divider, Chip, useTheme } from '@mui/material';
-import { MissionStatistics } from '@cktmcs/shared';
+import { Box, Typography, Paper, List, ListItem, ListItemText, Divider, Chip } from '@mui/material';
+import { MissionStatistics } from '../shared-browser';
 
 interface Props {
   statistics: MissionStatistics;
@@ -21,16 +21,16 @@ const StatisticsWindow: React.FC<Props> = ({ statistics, activeMissionName, acti
     if (statistics.agentStatistics instanceof Map) {
       for (const agents of statistics.agentStatistics.values()) {
         for (const agent of agents) {
-          for (const step of agent.steps) {
-            totals[step.status] = (totals[step.status] || 0) + 1;
+          if (agent.steps) {
+            for (const step of agent.steps) {
+              totals[step.status] = (totals[step.status] || 0) + 1;
+            }
           }
         }
       }
     }
     return totals;
   }, [statistics.agentStatistics]);
-
-  const theme = useTheme();
 
   // Get color for status
   const getStatusColor = (status: string): 'success' | 'error' | 'warning' | 'info' | 'default' => {
@@ -73,7 +73,7 @@ const StatisticsWindow: React.FC<Props> = ({ statistics, activeMissionName, acti
           Agents by Status
         </Typography>
         <List dense disablePadding>
-          {Object.entries(statistics.agentCountByStatus).length === 0 ? (
+          {!statistics.agentCountByStatus || Object.entries(statistics.agentCountByStatus).length === 0 ? (
             <ListItem>
               <ListItemText primary="No agent data available" />
             </ListItem>
@@ -153,7 +153,7 @@ const StatisticsWindow: React.FC<Props> = ({ statistics, activeMissionName, acti
           New Plugins
         </Typography>
         <List dense disablePadding>
-          {statistics.engineerStatistics.newPlugins.length === 0 ? (
+          {!statistics.engineerStatistics || !statistics.engineerStatistics.newPlugins || statistics.engineerStatistics.newPlugins.length === 0 ? (
             <ListItem>
               <ListItemText primary="No new plugins created" />
             </ListItem>

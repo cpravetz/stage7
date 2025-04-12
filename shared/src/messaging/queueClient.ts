@@ -1,4 +1,4 @@
-import amqplib from 'amqplib';
+import * as amqplib from 'amqplib';
 
 export class MessageQueueClient {
   private connection: amqplib.Connection | null = null;
@@ -16,8 +16,9 @@ export class MessageQueueClient {
       return;
     }
 
-    if (this.isConnecting) {
-      return this.connectionPromise;
+    if (this.isConnecting && this.connectionPromise) {
+      await this.connectionPromise;
+      return;
     }
 
     this.isConnecting = true;
@@ -27,26 +28,31 @@ export class MessageQueueClient {
 
   private async _connect(): Promise<void> {
     try {
-      this.connection = await amqplib.connect(this.url);
-      this.channel = await this.connection.createChannel();
-      
-      // Set up connection error handlers
-      this.connection.on('error', (err) => {
-        console.error('RabbitMQ connection error:', err);
-        this.reconnect();
-      });
-      
-      this.connection.on('close', () => {
-        console.log('RabbitMQ connection closed, attempting to reconnect...');
-        this.reconnect();
-      });
-      
+      // Use type assertion to fix the type error
+      this.connection = await amqplib.connect(this.url) as unknown as amqplib.Connection;
+
+      if (this.connection) {
+        // Use type assertion to fix the type error
+        this.channel = await (this.connection as any).createChannel();
+
+        // Set up connection error handlers
+        this.connection.on('error', (err: Error) => {
+          console.error('RabbitMQ connection error:', err);
+          this.reconnect();
+        });
+
+        this.connection.on('close', () => {
+          console.log('RabbitMQ connection closed, attempting to reconnect...');
+          this.reconnect();
+        });
+      }
+
       console.log('Connected to RabbitMQ');
       this.isConnecting = false;
     } catch (error) {
       console.error('Failed to connect to RabbitMQ:', error);
       this.isConnecting = false;
-      
+
       // Attempt to reconnect after a delay
       setTimeout(() => this.reconnect(), 5000);
       throw error;
@@ -55,11 +61,11 @@ export class MessageQueueClient {
 
   private async reconnect(): Promise<void> {
     if (this.isConnecting) return;
-    
+
     this.connection = null;
     this.channel = null;
     this.isConnecting = false;
-    
+
     console.log('Attempting to reconnect to RabbitMQ...');
     await this.connect();
   }
@@ -69,7 +75,7 @@ export class MessageQueueClient {
       if (!this.channel) {
         await this.connect();
       }
-      
+
       await this.channel!.assertExchange(exchange, 'topic', { durable: true });
       return this.channel!.publish(
         exchange,
@@ -89,9 +95,9 @@ export class MessageQueueClient {
       if (!this.channel) {
         await this.connect();
       }
-      
+
       await this.channel!.assertQueue(queueName, { durable: true });
-      await this.channel!.consume(queueName, async (msg) => {
+      await this.channel!.consume(queueName, async (msg: amqplib.ConsumeMessage | null) => {
         if (msg) {
           try {
             const content = JSON.parse(msg.content.toString());
@@ -104,7 +110,7 @@ export class MessageQueueClient {
           }
         }
       });
-      
+
       console.log(`Subscribed to queue: ${queueName}`);
     } catch (error) {
       console.error('Error subscribing to queue:', error);
@@ -118,11 +124,11 @@ export class MessageQueueClient {
       if (!this.channel) {
         await this.connect();
       }
-      
+
       await this.channel!.assertExchange(exchange, 'topic', { durable: true });
       await this.channel!.assertQueue(queueName, { durable: true });
       await this.channel!.bindQueue(queueName, exchange, routingPattern);
-      
+
       console.log(`Bound queue ${queueName} to exchange ${exchange} with pattern ${routingPattern}`);
     } catch (error) {
       console.error('Error binding queue to exchange:', error);
@@ -132,13 +138,20 @@ export class MessageQueueClient {
   }
 
   async close(): Promise<void> {
-    if (this.channel) {
-      await this.channel.close();
+    try {
+      if (this.channel) {
+        await this.channel.close();
+      }
+      if (this.connection) {
+        // Use type assertion to fix the type error
+        await (this.connection as any).close();
+      }
+    } catch (error) {
+      console.error('Error closing connection:', error);
+    } finally {
+      this.channel = null;
+      this.connection = null;
     }
-    if (this.connection) {
-      await this.connection.close();
-    }
-    this.channel = null;
-    this.connection = null;
   }
 }
+

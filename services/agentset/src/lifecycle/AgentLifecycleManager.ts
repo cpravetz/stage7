@@ -1,5 +1,5 @@
 import { Agent } from '../agents/Agent';
-import { AgentStatus } from '../agents/AgentStatus';
+import { AgentStatus } from '../collaboration/TaskDelegation'; // Import AgentStatus enum
 import { AgentPersistenceManager } from '../utils/AgentPersistenceManager';
 import { v4 as uuidv4 } from 'uuid';
 import { analyzeError } from '@cktmcs/errorhandler';
@@ -197,7 +197,14 @@ export class AgentLifecycleManager {
     const stateId = `${agentId}-v${newVersion}`;
     
     // Save agent state with this state ID
-    await this.persistenceManager.saveAgentWithId(agent, stateId);
+    const agentState = {
+        ...agent,
+        inputs: agent.inputs || new Map<string, any>() // Ensure inputs is always defined
+    };
+    await this.persistenceManager.saveAgent({
+        ...agentState,
+        missionContext: agent.missionContext
+    });
     
     // Create new version
     const version: AgentVersion = {
@@ -246,7 +253,8 @@ export class AgentLifecycleManager {
       await this.pauseAgent(agentId);
       
       // Load the state from this version
-      await this.persistenceManager.loadAgentWithId(agent, versionInfo.stateId);
+      const loadedState = await this.persistenceManager.loadAgent(versionInfo.stateId);
+      Object.assign(agent, loadedState);
       
       // Resume the agent
       await this.resumeAgent(agentId);
@@ -568,3 +576,5 @@ export class AgentLifecycleManager {
     this.checkpointIntervals.clear();
   }
 }
+
+

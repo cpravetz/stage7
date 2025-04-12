@@ -86,3 +86,5 @@ export const DEFAULT_TOKEN_CONFIG: TokenConfig = {
     secret: process.env.JWT_SECRET || 'your-secret-key',
     refreshSecret: process.env.JWT_REFRESH_SECRET || 'your-refresh-secret-key'
 };
+
+export const DEFAULT_TOKEN_SECRET = process.env.JWT_SECRET || 'your-secret-key';

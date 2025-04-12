@@ -1,4 +1,4 @@
-import { PluginDefinition, environmentType, PluginInput, PluginOutput } from '../types/Plugin';
+import { PluginDefinition, environmentType, PluginInput, PluginOutput, PluginParameterType } from '../types/Plugin';
 import { VM, VMScript } from 'vm2';
 import * as fs from 'fs/promises';
 import * as path from 'path';
@@ -41,13 +41,13 @@ export async function executePluginInSandbox(
   if (!plugin.security || !plugin.security.sandboxOptions) {
     throw new Error('Plugin security settings are missing');
   }
-  
+
   // Merge plugin sandbox options with defaults
   const sandboxOptions: SandboxOptions = {
     ...DEFAULT_SANDBOX_OPTIONS,
     ...plugin.security.sandboxOptions
   };
-  
+
   // Create a sandbox environment
   const sandbox = new VM({
     timeout: sandboxOptions.timeout,
@@ -68,29 +68,29 @@ export async function executePluginInSandbox(
     eval: sandboxOptions.allowEval,
     wasm: false
   });
-  
+
   try {
     // Load the plugin code
     const pluginCode = await loadPluginCode(plugin);
-    
+
     // Create a script from the plugin code
     const script = new VMScript(pluginCode, path.join(process.cwd(), 'sandbox.js'));
-    
+
     // Execute the script in the sandbox
     const result = sandbox.run(script);
-    
+
     // Call the execute function
     if (typeof result.execute !== 'function') {
       throw new Error('Plugin does not export an execute function');
     }
-    
+
     // Execute the plugin
     return await result.execute(inputs, environment);
   } catch (error) {
     return [{
       success: false,
       name: 'error',
-      resultType: 'error',
+      resultType: PluginParameterType.ERROR,
       result: null,
       resultDescription: `Error executing plugin in sandbox: ${error instanceof Error ? error.message : String(error)}`
     }];
@@ -106,23 +106,23 @@ async function loadPluginCode(plugin: PluginDefinition): Promise<string> {
   if (!plugin.entryPoint || !plugin.entryPoint.main) {
     throw new Error('Plugin entry point is missing');
   }
-  
+
   // If the plugin has inline files, use them
   if (plugin.entryPoint.files && Object.keys(plugin.entryPoint.files).length > 0) {
     // Find the main file
     const mainFile = Object.entries(plugin.entryPoint.files).find(
       ([filename]) => filename === plugin.entryPoint!.main
     );
-    
+
     if (mainFile) {
       return mainFile[1];
     }
   }
-  
+
   // Otherwise, load the file from disk
   const pluginDir = path.join(process.cwd(), 'plugins', plugin.verb);
   const mainFilePath = path.join(pluginDir, plugin.entryPoint.main);
-  
+
   try {
     return await fs.readFile(mainFilePath, 'utf-8');
   } catch (error) {
@@ -142,7 +142,7 @@ function createSafeRequire(allowedModules: string[]): (moduleName: string) => an
     if (!allowedModules.includes(baseModule)) {
       throw new Error(`Module '${moduleName}' is not allowed`);
     }
-    
+
     // Require the module
     return require(moduleName);
   };
@@ -159,7 +159,7 @@ function filterEnvironment(env: NodeJS.ProcessEnv, permissions: string[]): NodeJ
   if (permissions.includes('env.read')) {
     return { ...env };
   }
-  
+
   // Otherwise, return only safe environment variables
   const safeEnv: NodeJS.ProcessEnv = {};
   const safeKeys = [
@@ -171,12 +171,12 @@ function filterEnvironment(env: NodeJS.ProcessEnv, permissions: string[]): NodeJ
     'TEMP',
     'TMP'
   ];
-  
+
   for (const key of safeKeys) {
     if (env[key]) {
       safeEnv[key] = env[key];
     }
   }
-  
+
   return safeEnv;
 }

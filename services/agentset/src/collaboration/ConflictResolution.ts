@@ -2,7 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { analyzeError } from '@cktmcs/errorhandler';
 import axios from 'axios';
 import { Agent } from '../agents/Agent';
-import { CollaborationMessageType, ConflictResolutionRequest, ConflictResolutionResponse } from './CollaborationProtocol';
+import { CollaborationMessageType, ConflictResolutionRequest, ConflictResolutionResponse, createCollaborationMessage } from './CollaborationProtocol';
 
 /**
  * Conflict status
@@ -126,7 +126,13 @@ export class ConflictResolution {
             }
           };
           
-          await participantAgent.handleCollaborationMessage(message);
+          const properMessage = createCollaborationMessage({
+            type: message.type,
+            senderId: message.sender,
+            recipientId: message.recipient,
+            content: message.content
+          });
+          await participantAgent.handleCollaborationMessage(properMessage);
         } else {
           // Try to find participant agent in other agent sets
           const agentLocation = await this.findAgentLocation(participantId);
@@ -468,7 +474,14 @@ export class ConflictResolution {
             }
           };
           
-          await participantAgent.handleCollaborationMessage(message);
+          const properResolutionMessage = createCollaborationMessage({
+            type: message.type,
+            senderId: message.sender,
+            recipientId: message.recipient,
+            content: message.content
+          });
+          await participantAgent.handleCollaborationMessage(properResolutionMessage);
+          
         } else {
           // Try to find participant agent in other agent sets
           const agentLocation = await this.findAgentLocation(participantId);
@@ -522,7 +535,13 @@ export class ConflictResolution {
             }
           };
           
-          await participantAgent.handleCollaborationMessage(message);
+          const properEscalationMessage = createCollaborationMessage({
+            type: message.type,
+            senderId: message.sender,
+            recipientId: message.recipient,
+            content: message.content
+          });
+          await participantAgent.handleCollaborationMessage(properEscalationMessage);
         }
       }
     } catch (error) {

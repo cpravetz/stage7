@@ -1,12 +1,18 @@
 import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import express from 'express';
-import { MessageType } from './types/Message';
-import { AuthenticatedApiClient } from './AuthenticatedApiClient';
-import { MessageQueueClient } from './messaging/queueClient';
-import { ServiceDiscovery } from './discovery/serviceDiscovery';
+import type { MessageType } from './types/Message.js';
+import { MessageQueueClient } from './messaging/queueClient.js';
+import { ServiceDiscovery } from './discovery/serviceDiscovery.js';
+import { IBaseEntity } from './interfaces/IBaseEntity.js';
 
-export class BaseEntity {
+// Import MessageType enum directly to avoid ESM import issues
+import * as MessageModule from './types/Message.js';
+
+// Forward declaration to avoid circular dependency
+type AuthenticatedApiClientType = any; // Will be properly typed when used
+
+export class BaseEntity implements IBaseEntity {
   id: string;
   componentType: string;
   postOfficeUrl: string;
@@ -15,7 +21,7 @@ export class BaseEntity {
   port : string;
   registeredWithPostOffice: boolean = false;
   lastAnswer: string = '';
-  authenticatedApi: AuthenticatedApiClient;
+  authenticatedApi: AuthenticatedApiClientType;
   protected mqClient: MessageQueueClient | null = null;
   protected serviceDiscovery: ServiceDiscovery | null = null;
 
@@ -25,6 +31,8 @@ export class BaseEntity {
     this.postOfficeUrl = process.env.POSTOFFICE_URL || 'postoffice:5020'
     this.port = port;
     this.url = `${urlBase}:${port}` //url;
+    // Dynamically import to avoid circular dependency
+    const { AuthenticatedApiClient } = require('./AuthenticatedApiClient.js');
     this.authenticatedApi = new AuthenticatedApiClient(this);
 
     // Initialize services
@@ -210,23 +218,23 @@ export class BaseEntity {
 
     // Handle different message types
     switch (message.type) {
-      case MessageType.ANSWER:
+      case MessageModule.MessageType.ANSWER:
         if (this.onAnswer) {
           this.onAnswer(message.answer);
         }
         break;
 
-      case MessageType.REQUEST:
+      case MessageModule.MessageType.REQUEST:
         // Handle requests - subclasses should override for specific handling
         console.log(`${this.componentType} received request: ${JSON.stringify(message.content)}`);
         break;
 
-      case MessageType.RESPONSE:
+      case MessageModule.MessageType.RESPONSE:
         // Handle responses - subclasses should override for specific handling
         console.log(`${this.componentType} received response: ${JSON.stringify(message.content)}`);
         break;
 
-      case MessageType.STATUS_UPDATE:
+      case MessageModule.MessageType.STATUS_UPDATE:
         // Handle status updates - subclasses should override for specific handling
         console.log(`${this.componentType} received status update: ${JSON.stringify(message.content)}`);
         break;
@@ -252,7 +260,7 @@ export class BaseEntity {
       this.askPromises.set(questionGuid, Promise.resolve(''));
 
       // User requests always require synchronous handling
-      await this.sendMessage(MessageType.REQUEST, 'user', {
+      await this.sendMessage(MessageModule.MessageType.REQUEST, 'user', {
         question: content,
         questionGuid: questionGuid,
         choices: choices,

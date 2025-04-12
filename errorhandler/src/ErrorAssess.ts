@@ -176,7 +176,7 @@ async function getSourceCode(stackTrace: string | undefined): Promise<string> {
     ];
 
     for (const line of stackLines) {
-        let filePath, lineNumber, columnNumber;
+        let filePath: string | undefined, lineNumber: string | undefined, columnNumber: string | undefined;
         let matched = false;
 
         // Try each pattern until one matches
@@ -219,7 +219,7 @@ async function getSourceCode(stackTrace: string | undefined): Promise<string> {
             if (await fs.access(absolutePath).then(() => true).catch(() => false)) {
                 const fileContent = await fs.readFile(absolutePath, 'utf-8');
                 const lines = fileContent.split('\n');
-                const errorLine = parseInt(lineNumber, 10) - 1;
+                const errorLine = parseInt(lineNumber || '0', 10) - 1;
 
                 // Validate line number
                 if (errorLine < 0 || errorLine >= lines.length) {
@@ -277,7 +277,7 @@ async function getSourceCode(stackTrace: string | undefined): Promise<string> {
                 const snippet = lines.slice(startLine, endLine + 1)
                     .map((line, idx) => {
                         const lineNum = startLine + idx + 1;
-                        if (lineNum === parseInt(lineNumber, 10)) {
+                        if (lineNum === parseInt(lineNumber || '0', 10)) {
                             return `> ${lineNum}: ${line} <-- ERROR`;
                         }
                         return `  ${lineNum}: ${line}`;

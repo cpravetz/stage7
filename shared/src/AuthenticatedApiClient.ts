@@ -1,5 +1,9 @@
 import axios, { AxiosInstance, AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios';
-import { BaseEntity } from './BaseEntity';
+import { IBaseEntity } from './interfaces/IBaseEntity.js';
+
+/**
+ * Client for making authenticated API requests
+ */
 
 export class AuthenticatedApiClient {
   private api: AxiosInstance;
@@ -7,7 +11,7 @@ export class AuthenticatedApiClient {
   private accessToken: string | null = null;
   private tokenExpirationTime: number = 0;
 
-  constructor(private baseEntity: BaseEntity) {
+  constructor(private baseEntity: IBaseEntity) {
     this.securityManagerUrl = process.env.SECURITY_MANAGER_URL || 'securitymanager:5010';
     this.api = axios.create({
       headers: {
@@ -25,7 +29,7 @@ export class AuthenticatedApiClient {
       config.headers['Authorization'] = `Bearer ${this.accessToken}`;
       return config;
     }
-  
+
     await this.refreshToken();
     config.headers = config.headers || {};
     config.headers['Authorization'] = `Bearer ${this.accessToken}`;
@@ -36,11 +40,11 @@ export class AuthenticatedApiClient {
     try {
       const componentType = this.baseEntity.componentType;
       const clientSecret = process.env.CLIENT_SECRET;
-  
+
       if (!clientSecret) {
         throw new Error('CLIENT_SECRET is not set in environment variables');
       }
-  
+
       const response = await axios.post(
         `http://${this.securityManagerUrl}/auth/service`,
         { componentType, clientSecret },

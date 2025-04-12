@@ -21,10 +21,10 @@ COPY marketplace ./marketplace
 COPY services/engineer ./services/engineer
 
 # Build the TypeScript code
-RUN npm run build --workspace=shared && \
-    npm run build --workspace=errorhandler && \
-    npm run build --workspace=marketplace && \
-    npm run build --workspace=services/engineer
+RUN cd shared && npm run build
+RUN cd errorhandler && npm run build
+RUN cd marketplace && npm run build
+RUN npm run build --workspace=@cktmcs/engineer
 
 # Set the working directory to the service
 WORKDIR /usr/src/app/services/engineer

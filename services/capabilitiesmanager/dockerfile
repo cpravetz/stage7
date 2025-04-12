@@ -21,10 +21,10 @@ COPY marketplace ./marketplace
 COPY services/capabilitiesmanager ./services/capabilitiesmanager
 
 # Build the TypeScript code
-RUN npm run build --workspace=shared
-RUN npm run build --workspace=errorhandler
-RUN npm run build --workspace=marketplace
-RUN npm run build --workspace=services/capabilitiesmanager
+RUN cd shared && npm run build
+RUN cd errorhandler && npm run build
+RUN cd marketplace && npm run build
+RUN npm run build --workspace=@cktmcs/capabilitiesmanager
 
 # Set the working directory to the service
 WORKDIR /usr/src/app/services/capabilitiesmanager

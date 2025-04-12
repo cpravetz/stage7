@@ -8,9 +8,6 @@
       "esModuleInterop": true,
       "skipLibCheck": true,
       "forceConsistentCasingInFileNames": true,
-      "paths": {
-        "@cktmcs/shared": ["../../shared"]
-      },
       "baseUrl": "src"
     },
     "include": ["src/**/*"]

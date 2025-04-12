@@ -1,10 +1,10 @@
 import axios from 'axios';
 import express from 'express';
 import { Request, Response, NextFunction } from 'express';
-import { AgentStatistics, Mission, Status } from '@cktmcs/shared';
+import { AgentStatistics, Mission, Status } from '@cktmcs/shared/index.js';
 import { generateGuid } from './utils/generateGuid';
-import { BaseEntity, MessageType, PluginInput, MapSerializer } from '@cktmcs/shared';
-import { MissionStatistics } from '@cktmcs/shared';
+import { BaseEntity, MessageType, PluginInput, MapSerializer } from '@cktmcs/shared/index.js';
+import { MissionStatistics } from '@cktmcs/shared/index.js';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { rateLimit } from 'express-rate-limit';
 

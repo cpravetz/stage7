@@ -23,7 +23,7 @@ interface DataVersion {
     timestamp: Date;
     version: number;
   }
-  
+
 
 export class Librarian extends BaseEntity {
     private app: express.Application;
@@ -35,7 +35,7 @@ export class Librarian extends BaseEntity {
         this.setupRoutes();
         this.startServer();
       }
-    
+
       private setupRoutes() {
         this.app.post('/storeData', (req: express.Request, res: express.Response) => { this.storeData(req, res)});
         this.app.get('/loadData/:id', (req: express.Request, res: express.Response) => { this.loadData(req, res)} );
@@ -44,10 +44,10 @@ export class Librarian extends BaseEntity {
         this.app.post('/searchData', (req: express.Request, res: express.Response) => {this.searchData(req, res)});
         this.app.delete('/deleteData/:id', (req: express.Request, res: express.Response) => { this.deleteData(req, res)});
         this.app.post('/storeWorkProduct', (req: express.Request, res: express.Response) => { this.storeWorkProduct(req, res) });
-        this.app.get('/loadWorkProduct/:stepId', (req: express.Request, res: express.Response) => { this.loadWorkProduct(req, res) });    
+        this.app.get('/loadWorkProduct/:stepId', (req: express.Request, res: express.Response) => { this.loadWorkProduct(req, res) });
         this.app.get('/getSavedMissions', (req: express.Request, res: express.Response) => { this.getSavedMissions(req, res) });
         this.app.delete('/deleteCollection', (req: express.Request, res: express.Response) => { this.deleteCollection(req, res) });
-        
+
       }
 
       private startServer() {
@@ -58,15 +58,15 @@ export class Librarian extends BaseEntity {
     }
 
     private async storeData(req: express.Request, res: express.Response) {
-    
+
         let { id, data, storageType, collection } = req.body;
         collection = collection || 'mcsdata';
-    
-  
+
+
         if (!id || !data) {
             return res.status(400).send({ error: 'ID and data are required' });
         }
-    
+
         try {
             let result;
             if (storageType === 'mongo') {
@@ -113,11 +113,11 @@ export class Librarian extends BaseEntity {
 
     private async storeWorkProduct(req: express.Request, res: express.Response) {
         const { agentId, stepId, data } = req.body;
-    
+
         if (!agentId || !stepId ) {
             return res.status(400).send({ error: 'AgentId, StepId, and type are required' });
         }
-    
+
         const workProduct: WorkProduct = {
             id: `${agentId}_${stepId}`,
             agentId,
@@ -158,11 +158,11 @@ export class Librarian extends BaseEntity {
     private async queryData(req: express.Request, res: express.Response) {
         const { collection, query, limit } = req.body;
         //console.log('Querying data:', { collection, query, limit });
-    
+
         if (!collection || !query) {
             return res.status(400).send({ error: 'Collection and query are required' });
         }
-    
+
         try {
             const result = await loadManyFromMongo(collection, query, limit);
             res.status(200).send({ data: result });
@@ -198,7 +198,7 @@ export class Librarian extends BaseEntity {
 
         if (collection === undefined) {
             return res.status(400).send({ error: 'Collection is required' });
-        } 
+        }
         try {
             const result = await loadManyFromMongo(collection as string, query, parsedOptions);
             res.status(200).send({ data: result });
@@ -228,10 +228,10 @@ export class Librarian extends BaseEntity {
     private async handleMessage(req: express.Request, res: express.Response) {
         const message = req.body;
         console.log('Received message:', message);
-    
+
         // Process the message based on its content
         // This might involve storing or retrieving data
-    
+
         res.status(200).send({ status: 'Message received and processed' });
     }
 
@@ -244,7 +244,7 @@ export class Librarian extends BaseEntity {
             res.status(500).send({ error: 'Failed to get saved missions', details: error instanceof Error ? error.message : String(error) });
         }
     }
-    
+
     private async deleteCollection(req: express.Request, res: express.Response) {
         const { collection } = req.query;
         if (!collection) {

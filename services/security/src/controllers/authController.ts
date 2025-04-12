@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import { AsyncRequestHandler } from '../types/express';
 import { AuthenticationService } from '../services/AuthenticationService';
 import { TokenService } from '../services/TokenService';
 import { AuthorizationService } from '../services/AuthorizationService';
@@ -11,7 +12,7 @@ const tokenService = new TokenService();
 const authenticationService = new AuthenticationService(null, tokenService);
 const authorizationService = new AuthorizationService();
 
-export const register = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const register: AsyncRequestHandler = async (req, res, next) => {
     try {
         const { email, password, firstName, lastName, username } = req.body;
 
@@ -62,7 +63,7 @@ export const register = async (req: Request, res: Response, next: NextFunction):
     }
 };
 
-export const login = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const login: AsyncRequestHandler = async (req, res, next) => {
     try {
         // Validate request
         if (!req.body || typeof req.body !== 'object') {
@@ -127,7 +128,7 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
     }
 };
 
-export const logout = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const logout: AsyncRequestHandler = async (req, res, next) => {
     try {
         // Check if user is authenticated
         if (!req.user) {
@@ -152,7 +153,7 @@ export const logout = async (req: Request, res: Response, next: NextFunction): P
     }
 };
 
-export const refreshToken = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const refreshToken: AsyncRequestHandler = async (req, res, next) => {
     try {
         // Get refresh token from request
         const { refreshToken: token } = req.body;
@@ -188,7 +189,7 @@ export const refreshToken = async (req: Request, res: Response, next: NextFuncti
 };
 
 
-export const verifyToken = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const verifyToken: AsyncRequestHandler = async (req, res, next) => {
     try {
         // Get token from header
         const authHeader = req.headers.authorization;
@@ -241,7 +242,7 @@ export const verifyToken = async (req: Request, res: Response, next: NextFunctio
 /**
  * Verify MFA token
  */
-export const verifyMfaToken = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const verifyMfaToken: AsyncRequestHandler = async (req, res, next) => {
     try {
         const { userId, token } = req.body;
 
@@ -256,7 +257,7 @@ export const verifyMfaToken = async (req: Request, res: Response, next: NextFunc
         };
 
         // Verify MFA token
-        const result = await authenticationService.verifyMfaToken(userId, token);
+        const result = await authenticationService.verifyMfaTokenForAuth(userId, token);
 
         // Return tokens and user info
         res.status(200).json({
@@ -288,7 +289,7 @@ export const verifyMfaToken = async (req: Request, res: Response, next: NextFunc
 /**
  * Request password reset
  */
-export const requestPasswordReset = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const requestPasswordReset: AsyncRequestHandler = async (req, res, next) => {
     try {
         const { email } = req.body;
 
@@ -313,7 +314,7 @@ export const requestPasswordReset = async (req: Request, res: Response, next: Ne
 /**
  * Reset password
  */
-export const resetPassword = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const resetPassword: AsyncRequestHandler = async (req, res, next) => {
     try {
         const { token, newPassword } = req.body;
 
@@ -344,7 +345,7 @@ export const resetPassword = async (req: Request, res: Response, next: NextFunct
 /**
  * Change password
  */
-export const changePassword = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const changePassword: AsyncRequestHandler = async (req, res, next) => {
     try {
         // Check if user is authenticated
         if (!req.user) {
@@ -376,7 +377,7 @@ export const changePassword = async (req: Request, res: Response, next: NextFunc
 /**
  * Enable MFA
  */
-export const enableMfa = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const enableMfa: AsyncRequestHandler = async (req, res, next) => {
     try {
         // Check if user is authenticated
         if (!req.user) {
@@ -404,7 +405,7 @@ export const enableMfa = async (req: Request, res: Response, next: NextFunction)
 /**
  * Verify MFA setup
  */
-export const verifyMfaSetup = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const verifyMfaSetup: AsyncRequestHandler = async (req, res, next) => {
     try {
         // Check if user is authenticated
         if (!req.user) {
@@ -436,7 +437,7 @@ export const verifyMfaSetup = async (req: Request, res: Response, next: NextFunc
 /**
  * Disable MFA
  */
-export const disableMfa = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const disableMfa: AsyncRequestHandler = async (req, res, next) => {
     try {
         // Check if user is authenticated
         if (!req.user) {

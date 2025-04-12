@@ -1,5 +1,7 @@
 export * from './BaseEntity';
 //export * from './SecurityMiddleware';
+export * from './interfaces/IBaseEntity';
+export * from './AuthenticatedApiClient';
 export * from './types/Message';
 export * from './types/Plugin';
 export * from './types/PluginManifest';
@@ -18,6 +20,7 @@ export * from './config/configClient';
 export * from './versioning/semver';
 export * from './versioning/compatibilityChecker';
 export * from './security/pluginPermissions';
-export * from './security/pluginSandbox';
+export * from './security/isolatedPluginSandbox';
 export * from './security/pluginSigning';
+export * from './errorhandler';
 // Add any other exports here

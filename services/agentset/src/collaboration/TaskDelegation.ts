@@ -2,9 +2,16 @@ import { v4 as uuidv4 } from 'uuid';
 import { analyzeError } from '@cktmcs/errorhandler';
 import axios from 'axios';
 import { Agent } from '../agents/Agent';
-import { AgentStatus } from '../agents/AgentStatus';
-import { CollaborationMessageType, TaskDelegationRequest, TaskDelegationResponse, TaskResult } from './CollaborationProtocol';
+import { CollaborationMessageType, TaskDelegationRequest, TaskDelegationResponse, TaskResult, createCollaborationMessage } from './CollaborationProtocol';
 
+
+// Define AgentStatus enum here
+export enum AgentStatus {
+  IDLE = 'idle',
+  BUSY = 'busy',
+  OFFLINE = 'offline',
+  ERROR = 'error'
+}
 /**
  * Task status
  */
@@ -123,7 +130,13 @@ export class TaskDelegation {
         content: task
       };
       
-      await recipientAgent.handleCollaborationMessage(message);
+      const properTaskMessage = createCollaborationMessage({
+        type: message.type,
+        senderId: message.sender,
+        recipientId: message.recipient,
+        content: message.content
+      });
+      await recipientAgent.handleCollaborationMessage(properTaskMessage);
       
       // Update task status
       task.status = TaskStatus.ACCEPTED;
@@ -303,7 +316,14 @@ export class TaskDelegation {
           content: task
         };
         
-        await delegatorAgent.handleCollaborationMessage(message);
+        const properDelegationMessage = createCollaborationMessage({
+          type: message.type,
+          senderId: message.sender,
+          recipientId: message.recipient,
+          content: message.content
+        });
+        
+        await delegatorAgent.handleCollaborationMessage(properDelegationMessage);
       } else {
         // Try to find delegator agent in other agent sets
         const agentLocation = await this.findAgentLocation(task.delegatedBy);

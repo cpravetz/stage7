@@ -18,10 +18,10 @@ COPY shared ./shared
 COPY errorhandler ./errorhandler
 COPY services/security ./services/security
 
-# Build the TypeScript code
-RUN npm run build --workspace=shared && \
-    npm run build --workspace=errorhandler && \
-    npm run build --workspace=services/security
+# Build the TypeScript code - ensure shared is built first
+RUN cd shared && npm run build
+RUN cd errorhandler && npm run build
+RUN cd services/security && npm run build
 
 # Set the working directory to the service
 WORKDIR /usr/src/app/services/security

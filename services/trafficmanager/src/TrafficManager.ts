@@ -5,7 +5,7 @@ import { agentSetManager } from './utils/agentSetManager';
 import { dependencyManager } from './utils/dependencyManager';
 import { AgentStatus } from './utils/status';
 import { Message, MessageType,TrafficManagerStatistics,
-        BaseEntity, PluginInput, MapSerializer } from '@cktmcs/shared';
+        BaseEntity, PluginInput, MapSerializer } from '@cktmcs/shared/index.js';
 import { analyzeError } from '@cktmcs/errorhandler';
 
 

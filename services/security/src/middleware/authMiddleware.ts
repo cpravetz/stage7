@@ -1,18 +1,11 @@
 import { Request, Response, NextFunction } from 'express';
+import { AsyncRequestHandler } from '../types/express';
 import { TokenService } from '../services/TokenService';
 import { AuthorizationService } from '../services/AuthorizationService';
 import { TokenType, TokenPayload } from '../models/Token';
 import { analyzeError } from '@cktmcs/errorhandler';
+import { User } from '../models/User';
 
-// Extend Express Request interface
-declare global {
-    namespace Express {
-        interface Request {
-            user?: TokenPayload;
-            accessToken?: string;
-        }
-    }
-}
 
 /**
  * Authentication middleware
@@ -64,7 +57,7 @@ export function authorize(authorizationService: AuthorizationService, requiredPe
             }
 
             // Get user ID from token
-            const userId = req.user.sub;
+            const userId = (req.user as User).id;
 
             // Create context for permission evaluation
             const context: Record<string, any> = {
@@ -103,7 +96,7 @@ export function authorizeRoles(authorizationService: AuthorizationService, requi
             }
 
             // Get user ID from token
-            const userId = req.user.sub;
+            const userId = (req.user as User).id;
 
             // Check if user has any of the required roles
             for (const role of requiredRoles) {
@@ -155,7 +148,7 @@ export function isResourceOwner(resourceIdParam: string, resourceType: string) {
             }
 
             // Get user ID from token
-            const userId = req.user.sub;
+            const userId = (req.user as User).id;
 
             // Check if user is the owner of the resource
             // This is a placeholder - implement actual ownership check
@@ -197,7 +190,7 @@ export function requireEmailVerification() {
             }
 
             // Get user ID from token
-            const userId = req.user.sub;
+            const userId = (req.user as User).id;
 
             // Check if user has verified email
             // This is a placeholder - implement actual email verification check
@@ -237,7 +230,7 @@ export function requireMfa() {
             }
 
             // Get user ID from token
-            const userId = req.user.sub;
+            const userId = (req.user as User).id;
 
             // Check if user has MFA enabled
             // This is a placeholder - implement actual MFA check
