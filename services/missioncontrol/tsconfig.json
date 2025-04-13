@@ -1,8 +1,8 @@
 {
     "compilerOptions": {
       "target": "ES2020",                  // Target modern JavaScript (ES2020)
-      "module": "NodeNext",                // Use Node.js ES modules
-      "moduleResolution": "nodenext",      // Use Node.js module resolution for ES modules
+      "module": "commonjs",                // Use CommonJS module system (for Node.js)
+
       "strict": true,                      // Enable strict type checking
       "esModuleInterop": true,             // Enables compatibility with ES6 modules
       "skipLibCheck": true,                // Skips type checking of declaration files

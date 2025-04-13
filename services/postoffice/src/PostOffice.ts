@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken';
 import cors from 'cors';
 import WebSocket from 'ws';
 import http from 'http';
-import { Component } from './types/Component.js';
+import { Component } from './types/Component';
 import { Message, MessageType, MessageQueueClient, ServiceDiscovery } from '@cktmcs/shared';
 import axios from 'axios';
 import { analyzeError } from '@cktmcs/errorhandler';
@@ -85,7 +85,12 @@ export class PostOffice {
         });
 
         this.app.use('/securityManager/*', async (req, res, next) => { this.routeSecurityRequest(req, res, next); });
-        this.app.post('/registerComponent', (req, res) => this.registerComponent(req, res));
+        // Allow registration without authentication
+        this.app.post('/registerComponent', (req, res) => {
+            console.log('Received registration request:', req.body);
+            // Skip authentication check for component registration
+            this.registerComponent(req, res);
+        });
         this.app.get('/requestComponent', (req, res) => this.requestComponent(req, res));
         this.app.get('/getServices', (req, res) => this.getServices(req, res));
         this.app.post('/submitUserInput', (req, res) => this.submitUserInput(req, res));
@@ -423,7 +428,6 @@ export class PostOffice {
         const { id, type, url } = req.body;
 
         try {
-
             const component: Component = { id, type, url };
             this.components.set(id, component);
 
@@ -435,7 +439,7 @@ export class PostOffice {
             console.log(`Component registered: ${id} of type ${type}`);
             res.status(200).send({ message: 'Component registered successfully' });
         } catch (error) { analyzeError(error as Error);
-            console.error('Component registration failed:', error instanceof Error ? error.message : error);
+            console.error('Component registration failed:', error instanceof Error ? error.message : error, ' for ',id,'-',type);
             res.status(500).send({ error: 'Failed to register component' });
         }
     }

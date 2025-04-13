@@ -1,4 +1,4 @@
-import axios, { AxiosInstance, AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios';
+import axios, { AxiosInstance, AxiosRequestConfig, InternalAxiosRequestConfig, isAxiosError } from 'axios';
 import { IBaseEntity } from './interfaces/IBaseEntity.js';
 
 /**
@@ -39,11 +39,17 @@ export class AuthenticatedApiClient {
   private async refreshToken(): Promise<void> {
     try {
       const componentType = this.baseEntity.componentType;
-      const clientSecret = process.env.CLIENT_SECRET;
+
+      // Try to get component-specific client secret first, then fall back to generic CLIENT_SECRET
+      const componentSpecificSecretKey = `${componentType.toUpperCase()}_CLIENT_SECRET`;
+      let clientSecret = process.env[componentSpecificSecretKey] || process.env.CLIENT_SECRET;
 
       if (!clientSecret) {
-        throw new Error('CLIENT_SECRET is not set in environment variables');
+        console.error(`Neither ${componentSpecificSecretKey} nor CLIENT_SECRET is set in environment variables`);
+        throw new Error(`Client secret not found for ${componentType}`);
       }
+
+      console.log(`Authenticating ${componentType} with security manager at ${this.securityManagerUrl}`);
 
       const response = await axios.post(
         `http://${this.securityManagerUrl}/auth/service`,
@@ -63,7 +69,25 @@ export class AuthenticatedApiClient {
         throw new Error('Failed to authenticate component');
       }
     } catch (error) {
-      console.error('Failed to refresh token:', error);
+      // Provide more detailed error information
+      if (isAxiosError(error)) {
+        if (error.response) {
+          // The request was made and the server responded with a status code
+          // that falls out of the range of 2xx
+          console.error(`Authentication error (${error.response.status}): ${JSON.stringify(error.response.data)}`);
+        } else if (error.request) {
+          // The request was made but no response was received
+          console.error(`No response from security manager: ${error.message}`);
+          console.error(`Is the security manager running at ${this.securityManagerUrl}?`);
+        } else {
+          // Something happened in setting up the request that triggered an Error
+          console.error(`Error setting up authentication request: ${error.message}`);
+        }
+      } else {
+        console.error('Failed to refresh token:', error);
+      }
+
+      // Rethrow the error to be handled by the caller
       throw error;
     }
   }

@@ -1,6 +1,6 @@
 import express from 'express';
 import bodyParser from 'body-parser';
-import { BaseEntity } from '@cktmcs/shared/index.js';
+import { BaseEntity } from '@cktmcs/shared';
 import fs from 'fs/promises';
 import path from 'path';
 import { analyzeError } from '@cktmcs/errorhandler';

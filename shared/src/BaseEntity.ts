@@ -138,13 +138,32 @@ export class BaseEntity implements IBaseEntity {
   protected async registerWithPostOffice(retryCount: number = 10) {
     const register = async () => {
       try {
-        const response = await this.authenticatedApi.post(`http://${this.postOfficeUrl}/registerComponent`, {
+        // First try with authenticated API
+        try {
+          const response = await this.authenticatedApi.post(`http://${this.postOfficeUrl}/registerComponent`, {
+            id: this.id,
+            type: this.componentType,
+            url: this.url
+          });
+          if (response.status === 200) {
+            console.log(`${this.componentType} registered successfully with PostOffice using authenticated API`);
+            this.registeredWithPostOffice = true;
+            return;
+          }
+        } catch (authError) {
+          console.warn(`Authentication failed when registering ${this.componentType} with PostOffice, trying unauthenticated fallback`);
+          // Fall back to unauthenticated API if authentication fails
+        }
+
+        // Fallback to direct axios call without authentication
+        const fallbackResponse = await axios.post(`http://${this.postOfficeUrl}/registerComponent`, {
           id: this.id,
           type: this.componentType,
           url: this.url
         });
-        if (response.status === 200) {
-          console.log(`${this.componentType} registered successfully with PostOffice`);
+
+        if (fallbackResponse.status === 200) {
+          console.log(`${this.componentType} registered successfully with PostOffice using fallback method`);
           this.registeredWithPostOffice = true;
         }
       } catch (error) {

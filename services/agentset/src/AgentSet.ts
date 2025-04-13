@@ -1,8 +1,8 @@
 import express from 'express';
 import { Agent } from './agents/Agent';
-import { MapSerializer, BaseEntity } from '@cktmcs/shared/index.js';
+import { MapSerializer, BaseEntity } from '@cktmcs/shared';
 import { v4 as uuidv4 } from 'uuid';
-import { AgentSetStatistics, AgentStatistics, PluginInput } from '@cktmcs/shared/index.js';
+import { AgentSetStatistics, AgentStatistics, PluginInput } from '@cktmcs/shared';
 import { AgentPersistenceManager } from './utils/AgentPersistenceManager';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { setInterval } from 'timers';

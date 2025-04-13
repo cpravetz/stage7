@@ -22,7 +22,7 @@ COPY services/configservice ./services/configservice
 # Build TypeScript
 RUN cd shared && npm run build:verbose
 RUN cd errorhandler && npm run build
-RUN cd services/configservice && npm run build
+RUN npm run build --workspace=services/configservice
 
 # Create config directory
 RUN mkdir -p /usr/src/app/config
@@ -31,4 +31,4 @@ RUN mkdir -p /usr/src/app/config
 EXPOSE 5090
 
 # Start the service
-CMD ["node", "--experimental-specifier-resolution=node", "--experimental-modules", "services/configservice/dist/ConfigService.js"]
+CMD ["node", "services/configservice/dist/ConfigService.js"]

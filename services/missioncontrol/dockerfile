@@ -33,4 +33,4 @@ WORKDIR /usr/src/app/services/missioncontrol
 EXPOSE 5030
 
 # Define the command to run the application
-CMD ["node", "--experimental-specifier-resolution=node", "--experimental-modules", "dist/MissionControl.js"]
+CMD ["node", "dist/MissionControl.js"]

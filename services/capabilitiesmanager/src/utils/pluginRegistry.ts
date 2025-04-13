@@ -6,15 +6,15 @@ import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import { PluginMarketplace } from '@cktmcs/marketplace';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+//const __filename = fileURLToPath(import.meta.url);
+//const __dirname = path.dirname(__filename);
 
 export class PluginRegistry {
     private cache: Map<string, PluginRepositoryType>;
     private verbIndex: Map<string, string>;  // verb -> id mapping
     private pluginMarketplace: PluginMarketplace;
     private pluginsDir: string;
-    public currentDir = dirname(fileURLToPath(import.meta.url));
+    public currentDir = __dirname; //dirname(fileURLToPath(import.meta.url));
 
     constructor() {
         this.cache = new Map();

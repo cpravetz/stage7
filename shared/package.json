@@ -2,7 +2,7 @@
   "name": "@cktmcs/shared",
   "version": "1.0.0",
   "main": "dist/index.js",
-  "type": "module",
+  "type": "commonjs",
   "browser": "dist/browser.js",
   "types": "dist/index.d.ts",
   "scripts": {

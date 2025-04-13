@@ -3,7 +3,7 @@
     "version": "1.0.0",
     "description": "Brain component for handling conversations and selecting the best LLM",
     "main": "dist/Brain.js",
-    "type": "module",
+
     "scripts": {
         "start": "ts-node src/Brain.ts",
         "build": "tsc",

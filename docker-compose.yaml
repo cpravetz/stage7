@@ -6,6 +6,10 @@ services:
       dockerfile: services/postoffice/dockerfile
     depends_on:
       - securitymanager
+      - rabbitmq
+      - consul
+      - redis
+      - mongo
     environment:
       NODE_ENV: production
       PORT: &postofficePort 5020
@@ -15,8 +19,8 @@ services:
       RABBITMQ_URL: &rabbitmqUrl amqp://stage7:stage7password@rabbitmq:5672
       CONSUL_URL: &consulUrl consul:8500
       CONFIG_SERVICE_URL: &configserviceUrl configservice:5090
-      POSTOFFICE_CLIENT_SECRET: &postofficeSecret postOfficeAuthSecret
-      CLIENT_SECRET: *postofficeSecret
+      POSTOFFICE_CLIENT_SECRET: &sharedSecret stage7AuthSecret
+      CLIENT_SECRET: *sharedSecret
     ports:
       - "5020:5020"
 
@@ -27,6 +31,7 @@ services:
     depends_on:
       - postoffice
       - librarian
+      - securitymanager
     environment:
       NODE_ENV: production
       PORT: &missioncontrolPort 5030
@@ -41,8 +46,8 @@ services:
       BRAIN_URL: &brainUrl brain:5070
       ENGINEER_URL: &engineerUrl engineer:5050
 
-      MISSIONCONTROL_CLIENT_SECRET: &missioncontrolSecret missionControlAuthSecret
-      CLIENT_SECRET: *missioncontrolSecret
+      MISSIONCONTROL_CLIENT_SECRET: *sharedSecret
+      CLIENT_SECRET: *sharedSecret
 
   trafficmanager:
     build:
@@ -51,17 +56,19 @@ services:
     depends_on:
       - postoffice
       - agentset
+      - securitymanager
     environment:
       NODE_ENV: production
       PORT: &trafficmanagerPort 5080
       TRAFFICMANAGER_URL: *trafficmanagerUrl
+      SECURITYMANAGER_URL: *securitymanagerUrl
       POSTOFFICE_URL: *postofficeUrl
       RABBITMQ_URL: *rabbitmqUrl
       CONSUL_URL: *consulUrl
       CONFIG_SERVICE_URL: *configserviceUrl
       LIBRARIAN_URL: *librarianUrl
-      TRAFFICMANAGER_CLIENT_SECRET: &trafficmanagerSecret trafficManagerAuthSecret
-      CLIENT_SECRET: *trafficmanagerSecret
+      TRAFFICMANAGER_CLIENT_SECRET: *sharedSecret
+      CLIENT_SECRET: *sharedSecret
 
   brain:
     build:
@@ -70,16 +77,18 @@ services:
     depends_on:
       - postoffice
       - librarian
+      - securitymanager
     environment:
       NODE_ENV: production
       PORT: &brainPort 5070
       BRAIN_URL: *brainUrl
+      SECURITYMANAGER_URL: *securitymanagerUrl
       POSTOFFICE_URL: *postofficeUrl
       RABBITMQ_URL: *rabbitmqUrl
       CONSUL_URL: *consulUrl
       CONFIG_SERVICE_URL: *configserviceUrl
-      BRAIN_CLIENT_SECRET: &brainSecret brainAuthSecret
-      CLIENT_SECRET: *brainSecret
+      BRAIN_CLIENT_SECRET: *sharedSecret
+      CLIENT_SECRET: *sharedSecret
 
   agentset:
     build:
@@ -88,14 +97,17 @@ services:
     depends_on:
       - postoffice
       - librarian
+      - securitymanager
     environment:
       NODE_ENV: production
+      PORT: 5100
+      SECURITYMANAGER_URL: *securitymanagerUrl
       POSTOFFICE_URL: *postofficeUrl
       RABBITMQ_URL: *rabbitmqUrl
       TRAFFICMANAGER_URL: *trafficmanagerUrl
       CAPABILITIESMANAGER_URL: &capabilitiesmanagerUrl capabilitiesmanager:5060
-      AGENTSET_CLIENT_SECRET: &agentsetSecret agentSetAuthSecret
-      CLIENT_SECRET: *agentsetSecret
+      AGENTSET_CLIENT_SECRET: *sharedSecret
+      CLIENT_SECRET: *sharedSecret
 
   engineer:
     build:
@@ -105,10 +117,13 @@ services:
       - postoffice
       - brain
       - librarian
+      - rabbitmq
+      - securitymanager
     environment:
       NODE_ENV: production
       PORT: &engineerPort 5050
       ENGINEER_URL: *engineerUrl
+      SECURITYMANAGER_URL: *securitymanagerUrl
       POSTOFFICE_URL: *postofficeUrl
       RABBITMQ_URL: *rabbitmqUrl
       CONSUL_URL: *consulUrl
@@ -116,8 +131,8 @@ services:
       BRAIN_URL: *brainUrl
       LIBRARIAN_URL: *librarianUrl
       CAPABILITIESMANAGER_URL: *capabilitiesmanagerUrl
-      ENGINEER_CLIENT_SECRET: &engineerSecret engineerAuthSecret
-      CLIENT_SECRET: *engineerSecret
+      ENGINEER_CLIENT_SECRET: *sharedSecret
+      CLIENT_SECRET: *sharedSecret
       GITHUB_TOKEN: &githubToken ''
       GITHUB_USERNAME: &githubUsername ''
       GIT_DEFAULT_BRANCH: &gitDefaultBranch main
@@ -139,10 +154,13 @@ services:
       - postoffice
       - engineer
       - librarian
+      - rabbitmq
+      - securitymanager
     environment:
       NODE_ENV: production
       PORT: &capabilitiesmanagerPort 5060
       CAPABILITIESMANAGER_URL: *capabilitiesmanagerUrl
+      SECURITYMANAGER_URL: *securitymanagerUrl
       POSTOFFICE_URL: *postofficeUrl
       RABBITMQ_URL: *rabbitmqUrl
       CONSUL_URL: *consulUrl
@@ -150,8 +168,8 @@ services:
       LIBRARIAN_URL: *librarianUrl
       BRAIN_URL: *brainUrl
       ENGINEER_URL: &engineerUrl
-      CAPABILITIESMANAGER_CLIENT_SECRET: &capabilitiesmanagerSecret capabilitiesManagerAuthSecret
-      CLIENT_SECRET: *capabilitiesmanagerSecret
+      CAPABILITIESMANAGER_CLIENT_SECRET: *sharedSecret
+      CLIENT_SECRET: *sharedSecret
       LOCAL_PLUGIN_PATH: /usr/src/app/services//capabilitiesmanager/src/plugins
       GITHUB_TOKEN: *githubToken
       GITHUB_USERNAME: *githubUsername
@@ -171,6 +189,8 @@ services:
       dockerfile: services/librarian/dockerfile
     depends_on:
       - postoffice
+      - rabbitmq
+      - securitymanager
     environment:
       MONGO_URI: mongodb://mongo:27017
       MONGO_DB: librarianDB
@@ -179,17 +199,22 @@ services:
       NODE_ENV: production
       PORT: &librarianPort 5040
       LIBRARIAN_URL: *librarianUrl
+      SECURITYMANAGER_URL: *securitymanagerUrl
       POSTOFFICE_URL: *postofficeUrl
       RABBITMQ_URL: *rabbitmqUrl
       CONSUL_URL: *consulUrl
       CONFIG_SERVICE_URL: *configserviceUrl
-      LIBRARIAN_CLIENT_SECRET: &librarianSecret librarianAuthSecret
-      CLIENT_SECRET: *librarianSecret
+      LIBRARIAN_CLIENT_SECRET: *sharedSecret
+      CLIENT_SECRET: *sharedSecret
 
   securitymanager:
     build:
       context: .
       dockerfile: services/security/dockerfile
+    depends_on:
+      - mongo
+      - rabbitmq
+      - consul
     environment:
       NODE_ENV: production
       PORT:  &securitymanagerPort 5010
@@ -201,23 +226,38 @@ services:
       JWT_SECRET: your-secret-key
       ADMIN_SECRET: adminSecret
       LIBRARIAN_URL: *librarianUrl
-      SECURITYMANAGER_CLIENT_SECRET: &securitymanagerSecret securityManagerAuthSecret
-      CLIENT_SECRET: *securitymanagerSecret
+      # Using a single shared client secret for all services
+      SECURITYMANAGER_CLIENT_SECRET: *sharedSecret
+      POSTOFFICE_CLIENT_SECRET: *sharedSecret
+      CONFIGSERVICE_CLIENT_SECRET: *sharedSecret
+      MISSIONCONTROL_CLIENT_SECRET: *sharedSecret
+      TRAFFICMANAGER_CLIENT_SECRET: *sharedSecret
+      BRAIN_CLIENT_SECRET: *sharedSecret
+      AGENTSET_CLIENT_SECRET: *sharedSecret
+      ENGINEER_CLIENT_SECRET: *sharedSecret
+      CAPABILITIESMANAGER_CLIENT_SECRET: *sharedSecret
+      LIBRARIAN_CLIENT_SECRET: *sharedSecret
+      CLIENT_SECRET: *sharedSecret
+    ports:
+      - "5010:5010"
 
   configservice:
     build:
       context: .
       dockerfile: services/configservice/dockerfile
+    depends_on:
+      - securitymanager
     environment:
       NODE_ENV: production
       PORT: &configservicePort 5090
       CONFIG_SERVICE_URL: *configserviceUrl
+      SECURITYMANAGER_URL: *securitymanagerUrl
       POSTOFFICE_URL: *postofficeUrl
       RABBITMQ_URL: *rabbitmqUrl
       CONSUL_URL: *consulUrl
       CONFIG_DIR: /usr/src/app/config
-      CONFIGSERVICE_CLIENT_SECRET: &configserviceSecret configServiceAuthSecret
-      CLIENT_SECRET: *configserviceSecret
+      CONFIGSERVICE_CLIENT_SECRET: *sharedSecret
+      CLIENT_SECRET: *sharedSecret
     volumes:
       - config_data:/usr/src/app/config
 

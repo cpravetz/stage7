@@ -33,4 +33,4 @@ WORKDIR /usr/src/app/services/postoffice
 EXPOSE 5020
 
 # Define the command to run the application
-CMD ["node", "--experimental-specifier-resolution=node", "--experimental-modules", "dist/PostOffice.js"]
+CMD ["node", "dist/PostOffice.js"]

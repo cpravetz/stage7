@@ -3,7 +3,7 @@ import bodyParser from 'body-parser';
 import { OptimizationType, ModelManager } from './utils/modelManager';
 import { LLMConversationType } from './interfaces/baseInterface';
 import { ExchangeType } from './services/baseService';
-import { BaseEntity, MessageType } from '@cktmcs/shared/index.js';
+import { BaseEntity, MessageType } from '@cktmcs/shared';
 import dotenv from 'dotenv';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { PromptManager } from './utils/promptManager';
