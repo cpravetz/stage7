@@ -12,6 +12,9 @@ COPY services/brain/package*.json ./services/brain/
 
 # Install the application dependencies
 RUN npm install
+RUN cd shared && npm install
+RUN cd errorhandler && npm install
+RUN cd services/brain && npm install
 
 # Copy the application code to the working directory
 COPY shared ./shared
@@ -19,10 +22,10 @@ COPY errorhandler ./errorhandler
 COPY services/brain ./services/brain
 
 # Ensure plugins directory exists and copy plugins
-RUN mkdir -p ./services/brain/src/models 
+RUN mkdir -p ./services/brain/src/models
 COPY services/brain/src/models/*.?s ./services/brain/src/models
 
-RUN mkdir -p ./services/brain/src/interfaces 
+RUN mkdir -p ./services/brain/src/interfaces
 COPY services/brain/src/interfaces/*.?s ./services/brain/src/interfaces
 
 # Build the TypeScript code - ensure shared is built first
@@ -37,4 +40,4 @@ WORKDIR /usr/src/app/services/brain
 EXPOSE 5070
 
 # Define the command to run the application
-CMD ["node", "dist/Brain.js"]
+CMD ["node", "--experimental-specifier-resolution=node", "--experimental-modules", "dist/Brain.js"]

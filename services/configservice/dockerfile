@@ -31,4 +31,4 @@ RUN mkdir -p /usr/src/app/config
 EXPOSE 5090
 
 # Start the service
-CMD ["node", "services/configservice/dist/ConfigService.js"]
+CMD ["node", "--experimental-specifier-resolution=node", "--experimental-modules", "services/configservice/dist/ConfigService.js"]

@@ -1,6 +1,5 @@
 import axios from 'axios';
-import { PluginOutput, PluginParameterType } from '@cktmcs/shared';
-import { Step } from '@cktmcs/shared';
+import { PluginOutput, PluginParameterType, Step } from '@cktmcs/shared';
 
 
 export const requestPluginFromEngineer = async (step: Step, accomplishGuidance: String): Promise<PluginOutput> => {

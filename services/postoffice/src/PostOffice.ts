@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken';
 import cors from 'cors';
 import WebSocket from 'ws';
 import http from 'http';
-import { Component } from './types/Component';
+import { Component } from './types/Component.js';
 import { Message, MessageType, MessageQueueClient, ServiceDiscovery } from '@cktmcs/shared';
 import axios from 'axios';
 import { analyzeError } from '@cktmcs/errorhandler';

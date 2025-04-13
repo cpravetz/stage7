@@ -12,6 +12,9 @@ COPY services/postoffice/package*.json ./services/postoffice/
 
 # Install the application dependencies
 RUN npm install
+RUN cd shared && npm install
+RUN cd errorhandler && npm install
+RUN cd services/postoffice && npm install
 
 # Copy the application code to the working directory
 COPY shared ./shared
@@ -30,4 +33,4 @@ WORKDIR /usr/src/app/services/postoffice
 EXPOSE 5020
 
 # Define the command to run the application
-CMD ["node", "dist/PostOffice.js"]
+CMD ["node", "--experimental-specifier-resolution=node", "--experimental-modules", "dist/PostOffice.js"]

@@ -3,6 +3,7 @@
     "version": "1.0.0",
     "description": "MissionControl component for managing missions",
     "main": "dist/MissionControl.js",
+    "type": "module",
     "scripts": {
         "start": "ts-node src/MissionControl.ts",
         "build": "tsc"

@@ -3,7 +3,7 @@
     "version": "1.0.0",
     "description": "Capabilities Manager component to handle ActionVerbs and Plugins",
     "main": "dist/CapabilitiesManager.js",
-    "type": "commonjs",
+    "type": "module",
     "scripts": {
         "start": "ts-node src/CapabilitiesManager.ts",
         "build": "tsc",

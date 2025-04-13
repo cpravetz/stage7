@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Configuration service for Stage7",
   "main": "dist/ConfigService.js",
+  "type": "module",
   "scripts": {
     "build": "tsc",
     "start": "node dist/ConfigService.js",
