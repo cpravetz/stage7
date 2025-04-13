@@ -28,7 +28,7 @@ COPY services/brain/src/interfaces/*.?s ./services/brain/src/interfaces
 # Build the TypeScript code - ensure shared is built first
 RUN cd shared && npm run build
 RUN cd errorhandler && npm run build
-RUN npm run build --workspace=@cktmcs/brain
+RUN npm run build --workspace=services/brain
 
 # Set the working directory to the service
 WORKDIR /usr/src/app/services/brain

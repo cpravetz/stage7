@@ -24,7 +24,7 @@ COPY services/engineer ./services/engineer
 RUN cd shared && npm run build
 RUN cd errorhandler && npm run build
 RUN cd marketplace && npm run build
-RUN npm run build --workspace=@cktmcs/engineer
+RUN npm run build --workspace=services/engineer
 
 # Set the working directory to the service
 WORKDIR /usr/src/app/services/engineer

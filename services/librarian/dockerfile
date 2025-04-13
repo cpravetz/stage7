@@ -22,7 +22,7 @@ COPY services/librarian ./services/librarian
 RUN cd shared && npm run build
 RUN cd errorhandler && npm run build
 # Make sure the shared package is properly built before building the postoffice service
-RUN npm run build --workspace=@cktmcs/librarian
+RUN npm run build --workspace=services/librarian
 
 # Set the working directory to the librarian service
 

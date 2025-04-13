@@ -24,7 +24,7 @@ COPY services/capabilitiesmanager ./services/capabilitiesmanager
 RUN cd shared && npm run build
 RUN cd errorhandler && npm run build
 RUN cd marketplace && npm run build
-RUN npm run build --workspace=@cktmcs/capabilitiesmanager
+RUN npm run build --workspace=services/capabilitiesmanager
 
 # Set the working directory to the service
 WORKDIR /usr/src/app/services/capabilitiesmanager

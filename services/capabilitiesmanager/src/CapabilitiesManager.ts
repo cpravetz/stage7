@@ -81,7 +81,7 @@ export class CapabilitiesManager extends BaseEntity {
                 app.post('/executeAction', (req, res) => this.executeActionVerb(req, res));
                 app.post('/message', (req, res) => this.handleMessage(req, res));
                 app.get('/availablePlugins', async (req, res) => {res.json(await this.pluginRegistry.list())});
-                app.post('/storeNewPlugin', (req, res) => this.storeNewPlugin(req, res));
+                app.post('/storeNewPlugin', (req, res) => {this.storeNewPlugin(req, res)});
 
                 // Error handling middleware
                 app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -377,7 +377,7 @@ export class CapabilitiesManager extends BaseEntity {
             if (plugin.language === 'javascript') {
                 // Use sandbox for JavaScript plugins
                 try {
-                    return await executePluginInSandbox(plugin, inputs, environment);
+                    return await executePluginInSandbox(plugin, Array.from(inputs.values()), environment);
                 } catch (sandboxError) {
                     console.error(`Sandbox execution failed, falling back to direct execution: ${sandboxError instanceof Error ? sandboxError.message : String(sandboxError)}`);
                     return this.executeJavaScriptPlugin(plugin, inputs, environment);
