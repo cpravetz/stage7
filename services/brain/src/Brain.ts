@@ -16,6 +16,7 @@ interface Thread {
     exchanges: ExchangeType;
     optimization?: OptimizationType;
     optionals?: Record<string, any>;
+    conversationType?: LLMConversationType;
 }
 
 
@@ -75,31 +76,31 @@ export class Brain extends BaseEntity {
         });
 
         //API endpoint to report LLMCall total
-        app.get('/getLLMCalls', (req: express.Request, res: express.Response) => {
+        app.get('/getLLMCalls', (req: express.Request, res: express.Response, next: express.NextFunction) => {
             res.json({ llmCalls: this.llmCalls });
         });
 
         // API endpoint to get available models
-        app.get('/models', (req: express.Request, res: express.Response) => {
+        app.get('/models', (req: express.Request, res: express.Response, next: express.NextFunction) => {
             const models = this.getAvailableModels();
             res.json({ models });
         });
 
         // API endpoints for prompt management
-        app.get('/prompts', (req: express.Request, res: express.Response) => {
+        app.get('/prompts', (req: express.Request, res: express.Response, next: express.NextFunction) => {
             const prompts = this.promptManager.getAllTemplates();
             res.json({ prompts });
         });
 
-        app.get('/prompts/:id', (req: express.Request, res: express.Response) => {
+        app.get('/prompts/:id', (req: express.Request, res: express.Response, next: express.NextFunction) => {
             const prompt = this.promptManager.getTemplate(req.params.id);
             if (!prompt) {
-                return res.status(404).json({ error: 'Prompt template not found' });
+                res.status(404).json({ error: 'Prompt template not found' });
             }
             res.json({ prompt });
         });
 
-        app.post('/prompts', (req: express.Request, res: express.Response) => {
+        app.post('/prompts', (req: express.Request, res: express.Response, next: express.NextFunction) => {
             try {
                 const prompt = this.promptManager.createTemplate(req.body);
                 res.status(201).json({ prompt });
@@ -112,7 +113,7 @@ export class Brain extends BaseEntity {
             try {
                 const prompt = this.promptManager.updateTemplate(req.params.id, req.body);
                 if (!prompt) {
-                    return res.status(404).json({ error: 'Prompt template not found' });
+                    res.status(404).json({ error: 'Prompt template not found' });
                 }
                 res.json({ prompt });
             } catch (error) {
@@ -123,12 +124,12 @@ export class Brain extends BaseEntity {
         app.delete('/prompts/:id', (req: express.Request, res: express.Response) => {
             const deleted = this.promptManager.deleteTemplate(req.params.id);
             if (!deleted) {
-                return res.status(404).json({ error: 'Prompt template not found' });
+                res.status(404).json({ error: 'Prompt template not found' });
             }
             res.json({ success: true });
         });
 
-        app.post('/prompts/:id/render', (req: express.Request, res: express.Response) => {
+        app.post('/prompts/:id/render', (req: express.Request, res: express.Response, next: express.NextFunction) => {
             try {
                 const renderedPrompt = this.promptManager.renderTemplate(req.params.id, req.body.variables);
                 res.json({ renderedPrompt });
@@ -138,12 +139,12 @@ export class Brain extends BaseEntity {
         });
 
         // API endpoints for model performance
-        app.get('/performance', (req: express.Request, res: express.Response) => {
+        app.get('/performance', (req: express.Request, res: express.Response, next: express.NextFunction) => {
             const performanceData = this.modelManager.getAllPerformanceData();
             res.json({ performanceData });
         });
 
-        app.get('/performance/rankings', (req: express.Request, res: express.Response) => {
+        app.get('/performance/rankings', (req: express.Request, res: express.Response, next: express.NextFunction) => {
             const conversationType = req.query.conversationType as LLMConversationType || LLMConversationType.TextToText;
             const metric = req.query.metric as 'successRate' | 'averageLatency' | 'overall' || 'overall';
             const rankings = this.modelManager.getModelRankings(conversationType, metric);
@@ -151,18 +152,18 @@ export class Brain extends BaseEntity {
         });
 
         // API endpoints for response evaluation
-        app.get('/evaluations', (req: express.Request, res: express.Response) => {
+        app.get('/evaluations', (req: express.Request, res: express.Response, next: express.NextFunction) => {
             const limit = parseInt(req.query.limit as string) || 100;
             const evaluations = this.responseEvaluator.getAllEvaluations(limit);
             res.json({ evaluations });
         });
 
-        app.get('/evaluations/model/:modelName', (req: express.Request, res: express.Response) => {
+        app.get('/evaluations/model/:modelName', (req: express.Request, res: express.Response, next: express.NextFunction) => {
             const evaluations = this.responseEvaluator.getEvaluationsForModel(req.params.modelName);
             res.json({ evaluations });
         });
 
-        app.post('/evaluations', (req: express.Request, res: express.Response) => {
+        app.post('/evaluations', (req: express.Request, res: express.Response, next: express.NextFunction) => {
             try {
                 const { requestId, modelName, conversationType, prompt, response, criteria, feedback, evaluator } = req.body;
                 const evaluation = this.responseEvaluator.recordHumanEvaluation(
@@ -272,7 +273,7 @@ export class Brain extends BaseEntity {
             const startTime = Date.now();
 
             // Get the response from the model
-            const modelResponse = await selectedModel.chat(messages, thread.optionals || {});
+            const modelResponse = await selectedModel.chat(messages, { ...thread.optionals, modelName: selectedModel.modelName });
 
             // End timing the response
             const endTime = Date.now();
@@ -416,7 +417,7 @@ export class Brain extends BaseEntity {
         // Select the appropriate model
         const selectedModel = content.modelName
             ? this.modelManager.getModel(content.modelName)
-            : this.modelManager.selectModel(thread.optimization || 'accuracy', thread.conversationType);
+            : this.modelManager.selectModel(thread.optimization || 'accuracy', thread.conversationType || LLMConversationType.TextToText);
 
         if (!selectedModel || !selectedModel.isAvailable()) {
             return { response: 'No suitable model found.', mimeType: 'text/plain' };
@@ -425,7 +426,7 @@ export class Brain extends BaseEntity {
         // Track the request for performance monitoring
         const requestId = this.modelManager.trackModelRequest(
             selectedModel.name,
-            thread.conversationType,
+            thread.conversationType || LLMConversationType.TextToText,
             thread.exchanges[thread.exchanges.length - 1].content
         );
 
@@ -439,7 +440,7 @@ export class Brain extends BaseEntity {
         const startTime = Date.now();
 
         // Get the response from the model
-        const modelResponse = await selectedModel.chat(messages, thread.optionals);
+        const modelResponse = await selectedModel.chat(messages, { ...thread.optionals, modelName: selectedModel.modelName });
 
         // End timing the response
         const endTime = Date.now();
@@ -459,7 +460,7 @@ export class Brain extends BaseEntity {
         this.responseEvaluator.evaluateResponseAuto(
             requestId,
             selectedModel.name,
-            thread.conversationType,
+            thread.conversationType || LLMConversationType.TextToText,
             thread.exchanges[thread.exchanges.length - 1].content,
             modelResponse
         ).catch(error => {

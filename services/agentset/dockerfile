@@ -21,7 +21,7 @@ COPY services/agentset ./services/agentset
 # Build the TypeScript code
 RUN cd shared && npm run build
 RUN cd errorhandler && npm run build
-RUN npm run build --workspace=@cktmcs/agentset
+RUN npm run build --workspace=services/agentset
 
 # Set the working directory to the service
 WORKDIR /usr/src/app/services/agentset

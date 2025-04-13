@@ -5,13 +5,8 @@ import { Agent } from '../agents/Agent';
 import { CollaborationMessageType, TaskDelegationRequest, TaskDelegationResponse, TaskResult, createCollaborationMessage } from './CollaborationProtocol';
 
 
-// Define AgentStatus enum here
-export enum AgentStatus {
-  IDLE = 'idle',
-  BUSY = 'busy',
-  OFFLINE = 'offline',
-  ERROR = 'error'
-}
+// Import AgentStatus from utils
+import { AgentStatus } from '../utils/agentStatus';
 /**
  * Task status
  */
@@ -57,12 +52,12 @@ export class TaskDelegation {
   private tasks: Map<string, DelegatedTask> = new Map();
   private agents: Map<string, Agent>;
   private trafficManagerUrl: string;
-  
+
   constructor(agents: Map<string, Agent>, trafficManagerUrl: string) {
     this.agents = agents;
     this.trafficManagerUrl = trafficManagerUrl;
   }
-  
+
   /**
    * Delegate a task to another agent
    * @param delegatorId Delegator agent ID
@@ -78,11 +73,11 @@ export class TaskDelegation {
     try {
       // Check if recipient agent exists
       const recipientAgent = this.agents.get(recipientId);
-      
+
       if (!recipientAgent) {
         // Try to find agent in other agent sets
         const agentLocation = await this.findAgentLocation(recipientId);
-        
+
         if (!agentLocation) {
           return {
             taskId: request.taskId,
@@ -90,11 +85,11 @@ export class TaskDelegation {
             reason: `Agent ${recipientId} not found`
           };
         }
-        
+
         // Forward task delegation to the agent's location
         return this.forwardTaskDelegation(delegatorId, recipientId, request, agentLocation);
       }
-      
+
       // Check if recipient agent is available
       if (recipientAgent.getStatus() !== AgentStatus.RUNNING) {
         return {
@@ -103,7 +98,7 @@ export class TaskDelegation {
           reason: `Agent ${recipientId} is not running (status: ${recipientAgent.getStatus()})`
         };
       }
-      
+
       // Create task
       const task: DelegatedTask = {
         id: request.taskId || uuidv4(),
@@ -118,10 +113,10 @@ export class TaskDelegation {
         deadline: request.deadline,
         priority: request.priority || 'normal'
       };
-      
+
       // Store task
       this.tasks.set(task.id, task);
-      
+
       // Send task to recipient agent
       const message = {
         type: CollaborationMessageType.TASK_DELEGATION,
@@ -129,19 +124,19 @@ export class TaskDelegation {
         recipient: recipientId,
         content: task
       };
-      
-      const properTaskMessage = createCollaborationMessage({
-        type: message.type,
-        senderId: message.sender,
-        recipientId: message.recipient,
-        content: message.content
-      });
+
+      const properTaskMessage = createCollaborationMessage(
+        message.type,
+        message.sender,
+        message.recipient,
+        message.content
+      );
       await recipientAgent.handleCollaborationMessage(properTaskMessage);
-      
+
       // Update task status
       task.status = TaskStatus.ACCEPTED;
       task.updatedAt = new Date().toISOString();
-      
+
       return {
         taskId: task.id,
         accepted: true,
@@ -150,7 +145,7 @@ export class TaskDelegation {
     } catch (error) {
       analyzeError(error as Error);
       console.error('Error delegating task:', error);
-      
+
       return {
         taskId: request.taskId,
         accepted: false,
@@ -158,7 +153,7 @@ export class TaskDelegation {
       };
     }
   }
-  
+
   /**
    * Forward task delegation to another agent set
    * @param delegatorId Delegator agent ID
@@ -179,12 +174,12 @@ export class TaskDelegation {
         recipientId,
         request
       });
-      
+
       return response.data;
     } catch (error) {
       analyzeError(error as Error);
       console.error('Error forwarding task delegation:', error);
-      
+
       return {
         taskId: request.taskId,
         accepted: false,
@@ -192,7 +187,7 @@ export class TaskDelegation {
       };
     }
   }
-  
+
   /**
    * Find the location of an agent
    * @param agentId Agent ID
@@ -201,11 +196,11 @@ export class TaskDelegation {
   private async findAgentLocation(agentId: string): Promise<string | undefined> {
     try {
       const response = await axios.get(`http://${this.trafficManagerUrl}/getAgentLocation/${agentId}`);
-      
+
       if (response.data && response.data.agentSetUrl) {
         return response.data.agentSetUrl;
       }
-      
+
       return undefined;
     } catch (error) {
       analyzeError(error as Error);
@@ -213,7 +208,7 @@ export class TaskDelegation {
       return undefined;
     }
   }
-  
+
   /**
    * Estimate completion time for a task
    * @param task Task
@@ -223,7 +218,7 @@ export class TaskDelegation {
     // Simple estimation based on priority
     const now = new Date();
     let estimatedMinutes = 5; // Default
-    
+
     switch (task.priority) {
       case 'urgent':
         estimatedMinutes = 1;
@@ -238,11 +233,11 @@ export class TaskDelegation {
         estimatedMinutes = 10;
         break;
     }
-    
+
     const estimatedCompletion = new Date(now.getTime() + estimatedMinutes * 60000);
     return estimatedCompletion.toISOString();
   }
-  
+
   /**
    * Update task status
    * @param taskId Task ID
@@ -257,46 +252,46 @@ export class TaskDelegation {
     error?: string
   ): Promise<void> {
     const task = this.tasks.get(taskId);
-    
+
     if (!task) {
       throw new Error(`Task ${taskId} not found`);
     }
-    
+
     // Update task
     task.status = status;
     task.updatedAt = new Date().toISOString();
-    
+
     if (result !== undefined) {
       task.result = result;
     }
-    
+
     if (error !== undefined) {
       task.error = error;
     }
-    
+
     // Update metrics
     if (!task.metrics) {
       task.metrics = {};
     }
-    
+
     if (status === TaskStatus.IN_PROGRESS && !task.metrics.startTime) {
       task.metrics.startTime = new Date().toISOString();
     }
-    
+
     if ((status === TaskStatus.COMPLETED || status === TaskStatus.FAILED) && !task.metrics.endTime) {
       task.metrics.endTime = new Date().toISOString();
-      
+
       if (task.metrics.startTime) {
         const startTime = new Date(task.metrics.startTime).getTime();
         const endTime = new Date(task.metrics.endTime).getTime();
         task.metrics.duration = (endTime - startTime) / 1000; // Duration in seconds
       }
     }
-    
+
     // Notify delegator
     await this.notifyTaskUpdate(task);
   }
-  
+
   /**
    * Notify delegator about task update
    * @param task Updated task
@@ -304,7 +299,7 @@ export class TaskDelegation {
   private async notifyTaskUpdate(task: DelegatedTask): Promise<void> {
     try {
       const delegatorAgent = this.agents.get(task.delegatedBy);
-      
+
       if (delegatorAgent) {
         // Send task update to delegator agent
         const message = {
@@ -315,19 +310,19 @@ export class TaskDelegation {
           recipient: task.delegatedBy,
           content: task
         };
-        
-        const properDelegationMessage = createCollaborationMessage({
-          type: message.type,
-          senderId: message.sender,
-          recipientId: message.recipient,
-          content: message.content
-        });
-        
+
+        const properDelegationMessage = createCollaborationMessage(
+          message.type,
+          message.sender,
+          message.recipient,
+          message.content
+        );
+
         await delegatorAgent.handleCollaborationMessage(properDelegationMessage);
       } else {
         // Try to find delegator agent in other agent sets
         const agentLocation = await this.findAgentLocation(task.delegatedBy);
-        
+
         if (agentLocation) {
           // Forward task update to the agent's location
           await axios.post(`http://${agentLocation}/taskUpdate`, {
@@ -343,7 +338,7 @@ export class TaskDelegation {
       console.error('Error notifying task update:', error);
     }
   }
-  
+
   /**
    * Get task by ID
    * @param taskId Task ID
@@ -352,7 +347,7 @@ export class TaskDelegation {
   getTask(taskId: string): DelegatedTask | undefined {
     return this.tasks.get(taskId);
   }
-  
+
   /**
    * Get tasks delegated by an agent
    * @param agentId Agent ID
@@ -362,7 +357,7 @@ export class TaskDelegation {
     return Array.from(this.tasks.values())
       .filter(task => task.delegatedBy === agentId);
   }
-  
+
   /**
    * Get tasks delegated to an agent
    * @param agentId Agent ID
@@ -372,7 +367,7 @@ export class TaskDelegation {
     return Array.from(this.tasks.values())
       .filter(task => task.delegatedTo === agentId);
   }
-  
+
   /**
    * Cancel a task
    * @param taskId Task ID
@@ -381,44 +376,44 @@ export class TaskDelegation {
    */
   async cancelTask(taskId: string, agentId: string): Promise<boolean> {
     const task = this.tasks.get(taskId);
-    
+
     if (!task) {
       return false;
     }
-    
+
     // Check if agent is the delegator
     if (task.delegatedBy !== agentId) {
       throw new Error(`Agent ${agentId} is not the delegator of task ${taskId}`);
     }
-    
+
     // Check if task can be cancelled
-    if (task.status === TaskStatus.COMPLETED || 
-        task.status === TaskStatus.FAILED || 
+    if (task.status === TaskStatus.COMPLETED ||
+        task.status === TaskStatus.FAILED ||
         task.status === TaskStatus.CANCELLED) {
       return false;
     }
-    
+
     // Update task status
     await this.updateTaskStatus(taskId, TaskStatus.CANCELLED);
-    
+
     return true;
   }
-  
+
   /**
    * Check for expired tasks
    */
   async checkExpiredTasks(): Promise<void> {
     const now = new Date();
-    
+
     for (const [taskId, task] of this.tasks.entries()) {
-      if (task.deadline && 
-          task.status !== TaskStatus.COMPLETED && 
-          task.status !== TaskStatus.FAILED && 
-          task.status !== TaskStatus.CANCELLED && 
+      if (task.deadline &&
+          task.status !== TaskStatus.COMPLETED &&
+          task.status !== TaskStatus.FAILED &&
+          task.status !== TaskStatus.CANCELLED &&
           task.status !== TaskStatus.EXPIRED) {
-        
+
         const deadline = new Date(task.deadline);
-        
+
         if (now > deadline) {
           await this.updateTaskStatus(taskId, TaskStatus.EXPIRED, undefined, 'Task deadline expired');
         }

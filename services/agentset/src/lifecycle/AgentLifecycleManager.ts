@@ -1,5 +1,5 @@
 import { Agent } from '../agents/Agent';
-import { AgentStatus } from '../collaboration/TaskDelegation'; // Import AgentStatus enum
+import { AgentStatus } from '../utils/agentStatus'; // Import AgentStatus enum
 import { AgentPersistenceManager } from '../utils/AgentPersistenceManager';
 import { v4 as uuidv4 } from 'uuid';
 import { analyzeError } from '@cktmcs/errorhandler';
@@ -56,22 +56,22 @@ export class AgentLifecycleManager {
   private checkpointIntervals: Map<string, NodeJS.Timeout> = new Map();
   private monitoringInterval: NodeJS.Timeout;
   private trafficManagerUrl: string;
-  
+
   constructor(persistenceManager: AgentPersistenceManager, trafficManagerUrl: string) {
     this.persistenceManager = persistenceManager;
     this.trafficManagerUrl = trafficManagerUrl;
-    
+
     // Set up monitoring interval
     this.monitoringInterval = setInterval(() => this.monitorAgents(), 60000); // Monitor every minute
   }
-  
+
   /**
    * Register an agent with the lifecycle manager
    * @param agent Agent to register
    */
   registerAgent(agent: Agent): void {
     this.agents.set(agent.id, agent);
-    
+
     // Initialize agent versions
     if (!this.agentVersions.has(agent.id)) {
       this.agentVersions.set(agent.id, [{
@@ -82,7 +82,7 @@ export class AgentLifecycleManager {
         stateId: `${agent.id}-v1.0.0`
       }]);
     }
-    
+
     // Initialize lifecycle events
     if (!this.lifecycleEvents.has(agent.id)) {
       this.lifecycleEvents.set(agent.id, [{
@@ -96,14 +96,14 @@ export class AgentLifecycleManager {
         }
       }]);
     }
-    
+
     // Initialize diagnostics
     this.updateDiagnostics(agent);
-    
+
     // Set up automatic checkpointing
     this.setupCheckpointing(agent);
   }
-  
+
   /**
    * Unregister an agent from the lifecycle manager
    * @param agentId Agent ID
@@ -115,11 +115,11 @@ export class AgentLifecycleManager {
       clearInterval(interval);
       this.checkpointIntervals.delete(agentId);
     }
-    
+
     // Remove agent
     this.agents.delete(agentId);
   }
-  
+
   /**
    * Set up automatic checkpointing for an agent
    * @param agent Agent to checkpoint
@@ -131,16 +131,16 @@ export class AgentLifecycleManager {
     if (existingInterval) {
       clearInterval(existingInterval);
     }
-    
+
     // Set up new interval
     const interval = setInterval(() => {
       this.createCheckpoint(agent.id)
         .catch(error => console.error(`Failed to create checkpoint for agent ${agent.id}:`, error));
     }, intervalMinutes * 60 * 1000);
-    
+
     this.checkpointIntervals.set(agent.id, interval);
   }
-  
+
   /**
    * Create a checkpoint for an agent
    * @param agentId Agent ID
@@ -150,17 +150,17 @@ export class AgentLifecycleManager {
     if (!agent) {
       throw new Error(`Agent ${agentId} not found`);
     }
-    
+
     try {
       // Save agent state
       await agent.saveAgentState();
-      
+
       // Record checkpoint event
       this.recordLifecycleEvent(agentId, 'checkpointed', {
         timestamp: new Date().toISOString(),
         status: agent.getStatus()
       });
-      
+
       console.log(`Created checkpoint for agent ${agentId}`);
     } catch (error) {
       analyzeError(error as Error);
@@ -168,7 +168,7 @@ export class AgentLifecycleManager {
       throw error;
     }
   }
-  
+
   /**
    * Create a new version of an agent
    * @param agentId Agent ID
@@ -181,21 +181,21 @@ export class AgentLifecycleManager {
     if (!agent) {
       throw new Error(`Agent ${agentId} not found`);
     }
-    
+
     // Get current versions
     const versions = this.agentVersions.get(agentId) || [];
-    
+
     // Determine new version number
-    const currentVersion = versions.length > 0 
-      ? versions[versions.length - 1].version 
+    const currentVersion = versions.length > 0
+      ? versions[versions.length - 1].version
       : '0.0.0';
-    
+
     const versionParts = currentVersion.split('.');
     const newVersion = `${versionParts[0]}.${versionParts[1]}.${parseInt(versionParts[2]) + 1}`;
-    
+
     // Create state ID for this version
     const stateId = `${agentId}-v${newVersion}`;
-    
+
     // Save agent state with this state ID
     const agentState = {
         ...agent,
@@ -205,7 +205,7 @@ export class AgentLifecycleManager {
         ...agentState,
         missionContext: agent.missionContext
     });
-    
+
     // Create new version
     const version: AgentVersion = {
       version: newVersion,
@@ -214,21 +214,21 @@ export class AgentLifecycleManager {
       changes,
       stateId
     };
-    
+
     // Add to versions
     versions.push(version);
     this.agentVersions.set(agentId, versions);
-    
+
     // Record version event
     this.recordLifecycleEvent(agentId, 'checkpointed', {
       version: newVersion,
       description,
       changes
     });
-    
+
     return version;
   }
-  
+
   /**
    * Restore an agent to a specific version
    * @param agentId Agent ID
@@ -239,32 +239,32 @@ export class AgentLifecycleManager {
     if (!agent) {
       throw new Error(`Agent ${agentId} not found`);
     }
-    
+
     // Find the version
     const versions = this.agentVersions.get(agentId) || [];
     const versionInfo = versions.find(v => v.version === version);
-    
+
     if (!versionInfo) {
       throw new Error(`Version ${version} not found for agent ${agentId}`);
     }
-    
+
     try {
       // Pause the agent
       await this.pauseAgent(agentId);
-      
+
       // Load the state from this version
       const loadedState = await this.persistenceManager.loadAgent(versionInfo.stateId);
       Object.assign(agent, loadedState);
-      
+
       // Resume the agent
       await this.resumeAgent(agentId);
-      
+
       // Record restore event
       this.recordLifecycleEvent(agentId, 'migrated', {
         version,
         description: `Restored to version ${version}`
       });
-      
+
       console.log(`Restored agent ${agentId} to version ${version}`);
     } catch (error) {
       analyzeError(error as Error);
@@ -272,7 +272,7 @@ export class AgentLifecycleManager {
       throw error;
     }
   }
-  
+
   /**
    * Pause an agent
    * @param agentId Agent ID
@@ -282,7 +282,7 @@ export class AgentLifecycleManager {
     if (!agent) {
       throw new Error(`Agent ${agentId} not found`);
     }
-    
+
     try {
       // Send pause message to agent
       await agent.handleMessage({
@@ -292,12 +292,12 @@ export class AgentLifecycleManager {
         content: {},
         timestamp: new Date().toISOString()
       });
-      
+
       // Record pause event
       this.recordLifecycleEvent(agentId, 'paused', {
         timestamp: new Date().toISOString()
       });
-      
+
       console.log(`Paused agent ${agentId}`);
     } catch (error) {
       analyzeError(error as Error);
@@ -305,7 +305,7 @@ export class AgentLifecycleManager {
       throw error;
     }
   }
-  
+
   /**
    * Resume an agent
    * @param agentId Agent ID
@@ -315,7 +315,7 @@ export class AgentLifecycleManager {
     if (!agent) {
       throw new Error(`Agent ${agentId} not found`);
     }
-    
+
     try {
       // Send resume message to agent
       await agent.handleMessage({
@@ -325,12 +325,12 @@ export class AgentLifecycleManager {
         content: {},
         timestamp: new Date().toISOString()
       });
-      
+
       // Record resume event
       this.recordLifecycleEvent(agentId, 'resumed', {
         timestamp: new Date().toISOString()
       });
-      
+
       console.log(`Resumed agent ${agentId}`);
     } catch (error) {
       analyzeError(error as Error);
@@ -338,7 +338,7 @@ export class AgentLifecycleManager {
       throw error;
     }
   }
-  
+
   /**
    * Abort an agent
    * @param agentId Agent ID
@@ -348,7 +348,7 @@ export class AgentLifecycleManager {
     if (!agent) {
       throw new Error(`Agent ${agentId} not found`);
     }
-    
+
     try {
       // Send abort message to agent
       await agent.handleMessage({
@@ -358,12 +358,12 @@ export class AgentLifecycleManager {
         content: {},
         timestamp: new Date().toISOString()
       });
-      
+
       // Record abort event
       this.recordLifecycleEvent(agentId, 'aborted', {
         timestamp: new Date().toISOString()
       });
-      
+
       console.log(`Aborted agent ${agentId}`);
     } catch (error) {
       analyzeError(error as Error);
@@ -371,7 +371,7 @@ export class AgentLifecycleManager {
       throw error;
     }
   }
-  
+
   /**
    * Migrate an agent to another agent set
    * @param agentId Agent ID
@@ -382,42 +382,42 @@ export class AgentLifecycleManager {
     if (!agent) {
       throw new Error(`Agent ${agentId} not found`);
     }
-    
+
     try {
       // Pause the agent
       await this.pauseAgent(agentId);
-      
+
       // Create checkpoint
       await this.createCheckpoint(agentId);
-      
+
       // Get agent state
       const state = await this.persistenceManager.loadAgent(agentId);
-      
+
       // Send state to target agent set
       const response = await axios.post(`http://${targetAgentSetUrl}/migrateAgent`, {
         agentId,
         state
       });
-      
+
       if (response.status >= 300) {
         throw new Error(`Failed to migrate agent: ${response.data.error || 'Unknown error'}`);
       }
-      
+
       // Record migration event
       this.recordLifecycleEvent(agentId, 'migrated', {
         targetAgentSetUrl,
         timestamp: new Date().toISOString()
       });
-      
+
       // Unregister agent from this agent set
       this.unregisterAgent(agentId);
-      
+
       // Notify TrafficManager about migration
       await axios.post(`http://${this.trafficManagerUrl}/updateAgentLocation`, {
         agentId,
         agentSetUrl: targetAgentSetUrl
       });
-      
+
       console.log(`Migrated agent ${agentId} to ${targetAgentSetUrl}`);
     } catch (error) {
       analyzeError(error as Error);
@@ -425,7 +425,7 @@ export class AgentLifecycleManager {
       throw error;
     }
   }
-  
+
   /**
    * Record a lifecycle event for an agent
    * @param agentId Agent ID
@@ -435,7 +435,7 @@ export class AgentLifecycleManager {
   recordLifecycleEvent(agentId: string, eventType: AgentLifecycleEvent['eventType'], details: Record<string, any>): void {
     // Get or create events array
     const events = this.lifecycleEvents.get(agentId) || [];
-    
+
     // Add new event
     events.push({
       id: uuidv4(),
@@ -444,11 +444,11 @@ export class AgentLifecycleManager {
       timestamp: new Date().toISOString(),
       details
     });
-    
+
     // Update events
     this.lifecycleEvents.set(agentId, events);
   }
-  
+
   /**
    * Update diagnostics for an agent
    * @param agent Agent to update diagnostics for
@@ -457,21 +457,21 @@ export class AgentLifecycleManager {
     const status = agent.getStatus();
     const steps = agent.getSteps();
     const errorCount = steps.filter(step => step.status === 'error').length;
-    
+
     // Calculate health score (0-100)
     let healthScore = 100;
-    
+
     // Reduce score for errors
     healthScore -= errorCount * 10;
-    
+
     // Reduce score for non-running status
     if (status !== AgentStatus.RUNNING) {
       healthScore -= 20;
     }
-    
+
     // Ensure score is within bounds
     healthScore = Math.max(0, Math.min(100, healthScore));
-    
+
     // Update diagnostics
     this.diagnostics.set(agent.id, {
       agentId: agent.id,
@@ -486,7 +486,7 @@ export class AgentLifecycleManager {
       healthScore
     });
   }
-  
+
   /**
    * Monitor agents for health and performance
    */
@@ -495,23 +495,23 @@ export class AgentLifecycleManager {
       try {
         // Update diagnostics
         this.updateDiagnostics(agent);
-        
+
         // Get diagnostics
         const diagnostics = this.diagnostics.get(agentId);
-        
+
         if (!diagnostics) continue;
-        
+
         // Check for unhealthy agents
         if (diagnostics.healthScore < 50) {
           console.warn(`Agent ${agentId} has low health score: ${diagnostics.healthScore}`);
-          
+
           // Create checkpoint for unhealthy agent
           await this.createCheckpoint(agentId);
-          
+
           // If agent is in error state, try to recover
           if (agent.getStatus() === AgentStatus.ERROR) {
             console.warn(`Attempting to recover agent ${agentId} from error state`);
-            
+
             // Try to restore to last known good state
             const versions = this.agentVersions.get(agentId) || [];
             if (versions.length > 1) {
@@ -526,7 +526,7 @@ export class AgentLifecycleManager {
       }
     }
   }
-  
+
   /**
    * Get lifecycle events for an agent
    * @param agentId Agent ID
@@ -535,7 +535,7 @@ export class AgentLifecycleManager {
   getLifecycleEvents(agentId: string): AgentLifecycleEvent[] {
     return this.lifecycleEvents.get(agentId) || [];
   }
-  
+
   /**
    * Get versions for an agent
    * @param agentId Agent ID
@@ -544,7 +544,7 @@ export class AgentLifecycleManager {
   getAgentVersions(agentId: string): AgentVersion[] {
     return this.agentVersions.get(agentId) || [];
   }
-  
+
   /**
    * Get diagnostics for an agent
    * @param agentId Agent ID
@@ -553,7 +553,7 @@ export class AgentLifecycleManager {
   getAgentDiagnostics(agentId: string): AgentDiagnostics | undefined {
     return this.diagnostics.get(agentId);
   }
-  
+
   /**
    * Get all agent diagnostics
    * @returns All agent diagnostics
@@ -561,18 +561,18 @@ export class AgentLifecycleManager {
   getAllAgentDiagnostics(): AgentDiagnostics[] {
     return Array.from(this.diagnostics.values());
   }
-  
+
   /**
    * Clean up resources
    */
   cleanup(): void {
     // Clear intervals
     clearInterval(this.monitoringInterval);
-    
+
     for (const interval of this.checkpointIntervals.values()) {
       clearInterval(interval);
     }
-    
+
     this.checkpointIntervals.clear();
   }
 }

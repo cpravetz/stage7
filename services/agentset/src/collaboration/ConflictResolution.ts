@@ -54,13 +54,13 @@ export class ConflictResolution {
   private agents: Map<string, Agent>;
   private trafficManagerUrl: string;
   private brainUrl: string;
-  
+
   constructor(agents: Map<string, Agent>, trafficManagerUrl: string, brainUrl: string) {
     this.agents = agents;
     this.trafficManagerUrl = trafficManagerUrl;
     this.brainUrl = brainUrl;
   }
-  
+
   /**
    * Create a new conflict
    * @param initiatorId Initiator agent ID
@@ -88,16 +88,16 @@ export class ConflictResolution {
       updatedAt: new Date().toISOString(),
       deadline: request.deadline
     };
-    
+
     // Store conflict
     this.conflicts.set(conflict.id, conflict);
-    
+
     // Notify participants
     await this.notifyParticipants(conflict);
-    
+
     return conflict;
   }
-  
+
   /**
    * Notify participants about a conflict
    * @param conflict Conflict
@@ -107,10 +107,10 @@ export class ConflictResolution {
       if (participantId === conflict.initiatedBy) {
         continue; // Skip initiator
       }
-      
+
       try {
         const participantAgent = this.agents.get(participantId);
-        
+
         if (participantAgent) {
           // Send conflict notification to participant agent
           const message = {
@@ -125,18 +125,18 @@ export class ConflictResolution {
               deadline: conflict.deadline
             }
           };
-          
-          const properMessage = createCollaborationMessage({
-            type: message.type,
-            senderId: message.sender,
-            recipientId: message.recipient,
-            content: message.content
-          });
+
+          const properMessage = createCollaborationMessage(
+            message.type,
+            message.sender,
+            message.recipient,
+            message.content
+          );
           await participantAgent.handleCollaborationMessage(properMessage);
         } else {
           // Try to find participant agent in other agent sets
           const agentLocation = await this.findAgentLocation(participantId);
-          
+
           if (agentLocation) {
             // Forward conflict notification to the agent's location
             await axios.post(`http://${agentLocation}/conflictNotification`, {
@@ -155,7 +155,7 @@ export class ConflictResolution {
       }
     }
   }
-  
+
   /**
    * Find the location of an agent
    * @param agentId Agent ID
@@ -164,11 +164,11 @@ export class ConflictResolution {
   private async findAgentLocation(agentId: string): Promise<string | undefined> {
     try {
       const response = await axios.get(`http://${this.trafficManagerUrl}/getAgentLocation/${agentId}`);
-      
+
       if (response.data && response.data.agentSetUrl) {
         return response.data.agentSetUrl;
       }
-      
+
       return undefined;
     } catch (error) {
       analyzeError(error as Error);
@@ -176,7 +176,7 @@ export class ConflictResolution {
       return undefined;
     }
   }
-  
+
   /**
    * Submit a vote for a conflict
    * @param conflictId Conflict ID
@@ -191,121 +191,121 @@ export class ConflictResolution {
     explanation?: string
   ): Promise<void> {
     const conflict = this.conflicts.get(conflictId);
-    
+
     if (!conflict) {
       throw new Error(`Conflict ${conflictId} not found`);
     }
-    
+
     // Check if agent is a participant
     if (!conflict.participants.includes(agentId)) {
       throw new Error(`Agent ${agentId} is not a participant in conflict ${conflictId}`);
     }
-    
+
     // Check if conflict is still open
     if (conflict.status !== ConflictStatus.PENDING && conflict.status !== ConflictStatus.IN_PROGRESS) {
       throw new Error(`Conflict ${conflictId} is already ${conflict.status}`);
     }
-    
+
     // Initialize votes if needed
     if (!conflict.votes) {
       conflict.votes = {};
     }
-    
+
     // Record vote
     conflict.votes[agentId] = {
       vote,
       explanation,
       timestamp: new Date().toISOString()
     };
-    
+
     // Update conflict status
     conflict.status = ConflictStatus.IN_PROGRESS;
     conflict.updatedAt = new Date().toISOString();
-    
+
     // Check if all participants have voted
-    const allVoted = conflict.participants.every(participantId => 
+    const allVoted = conflict.participants.every(participantId =>
       conflict.votes && conflict.votes[participantId]
     );
-    
+
     if (allVoted) {
       // Resolve conflict
       await this.resolveConflict(conflictId);
     }
   }
-  
+
   /**
    * Resolve a conflict
    * @param conflictId Conflict ID
    */
   async resolveConflict(conflictId: string): Promise<void> {
     const conflict = this.conflicts.get(conflictId);
-    
+
     if (!conflict) {
       throw new Error(`Conflict ${conflictId} not found`);
     }
-    
+
     // Check if conflict is still open
     if (conflict.status !== ConflictStatus.PENDING && conflict.status !== ConflictStatus.IN_PROGRESS) {
       return; // Already resolved
     }
-    
+
     try {
       let resolution: any;
       let explanation: string;
-      
+
       switch (conflict.strategy) {
         case ConflictResolutionStrategy.VOTING:
           ({ resolution, explanation } = this.resolveByVoting(conflict));
           break;
-        
+
         case ConflictResolutionStrategy.CONSENSUS:
           ({ resolution, explanation } = this.resolveByConsensus(conflict));
           break;
-        
+
         case ConflictResolutionStrategy.AUTHORITY:
           ({ resolution, explanation } = this.resolveByAuthority(conflict));
           break;
-        
+
         case ConflictResolutionStrategy.NEGOTIATION:
           ({ resolution, explanation } = await this.resolveByNegotiation(conflict));
           break;
-        
+
         case ConflictResolutionStrategy.EXTERNAL:
           // External resolution requires human intervention
           conflict.status = ConflictStatus.ESCALATED;
           conflict.escalatedTo = 'human';
           conflict.updatedAt = new Date().toISOString();
-          
+
           // Notify about escalation
           await this.notifyEscalation(conflict);
           return;
-        
+
         default:
           throw new Error(`Unknown resolution strategy: ${conflict.strategy}`);
       }
-      
+
       // Update conflict
       conflict.resolution = resolution;
       conflict.explanation = explanation;
       conflict.status = ConflictStatus.RESOLVED;
       conflict.updatedAt = new Date().toISOString();
-      
+
       // Notify participants about resolution
       await this.notifyResolution(conflict);
     } catch (error) {
       analyzeError(error as Error);
       console.error(`Error resolving conflict ${conflictId}:`, error);
-      
+
       // Update conflict
       conflict.status = ConflictStatus.FAILED;
       conflict.explanation = error instanceof Error ? error.message : String(error);
       conflict.updatedAt = new Date().toISOString();
-      
+
       // Notify participants about failure
       await this.notifyResolution(conflict);
     }
   }
-  
+
   /**
    * Resolve conflict by voting
    * @param conflict Conflict
@@ -315,40 +315,40 @@ export class ConflictResolution {
     if (!conflict.votes) {
       throw new Error('No votes available');
     }
-    
+
     // Count votes
     const voteCounts: Record<string, number> = {};
-    
+
     for (const participantId of Object.keys(conflict.votes)) {
       const vote = JSON.stringify(conflict.votes[participantId].vote);
       voteCounts[vote] = (voteCounts[vote] || 0) + 1;
     }
-    
+
     // Find the most popular vote
     let maxCount = 0;
     let winningVote: string | undefined;
-    
+
     for (const [vote, count] of Object.entries(voteCounts)) {
       if (count > maxCount) {
         maxCount = count;
         winningVote = vote;
       }
     }
-    
+
     if (!winningVote) {
       throw new Error('No winning vote found');
     }
-    
+
     // Calculate percentage
     const totalVotes = Object.values(voteCounts).reduce((sum, count) => sum + count, 0);
     const percentage = (maxCount / totalVotes) * 100;
-    
+
     return {
       resolution: JSON.parse(winningVote),
       explanation: `Resolved by voting with ${percentage.toFixed(1)}% agreement (${maxCount}/${totalVotes} votes)`
     };
   }
-  
+
   /**
    * Resolve conflict by consensus
    * @param conflict Conflict
@@ -358,11 +358,11 @@ export class ConflictResolution {
     if (!conflict.votes) {
       throw new Error('No votes available');
     }
-    
+
     // Check if all votes are the same
     const votes = Object.values(conflict.votes).map(v => JSON.stringify(v.vote));
     const uniqueVotes = new Set(votes);
-    
+
     if (uniqueVotes.size === 1) {
       // Consensus reached
       return {
@@ -370,11 +370,11 @@ export class ConflictResolution {
         explanation: `Resolved by consensus with 100% agreement (${votes.length}/${votes.length} votes)`
       };
     }
-    
+
     // No consensus, fall back to voting
     return this.resolveByVoting(conflict);
   }
-  
+
   /**
    * Resolve conflict by authority
    * @param conflict Conflict
@@ -384,20 +384,20 @@ export class ConflictResolution {
     if (!conflict.votes) {
       throw new Error('No votes available');
     }
-    
+
     // Use initiator's vote as authoritative
     const initiatorVote = conflict.votes[conflict.initiatedBy];
-    
+
     if (!initiatorVote) {
       throw new Error('Initiator has not voted');
     }
-    
+
     return {
       resolution: initiatorVote.vote,
       explanation: `Resolved by authority (initiator's decision)`
     };
   }
-  
+
   /**
    * Resolve conflict by negotiation
    * @param conflict Conflict
@@ -407,14 +407,14 @@ export class ConflictResolution {
     if (!conflict.votes) {
       throw new Error('No votes available');
     }
-    
+
     // Collect all votes and explanations
     const votesWithExplanations = Object.entries(conflict.votes).map(([agentId, voteInfo]) => ({
       agentId,
       vote: voteInfo.vote,
       explanation: voteInfo.explanation || 'No explanation provided'
     }));
-    
+
     // Use LLM to negotiate a resolution
     try {
       const response = await axios.post(`http://${this.brainUrl}/chat`, {
@@ -430,27 +430,27 @@ export class ConflictResolution {
         ],
         optimization: 'accuracy'
       });
-      
+
       // Parse LLM response
       const llmResponse = response.data.response;
-      
+
       // Extract resolution and explanation
       const resolutionMatch = llmResponse.match(/Resolution:\s*(.*?)(?:\n\n|$)/s);
       const explanationMatch = llmResponse.match(/Explanation:\s*(.*?)(?:\n\n|$)/s);
-      
+
       const resolution = resolutionMatch ? resolutionMatch[1].trim() : llmResponse;
       const explanation = explanationMatch ? explanationMatch[1].trim() : 'Resolved by AI-assisted negotiation';
-      
+
       return { resolution, explanation };
     } catch (error) {
       analyzeError(error as Error);
       console.error('Error using LLM for negotiation:', error);
-      
+
       // Fall back to voting
       return this.resolveByVoting(conflict);
     }
   }
-  
+
   /**
    * Notify participants about conflict resolution
    * @param conflict Resolved conflict
@@ -459,7 +459,7 @@ export class ConflictResolution {
     for (const participantId of conflict.participants) {
       try {
         const participantAgent = this.agents.get(participantId);
-        
+
         if (participantAgent) {
           // Send resolution notification to participant agent
           const message = {
@@ -473,19 +473,19 @@ export class ConflictResolution {
               explanation: conflict.explanation
             }
           };
-          
-          const properResolutionMessage = createCollaborationMessage({
-            type: message.type,
-            senderId: message.sender,
-            recipientId: message.recipient,
-            content: message.content
-          });
+
+          const properResolutionMessage = createCollaborationMessage(
+            message.type,
+            message.sender,
+            message.recipient,
+            message.content
+          );
           await participantAgent.handleCollaborationMessage(properResolutionMessage);
-          
+
         } else {
           // Try to find participant agent in other agent sets
           const agentLocation = await this.findAgentLocation(participantId);
-          
+
           if (agentLocation) {
             // Forward resolution notification to the agent's location
             await axios.post(`http://${agentLocation}/conflictResolution`, {
@@ -502,7 +502,7 @@ export class ConflictResolution {
       }
     }
   }
-  
+
   /**
    * Notify about conflict escalation
    * @param conflict Escalated conflict
@@ -517,11 +517,11 @@ export class ConflictResolution {
         participants: conflict.participants,
         votes: conflict.votes
       });
-      
+
       // Notify participants about escalation
       for (const participantId of conflict.participants) {
         const participantAgent = this.agents.get(participantId);
-        
+
         if (participantAgent) {
           // Send escalation notification to participant agent
           const message = {
@@ -534,13 +534,13 @@ export class ConflictResolution {
               escalatedTo: conflict.escalatedTo
             }
           };
-          
-          const properEscalationMessage = createCollaborationMessage({
-            type: message.type,
-            senderId: message.sender,
-            recipientId: message.recipient,
-            content: message.content
-          });
+
+          const properEscalationMessage = createCollaborationMessage(
+            message.type,
+            message.sender,
+            message.recipient,
+            message.content
+          );
           await participantAgent.handleCollaborationMessage(properEscalationMessage);
         }
       }
@@ -549,7 +549,7 @@ export class ConflictResolution {
       console.error('Error notifying about conflict escalation:', error);
     }
   }
-  
+
   /**
    * Get conflict by ID
    * @param conflictId Conflict ID
@@ -558,7 +558,7 @@ export class ConflictResolution {
   getConflict(conflictId: string): Conflict | undefined {
     return this.conflicts.get(conflictId);
   }
-  
+
   /**
    * Get conflicts involving an agent
    * @param agentId Agent ID
@@ -568,39 +568,39 @@ export class ConflictResolution {
     return Array.from(this.conflicts.values())
       .filter(conflict => conflict.participants.includes(agentId));
   }
-  
+
   /**
    * Get unresolved conflicts
    * @returns Unresolved conflicts
    */
   getUnresolvedConflicts(): Conflict[] {
     return Array.from(this.conflicts.values())
-      .filter(conflict => 
-        conflict.status !== ConflictStatus.RESOLVED && 
+      .filter(conflict =>
+        conflict.status !== ConflictStatus.RESOLVED &&
         conflict.status !== ConflictStatus.FAILED
       );
   }
-  
+
   /**
    * Check for expired conflicts
    */
   async checkExpiredConflicts(): Promise<void> {
     const now = new Date();
-    
+
     for (const conflict of this.conflicts.values()) {
-      if (conflict.deadline && 
-          conflict.status !== ConflictStatus.RESOLVED && 
+      if (conflict.deadline &&
+          conflict.status !== ConflictStatus.RESOLVED &&
           conflict.status !== ConflictStatus.FAILED) {
-        
+
         const deadline = new Date(conflict.deadline);
-        
+
         if (now > deadline) {
           // Escalate expired conflict
           conflict.status = ConflictStatus.ESCALATED;
           conflict.escalatedTo = 'human';
           conflict.explanation = 'Conflict deadline expired';
           conflict.updatedAt = new Date().toISOString();
-          
+
           // Notify about escalation
           await this.notifyEscalation(conflict);
         }

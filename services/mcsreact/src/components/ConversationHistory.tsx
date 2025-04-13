@@ -1,8 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { Box, Typography, Paper, Divider, useTheme } from '@mui/material';
 import ReactMarkdown from 'react-markdown';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { materialDark, materialLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
 interface Props {
   history: string[];
@@ -18,7 +16,6 @@ const ConversationHistory: React.FC<Props> = ({ history }) => {
   }, [history]);
 
   const theme = useTheme();
-  const codeStyle = theme.palette.mode === 'dark' ? materialDark : materialLight;
 
   // Function to determine if a message is from the user or the system
   const isUserMessage = (message: string): boolean => {
@@ -123,23 +120,11 @@ const ConversationHistory: React.FC<Props> = ({ history }) => {
               <Divider sx={{ mb: 1 }} />
               <ReactMarkdown
                 components={{
-                  code({ node, inline, className, children, ...props }) {
-                    const match = /language-(\w+)/.exec(className || '');
-                    return !inline && match ? (
-                      <SyntaxHighlighter
-                        style={codeStyle}
-                        language={match[1]}
-                        PreTag="div"
-                        {...props}
-                      >
-                        {String(children).replace(/\n$/, '')}
-                      </SyntaxHighlighter>
-                    ) : (
-                      <code className={className} {...props}>
-                        {children}
-                      </code>
-                    );
-                  },
+                  code({ node, className, children, ...props }) {
+                    return <code className={className} {...props}>
+                      {children}
+                    </code>
+                  }
                 }}
               >
                 {formattedMessage}
