@@ -1,4 +1,4 @@
-import express from 'express';
+import express, { Request, Response } from 'express';
 import passport from 'passport';
 import cors from 'cors';
 import { configurePassport } from './config/passport';
@@ -6,9 +6,8 @@ import { authRoutes } from './routes/auth';
 import { userRoutes } from './routes/user';
 import { errorHandler } from './middleware/errorHandler';
 import bodyParser from 'body-parser';
-import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
-import { verifyComponentCredentials } from './models/jwtAuth';
+import { authenticateService, verifyToken } from './models/jwtAuth';
 
 const app = express();
 export class SecurityManager {
@@ -27,7 +26,7 @@ export class SecurityManager {
             windowMs: 15 * 60 * 1000, // 15 minutes
             max: 1000, // max 100 requests per windowMs
         });
-        app.use(limiter);        
+        app.use(limiter);
         app.use(cors());
         app.use(bodyParser.json());
         app.use(bodyParser.urlencoded({ extended: true }));
@@ -47,19 +46,50 @@ export class SecurityManager {
             message: 'Too many authentication requests, please try again later.'
         });
 
-        app.post('/auth/service', authServiceLimiter, async (req, res) => {
-            const { componentType, clientSecret } = req.body;
+        app.post('/auth/service', authServiceLimiter, async (req: Request, res: Response) => {
+            console.log('Received authentication request from component');
+            console.log('Request body:', JSON.stringify(req.body));
 
-            // Verify the component's credentials (you'll need to implement this)
-            if (process.env.JWT_SECRET && await verifyComponentCredentials(componentType, clientSecret)) {
-                const token = jwt.sign(
-                    { componentType },
-                    process.env.JWT_SECRET,
-                    { expiresIn: '1h' }
-                );
-                res.json({ authenticated: true, token });
+            const { componentType, clientSecret } = req.body;
+            console.log(`Component type: ${componentType}, Client secret provided: ${clientSecret ? 'Yes' : 'No'}`);
+
+            try {
+                const token = await authenticateService(componentType, clientSecret);
+                if (token) {
+                    console.log(`Generated token for ${componentType}`);
+                    res.json({ authenticated: true, token });
+                } else {
+                    console.error(`Authentication failed for ${componentType}`);
+                    res.status(401).json({ authenticated: false, error: 'Invalid credentials' });
+                }
+            } catch (error) {
+                console.error(`Error authenticating ${componentType}:`, error);
+                res.status(500).json({ authenticated: false, error: 'Authentication service error' });
+            }
+        });
+
+        // Add endpoint to verify tokens
+        app.post('/verify', (req: any, res: any) => {
+            console.log('Received token verification request');
+            const authHeader = req.headers.authorization;
+            console.log('Authorization header:', authHeader);
+
+            if (!authHeader || !authHeader.startsWith('Bearer ')) {
+                return res.status(401).json({ valid: false, error: 'No token provided' });
+            }
+
+            const token = authHeader.split(' ')[1];
+            const decoded = verifyToken(token);
+
+            if (decoded) {
+                console.log('Token verified successfully:', decoded);
+                return res.status(200).json({
+                    valid: true,
+                    user: decoded
+                });
             } else {
-                res.status(401).json({ authenticated: false, message: 'Invalid credentials' });
+                console.error('Invalid token');
+                return res.status(401).json({ valid: false, error: 'Invalid token' });
             }
         });
 

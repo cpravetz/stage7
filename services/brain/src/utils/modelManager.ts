@@ -110,6 +110,30 @@ export class ModelManager {
         return Array.from(this.models.keys());
     }
 
+    /**
+     * Get all models
+     * @returns Map of all models
+     */
+    getAllModels(): Map<string, BaseModel> {
+        return this.models;
+    }
+
+    /**
+     * Get the interface manager
+     * @returns The interface manager
+     */
+    getInterfaceManager() {
+        return interfaceManager;
+    }
+
+    /**
+     * Get the service manager
+     * @returns The service manager
+     */
+    getServiceManager() {
+        return serviceManager;
+    }
+
     // getModel is already defined above
 
     /**

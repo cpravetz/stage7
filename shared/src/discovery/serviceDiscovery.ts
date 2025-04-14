@@ -7,6 +7,7 @@ export class ServiceDiscovery {
   private consulUrl: string;
   private serviceCache: Map<string, { url: string, timestamp: number }> = new Map();
   private cacheTTL: number = 60000; // 1 minute cache TTL
+  private registeredServices: Set<string> = new Set();
 
   constructor(consulUrl: string = process.env.CONSUL_URL || 'consul:8500') {
     this.consulUrl = consulUrl;
@@ -48,9 +49,11 @@ export class ServiceDiscovery {
         }
       });
 
+      // Track registered service locally
+      this.registeredServices.add(serviceId);
       console.log(`Service ${serviceId} registered with Consul`);
     } catch (error) {
-      console.error('Failed to register service with Consul:', error);
+      console.error(`Failed to register service ${serviceId} with Consul`);
       // Continue without service discovery - will fall back to environment variables
     }
   }
@@ -63,10 +66,21 @@ export class ServiceDiscovery {
   async deregisterService(serviceId: string): Promise<void> {
     try {
       await axios.put(`http://${this.consulUrl}/v1/agent/service/deregister/${serviceId}`);
+      // Remove from local tracking
+      this.registeredServices.delete(serviceId);
       console.log(`Service ${serviceId} deregistered from Consul`);
     } catch (error) {
       console.error('Failed to deregister service from Consul:', error);
     }
+  }
+
+  /**
+   * Check if a service is registered
+   * @param serviceId Unique identifier for the service
+   * @returns true if the service is registered, false otherwise
+   */
+  isRegistered(serviceId: string): boolean {
+    return this.registeredServices.has(serviceId);
   }
 
   /**
@@ -79,7 +93,7 @@ export class ServiceDiscovery {
     // Check cache first
     const cacheKey = `${serviceName}${tag ? `:${tag}` : ''}`;
     const cachedService = this.serviceCache.get(cacheKey);
-    
+
     if (cachedService && (Date.now() - cachedService.timestamp) < this.cacheTTL) {
       return cachedService.url;
     }
@@ -94,16 +108,16 @@ export class ServiceDiscovery {
         // Get a random healthy instance
         const instance = response.data[Math.floor(Math.random() * response.data.length)];
         const serviceUrl = `${instance.Service.Address}:${instance.Service.Port}`;
-        
+
         // Update cache
-        this.serviceCache.set(cacheKey, { 
-          url: serviceUrl, 
-          timestamp: Date.now() 
+        this.serviceCache.set(cacheKey, {
+          url: serviceUrl,
+          timestamp: Date.now()
         });
-        
+
         return serviceUrl;
       }
-      
+
       return null;
     } catch (error) {
       console.error(`Failed to discover service ${serviceName}:`, error);
@@ -125,11 +139,11 @@ export class ServiceDiscovery {
       );
 
       if (response.data && response.data.length > 0) {
-        return response.data.map((instance: any) => 
+        return response.data.map((instance: any) =>
           `${instance.Service.Address}:${instance.Service.Port}`
         );
       }
-      
+
       return [];
     } catch (error) {
       console.error(`Failed to discover service instances for ${serviceName}:`, error);

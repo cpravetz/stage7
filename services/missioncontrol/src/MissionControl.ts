@@ -361,7 +361,7 @@ class MissionControl extends BaseEntity {
                     console.warn('Failed to fetch LLM calls:', error instanceof Error ? error.message : error);
                     return { data: { llmCalls: null } };
                 }),
-                api.get(`http://${this.engineerUrl}/statistics`).catch(error => {
+                this.authenticatedApi.get(`http://${this.engineerUrl}/statistics`).catch((error: any) => {
                     console.warn('Failed to fetch engineer statistics:', error instanceof Error ? error.message : error);
                     return { data: null };
                 })

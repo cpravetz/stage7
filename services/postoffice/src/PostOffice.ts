@@ -68,7 +68,7 @@ export class PostOffice {
 
         this.app.use(bodyParser.json());
         this.app.use(bodyParser.urlencoded({ extended: true }));
-        this.app.use(this.logRequest);
+        //this.app.use(this.logRequest);
 
         // Add OPTIONS handler for preflight requests
         this.app.options('*', cors(corsOptions));
@@ -181,8 +181,38 @@ export class PostOffice {
     }
 
     private setupHealthCheck() {
+        // Basic health check endpoint
         this.app.get('/health', (req, res) => {
-            res.status(200).json({ status: 'ok' });
+            const rabbitMQConnected = this.mqClient.isConnected();
+            const status = {
+                status: rabbitMQConnected ? 'ok' : 'degraded',
+                timestamp: new Date().toISOString(),
+                services: {
+                    rabbitMQ: rabbitMQConnected ? 'connected' : 'disconnected',
+                    serviceDiscovery: this.serviceDiscovery.isRegistered('PostOffice') ? 'registered' : 'not registered',
+                    components: this.components.size
+                },
+                ready: rabbitMQConnected
+            };
+
+            res.status(rabbitMQConnected ? 200 : 503).json(status);
+        });
+
+        // Readiness check endpoint - returns 200 only when fully ready to accept connections
+        this.app.get('/ready', (req, res) => {
+            const rabbitMQConnected = this.mqClient.isConnected();
+            const serviceDiscoveryReady = this.serviceDiscovery.isRegistered('PostOffice');
+            const ready = rabbitMQConnected && serviceDiscoveryReady;
+
+            if (ready) {
+                res.status(200).json({ ready: true });
+            } else {
+                res.status(503).json({
+                    ready: false,
+                    rabbitMQ: rabbitMQConnected ? 'connected' : 'disconnected',
+                    serviceDiscovery: serviceDiscoveryReady ? 'registered' : 'not registered'
+                });
+            }
         });
     }
 

@@ -135,44 +135,66 @@ export class BaseEntity implements IBaseEntity {
     // Subclasses should override handleBaseMessage or implement their own message handling
   }
 
-  protected async registerWithPostOffice(retryCount: number = 10) {
-    const register = async () => {
+  /**
+   * Check if PostOffice is ready to accept connections
+   * @returns Promise that resolves to true if PostOffice is ready, false otherwise
+   */
+  private async isPostOfficeReady(): Promise<boolean> {
+    try {
+      const response = await axios.get(`http://${this.postOfficeUrl}/ready`, { timeout: 2000 });
+      return response.status === 200;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  /**
+   * Register this entity with the PostOffice service
+   * @param maxRetries Maximum number of retry attempts
+   * @param initialDelayMs Initial delay between retries in milliseconds
+   */
+  protected async registerWithPostOffice(maxRetries: number = 10, initialDelayMs: number = 1000) {
+    let retries = 0;
+    let delay = initialDelayMs;
+
+    while (retries < maxRetries) {
       try {
-        // First try with authenticated API
-        try {
-          const response = await this.authenticatedApi.post(`http://${this.postOfficeUrl}/registerComponent`, {
-            id: this.id,
-            type: this.componentType,
-            url: this.url
-          });
-          if (response.status === 200) {
-            console.log(`${this.componentType} registered successfully with PostOffice using authenticated API`);
-            this.registeredWithPostOffice = true;
-            return;
-          }
-        } catch (authError) {
-          console.warn(`Authentication failed when registering ${this.componentType} with PostOffice, trying unauthenticated fallback`);
-          // Fall back to unauthenticated API if authentication fails
+        // First check if PostOffice is ready
+        const isReady = await this.isPostOfficeReady();
+        if (!isReady) {
+          console.log(`PostOffice not ready, waiting ${delay}ms before retry ${retries + 1}/${maxRetries}`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          delay = Math.min(delay * 1.5, 10000); // Exponential backoff with 10s cap
+          retries++;
+          continue;
         }
 
-        // Fallback to direct axios call without authentication
-        const fallbackResponse = await axios.post(`http://${this.postOfficeUrl}/registerComponent`, {
+        // Use authenticated API with shared secret
+        const response = await this.authenticatedApi.post(`http://${this.postOfficeUrl}/registerComponent`, {
           id: this.id,
           type: this.componentType,
           url: this.url
         });
 
-        if (fallbackResponse.status === 200) {
-          console.log(`${this.componentType} registered successfully with PostOffice using fallback method`);
+        if (response.status === 200) {
+          console.log(`${this.componentType} registered successfully with PostOffice`);
           this.registeredWithPostOffice = true;
+          return;
         }
       } catch (error) {
-        console.error(`Failed to register ${this.componentType} with PostOffice:`, error);
-        throw error;
-      }
-    };
+        console.error(`Failed to register ${this.componentType} with PostOffice (attempt ${retries + 1}/${maxRetries}): ${(error as Error).message ? (error as Error).message : ''}`);
 
-    await register();
+        if (retries >= maxRetries - 1) {
+          console.error(`Maximum retries (${maxRetries}) reached for registering with PostOffice`);
+          return;
+        }
+
+        await new Promise(resolve => setTimeout(resolve, delay));
+        delay = Math.min(delay * 1.5, 10000); // Exponential backoff with 10s cap
+      }
+
+      retries++;
+    }
   }
 
   async sendMessage(type: string, recipient: string, content: any, requiresSync: boolean = false): Promise<void> {

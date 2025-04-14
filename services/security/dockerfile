@@ -18,6 +18,8 @@ COPY shared ./shared
 COPY errorhandler ./errorhandler
 COPY services/security ./services/security
 
+# No need for minimal implementation anymore - using TypeScript version
+
 # Build the TypeScript code - ensure shared is built first
 RUN cd shared && npm run build
 RUN cd errorhandler && npm run build
@@ -30,4 +32,4 @@ WORKDIR /usr/src/app/services/security
 EXPOSE 5010
 
 # Define the command to run the application
-CMD ["node", "dist/SecurityManager.js"]
+CMD ["node", "src/SecurityManager.js"]

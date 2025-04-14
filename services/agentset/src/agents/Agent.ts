@@ -15,9 +15,10 @@ import { Step, StepStatus, createFromPlan } from './Step';
 import { StateManager } from '../utils/StateManager';
 import { CollaborationMessage } from '../collaboration/CollaborationProtocol';
 import { DelegatedTask } from '../collaboration/TaskDelegation';
+import { AuthenticatedApiClient } from '@cktmcs/shared';
 
-
-const api = axios.create({
+// Create a simple axios instance for non-authenticated calls
+const simpleApi = axios.create({
     headers: {
       'Content-Type': 'application/json',
       'Access-Control-Allow-Origin': '*',
@@ -40,6 +41,7 @@ export class Agent extends BaseEntity {
     trafficManagerUrl: string = '';
     librarianUrl: string = '';
     conversation: Array<{ role: string, content: string }> = [];
+    authenticatedApi: AuthenticatedApiClient;
 
     // Agent lifecycle properties
     private paused: boolean = false;
@@ -73,6 +75,9 @@ export class Agent extends BaseEntity {
         if (config.missionContext) {
             this.missionContext = config.missionContext;
         }
+
+        // Initialize the authenticated API client
+        this.authenticatedApi = new AuthenticatedApiClient(this);
 
         // Create initial step using the new Step class
         const initialStep = new Step({
@@ -259,7 +264,8 @@ Please consider this context and the available plugins when planning and executi
 
     private async checkAndResumeBlockedAgents() {
         try {
-            await api.post(`http://${this.trafficManagerUrl}/checkBlockedAgents`, { completedAgentId: this.id });
+            // Use simpleApi for non-authenticated calls
+            await simpleApi.post(`http://${this.trafficManagerUrl}/checkBlockedAgents`, { completedAgentId: this.id });
         } catch (error) { analyzeError(error as Error);
             console.error('Error checking blocked agents:', error instanceof Error ? error.message : error);
         }
@@ -399,7 +405,8 @@ Please consider this context and the available plugins when planning and executi
                 missionContext: this.missionContext
             };
 
-            const response = await axios.post(`http://${this.agentSetUrl}/addAgent`, subAgentConfig);
+            // Use simpleApi for non-authenticated calls
+            const response = await simpleApi.post(`http://${this.agentSetUrl}/addAgent`, subAgentConfig);
 
             if (response.status >= 300) {
                 console.error('Failed to create sub-agent:', response.data.error || 'Unknown error');
@@ -484,7 +491,8 @@ Please consider this context and the available plugins when planning and executi
         };
 
         try {
-            const response = await api.post(`http://${this.brainUrl}/chat`, reasoningInput);
+            // Use the authenticated API client for Brain requests
+            const response = await this.authenticatedApi.post(`http://${this.brainUrl}/chat`, reasoningInput);
             const brainResponse = response.data.response;
             const mimeType = response.data.mimeType || 'text/plain';
 
@@ -539,7 +547,7 @@ Please consider this context and the available plugins when planning and executi
             //console.log('Agent: Executing serialized action with CapabilitiesManager:', payload);
 
             // Add timeout and abort signal to the request
-            const response = await api.post(
+            const response = await simpleApi.post(
                 `http://${this.capabilitiesManagerUrl}/executeAction`,
                 payload
             );
@@ -970,8 +978,8 @@ Please consider this context and the available plugins when planning and executi
      */
     async generateConflictVote(conflict: any): Promise<{ vote: any, explanation: string } | null> {
         try {
-            // Use brain to generate vote
-            const response = await axios.post(`http://${this.brainUrl}/chat`, {
+            // Use brain to generate vote with authenticated API client
+            const response = await this.authenticatedApi.post(`http://${this.brainUrl}/chat`, {
                 exchanges: [
                     {
                         role: 'system',

@@ -148,7 +148,7 @@ const StatisticsWindow: React.FC<Props> = ({ statistics, activeMissionName, acti
         </Box>
       </Paper>
 
-      <Paper elevation={1} sx={{ p: 2, borderRadius: 2 }}>
+      <Paper elevation={1} sx={{ p: 2, mb: 3, lborderRadius: 2 }}>
         <Typography variant="subtitle1" color="text.secondary" gutterBottom>
           New Plugins
         </Typography>
@@ -171,6 +171,11 @@ const StatisticsWindow: React.FC<Props> = ({ statistics, activeMissionName, acti
             ))
           )}
         </List>
+      </Paper>
+      <Paper elevation={1} sx={{ p: 2, borderRadius: 2 }}>
+        <Typography variant="subtitle1" color="text.secondary" gutterBottom>
+          Seakaytee
+        </Typography>
       </Paper>
     </Box>
   );

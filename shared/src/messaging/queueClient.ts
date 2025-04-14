@@ -137,6 +137,14 @@ export class MessageQueueClient {
     }
   }
 
+  /**
+   * Check if the client is connected to RabbitMQ
+   * @returns true if connected, false otherwise
+   */
+  isConnected(): boolean {
+    return this.connection !== null && this.channel !== null;
+  }
+
   async close(): Promise<void> {
     try {
       if (this.channel) {

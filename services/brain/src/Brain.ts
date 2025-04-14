@@ -1,5 +1,6 @@
 import express from 'express';
 import bodyParser from 'body-parser';
+import axios from 'axios';
 import { OptimizationType, ModelManager } from './utils/modelManager';
 import { LLMConversationType } from './interfaces/baseInterface';
 import { ExchangeType } from './services/baseService';
@@ -41,6 +42,52 @@ export class Brain extends BaseEntity {
     init() {
         // Middleware
         app.use(bodyParser.json());
+
+        // Create a function to check authentication
+        const checkAuth = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+            // Skip authentication for health and models/health endpoints
+            if (req.path === '/health' || req.path === '/models/health') {
+                return next();
+            }
+
+            // Skip authentication in development mode if configured
+            if (process.env.SKIP_AUTH === 'true' || process.env.NODE_ENV === 'development') {
+                return next();
+            }
+
+            // Check for authentication token
+            const authHeader = req.headers.authorization;
+            if (!authHeader || !authHeader.startsWith('Bearer ')) {
+                return res.status(401).json({ error: 'No token provided' });
+            }
+
+            // Token is present, proceed with the request
+            next();
+        };
+
+        // Apply authentication to all routes except health checks
+        app.use((req, res, next) => {
+            if (req.path === '/health' || req.path === '/models/health') {
+                return next();
+            }
+            checkAuth(req, res, next);
+        });
+
+        // Add health check endpoint
+        app.get('/health', (req: express.Request, res: express.Response) => {
+            res.json({ status: 'ok', message: 'Brain service is running' });
+        });
+
+        // API endpoint to check the health of all LLM models - no auth required
+        app.get('/models/health', (req: express.Request, res: express.Response, next: express.NextFunction) => {
+            this.checkModelsHealth()
+                .then(healthReport => {
+                    res.json(healthReport);
+                })
+                .catch(error => {
+                    next(error);
+                });
+        });
 
         // Global error handler
         app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -183,8 +230,8 @@ export class Brain extends BaseEntity {
         });
 
         // Start the server
-        app.listen(port, () => {
-            console.log(`Brain service listening at http://localhost:${port}`);
+        app.listen(Number(port), '0.0.0.0', () => {
+            console.log(`Brain service listening at http://0.0.0.0:${port}`);
         });
 
         // Handle uncaught exceptions
@@ -327,6 +374,153 @@ export class Brain extends BaseEntity {
      */
     getAvailableModels(): string[] {
         return this.modelManager.getAvailableModels();
+    }
+
+    /**
+     * Get the interface manager
+     * @returns The interface manager
+     */
+    getInterfaceManager() {
+        return this.modelManager.getInterfaceManager();
+    }
+
+    /**
+     * Get the service manager
+     * @returns The service manager
+     */
+    getServiceManager() {
+        return this.modelManager.getServiceManager();
+    }
+
+    /**
+     * Check the health of all LLM models.
+     * @returns A health report for all models
+     */
+    async checkModelsHealth(): Promise<any> {
+        const modelNames = this.modelManager.getAvailableModels();
+        const allModels = this.modelManager.getAllModels();
+        const healthReport: any = {
+            totalModels: modelNames.length,
+            availableModels: 0,
+            unavailableModels: 0,
+            models: []
+        };
+
+        // Get all interfaces and services for reporting
+        const interfaceManager = this.getInterfaceManager();
+        const serviceManager = this.getServiceManager();
+        const allInterfaces = interfaceManager.getAllInterfaces();
+        const allServices = serviceManager.getAllServices();
+
+        // Report on interfaces
+        const interfaceReport: any = {};
+        for (const [name, interfaceInstance] of allInterfaces) {
+            interfaceReport[name] = {
+                name,
+                available: true, // Interfaces are always available
+                models: []
+            };
+        }
+
+        // Report on services
+        const serviceReport: any = {};
+        for (const [name, serviceInstance] of allServices) {
+            serviceReport[name] = {
+                name,
+                available: serviceInstance.isAvailable(),
+                apiKeySet: !!serviceInstance.apiKey,
+                apiUrlSet: !!serviceInstance.apiUrl,
+                models: []
+            };
+        }
+
+        // Process all models
+        for (const modelName of modelNames) {
+            const model = allModels.get(modelName);
+            if (!model) continue;
+
+            const modelHealth = {
+                name: model.name,
+                modelName: model.modelName,
+                interfaceName: model.interfaceName,
+                serviceName: model.serviceName,
+                available: model.isAvailable(),
+                tokenLimit: model.tokenLimit,
+                supportedConversationTypes: model.contentConversation,
+                serviceAvailable: model.service?.isAvailable() || false,
+                interfaceAvailable: !!model.llminterface,
+                apiKeySet: !!model.service?.apiKey
+            };
+
+            if (modelHealth.available) {
+                healthReport.availableModels++;
+            } else {
+                healthReport.unavailableModels++;
+            }
+
+            healthReport.models.push(modelHealth);
+
+            // Add model to interface report
+            if (interfaceReport[model.interfaceName]) {
+                interfaceReport[model.interfaceName].models.push(modelHealth);
+            }
+
+            // Add model to service report
+            if (serviceReport[model.serviceName]) {
+                serviceReport[model.serviceName].models.push(modelHealth);
+            }
+        }
+
+        // Group models by provider
+        const modelsByProvider: any = {};
+        for (const model of healthReport.models) {
+            const provider = model.interfaceName;
+            if (!modelsByProvider[provider]) {
+                modelsByProvider[provider] = {
+                    provider,
+                    totalModels: 0,
+                    availableModels: 0,
+                    unavailableModels: 0,
+                    models: []
+                };
+            }
+
+            modelsByProvider[provider].totalModels++;
+            if (model.available) {
+                modelsByProvider[provider].availableModels++;
+            } else {
+                modelsByProvider[provider].unavailableModels++;
+            }
+            modelsByProvider[provider].models.push(model);
+        }
+
+        // Add additional information about interfaces and services
+        healthReport.providers = Object.values(modelsByProvider);
+        healthReport.interfaces = Object.values(interfaceReport);
+        healthReport.services = Object.values(serviceReport);
+
+        // Add information about missing interfaces
+        healthReport.missingInterfaces = [];
+        if (!allInterfaces.has('gemini') && !modelsByProvider['gemini']) {
+            healthReport.missingInterfaces.push({
+                name: 'gemini',
+                reason: 'Interface not implemented or empty'
+            });
+        }
+        if (!allInterfaces.has('huggingface') && !modelsByProvider['huggingface']) {
+            healthReport.missingInterfaces.push({
+                name: 'huggingface',
+                reason: 'Interface not registered properly'
+            });
+        }
+        if (!allInterfaces.has('openrouter') && !modelsByProvider['openrouter']) {
+            healthReport.missingInterfaces.push({
+                name: 'openrouter',
+                reason: 'Interface not registered properly'
+            });
+        }
+
+        return healthReport;
     }
 
     private determineMimeType(response: string): string {

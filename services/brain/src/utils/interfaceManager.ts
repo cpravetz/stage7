@@ -50,6 +50,14 @@ export class InterfaceManager {
             return undefined;
         }
     }
+
+    /**
+     * Get all interfaces
+     * @returns Map of all interfaces
+     */
+    getAllInterfaces(): Map<string, BaseInterface> {
+        return this.interfaces;
+    }
 }
 
 const interfaceManager = new InterfaceManager();

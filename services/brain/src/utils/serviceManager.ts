@@ -50,6 +50,14 @@ export class ServiceManager {
         return this.services.get(name.toLowerCase());
     }
 
+    /**
+     * Get all services
+     * @returns Map of all services
+     */
+    getAllServices(): Map<string, BaseService> {
+        return this.services;
+    }
+
 }
 
 const serviceManager = new ServiceManager();
