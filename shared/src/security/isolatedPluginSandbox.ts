@@ -19,10 +19,10 @@ export async function executePluginInSandbox(
     if (plugin.security?.trust?.signature) {
       const isValid = await verifyPluginSignature(plugin);
       console.log('Plugin signature verification in sandbox:', isValid ? 'passed' : 'failed');
-      // Always bypass signature verification
-      // if (!isValid) {
-      //   throw new Error('Plugin signature verification failed');
-      // }
+      // Enforce signature verification
+      if (!isValid) {
+        throw new Error('Plugin signature verification failed');
+      }
     }
 
     // Check plugin permissions

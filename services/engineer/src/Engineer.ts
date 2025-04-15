@@ -279,7 +279,8 @@ Types used in the plugin structure are:
     }
 
     private finalizePlugin(pluginStructure: any, explanation: string): PluginDefinition {
-      return {
+      // Create the plugin definition
+      const plugin: PluginDefinition = {
           ...pluginStructure,
           explanation,
           version: '1.0.0',
@@ -293,11 +294,21 @@ Types used in the plugin structure are:
                   allowedAPIs: ['fetch', 'console']
               },
               trust: {
-                  publisher: 'system-generated',
-                  signature: signPlugin(pluginStructure)
+                  publisher: 'system-generated'
               }
           }
       };
+
+      // Sign the plugin
+      try {
+          // Sign the plugin using the RSA key if available
+          plugin.security.trust.signature = signPlugin(plugin);
+          console.log(`Plugin ${plugin.id} signed successfully`);
+      } catch (error) {
+          console.error(`Error signing plugin ${plugin.id}:`, error instanceof Error ? error.message : error);
+      }
+
+      return plugin;
   }
 
     private async generateExplanation(verb: string, context: Map<string, PluginInput>): Promise<string> {

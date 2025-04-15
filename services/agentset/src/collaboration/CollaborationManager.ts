@@ -5,6 +5,7 @@ import { ConflictResolution } from './ConflictResolution';
 import { CollaborationMessage, CollaborationMessageType, CollaborationProtocol, TaskDelegationRequest, TaskDelegationResponse, ConflictResolutionRequest, ConflictResolutionResponse, KnowledgeSharing, createCollaborationMessage } from './CollaborationProtocol';
 import { v4 as uuidv4 } from 'uuid';
 import { analyzeError } from '@cktmcs/errorhandler';
+import axios from 'axios';
 
 /**
  * Collaboration manager
@@ -17,7 +18,7 @@ export class CollaborationManager implements CollaborationProtocol {
   private librarianUrl: string;
   private trafficManagerUrl: string;
   private brainUrl: string;
-  
+
   constructor(
     agents: Map<string, Agent>,
     librarianUrl: string,
@@ -28,15 +29,15 @@ export class CollaborationManager implements CollaborationProtocol {
     this.librarianUrl = librarianUrl;
     this.trafficManagerUrl = trafficManagerUrl;
     this.brainUrl = brainUrl;
-    
+
     this.taskDelegation = new TaskDelegation(agents, trafficManagerUrl);
     this.conflictResolution = new ConflictResolution(agents, trafficManagerUrl, brainUrl);
-    
+
     // Set up periodic checks
     setInterval(() => this.taskDelegation.checkExpiredTasks(), 60000); // Check every minute
     setInterval(() => this.conflictResolution.checkExpiredConflicts(), 60000); // Check every minute
   }
-  
+
   /**
    * Get or create shared memory for a mission
    * @param missionId Mission ID
@@ -46,10 +47,10 @@ export class CollaborationManager implements CollaborationProtocol {
     if (!this.sharedMemories.has(missionId)) {
       this.sharedMemories.set(missionId, new SharedMemory(this.librarianUrl, missionId));
     }
-    
+
     return this.sharedMemories.get(missionId)!;
   }
-  
+
   /**
    * Send a collaboration message
    * @param message Message to send
@@ -64,12 +65,18 @@ export class CollaborationManager implements CollaborationProtocol {
       } else {
         // Send message to specific agent
         const recipientAgent = this.agents.get(message.recipientId);
-        
+
         if (recipientAgent) {
           await recipientAgent.handleCollaborationMessage(message);
         } else {
-          // TODO: Forward message to agent in another agent set
-          console.warn(`Agent ${message.recipientId} not found in this agent set`);
+          // Forward message to agent in another agent set
+          const agentLocation = await this.findAgentLocation(message.recipientId);
+
+          if (agentLocation) {
+            await this.forwardCollaborationMessage(message, agentLocation);
+          } else {
+            console.warn(`Agent ${message.recipientId} not found in any agent set`);
+          }
         }
       }
     } catch (error) {
@@ -78,46 +85,99 @@ export class CollaborationManager implements CollaborationProtocol {
       throw error;
     }
   }
-  
+
+  /**
+   * Find the location of an agent
+   * @param agentId Agent ID
+   * @returns Agent set URL or undefined if not found
+   */
+  private async findAgentLocation(agentId: string): Promise<string | undefined> {
+    try {
+      const response = await axios.get(`http://${this.trafficManagerUrl}/getAgentLocation/${agentId}`);
+
+      if (response.data && response.data.agentSetUrl) {
+        return response.data.agentSetUrl;
+      }
+
+      return undefined;
+    } catch (error) {
+      analyzeError(error as Error);
+      console.error('Error finding agent location:', error);
+      return undefined;
+    }
+  }
+
+  /**
+   * Forward a collaboration message to an agent in another agent set
+   * @param message Collaboration message
+   * @param agentSetUrl Agent set URL
+   */
+  private async forwardCollaborationMessage(message: CollaborationMessage, agentSetUrl: string): Promise<void> {
+    try {
+      console.log(`Forwarding collaboration message to agent ${message.recipientId} at ${agentSetUrl}`);
+
+      await axios.post(`http://${agentSetUrl}/collaboration/message`, message);
+
+      console.log(`Successfully forwarded collaboration message to agent ${message.recipientId}`);
+    } catch (error) {
+      analyzeError(error as Error);
+      console.error(`Error forwarding collaboration message to agent ${message.recipientId}:`, error);
+      throw error;
+    }
+  }
+
   /**
    * Handle a received collaboration message
    * @param message Received message
    */
   async handleMessage(message: CollaborationMessage): Promise<void> {
     try {
+      console.log(`Received collaboration message for agent ${message.recipientId}`);
+
+      // If the message is for a specific agent, route it to that agent
+      if (message.recipientId !== 'broadcast') {
+        const recipientAgent = this.agents.get(message.recipientId);
+
+        if (recipientAgent) {
+          await recipientAgent.handleCollaborationMessage(message);
+          return;
+        }
+      }
+
+      // Process the message based on its type
       switch (message.type) {
         case CollaborationMessageType.KNOWLEDGE_SHARE:
           await this.handleKnowledgeShare(message);
           break;
-        
+
         case CollaborationMessageType.TASK_DELEGATION:
           await this.handleTaskDelegation(message);
           break;
-        
+
         case CollaborationMessageType.TASK_RESULT:
           await this.handleTaskResult(message);
           break;
-        
+
         case CollaborationMessageType.TASK_STATUS:
           await this.handleTaskStatus(message);
           break;
-        
+
         case CollaborationMessageType.CONFLICT_RESOLUTION:
           await this.handleConflictResolution(message);
           break;
-        
+
         case CollaborationMessageType.COORDINATION:
           await this.handleCoordination(message);
           break;
-        
+
         case CollaborationMessageType.RESOURCE_REQUEST:
           await this.handleResourceRequest(message);
           break;
-        
+
         case CollaborationMessageType.RESOURCE_RESPONSE:
           await this.handleResourceResponse(message);
           break;
-        
+
         default:
           console.warn(`Unknown collaboration message type: ${message.type}`);
       }
@@ -127,7 +187,7 @@ export class CollaborationManager implements CollaborationProtocol {
       throw error;
     }
   }
-  
+
   /**
    * Handle knowledge share message
    * @param message Knowledge share message
@@ -135,15 +195,15 @@ export class CollaborationManager implements CollaborationProtocol {
   private async handleKnowledgeShare(message: CollaborationMessage): Promise<void> {
     const knowledge = message.content as KnowledgeSharing;
     const senderAgent = this.agents.get(message.senderId);
-    
+
     if (!senderAgent) {
       console.warn(`Agent ${message.senderId} not found`);
       return;
     }
-    
+
     // Store knowledge in shared memory
     const sharedMemory = this.getSharedMemory(senderAgent.missionId);
-    
+
     await sharedMemory.set(
       `knowledge:${knowledge.topic}:${uuidv4()}`,
       knowledge.content,
@@ -153,10 +213,10 @@ export class CollaborationManager implements CollaborationProtocol {
         accessControl: { read: ['all'], write: [message.senderId] }
       }
     );
-    
+
     console.log(`Knowledge shared by agent ${message.senderId} on topic ${knowledge.topic}`);
   }
-  
+
   /**
    * Handle task delegation message
    * @param message Task delegation message
@@ -164,19 +224,19 @@ export class CollaborationManager implements CollaborationProtocol {
   private async handleTaskDelegation(message: CollaborationMessage): Promise<void> {
     const task = message.content;
     const recipientAgent = this.agents.get(message.recipientId);
-    
+
     if (!recipientAgent) {
       console.warn(`Agent ${message.recipientId} not found`);
       return;
     }
-    
+
     // Update task status to in progress
     await this.taskDelegation.updateTaskStatus(task.id, 'in_progress' as TaskStatus);
-    
+
     // Create a step for the task
     await recipientAgent.createStepForTask(task);
   }
-  
+
   /**
    * Handle task result message
    * @param message Task result message
@@ -184,16 +244,16 @@ export class CollaborationManager implements CollaborationProtocol {
   private async handleTaskResult(message: CollaborationMessage): Promise<void> {
     const result = message.content;
     const delegatorAgent = this.agents.get(message.recipientId);
-    
+
     if (!delegatorAgent) {
       console.warn(`Agent ${message.recipientId} not found`);
       return;
     }
-    
+
     // Process task result
     await delegatorAgent.processTaskResult(result);
   }
-  
+
   /**
    * Handle task status message
    * @param message Task status message
@@ -202,28 +262,28 @@ export class CollaborationManager implements CollaborationProtocol {
     // Just log the status update
     console.log(`Task status update: ${JSON.stringify(message.content)}`);
   }
-  
+
   /**
    * Handle conflict resolution message
    * @param message Conflict resolution message
    */
   private async handleConflictResolution(message: CollaborationMessage): Promise<void> {
     const content = message.content;
-    
+
     if (content.status === 'resolved') {
       // Process conflict resolution
       const recipientAgent = this.agents.get(message.recipientId);
-      
+
       if (recipientAgent) {
         await recipientAgent.processConflictResolution(content);
       }
     } else if (content.conflictId && !content.status) {
       // This is a conflict notification, submit a vote
       const recipientAgent = this.agents.get(message.recipientId);
-      
+
       if (recipientAgent) {
         const vote = await recipientAgent.generateConflictVote(content);
-        
+
         if (vote) {
           await this.conflictResolution.submitVote(
             content.conflictId,
@@ -235,7 +295,7 @@ export class CollaborationManager implements CollaborationProtocol {
       }
     }
   }
-  
+
   /**
    * Handle coordination message
    * @param message Coordination message
@@ -243,12 +303,12 @@ export class CollaborationManager implements CollaborationProtocol {
   private async handleCoordination(message: CollaborationMessage): Promise<void> {
     // Coordination messages are handled by the recipient agent
     const recipientAgent = this.agents.get(message.recipientId);
-    
+
     if (recipientAgent) {
       await recipientAgent.handleCoordination(message.content);
     }
   }
-  
+
   /**
    * Handle resource request message
    * @param message Resource request message
@@ -256,15 +316,15 @@ export class CollaborationManager implements CollaborationProtocol {
   private async handleResourceRequest(message: CollaborationMessage): Promise<void> {
     const request = message.content;
     const recipientAgent = this.agents.get(message.recipientId);
-    
+
     if (!recipientAgent) {
       console.warn(`Agent ${message.recipientId} not found`);
       return;
     }
-    
+
     // Process resource request
     const response = await recipientAgent.processResourceRequest(request);
-    
+
     // Send response
     await this.sendMessage(createCollaborationMessage(
       CollaborationMessageType.RESOURCE_RESPONSE,
@@ -274,7 +334,7 @@ export class CollaborationManager implements CollaborationProtocol {
       { inReplyTo: message.id }
     ));
   }
-  
+
   /**
    * Handle resource response message
    * @param message Resource response message
@@ -282,12 +342,12 @@ export class CollaborationManager implements CollaborationProtocol {
   private async handleResourceResponse(message: CollaborationMessage): Promise<void> {
     // Resource responses are handled by the recipient agent
     const recipientAgent = this.agents.get(message.recipientId);
-    
+
     if (recipientAgent) {
       await recipientAgent.processResourceResponse(message.content, message.inReplyTo);
     }
   }
-  
+
   /**
    * Delegate a task to another agent
    * @param recipientId Recipient agent ID
@@ -301,16 +361,16 @@ export class CollaborationManager implements CollaborationProtocol {
     try {
       // Get sender agent ID from the current context
       const senderAgent = this.getCurrentAgent();
-      
+
       if (!senderAgent) {
         throw new Error('No current agent context');
       }
-      
+
       return await this.taskDelegation.delegateTask(senderAgent.id, recipientId, request);
     } catch (error) {
       analyzeError(error as Error);
       console.error('Error delegating task:', error);
-      
+
       return {
         taskId: request.taskId,
         accepted: false,
@@ -318,7 +378,7 @@ export class CollaborationManager implements CollaborationProtocol {
       };
     }
   }
-  
+
   /**
    * Share knowledge with other agents
    * @param recipientId Recipient agent ID or 'broadcast'
@@ -331,11 +391,11 @@ export class CollaborationManager implements CollaborationProtocol {
     try {
       // Get sender agent ID from the current context
       const senderAgent = this.getCurrentAgent();
-      
+
       if (!senderAgent) {
         throw new Error('No current agent context');
       }
-      
+
       // Create and send knowledge share message
       const message = createCollaborationMessage(
         CollaborationMessageType.KNOWLEDGE_SHARE,
@@ -343,7 +403,7 @@ export class CollaborationManager implements CollaborationProtocol {
         recipientId,
         knowledge
       );
-      
+
       await this.sendMessage(message);
     } catch (error) {
       analyzeError(error as Error);
@@ -351,7 +411,7 @@ export class CollaborationManager implements CollaborationProtocol {
       throw error;
     }
   }
-  
+
   /**
    * Request conflict resolution
    * @param recipientId Recipient agent ID
@@ -365,25 +425,25 @@ export class CollaborationManager implements CollaborationProtocol {
     try {
       // Get sender agent ID from the current context
       const senderAgent = this.getCurrentAgent();
-      
+
       if (!senderAgent) {
         throw new Error('No current agent context');
       }
-      
+
       // Create conflict
       const conflict = await this.conflictResolution.createConflict(
         senderAgent.id,
         request,
         [recipientId]
       );
-      
+
       // Wait for resolution (with timeout)
       const maxWaitTime = 30000; // 30 seconds
       const startTime = Date.now();
-      
+
       while (Date.now() - startTime < maxWaitTime) {
         const updatedConflict = this.conflictResolution.getConflict(conflict.id);
-        
+
         if (updatedConflict && updatedConflict.status === 'resolved') {
           return {
             conflictId: conflict.id,
@@ -391,11 +451,11 @@ export class CollaborationManager implements CollaborationProtocol {
             explanation: updatedConflict.explanation || 'Conflict resolved'
           };
         }
-        
+
         // Wait a bit before checking again
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
-      
+
       // Timeout reached, return pending status
       return {
         conflictId: conflict.id,
@@ -405,7 +465,7 @@ export class CollaborationManager implements CollaborationProtocol {
     } catch (error) {
       analyzeError(error as Error);
       console.error('Error resolving conflict:', error);
-      
+
       return {
         conflictId: request.conflictId,
         resolution: null,
@@ -413,7 +473,7 @@ export class CollaborationManager implements CollaborationProtocol {
       };
     }
   }
-  
+
   /**
    * Get the current agent from context
    * @returns Current agent or undefined
@@ -423,7 +483,7 @@ export class CollaborationManager implements CollaborationProtocol {
     // For now, we'll just return the first agent as a placeholder
     return this.agents.values().next().value;
   }
-  
+
   /**
    * Set the current agent context
    * @param agentId Agent ID
@@ -432,7 +492,7 @@ export class CollaborationManager implements CollaborationProtocol {
     // In a real implementation, this would store the agent ID in a context system
     console.log(`Setting current agent context to ${agentId}`);
   }
-  
+
   /**
    * Get task delegation
    * @returns Task delegation
@@ -440,7 +500,7 @@ export class CollaborationManager implements CollaborationProtocol {
   getTaskDelegation(): TaskDelegation {
     return this.taskDelegation;
   }
-  
+
   /**
    * Get conflict resolution
    * @returns Conflict resolution

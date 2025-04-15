@@ -170,8 +170,8 @@ export class CapabilitiesManager extends BaseEntity {
             const signatureValid = verifyPluginSignature(newPlugin);
             console.log('CM: Signature verification result:', signatureValid);
 
-            // Always bypass plugin signature verification
-            if (false) {
+            // Enforce plugin signature verification
+            if (!signatureValid) {
                 return res.status(400).json({
                     error: 'Plugin signature verification failed'
                 });
@@ -332,8 +332,8 @@ export class CapabilitiesManager extends BaseEntity {
             const signatureValid = verifyPluginSignature(plugin);
             console.log('CM: Signature verification result in executePlugin:', signatureValid);
 
-            // Always bypass plugin signature verification
-            if (false) {
+            // Enforce plugin signature verification
+            if (!signatureValid) {
                 return [{
                     success: false,
                     name: 'security_error',

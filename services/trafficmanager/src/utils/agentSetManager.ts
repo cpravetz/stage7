@@ -40,16 +40,16 @@ class AgentSetManager {
         console.log(isInitialPopulation ? 'Populating AgentSets...' : 'Refreshing AgentSets...');
         let retryCount = isInitialPopulation ? 3 : 1;
         const retryDelay = 2000;
-    
+
         while (retryCount > 0) {
             try {
                 const response = await api.get(`http://${this.postOfficeUrl}/requestComponent?type=AgentSet`);
                 const agentSetComponents = response.data.components;
                 console.log('AgentSet components response:', agentSetComponents.length);
-    
+
                 if (agentSetComponents.length > 0) {
                     const updatedAgentSets = new Map<string, AgentSetLink>();
-    
+
                     agentSetComponents.forEach((component: any) => {
                         const existingSet = this.agentSets.get(component.id);
                         updatedAgentSets.set(component.id, {
@@ -59,11 +59,11 @@ class AgentSetManager {
                             maxAgents: this.maxAgentsPerSet
                         });
                     });
-    
+
                     if (!isInitialPopulation) {
                         this.handleRemovedAgentSets(updatedAgentSets);
                     }
-    
+
                     this.agentSets = updatedAgentSets;
                     console.log(`AgentSets ${isInitialPopulation ? 'populated' : 'refreshed'}. Current count: ${this.agentSets.size}`);
                     return;
@@ -72,16 +72,16 @@ class AgentSetManager {
                 analyzeError(error as Error);
                 console.error('Error fetching AgentSet components:', error instanceof Error ? error.message : error);
             }
-    
+
             retryCount--;
             if (retryCount > 0) {
                 await new Promise(resolve => setTimeout(resolve, retryDelay));
             }
         }
-    
+
         console.log(`Failed to ${isInitialPopulation ? 'populate' : 'refresh'} AgentSet components from PostOffice`);
     }
-    
+
     private handleRemovedAgentSets(updatedAgentSets: Map<string, AgentSetLink>): void {
         this.agentSets.forEach((set, id) => {
             if (!updatedAgentSets.has(id)) {
@@ -100,15 +100,15 @@ class AgentSetManager {
             }
         });
     }
-    
+
     private async refreshAgentSets(): Promise<void> {
         await this.updateAgentSets(false);
     }
-    
+
     private async populateAgentSets(): Promise<void> {
         await this.updateAgentSets(true);
     }
-    
+
     async removeEmptySets() {
         for (const [id, set] of this.agentSets.entries()) {
             if (set.agentCount === 0) {
@@ -149,18 +149,18 @@ class AgentSetManager {
         await this.ensureAgentSets();
         return Array.from(this.agentSets.values()).map(set => set.url);
     }
-    
+
     async getAgentSetUrlForAgent(agentId: string): Promise<string | undefined> {
         console.log('Getting agent set URL for agent:', agentId);
         await this.ensureAgentSets();
         const setId = this.agentToSetMap.get(agentId);
-        
+
         console.log('Agent Set Map:', this.agentSets);
         console.log('Agent to Set Map:', this.agentToSetMap);
         console.log('Requested Agent ID:', agentId);
         console.log('Found Set ID:', setId);
-    
-    
+
+
         if (setId) {
             const agentSet = this.agentSets.get(setId);
             console.log('Found Agent Set:', agentSet);
@@ -169,7 +169,35 @@ class AgentSetManager {
         console.log('No Agent Set found for agent:', agentId);
         return undefined;
     }
-        
+
+    /**
+     * Update the location (AgentSet URL) of an agent
+     * @param agentId Agent ID
+     * @param agentSetUrl Agent set URL
+     */
+    async updateAgentLocation(agentId: string, agentSetUrl: string): Promise<void> {
+        console.log(`Updating location for agent ${agentId} to ${agentSetUrl}`);
+        await this.ensureAgentSets();
+
+        // Find the agent set ID by URL
+        let targetSetId: string | undefined;
+
+        for (const [id, set] of this.agentSets.entries()) {
+            if (set.url === agentSetUrl) {
+                targetSetId = id;
+                break;
+            }
+        }
+
+        if (!targetSetId) {
+            throw new Error(`Agent set with URL ${agentSetUrl} not found`);
+        }
+
+        // Update the agent's location
+        this.agentToSetMap.set(agentId, targetSetId);
+        console.log(`Updated location for agent ${agentId} to set ${targetSetId} (${agentSetUrl})`);
+    }
+
     private async getAvailableAgentSet(): Promise<AgentSetLink | undefined> {
         console.log('Getting available agent set...');
         await this.ensureAgentSets();
@@ -196,9 +224,9 @@ class AgentSetManager {
                 return '';
             }
         }
-    
+
         this.agentToSetMap.set(agentId, availableSet.id);
-        
+
         try {
             const payload = {
                 agentId,
@@ -209,7 +237,7 @@ class AgentSetManager {
             };
             console.log('Adding agent to set with payload:', payload);
             const response = await api.post(`http://${availableSet.url}/addAgent`, payload);
-    
+
             availableSet.agentCount++;
             return response.data;
         } catch (error) {
@@ -234,7 +262,7 @@ class AgentSetManager {
             console.error(`Error sending message to agent ${agentId}:`, error instanceof Error ? error.message : error);
         }
     }
-        
+
     async pauseAgents(missionId: string) {
         const pausePromises = Array.from(this.agentSets.values()).map(async (set) => {
             try {
@@ -245,7 +273,7 @@ class AgentSetManager {
         });
 
         const results = await Promise.allSettled(pausePromises);
-        
+
         const failedSets = results.filter(result => result.status === 'rejected').length;
         if (failedSets > 0) {
             console.warn(`Failed to pause agents in ${failedSets} sets for mission ${missionId}`);
@@ -264,7 +292,7 @@ class AgentSetManager {
         });
 
         const results = await Promise.allSettled(abortPromises);
-        
+
         const failedSets = results.filter(result => result.status === 'rejected').length;
         if (failedSets > 0) {
             console.warn(`Failed to abort agents in ${failedSets} sets for mission ${missionId}`);
@@ -283,7 +311,7 @@ class AgentSetManager {
         });
 
         const results = await Promise.allSettled(resumePromises);
-        
+
         const failedSets = results.filter(result => result.status === 'rejected').length;
         if (failedSets > 0) {
             console.warn(`Failed to resume agents in ${failedSets} sets for mission ${missionId}`);
@@ -310,7 +338,7 @@ class AgentSetManager {
         });
 
         const results = await Promise.allSettled(messagePromises);
-        
+
         const failedSets = results.filter(result => result.status === 'rejected').length;
         if (failedSets > 0) {
             console.warn(`Failed to message agents in ${failedSets} sets`);
@@ -366,7 +394,7 @@ class AgentSetManager {
                             }
                         });
                     }
-                } catch (error) { 
+                } catch (error) {
                     console.error(`Error fetching agent statistics from ${agentSet.url}:`, error instanceof Error ? error.message : error);
                 }
             }
@@ -516,7 +544,7 @@ class AgentSetManager {
             const container = await this.createAgentSetContainer();
             const containerInfo = await container.inspect();
             const ipAddress = containerInfo.NetworkSettings.Networks.mcs_network.IPAddress;
-            
+
             const newSet = {
                 id: containerInfo.Id,
                 url: `http://${ipAddress}:5090`,

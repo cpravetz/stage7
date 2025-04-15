@@ -1,6 +1,5 @@
-import { PluginDefinition } from '@cktmcs/shared';
+import { PluginDefinition, signPlugin, verifyPluginSignature } from '@cktmcs/shared';
 import { PluginManifest, PluginRepository, RepositoryConfig, PluginRepositoryType, PluginLocator } from '@cktmcs/shared';
-import { createHash } from 'crypto';
 import axios from 'axios';
 import { analyzeError } from '@cktmcs/errorhandler';
 import fs from 'fs/promises';
@@ -76,7 +75,7 @@ export class PluginMarketplace {
                     return plugin;
                 }
             }
-            for (const repository of this.repositories.values()) { 
+            for (const repository of this.repositories.values()) {
                 try {
                     const plugin = await repository.fetch(id);
                     if (plugin) {
@@ -118,29 +117,21 @@ export class PluginMarketplace {
         }
         return undefined;
     }
-    
-    
-    private async signPlugin(plugin: PluginDefinition): Promise<string> {
+
+
+    private async signPluginWithShared(plugin: PluginDefinition): Promise<string> {
         try {
-            const content = JSON.stringify({
-                id: plugin.id,
-                verb: plugin.verb,
-                entryPoint: plugin.entryPoint,
-                security: plugin.security
-            });
-    
-            // In production, use proper signing mechanism
-            const hash = createHash('sha256').update(content).digest('hex');
-            return hash;
+            // Use the shared signPlugin function that supports RSA signing
+            return signPlugin(plugin);
         } catch (error) {
             analyzeError(error as Error);
             throw new Error('Failed to sign plugin');
         }
     }
-    
+
     private async verifySignature(plugin: PluginManifest): Promise<boolean> {
-        const hash = await this.signPlugin(plugin);
-        return hash === plugin.security.trust.signature;
+        // Use the shared verifyPluginSignature function that supports RSA verification
+        return verifyPluginSignature(plugin);
     }
 
     public async store(plugin: PluginManifest): Promise<void> {
@@ -150,7 +141,7 @@ export class PluginMarketplace {
             if (existingPlugin) {
                 repository = existingPlugin.repository.type;
             }
-            const signature = await this.signPlugin(plugin);
+            const signature = await this.signPluginWithShared(plugin);
             plugin.security.trust.signature = signature;
             const repo = this.repositories.get(repository);
             if (repo) {

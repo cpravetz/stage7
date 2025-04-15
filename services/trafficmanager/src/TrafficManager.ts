@@ -45,6 +45,8 @@ export class TrafficManager extends BaseEntity {
         this.app.post('/checkBlockedAgents', async (req, res) => { this.checkBlockedAgents(req, res)});
         this.app.get('/dependentAgents/:agentId', (req: express.Request, res: express.Response) => { this.getDependentAgents(req, res); });
         this.app.post('/distributeUserMessage', async (req, res) => this.distributeUserMessage(req, res));
+        this.app.get('/getAgentLocation/:agentId', async (req, res) => this.getAgentLocation(req, res));
+        this.app.post('/updateAgentLocation', async (req, res) => this.updateAgentLocation(req, res));
     }
 
     private getAgentSetsForMission(missionId: string) {
@@ -516,6 +518,49 @@ export class TrafficManager extends BaseEntity {
         } catch (error) { analyzeError(error as Error);
             console.error('Error distributing user message:', error instanceof Error ? error.message : error);
             res.status(500).send({ error: 'Failed to distribute user message' });
+        }
+    }
+
+    /**
+     * Get the location (AgentSet URL) of an agent
+     * @param req Request
+     * @param res Response
+     */
+    private async getAgentLocation(req: express.Request, res: express.Response) {
+        const { agentId } = req.params;
+
+        try {
+            const agentSetUrl = await agentSetManager.getAgentSetUrlForAgent(agentId);
+
+            if (agentSetUrl) {
+                res.status(200).send({ agentId, agentSetUrl });
+            } else {
+                res.status(404).send({ error: `Agent ${agentId} not found` });
+            }
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error getting agent location:', error instanceof Error ? error.message : error);
+            res.status(500).send({ error: 'Failed to get agent location' });
+        }
+    }
+
+    /**
+     * Update the location (AgentSet URL) of an agent
+     * @param req Request
+     * @param res Response
+     */
+    private async updateAgentLocation(req: express.Request, res: express.Response) {
+        const { agentId, agentSetUrl } = req.body;
+
+        if (!agentId || !agentSetUrl) {
+            return res.status(400).send({ error: 'agentId and agentSetUrl are required' });
+        }
+
+        try {
+            await agentSetManager.updateAgentLocation(agentId, agentSetUrl);
+            res.status(200).send({ message: `Agent ${agentId} location updated to ${agentSetUrl}` });
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error updating agent location:', error instanceof Error ? error.message : error);
+            res.status(500).send({ error: 'Failed to update agent location' });
         }
     }
 }

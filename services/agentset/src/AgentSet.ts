@@ -427,6 +427,18 @@ export class AgentSet extends BaseEntity {
             }
         });
 
+        // Handle collaboration messages from other agent sets
+        app.post('/collaboration/message', async (req, res) => {
+            try {
+                const message = req.body;
+                await this.collaborationManager.handleMessage(message);
+                res.status(200).send({ message: 'Collaboration message processed successfully' });
+            } catch (error) {
+                analyzeError(error as Error);
+                res.status(500).send({ error: error instanceof Error ? error.message : String(error) });
+            }
+        });
+
         // Resume mission agents
         app.post('/resumeAgents', async (req, res) => {
             const { missionId } = req.body;

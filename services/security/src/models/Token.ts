@@ -82,7 +82,7 @@ export const DEFAULT_TOKEN_CONFIG: TokenConfig = {
     apiTokenExpiresIn: 30 * 24 * 60 * 60, // 30 days
     issuer: 'stage7',
     audience: 'stage7-api',
-    algorithm: 'HS256',
+    algorithm: 'RS256',
     secret: process.env.JWT_SECRET || 'your-secret-key',
     refreshSecret: process.env.JWT_REFRESH_SECRET || 'your-refresh-secret-key'
 };
