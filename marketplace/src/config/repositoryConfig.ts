@@ -1,5 +1,5 @@
 export const repositoryConfig = {
-    defaultRepository: 'mongo',
+    defaultRepository: process.env.DEFAULT_PLUGIN_REPOSITORY || 'mongo',
     Repositories: [
         {
             type: 'local',
@@ -13,15 +13,30 @@ export const repositoryConfig = {
             options: {
                 collection: process.env.MONGO_COLLECTION || 'plugins'
             }
-        }
-/*        {
+        },
+        {
             type: 'git',
-            url: process.env.GIT_REPOSITORY_URL,
+            url: process.env.GIT_REPOSITORY_URL || '',
             credentials: {
-                username: process.env.GITHUB_USERNAME,
-                token: process.env.GITHUB_TOKEN,
-                email: process.env.GITHUB_EMAIL
+                username: process.env.GITHUB_USERNAME || '',
+                token: process.env.GITHUB_TOKEN || '',
+                email: process.env.GITHUB_EMAIL || ''
+            },
+            options: {
+                defaultBranch: process.env.GIT_DEFAULT_BRANCH || 'main'
             }
-        },*/
+        },
+        {
+            type: 'github',
+            url: process.env.GIT_REPOSITORY_URL || '',
+            credentials: {
+                username: process.env.GITHUB_USERNAME || '',
+                token: process.env.GITHUB_TOKEN || '',
+                email: process.env.GITHUB_EMAIL || ''
+            },
+            options: {
+                defaultBranch: process.env.GIT_DEFAULT_BRANCH || 'main'
+            }
+        }
     ]
 };

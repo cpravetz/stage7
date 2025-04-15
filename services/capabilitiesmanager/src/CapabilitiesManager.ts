@@ -20,6 +20,7 @@ import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import { validateAndStandardizeInputs } from './utils/validator.js';
 import { requestPluginFromEngineer } from './utils/engineer.js';
+import githubRoutes from './routes/githubRoutes';
 
 const configPath = path.join(os.homedir(), '.cktmcs', 'capabilitiesmanager.json');
 
@@ -82,6 +83,71 @@ export class CapabilitiesManager extends BaseEntity {
                 app.post('/message', (req, res) => this.handleMessage(req, res));
                 app.get('/availablePlugins', async (req, res) => {res.json(await this.pluginRegistry.list())});
                 app.post('/storeNewPlugin', (req, res) => {this.storeNewPlugin(req, res)});
+
+                // GitHub integration routes
+                app.use('/github', githubRoutes);
+
+                // Generic plugin API routes
+                app.get('/plugins', async (req, res) => {
+                    try {
+                        const repositoryType = req.query.repository as string || 'mongo';
+                        const repositories = this.pluginRegistry.getPluginMarketplace().getRepositories();
+                        const repository = repositories.get(repositoryType);
+
+                        if (!repository) {
+                            return res.status(404).json({ error: `Repository type ${repositoryType} not found` });
+                        }
+
+                        const plugins = await repository.list();
+                        res.json({ plugins });
+                    } catch (error) {
+                        analyzeError(error as Error);
+                        res.status(500).json({ error: 'Failed to list plugins' });
+                    }
+                });
+
+                app.get('/plugins/:id', async (req, res) => {
+                    try {
+                        const { id } = req.params;
+                        const repositoryType = req.query.repository as string || 'mongo';
+                        const repositories = this.pluginRegistry.getPluginMarketplace().getRepositories();
+                        const repository = repositories.get(repositoryType);
+
+                        if (!repository) {
+                            return res.status(404).json({ error: `Repository type ${repositoryType} not found` });
+                        }
+
+                        const plugin = await repository.fetch(id);
+
+                        if (!plugin) {
+                            return res.status(404).json({ error: 'Plugin not found' });
+                        }
+
+                        res.json({ plugin });
+                    } catch (error) {
+                        analyzeError(error as Error);
+                        res.status(500).json({ error: 'Failed to get plugin' });
+                    }
+                });
+
+                app.delete('/plugins/:id', async (req, res) => {
+                    try {
+                        const { id } = req.params;
+                        const repositoryType = req.query.repository as string || 'mongo';
+                        const repositories = this.pluginRegistry.getPluginMarketplace().getRepositories();
+                        const repository = repositories.get(repositoryType);
+
+                        if (!repository) {
+                            return res.status(404).json({ error: `Repository type ${repositoryType} not found` });
+                        }
+
+                        await repository.delete(id);
+                        res.json({ success: true, message: 'Plugin deleted successfully' });
+                    } catch (error) {
+                        analyzeError(error as Error);
+                        res.status(500).json({ error: 'Failed to delete plugin' });
+                    }
+                });
 
                 // Error handling middleware
                 app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {

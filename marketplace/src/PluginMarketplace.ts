@@ -6,6 +6,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { MongoRepository } from './repositories/MongoRepository';
 import { GitRepository } from './repositories/GitRepository';
+import { GitHubRepository } from './repositories/GitHubRepository';
 //import { NpmRepository } from './repositories/NpmRepository';
 import { LocalRepository } from './repositories/LocalRepository';
 import { repositoryConfig } from './config/repositoryConfig';
@@ -16,6 +17,14 @@ export class PluginMarketplace {
     private localRepository: PluginRepositoryType = 'local';
     private repositories: Map<string, PluginRepository>;
     private pluginsBaseDir: string;
+
+    /**
+     * Get all repositories
+     * @returns Map of repositories
+     */
+    public getRepositories(): Map<string, PluginRepository> {
+        return this.repositories;
+    }
 
     constructor() {
         this.pluginsBaseDir = path.join(process.cwd(), 'plugins');
@@ -54,6 +63,8 @@ export class PluginMarketplace {
         switch (config.type) {
             case 'git':
                 return new GitRepository(config);
+            case 'github':
+                return new GitHubRepository(config);
             case 'mongo':
                 return new MongoRepository(config);
             //case 'npm':

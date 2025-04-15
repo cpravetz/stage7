@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Box, Container, Paper, Typography, useTheme as useMuiTheme, Drawer, AppBar, Toolbar, IconButton } from '@mui/material';
+import { BrowserRouter as Router, Routes, Route, Navigate, Link } from 'react-router-dom';
+import { Box, Button, Container, Paper, Typography, useTheme as useMuiTheme, Drawer, AppBar, Toolbar, IconButton } from '@mui/material';
 import MenuIcon from '@mui/icons-material/Menu';
 import CloseIcon from '@mui/icons-material/Close';
 import UserInputModal from './components/UserInputModal';
@@ -10,6 +11,11 @@ import StatisticsWindow from './components/StatisticsWindow';
 import SavedMissionsList from './components/SavedMissionsList';
 import ErrorBoundary from './components/ErrorBoundary';
 import LoginComponent from './components/Login';
+import EmailVerification from './components/EmailVerification';
+import PasswordReset from './components/PasswordReset';
+import RequestPasswordReset from './components/RequestPasswordReset';
+import ModelPerformanceDashboard from './components/ModelPerformanceDashboard';
+import GitHubPluginManager from './components/GitHubPluginManager';
 import { ThemeToggle } from './components/ThemeToggle';
 import { AppThemeProvider } from './theme/AppThemeProvider';
 import { useTheme } from './theme/ThemeContext';
@@ -29,7 +35,7 @@ interface WorkProduct {
   url: string;
 }
 
-const AppContent: React.FC = () => {
+const MainApp: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [token, setToken] = useState<string | null>(null);
   const securityClient = useMemo(() => new SecurityClient(API_BASE_URL), []);
@@ -408,12 +414,30 @@ useEffect(() => {
             <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
               Stage7
             </Typography>
-            <ThemeToggle />
-            <IconButton color="inherit" onClick={handleLogout} aria-label="logout">
-              <Typography variant="body2" sx={{ mr: 1 }}>
-                Logout
-              </Typography>
-            </IconButton>
+            <Box sx={{ display: 'flex', alignItems: 'center' }}>
+              <Button
+                color="inherit"
+                component={Link}
+                to="/model-performance"
+                sx={{ mr: 2 }}
+              >
+                Model Performance
+              </Button>
+              <Button
+                color="inherit"
+                component={Link}
+                to="/github-plugins"
+                sx={{ mr: 2 }}
+              >
+                GitHub Plugins
+              </Button>
+              <ThemeToggle />
+              <IconButton color="inherit" onClick={handleLogout} aria-label="logout">
+                <Typography variant="body2" sx={{ mr: 1 }}>
+                  Logout
+                </Typography>
+              </IconButton>
+            </Box>
           </Toolbar>
         </AppBar>
 
@@ -516,7 +540,17 @@ useEffect(() => {
 const App: React.FC = () => {
   return (
     <AppThemeProvider>
-      <AppContent />
+      <Router>
+        <Routes>
+          <Route path="/" element={<MainApp />} />
+          <Route path="/verify-email" element={<EmailVerification />} />
+          <Route path="/reset-password" element={<PasswordReset />} />
+          <Route path="/forgot-password" element={<RequestPasswordReset />} />
+          <Route path="/model-performance" element={<ModelPerformanceDashboard />} />
+          <Route path="/github-plugins" element={<GitHubPluginManager />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Router>
     </AppThemeProvider>
   );
 };

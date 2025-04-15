@@ -126,13 +126,51 @@ export class BaseEntity implements IBaseEntity {
     }
   }
 
+  /**
+   * Handle a message received from the message queue
+   * @param message Message received from the queue
+   */
   protected async handleQueueMessage(message: any) {
     console.log(`${this.componentType} received message from queue:`, message);
 
     // Process the message using the same handler as HTTP messages
     await this.handleBaseMessage(message);
 
+    // If the message requires a synchronous response, send it back via the queue
+    if (message.replyTo && message.correlationId) {
+      try {
+        // Get the response from the message handler
+        const response = await this.handleSyncMessage(message);
+
+        // Send the response back via the queue
+        if (this.mqClient) {
+          await this.mqClient.publishMessage('', message.replyTo, response, {
+            correlationId: message.correlationId
+          });
+        }
+      } catch (error) {
+        console.error(`Error handling sync message:`, error);
+      }
+    }
+
     // Subclasses should override handleBaseMessage or implement their own message handling
+  }
+
+  /**
+   * Handle a synchronous message that requires a response
+   * This should be overridden by subclasses that need to handle sync messages
+   * @param message Message to handle
+   * @returns Response to the message
+   */
+  protected async handleSyncMessage(message: any): Promise<any> {
+    // Default implementation just returns an acknowledgement
+    return {
+      type: 'response',
+      content: { acknowledged: true },
+      sender: this.id,
+      recipient: message.sender,
+      timestamp: new Date().toISOString()
+    };
   }
 
   /**
@@ -197,7 +235,15 @@ export class BaseEntity implements IBaseEntity {
     }
   }
 
-  async sendMessage(type: string, recipient: string, content: any, requiresSync: boolean = false): Promise<void> {
+  /**
+   * Send a message to another component
+   * @param type Message type
+   * @param recipient Recipient ID
+   * @param content Message content
+   * @param requiresSync Whether the message requires a synchronous response
+   * @returns Promise that resolves when the message is sent, or with the response if sync
+   */
+  async sendMessage(type: string, recipient: string, content: any, requiresSync: boolean = false): Promise<any> {
     const message = {
       type: type,
       content,
@@ -207,11 +253,17 @@ export class BaseEntity implements IBaseEntity {
       timestamp: new Date().toISOString()
     };
 
-    // If message queue is available and message doesn't require sync, use it
-    if (this.mqClient && !requiresSync) {
+    // If message queue is available, use it
+    if (this.mqClient) {
       try {
-        await this.mqClient.publishMessage('stage7', `message.${recipient}`, message);
-        return;
+        if (requiresSync) {
+          // For synchronous messages, use RPC pattern
+          return await this.mqClient.sendRpcRequest('stage7', `message.${recipient}`, message, 30000);
+        } else {
+          // For asynchronous messages, just publish
+          await this.mqClient.publishMessage('stage7', `message.${recipient}`, message);
+          return;
+        }
       } catch (error) {
         console.error(`Failed to send message via queue, falling back to HTTP:`, error);
         // Fall back to HTTP if queue fails

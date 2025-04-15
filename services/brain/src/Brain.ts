@@ -183,45 +183,113 @@ export class Brain extends BaseEntity {
 
         // API endpoints for model performance
         app.get('/performance', (req: express.Request, res: express.Response, next: express.NextFunction) => {
-            const performanceData = this.modelManager.getAllPerformanceData();
-            res.json({ performanceData });
+            try {
+                const performanceData = this.modelManager.getAllPerformanceData();
+                res.json({ performanceData });
+            } catch (error) {
+                analyzeError(error as Error);
+                res.status(500).json({ error: 'Failed to get performance data' });
+            }
         });
 
         app.get('/performance/rankings', (req: express.Request, res: express.Response, next: express.NextFunction) => {
-            const conversationType = req.query.conversationType as LLMConversationType || LLMConversationType.TextToText;
-            const metric = req.query.metric as 'successRate' | 'averageLatency' | 'overall' || 'overall';
-            const rankings = this.modelManager.getModelRankings(conversationType, metric);
-            res.json({ rankings });
+            try {
+                const conversationType = req.query.conversationType as LLMConversationType || LLMConversationType.TextToText;
+                const metric = req.query.metric as 'successRate' | 'averageLatency' | 'overall' || 'overall';
+                const rankings = this.modelManager.getModelRankings(conversationType, metric);
+                res.json({ rankings });
+            } catch (error) {
+                analyzeError(error as Error);
+                res.status(500).json({ error: 'Failed to get model rankings' });
+            }
+        });
+
+        app.get('/performance/metrics/:modelName', (req: express.Request, res: express.Response, next: express.NextFunction) => {
+            try {
+                const { modelName } = req.params;
+                const conversationType = req.query.conversationType as LLMConversationType || LLMConversationType.TextToText;
+                const metrics = this.modelManager.getModelPerformanceMetrics(modelName, conversationType);
+                res.json({ metrics });
+            } catch (error) {
+                analyzeError(error as Error);
+                res.status(500).json({ error: 'Failed to get model metrics' });
+            }
+        });
+
+        app.get('/performance/blacklisted', (req: express.Request, res: express.Response, next: express.NextFunction) => {
+            try {
+                const blacklistedModels = this.modelManager.getBlacklistedModels();
+                res.json({ blacklistedModels });
+            } catch (error) {
+                analyzeError(error as Error);
+                res.status(500).json({ error: 'Failed to get blacklisted models' });
+            }
+        });
+
+        app.get('/performance/summary', (req: express.Request, res: express.Response, next: express.NextFunction) => {
+            try {
+                const summary = this.modelManager.getPerformanceSummary();
+                res.json({ summary });
+            } catch (error) {
+                analyzeError(error as Error);
+                res.status(500).json({ error: 'Failed to get performance summary' });
+            }
         });
 
         // API endpoints for response evaluation
         app.get('/evaluations', (req: express.Request, res: express.Response, next: express.NextFunction) => {
-            const limit = parseInt(req.query.limit as string) || 100;
-            const evaluations = this.responseEvaluator.getAllEvaluations(limit);
-            res.json({ evaluations });
+            try {
+                const limit = parseInt(req.query.limit as string) || 100;
+                const evaluations = this.responseEvaluator.getAllEvaluations(limit);
+                res.json({ evaluations });
+            } catch (error) {
+                analyzeError(error as Error);
+                res.status(500).json({ error: 'Failed to get evaluations' });
+            }
         });
 
         app.get('/evaluations/model/:modelName', (req: express.Request, res: express.Response, next: express.NextFunction) => {
-            const evaluations = this.responseEvaluator.getEvaluationsForModel(req.params.modelName);
-            res.json({ evaluations });
+            try {
+                const evaluations = this.responseEvaluator.getEvaluationsForModel(req.params.modelName);
+                res.json({ evaluations });
+            } catch (error) {
+                analyzeError(error as Error);
+                res.status(500).json({ error: 'Failed to get model evaluations' });
+            }
         });
 
         app.post('/evaluations', (req: express.Request, res: express.Response, next: express.NextFunction) => {
             try {
-                const { requestId, modelName, conversationType, prompt, response, criteria, feedback, evaluator } = req.body;
-                const evaluation = this.responseEvaluator.recordHumanEvaluation(
-                    requestId,
+                const { modelName, conversationType, requestId, prompt, response, scores, comments } = req.body;
+
+                if (!modelName || !conversationType || !prompt || !response || !scores) {
+                    return res.status(400).json({ error: 'Missing required fields' });
+                }
+
+                const evaluation = this.responseEvaluator.recordHumanEvaluation({
                     modelName,
                     conversationType,
+                    requestId: requestId || uuidv4(),
                     prompt,
                     response,
-                    criteria,
-                    feedback,
-                    evaluator
-                );
+                    scores,
+                    comments
+                });
+
                 res.status(201).json({ evaluation });
             } catch (error) {
+                analyzeError(error as Error);
                 res.status(400).json({ error: error instanceof Error ? error.message : 'Invalid evaluation data' });
+            }
+        });
+
+        app.get('/evaluations/summary', (req: express.Request, res: express.Response, next: express.NextFunction) => {
+            try {
+                const summaries = this.responseEvaluator.getEvaluationSummaries();
+                res.json({ summaries });
+            } catch (error) {
+                analyzeError(error as Error);
+                res.status(500).json({ error: 'Failed to get evaluation summaries' });
             }
         });
 

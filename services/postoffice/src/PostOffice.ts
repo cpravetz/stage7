@@ -293,6 +293,10 @@ export class PostOffice {
         res.status(200).send({ status: 'Message queued for processing' });
     }
 
+    /**
+     * Route a message to its recipient
+     * @param message Message to route
+     */
     private async routeMessage(message: Message) {
         console.log('Routing message:', message);
         const { clientId } = message;
@@ -331,27 +335,51 @@ export class PostOffice {
                             message.type === MessageType.REQUEST ||
                             message.type === MessageType.RESPONSE;
 
-        if (requiresSync) {
-            // Use the traditional HTTP-based queue for synchronous messages
-            if (!this.messageQueue.has(recipientId)) {
-                this.messageQueue.set(recipientId, []);
-            }
-            this.messageQueue.get(recipientId)!.push(message);
-        } else {
-            // Use RabbitMQ for asynchronous messages
-            try {
-                const routingKey = `message.${recipientId}`;
+        // Always try to use RabbitMQ first, even for synchronous messages
+        try {
+            const routingKey = `message.${recipientId}`;
+
+            if (requiresSync && message.sender && message.replyTo) {
+                // For synchronous messages with replyTo, just publish with correlation ID
                 await this.mqClient.publishMessage('stage7', routingKey, message);
-                console.log(`Published message to queue with routing key: ${routingKey}`);
-            } catch (error) {
-                console.error('Failed to publish message to queue:', error);
-                // Fallback to traditional queue if RabbitMQ fails
-                if (!this.messageQueue.has(recipientId)) {
-                    this.messageQueue.set(recipientId, []);
+                console.log(`Published sync message to queue with routing key: ${routingKey}`);
+                return;
+            } else if (requiresSync) {
+                // For synchronous messages without replyTo, use RPC pattern
+                // Add replyTo and correlationId to the message
+                const correlationId = Math.random().toString() + Date.now().toString();
+                const rpcMessage = {
+                    ...message,
+                    correlationId,
+                    replyTo: 'amq.rabbitmq.reply-to'
+                };
+
+                // Send the message and wait for response
+                const response = await this.mqClient.sendRpcRequest('stage7', routingKey, rpcMessage, 30000);
+
+                // If this is a request from a client, send the response back to the client
+                if (clientId) {
+                    this.sendToClient(clientId, response);
                 }
-                this.messageQueue.get(recipientId)!.push(message);
+
+                return;
+            } else {
+                // For asynchronous messages, just publish
+                await this.mqClient.publishMessage('stage7', routingKey, message);
+                console.log(`Published async message to queue with routing key: ${routingKey}`);
+                return;
             }
+        } catch (error) {
+            console.error('Failed to publish message to queue:', error);
+            // Fallback to traditional queue if RabbitMQ fails
         }
+
+        // Fallback to traditional HTTP-based queue
+        if (!this.messageQueue.has(recipientId)) {
+            this.messageQueue.set(recipientId, []);
+        }
+        this.messageQueue.get(recipientId)!.push(message);
+        console.log(`Added message to HTTP queue for ${recipientId}`);
     }
 
     private sendToClient(clientId: string, message: any) {

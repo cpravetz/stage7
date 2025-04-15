@@ -236,4 +236,80 @@ export class ModelManager {
     getAllPerformanceData() {
         return this.performanceTracker.getAllPerformanceData();
     }
+
+    /**
+     * Get blacklisted models
+     * @returns List of blacklisted models
+     */
+    getBlacklistedModels() {
+        const blacklistedModels = [];
+
+        for (const model of this.models.values()) {
+            for (const conversationType of model.contentConversation) {
+                if (this.performanceTracker.isModelBlacklisted(model.name, conversationType)) {
+                    const metrics = this.performanceTracker.getPerformanceMetrics(model.name, conversationType);
+                    blacklistedModels.push({
+                        modelName: model.name,
+                        conversationType,
+                        blacklistedUntil: metrics.blacklistedUntil,
+                        consecutiveFailures: metrics.consecutiveFailures,
+                        lastFailureTime: metrics.lastFailureTime
+                    });
+                }
+            }
+        }
+
+        return blacklistedModels;
+    }
+
+    /**
+     * Get performance summary
+     * @returns Performance summary for all models
+     */
+    getPerformanceSummary() {
+        const summary = {
+            totalRequests: 0,
+            successfulRequests: 0,
+            failedRequests: 0,
+            averageLatency: 0,
+            averageTokenCount: 0,
+            modelPerformance: []
+        };
+
+        const performanceData = this.performanceTracker.getAllPerformanceData();
+
+        for (const [modelName, modelData] of performanceData) {
+            for (const [conversationType, metrics] of Object.entries(modelData.metrics)) {
+                summary.totalRequests += metrics.usageCount;
+                summary.successfulRequests += metrics.successCount;
+                summary.failedRequests += metrics.failureCount;
+
+                // Add model performance data
+                summary.modelPerformance.push({
+                    modelName,
+                    conversationType,
+                    usageCount: metrics.usageCount,
+                    successRate: metrics.successRate,
+                    averageLatency: metrics.averageLatency,
+                    averageTokenCount: metrics.averageTokenCount,
+                    feedbackScores: metrics.feedbackScores
+                });
+            }
+        }
+
+        // Calculate overall averages
+        if (summary.totalRequests > 0) {
+            const totalLatency = summary.modelPerformance.reduce(
+                (sum, model) => sum + (model.averageLatency * model.usageCount), 0
+            );
+            const totalTokens = summary.modelPerformance.reduce(
+                (sum, model) => sum + (model.averageTokenCount * model.usageCount), 0
+            );
+
+            summary.averageLatency = totalLatency / summary.totalRequests;
+            summary.averageTokenCount = totalTokens / summary.totalRequests;
+        }
+
+        return summary;
+    }
 }

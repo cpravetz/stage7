@@ -57,7 +57,7 @@ export class SecurityClient {
     async login(email: string, password: string): Promise<void> {
         console.log('Logging in user:', email);
         try {
-            const response = await this.api.post(`${this.postOfficeUrl}/securityManager/login`, 
+            const response = await this.api.post(`${this.postOfficeUrl}/securityManager/login`,
                 { email, password },
                 {
                     headers: {
@@ -149,5 +149,48 @@ export class SecurityClient {
     private clearTokens(): void {
         localStorage.removeItem(ACCESS_TOKEN_KEY);
         localStorage.removeItem(REFRESH_TOKEN_KEY);
+    }
+
+    /**
+     * Verify email with token
+     * @param token Verification token
+     * @returns Promise<void>
+     */
+    async verifyEmail(token: string): Promise<void> {
+        try {
+            await this.api.post(`${this.postOfficeUrl}/securityManager/verify-email`, { token });
+        } catch (error) {
+            console.error('Email verification error:', error instanceof Error ? error.message : error);
+            throw error;
+        }
+    }
+
+    /**
+     * Request password reset
+     * @param email User email
+     * @returns Promise<void>
+     */
+    async requestPasswordReset(email: string): Promise<void> {
+        try {
+            await this.api.post(`${this.postOfficeUrl}/securityManager/request-password-reset`, { email });
+        } catch (error) {
+            console.error('Password reset request error:', error instanceof Error ? error.message : error);
+            throw error;
+        }
+    }
+
+    /**
+     * Reset password with token
+     * @param token Reset token
+     * @param newPassword New password
+     * @returns Promise<void>
+     */
+    async resetPassword(token: string, newPassword: string): Promise<void> {
+        try {
+            await this.api.post(`${this.postOfficeUrl}/securityManager/reset-password`, { token, newPassword });
+        } catch (error) {
+            console.error('Password reset error:', error instanceof Error ? error.message : error);
+            throw error;
+        }
     }
 }

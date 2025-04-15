@@ -16,12 +16,20 @@ export class PluginRegistry {
     private pluginsDir: string;
     public currentDir = __dirname; //dirname(fileURLToPath(import.meta.url));
 
+    /**
+     * Get the plugin marketplace instance
+     * @returns PluginMarketplace instance
+     */
+    public getPluginMarketplace(): PluginMarketplace {
+        return this.pluginMarketplace;
+    }
+
     constructor() {
         this.cache = new Map();
         this.verbIndex = new Map();
         this.pluginMarketplace = new PluginMarketplace();
         this.pluginsDir = path.join(__dirname, 'plugins');
-        this.initialize();        
+        this.initialize();
     }
 
     public async initialize(): Promise<void> {
@@ -30,7 +38,7 @@ export class PluginRegistry {
         for (const locator of locators) {
             this.updateCache(locator);
         }
-    }   
+    }
 
     async fetchOne(id: string, repository?: PluginRepositoryType): Promise<PluginManifest | undefined> {
         const plugin = await this.pluginMarketplace.fetchOne(id, repository);

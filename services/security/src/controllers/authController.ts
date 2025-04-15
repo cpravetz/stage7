@@ -16,6 +16,11 @@ export const register: AsyncRequestHandler = async (req, res, next) => {
     try {
         const { email, password, firstName, lastName, username } = req.body;
 
+        // Validate required fields
+        if (!email || !password) {
+            return res.status(400).json({ message: 'Email and password are required' });
+        }
+
         // Get client info for token
         const clientInfo = {
             ip: req.ip,
@@ -283,6 +288,76 @@ export const verifyMfaToken: AsyncRequestHandler = async (req, res, next) => {
 
         console.error('MFA verification error:', error);
         res.status(500).json({ message: 'Error verifying MFA token' });
+    }
+};
+
+/**
+ * Verify email
+ */
+export const verifyEmail: AsyncRequestHandler = async (req, res, next) => {
+    try {
+        const { token } = req.body;
+
+        if (!token) {
+            return res.status(400).json({ message: 'Verification token is required' });
+        }
+
+        // Verify email
+        const user = await authenticationService.verifyEmail(token);
+
+        res.status(200).json({
+            message: 'Email verified successfully',
+            user: {
+                id: user.id,
+                email: user.email,
+                username: user.username,
+                isEmailVerified: user.isEmailVerified
+            }
+        });
+    } catch (error) {
+        analyzeError(error as Error);
+
+        if ((error as Error).message === 'Invalid or expired token') {
+            return res.status(401).json({ message: 'Invalid or expired verification token' });
+        }
+
+        console.error('Email verification error:', error);
+        res.status(500).json({ message: 'Error verifying email' });
+    }
+};
+
+/**
+ * Verify email
+ */
+export const verifyEmail: AsyncRequestHandler = async (req, res, next) => {
+    try {
+        const { token } = req.body;
+
+        if (!token) {
+            return res.status(400).json({ message: 'Verification token is required' });
+        }
+
+        // Verify email
+        const user = await authenticationService.verifyEmail(token);
+
+        res.status(200).json({
+            message: 'Email verified successfully',
+            user: {
+                id: user.id,
+                email: user.email,
+                username: user.username,
+                isEmailVerified: user.isEmailVerified
+            }
+        });
+    } catch (error) {
+        analyzeError(error as Error);
+
+        if ((error as Error).message === 'Invalid or expired token') {
+            return res.status(401).json({ message: 'Invalid or expired verification token' });
+        }
+
+        console.error('Email verification error:', error);
+        res.status(500).json({ message: 'Error verifying email' });
     }
 };
 

@@ -109,8 +109,8 @@ services:
       CLIENT_SECRET: *sharedSecret
       # Explicitly set OpenWebUI URL to override any default
       OPENWEB_URL: 'https://knllm.dusdusdusd.com'
-      # Explicitly set GROQ_API_KEY
-      GROQ_API_KEY: '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'
+      # Use environment variable for GROQ_API_KEY
+      GROQ_API_KEY: ${GROQ_API_KEY:-''}
     volumes:
       - ./shared/keys:/usr/src/app/shared/keys
     ports:
@@ -339,12 +339,14 @@ services:
     environment:
       - RABBITMQ_DEFAULT_USER=stage7
       - RABBITMQ_DEFAULT_PASS=stage7password
+      - RABBITMQ_DEFAULT_VHOST=/
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "ping"]
       interval: 10s
       timeout: 10s
       retries: 5
       start_period: 30s
+    restart: unless-stopped
 
   consul:
     image: consul:1.15

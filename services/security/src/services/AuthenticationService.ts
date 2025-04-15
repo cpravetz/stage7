@@ -4,6 +4,7 @@ import { User } from '../models/User';
 import { TokenService } from './TokenService';
 import { Token, TokenType } from '../models/Token';
 import { SystemRoles } from '../models/Role';
+import { emailService } from './EmailService';
 import { analyzeError } from '@cktmcs/errorhandler';
 
 /**
@@ -91,7 +92,15 @@ export class AuthenticationService {
             let verificationToken: Token | undefined;
             if (sendVerificationEmail) {
                 verificationToken = await this.tokenService.generateVerificationToken(user);
-                // TODO: Send verification email
+
+                // Send verification email
+                if (verificationToken) {
+                    await emailService.sendVerificationEmail(
+                        user.email,
+                        verificationToken.token,
+                        user.username || user.email.split('@')[0]
+                    );
+                }
             }
 
             return { user, accessToken, refreshToken, verificationToken };
@@ -272,7 +281,12 @@ export class AuthenticationService {
             user.updatedAt = new Date();
             await this.userRepository.save(user);
 
-            // TODO: Send password reset email
+            // Send password reset email
+            await emailService.sendPasswordResetEmail(
+                user.email,
+                resetToken.token,
+                user.username || user.email.split('@')[0]
+            );
 
             return resetToken;
         } catch (error) {
@@ -327,6 +341,12 @@ export class AuthenticationService {
 
             // Revoke all user tokens
             await this.tokenService.revokeAllUserTokens(user.id, 'Password reset');
+
+            // Send welcome email after successful password reset
+            await emailService.sendWelcomeEmail(
+                user.email,
+                user.username || user.email.split('@')[0]
+            );
 
             return user;
         } catch (error) {

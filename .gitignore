@@ -130,3 +130,16 @@ dist
 .pnp.*
 .todo.txt
 .qodo
+
+# Private keys and sensitive files
+*.pem
+*.key
+*private*
+
+# Specific sensitive directories
+services/security/keys/**
+shared/keys/**
+
+# Allow public keys to be committed
+!*public*.pem
+!*public*.key

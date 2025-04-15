@@ -42,15 +42,15 @@ export interface ResponseEvaluation {
 export class ResponseEvaluator {
   private evaluations: Map<string, ResponseEvaluation> = new Map();
   private dataFilePath: string;
-  
+
   constructor(dataDirectory: string = path.join(__dirname, '..', '..', 'data')) {
     this.dataFilePath = path.join(dataDirectory, 'response-evaluations.json');
     this.loadEvaluations();
-    
+
     // Set up periodic saving
     setInterval(() => this.saveEvaluations(), 5 * 60 * 1000); // Save every 5 minutes
   }
-  
+
   /**
    * Load evaluations from disk
    */
@@ -59,16 +59,16 @@ export class ResponseEvaluator {
       // Ensure the data directory exists
       const dataDir = path.dirname(this.dataFilePath);
       await fs.mkdir(dataDir, { recursive: true });
-      
+
       // Try to read the evaluations file
       const data = await fs.readFile(this.dataFilePath, 'utf-8');
       const evaluationsArray = JSON.parse(data) as ResponseEvaluation[];
-      
+
       // Convert array to map
       this.evaluations = new Map(
         evaluationsArray.map(evaluation => [evaluation.id, evaluation])
       );
-      
+
       console.log(`Loaded ${this.evaluations.size} response evaluations`);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
@@ -79,7 +79,7 @@ export class ResponseEvaluator {
       }
     }
   }
-  
+
   /**
    * Save evaluations to disk
    */
@@ -87,21 +87,21 @@ export class ResponseEvaluator {
     try {
       // Convert map to array for serialization
       const evaluationsArray = Array.from(this.evaluations.values());
-      
+
       // Save to file
       await fs.writeFile(
         this.dataFilePath,
         JSON.stringify(evaluationsArray, null, 2),
         'utf-8'
       );
-      
+
       console.log(`Saved ${evaluationsArray.length} response evaluations`);
     } catch (error) {
       console.error('Error saving response evaluations:', error);
       analyzeError(error as Error);
     }
   }
-  
+
   /**
    * Evaluate a response automatically
    * @param requestId Request ID
@@ -121,7 +121,7 @@ export class ResponseEvaluator {
     try {
       // Perform basic automated evaluation
       const criteria = this.performBasicEvaluation(prompt, response);
-      
+
       // Create evaluation
       const evaluation: ResponseEvaluation = {
         id: uuidv4(),
@@ -135,18 +135,18 @@ export class ResponseEvaluator {
         evaluationType: 'auto',
         evaluator: 'system'
       };
-      
+
       // Store evaluation
       this.evaluations.set(evaluation.id, evaluation);
-      
+
       // Generate improvement suggestions
       evaluation.improvementSuggestions = await this.generateImprovementSuggestions(prompt, response, criteria);
-      
+
       return evaluation;
     } catch (error) {
       console.error('Error evaluating response:', error);
       analyzeError(error as Error);
-      
+
       // Return a default evaluation
       return {
         id: uuidv4(),
@@ -172,7 +172,7 @@ export class ResponseEvaluator {
       };
     }
   }
-  
+
   /**
    * Perform basic evaluation of a response
    * @param prompt Prompt
@@ -181,25 +181,25 @@ export class ResponseEvaluator {
    */
   private performBasicEvaluation(prompt: string, response: string): EvaluationCriteria {
     // Basic heuristics for evaluation
-    
+
     // Relevance: Check if response contains keywords from prompt
     const promptKeywords = this.extractKeywords(prompt);
     const responseKeywords = this.extractKeywords(response);
-    const keywordOverlap = promptKeywords.filter(keyword => 
+    const keywordOverlap = promptKeywords.filter(keyword =>
       responseKeywords.includes(keyword)
     ).length;
     const relevance = Math.min(10, Math.round((keywordOverlap / Math.max(1, promptKeywords.length)) * 10));
-    
+
     // Completeness: Check response length relative to prompt
     const promptWords = prompt.split(/\s+/).length;
     const responseWords = response.split(/\s+/).length;
     const completeness = Math.min(10, Math.round((responseWords / Math.max(10, promptWords * 0.5)) * 5));
-    
+
     // Coherence: Check for sentence structure
     const sentences = response.split(/[.!?]+/).filter(s => s.trim().length > 0);
     const avgSentenceLength = sentences.reduce((sum, s) => sum + s.split(/\s+/).length, 0) / Math.max(1, sentences.length);
     const coherence = Math.min(10, Math.round(Math.min(avgSentenceLength, 20) / 2));
-    
+
     // Safety: Check for potentially unsafe content
     const unsafePatterns = [
       /hack/i, /exploit/i, /illegal/i, /harmful/i, /dangerous/i,
@@ -207,18 +207,18 @@ export class ResponseEvaluator {
     ];
     const safetyIssues = unsafePatterns.filter(pattern => pattern.test(response)).length;
     const safety = Math.max(0, 10 - safetyIssues * 2);
-    
+
     // Other metrics are harder to evaluate automatically
     // For now, we'll use default values
     const accuracy = 7; // Default value
     const helpfulness = 7; // Default value
     const creativity = 6; // Default value
-    
+
     // Overall score is an average of all criteria
     const overall = Math.round(
       (relevance + accuracy + completeness + coherence + helpfulness + creativity + safety) / 7
     );
-    
+
     return {
       relevance,
       accuracy,
@@ -230,7 +230,7 @@ export class ResponseEvaluator {
       overall
     };
   }
-  
+
   /**
    * Extract keywords from text
    * @param text Text to extract keywords from
@@ -249,13 +249,13 @@ export class ResponseEvaluator {
       'hers', 'ours', 'theirs', 'what', 'which', 'who', 'whom', 'whose', 'when',
       'where', 'why', 'how'
     ]);
-    
+
     return text.toLowerCase()
       .replace(/[^\w\s]/g, '') // Remove punctuation
       .split(/\s+/) // Split by whitespace
       .filter(word => word.length > 2 && !stopWords.has(word)); // Filter out stop words and short words
   }
-  
+
   /**
    * Generate improvement suggestions for a response
    * @param prompt Prompt
@@ -269,87 +269,97 @@ export class ResponseEvaluator {
     criteria: EvaluationCriteria
   ): Promise<string[]> {
     const suggestions: string[] = [];
-    
+
     // Add suggestions based on criteria scores
     if (criteria.relevance < 7) {
       suggestions.push('The response could be more relevant to the prompt. Consider addressing the main points of the query more directly.');
     }
-    
+
     if (criteria.accuracy < 7) {
       suggestions.push('The response may contain inaccuracies. Verify facts and provide more precise information.');
     }
-    
+
     if (criteria.completeness < 7) {
       suggestions.push('The response is incomplete. Consider providing more comprehensive information or addressing all aspects of the prompt.');
     }
-    
+
     if (criteria.coherence < 7) {
       suggestions.push('The response could be more coherent. Improve the logical flow and structure of the response.');
     }
-    
+
     if (criteria.helpfulness < 7) {
       suggestions.push('The response could be more helpful. Consider providing more actionable advice or practical information.');
     }
-    
+
     if (criteria.creativity < 7) {
       suggestions.push('The response could be more creative. Consider providing more unique insights or perspectives.');
     }
-    
+
     if (criteria.safety < 7) {
       suggestions.push('The response may contain potentially unsafe content. Review for appropriateness and ethical considerations.');
     }
-    
+
     // Add general suggestions
     if (suggestions.length === 0) {
       suggestions.push('The response is generally good, but could be improved by providing more specific examples or details.');
     }
-    
+
     return suggestions;
   }
-  
+
   /**
    * Record human evaluation of a response
-   * @param requestId Request ID
-   * @param modelName Model name
-   * @param conversationType Conversation type
-   * @param prompt Prompt
-   * @param response Response
-   * @param criteria Evaluation criteria
-   * @param feedback Feedback
-   * @param evaluator Evaluator name
+   * @param evaluationData Evaluation data
    * @returns Evaluation
    */
-  recordHumanEvaluation(
-    requestId: string,
-    modelName: string,
-    conversationType: LLMConversationType,
-    prompt: string,
-    response: string,
-    criteria: EvaluationCriteria,
-    feedback?: string,
-    evaluator: string = 'user'
-  ): ResponseEvaluation {
+  recordHumanEvaluation(evaluationData: {
+    requestId: string;
+    modelName: string;
+    conversationType: LLMConversationType;
+    prompt: string;
+    response: string;
+    scores: {
+      relevance: number;
+      accuracy: number;
+      helpfulness: number;
+      creativity: number;
+      overall: number;
+    };
+    comments?: string;
+  }): ResponseEvaluation {
+    // Convert scores to criteria format
+    const criteria: EvaluationCriteria = {
+      relevance: evaluationData.scores.relevance,
+      accuracy: evaluationData.scores.accuracy,
+      completeness: evaluationData.scores.accuracy, // Use accuracy as a proxy for completeness
+      coherence: evaluationData.scores.accuracy, // Use accuracy as a proxy for coherence
+      helpfulness: evaluationData.scores.helpfulness,
+      creativity: evaluationData.scores.creativity,
+      safety: 10, // Assume safe content from human evaluation
+      overall: evaluationData.scores.overall
+    };
+
     // Create evaluation
     const evaluation: ResponseEvaluation = {
       id: uuidv4(),
-      requestId,
-      modelName,
-      conversationType,
-      prompt,
-      response,
+      requestId: evaluationData.requestId,
+      modelName: evaluationData.modelName,
+      conversationType: evaluationData.conversationType,
+      prompt: evaluationData.prompt,
+      response: evaluationData.response,
       criteria,
-      feedback,
+      feedback: evaluationData.comments,
       timestamp: new Date().toISOString(),
       evaluationType: 'human',
-      evaluator
+      evaluator: 'user'
     };
-    
+
     // Store evaluation
     this.evaluations.set(evaluation.id, evaluation);
-    
+
     return evaluation;
   }
-  
+
   /**
    * Get evaluation by ID
    * @param id Evaluation ID
@@ -358,7 +368,7 @@ export class ResponseEvaluator {
   getEvaluation(id: string): ResponseEvaluation | undefined {
     return this.evaluations.get(id);
   }
-  
+
   /**
    * Get evaluations for a model
    * @param modelName Model name
@@ -368,7 +378,7 @@ export class ResponseEvaluator {
     return Array.from(this.evaluations.values())
       .filter(evaluation => evaluation.modelName === modelName);
   }
-  
+
   /**
    * Get evaluations for a request
    * @param requestId Request ID
@@ -378,7 +388,7 @@ export class ResponseEvaluator {
     return Array.from(this.evaluations.values())
       .filter(evaluation => evaluation.requestId === requestId);
   }
-  
+
   /**
    * Get all evaluations
    * @param limit Maximum number of evaluations to return
@@ -389,7 +399,7 @@ export class ResponseEvaluator {
       .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
       .slice(0, limit);
   }
-  
+
   /**
    * Get average scores for a model
    * @param modelName Model name
@@ -398,7 +408,7 @@ export class ResponseEvaluator {
   getAverageScoresForModel(modelName: string): EvaluationCriteria | null {
     const evaluations = this.getEvaluationsForModel(modelName);
     if (evaluations.length === 0) return null;
-    
+
     const sum: EvaluationCriteria = {
       relevance: 0,
       accuracy: 0,
@@ -409,7 +419,7 @@ export class ResponseEvaluator {
       safety: 0,
       overall: 0
     };
-    
+
     for (const evaluation of evaluations) {
       sum.relevance += evaluation.criteria.relevance;
       sum.accuracy += evaluation.criteria.accuracy;
@@ -420,7 +430,7 @@ export class ResponseEvaluator {
       sum.safety += evaluation.criteria.safety;
       sum.overall += evaluation.criteria.overall;
     }
-    
+
     return {
       relevance: Math.round((sum.relevance / evaluations.length) * 10) / 10,
       accuracy: Math.round((sum.accuracy / evaluations.length) * 10) / 10,
@@ -432,7 +442,7 @@ export class ResponseEvaluator {
       overall: Math.round((sum.overall / evaluations.length) * 10) / 10
     };
   }
-  
+
   /**
    * Get common improvement suggestions for a model
    * @param modelName Model name
@@ -441,7 +451,7 @@ export class ResponseEvaluator {
   getCommonImprovementSuggestionsForModel(modelName: string): { suggestion: string, count: number }[] {
     const evaluations = this.getEvaluationsForModel(modelName);
     const suggestions: Record<string, number> = {};
-    
+
     for (const evaluation of evaluations) {
       if (evaluation.improvementSuggestions) {
         for (const suggestion of evaluation.improvementSuggestions) {
@@ -449,9 +459,54 @@ export class ResponseEvaluator {
         }
       }
     }
-    
+
     return Object.entries(suggestions)
       .map(([suggestion, count]) => ({ suggestion, count }))
       .sort((a, b) => b.count - a.count);
+  }
+
+  /**
+   * Get evaluation summaries for all models
+   * @returns Evaluation summaries
+   */
+  getEvaluationSummaries(): Record<string, any> {
+    // Get all unique model names
+    const modelNames = new Set<string>();
+    for (const evaluation of this.evaluations.values()) {
+      modelNames.add(evaluation.modelName);
+    }
+
+    // Create summaries for each model
+    const summaries: Record<string, any> = {};
+    for (const modelName of modelNames) {
+      const evaluations = this.getEvaluationsForModel(modelName);
+      const averageScores = this.getAverageScoresForModel(modelName);
+      const commonSuggestions = this.getCommonImprovementSuggestionsForModel(modelName);
+
+      // Count evaluations by type
+      const autoEvaluations = evaluations.filter(e => e.evaluationType === 'auto').length;
+      const humanEvaluations = evaluations.filter(e => e.evaluationType === 'human').length;
+
+      // Get conversation types
+      const conversationTypes = new Set<string>();
+      for (const evaluation of evaluations) {
+        conversationTypes.add(evaluation.conversationType);
+      }
+
+      summaries[modelName] = {
+        modelName,
+        totalEvaluations: evaluations.length,
+        autoEvaluations,
+        humanEvaluations,
+        conversationTypes: Array.from(conversationTypes),
+        averageScores,
+        topSuggestions: commonSuggestions.slice(0, 5),
+        lastEvaluated: evaluations.length > 0 ?
+          new Date(Math.max(...evaluations.map(e => new Date(e.timestamp).getTime()))).toISOString() :
+          null
+      };
+    }
+
+    return summaries;
   }
 }
