@@ -73,46 +73,88 @@ export class HuggingfaceInterface extends BaseInterface {
         try {
             const MODEL_MAX_TOKENS = 4096;
             const SAFETY_MARGIN = 200;
-            
-            const trimmedMessages = this.trimMessages(messages, MODEL_MAX_TOKENS);
+
+            // Validate service and API key
+            if (!service || !service.apiKey || service.apiKey === 'dummy-key' || service.apiKey === '') {
+                return 'Error: No valid Huggingface API key provided. Please set the HUGGINGFACE_API_KEY environment variable.';
+            }
+
+            // Ensure messages array is valid
+            if (!messages || !Array.isArray(messages) || messages.length === 0) {
+                return 'Error: No valid messages provided for chat completion.';
+            }
+
+            // Format messages for the API
+            const formattedMessages = messages.map(msg => ({
+                role: msg.role,
+                content: msg.content || ''
+            }));
+
+            const trimmedMessages = this.trimMessages(formattedMessages, MODEL_MAX_TOKENS);
+
+            // Calculate token usage
             const inputTokens = trimmedMessages.reduce((sum, message) => {
-                return sum + Math.ceil(message.content.length / 3.7);
+                return sum + Math.ceil((message.content?.length || 0) / 3.7);
             }, 0);
-    
+
             const availableTokens = MODEL_MAX_TOKENS - inputTokens - SAFETY_MARGIN;
-            
+
             if (availableTokens < 100) {
                 return `Error: Input too long: ${inputTokens} tokens used, only ${availableTokens} tokens available for response`;
             }
-    
+
             const max_new_tokens = Math.min(
                 availableTokens,
                 options.max_length || MODEL_MAX_TOKENS,
                 MODEL_MAX_TOKENS - inputTokens - SAFETY_MARGIN
             );
-    
+
             console.log(`Token allocation: input=${inputTokens}, max_new=${max_new_tokens}, total=${inputTokens + max_new_tokens}`);
-    
+
+            // Create inference instance with API key
             const inference = new HfInference(service.apiKey);
             let out = "";
-            
-            const stream = await inference.chatCompletionStream({
-                model: options.modelName || "HuggingFaceH4/zephyr-7b-beta",
-                messages: trimmedMessages,
-                max_tokens: max_new_tokens,
-                temperature: options.temperature || 0.5,
-                top_p: 0.7,
-                timeout: options.timeout || 450000, // Use the timeout option here
-            });
-    
-            for await (const chunk of stream) {
-                if (chunk.choices && chunk.choices.length > 0) {
-                    const newContent = chunk.choices[0].delta.content;
-                    out += newContent;
+
+            try {
+                const stream = await inference.chatCompletionStream({
+                    model: options.modelName || "HuggingFaceH4/zephyr-7b-beta",
+                    messages: trimmedMessages,
+                    max_tokens: max_new_tokens,
+                    temperature: options.temperature || 0.5,
+                    top_p: 0.7,
+                    timeout: options.timeout || 450000, // Use the timeout option here
+                });
+
+                for await (const chunk of stream) {
+                    if (chunk.choices && chunk.choices.length > 0 && chunk.choices[0].delta) {
+                        const newContent = chunk.choices[0].delta.content || '';
+                        out += newContent;
+                    }
+                }
+
+                return out || 'No response generated';
+            } catch (streamError) {
+                analyzeError(streamError as Error);
+                const streamErrorMessage = streamError instanceof Error ? streamError.message : String(streamError);
+                console.error('Error in Huggingface stream:', streamErrorMessage);
+
+                // Try a non-streaming fallback
+                try {
+                    const response = await inference.textGeneration({
+                        model: options.modelName || "HuggingFaceH4/zephyr-7b-beta",
+                        inputs: trimmedMessages[trimmedMessages.length - 1].content,
+                        parameters: {
+                            max_new_tokens: max_new_tokens,
+                            temperature: options.temperature || 0.5,
+                            top_p: 0.7,
+                        }
+                    });
+                    return response.generated_text || 'No response generated';
+                } catch (fallbackError) {
+                    analyzeError(fallbackError as Error);
+                    throw fallbackError; // Let the outer catch handle this
                 }
             }
-    
-            return out || 'No response generated';
         } catch (error) {
             analyzeError(error as Error);
             const errorMessage = error instanceof Error ? error.message : String(error);
@@ -125,15 +167,15 @@ export class HuggingfaceInterface extends BaseInterface {
     async convertTextToText(args: ConvertParamsType): Promise<string> {
         const { service, prompt, modelName } = args;
         const inference = new HfInference(service.apiKey);
-    
+
         // Estimate the number of tokens in the input prompt
         // A rough estimate is 1 token per 4 characters
         const estimatedInputTokens = Math.ceil((prompt?.length || 0) / 3.5);
-    
+
         // Calculate the maximum new tokens, ensuring we don't exceed the model's limit
         const maxTotalTokens = args.max_length || 2048; // Default to 2048 if not specified
         const maxNewTokens = Math.max(1, maxTotalTokens - estimatedInputTokens);
-    
+
         const response = await inference.textGeneration({
             model: modelName || 'gpt2',
             inputs: prompt || '',
@@ -210,6 +252,8 @@ export class HuggingfaceInterface extends BaseInterface {
         }
         return converter.converter(convertParams);
     }
+
+
 
 
 }

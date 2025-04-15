@@ -31,5 +31,8 @@ WORKDIR /usr/src/app/services/librarian
 # Expose the port the app runs on
 EXPOSE 5040
 
-# Define the command to run the application
-CMD ["node", "dist/Librarian.js"]
+# Install MongoDB client for initialization script
+RUN npm install mongodb
+
+# Define the command to run the initialization script and then the application
+CMD ["sh", "-c", "node src/init-mongo-data.js && node dist/Librarian.js"]

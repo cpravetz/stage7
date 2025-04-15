@@ -1,0 +1,47 @@
+{
+  "id": "plugin-ACCOMPLISH",
+  "verb": "ACCOMPLISH",
+  "description": "A plugin to accomplish a goal by generating a plan or providing a direct answer",
+  "explanation": "This plugin takes a goal and generates a plan to accomplish it or provides a direct answer if possible.",
+  "inputDefinitions": [
+    {
+      "name": "goal",
+      "required": true,
+      "type": "string",
+      "description": "The goal to accomplish"
+    }
+  ],
+  "outputDefinitions": [
+    {
+      "name": "plan",
+      "required": false,
+      "type": "plan",
+      "description": "A plan to accomplish the goal"
+    },
+    {
+      "name": "answer",
+      "required": false,
+      "type": "string",
+      "description": "A direct answer to the goal"
+    }
+  ],
+  "language": "javascript",
+  "entryPoint": {
+    "main": "ACCOMPLISH.js.simple"
+  },
+  "version": "1.0.0",
+  "security": {
+    "permissions": [],
+    "sandboxOptions": {},
+    "trust": {
+      "publisher": "system-generated",
+      "signature": "1"
+    }
+  },
+  "repository": {
+    "type": "local",
+    "url": "",
+    "signature": "",
+    "dependencies": []
+  }
+}

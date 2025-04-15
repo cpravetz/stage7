@@ -13,10 +13,10 @@ export class LlamaGeminiModel extends BaseModel {
         ]);
 
         super({
-            name: "google/gemini-flash-1.5-exp",
-            modelName: "google/gemini-flash-1.5-exp",
-            interfaceName: "openrouter",
-            serviceName: "ORService",
+            name: "google/gemini-1.5-pro-vision",
+            modelName: "gemini-1.5-pro-vision",
+            interfaceName: "gemini",
+            serviceName: "gemini",
             tokenLimit: 8192, // Adjust this value if needed
             scoresByConversationType: scoresByConversationType,
             contentConversation: [LLMConversationType.TextToText]

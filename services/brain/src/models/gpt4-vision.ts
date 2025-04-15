@@ -13,7 +13,7 @@ export class GPT4VisionModel extends BaseModel {
             name: "openai/gpt-4-vision",
             modelName: "gpt-4-vision-preview",
             interfaceName: "openai",
-            serviceName: "OAIService",
+            serviceName: "OAService",
             tokenLimit: 128000, // Adjust this value if needed
             scoresByConversationType: scoresByConversationType,
             contentConversation: [LLMConversationType.TextToText, LLMConversationType.TextToCode, LLMConversationType.ImageToText]

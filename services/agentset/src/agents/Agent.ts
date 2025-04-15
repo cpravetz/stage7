@@ -63,10 +63,13 @@ export class Agent extends BaseEntity {
     private currentQuestionReject: ((reason?: any) => void) | null = null;
 
     constructor(config: AgentConfig) {
-        super(config.id, 'Agent', `agentset`, process.env.PORT || '9000');
-        console.log(`Agent ${config.id} created. missionId=${config.missionId}. Inputs: ${JSON.stringify(config.inputs)}` );
+        // Ensure the agent has a valid ID
+        const agentId = config.id || `agent_${uuidv4()}`;
+        super(agentId, 'Agent', `agentset`, process.env.PORT || '9000');
+
+        console.log(`Agent ${agentId} created. missionId=${config.missionId}. Inputs: ${JSON.stringify(config.inputs)}` );
         this.agentPersistenceManager = new AgentPersistenceManager();
-        this.stateManager = new StateManager(config.id, this.agentPersistenceManager);
+        this.stateManager = new StateManager(agentId, this.agentPersistenceManager);
         this.inputs = new Map(config.inputs instanceof Map ? config.inputs : Object.entries(config.inputs||{}));
         this.missionId = config.missionId;
         this.agentSetUrl = config.agentSetUrl;
@@ -81,12 +84,13 @@ export class Agent extends BaseEntity {
 
         // Create initial step using the new Step class
         const initialStep = new Step({
-            actionVerb: config.actionVerb,
+            actionVerb: config.actionVerb || 'ACCOMPLISH',
             stepNo: 1,
             inputs: this.inputs,
             description: 'Initial mission step',
             status: StepStatus.PENDING,
-            persistenceManager: this.agentPersistenceManager
+            persistenceManager: this.agentPersistenceManager,
+            agentId: this.id // Pass the agent ID to the Step constructor
         });
         this.steps.push(initialStep);
 
@@ -217,7 +221,7 @@ Please consider this context and the available plugins when planning and executi
     }
 
     private addStepsFromPlan(plan: ActionVerbTask[]) {
-        const newSteps = createFromPlan(plan, this.steps.length + 1, this.agentPersistenceManager);
+        const newSteps = createFromPlan(plan, this.steps.length + 1, this.agentPersistenceManager, this.id);
         this.steps.push(...newSteps);
     }
 
@@ -263,11 +267,18 @@ Please consider this context and the available plugins when planning and executi
     }
 
     private async checkAndResumeBlockedAgents() {
+        // Skip if the agent ID is not valid or traffic manager URL is not set
+        if (!this.id || !this.trafficManagerUrl) {
+            console.log('Skipping checkAndResumeBlockedAgents: missing agent ID or traffic manager URL');
+            return;
+        }
+
         try {
             // Use simpleApi for non-authenticated calls
+            console.log(`Checking blocked agents for agent ${this.id}`);
             await simpleApi.post(`http://${this.trafficManagerUrl}/checkBlockedAgents`, { completedAgentId: this.id });
         } catch (error) { analyzeError(error as Error);
-            console.error('Error checking blocked agents:', error instanceof Error ? error.message : error);
+            console.error(`Error checking blocked agents for agent ${this.id}:`, error instanceof Error ? error.message : error);
         }
     }
 
@@ -361,8 +372,7 @@ Please consider this context and the available plugins when planning and executi
     }
 
     private async saveWorkProduct(stepId: string, data: PluginOutput[], isFinal: boolean): Promise<void> {
-        const serializedData = MapSerializer.transformForSerialization(data);
-        const workProduct = new WorkProduct(this.id, stepId, serializedData);
+        const workProduct = new WorkProduct(this.id, stepId, data);
         try {
             await this.agentPersistenceManager.saveWorkProduct(workProduct);
 
@@ -1214,5 +1224,27 @@ Please consider this context and the available plugins when planning and executi
      */
     async getTaskHistory(): Promise<Array<{ id: string, type: string, success: boolean, duration: number }>> {
         return this.taskHistory;
+    }
+
+    /**
+     * Get agent state
+     * @returns Agent state
+     */
+    async getAgentState(): Promise<any> {
+        return {
+            id: this.id,
+            status: this.status,
+            missionId: this.missionId,
+            steps: this.steps.map(step => ({
+                id: step.id,
+                status: step.status,
+                actionVerb: step.actionVerb,
+                description: step.description,
+                stepNo: step.stepNo
+            })),
+            role: this.role,
+            capabilities: this.capabilities,
+            paused: this.paused
+        };
     }
 }

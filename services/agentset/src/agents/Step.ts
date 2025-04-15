@@ -39,9 +39,12 @@ export class Step {
         status?: StepStatus,
         waitingFor?: string,
         error?: string,
-        persistenceManager: AgentPersistenceManager
+        persistenceManager: AgentPersistenceManager,
+        agentId?: string
     }) {
-        this.id = params.id || uuidv4();
+        // If an agent ID is provided, use it to create a step ID in the format 'agentId_stepUuid'
+        const stepUuid = uuidv4();
+        this.id = params.agentId ? `${params.agentId}_${stepUuid}` : (params.id || stepUuid);
         this.stepNo = params.stepNo;
         this.actionVerb = params.actionVerb;
         this.inputs = params.inputs || new Map();
@@ -167,8 +170,14 @@ export class Step {
             });
 
             this.updateStatus(StepStatus.COMPLETED, result);
+            // Extract the agent ID from the step ID
+            const stepIdParts = this.id.split('_');
+            // If the step ID has the format 'agent_uuid_stepuuid', extract the agent ID as 'agent_uuid'
+            const agentId = stepIdParts.length >= 3 && stepIdParts[0] === 'agent' ? `${stepIdParts[0]}_${stepIdParts[1]}` : 'unknown';
+            console.log(`Extracted agent ID ${agentId} from step ID ${this.id}`);
+            console.log(`Saving work product for step ${this.id} with agent ID ${agentId}`);
             await this.persistenceManager.saveWorkProduct({
-                agentId: this.id.split('_')[0], // Assuming the step ID is in the format 'agentId_stepId'
+                agentId: agentId,
                 stepId: this.id,
                 data: result
             });
@@ -186,8 +195,14 @@ export class Step {
             }];
 
             // Push error output to Librarian
+            // Extract the agent ID from the step ID
+            const stepIdParts = this.id.split('_');
+            // If the step ID has the format 'agent_uuid_stepuuid', extract the agent ID as 'agent_uuid'
+            const agentId = stepIdParts.length >= 3 && stepIdParts[0] === 'agent' ? `${stepIdParts[0]}_${stepIdParts[1]}` : 'unknown';
+            console.log(`Extracted agent ID ${agentId} from step ID ${this.id}`);
+            console.log(`Saving error work product for step ${this.id} with agent ID ${agentId}`);
             await this.persistenceManager.saveWorkProduct({
-                agentId: this.id.split('_')[0],
+                agentId: agentId,
                 stepId: this.id,
                 data: errorResult
             });
@@ -232,7 +247,9 @@ export class Step {
 
         const stepsToExecute = result ? trueSteps : falseSteps;
         if (stepsToExecute) {
-            const newSteps = createFromPlan(stepsToExecute, this.stepNo + 1, this.persistenceManager);
+            // Extract the agent ID from the step ID
+            const agentId = this.id.includes('_') ? this.id.split('_')[0] : undefined;
+            const newSteps = createFromPlan(stepsToExecute, this.stepNo + 1, this.persistenceManager, agentId);
             // Add these steps to the agent's step queue
             return [{
                 success: true,
@@ -250,8 +267,11 @@ export class Step {
         const steps = this.inputs.get('steps')?.inputValue as ActionVerbTask[];
         const newSteps: Step[] = [];
 
+        // Extract the agent ID from the step ID
+        const agentId = this.id.includes('_') ? this.id.split('_')[0] : undefined;
+
         for (let i = 0; i < count; i++) {
-            const iterationSteps = createFromPlan(steps, this.stepNo + 1 + (i * steps.length), this.persistenceManager);
+            const iterationSteps = createFromPlan(steps, this.stepNo + 1 + (i * steps.length), this.persistenceManager, agentId);
             newSteps.push(...iterationSteps);
         }
 
@@ -267,7 +287,10 @@ export class Step {
     private async handleTimeout(): Promise<PluginOutput[]> {
         const timeoutMs = this.inputs.get('timeout')?.inputValue as number;
         const steps = this.inputs.get('steps')?.inputValue as ActionVerbTask[];
-        const newSteps = createFromPlan(steps, this.stepNo + 1, this.persistenceManager);
+
+        // Extract the agent ID from the step ID
+        const agentId = this.id.includes('_') ? this.id.split('_')[0] : undefined;
+        const newSteps = createFromPlan(steps, this.stepNo + 1, this.persistenceManager, agentId);
 
         newSteps.forEach(step => {
             step.timeout = timeoutMs;
@@ -323,8 +346,11 @@ export class Step {
 
         newSteps.push(checkStep);
 
+        // Extract the agent ID from the step ID
+        const agentId = this.id.includes('_') ? this.id.split('_')[0] : undefined;
+
         // Create steps for first potential iteration
-        const iterationSteps = createFromPlan(steps, this.stepNo + 2, this.persistenceManager);
+        const iterationSteps = createFromPlan(steps, this.stepNo + 2, this.persistenceManager, agentId);
 
         // Add dependency on condition check for all first iteration steps
         iterationSteps.forEach(step => {
@@ -385,8 +411,11 @@ export class Step {
 
         const newSteps: Step[] = [];
 
+        // Extract the agent ID from the step ID
+        const agentId = this.id.includes('_') ? this.id.split('_')[0] : undefined;
+
         // Create first iteration steps (UNTIL executes at least once)
-        const iterationSteps = createFromPlan(steps, this.stepNo + 1, this.persistenceManager);
+        const iterationSteps = createFromPlan(steps, this.stepNo + 1, this.persistenceManager, agentId);
         newSteps.push(...iterationSteps);
 
         // Add condition check step after first iteration
@@ -442,6 +471,9 @@ export class Step {
         const steps = stepsInput.inputValue as ActionVerbTask[];
         const newSteps: Step[] = [];
 
+        // Extract the agent ID from the step ID
+        const agentId = this.id.includes('_') ? this.id.split('_')[0] : undefined;
+
         // Create steps with explicit dependencies to force sequential execution
         let previousStepId: string | undefined;
 
@@ -451,7 +483,8 @@ export class Step {
                 stepNo: this.stepNo + 1 + index,
                 inputs: task.inputs || new Map(),
                 description: task.description || `Sequential step ${index + 1}`,
-                persistenceManager: this.persistenceManager
+                persistenceManager: this.persistenceManager,
+                agentId: agentId // Pass the agent ID to the Step constructor
             });
 
             if (previousStepId) {
@@ -533,9 +566,11 @@ export class Step {
      * Creates steps from a plan of action verb tasks
      * @param plan Array of action verb tasks
      * @param startingStepNo The starting step number
+     * @param persistenceManager The persistence manager to use
+     * @param agentId The ID of the agent creating these steps
      * @returns Array of Step instances
      */
-    export function createFromPlan(plan: ActionVerbTask[], startingStepNo: number, persistenceManager: AgentPersistenceManager): Step[] {
+    export function createFromPlan(plan: ActionVerbTask[], startingStepNo: number, persistenceManager: AgentPersistenceManager, agentId?: string): Step[] {
         return plan.map((task, index) => {
             const inputs = new Map<string, PluginInput>();
             if (task.inputs) {
@@ -565,7 +600,8 @@ export class Step {
                 inputs: inputs,
                 description: task.description,
                 dependencies: dependencies,
-                persistenceManager: persistenceManager
+                persistenceManager: persistenceManager,
+                agentId: agentId // Pass the agent ID to the Step constructor
             });
 
             return step;

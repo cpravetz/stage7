@@ -427,9 +427,7 @@ class MissionControl extends BaseEntity {
     private async verifyToken(req: CustomRequest, res: Response, next: NextFunction) {
         const clientId = req.body.clientId || req.query.clientId;
         const token = req.headers.authorization?.split(' ')[1];
-        console.log(`Verifying token for client ${clientId}`);
-        console.log(`Token: ${token}`);
-
+        console.log(`Verifying token for client ${clientId} - token ${token}`);
         if (!token) {
             console.log('No token provided');
             return res.status(401).json({ message: 'No token provided' });

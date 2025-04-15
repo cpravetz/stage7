@@ -1,9 +1,15 @@
 import { BaseService } from './baseService';
 
-
 export class HFService extends BaseService {
     constructor() {
-        super('HFService', process.env.HUGGINGFACE_API_KEY || '', process.env.HUGGINGFACE_API_URL || '', ['huggingface']);
+        // Use the API key from environment variables or a default key for testing
+        const apiKey = process.env.HUGGINGFACE_API_KEY || process.env.HF_API_KEY || '';
+        super('HFService', apiKey, process.env.HUGGINGFACE_API_URL || 'https://api-inference.huggingface.co/models', ['huggingface']);
+    }
+
+    // Check if the service is available based on whether an API key is provided
+    isAvailable(): boolean {
+        return !!this.apiKey && this.apiKey.length > 0 && this.apiKey !== 'dummy-key';
     }
 }
 

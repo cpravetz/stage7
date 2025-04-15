@@ -14,7 +14,7 @@ export class GPT4TurboModel extends BaseModel {
             name: "openai/gpt-4-turbo",
             modelName: "gpt-4-turbo-preview",
             interfaceName: "openai",
-            serviceName: "OAIService",
+            serviceName: "OAService",
             tokenLimit: 128000, // Adjust this value if needed
             scoresByConversationType: scoresByConversationType,
             contentConversation: [LLMConversationType.TextToCode, LLMConversationType.CodeToText, LLMConversationType.ImageToText, LLMConversationType.TextToText]

@@ -61,6 +61,8 @@ export class AgentSet extends BaseEntity {
 
         app.post('/agent/:agentId/message', (req, res) => this.handleAgentMessage(req, res));
 
+        app.get('/agent/:agentId', (req, res) => this.getAgent(req, res));
+
         app.get('/agent/:agentId/output', (req, res) => this.getAgentOutput(req, res));
 
         // Pause mission agents
@@ -592,6 +594,24 @@ export class AgentSet extends BaseEntity {
         }
     }
 
+    private async getAgent(req: express.Request, res: express.Response) {
+        const { agentId } = req.params;
+        const agent = this.agents.get(agentId);
+
+        if (!agent) {
+            res.status(404).send({ error: `Agent with id ${agentId} not found` });
+        }
+        else {
+            try {
+                const agentState = await agent.getAgentState();
+                res.status(200).send(agentState);
+            } catch (error) { analyzeError(error as Error);
+                console.error('Error fetching agent state for agent %s:', agentId, error instanceof Error ? error.message : error);
+                res.status(500).send({ error: `Failed to fetch agent state for agent ${agentId}` });
+            }
+        }
+    }
+
     private async getAgentOutput(req: express.Request, res: express.Response) {
         const { agentId } = req.params;
         const agent = this.agents.get(agentId);
@@ -720,6 +740,7 @@ export class AgentSet extends BaseEntity {
             'perform': 'executor',
             'run': 'executor',
             'do': 'executor',
+            'accomplish': 'executor',
 
             'coordinate': 'coordinator',
             'manage': 'coordinator',
@@ -735,7 +756,7 @@ export class AgentSet extends BaseEntity {
         };
 
         // Convert action verb to lowercase and remove any non-alphanumeric characters
-        const normalizedVerb = actionVerb.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const normalizedVerb = actionVerb ? actionVerb.toLowerCase().replace(/[^a-z0-9]/g, '') : 'accomplish';
 
         // Check for exact match
         if (actionVerbToRoleMap[normalizedVerb]) {

@@ -13,7 +13,7 @@ export class GPT35TurboModel extends BaseModel {
             name: "openai/gpt-3.5-turbo",
             modelName: "gpt-3.5-turbo-16k",
             interfaceName: "openai",
-            serviceName: "OAIService",
+            serviceName: "OAService",
             tokenLimit: 16384,
             scoresByConversationType: scoresByConversationType,
             contentConversation: [LLMConversationType.TextToCode, LLMConversationType.CodeToText, LLMConversationType.TextToText]

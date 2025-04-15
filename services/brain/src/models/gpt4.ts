@@ -14,7 +14,7 @@ export class GPT4Model extends BaseModel {
             name: "openai/gpt-4",
             modelName: "gpt-4",
             interfaceName: "openai",
-            serviceName: "OAIService",
+            serviceName: "OAService",
             tokenLimit: 8192,
             scoresByConversationType: scoresByConversationType,
             contentConversation: [

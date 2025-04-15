@@ -94,6 +94,8 @@ services:
       - postoffice
       - librarian
       - securitymanager
+    env_file:
+      - services/brain/.env
     environment:
       NODE_ENV: production
       PORT: &brainPort 5070
@@ -105,15 +107,8 @@ services:
       CONFIG_SERVICE_URL: *configserviceUrl
       BRAIN_CLIENT_SECRET: *sharedSecret
       CLIENT_SECRET: *sharedSecret
-      # LLM API Keys and URLs
-      ANTHROPIC_API_KEY: 'dummy-key'
-      ANTHROPIC_API_URL: 'https://api.anthropic.com/v1/messages'
-      OPENAI_API_KEY: 'dummy-key'
-      OPENAI_API_URL: 'https://api.openai.com/v1'
-      HUGGINGFACE_API_KEY: 'dummy-key'
-      HUGGINGFACE_API_URL: 'https://api-inference.huggingface.co/models'
-      OPENROUTER_API_KEY: 'dummy-key'
-      OPENROUTER_API_URL: 'https://openrouter.ai/api/v1'
+      # Explicitly set OpenWebUI URL to override any default
+      OPENWEB_URL: 'https://knllm.dusdusdusd.com'
     volumes:
       - ./shared/keys:/usr/src/app/shared/keys
     ports:
@@ -139,6 +134,8 @@ services:
       CLIENT_SECRET: *sharedSecret
     volumes:
       - ./shared/keys:/usr/src/app/shared/keys
+    ports:
+      - "5100:5100"
 
   engineer:
     build:
@@ -354,6 +351,8 @@ services:
     volumes:
       - consul_data:/consul/data
     command: agent -server -ui -bootstrap-expect=1 -client=0.0.0.0
+
+  # OpenWebUI is using an external server, not a local container
 
 volumes:
   mongo_data:

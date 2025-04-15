@@ -62,16 +62,43 @@ export class ModelManager {
     selectModel(optimization: OptimizationType, conversationType: LLMConversationType): BaseModel | null {
         let bestModel: BaseModel | null = null;
         let bestScore = -Infinity;
+        let bestNonOpenRouterModel: BaseModel | null = null;
+        let bestNonOpenRouterScore = -Infinity;
+
+        // Check if OpenRouter API key is set
+        const orService = serviceManager.getService('ORService');
+        const openRouterAvailable = orService && orService.apiKey && orService.apiKey.length > 0;
 
         for (const model of this.models.values()) {
             if (model.contentConversation.includes(conversationType)) {
+                // Skip blacklisted models
+                if (this.performanceTracker.isModelBlacklisted(model.name, conversationType)) {
+                    console.log(`Skipping blacklisted model: ${model.name} for conversation type ${conversationType}`);
+                    continue;
+                }
+
                 const score = this.calculateScore(model, optimization, conversationType);
+
+                // Track best overall model
                 if (score > bestScore) {
                     bestScore = score;
                     bestModel = model;
                 }
+
+                // Track best non-OpenRouter model
+                if (model.interfaceName !== 'openrouter' && score > bestNonOpenRouterScore) {
+                    bestNonOpenRouterScore = score;
+                    bestNonOpenRouterModel = model;
+                }
             }
         }
+
+        // If best model uses OpenRouter but OpenRouter is not available, use best non-OpenRouter model
+        if (bestModel && bestModel.interfaceName === 'openrouter' && !openRouterAvailable && bestNonOpenRouterModel) {
+            console.log(`OpenRouter API key not set, using alternative model: ${bestNonOpenRouterModel.name} with score ${bestNonOpenRouterScore} for ${optimization} and conversation type ${conversationType}`);
+            return bestNonOpenRouterModel;
+        }
+
         console.log(`Selected model: ${bestModel?.name} with score ${bestScore} for ${optimization} and conversation type ${conversationType}`);
         return bestModel;
     }

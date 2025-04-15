@@ -111,7 +111,7 @@ export class BaseEntity implements IBaseEntity {
   protected async cleanup() {
     try {
       // Deregister from service discovery
-      if (this.serviceDiscovery) {
+      if (this.serviceDiscovery && this.id) {
         await this.serviceDiscovery.deregisterService(this.id);
         console.log(`${this.componentType} deregistered from service discovery`);
       }

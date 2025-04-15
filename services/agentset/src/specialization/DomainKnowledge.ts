@@ -39,15 +39,15 @@ export class DomainKnowledge {
   private domains: Map<string, KnowledgeDomain>;
   private librarianUrl: string;
   private brainUrl: string;
-  
+
   constructor(domains: Map<string, KnowledgeDomain>, librarianUrl: string, brainUrl: string) {
     this.domains = domains;
     this.librarianUrl = librarianUrl;
     this.brainUrl = brainUrl;
-    
+
     this.loadKnowledgeItems();
   }
-  
+
   /**
    * Load knowledge items from persistent storage
    */
@@ -59,7 +59,7 @@ export class DomainKnowledge {
           collection: 'domain_knowledge'
         }
       });
-      
+
       if (response.data && Array.isArray(response.data)) {
         for (const item of response.data) {
           this.knowledgeItems.set(item.id, item);
@@ -71,28 +71,28 @@ export class DomainKnowledge {
       console.error('Error loading knowledge items:', error);
     }
   }
-  
+
   /**
    * Save knowledge items to persistent storage
    */
   private async saveKnowledgeItems(): Promise<void> {
     try {
       const items = Array.from(this.knowledgeItems.values());
-      
+
       await axios.post(`http://${this.librarianUrl}/storeData`, {
         id: 'domain_knowledge',
         data: items,
         storageType: 'mongo',
         collection: 'domain_knowledge'
       });
-      
+
       console.log(`Saved ${items.length} knowledge items`);
     } catch (error) {
       analyzeError(error as Error);
       console.error('Error saving knowledge items:', error);
     }
   }
-  
+
   /**
    * Add a knowledge item
    * @param item Knowledge item to add
@@ -103,7 +103,7 @@ export class DomainKnowledge {
     if (!this.domains.has(item.domainId)) {
       throw new Error(`Domain ${item.domainId} not found`);
     }
-    
+
     // Create knowledge item
     const newItem: KnowledgeItem = {
       ...item,
@@ -112,14 +112,14 @@ export class DomainKnowledge {
       updatedAt: new Date().toISOString(),
       version: 1
     };
-    
+
     // Store knowledge item
     this.knowledgeItems.set(newItem.id, newItem);
     await this.saveKnowledgeItems();
-    
+
     return newItem;
   }
-  
+
   /**
    * Update a knowledge item
    * @param id Knowledge item ID
@@ -132,16 +132,16 @@ export class DomainKnowledge {
   ): Promise<KnowledgeItem> {
     // Check if knowledge item exists
     const item = this.knowledgeItems.get(id);
-    
+
     if (!item) {
       throw new Error(`Knowledge item ${id} not found`);
     }
-    
+
     // Check if domain exists
     if (updates.domainId && !this.domains.has(updates.domainId)) {
       throw new Error(`Domain ${updates.domainId} not found`);
     }
-    
+
     // Update knowledge item
     const updatedItem: KnowledgeItem = {
       ...item,
@@ -149,14 +149,14 @@ export class DomainKnowledge {
       updatedAt: new Date().toISOString(),
       version: item.version + 1
     };
-    
+
     // Store updated knowledge item
     this.knowledgeItems.set(id, updatedItem);
     await this.saveKnowledgeItems();
-    
+
     return updatedItem;
   }
-  
+
   /**
    * Delete a knowledge item
    * @param id Knowledge item ID
@@ -167,14 +167,14 @@ export class DomainKnowledge {
     if (!this.knowledgeItems.has(id)) {
       return false;
     }
-    
+
     // Delete knowledge item
     this.knowledgeItems.delete(id);
     await this.saveKnowledgeItems();
-    
+
     return true;
   }
-  
+
   /**
    * Get a knowledge item by ID
    * @param id Knowledge item ID
@@ -183,7 +183,7 @@ export class DomainKnowledge {
   getKnowledgeItem(id: string): KnowledgeItem | undefined {
     return this.knowledgeItems.get(id);
   }
-  
+
   /**
    * Query knowledge items
    * @param options Query options
@@ -191,42 +191,42 @@ export class DomainKnowledge {
    */
   queryKnowledgeItems(options: KnowledgeQueryOptions = {}): KnowledgeItem[] {
     let items = Array.from(this.knowledgeItems.values());
-    
+
     // Filter by domains
     if (options.domains && options.domains.length > 0) {
       items = items.filter(item => options.domains!.includes(item.domainId));
     }
-    
+
     // Filter by tags
     if (options.tags && options.tags.length > 0) {
-      items = items.filter(item => 
+      items = items.filter(item =>
         options.tags!.some(tag => item.tags.includes(tag))
       );
     }
-    
+
     // Filter by query
     if (options.query) {
       const query = options.query.toLowerCase();
-      
-      items = items.filter(item => 
+
+      items = items.filter(item =>
         item.title.toLowerCase().includes(query) ||
         item.content.toLowerCase().includes(query) ||
         item.tags.some(tag => tag.toLowerCase().includes(query))
       );
     }
-    
+
     // Apply pagination
     if (options.offset) {
       items = items.slice(options.offset);
     }
-    
+
     if (options.limit) {
       items = items.slice(0, options.limit);
     }
-    
+
     return items;
   }
-  
+
   /**
    * Get knowledge items for a domain
    * @param domainId Domain ID
@@ -236,7 +236,7 @@ export class DomainKnowledge {
     return Array.from(this.knowledgeItems.values())
       .filter(item => item.domainId === domainId);
   }
-  
+
   /**
    * Generate domain-specific context for a task
    * @param domainIds Domain IDs
@@ -250,32 +250,32 @@ export class DomainKnowledge {
     try {
       // Get relevant knowledge items
       const relevantItems: KnowledgeItem[] = [];
-      
+
       for (const domainId of domainIds) {
         const domainItems = this.getKnowledgeItemsForDomain(domainId);
-        
+
         // Filter items by relevance to task
         const filteredItems = await this.filterItemsByRelevance(domainItems, taskDescription);
-        
+
         relevantItems.push(...filteredItems);
       }
-      
+
       if (relevantItems.length === 0) {
         return ''; // No relevant items
       }
-      
+
       // Generate context
       let context = 'Domain-Specific Knowledge:\n\n';
-      
+
       for (const item of relevantItems) {
         context += `## ${item.title}\n\n`;
         context += `${item.content}\n\n`;
-        
+
         if (item.source) {
           context += `Source: ${item.source}\n\n`;
         }
       }
-      
+
       return context;
     } catch (error) {
       analyzeError(error as Error);
@@ -283,7 +283,7 @@ export class DomainKnowledge {
       return '';
     }
   }
-  
+
   /**
    * Filter knowledge items by relevance to a task
    * @param items Knowledge items
@@ -297,10 +297,24 @@ export class DomainKnowledge {
     if (items.length === 0) {
       return [];
     }
-    
+
     try {
-      // Use LLM to determine relevance
-      const response = await axios.post(`http://${this.brainUrl}/chat`, {
+      // Import AuthenticatedApiClient
+      const { AuthenticatedApiClient } = require('@cktmcs/shared');
+
+      // Create a temporary BaseEntity for authentication
+      const tempEntity = {
+        id: 'domain-knowledge-' + Date.now(),
+        componentType: 'AgentSet',
+        url: 'agentset:5100',
+        port: '5100'
+      };
+
+      // Create authenticated API client
+      const authenticatedApi = new AuthenticatedApiClient(tempEntity);
+
+      // Use LLM to determine relevance with authenticated request
+      const response = await authenticatedApi.post(`http://${this.brainUrl}/chat`, {
         exchanges: [
           {
             role: 'system',
@@ -313,19 +327,19 @@ export class DomainKnowledge {
         ],
         optimization: 'accuracy'
       });
-      
+
       // Parse LLM response
       const llmResponse = response.data.response;
-      
+
       // Extract indices
       const indexMatch = llmResponse.match(/(\d+(?:,\s*\d+)*)/);
-      
+
       if (!indexMatch || llmResponse.toLowerCase().includes('none')) {
         return []; // No relevant items
       }
-      
+
       const indices = indexMatch[1].split(',').map((index: string) => parseInt(index.trim()) - 1);
-      
+
       // Filter items by indices
       return indices
         .filter((index: number) => index >= 0 && index < items.length)
@@ -333,17 +347,17 @@ export class DomainKnowledge {
     } catch (error) {
       analyzeError(error as Error);
       console.error('Error filtering items by relevance:', error);
-      
+
       // Fall back to simple keyword matching
       const keywords = taskDescription.toLowerCase().split(/\s+/);
-      
+
       return items.filter(item => {
         const itemText = `${item.title} ${item.content}`.toLowerCase();
         return keywords.some(keyword => itemText.includes(keyword));
       });
     }
   }
-  
+
   /**
    * Import knowledge from external source
    * @param domainId Domain ID
@@ -361,9 +375,9 @@ export class DomainKnowledge {
       if (!this.domains.has(domainId)) {
         throw new Error(`Domain ${domainId} not found`);
       }
-      
+
       let content: string;
-      
+
       // Fetch content from source
       if (format === 'url') {
         const response = await axios.get(source);
@@ -374,9 +388,23 @@ export class DomainKnowledge {
       } else {
         throw new Error(`Unsupported format: ${format}`);
       }
-      
-      // Use LLM to extract knowledge items
-      const response = await axios.post(`http://${this.brainUrl}/chat`, {
+
+      // Import AuthenticatedApiClient if not already imported
+      const { AuthenticatedApiClient } = require('@cktmcs/shared');
+
+      // Create a temporary BaseEntity for authentication
+      const tempEntity = {
+        id: 'domain-knowledge-import-' + Date.now(),
+        componentType: 'AgentSet',
+        url: 'agentset:5100',
+        port: '5100'
+      };
+
+      // Create authenticated API client
+      const authenticatedApi = new AuthenticatedApiClient(tempEntity);
+
+      // Use LLM to extract knowledge items with authenticated request
+      const response = await authenticatedApi.post(`http://${this.brainUrl}/chat`, {
         exchanges: [
           {
             role: 'system',
@@ -389,22 +417,22 @@ export class DomainKnowledge {
         ],
         optimization: 'accuracy'
       });
-      
+
       // Parse LLM response
       const llmResponse = response.data.response;
-      
+
       // Extract JSON
       const jsonMatch = llmResponse.match(/\[\s*\{.*\}\s*\]/s);
-      
+
       if (!jsonMatch) {
         throw new Error('Failed to extract knowledge items from content');
       }
-      
+
       const extractedItems = JSON.parse(jsonMatch[0]);
-      
+
       // Add knowledge items
       const addedItems: KnowledgeItem[] = [];
-      
+
       for (const extractedItem of extractedItems) {
         const item = await this.addKnowledgeItem({
           domainId,
@@ -415,10 +443,10 @@ export class DomainKnowledge {
           source,
           metadata: { importedAt: new Date().toISOString() }
         });
-        
+
         addedItems.push(item);
       }
-      
+
       return addedItems;
     } catch (error) {
       analyzeError(error as Error);
