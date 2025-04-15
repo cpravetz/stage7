@@ -1,6 +1,6 @@
 /**
  * Authentication Middleware
- * 
+ *
  * Express middleware for verifying JWT tokens
  */
 
@@ -9,6 +9,7 @@ import jwt from 'jsonwebtoken';
 import fs from 'fs';
 import path from 'path';
 import axios from 'axios';
+import { ServiceTokenManager } from './ServiceTokenManager.js';
 
 // Extend Express Request type to include service info
 declare global {
@@ -26,7 +27,7 @@ declare global {
 // Try to load the public key
 let PUBLIC_KEY: string | null = null;
 try {
-  PUBLIC_KEY = fs.readFileSync(path.join(__dirname, '../../keys/public.pem'), 'utf8');
+  PUBLIC_KEY = fs.readFileSync(path.join(__dirname, '../../keys/public.key'), 'utf8');
   console.log('Loaded RSA public key for JWT verification');
 } catch (error) {
   console.error('Failed to load RSA public key:', error);
@@ -34,7 +35,7 @@ try {
 }
 
 /**
- * Create authentication middleware
+ * Create authentication middleware using SecurityManager URL
  * @param securityManagerUrl URL of the SecurityManager service
  * @param requiredRoles Optional array of roles required to access the endpoint
  * @returns Express middleware function
@@ -42,16 +43,16 @@ try {
 export function createAuthMiddleware(securityManagerUrl: string, requiredRoles: string[] = []) {
   return async (req: Request, res: Response, next: NextFunction) => {
     const authHeader = req.headers.authorization;
-    
+
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return res.status(401).json({ message: 'Authorization header missing or invalid' });
     }
-    
+
     const token = authHeader.split(' ')[1];
-    
+
     try {
       let decoded: any;
-      
+
       // If we have the public key, verify locally
       if (PUBLIC_KEY) {
         try {
@@ -65,21 +66,21 @@ export function createAuthMiddleware(securityManagerUrl: string, requiredRoles: 
         // No public key, use SecurityManager
         decoded = await verifyWithSecurityManager(token, securityManagerUrl);
       }
-      
+
       if (!decoded) {
         return res.status(401).json({ message: 'Invalid token' });
       }
-      
+
       // Check if the service has required roles
       if (requiredRoles.length > 0) {
         const serviceRoles = decoded.roles || [];
         const hasRequiredRole = requiredRoles.some(role => serviceRoles.includes(role));
-        
+
         if (!hasRequiredRole) {
           return res.status(403).json({ message: 'Insufficient permissions' });
         }
       }
-      
+
       // Add service info to request
       req.service = decoded;
       next();
@@ -103,14 +104,58 @@ async function verifyWithSecurityManager(token: string, securityManagerUrl: stri
         'Authorization': `Bearer ${token}`
       }
     });
-    
+
     if (response.data.valid) {
       return response.data.user;
     }
-    
+
     return null;
   } catch (error) {
     console.error('SecurityManager verification failed:', error);
     return null;
   }
+}
+
+/**
+ * Create authentication middleware using ServiceTokenManager
+ * @param tokenManager ServiceTokenManager instance
+ * @param requiredRoles Optional array of roles required to access the endpoint
+ * @returns Express middleware function
+ */
+export function createAuthMiddlewareWithTokenManager(tokenManager: ServiceTokenManager, requiredRoles: string[] = []) {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ message: 'Authorization header missing or invalid' });
+    }
+
+    const token = authHeader.split(' ')[1];
+
+    try {
+      // Verify token using the token manager
+      const decoded = await tokenManager.verifyToken(token);
+
+      if (!decoded) {
+        return res.status(401).json({ message: 'Invalid token' });
+      }
+
+      // Check if the service has required roles
+      if (requiredRoles.length > 0) {
+        const serviceRoles = decoded.roles || [];
+        const hasRequiredRole = requiredRoles.some(role => serviceRoles.includes(role));
+
+        if (!hasRequiredRole) {
+          return res.status(403).json({ message: 'Insufficient permissions' });
+        }
+      }
+
+      // Add service info to request
+      req.service = decoded;
+      next();
+    } catch (error) {
+      console.error('Token verification error:', error);
+      return res.status(401).json({ message: 'Token verification failed' });
+    }
+  };
 }

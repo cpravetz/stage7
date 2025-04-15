@@ -25,6 +25,9 @@ RUN cd shared && npm run build
 RUN cd errorhandler && npm run build
 RUN cd services/security && npm run build
 
+# Create keys directory
+RUN mkdir -p /usr/src/app/services/security/keys
+
 # Set the working directory to the service
 WORKDIR /usr/src/app/services/security
 

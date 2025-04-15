@@ -5,6 +5,7 @@
  */
 
 import axios from 'axios';
+import * as jwt from 'jsonwebtoken';
 
 export class ServiceTokenManager {
   private token: string = '';
@@ -12,6 +13,7 @@ export class ServiceTokenManager {
   private authUrl: string;
   private serviceId: string;
   private serviceSecret: string;
+  private publicKey: string = '';
 
   /**
    * Create a new ServiceTokenManager
@@ -23,6 +25,25 @@ export class ServiceTokenManager {
     this.authUrl = authUrl;
     this.serviceId = serviceId;
     this.serviceSecret = serviceSecret;
+
+    // Fetch the public key when the token manager is created
+    this.fetchPublicKey().catch(error => {
+      console.warn(`Failed to fetch public key: ${error.message}. Will retry later.`);
+    });
+  }
+
+  /**
+   * Fetch the public key from the security manager
+   */
+  private async fetchPublicKey(): Promise<void> {
+    try {
+      const response = await axios.get(`${this.authUrl}/public-key`);
+      this.publicKey = response.data;
+      console.log(`Public key fetched successfully for ${this.serviceId}`);
+    } catch (error: any) {
+      console.error(`Failed to fetch public key: ${error.message}`);
+      throw error;
+    }
   }
 
   /**
@@ -35,6 +56,11 @@ export class ServiceTokenManager {
     // If we have a valid token, return it
     if (this.token !== '' && this.tokenExpiry > now + 5000) {
       return this.token;
+    }
+
+    // Make sure we have the public key
+    if (!this.publicKey) {
+      await this.fetchPublicKey();
     }
 
     // Otherwise, get a new token
@@ -98,5 +124,25 @@ export class ServiceTokenManager {
   clearToken(): void {
     this.token = '';
     this.tokenExpiry = 0;
+  }
+
+  /**
+   * Verify a token locally using the public key
+   * @param token JWT token to verify
+   * @returns Decoded token payload or null if invalid
+   */
+  async verifyToken(token: string): Promise<any | null> {
+    try {
+      // Make sure we have the public key
+      if (!this.publicKey) {
+        await this.fetchPublicKey();
+      }
+
+      // Verify the token
+      return jwt.verify(token, this.publicKey, { algorithms: ['RS256'] });
+    } catch (error) {
+      console.error('Token verification failed:', error);
+      return null;
+    }
   }
 }

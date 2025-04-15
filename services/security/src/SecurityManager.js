@@ -4,11 +4,24 @@ const bodyParser = require('body-parser');
 const jwt = require('jsonwebtoken');
 const fs = require('fs');
 const path = require('path');
+const { loadRsaKeyPair } = require('./utils/generateKeys');
 
 // Create a minimal express app
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
+
+// Load RSA keys for JWT signing and verification
+const keysDir = process.env.KEYS_DIR || path.join(__dirname, 'keys');
+const { publicKey, privateKey } = loadRsaKeyPair(keysDir);
+
+// Copy public key to shared keys directory
+try {
+  require('./scripts/copyPublicKey');
+  console.log('Public key copied to shared keys directory');
+} catch (error) {
+  console.error('Failed to copy public key:', error);
+}
 
 // Service Registry
 const serviceRegistry = {
@@ -55,17 +68,21 @@ const serviceRegistry = {
   'AgentSet': {
     id: 'AgentSet',
     secret: process.env.AGENTSET_SECRET || 'stage7AuthSecret',
-    roles: ['agent:manage']
+    roles: ['agent:manage', 'agent:execute']
   },
 };
 
-// Use a simple shared secret for JWT signing and verification
-const JWT_SECRET = process.env.JWT_SECRET || 'stage7AuthSecret';
-console.log('Using shared secret for JWT signing and verification');
+// Use RSA keys for JWT signing and verification
+console.log('Using RS256 asymmetric keys for JWT signing and verification');
 
 // Basic routes
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', message: 'Security service is running' });
+});
+
+// Endpoint to get the public key
+app.get('/public-key', (req, res) => {
+  res.send(publicKey);
 });
 
 // Add the /auth/service endpoint for component authentication
@@ -90,8 +107,9 @@ app.post('/auth/service', (req, res) => {
       issuedAt: Date.now()
     };
 
-    // Use HS256 algorithm with the shared secret
-    const token = jwt.sign(payload, JWT_SECRET, {
+    // Use RS256 algorithm with the private key
+    const token = jwt.sign(payload, privateKey, {
+      algorithm: 'RS256',
       expiresIn: '1h'
     });
 
@@ -116,8 +134,8 @@ app.post('/verify', (req, res) => {
   const token = authHeader.split(' ')[1];
 
   try {
-    // Verify the token using HS256 with the shared secret
-    const decoded = jwt.verify(token, JWT_SECRET);
+    // Verify the token using RS256 with the public key
+    const decoded = jwt.verify(token, publicKey, { algorithms: ['RS256'] });
     console.log('Token verified successfully:', decoded);
 
     return res.status(200).json({

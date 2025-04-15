@@ -19,7 +19,7 @@ export class QwenQwqModel extends BaseModel {
         ]);
 
         super({
-            name: "groq/qwen-qwq",
+            name: "groq/qwen-qwq-32b",
             modelName: "qwen-qwq-32b",
             interfaceName: "groq",
             serviceName: "groq",

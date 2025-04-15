@@ -109,6 +109,8 @@ services:
       CLIENT_SECRET: *sharedSecret
       # Explicitly set OpenWebUI URL to override any default
       OPENWEB_URL: 'https://knllm.dusdusdusd.com'
+      # Explicitly set GROQ_API_KEY
+      GROQ_API_KEY: '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'
     volumes:
       - ./shared/keys:/usr/src/app/shared/keys
     ports:
@@ -244,7 +246,7 @@ services:
   securitymanager:
     build:
       context: .
-      dockerfile: services/security/dockerfile.simple
+      dockerfile: services/security/Dockerfile
     depends_on:
       - mongo
       - rabbitmq
@@ -257,7 +259,8 @@ services:
       RABBITMQ_URL: *rabbitmqUrl
       CONSUL_URL: *consulUrl
       CONFIG_SERVICE_URL: &configserviceUrl configservice:5090
-      JWT_SECRET: stage7AuthSecret
+      # Using RS256 asymmetric keys for JWT signing and verification
+      KEYS_DIR: /usr/src/app/services/security/keys
       ADMIN_SECRET: adminSecret
       LIBRARIAN_URL: *librarianUrl
       # Using a single shared client secret for all services
