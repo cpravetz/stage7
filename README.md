@@ -175,6 +175,8 @@ should not be changed.
    docker compose exec securitymanager node src/scripts/generate-keys.js
    ```
 
+   **IMPORTANT SECURITY NOTE**: Never commit private keys to the repository. The `.gitignore` file is configured to exclude private keys, but always verify that sensitive files are not being committed.
+
 7. On the host machine, the application will be available at [http://localhost:80](http://localhost:80).
 
 
@@ -334,7 +336,9 @@ the library of initial plugins.
    - RSA keys are generated during first-time setup and stored in the `services/security/keys` directory
    - The public key is distributed to all services for token verification
    - Each service has its own client secret defined in the environment variables
-   - Never commit private keys to the repository
+   - **CRITICAL**: Never commit private keys to the repository
+   - If you suspect keys have been compromised, use the `regenerate-keys.js` script to create new keys
+   - Always verify that `.gitignore` is properly configured to exclude sensitive files
 
 2. **Code Security**
    - No hardcoded credentials
