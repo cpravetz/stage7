@@ -1,33 +1,45 @@
-const { execSync } = require('child_process');
+/**
+ * Build script for the SecurityManager service
+ * This script copies the JavaScript files to the dist directory
+ */
+
 const fs = require('fs');
 const path = require('path');
+const { execSync } = require('child_process');
 
-// Ensure the dist directory exists
+// Create dist directory if it doesn't exist
 const distDir = path.join(__dirname, 'dist');
 if (!fs.existsSync(distDir)) {
   fs.mkdirSync(distDir, { recursive: true });
 }
 
-// Run TypeScript compiler with --noEmitOnError=false
-try {
-  console.log('Building security service...');
-  execSync('tsc --noEmitOnError=false', { stdio: 'inherit' });
-  console.log('Build completed successfully');
-} catch (error) {
-  // Even if tsc fails, we want to continue
-  console.log('Build completed with warnings/errors, using minimal implementation');
-  // Copy the minimal JS implementation to the dist directory
-  const minimalJsPath = path.join(__dirname, 'src', 'SecurityManager.min.js');
-  const targetPath = path.join(distDir, 'SecurityManager.js');
-  if (fs.existsSync(minimalJsPath)) {
-    fs.copyFileSync(minimalJsPath, targetPath);
-    console.log('Copied minimal implementation to dist directory');
-  } else {
-    // Create a dummy file if the minimal implementation doesn't exist
-    fs.writeFileSync(targetPath,
-      'console.log("Security service placeholder - rebuild required");');
-    console.log('Created placeholder implementation');
+// Function to copy a directory recursively
+function copyDir(src, dest) {
+  // Create destination directory if it doesn't exist
+  if (!fs.existsSync(dest)) {
+    fs.mkdirSync(dest, { recursive: true });
   }
-  // Exit with success code
-  process.exit(0);
+
+  // Get all files and directories in the source directory
+  const entries = fs.readdirSync(src, { withFileTypes: true });
+
+  for (const entry of entries) {
+    const srcPath = path.join(src, entry.name);
+    const destPath = path.join(dest, entry.name);
+
+    if (entry.isDirectory()) {
+      // Recursively copy subdirectories
+      copyDir(srcPath, destPath);
+    } else if (entry.isFile() && entry.name.endsWith('.js')) {
+      // Only copy JavaScript files
+      fs.copyFileSync(srcPath, destPath);
+      console.log(`Copied ${srcPath} to ${destPath}`);
+    }
+  }
 }
+
+// Copy JavaScript files from src to dist
+console.log('Copying JavaScript files from src to dist...');
+copyDir(path.join(__dirname, 'src'), distDir);
+
+console.log('Build completed successfully!');

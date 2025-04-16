@@ -7,6 +7,9 @@ import { BaseEntity, MessageType, PluginInput, MapSerializer } from '@cktmcs/sha
 import { MissionStatistics } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { rateLimit } from 'express-rate-limit';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as jwt from 'jsonwebtoken';
 
 interface CustomRequest extends Request {
     user?: {
@@ -427,31 +430,108 @@ class MissionControl extends BaseEntity {
     private async verifyToken(req: CustomRequest, res: Response, next: NextFunction) {
         const clientId = req.body.clientId || req.query.clientId;
         const token = req.headers.authorization?.split(' ')[1];
-        console.log(`Verifying token for client ${clientId} - token ${token}`);
+        console.log(`Verifying token for client ${clientId}`);
+        console.log(`Token: ${token}`);
+
         if (!token) {
             console.log('No token provided');
             return res.status(401).json({ message: 'No token provided' });
         }
 
         try {
-            const response = await axios.post(`http://${this.securityManagerUrl}/verify`, {}, {
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                }
-            });
-            console.log('Token verification response:', response.data);
+            // Try multiple verification methods in sequence
 
-            if (response.data.valid) {
-                console.log('Token verified successfully');
-                req.user = response.data.user;
-                next();
-            } else {
-                console.log('Token verification failed');
-                res.status(401).json({ message: 'Invalid token' });
+            // 1. First try to verify locally using the public key from file
+            try {
+                // Try public.key first
+                const publicKeyPath = path.join(__dirname, '../../../shared/keys/public.key');
+                if (fs.existsSync(publicKeyPath)) {
+                    const publicKey = fs.readFileSync(publicKeyPath, 'utf8');
+                    const decoded = jwt.verify(token, publicKey, { algorithms: ['RS256'] });
+                    console.log('Token verified locally with public.key');
+                    req.user = decoded;
+                    return next();
+                }
+
+                // Try public.pem if public.key doesn't exist
+                const publicPemPath = path.join(__dirname, '../../../shared/keys/public.pem');
+                if (fs.existsSync(publicPemPath)) {
+                    const publicKey = fs.readFileSync(publicPemPath, 'utf8');
+                    const decoded = jwt.verify(token, publicKey, { algorithms: ['RS256'] });
+                    console.log('Token verified locally with public.pem');
+                    req.user = decoded;
+                    return next();
+                }
+            } catch (localError) {
+                console.log('Local verification with file failed:', localError.message);
             }
+
+            // 2. Try to fetch the public key from SecurityManager and verify
+            try {
+                const keyResponse = await axios.get(`http://${this.securityManagerUrl}/public-key`);
+                const publicKey = keyResponse.data;
+
+                // Save the key for future use
+                try {
+                    const keysDir = path.join(__dirname, '../../../shared/keys');
+                    if (!fs.existsSync(keysDir)) {
+                        fs.mkdirSync(keysDir, { recursive: true });
+                    }
+                    fs.writeFileSync(path.join(keysDir, 'public.key'), publicKey);
+                } catch (saveError) {
+                    console.warn('Failed to save public key:', saveError.message);
+                }
+
+                // Verify with the fetched key
+                const decoded = jwt.verify(token, publicKey, { algorithms: ['RS256'] });
+                console.log('Token verified with fetched public key');
+                req.user = decoded;
+                return next();
+            } catch (fetchError) {
+                console.log('Verification with fetched key failed:', fetchError.message);
+            }
+
+            // 3. Fall back to SecurityManager verification endpoint
+            try {
+                const response = await axios.post(`http://${this.securityManagerUrl}/verify`, {}, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+
+                if (response.data.valid) {
+                    console.log('Token verified by SecurityManager');
+                    req.user = response.data.user;
+                    return next();
+                } else {
+                    console.log('Token rejected by SecurityManager:', response.data.error);
+                    return res.status(401).json({ message: 'Invalid token' });
+                }
+            } catch (verifyError) {
+                console.error('SecurityManager verification failed:', verifyError.message);
+                if (axios.isAxiosError(verifyError)) {
+                    console.error('Response data:', verifyError.response?.data);
+                    console.error('Response status:', verifyError.response?.status);
+                }
+            }
+
+            // 4. Try legacy verification with shared secret
+            try {
+                const sharedSecret = process.env.JWT_SECRET || 'stage7AuthSecret';
+                const decoded = jwt.verify(token, sharedSecret);
+                console.log('Token verified with legacy shared secret');
+                req.user = decoded;
+                return next();
+            } catch (legacyError) {
+                console.log('Legacy verification failed:', legacyError.message);
+            }
+
+            // All verification methods failed
+            console.error('All token verification methods failed');
+            return res.status(401).json({ message: 'Invalid token' });
         } catch (error) {
-            console.error('Error during token verification:', error);
-            res.status(500).json({ message: 'Error verifying token' });
+            console.error(`Unexpected error verifying token for client ${clientId}:`, error);
+            return res.status(500).json({ message: 'Error verifying token' });
         }
     }
 }

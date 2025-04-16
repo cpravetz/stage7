@@ -9,6 +9,8 @@ import axios from 'axios';
 import { analyzeError } from '@cktmcs/errorhandler';
 import bodyParser from 'body-parser';
 import rateLimit from 'express-rate-limit';
+import fs from 'fs';
+import path from 'path';
 
 const api = axios.create({
     headers: {
@@ -738,20 +740,100 @@ export class PostOffice {
 
     private async verifyToken(clientId: string, token: string): Promise<boolean> {
         try {
-            console.log(`Verifying token ${token} for client ${clientId}`);
-            const response = await axios.post(`http://${this.securityManagerUrl}/verify`, {}, {
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                }
-            });
-            console.log(`Verification response:`, response.data);
-            return response.data.valid;
-        } catch (error) {
-            console.error(`Error verifying token for client ${clientId}:`, error);
-            if (axios.isAxiosError(error)) {
-                console.error('Response data:', error.response?.data);
-                console.error('Response status:', error.response?.status);
+            console.log(`Verifying token for client ${clientId}`);
+
+            if (!token) {
+                console.log('No token provided');
+                return false;
             }
+
+            // Try multiple verification methods in sequence
+
+            // 1. First try to verify locally using the public key from file
+            try {
+                // Try public.key first
+                const publicKeyPath = path.join(__dirname, '../../../shared/keys/public.key');
+                if (fs.existsSync(publicKeyPath)) {
+                    const publicKey = fs.readFileSync(publicKeyPath, 'utf8');
+                    const decoded = jwt.verify(token, publicKey, { algorithms: ['RS256'] });
+                    console.log('Token verified locally with public.key');
+                    return true;
+                }
+
+                // Try public.pem if public.key doesn't exist
+                const publicPemPath = path.join(__dirname, '../../../shared/keys/public.pem');
+                if (fs.existsSync(publicPemPath)) {
+                    const publicKey = fs.readFileSync(publicPemPath, 'utf8');
+                    const decoded = jwt.verify(token, publicKey, { algorithms: ['RS256'] });
+                    console.log('Token verified locally with public.pem');
+                    return true;
+                }
+            } catch (localError) {
+                console.log('Local verification with file failed:', localError.message);
+            }
+
+            // 2. Try to fetch the public key from SecurityManager and verify
+            try {
+                const keyResponse = await axios.get(`http://${this.securityManagerUrl}/public-key`);
+                const publicKey = keyResponse.data;
+
+                // Save the key for future use
+                try {
+                    const keysDir = path.join(__dirname, '../../../shared/keys');
+                    if (!fs.existsSync(keysDir)) {
+                        fs.mkdirSync(keysDir, { recursive: true });
+                    }
+                    fs.writeFileSync(path.join(keysDir, 'public.key'), publicKey);
+                } catch (saveError) {
+                    console.warn('Failed to save public key:', saveError.message);
+                }
+
+                // Verify with the fetched key
+                const decoded = jwt.verify(token, publicKey, { algorithms: ['RS256'] });
+                console.log('Token verified with fetched public key');
+                return true;
+            } catch (fetchError) {
+                console.log('Verification with fetched key failed:', fetchError.message);
+            }
+
+            // 3. Fall back to SecurityManager verification endpoint
+            try {
+                const response = await axios.post(`http://${this.securityManagerUrl}/verify`, {}, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+
+                if (response.data.valid) {
+                    console.log('Token verified by SecurityManager');
+                    return true;
+                } else {
+                    console.log('Token rejected by SecurityManager:', response.data.error);
+                    return false;
+                }
+            } catch (verifyError) {
+                console.error('SecurityManager verification failed:', verifyError.message);
+                if (axios.isAxiosError(verifyError)) {
+                    console.error('Response data:', verifyError.response?.data);
+                    console.error('Response status:', verifyError.response?.status);
+                }
+            }
+
+            // 4. Try legacy verification with shared secret
+            try {
+                const sharedSecret = process.env.JWT_SECRET || 'stage7AuthSecret';
+                const decoded = jwt.verify(token, sharedSecret);
+                console.log('Token verified with legacy shared secret');
+                return true;
+            } catch (legacyError) {
+                console.log('Legacy verification failed:', legacyError.message);
+            }
+
+            // All verification methods failed
+            console.error('All token verification methods failed');
+            return false;
+        } catch (error) {
+            console.error(`Unexpected error verifying token for client ${clientId}:`, error);
             return false;
         }
     }

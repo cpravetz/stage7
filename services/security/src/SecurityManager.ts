@@ -1,4 +1,4 @@
-import express, { Request, Response } from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import passport from 'passport';
 import cors from 'cors';
 import { configurePassport } from './config/passport';
@@ -8,6 +8,10 @@ import { errorHandler } from './middleware/errorHandler';
 import bodyParser from 'body-parser';
 import rateLimit from 'express-rate-limit';
 import { authenticateService, verifyToken } from './models/jwtAuth';
+import * as fs from 'fs';
+import * as path from 'path';
+import { analyzeError } from '@cktmcs/errorhandler';
+import { token, authenticate, verifyToken as oauthVerifyToken } from './oauth/server';
 
 const app = express();
 export class SecurityManager {
@@ -37,62 +41,69 @@ export class SecurityManager {
     }
 
     private configureRoutes() {
+        // Legacy routes for user authentication
         app.use('/', authRoutes);
         app.use('/', userRoutes);
 
+        // OAuth 2.0 endpoints
+        app.post('/oauth/token', token());
+
+        // Legacy service authentication endpoint
         const authServiceLimiter = rateLimit({
             windowMs: 15 * 60 * 1000, // 15 minutes
             max: 100, // Limit each IP to 100 requests per windowMs
             message: 'Too many authentication requests, please try again later.'
         });
 
-        app.post('/auth/service', authServiceLimiter, async (req: Request, res: Response) => {
+        // Legacy service authentication endpoint that redirects to OAuth 2.0 token endpoint
+        app.post('/auth/service', authServiceLimiter, (req: Request, res: Response, next: NextFunction) => {
             console.log('Received authentication request from component');
             console.log('Request body:', JSON.stringify(req.body));
 
             const { componentType, clientSecret } = req.body;
             console.log(`Component type: ${componentType}, Client secret provided: ${clientSecret ? 'Yes' : 'No'}`);
 
+            // Convert legacy request to OAuth 2.0 request
+            req.body = {
+                grant_type: 'client_credentials',
+                client_id: componentType,
+                client_secret: clientSecret
+            };
+
+            // Forward to OAuth 2.0 token endpoint
+            next();
+        }, token());
+
+        // Token verification endpoint
+        app.post('/verify', oauthVerifyToken());
+
+        // Add endpoint to get public key
+        app.get('/public-key', (req: Request, res: Response) => {
             try {
-                const token = await authenticateService(componentType, clientSecret);
-                if (token) {
-                    console.log(`Generated token for ${componentType}`);
-                    res.json({ authenticated: true, token });
+                const publicKeyPath = path.join(__dirname, '../keys/public.key');
+
+                if (fs.existsSync(publicKeyPath)) {
+                    const publicKey = fs.readFileSync(publicKeyPath, 'utf8');
+                    console.log('Serving public key from file');
+                    res.set('Content-Type', 'text/plain');
+                    return res.send(publicKey);
                 } else {
-                    console.error(`Authentication failed for ${componentType}`);
-                    res.status(401).json({ authenticated: false, error: 'Invalid credentials' });
+                    console.error('Public key file not found at', publicKeyPath);
+                    return res.status(500).json({ error: 'Public key not available' });
                 }
             } catch (error) {
-                console.error(`Error authenticating ${componentType}:`, error);
-                res.status(500).json({ authenticated: false, error: 'Authentication service error' });
+                analyzeError(error as Error);
+                console.error('Error serving public key:', error);
+                return res.status(500).json({ error: 'Failed to serve public key' });
             }
         });
 
-        // Add endpoint to verify tokens
-        app.post('/verify', (req: any, res: any) => {
-            console.log('Received token verification request');
-            const authHeader = req.headers.authorization;
-            console.log('Authorization header:', authHeader);
-
-            if (!authHeader || !authHeader.startsWith('Bearer ')) {
-                return res.status(401).json({ valid: false, error: 'No token provided' });
-            }
-
-            const token = authHeader.split(' ')[1];
-            const decoded = verifyToken(token);
-
-            if (decoded) {
-                console.log('Token verified successfully:', decoded);
-                return res.status(200).json({
-                    valid: true,
-                    user: decoded
-                });
-            } else {
-                console.error('Invalid token');
-                return res.status(401).json({ valid: false, error: 'Invalid token' });
-            }
+        // Health check endpoint
+        app.get('/health', (req: Request, res: Response) => {
+            res.json({ status: 'ok', message: 'Security service is running' });
         });
 
+        // Error handler
         app.use(errorHandler);
     }
 

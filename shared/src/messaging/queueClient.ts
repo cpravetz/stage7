@@ -1,4 +1,27 @@
 import * as amqplib from 'amqplib';
+
+// Define missing types
+declare module 'amqplib' {
+  namespace Options {
+    interface Publish {
+      persistent?: boolean;
+      contentType?: string;
+      correlationId?: string;
+      replyTo?: string;
+      [key: string]: any;
+    }
+
+    interface AssertQueue {
+      durable?: boolean;
+      [key: string]: any;
+    }
+
+    interface AssertExchange {
+      durable?: boolean;
+      [key: string]: any;
+    }
+  }
+}
 import { Message } from '../types/Message';
 
 /**

@@ -4,7 +4,8 @@ const bodyParser = require('body-parser');
 const jwt = require('jsonwebtoken');
 const fs = require('fs');
 const path = require('path');
-const { loadRsaKeyPair } = require('./utils/generateKeys');
+const rateLimit = require('express-rate-limit');
+const { token, authenticate, verifyToken: oauthVerifyToken } = require('./oauth/server');
 
 // Create a minimal express app
 const app = express();
@@ -85,85 +86,37 @@ app.get('/public-key', (req, res) => {
   res.send(publicKey);
 });
 
-// Add the /auth/service endpoint for component authentication
-app.post('/auth/service', (req, res) => {
-  const { componentType, clientSecret } = req.body;
-  console.log(`Authenticating component: ${componentType}`);
+// OAuth 2.0 endpoints
+app.post('/oauth/token', token());
 
-  const service = serviceRegistry[componentType];
-  if (!service) {
-    console.error(`Unknown service type: ${componentType}`);
-    return res.status(401).json({ authenticated: false, error: 'Unknown service type' });
-  }
+// Legacy service authentication endpoint
+const authServiceLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100, // Limit each IP to 100 requests per windowMs
+    message: 'Too many authentication requests, please try again later.'
+});
 
-  // In development mode or if the secret matches, authenticate the service
-  if (process.env.NODE_ENV === 'development' || service.secret === clientSecret) {
-    console.log(`Client verified for componentType: ${componentType}`);
+// Legacy service authentication endpoint that redirects to OAuth 2.0 token endpoint
+app.post('/auth/service', authServiceLimiter, (req, res, next) => {
+    console.log('Received authentication request from component');
+    console.log('Request body:', JSON.stringify(req.body));
 
-    // Generate token
-    const payload = {
-      componentType,
-      roles: service.roles,
-      issuedAt: Date.now()
+    const { componentType, clientSecret } = req.body;
+    console.log(`Component type: ${componentType}, Client secret provided: ${clientSecret ? 'Yes' : 'No'}`);
+
+    // Convert legacy request to OAuth 2.0 request
+    req.body = {
+        grant_type: 'client_credentials',
+        client_id: componentType,
+        client_secret: clientSecret
     };
 
-    // Use RS256 algorithm with the private key
-    const token = jwt.sign(payload, privateKey, {
-      algorithm: 'RS256',
-      expiresIn: '1h'
-    });
-
-    console.log(`Generated token for ${componentType}`);
-    return res.json({ authenticated: true, token });
-  }
-
-  console.error(`Authentication failed for ${componentType}`);
-  return res.status(401).json({ authenticated: false, error: 'Invalid credentials' });
-});
+    // Forward to OAuth 2.0 token endpoint
+    next();
+}, token());
 
 // Add the /verify endpoint for token verification
-app.post('/verify', (req, res) => {
-  console.log('Received token verification request');
-  const authHeader = req.headers.authorization;
-  console.log('Authorization header:', authHeader);
-
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ valid: false, error: 'No token provided' });
-  }
-
-  const token = authHeader.split(' ')[1];
-
-  try {
-    let decoded;
-
-    try {
-      // First try to verify with RS256
-      decoded = jwt.verify(token, publicKey, { algorithms: ['RS256'] });
-      console.log('Token verified successfully with RS256');
-    } catch (rsaError) {
-      console.error('RS256 verification failed:', rsaError);
-
-      // If that fails, try with the legacy HS256 method
-      console.log('Trying legacy HS256 verification');
-      const legacySecret = process.env.JWT_SECRET || 'stage7AuthSecret';
-      try {
-        decoded = jwt.verify(token, legacySecret);
-        console.log('Token verified successfully with HS256');
-      } catch (hs256Error) {
-        console.error('HS256 verification failed:', hs256Error);
-        throw hs256Error; // Re-throw to be caught by the outer catch
-      }
-    }
-
-    return res.status(200).json({
-      valid: true,
-      user: decoded
-    });
-  } catch (error) {
-    console.error('Token verification failed:', error);
-    return res.status(401).json({ valid: false, error: 'Invalid token' });
-  }
-});
+app.post('/verify', oauthVerifyToken());
 
 // Add endpoint to get public key
 app.get('/public-key', (req, res) => {

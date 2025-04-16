@@ -6,6 +6,8 @@
 
 import axios from 'axios';
 import * as jwt from 'jsonwebtoken';
+import * as fs from 'fs';
+import * as path from 'path';
 
 export class ServiceTokenManager {
   private token: string = '';
@@ -37,8 +39,33 @@ export class ServiceTokenManager {
    */
   private async fetchPublicKey(): Promise<void> {
     try {
+      // First try to load from file system
+      try {
+        const publicKeyPath = path.join(__dirname, '../../keys/public.key');
+        if (fs.existsSync(publicKeyPath)) {
+          this.publicKey = fs.readFileSync(publicKeyPath, 'utf8');
+          console.log(`Public key loaded from file for ${this.serviceId}`);
+          return;
+        }
+      } catch (fsError: any) {
+        console.warn(`Could not load public key from file: ${fsError.message}`);
+      }
+
+      // If file system fails, fetch from security manager
       const response = await axios.get(`${this.authUrl}/public-key`);
       this.publicKey = response.data;
+
+      // Save the public key to file for future use
+      try {
+        const keysDir = path.join(__dirname, '../../keys');
+        if (!fs.existsSync(keysDir)) {
+          fs.mkdirSync(keysDir, { recursive: true });
+        }
+        fs.writeFileSync(path.join(keysDir, 'public.key'), this.publicKey);
+      } catch (fsError: any) {
+        console.warn(`Could not save public key to file: ${fsError.message}`);
+      }
+
       console.log(`Public key fetched successfully for ${this.serviceId}`);
     } catch (error: any) {
       console.error(`Failed to fetch public key: ${error.message}`);
@@ -97,12 +124,24 @@ export class ServiceTokenManager {
         console.error('Failed to get auth token:', error);
       }
 
-      // In development mode, return a fake token to allow the system to function
-      if (process.env.NODE_ENV === 'development') {
-        console.warn('DEVELOPMENT MODE: Using fake token due to authentication failure');
-        this.token = 'fake-dev-token-' + this.serviceId;
-        this.tokenExpiry = now + (50 * 60 * 1000);
-        return this.token;
+      // Try to authenticate with retry logic
+      console.warn(`Authentication failed, retrying in 5 seconds...`);
+      await new Promise(resolve => setTimeout(resolve, 5000));
+
+      try {
+        const retryResponse = await axios.post(this.authUrl + '/auth/service', {
+          componentType: this.serviceId,
+          clientSecret: this.serviceSecret
+        });
+
+        if (retryResponse.data.authenticated && retryResponse.data.token) {
+          this.token = retryResponse.data.token;
+          this.tokenExpiry = now + (50 * 60 * 1000);
+          console.log(`Successfully authenticated ${this.serviceId} on retry`);
+          return this.token;
+        }
+      } catch (retryError: any) {
+        console.error(`Retry authentication failed: ${retryError.message || 'Unknown error'}`);
       }
 
       throw new Error(`Authentication service unavailable: ${error.message || 'Unknown error'}`);

@@ -71,12 +71,42 @@ let PUBLIC_KEY: string;
 let isUsingAsymmetricKeys = false;
 
 try {
-  PRIVATE_KEY = fs.readFileSync(path.join(__dirname, '../../keys/private.pem'), 'utf8');
-  PUBLIC_KEY = fs.readFileSync(path.join(__dirname, '../../keys/public.pem'), 'utf8');
+  // Try to load private key (for signing)
+  try {
+    PRIVATE_KEY = fs.readFileSync(path.join(__dirname, '../../keys/private.pem'), 'utf8');
+    console.log('Loaded RSA private key for JWT signing');
+  } catch (privateKeyError) {
+    console.error('Failed to load RSA private key from private.pem:', privateKeyError);
+
+    try {
+      PRIVATE_KEY = fs.readFileSync(path.join(__dirname, '../../keys/private.key'), 'utf8');
+      console.log('Loaded RSA private key for JWT signing from alternate location');
+    } catch (alternatePrivateKeyError) {
+      console.error('Failed to load RSA private key from private.key:', alternatePrivateKeyError);
+      throw new Error('No private key available for JWT signing');
+    }
+  }
+
+  // Try to load public key (for verification)
+  try {
+    PUBLIC_KEY = fs.readFileSync(path.join(__dirname, '../../keys/public.pem'), 'utf8');
+    console.log('Loaded RSA public key for JWT verification');
+  } catch (publicKeyError) {
+    console.error('Failed to load RSA public key from public.pem:', publicKeyError);
+
+    try {
+      PUBLIC_KEY = fs.readFileSync(path.join(__dirname, '../../keys/public.key'), 'utf8');
+      console.log('Loaded RSA public key for JWT verification from alternate location');
+    } catch (alternatePublicKeyError) {
+      console.error('Failed to load RSA public key from public.key:', alternatePublicKeyError);
+      throw new Error('No public key available for JWT verification');
+    }
+  }
+
   isUsingAsymmetricKeys = true;
-  console.log('Loaded RSA keys for JWT signing and verification');
+  console.log('Successfully loaded RSA keys for JWT signing and verification');
 } catch (error) {
-  console.error('Failed to load RSA keys:', error);
+  console.error('Failed to load any RSA keys:', error);
   console.warn('Using fallback secret key for JWT signing and verification');
   PRIVATE_KEY = process.env.JWT_SECRET || 'fallback-secret-key';
   PUBLIC_KEY = PRIVATE_KEY;
@@ -171,24 +201,9 @@ export function generateServiceToken(componentType: string): string {
  * @returns Decoded token payload or null if invalid
  */
 export function verifyToken(token: string): any {
-  try {
-    if (isUsingAsymmetricKeys) {
-      try {
-        // First try to verify with RS256
-        return jwt.verify(token, PUBLIC_KEY, { algorithms: ['RS256'] });
-      } catch (rsaError) {
-        // If that fails, try with the legacy HS256 method
-        console.log('RS256 verification failed, trying legacy HS256 verification');
-        const legacySecret = process.env.JWT_SECRET || 'your-secret-key';
-        return jwt.verify(token, legacySecret);
-      }
-    } else {
-      return jwt.verify(token, PUBLIC_KEY);
-    }
-  } catch (error) {
-    console.error('Token verification failed:', error);
-    return null;
-  }
+  // Import the compatibility layer
+  const { verifyToken: compatVerifyToken } = require('../oauth/compatibility');
+  return compatVerifyToken(token);
 }
 
 /**
@@ -198,21 +213,9 @@ export function verifyToken(token: string): any {
  * @returns JWT token if authentication successful, null otherwise
  */
 export async function authenticateService(componentType: string, clientSecret: string): Promise<string | null> {
-  const isValid = await verifyComponentCredentials(componentType, clientSecret);
-  if (!isValid) {
-    return null;
-  }
-
-  const token = generateServiceToken(componentType);
-
-  // Store the token for future reference
-  try {
-    await saveToken(token, componentType);
-  } catch (error) {
-    console.error('Failed to save token, but continuing with authentication:', error);
-  }
-
-  return token;
+  // Import the compatibility layer
+  const { authenticateService: compatAuthenticateService } = require('../oauth/compatibility');
+  return compatAuthenticateService(componentType, clientSecret);
 }
 
 /**

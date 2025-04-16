@@ -18,12 +18,11 @@ COPY shared ./shared
 COPY errorhandler ./errorhandler
 COPY services/security ./services/security
 
-# No need for minimal implementation anymore - using TypeScript version
-
-# Build the TypeScript code - ensure shared is built first
+# Build the shared and errorhandler packages
 RUN cd shared && npm run build
 RUN cd errorhandler && npm run build
-RUN cd services/security && npm run build
+
+# No need to build the security service as we're using JavaScript directly
 
 # Create keys directory
 RUN mkdir -p /usr/src/app/services/security/keys
