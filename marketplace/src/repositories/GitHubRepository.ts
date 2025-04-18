@@ -20,14 +20,21 @@ export class GitHubRepository implements PluginRepository {
     private pluginsDir: string;
 
     constructor(config: RepositoryConfig) {
+        // Check if GitHub access is enabled
+        const enableGithub = process.env.ENABLE_GITHUB === 'true';
+
+        if (!enableGithub) {
+            console.log('GitHub access is disabled by configuration. Set ENABLE_GITHUB=true to enable.');
+        }
+
         // Extract credentials
         this.token = config.credentials?.token || process.env.GITHUB_TOKEN || '';
         this.username = config.credentials?.username || process.env.GITHUB_USERNAME || '';
-        
+
         // Parse repository URL
         const repoUrl = config.url || process.env.GIT_REPOSITORY_URL || '';
         const repoMatch = repoUrl.match(/github\.com\/([^\/]+)\/([^\/\.]+)(\.git)?$/);
-        
+
         if (repoMatch) {
             this.repoOwner = repoMatch[1];
             this.repoName = repoMatch[2];
@@ -36,13 +43,15 @@ export class GitHubRepository implements PluginRepository {
             this.repoName = 'plugins';
             console.warn(`Invalid GitHub repository URL: ${repoUrl}. Using default: ${this.repoOwner}/${this.repoName}`);
         }
-        
+
         this.defaultBranch = config.options?.defaultBranch || process.env.GIT_DEFAULT_BRANCH || 'main';
         this.baseApiUrl = `https://api.github.com/repos/${this.repoOwner}/${this.repoName}`;
         this.baseContentUrl = `${this.baseApiUrl}/contents`;
         this.pluginsDir = 'plugins';
-        
-        console.log(`Initialized GitHub repository: ${this.repoOwner}/${this.repoName} (branch: ${this.defaultBranch})`);
+
+        if (enableGithub) {
+            console.log(`Initialized GitHub repository: ${this.repoOwner}/${this.repoName} (branch: ${this.defaultBranch})`);
+        }
     }
 
     /**
@@ -51,13 +60,18 @@ export class GitHubRepository implements PluginRepository {
      */
     async store(manifest: PluginManifest): Promise<void> {
         try {
+            // Check if GitHub access is enabled
+            if (process.env.ENABLE_GITHUB !== 'true') {
+                throw new Error('GitHub access is disabled by configuration. Set ENABLE_GITHUB=true to enable.');
+            }
+
             if (!this.token || !this.username) {
                 throw new Error('GitHub credentials not found in environment variables or configuration');
             }
 
             // Create plugin directory path
             const pluginPath = `${this.pluginsDir}/${manifest.id}`;
-            
+
             // Check if plugin directory already exists
             let sha: string | undefined;
             try {
@@ -103,6 +117,12 @@ export class GitHubRepository implements PluginRepository {
      */
     async fetch(id: string): Promise<PluginManifest | undefined> {
         try {
+            // Check if GitHub access is enabled
+            if (process.env.ENABLE_GITHUB !== 'true') {
+                console.log('GitHub access is disabled by configuration. Set ENABLE_GITHUB=true to enable.');
+                return undefined;
+            }
+
             if (!id) {
                 console.log('ID must be provided');
                 return undefined;
@@ -111,29 +131,29 @@ export class GitHubRepository implements PluginRepository {
             // Get manifest file content
             const manifestPath = `${this.pluginsDir}/${id}/plugin-manifest.json`;
             const manifestContent = await this.getFileContent(manifestPath);
-            
+
             if (!manifestContent) {
                 return undefined;
             }
 
             // Parse manifest
             const manifest = JSON.parse(manifestContent) as PluginManifest;
-            
+
             // If the manifest has entry point files, fetch them
             if (manifest.entryPoint && !manifest.entryPoint.files) {
                 manifest.entryPoint.files = {};
-                
+
                 // Try to get directory contents to find entry point files
                 try {
                     const response = await this.makeGitHubRequest('GET', `${this.baseContentUrl}/${this.pluginsDir}/${id}`);
-                    
+
                     if (response.status === 200 && Array.isArray(response.data)) {
                         // Filter out the manifest file and directories
-                        const files = response.data.filter(item => 
-                            item.type === 'file' && 
+                        const files = response.data.filter(item =>
+                            item.type === 'file' &&
                             item.name !== 'plugin-manifest.json'
                         );
-                        
+
                         // Fetch each file content
                         for (const file of files) {
                             const fileContent = await this.getFileContent(`${this.pluginsDir}/${id}/${file.name}`);
@@ -162,6 +182,12 @@ export class GitHubRepository implements PluginRepository {
      */
     async fetchByVerb(verb: string): Promise<PluginManifest | undefined> {
         try {
+            // Check if GitHub access is enabled
+            if (process.env.ENABLE_GITHUB !== 'true') {
+                console.log('GitHub access is disabled by configuration. Set ENABLE_GITHUB=true to enable.');
+                return undefined;
+            }
+
             if (!verb) {
                 console.log('Verb must be provided');
                 return undefined;
@@ -169,7 +195,7 @@ export class GitHubRepository implements PluginRepository {
 
             // List all plugins
             const plugins = await this.list();
-            
+
             // Find plugin with matching verb
             for (const plugin of plugins) {
                 if (plugin.verb === verb) {
@@ -203,7 +229,7 @@ export class GitHubRepository implements PluginRepository {
             // Get the plugin directory contents
             const pluginPath = `${this.pluginsDir}/${id}`;
             const response = await this.makeGitHubRequest('GET', `${this.baseContentUrl}/${pluginPath}`);
-            
+
             if (response.status !== 200 || !Array.isArray(response.data)) {
                 console.log(`Plugin with ID ${id} not found`);
                 return;
@@ -242,6 +268,11 @@ export class GitHubRepository implements PluginRepository {
      */
     async list(): Promise<PluginLocator[]> {
         try {
+            // Check if GitHub access is enabled
+            if (process.env.ENABLE_GITHUB !== 'true') {
+                console.log('GitHub access is disabled by configuration. Set ENABLE_GITHUB=true to enable.');
+                return [];
+            }
             // Get plugins directory contents
             let response;
             try {
@@ -258,7 +289,7 @@ export class GitHubRepository implements PluginRepository {
                 }
                 throw error;
             }
-            
+
             if (!Array.isArray(response.data)) {
                 return [];
             }
@@ -272,7 +303,7 @@ export class GitHubRepository implements PluginRepository {
                 try {
                     // Get manifest file
                     const manifestContent = await this.getFileContent(`${this.pluginsDir}/${dir.name}/plugin-manifest.json`);
-                    
+
                     if (manifestContent) {
                         const manifest = JSON.parse(manifestContent) as PluginManifest;
                         locators.push({
@@ -325,12 +356,12 @@ export class GitHubRepository implements PluginRepository {
     private async getFileContent(path: string): Promise<string | undefined> {
         try {
             const response = await this.makeGitHubRequest('GET', `${this.baseContentUrl}/${path}`);
-            
+
             if (response.status === 200 && response.data.content) {
                 // GitHub API returns content as base64 encoded
                 return Buffer.from(response.data.content, 'base64').toString('utf-8');
             }
-            
+
             return undefined;
         } catch (error) {
             if (axios.isAxiosError(error) && error.response?.status === 404) {

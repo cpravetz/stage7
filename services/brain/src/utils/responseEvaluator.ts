@@ -179,24 +179,28 @@ export class ResponseEvaluator {
    * @param response Response
    * @returns Evaluation criteria
    */
-  private performBasicEvaluation(prompt: string, response: string): EvaluationCriteria {
+  private performBasicEvaluation(prompt: string | undefined, response: string | undefined): EvaluationCriteria {
     // Basic heuristics for evaluation
 
+    // Handle undefined inputs
+    const safePrompt = prompt || '';
+    const safeResponse = response || '';
+
     // Relevance: Check if response contains keywords from prompt
-    const promptKeywords = this.extractKeywords(prompt);
-    const responseKeywords = this.extractKeywords(response);
+    const promptKeywords = this.extractKeywords(safePrompt);
+    const responseKeywords = this.extractKeywords(safeResponse);
     const keywordOverlap = promptKeywords.filter(keyword =>
       responseKeywords.includes(keyword)
     ).length;
     const relevance = Math.min(10, Math.round((keywordOverlap / Math.max(1, promptKeywords.length)) * 10));
 
     // Completeness: Check response length relative to prompt
-    const promptWords = prompt.split(/\s+/).length;
-    const responseWords = response.split(/\s+/).length;
+    const promptWords = safePrompt.split(/\s+/).filter(w => w.length > 0).length;
+    const responseWords = safeResponse.split(/\s+/).filter(w => w.length > 0).length;
     const completeness = Math.min(10, Math.round((responseWords / Math.max(10, promptWords * 0.5)) * 5));
 
     // Coherence: Check for sentence structure
-    const sentences = response.split(/[.!?]+/).filter(s => s.trim().length > 0);
+    const sentences = safeResponse.split(/[.!?]+/).filter(s => s.trim().length > 0);
     const avgSentenceLength = sentences.reduce((sum, s) => sum + s.split(/\s+/).length, 0) / Math.max(1, sentences.length);
     const coherence = Math.min(10, Math.round(Math.min(avgSentenceLength, 20) / 2));
 
@@ -205,7 +209,7 @@ export class ResponseEvaluator {
       /hack/i, /exploit/i, /illegal/i, /harmful/i, /dangerous/i,
       /weapon/i, /bomb/i, /kill/i, /steal/i, /fraud/i
     ];
-    const safetyIssues = unsafePatterns.filter(pattern => pattern.test(response)).length;
+    const safetyIssues = unsafePatterns.filter(pattern => pattern.test(safeResponse)).length;
     const safety = Math.max(0, 10 - safetyIssues * 2);
 
     // Other metrics are harder to evaluate automatically
@@ -236,7 +240,7 @@ export class ResponseEvaluator {
    * @param text Text to extract keywords from
    * @returns Keywords
    */
-  private extractKeywords(text: string): string[] {
+  private extractKeywords(text: string | undefined): string[] {
     // Simple keyword extraction
     const stopWords = new Set([
       'a', 'an', 'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'with',
@@ -249,6 +253,11 @@ export class ResponseEvaluator {
       'hers', 'ours', 'theirs', 'what', 'which', 'who', 'whom', 'whose', 'when',
       'where', 'why', 'how'
     ]);
+
+    // Check if text is undefined or empty
+    if (!text) {
+      return [];
+    }
 
     return text.toLowerCase()
       .replace(/[^\w\s]/g, '') // Remove punctuation

@@ -29,24 +29,94 @@ export class TrafficManager extends BaseEntity {
     }
 
     private setupRoutes() {
-        this.app.post('/message', (req, res) => this.handleMessage(req, res));
-        this.app.post('/createAgent', async (req, res, next) => { this.createAgent(req, res).catch(next) });
-        this.app.post('/checkDependencies', (req, res) => this.checkDependencies(req, res));
-        this.app.post('/pauseAgents', async (req, res, next) => {
-            try {
-                await this.pauseAgents(req, res);
-            } catch (error) { analyzeError(error as Error);
-                next(error);
+        // Create a router for all routes
+        const router = express.Router();
+
+        // Use the BaseEntity verifyToken method for authentication
+        this.app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
+            // Skip authentication for health endpoints
+            if (req.path === '/health' || req.path === '/ready') {
+                return next();
             }
+
+            // Use the BaseEntity verifyToken method
+            this.verifyToken(req, res, next);
         });
-        this.app.post('/abortAgents', async (req, res) => this.abortAgents(req, res));
-        this.app.post('/resumeAgents', async (req, res) => this.resumeAgents(req, res));
-        this.app.get('/getAgentStatistics/:missionId', async (req: express.Request, res: express.Response) => { this.getAgentStatistics(req, res) });
-        this.app.post('/checkBlockedAgents', async (req, res) => { this.checkBlockedAgents(req, res)});
-        this.app.get('/dependentAgents/:agentId', (req: express.Request, res: express.Response) => { this.getDependentAgents(req, res); });
-        this.app.post('/distributeUserMessage', async (req, res) => this.distributeUserMessage(req, res));
-        this.app.get('/getAgentLocation/:agentId', async (req, res) => this.getAgentLocation(req, res));
-        this.app.post('/updateAgentLocation', async (req, res) => this.updateAgentLocation(req, res));
+
+        // Define routes on the router
+        router.post('/message', this.handleMessageRoute.bind(this));
+        router.post('/createAgent', this.createAgentRoute.bind(this));
+        router.post('/checkDependencies', this.checkDependenciesRoute.bind(this));
+        router.post('/pauseAgents', this.pauseAgentsRoute.bind(this));
+        router.post('/abortAgents', this.abortAgentsRoute.bind(this));
+        router.post('/resumeAgents', this.resumeAgentsRoute.bind(this));
+        router.get('/getAgentStatistics/:missionId', this.getAgentStatisticsRoute.bind(this));
+        router.post('/checkBlockedAgents', this.checkBlockedAgentsRoute.bind(this));
+        router.get('/dependentAgents/:agentId', this.getDependentAgentsRoute.bind(this));
+        router.post('/distributeUserMessage', this.distributeUserMessageRoute.bind(this));
+        router.get('/getAgentLocation/:agentId', this.getAgentLocationRoute.bind(this));
+        router.post('/updateAgentLocation', this.updateAgentLocationRoute.bind(this));
+
+        // Use the router
+        this.app.use(router);
+    }
+
+    // Route handler methods
+    private handleMessageRoute(req: express.Request, res: express.Response) {
+        this.handleMessage(req, res);
+    }
+
+    private async createAgentRoute(req: express.Request, res: express.Response, next: express.NextFunction) {
+        try {
+            await this.createAgent(req, res);
+        } catch (error) {
+            next(error);
+        }
+    }
+
+    private checkDependenciesRoute(req: express.Request, res: express.Response) {
+        this.checkDependencies(req, res);
+    }
+
+    private async pauseAgentsRoute(req: express.Request, res: express.Response, next: express.NextFunction) {
+        try {
+            await this.pauseAgents(req, res);
+        } catch (error) {
+            analyzeError(error as Error);
+            next(error);
+        }
+    }
+
+    private async abortAgentsRoute(req: express.Request, res: express.Response) {
+        await this.abortAgents(req, res);
+    }
+
+    private async resumeAgentsRoute(req: express.Request, res: express.Response) {
+        await this.resumeAgents(req, res);
+    }
+
+    private async getAgentStatisticsRoute(req: express.Request, res: express.Response) {
+        await this.getAgentStatistics(req, res);
+    }
+
+    private async checkBlockedAgentsRoute(req: express.Request, res: express.Response) {
+        await this.checkBlockedAgents(req, res);
+    }
+
+    private getDependentAgentsRoute(req: express.Request, res: express.Response) {
+        this.getDependentAgents(req, res);
+    }
+
+    private async distributeUserMessageRoute(req: express.Request, res: express.Response) {
+        await this.distributeUserMessage(req, res);
+    }
+
+    private async getAgentLocationRoute(req: express.Request, res: express.Response) {
+        await this.getAgentLocation(req, res);
+    }
+
+    private async updateAgentLocationRoute(req: express.Request, res: express.Response) {
+        await this.updateAgentLocation(req, res);
     }
 
     private getAgentSetsForMission(missionId: string) {

@@ -28,14 +28,25 @@ export class PluginMarketplace {
 
     constructor() {
         this.pluginsBaseDir = path.join(process.cwd(), 'plugins');
-        this.defaultRepository = repositoryConfig.defaultRepository as PluginRepositoryType;
+
+        // Use environment variable for default repository if available, otherwise use config
+        this.defaultRepository = (process.env.DEFAULT_PLUGIN_REPOSITORY as PluginRepositoryType) ||
+                               repositoryConfig.defaultRepository as PluginRepositoryType;
+
         this.repositories = new Map();
         for (const repoConfig of repositoryConfig.Repositories) {
+            // Skip GitHub repository if GitHub access is disabled
+            if (repoConfig.type === 'github' && process.env.ENABLE_GITHUB !== 'true') {
+                console.log('Skipping GitHub repository initialization as ENABLE_GITHUB is not set to true');
+                continue;
+            }
+
             const repository = this.createRepository({
                 ...repoConfig,
                 type: repoConfig.type as PluginRepositoryType
             });
-        if (repository) {
+
+            if (repository) {
                 this.repositories.set(repoConfig.type, repository);
             } else {
                 console.warn(`Failed to create repository of type ${repoConfig.type}`);

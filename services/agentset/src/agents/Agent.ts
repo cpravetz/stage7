@@ -2,7 +2,6 @@ import { v4 as uuidv4 } from 'uuid';
 import axios from 'axios';
 import express from 'express';
 import { AgentStatus } from '../utils/agentStatus';
-import { getServiceUrls } from '../utils/postOfficeInterface';
 import { WorkProduct } from '../utils/WorkProduct';
 import { MapSerializer, BaseEntity } from '@cktmcs/shared';
 import { AgentPersistenceManager } from '../utils/AgentPersistenceManager';
@@ -112,11 +111,12 @@ export class Agent extends BaseEntity {
 
     private async initializeAgent() {
         try {
-            const { capabilitiesManagerUrl, brainUrl, trafficManagerUrl, librarianUrl } = await getServiceUrls();
-            this.capabilitiesManagerUrl = capabilitiesManagerUrl;
-            this.brainUrl = brainUrl;
-            this.trafficManagerUrl = trafficManagerUrl;
-            this.librarianUrl = librarianUrl;
+            // Use the BaseEntity's getServiceUrls method
+            const serviceUrls = await this.getServiceUrls();
+            this.capabilitiesManagerUrl = serviceUrls.capabilitiesManagerUrl;
+            this.brainUrl = serviceUrls.brainUrl;
+            this.trafficManagerUrl = serviceUrls.trafficManagerUrl;
+            this.librarianUrl = serviceUrls.librarianUrl;
             this.status = AgentStatus.RUNNING;
 
             if (this.missionContext && this.steps[0]?.actionVerb === 'ACCOMPLISH') {

@@ -32,6 +32,17 @@ export class Engineer extends BaseEntity {
         const app = express();
         app.use(express.json());
 
+        // Use the BaseEntity verifyToken method for authentication
+        app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
+            // Skip authentication for health endpoints
+            if (req.path === '/health' || req.path === '/ready') {
+                return next();
+            }
+
+            // Use the BaseEntity verifyToken method
+            this.verifyToken(req, res, next);
+        });
+
         app.post('/createPlugin', async (req, res) => {
             const { verb, context, guidance } = MapSerializer.transformFromSerialization(req.body);
             try {
@@ -44,8 +55,8 @@ export class Engineer extends BaseEntity {
             }
         });
 
-        app.post('/message', (req, res) => this.handleMessage(req, res))
-        ;app.get('/statistics', (req, res) => { this.getStatistics(req, res) });
+        app.post('/message', (req, res) => this.handleMessage(req, res));
+        app.get('/statistics', (req, res) => { this.getStatistics(req, res) });
 
         app.listen(this.port, () => {
             console.log(`Engineer listening at ${this.url}`);

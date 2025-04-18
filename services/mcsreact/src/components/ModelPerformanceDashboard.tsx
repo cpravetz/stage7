@@ -25,8 +25,26 @@ import {
   InputLabel,
   SelectChangeEvent
 } from '@mui/material';
-import { LLMConversationType } from '../shared-browser/types/LLMTypes';
 import axios from 'axios';
+
+export enum LLMConversationType {
+    TextToText = 'text/text',
+    TextToImage = 'text/image',
+    TextToAudio = 'text/audio',
+    TextToVideo = 'text/video',
+    AudioToText = 'audio/text',
+    ImageToText = 'image/text',
+    ImageToImage = 'image/image',
+    ImageToAudio = 'image/audio',
+    ImageToVideo = 'image/video',
+    VideoToText = 'video/text',
+    VideoToImage = 'video/image',
+    VideoToAudio = 'video/audio',
+    VideoToVideo = 'video/video',
+    TextToCode = 'text/code',
+    CodeToText = 'code/text',
+}
+
 
 interface ModelPerformanceMetrics {
   usageCount: number;
@@ -115,7 +133,22 @@ const ModelPerformanceDashboard: React.FC = () => {
 
         // Fetch performance data
         const performanceResponse = await axios.get('/brain/performance');
-        setPerformanceData(performanceResponse.data.performanceData);
+
+        // Convert the array of model data to a Record<string, ModelPerformanceMetrics>
+        const formattedData: Record<string, ModelPerformanceMetrics> = {};
+        if (Array.isArray(performanceResponse.data.performanceData)) {
+          performanceResponse.data.performanceData.forEach((modelData: any) => {
+            if (modelData && modelData.modelName && modelData.metrics) {
+              // Use the first conversation type's metrics as the default
+              const conversationTypes = Object.keys(modelData.metrics);
+              if (conversationTypes.length > 0) {
+                formattedData[modelData.modelName] = modelData.metrics[conversationTypes[0]];
+              }
+            }
+          });
+        }
+
+        setPerformanceData(formattedData);
 
         // Fetch rankings
         const rankingsResponse = await axios.get(`/brain/performance/rankings?conversationType=${conversationType}&metric=${rankingMetric}`);
@@ -308,9 +341,9 @@ const ModelPerformanceDashboard: React.FC = () => {
                           {Object.entries(performanceData).map(([modelName, data]) => (
                             <TableRow key={modelName}>
                               <TableCell>{modelName}</TableCell>
-                              <TableCell align="right">{data.usageCount}</TableCell>
-                              <TableCell align="right">{data.successCount}</TableCell>
-                              <TableCell align="right">{data.failureCount}</TableCell>
+                              <TableCell align="right">{data?.usageCount || 0}</TableCell>
+                              <TableCell align="right">{data?.successCount || 0}</TableCell>
+                              <TableCell align="right">{data?.failureCount || 0}</TableCell>
                             </TableRow>
                           ))}
                         </TableBody>
@@ -340,11 +373,11 @@ const ModelPerformanceDashboard: React.FC = () => {
                           {Object.entries(performanceData).map(([modelName, data]) => (
                             <TableRow key={modelName}>
                               <TableCell>{modelName}</TableCell>
-                              <TableCell align="right">{data.feedbackScores.relevance.toFixed(1)}</TableCell>
-                              <TableCell align="right">{data.feedbackScores.accuracy.toFixed(1)}</TableCell>
-                              <TableCell align="right">{data.feedbackScores.helpfulness.toFixed(1)}</TableCell>
-                              <TableCell align="right">{data.feedbackScores.creativity.toFixed(1)}</TableCell>
-                              <TableCell align="right">{data.feedbackScores.overall.toFixed(1)}</TableCell>
+                              <TableCell align="right">{data?.feedbackScores?.relevance?.toFixed(1) || '0.0'}</TableCell>
+                              <TableCell align="right">{data?.feedbackScores?.accuracy?.toFixed(1) || '0.0'}</TableCell>
+                              <TableCell align="right">{data?.feedbackScores?.helpfulness?.toFixed(1) || '0.0'}</TableCell>
+                              <TableCell align="right">{data?.feedbackScores?.creativity?.toFixed(1) || '0.0'}</TableCell>
+                              <TableCell align="right">{data?.feedbackScores?.overall?.toFixed(1) || '0.0'}</TableCell>
                             </TableRow>
                           ))}
                         </TableBody>

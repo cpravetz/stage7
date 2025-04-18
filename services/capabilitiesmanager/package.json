@@ -20,7 +20,8 @@
         "express": "^4.21.1",
         "json-alexander": "^0.1.13",
         "simple-git": "^3.27.0",
-        "ws": "^8.18.0"
+        "ws": "^8.18.0",
+        "dotenv": "^16.4.5"
     },
     "devDependencies": {
         "@types/cheerio": "^0.22.35",

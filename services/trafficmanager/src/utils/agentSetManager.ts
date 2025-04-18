@@ -1,4 +1,4 @@
-import Docker from 'dockerode';
+// No longer using Docker API directly
 import express from 'express';
 import axios from 'axios';
 import { MapSerializer, AgentSetManagerStatistics, AgentStatistics, PluginInput, MessageType } from '@cktmcs/shared';
@@ -26,79 +26,121 @@ class AgentSetManager {
     private maxAgentsPerSet: number;
     private postOfficeUrl: string;
     private refreshInterval: NodeJS.Timeout;
-    private docker: Docker;
 
     constructor(maxAgentsPerSet: number = 250, postOfficeUrl: string = 'postoffice:5020') {
         this.maxAgentsPerSet = maxAgentsPerSet;
         this.postOfficeUrl = postOfficeUrl;
         this.refreshInterval = setInterval(() => this.refreshAgentSets(), 60000); // Refresh every minute
-        this.docker = new Docker();
     }
 
 
     private async updateAgentSets(isInitialPopulation: boolean = false): Promise<void> {
         console.log(isInitialPopulation ? 'Populating AgentSets...' : 'Refreshing AgentSets...');
-        let retryCount = isInitialPopulation ? 3 : 1;
-        const retryDelay = 2000;
 
-        while (retryCount > 0) {
+        // If we already have AgentSets and this is not an initial population, just return
+        if (!isInitialPopulation && this.agentSets.size > 0) {
+            console.log(`Using existing ${this.agentSets.size} AgentSets`);
+            return;
+        }
+
+        // For initial population, if we don't have any AgentSets, create one
+        if (isInitialPopulation && this.agentSets.size === 0) {
             try {
-                const response = await api.get(`http://${this.postOfficeUrl}/requestComponent?type=AgentSet`);
-                const agentSetComponents = response.data.components;
-                console.log('AgentSet components response:', agentSetComponents.length);
-
-                if (agentSetComponents.length > 0) {
-                    const updatedAgentSets = new Map<string, AgentSetLink>();
-
-                    agentSetComponents.forEach((component: any) => {
-                        const existingSet = this.agentSets.get(component.id);
-                        updatedAgentSets.set(component.id, {
-                            id: component.id,
-                            url: component.url,
-                            agentCount: existingSet ? existingSet.agentCount : 0,
-                            maxAgents: this.maxAgentsPerSet
-                        });
-                    });
-
-                    if (!isInitialPopulation) {
-                        this.handleRemovedAgentSets(updatedAgentSets);
-                    }
-
-                    this.agentSets = updatedAgentSets;
-                    console.log(`AgentSets ${isInitialPopulation ? 'populated' : 'refreshed'}. Current count: ${this.agentSets.size}`);
-                    return;
-                }
+                console.log('No AgentSets found. Creating a new one...');
+                await this.createNewAgentSet();
+                console.log(`Created new AgentSet. Current count: ${this.agentSets.size}`);
+                return;
             } catch (error) {
                 analyzeError(error as Error);
-                console.error('Error fetching AgentSet components:', error instanceof Error ? error.message : error);
-            }
-
-            retryCount--;
-            if (retryCount > 0) {
-                await new Promise(resolve => setTimeout(resolve, retryDelay));
+                console.error('Error creating new AgentSet:', error instanceof Error ? error.message : error);
             }
         }
 
-        console.log(`Failed to ${isInitialPopulation ? 'populate' : 'refresh'} AgentSet components from PostOffice`);
-    }
+        // If we still don't have any AgentSets, try to find them through PostOffice as a fallback
+        if (this.agentSets.size === 0) {
+            let retryCount = isInitialPopulation ? 3 : 1;
+            const retryDelay = 2000;
 
-    private handleRemovedAgentSets(updatedAgentSets: Map<string, AgentSetLink>): void {
-        this.agentSets.forEach((set, id) => {
-            if (!updatedAgentSets.has(id)) {
-                const newSetId = updatedAgentSets.keys().next().value;
-                if (newSetId) {
-                    this.agentToSetMap.forEach((setId, agentId) => {
-                        if (setId === id) {
-                            this.agentToSetMap.set(agentId, newSetId);
-                            const newSet = updatedAgentSets.get(newSetId);
-                            if (newSet) {
-                                newSet.agentCount++;
-                            }
-                        }
-                    });
+            while (retryCount > 0) {
+                try {
+                    console.log('Attempting to find AgentSets through PostOffice as fallback...');
+                    const response = await api.get(`http://${this.postOfficeUrl}/requestComponent?type=AgentSet`);
+                    const agentSetComponents = response.data.components;
+                    console.log('AgentSet components response:', agentSetComponents.length);
+
+                    if (agentSetComponents.length > 0) {
+                        const updatedAgentSets = new Map<string, AgentSetLink>();
+
+                        agentSetComponents.forEach((component: any) => {
+                            const existingSet = this.agentSets.get(component.id);
+                            updatedAgentSets.set(component.id, {
+                                id: component.id,
+                                url: component.url,
+                                agentCount: existingSet ? existingSet.agentCount : 0,
+                                maxAgents: this.maxAgentsPerSet
+                            });
+                        });
+
+                        this.agentSets = updatedAgentSets;
+                        console.log(`AgentSets found through PostOffice. Current count: ${this.agentSets.size}`);
+                        return;
+                    }
+                } catch (error) {
+                    analyzeError(error as Error);
+                    console.error('Error fetching AgentSet components:', error instanceof Error ? error.message : error);
+                }
+
+                retryCount--;
+                if (retryCount > 0) {
+                    await new Promise(resolve => setTimeout(resolve, retryDelay));
                 }
             }
+
+            // If we still don't have any AgentSets, create one
+            if (this.agentSets.size === 0) {
+                try {
+                    console.log('No AgentSets found through PostOffice. Creating a new one...');
+                    await this.createNewAgentSet();
+                    console.log(`Created new AgentSet. Current count: ${this.agentSets.size}`);
+                } catch (error) {
+                    analyzeError(error as Error);
+                    console.error('Error creating new AgentSet:', error instanceof Error ? error.message : error);
+                    console.log(`Failed to ${isInitialPopulation ? 'populate' : 'refresh'} AgentSet components`);
+                }
+            }
+        }
+    }
+
+    // Method to handle agent reassignment when an AgentSet is removed
+    private reassignAgentsFromSet(removedSetId: string): void {
+        // Find a new AgentSet to reassign agents to
+        const availableSetIds = Array.from(this.agentSets.keys())
+            .filter(id => id !== removedSetId);
+
+        if (availableSetIds.length === 0) {
+            console.warn('No available AgentSets to reassign agents to');
+            return;
+        }
+
+        const newSetId = availableSetIds[0];
+        const newSet = this.agentSets.get(newSetId);
+
+        if (!newSet) {
+            console.warn(`AgentSet ${newSetId} not found for reassignment`);
+            return;
+        }
+
+        // Reassign all agents from the removed set to the new set
+        let reassignedCount = 0;
+        this.agentToSetMap.forEach((setId, agentId) => {
+            if (setId === removedSetId) {
+                this.agentToSetMap.set(agentId, newSetId);
+                newSet.agentCount++;
+                reassignedCount++;
+            }
         });
+
+        console.log(`Reassigned ${reassignedCount} agents from set ${removedSetId} to set ${newSetId}`);
     }
 
     private async refreshAgentSets(): Promise<void> {
@@ -109,6 +151,9 @@ class AgentSetManager {
         await this.updateAgentSets(true);
     }
 
+    /**
+     * Remove empty AgentSets to clean up resources
+     */
     async removeEmptySets() {
         for (const [id, set] of this.agentSets.entries()) {
             if (set.agentCount === 0) {
@@ -117,14 +162,18 @@ class AgentSetManager {
         }
     }
 
+    /**
+     * Remove an AgentSet and reassign its agents to another set
+     * @param id The ID of the AgentSet to remove
+     */
     private removeAgentSet(id: string): void {
+        // First reassign any agents from this set to another set
+        this.reassignAgentsFromSet(id);
+
+        // Then remove the set from our map
         this.agentSets.delete(id);
-        // Remove all agents associated with this AgentSet
-        for (const [agentId, setId] of this.agentToSetMap.entries()) {
-            if (setId === id) {
-                this.agentToSetMap.delete(agentId);
-            }
-        }
+
+        console.log(`Removed AgentSet ${id}`);
     }
 
     async getAgentUrl(agentId: string): Promise<string | undefined> {
@@ -152,21 +201,42 @@ class AgentSetManager {
 
     async getAgentSetUrlForAgent(agentId: string): Promise<string | undefined> {
         console.log('Getting agent set URL for agent:', agentId);
-        await this.ensureAgentSets();
+
+        // If we don't have any AgentSets, create one
+        if (this.agentSets.size === 0) {
+            console.log('No agent sets exist. Creating a new one...');
+            try {
+                await this.createNewAgentSet();
+                console.log(`Created new AgentSet. Current count: ${this.agentSets.size}`);
+            } catch (error) {
+                console.error('Error creating new agent set:', error instanceof Error ? error.message : error);
+            }
+        }
+
+        // Get the set ID from our mapping
         const setId = this.agentToSetMap.get(agentId);
+        console.log(`Agent ${agentId} is mapped to set ${setId}`);
 
-        console.log('Agent Set Map:', this.agentSets);
-        console.log('Agent to Set Map:', this.agentToSetMap);
-        console.log('Requested Agent ID:', agentId);
-        console.log('Found Set ID:', setId);
-
-
-        if (setId) {
+        // If we have a set ID, return the URL
+        if (setId && this.agentSets.has(setId)) {
             const agentSet = this.agentSets.get(setId);
-            console.log('Found Agent Set:', agentSet);
+            console.log(`Found Agent Set for ${agentId}:`, agentSet);
             return agentSet?.url;
         }
-        console.log('No Agent Set found for agent:', agentId);
+
+        // If we don't have a mapping but we have AgentSets, assign the agent to the first available set
+        if (this.agentSets.size > 0) {
+            const firstSetId = Array.from(this.agentSets.keys())[0];
+            const firstSet = this.agentSets.get(firstSetId);
+
+            if (firstSet) {
+                console.log(`No mapping found for agent ${agentId}, assigning to set ${firstSetId}`);
+                this.agentToSetMap.set(agentId, firstSetId);
+                return firstSet.url;
+            }
+        }
+
+        console.log(`No Agent Set found or could be created for agent: ${agentId}`);
         return undefined;
     }
 
@@ -208,23 +278,40 @@ class AgentSetManager {
         console.log('Assigning agent to set...');
         console.log('actionVerb: ', actionVerb);
         console.log('inputs: ', inputs);
-        let availableSet = await this.getAvailableAgentSet();
-        if (!availableSet) {
-            console.log('No available agent set found. Attempting to create a new one...');
+
+        // If we don't have any AgentSets, create one directly
+        if (this.agentSets.size === 0) {
+            console.log('No agent sets exist. Creating a new one...');
             try {
                 await this.createNewAgentSet();
-                availableSet = await this.getAvailableAgentSet();
-                if (!availableSet) {
-                    console.log('No agentSet was available for the new agent.');
-                }
-                return '';
+                console.log(`Created new AgentSet. Current count: ${this.agentSets.size}`);
             } catch (error) {
                 analyzeError(error as Error);
                 console.error('Error creating new agent set:', error instanceof Error ? error.message : error);
-                return '';
+                throw new Error('Failed to create agent set');
             }
         }
 
+        // Get an available set from our internal state
+        let availableSet = Array.from(this.agentSets.values()).find(set => set.agentCount < this.maxAgentsPerSet);
+
+        if (!availableSet) {
+            console.log('All existing agent sets are full. Creating a new one...');
+            try {
+                await this.createNewAgentSet();
+                availableSet = Array.from(this.agentSets.values()).find(set => set.agentCount < this.maxAgentsPerSet);
+
+                if (!availableSet) {
+                    throw new Error('Failed to create an available agent set');
+                }
+            } catch (error) {
+                analyzeError(error as Error);
+                console.error('Error creating new agent set:', error instanceof Error ? error.message : error);
+                throw new Error('Failed to create agent set');
+            }
+        }
+
+        console.log(`Using AgentSet ${availableSet.id} at ${availableSet.url} for agent ${agentId}`);
         this.agentToSetMap.set(agentId, availableSet.id);
 
         try {
@@ -244,7 +331,7 @@ class AgentSetManager {
             analyzeError(error as Error);
             this.agentToSetMap.delete(agentId);
             console.error('Failed to assign agent to set:', error instanceof Error ? error.message : error);
-            return '';
+            throw new Error(`Failed to assign agent ${agentId} to set ${availableSet.id}: ${error instanceof Error ? error.message : String(error)}`);
         }
     }
 
@@ -541,49 +628,47 @@ class AgentSetManager {
 
     private async createNewAgentSet(): Promise<void> {
         try {
-            const container = await this.createAgentSetContainer();
-            const containerInfo = await container.inspect();
-            const ipAddress = containerInfo.NetworkSettings.Networks.mcs_network.IPAddress;
+            // Use the default AgentSet container that's already running
+            // FIXED: Changed port from 5090 to 5100 to match the actual AgentSet service port
+            const defaultAgentSetUrl = 'agentset:5100';
+            console.log('Creating new AgentSet with URL:', defaultAgentSetUrl);
+
+            // Generate a unique ID for this AgentSet
+            const id = `agentset-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
             const newSet = {
-                id: containerInfo.Id,
-                url: `http://${ipAddress}:5090`,
+                id: id,
+                url: defaultAgentSetUrl,
                 agentCount: 0,
                 maxAgents: this.maxAgentsPerSet
             };
 
             this.agentSets.set(newSet.id, newSet);
 
-            // Register the new AgentSet with PostOffice
-            await axios.post(`http://${this.postOfficeUrl}/registerComponent`, {
-                type: 'AgentSet',
-                url: newSet.url,
-                name: `AgentSet-${ipAddress}`
-            });
-            console.log('Created new AgentSet:', newSet);
+            // Try to register the AgentSet with PostOffice (but don't fail if it doesn't work)
+            try {
+                await axios.post(`http://${this.postOfficeUrl}/registerComponent`, {
+                    type: 'AgentSet',
+                    url: newSet.url,
+                    name: `AgentSet-${id}`,
+                    id: id
+                });
+                console.log(`Registered AgentSet ${id} with PostOffice`);
+            } catch (regError) {
+                console.warn(`Failed to register AgentSet with PostOffice, but continuing anyway:`,
+                    regError instanceof Error ? regError.message : regError);
+            }
+
+            console.log('Created new AgentSet reference:', newSet);
+            return;
         } catch (error) {
             analyzeError(error as Error);
             console.error('Error creating new AgentSet:', error instanceof Error ? error.message : error);
+            throw error; // Re-throw to allow caller to handle
         }
     }
 
-    private async createAgentSetContainer(): Promise<Docker.Container> {
-        const container = await this.docker.createContainer({
-            Image: 'agentset:latest',
-            Env: [
-                `POSTOFFICE_URL=${this.postOfficeUrl}`,
-                `PORT=5090`,
-            ],
-            NetworkingConfig: {
-                EndpointsConfig: {
-                    mcs_network: {}
-                }
-            }
-        });
-
-        await container.start();
-        return container;
-    }
+    // We're now using the existing AgentSet container instead of creating new ones
 }
 
 export const agentSetManager = new AgentSetManager();

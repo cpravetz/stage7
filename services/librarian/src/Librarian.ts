@@ -37,6 +37,17 @@ export class Librarian extends BaseEntity {
       }
 
       private setupRoutes() {
+        // Use the BaseEntity verifyToken method for authentication
+        this.app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
+            // Skip authentication for health endpoints
+            if (req.path === '/health' || req.path === '/ready') {
+                return next();
+            }
+
+            // Use the BaseEntity verifyToken method
+            this.verifyToken(req, res, next);
+        });
+
         this.app.post('/storeData', (req: express.Request, res: express.Response) => { this.storeData(req, res)});
         this.app.get('/loadData/:id', (req: express.Request, res: express.Response) => { this.loadData(req, res)} );
         this.app.get('/loadData', (req: express.Request, res: express.Response) => { this.loadDataByQuery(req, res)} );
@@ -310,7 +321,7 @@ export class Librarian extends BaseEntity {
                 } else {
                     console.log('loadDataByQuery failed Please specify an ID or use the queryData endpoint.');
                     return res.status(400).send({ error: 'Please specify an ID or use the queryData endpoint' });
-                }w
+                }
             } else {
                 console.log('loadDataByQuery failed for invalid storage type.');
                 return res.status(400).send({ error: 'Invalid storage type' });

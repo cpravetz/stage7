@@ -85,7 +85,7 @@ when the goal can be accomplished with a plan.  If you determine a plugin is nee
             "outputKey3": "Description of output3"
         }
     }
-    ... 
+    ...
     ]
 }
 
@@ -93,7 +93,7 @@ Guidelines for creating a plan:
 1. Number each step sequentially.
 2. Use specific, actionable verbs or phrases for each step (e.g.  ANALYZE_CSV, ANALYZE_AUDIOFILE, PREDICT, WRITE_TEXT, WRITE_CODE, BOOK_A_CAR).
 3. Ensure each step has a description.
-4. Each step input should be an object with either a 'value' property for predetermined values or an 'outputKey' property referencing an output from a previous step. 
+4. Each step input should be an object with either a 'value' property for predetermined values or an 'outputKey' property referencing an output from a previous step.
 5. List dependencies for each step as an object with the property names being the outputs needed and the values being the step number that provides the required inputlike: {outputname: stepNumber}
 There MUST be a dependency entry for every input that comes from a previous step output.
 6. Specify the outputs of each step. At least one output is mandatory.
@@ -138,12 +138,12 @@ Ensure your response is a valid JSON object starting with either "type": "DIRECT
 
 function validateResponse(response: any): boolean {
     if (!response || typeof response !== 'object') return false;
-    
+
     if (!response.type || !['PLAN', 'PLUGIN', 'DIRECT_ANSWER'].includes(response.type)) return false;
-    
+
     if (response.type === 'PLAN') {
-        return Array.isArray(response.plan) && 
-               response.plan.every((step: any) => 
+        return Array.isArray(response.plan) &&
+               response.plan.every((step: any) =>
                    typeof step.number === 'number' &&
                    typeof step.verb === 'string' &&
                    typeof step.description === 'string' &&
@@ -154,15 +154,15 @@ function validateResponse(response: any): boolean {
     }
 
     return typeof response.answer === 'string';
-    
+
 }
 
 export async function execute(inputs: Map<string, PluginInput> | Record<string, any>): Promise<PluginOutput[]> {
     try {
         console.log('ACCOMPLISH plugin inputs:', inputs);
-        
+
         let inputMap: Map<string, PluginInput>;
-        
+
         if (inputs instanceof Map) {
             inputMap = inputs;
         } else {
@@ -269,25 +269,49 @@ export async function execute(inputs: Map<string, PluginInput> | Record<string, 
     }
 }
 
- 
+
 async function parseJsonWithErrorCorrection(jsonString: string): Promise<any> {
     let correctedJson = '';
     try {
+        if (!jsonString) {
+            throw new Error('Empty response from Brain');
+        }
+
+        console.log('Original JSON string:', jsonString);
+
+        // Handle markdown code blocks (both with and without language specifier)
+        // This regex handles triple backticks with or without language identifier
+        const codeBlockRegex = /```(?:json)?([\s\S]*?)```/g;
+        const match = codeBlockRegex.exec(jsonString);
+
+        if (match && match[1]) {
+            // If we found a code block, use its content
+            correctedJson = match[1].trim();
+            console.log('Extracted code block:', correctedJson);
+        } else {
+            // If no code blocks were found, use the original string
+            correctedJson = jsonString;
+        }
 
         // Remove any leading or trailing quotation marks
-        correctedJson = jsonString.trim().replace(/^"|"$/g, '');
+        correctedJson = correctedJson.trim().replace(/^"|"$/g, '');
 
-        // Remove all characters before first opening brace
-        correctedJson = correctedJson.substring(correctedJson.indexOf('{'));
-        // Remove all characters after last closing brace
-        correctedJson = correctedJson.substring(0, correctedJson.lastIndexOf('}') + 1);
-        // Remove all triple backticks
-        correctedJson = correctedJson.replace(/```/g, '');        
+        // Find the first opening brace and last closing brace
+        const firstBrace = correctedJson.indexOf('{');
+        const lastBrace = correctedJson.lastIndexOf('}');
+
+        if (firstBrace === -1 || lastBrace === -1) {
+            throw new Error('No JSON object found in response');
+        }
+
+        // Extract just the JSON object
+        correctedJson = correctedJson.substring(firstBrace, lastBrace + 1);
+
         // Replace 'undefined' with null
         correctedJson = correctedJson.replace(/: undefined/gi, ': null');
 
-         // Handle string concatenation in JSON
-         correctedJson = correctedJson.replace(/"\s*\+\s*JSON\.stringify\((.*?)\)\s*\+\s*"/g, (match, p1) => {
+        // Handle string concatenation in JSON
+        correctedJson = correctedJson.replace(/"\s*\+\s*JSON\.stringify\((.*?)\)\s*\+\s*"/g, (match, p1) => {
             try {
                 const parsed = parseJSON(p1);
                 return JSON.stringify(parsed);
@@ -296,15 +320,16 @@ async function parseJsonWithErrorCorrection(jsonString: string): Promise<any> {
             }
         });
 
+        console.log('Corrected JSON string:', correctedJson);
         return parseJSON(correctedJson);
-    } catch (error) { 
+    } catch (error) {
         analyzeError(error as Error);
         console.log('JSON correction failed, attempting to use LLM...');
         console.log('Malformed JSON: -->', correctedJson,'<--');
-            
+
         const brainUrl = process.env.BRAIN_URL || 'brain:5070';
         const prompt = `The following JSON is malformed. Please correct it and return only the corrected JSON:\n\n${correctedJson}`;
-            
+
         try {
             const response = await axios.post(`http://${brainUrl}/chat`, {
                 exchanges: [{ role: 'user', content: prompt }],
@@ -315,7 +340,7 @@ async function parseJsonWithErrorCorrection(jsonString: string): Promise<any> {
             const startIndex = fullResponse.indexOf('{');
             const endIndex = fullResponse.lastIndexOf('}') + 1;
             const correctedByLLM = fullResponse.substring(startIndex, endIndex);
-                
+
             console.log('LLM corrected JSON:', correctedByLLM);
             return parseJSON(correctedByLLM);
         } catch (llmError) {
@@ -374,7 +399,7 @@ function convertJsonToTasks(jsonPlan: JsonPlanStep[]): ActionVerbTask[] {
                     });
 
                     // If this input references an output key but has no explicit dependency
-                    if (inputData.outputKey && 
+                    if (inputData.outputKey &&
                         (!step.dependencies || !Object.entries(step.dependencies).some(([depKey]) => depKey === key))) {
                         const sourceStepNo = outputToStepMap.get(inputData.outputKey);
                         if (sourceStepNo !== undefined && sourceStepNo < (step.number || index + 1)) {
@@ -396,13 +421,13 @@ function convertJsonToTasks(jsonPlan: JsonPlanStep[]): ActionVerbTask[] {
                         planDependencies.push({
                             inputName,
                             sourceStepNo: depInfo,
-                            outputName: step.outputs && Object.keys(step.outputs).length > 0 
-                                ? Object.keys(step.outputs)[0] 
+                            outputName: step.outputs && Object.keys(step.outputs).length > 0
+                                ? Object.keys(step.outputs)[0]
                                 : (step.inputs[inputName]?.args?.outputKey || 'result')
                         });
                     }
                 }
-            }            
+            }
 
             if (planDependencies.length > 0) {
                 console.log(`Created task for step ${step.number || index + 1}:`, {

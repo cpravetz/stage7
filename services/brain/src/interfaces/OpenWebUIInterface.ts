@@ -4,9 +4,11 @@ import { analyzeError } from '@cktmcs/errorhandler';
 
 export class OpenWebUIInterface extends BaseInterface {
     interfaceName: string = 'openwebui';
+    private readonly DEFAULT_TIMEOUT = 300000; // 5 minutes timeout for knownow model
 
     constructor() {
         super();
+        console.log(`OpenWebUIInterface initialized with DEFAULT_TIMEOUT: ${this.DEFAULT_TIMEOUT}ms`);
     }
 
     async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number } = {}): Promise<string> {
@@ -21,6 +23,10 @@ export class OpenWebUIInterface extends BaseInterface {
             if (!baseUrl || !apiKey) {
                 throw new Error('OpenWebUI service configuration is incomplete');
             }
+
+            console.log(`OpenWebUI service URL: ${baseUrl}`);
+            console.log(`OpenWebUI API key available: ${apiKey ? 'Yes' : 'No'}`);
+            console.log(`Using timeout of ${this.DEFAULT_TIMEOUT}ms for OpenWebUI request`);
 
             // Format messages for OpenWebUI API
             // Ensure all messages have valid content (not undefined or null)
@@ -39,54 +45,78 @@ export class OpenWebUIInterface extends BaseInterface {
                 // Optional parameters
                 temperature: options.temperature || 0.3,
                 max_tokens: options.max_length || 4096,
+                stream: false // Disable streaming for simplicity
             });
 
             console.log(`Sending request to OpenWebUI at ${baseUrl}/api/chat/completions`);
 
-            // Make the API call
-            const response = await fetch(`${baseUrl}/api/chat/completions`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${apiKey}`,
-                    'Accept': 'application/json'
-                },
-                body
-            });
+            // Create AbortController for timeout
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => {
+                controller.abort();
+                console.error(`OpenWebUI request timed out after ${this.DEFAULT_TIMEOUT}ms`);
+            }, this.DEFAULT_TIMEOUT);
 
-            if (!response.ok) {
-                try {
-                    const errorText = await response.text();
-                    console.error(`OpenWebUI API error (${response.status}): ${errorText}`);
-
-                    // If we get a 400 error with 'content' in the error message, it's likely a formatting issue
-                    if (response.status === 400 && errorText.includes('content')) {
-                        console.error('Content format error detected. Request body was:', body);
-                        throw new Error(`OpenWebUI API content format error: ${response.status} - ${errorText}`);
-                    }
-
-                    throw new Error(`OpenWebUI API error: ${response.status} - ${errorText}`);
-                } catch (err) {
-                    console.error('Error parsing error response:', err);
-                    throw new Error(`OpenWebUI API error: ${response.status}`);
-                }
-            }
-
-            let data;
             try {
-                data = await response.json();
-                console.log('OpenWebUI response data:', JSON.stringify(data));
-            } catch (err) {
-                console.error('Error parsing JSON response:', err);
-                throw new Error('Failed to parse OpenWebUI response');
-            }
+                // Make the actual API call with timeout
+                const response = await fetch(`${baseUrl}/api/chat/completions`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${apiKey}`
+                    },
+                    body: body,
+                    signal: controller.signal
+                });
 
-            // Extract the response content
-            if (data && data.choices && data.choices.length > 0 && data.choices[0].message && data.choices[0].message.content) {
-                return data.choices[0].message.content;
-            } else {
-                console.error('Unexpected response format from OpenWebUI:', JSON.stringify(data));
-                throw new Error('Unexpected response format from OpenWebUI');
+                // Clear the timeout since we got a response
+                clearTimeout(timeoutId);
+
+                if (!response.ok) {
+                    try {
+                        const errorText = await response.text();
+                        console.error(`OpenWebUI API error (${response.status}): ${errorText}`);
+
+                        // If we get a 400 error with 'content' in the error message, it's likely a formatting issue
+                        if (response.status === 400 && errorText.includes('content')) {
+                            console.error('Content format error detected. Request body was:', body);
+                            throw new Error(`OpenWebUI API content format error: ${response.status} - ${errorText}`);
+                        }
+
+                        throw new Error(`OpenWebUI API error: ${response.status} - ${errorText}`);
+                    } catch (err) {
+                        console.error('Error parsing error response:', err);
+                        throw new Error(`OpenWebUI API error: ${response.status}`);
+                    }
+                }
+
+                let data;
+                try {
+                    data = await response.json();
+                    console.log('OpenWebUI response received successfully');
+                    console.log(`OpenWebUI response data length: ${JSON.stringify(data).length} characters`);
+                } catch (err) {
+                    console.error('Error parsing JSON response:', err);
+                    throw new Error('Failed to parse OpenWebUI response');
+                }
+
+                // Extract the response content
+                if (data && data.choices && data.choices.length > 0 && data.choices[0].message && data.choices[0].message.content) {
+                    const content = data.choices[0].message.content;
+                    console.log(`OpenWebUI response content length: ${content.length} characters`);
+                    return content;
+                } else {
+                    console.error('Unexpected response format from OpenWebUI:', JSON.stringify(data));
+                    throw new Error('Unexpected response format from OpenWebUI');
+                }
+            } catch (fetchError: unknown) {
+                // Clear the timeout if there was an error
+                clearTimeout(timeoutId);
+
+                if (fetchError instanceof Error && fetchError.name === 'AbortError') {
+                    throw new Error(`OpenWebUI request timed out after ${this.DEFAULT_TIMEOUT}ms`);
+                }
+                throw fetchError;
             }
         } catch (error) {
             analyzeError(error as Error);

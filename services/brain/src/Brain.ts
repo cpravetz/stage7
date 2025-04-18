@@ -30,6 +30,7 @@ export class Brain extends BaseEntity {
     private promptManager: PromptManager;
     private responseEvaluator: ResponseEvaluator;
     private llmCalls: number = 0;
+    private handleEvaluations!: (req: express.Request, res: express.Response) => void;
 
     constructor() {
         super('Brain', 'Brain', `brain`, process.env.PORT || '5020');
@@ -43,30 +44,15 @@ export class Brain extends BaseEntity {
         // Middleware
         app.use(bodyParser.json());
 
-        // Create a function to check authentication
-        const checkAuth = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+        // Use the BaseEntity verifyToken method for authentication
+        app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
             // Skip authentication for health and models/health endpoints
             if (req.path === '/health' || req.path === '/models/health') {
                 return next();
             }
 
-            // Skip authentication in development mode if configured
-            if (process.env.SKIP_AUTH === 'true' || process.env.NODE_ENV === 'development') {
-                return next();
-            }
-
-            // Temporarily disable authentication for all endpoints to fix integration issues
-            // This is a temporary solution to get the system working
-            // In a production environment, we would validate the token with the SecurityManager
-            return next();
-        };
-
-        // Apply authentication to all routes except health checks
-        app.use((req, res, next) => {
-            if (req.path === '/health' || req.path === '/models/health') {
-                return next();
-            }
-            checkAuth(req, res, next);
+            // Use the BaseEntity verifyToken method
+            this.verifyToken(req, res, next);
         });
 
         // Add health check endpoint
@@ -108,6 +94,11 @@ export class Brain extends BaseEntity {
             } catch (error) {
                 next(error); // Pass errors to the global error handler
             }
+        });
+
+        // Direct OpenWebUI chat endpoint for testing
+        app.post('/openwebui/chat', (req: express.Request, res: express.Response, next: express.NextFunction) => {
+            this.handleDirectOpenWebUIChat(req, res, next);
         });
 
         app.post('/generate', async (req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -258,7 +249,8 @@ export class Brain extends BaseEntity {
             }
         });
 
-        app.post('/evaluations', (req: express.Request, res: express.Response, next: express.NextFunction) => {
+        // Add evaluations endpoint as a class method
+        this.handleEvaluations = (req: express.Request, res: express.Response) => {
             try {
                 const { modelName, conversationType, requestId, prompt, response, scores, comments } = req.body;
 
@@ -281,7 +273,9 @@ export class Brain extends BaseEntity {
                 analyzeError(error as Error);
                 res.status(400).json({ error: error instanceof Error ? error.message : 'Invalid evaluation data' });
             }
-        });
+        };
+
+        app.post('/evaluations', this.handleEvaluations);
 
         app.get('/evaluations/summary', (req: express.Request, res: express.Response, next: express.NextFunction) => {
             try {
@@ -373,9 +367,11 @@ export class Brain extends BaseEntity {
             // Try multiple models until we get a valid response or run out of retries
             while (currentRetry < maxRetries) {
                 try {
-                    // Select the appropriate model, excluding any that have already failed
-                    selectedModel = this.modelManager.getModel(req.body.model) ||
-                                    this.modelManager.selectModel(thread.optimization, thread.conversationType);
+                    // Select the best model based on optimization criteria
+                    selectedModel = this.modelManager.selectModel(thread.optimization, thread.conversationType);
+
+                    // Log the selected model
+                    console.log(`Selected model: ${selectedModel ? selectedModel.name : 'none'}`);
 
                     if (!selectedModel) {
                         // If we've run out of models, check if we have any models at all
@@ -677,6 +673,43 @@ export class Brain extends BaseEntity {
         return 'text/plain';
     }
 
+    /**
+     * Handle direct OpenWebUI chat requests for testing
+     */
+    private handleDirectOpenWebUIChat(req: express.Request, res: express.Response, next: express.NextFunction): void {
+        try {
+            const owService = this.getServiceManager().getService('OWService');
+            if (!owService || !owService.isAvailable()) {
+                res.status(503).json({ error: 'OpenWebUI service is not available' });
+                return;
+            }
+
+            const openWebUIInterface = this.getInterfaceManager().getInterface('openwebui');
+            if (!openWebUIInterface) {
+                res.status(503).json({ error: 'OpenWebUI interface is not available' });
+                return;
+            }
+
+            console.log('Direct OpenWebUI chat request received');
+            const messages = req.body.messages || [];
+            const options = req.body.options || {};
+
+            openWebUIInterface.chat(owService, messages, options)
+                .then((response: string) => {
+                    res.json({ response });
+                })
+                .catch((error: unknown) => {
+                    console.error('Error in direct OpenWebUI chat:', error instanceof Error ? error.message : String(error));
+                    res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+                });
+        } catch (error) {
+            console.error('Error in direct OpenWebUI chat:', error instanceof Error ? error.message : String(error));
+            next(error);
+        }
+    }
+
+
+
     // Handle HTTP messages
     private async handleMessage(req: express.Request, res: express.Response) {
         try {
@@ -770,10 +803,11 @@ export class Brain extends BaseEntity {
         // Try multiple models until we get a valid response or run out of retries
         while (currentRetry < maxRetries) {
             try {
-                // Select the appropriate model, excluding any that have already failed
-                selectedModel = content.modelName
-                    ? this.modelManager.getModel(content.modelName)
-                    : this.modelManager.selectModel(thread.optimization || 'accuracy', thread.conversationType || LLMConversationType.TextToText);
+                // Select the best model based on optimization criteria
+                selectedModel = this.modelManager.selectModel(thread.optimization || 'accuracy', thread.conversationType || LLMConversationType.TextToText);
+
+                // Log the selected model
+                console.log(`Selected model: ${selectedModel ? selectedModel.name : 'none'}`);
 
                 if (!selectedModel || !selectedModel.isAvailable()) {
                     // If we've run out of models, check if we have any models at all

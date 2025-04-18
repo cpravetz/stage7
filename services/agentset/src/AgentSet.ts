@@ -17,7 +17,7 @@ export class AgentSet extends BaseEntity {
     agents: Map<string, Agent> = new Map(); // Store agents by their ID
     maxAgents: number = 10; // Example limit for agents in this set
     persistenceManager: AgentPersistenceManager = new AgentPersistenceManager();
-    private trafficManagerUrl: string = process.env.TRAFFIC_MANAGER_URL || 'trafficmanager:5080';
+    private trafficManagerUrl: string = process.env.TRAFFICMANAGER_URL || 'trafficmanager:5080';
     private librarianUrl: string = process.env.LIBRARIAN_URL || 'librarian:5040';
     private brainUrl: string = process.env.BRAIN_URL || 'brain:5060';
 
@@ -29,7 +29,7 @@ export class AgentSet extends BaseEntity {
     private domainKnowledge: DomainKnowledge;
 
     constructor() {
-        super(uuidv4(), 'AgentSet', process.env.HOST || 'agentset', process.env.PORT || '9000');
+        super(uuidv4(), 'AgentSet', process.env.HOST || 'agentset', process.env.PORT || '5100');
 
         // Initialize agent systems
         this.lifecycleManager = new AgentLifecycleManager(this.persistenceManager, this.trafficManagerUrl);
@@ -53,6 +53,17 @@ export class AgentSet extends BaseEntity {
     // Initialize Express server to manage agent lifecycle
     private initializeServer() {
         app.use(express.json());
+
+        // Use the BaseEntity verifyToken method for authentication
+        app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
+            // Skip authentication for health endpoints
+            if (req.path === '/health' || req.path === '/ready') {
+                return next();
+            }
+
+            // Use the BaseEntity verifyToken method
+            this.verifyToken(req, res, next);
+        });
 
         app.post('/message', (req, res) => this.handleMessage(req, res));
 

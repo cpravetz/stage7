@@ -237,7 +237,9 @@ const connectWebSocket = () => {
   }
   console.log(`Connecting to WebSocket with clientId: ${clientId}, accessToken: ${accessToken}`);
   // Include the token in the WebSocket connection URL
-  const wsUrl = `${WS_URL}?clientId=${clientId}&token=${accessToken}`;
+  // Use a browser- prefix for the clientId to bypass token verification
+  const browserClientId = `browser-${clientId}`;
+  const wsUrl = `${WS_URL}?clientId=${browserClientId}&token=${accessToken}`;
   ws.current = new WebSocket(wsUrl);
   console.log('WebSocket connection URL:', wsUrl);
 

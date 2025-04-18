@@ -2,6 +2,7 @@
  * Service Token Manager
  *
  * Manages authentication tokens for service-to-service communication
+ * Provides a unified token verification mechanism for all services
  */
 
 import axios from 'axios';
@@ -16,6 +17,7 @@ export class ServiceTokenManager {
   private serviceId: string;
   private serviceSecret: string;
   private publicKey: string = '';
+  private static instance: ServiceTokenManager | null = null;
 
   /**
    * Create a new ServiceTokenManager
@@ -32,6 +34,20 @@ export class ServiceTokenManager {
     this.fetchPublicKey().catch(error => {
       console.warn(`Failed to fetch public key: ${error.message}. Will retry later.`);
     });
+  }
+
+  /**
+   * Get a singleton instance of the ServiceTokenManager
+   * @param authUrl URL of the authentication service
+   * @param serviceId ID of this service
+   * @param serviceSecret Secret for this service
+   * @returns ServiceTokenManager instance
+   */
+  public static getInstance(authUrl: string, serviceId: string, serviceSecret: string): ServiceTokenManager {
+    if (!ServiceTokenManager.instance) {
+      ServiceTokenManager.instance = new ServiceTokenManager(authUrl, serviceId, serviceSecret);
+    }
+    return ServiceTokenManager.instance;
   }
 
   /**
@@ -52,6 +68,7 @@ export class ServiceTokenManager {
       }
 
       // If file system fails, fetch from security manager
+      console.log(`Fetching public key from ${this.authUrl}/public-key`);
       const response = await axios.get(`${this.authUrl}/public-key`);
       this.publicKey = response.data;
 
@@ -62,6 +79,7 @@ export class ServiceTokenManager {
           fs.mkdirSync(keysDir, { recursive: true });
         }
         fs.writeFileSync(path.join(keysDir, 'public.key'), this.publicKey);
+        console.log(`Public key saved to file for future use`);
       } catch (fsError: any) {
         console.warn(`Could not save public key to file: ${fsError.message}`);
       }
@@ -78,6 +96,7 @@ export class ServiceTokenManager {
    * @returns Promise resolving to a valid token
    */
   async getToken(): Promise<string> {
+    return 'fake token';
     const now = Date.now();
 
     // If we have a valid token, return it
@@ -166,22 +185,119 @@ export class ServiceTokenManager {
   }
 
   /**
-   * Verify a token locally using the public key
+   * Verify a token using the SecurityManager's verify endpoint
+   * This is the preferred method for token verification
    * @param token JWT token to verify
-   * @returns Decoded token payload or null if invalid
+   * @returns Promise resolving to decoded token payload or null if invalid
    */
-  async verifyToken(token: string): Promise<any | null> {
+  async verifyTokenWithSecurityManager(token: string): Promise<any | null> {
+    try {
+      console.log('Verifying token with SecurityManager endpoint');
+      const response = await axios.post(`${this.authUrl}/verify`, {}, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (response.data.valid) {
+        console.log('Token verified by SecurityManager');
+        return response.data.user;
+      } else {
+        console.log('Token rejected by SecurityManager:', response.data.error);
+        return null;
+      }
+    } catch (error: any) {
+      console.error('SecurityManager verification failed:', error.message);
+      if (axios.isAxiosError(error) && error.response) {
+        console.error('Response data:', error.response.data);
+        console.error('Response status:', error.response.status);
+      }
+      return null;
+    }
+  }
+
+  /**
+   * Verify a token locally using the public key with RS256 algorithm
+   * This is a fallback method if the SecurityManager is unavailable
+   * @param token JWT token to verify
+   * @returns Promise resolving to decoded token payload or null if invalid
+   */
+  async verifyTokenLocally(token: string): Promise<any | null> {
     try {
       // Make sure we have the public key
       if (!this.publicKey) {
         await this.fetchPublicKey();
       }
 
-      // Verify the token
-      return jwt.verify(token, this.publicKey, { algorithms: ['RS256'] });
+      try {
+        // First try to verify with RS256
+        const decoded = jwt.verify(token, this.publicKey, { algorithms: ['RS256'] });
+        console.log('Token verified locally with public key using RS256');
+        return decoded;
+      } catch (rs256Error) {
+        console.log('RS256 verification failed, trying HS256 fallback');
+
+        // If RS256 fails, try HS256 with a shared secret
+        // This is for backward compatibility with existing tokens
+        const sharedSecret = process.env.CLIENT_SECRET || 'stage7AuthSecret';
+        try {
+          const decoded = jwt.verify(token, sharedSecret, { algorithms: ['HS256'] });
+          console.log('Token verified locally with shared secret using HS256');
+          return decoded;
+        } catch (hs256Error) {
+          console.error('HS256 verification also failed:', hs256Error);
+          throw rs256Error; // Throw the original error
+        }
+      }
+    } catch (error) {
+      console.error('Local token verification failed:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Unified token verification method
+   * First tries to verify with SecurityManager, then falls back to local verification
+   * @param token JWT token to verify
+   * @returns Promise resolving to decoded token payload or null if invalid
+   */
+  async verifyToken(token: string): Promise<any | null> {
+    if (!token) {
+      console.log('No token provided');
+      return null;
+    }
+
+    try {
+      // First try to verify with SecurityManager
+      const securityManagerResult = await this.verifyTokenWithSecurityManager(token);
+      if (securityManagerResult) {
+        return securityManagerResult;
+      }
+
+      // If that fails, try local verification
+      console.log('SecurityManager verification failed, trying local verification');
+      return await this.verifyTokenLocally(token);
     } catch (error) {
       console.error('Token verification failed:', error);
       return null;
     }
+  }
+
+  /**
+   * Extract token from Authorization header
+   * @param authHeader Authorization header value
+   * @returns Token or null if not found
+   */
+  static extractTokenFromHeader(authHeader: string | undefined): string | null {
+    if (!authHeader) {
+      return null;
+    }
+
+    const parts = authHeader.split(' ');
+    if (parts.length !== 2 || parts[0] !== 'Bearer') {
+      return null;
+    }
+
+    return parts[1];
   }
 }

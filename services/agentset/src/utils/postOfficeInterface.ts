@@ -18,9 +18,35 @@ export async function getServiceUrls(): Promise<{
     try {
         const response = await api.get(`http://${POSTOFFICE_URL}/getServices`);
         const { capabilitiesManagerUrl, brainUrl, trafficManagerUrl, librarianUrl } = response.data;
-        return { capabilitiesManagerUrl, brainUrl, trafficManagerUrl, librarianUrl };
-    } catch (error) { 
+
+        // Check if any of the URLs are undefined or empty
+        const validCapabilitiesManagerUrl = capabilitiesManagerUrl || process.env.CAPABILITIESMANAGER_URL || 'capabilitiesmanager:5060';
+        const validBrainUrl = brainUrl || process.env.BRAIN_URL || 'brain:5070';
+        const validTrafficManagerUrl = trafficManagerUrl || process.env.TRAFFICMANAGER_URL || 'trafficmanager:5080';
+        const validLibrarianUrl = librarianUrl || process.env.LIBRARIAN_URL || 'librarian:5040';
+
+        console.log('Service URLs:', {
+            capabilitiesManagerUrl: validCapabilitiesManagerUrl,
+            brainUrl: validBrainUrl,
+            trafficManagerUrl: validTrafficManagerUrl,
+            librarianUrl: validLibrarianUrl
+        });
+
+        return {
+            capabilitiesManagerUrl: validCapabilitiesManagerUrl,
+            brainUrl: validBrainUrl,
+            trafficManagerUrl: validTrafficManagerUrl,
+            librarianUrl: validLibrarianUrl
+        };
+    } catch (error) {
         console.error('Failed to retrieve service URLs from PostOffice:', error instanceof Error ? error.message : error);
-        return { capabilitiesManagerUrl: 'capabilitiesmanager:5060', brainUrl: 'brain:5070', trafficManagerUrl: 'trafficmanager:5080', librarianUrl: 'librarian:5040' };
+        const fallbackUrls = {
+            capabilitiesManagerUrl: process.env.CAPABILITIESMANAGER_URL || 'capabilitiesmanager:5060',
+            brainUrl: process.env.BRAIN_URL || 'brain:5070',
+            trafficManagerUrl: process.env.TRAFFICMANAGER_URL || 'trafficmanager:5080',
+            librarianUrl: process.env.LIBRARIAN_URL || 'librarian:5040'
+        };
+        console.log('Using fallback service URLs:', fallbackUrls);
+        return fallbackUrls;
     }
 }

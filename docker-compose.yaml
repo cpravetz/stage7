@@ -85,6 +85,8 @@ services:
       CLIENT_SECRET: *sharedSecret
     volumes:
       - ./shared/keys:/usr/src/app/shared/keys
+    ports:
+      - "5080:5080"
 
   brain:
     build:
@@ -107,8 +109,6 @@ services:
       CONFIG_SERVICE_URL: *configserviceUrl
       BRAIN_CLIENT_SECRET: *sharedSecret
       CLIENT_SECRET: *sharedSecret
-      # Explicitly set OpenWebUI URL to override any default
-      OPENWEB_URL: 'https://knllm.dusdusdusd.com'
       # Use environment variable for GROQ_API_KEY
       GROQ_API_KEY: ${GROQ_API_KEY:-''}
     volumes:
@@ -203,12 +203,13 @@ services:
       CAPABILITIESMANAGER_CLIENT_SECRET: *sharedSecret
       CLIENT_SECRET: *sharedSecret
       LOCAL_PLUGIN_PATH: /usr/src/app/services//capabilitiesmanager/src/plugins
+      ENABLE_GITHUB: "false"
       GITHUB_TOKEN: *githubToken
       GITHUB_USERNAME: *githubUsername
       GIT_DEFAULT_BRANCH: *gitDefaultBranch
       GIT_REPOSITORY_URL: *gitRepositoryUrl
       GITHUB_EMAIL: *githubEmail
-      DEFAULT_PLUGIN_REPOSITORY: *defaultPluginRepository
+      DEFAULT_PLUGIN_REPOSITORY: "mongo"
       DEFAULT_REPOSITORY_URL: *defaultRepositoryUrl
       REPOSITORY_USERNAME: *repositoryUserName
       REPOSITORY_TOKEN: *repositoryToken
@@ -216,6 +217,8 @@ services:
       MONGO_COLLECTION: *mongoCollection
     volumes:
       - ./shared/keys:/usr/src/app/shared/keys
+    ports:
+      - "5060:5060"
 
   librarian:
     build:
@@ -242,6 +245,8 @@ services:
       CLIENT_SECRET: *sharedSecret
     volumes:
       - ./shared/keys:/usr/src/app/shared/keys
+    ports:
+      - "5040:5040"
 
   securitymanager:
     build:

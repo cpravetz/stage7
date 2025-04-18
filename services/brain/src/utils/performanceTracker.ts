@@ -298,16 +298,28 @@ export class ModelPerformanceTracker {
 
       // Blacklist model if it has too many consecutive failures
       // Blacklist duration increases with more failures
-      if (metrics.consecutiveFailures >= 3) {
-        // Calculate blacklist duration: 1 hour * 2^(consecutiveFailures-3)
-        // 3 failures: 1 hour, 4 failures: 2 hours, 5 failures: 4 hours, etc.
-        const blacklistHours = Math.pow(2, metrics.consecutiveFailures - 3);
-        const blacklistDuration = blacklistHours * 60 * 60 * 1000; // Convert to milliseconds
+      // Huggingface models are blacklisted more aggressively
+      const isHuggingfaceModel = modelName.toLowerCase().includes('huggingface') || modelName.toLowerCase().includes('hf/');
+      const blacklistThreshold = isHuggingfaceModel ? 2 : 3; // Lower threshold for Huggingface models
+
+      if (metrics.consecutiveFailures >= blacklistThreshold) {
+        // Calculate blacklist duration: 1 hour * 2^(consecutiveFailures-threshold)
+        // For regular models: 3 failures: 1 hour, 4 failures: 2 hours, 5 failures: 4 hours, etc.
+        // For Huggingface: 2 failures: 1 hour, 3 failures: 2 hours, 4 failures: 4 hours, etc.
+        const blacklistHours = Math.pow(2, metrics.consecutiveFailures - blacklistThreshold);
+
+        // Huggingface models get longer blacklist periods
+        const multiplier = isHuggingfaceModel ? 4 : 1; // 4x longer blacklist for Huggingface models
+        const blacklistDuration = blacklistHours * multiplier * 60 * 60 * 1000; // Convert to milliseconds
 
         const blacklistedUntil = new Date(Date.now() + blacklistDuration);
         metrics.blacklistedUntil = blacklistedUntil.toISOString();
 
-        console.log(`Model ${modelName} blacklisted for ${blacklistHours} hour(s) until ${blacklistedUntil.toLocaleString()} due to ${metrics.consecutiveFailures} consecutive failures`);
+        console.log(`Model ${modelName} blacklisted for ${blacklistHours * multiplier} hour(s) until ${blacklistedUntil.toLocaleString()} due to ${metrics.consecutiveFailures} consecutive failures`);
+
+        if (isHuggingfaceModel) {
+          console.log(`Huggingface model ${modelName} blacklisted more aggressively due to frequent failures`);
+        }
       }
     }
 
@@ -421,6 +433,7 @@ export class ModelPerformanceTracker {
    * @returns True if the model is blacklisted, false otherwise
    */
   isModelBlacklisted(modelName: string, conversationType: LLMConversationType): boolean {
+
     const metrics = this.getPerformanceMetrics(modelName, conversationType);
 
     // If the model has no blacklistedUntil date, it's not blacklisted

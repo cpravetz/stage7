@@ -7,9 +7,6 @@ import { BaseEntity, MessageType, PluginInput, MapSerializer } from '@cktmcs/sha
 import { MissionStatistics } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { rateLimit } from 'express-rate-limit';
-import * as fs from 'fs';
-import * as path from 'path';
-import * as jwt from 'jsonwebtoken';
 
 interface CustomRequest extends Request {
     user?: {
@@ -30,11 +27,10 @@ const api = axios.create({
 class MissionControl extends BaseEntity {
     private missions: Map<string, Mission> = new Map();
     private clientMissions: Map<string, Set<string>> = new Map();
-    private trafficManagerUrl: string = process.env.TRAFFIC_MANAGER_URL || 'trafficmanager:5080';
+    private trafficManagerUrl: string = process.env.TRAFFICMANAGER_URL || 'trafficmanager:5080';
     private librarianUrl: string = process.env.LIBRARIAN_URL || 'librarian:5040';
     private brainUrl: string = process.env.BRAIN_URL || 'brain:5060';
     private engineerUrl: string = process.env.ENGINEER_URL || 'engineer:5050';
-    private securityManagerUrl: string = process.env.SECURITY_MANAGER_URL || 'securitymanager:5010';
 
     constructor() {
         super('MissionControl', 'MissionControl', process.env.HOST || 'missioncontrol', process.env.PORT || '5050');
@@ -51,9 +47,23 @@ class MissionControl extends BaseEntity {
         }));
         app.use(express.json());
 
-        app.use((req: Request, res: Response, next: NextFunction) => {this.verifyToken(req, res, next)});
+        // Use the BaseEntity verifyToken method for authentication
+        app.use((req: Request, res: Response, next: NextFunction) => {
+            // Skip authentication for health endpoints
+            if (req.path === '/health' || req.path === '/ready') {
+                return next();
+            }
 
-        app.post('/message', (req, res) => this.handleMessage(req, res));
+            // Use the BaseEntity verifyToken method
+            this.verifyToken(req, res, next);
+        });
+
+        app.post('/message', (req, res) => {
+            this.handleMessage(req, res).catch(error => {
+                console.error('Error in handleMessage:', error);
+                res.status(500).send({ error: 'Internal server error' });
+            });
+        });
 
         app.listen(this.port, () => {
             console.log(`MissionControl is running on port ${this.port}`);
@@ -62,53 +72,139 @@ class MissionControl extends BaseEntity {
 
     private async handleMessage(req: express.Request, res: express.Response) {
         try {
-            await this.processMessage(req.body, (req as any).user);
-            res.status(200).send({ message: 'Message processed successfully' });
-        } catch (error) { analyzeError(error as Error);
+            console.log(`MissionControl received HTTP message:`, req.body);
+
+            // Log the message type for debugging
+            console.log(`MissionControl handling message of type ${req.body.type} from ${req.body.sender}`);
+
+            // Special handling for CREATE_MISSION messages
+            if (req.body.type === 'CREATE_MISSION') {
+                try {
+                    const { content, clientId } = req.body;
+                    const userId = (req as any).user?.id || 'system';
+
+                    // TEMPORARY: Add debug logging
+                    console.log('Creating mission with content:', content);
+                    console.log('Client ID:', clientId);
+                    console.log('User ID:', userId);
+
+                    // Create the mission
+                    const mission = await this.createMission(content, clientId, userId);
+                    console.log(`Mission created successfully: ${mission.id}`);
+
+                    return res.status(200).send({
+                        message: 'Mission created successfully',
+                        missionId: mission.id,
+                        status: mission.status
+                    });
+                } catch (missionError) {
+                    console.error('Error creating mission:', missionError instanceof Error ? missionError.message : missionError);
+                    if (missionError instanceof Error && missionError.stack) {
+                        console.error(missionError.stack);
+                    }
+                    return res.status(500).send({
+                        error: 'Error creating mission',
+                        message: missionError instanceof Error ? missionError.message : 'Unknown error'
+                    });
+                }
+            }
+
+            // For other message types
+            const result = await this.processMessage(req.body, (req as any).user);
+            console.log(`Message processed successfully, result:`, result);
+            res.status(200).send({ message: 'Message processed successfully', result });
+        } catch (error) {
+            analyzeError(error as Error);
             console.error('Error processing message:', error instanceof Error ? error.message : error);
-            res.status(502).send({ error: 'Internal server error' });
+            if (error instanceof Error) {
+                console.error(error.stack);
+            }
+            res.status(500).send({
+                error: 'Error processing message',
+                message: error instanceof Error ? error.message : 'Unknown error'
+            });
         }
     }
 
     // Override the handleQueueMessage method from BaseEntity
     protected async handleQueueMessage(message: any) {
         try {
+            console.log(`MissionControl received queue message:`, message);
+
             // For queue messages, we don't have user info from JWT
             // We'll need to handle authorization differently or get user info another way
             const userId = message.userId || 'system';
             const user = { id: userId };
 
-            await this.processMessage(message, user);
-            console.log(`Queue message of type ${message.type} processed successfully`);
-        } catch (error) { analyzeError(error as Error);
+            const result = await this.processMessage(message, user);
+            console.log(`Queue message of type ${message.type} processed successfully, result:`, result);
+
+            // If the message has a replyTo field, send a response back to the queue
+            if (message.replyTo && this.mqClient) {
+                try {
+                    await this.mqClient.publishMessage('stage7', message.replyTo, {
+                        type: 'RESPONSE',
+                        correlationId: message.correlationId,
+                        content: result
+                    });
+                    console.log(`Sent response to ${message.replyTo} for message ${message.correlationId}`);
+                } catch (replyError) {
+                    console.error('Error sending reply to queue:', replyError);
+                }
+            }
+        } catch (error) {
+            analyzeError(error as Error);
             console.error('Error processing queue message:', error instanceof Error ? error.message : error);
+            if (error instanceof Error) {
+                console.error(error.stack);
+            }
+
+            // If the message has a replyTo field, send an error response back to the queue
+            if (message && message.replyTo && this.mqClient) {
+                try {
+                    await this.mqClient.publishMessage('stage7', message.replyTo, {
+                        type: 'ERROR',
+                        correlationId: message.correlationId,
+                        content: {
+                            error: error instanceof Error ? error.message : 'Unknown error',
+                            status: 'error'
+                        }
+                    });
+                } catch (replyError) {
+                    console.error('Error sending error reply to queue:', replyError);
+                }
+            }
         }
     }
 
     // Common message processing logic for both HTTP and queue messages
     private async processMessage(message: any, user: any) {
         const { type, sender, content, clientId } = message;
-        console.log(`user: `, user);
+        console.log(`Processing message from user:`, user);
         const missionId = message.missionId ? message.missionId : (message.content?.missionId ? message.content.missionId : null);
         console.log(`Processing message of type ${type} from ${sender} for mission ${missionId}`);
 
+        let result;
         switch (type) {
             case MessageType.CREATE_MISSION:
-                await this.createMission(content, clientId, user.id);
-                break;
+                result = await this.createMission(content, clientId, user.id);
+                return { missionId: result?.id, status: result?.status };
             case MessageType.PAUSE:
                 if (missionId) {
                     await this.pauseMission(missionId);
+                    return { missionId, status: 'paused' };
                 }
                 break;
             case MessageType.RESUME:
                 if (missionId) {
                     await this.resumeMission(missionId);
+                    return { missionId, status: 'resumed' };
                 }
                 break;
             case MessageType.ABORT:
                 if (missionId) {
                     await this.abortMission(missionId);
+                    return { missionId, status: 'aborted' };
                 }
                 break;
             case MessageType.SAVE:
@@ -116,62 +212,107 @@ class MissionControl extends BaseEntity {
                 if (mission) {
                     const missionName = message.missionName ? message.missionName : (mission.name ? mission.name : `mission ${new Date()}`);
                     await this.saveMission(missionId, missionName);
+                    return { missionId, status: 'saved', name: missionName };
                 }
                 break;
             case MessageType.LOAD:
-                await this.loadMission(missionId, clientId, user.id);
-                break;
+                const loadedMission = await this.loadMission(missionId, clientId, user.id);
+                return { missionId, status: 'loaded', mission: loadedMission };
             case MessageType.USER_MESSAGE:
                 await this.handleUserMessage(content, clientId, missionId);
-                break;
+                return { missionId, status: 'message_sent' };
             default:
                 // Call the base class handler for standard message types
                 await super.handleBaseMessage(message);
+                return { status: 'message_handled' };
         }
+
+        return { status: 'no_action_taken' };
     }
 
     private async createMission(content: any, clientId: string, userId: string) {
-        this.logAndSay(`Creating mission with goal: ${content.goal}`);
-
-        // Clear action plan cache before creating new mission
-        await this.clearActionPlanCache();
-
-        const mission: Mission = {
-            id: generateGuid(),
-            userId: userId,
-            name: content.name,
-            goal: content.goal,
-            missionContext: content.missionContext || '',
-            status: Status.INITIALIZING,
-            createdAt: new Date(),
-            updatedAt: new Date()
-        };
-
-        this.missions.set(mission.id, mission);
-        this.addClientMission(clientId, mission.id);
-
-        console.log(`Mission created: ${mission.id}, Name: ${mission.name}, Client: ${clientId}`);
-        this.sendStatusUpdate(mission, 'Mission created');
-
         try {
+            this.logAndSay(`Creating mission with goal: ${content.goal}`);
+            console.log(`MissionControl creating mission with goal: ${content.goal} for client: ${clientId}`);
+
+            // Clear action plan cache before creating new mission
+            await this.clearActionPlanCache();
+
+            const missionId = generateGuid();
+            console.log(`Generated mission ID: ${missionId}`);
+
+            const mission: Mission = {
+                id: missionId,
+                userId: userId,
+                name: content.name || `Mission ${new Date().toISOString().slice(0, 10)}`,
+                goal: content.goal,
+                missionContext: content.missionContext || '',
+                status: Status.INITIALIZING,
+                createdAt: new Date(),
+                updatedAt: new Date()
+            };
+
+            this.missions.set(mission.id, mission);
+            this.addClientMission(clientId, mission.id);
+
+            console.log(`Mission created: ${mission.id}, Name: ${mission.name}, Client: ${clientId}`);
+            this.sendStatusUpdate(mission, 'Mission created');
+
+            // Create the inputs map for the agent
             const inputs = new Map<string, PluginInput>();
             inputs.set('goal', {
                 inputName: 'goal',
                 inputValue: mission.goal,
                 args: {}
             });
-            console.log('Serializing inputs: ', inputs);
-            console.log('Serialized: ', MapSerializer.transformForSerialization(inputs));
-            await api.post(`http://${this.trafficManagerUrl}/createAgent`, { actionVerb: 'ACCOMPLISH',
-                inputs: MapSerializer.transformForSerialization(inputs),
+
+            // Add mission context if available
+            if (mission.missionContext) {
+                inputs.set('missionContext', {
+                    inputName: 'missionContext',
+                    inputValue: mission.missionContext,
+                    args: {}
+                });
+            }
+
+            console.log('Serializing inputs for TrafficManager...');
+            const serializedInputs = MapSerializer.transformForSerialization(inputs);
+
+            // Create the agent through TrafficManager
+            console.log(`Sending createAgent request to TrafficManager for mission ${mission.id}`);
+            const createAgentResponse = await api.post(`http://${this.trafficManagerUrl}/createAgent`, {
+                actionVerb: 'ACCOMPLISH',
+                inputs: serializedInputs,
                 missionId: mission.id,
-                dependencies: [] });
+                missionContext: mission.missionContext,
+                dependencies: []
+            });
+
+            console.log(`TrafficManager createAgent response:`, createAgentResponse.data);
             mission.status = Status.RUNNING;
             this.sendStatusUpdate(mission, 'Mission started');
-        } catch (error) { analyzeError(error as Error);
-            console.error('Error starting mission:', error instanceof Error ? error.message : error);
-            mission.status = Status.ERROR;
-            this.sendStatusUpdate(mission, 'Error starting mission');
+
+            // Save the mission state
+            await this.saveMissionState(mission);
+            console.log(`Mission ${mission.id} state saved`);
+
+            return mission;
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error('Error creating/starting mission:', error instanceof Error ? error.message : error);
+
+            // If we have a mission object, update its status
+            if (content && content.goal) {
+                const failedMission = Array.from(this.missions.values())
+                    .find(m => m.goal === content.goal && m.status === Status.INITIALIZING);
+
+                if (failedMission) {
+                    failedMission.status = Status.ERROR;
+                    this.sendStatusUpdate(failedMission, `Error starting mission: ${error instanceof Error ? error.message : 'Unknown error'}`);
+                }
+            }
+
+            throw error; // Re-throw to allow caller to handle
         }
     }
 
@@ -231,23 +372,34 @@ class MissionControl extends BaseEntity {
 
     private async loadMission(missionId: string, clientId: string, userId: string) {
         try {
+            console.log(`Loading mission ${missionId} for client ${clientId} and user ${userId}`);
+
             const mission = await this.loadMissionState(missionId);
             if (!mission) {
                 console.error('Mission not found:', missionId);
-                return;
+                throw new Error(`Mission ${missionId} not found`);
             }
+
             if (mission.userId !== userId) {
-                console.error('User not authorized to load this mission');
-                return;
+                console.error(`User ${userId} not authorized to load mission ${missionId}`);
+                throw new Error('Access denied: You do not have permission to access this mission');
             }
 
             this.missions.set(missionId, mission);
-            await api.post(`http://${this.trafficManagerUrl}/loadAgents`, { missionId });
+
+            console.log(`Loading agents for mission ${missionId} from TrafficManager`);
+            const loadAgentsResponse = await api.post(`http://${this.trafficManagerUrl}/loadAgents`, { missionId });
+            console.log(`TrafficManager loadAgents response:`, loadAgentsResponse.data);
+
             this.addClientMission(clientId, missionId);
             console.log(`Mission loaded: ${missionId}, Name: ${mission.name || 'Unnamed'}, Client: ${clientId}`);
             this.sendStatusUpdate(mission, `Mission loaded: ${mission.name || 'Unnamed'}`);
-        } catch (error) { analyzeError(error as Error);
+
+            return mission;
+        } catch (error) {
+            analyzeError(error as Error);
             console.error('Error loading mission:', error instanceof Error ? error.message : error);
+            throw error; // Re-throw to allow caller to handle
         }
     }
 
@@ -424,114 +576,6 @@ class MissionControl extends BaseEntity {
             if (this.clientMissions.get(clientId)!.size === 0) {
                 this.clientMissions.delete(clientId);
             }
-        }
-    }
-
-    private async verifyToken(req: CustomRequest, res: Response, next: NextFunction) {
-        const clientId = req.body.clientId || req.query.clientId;
-        const token = req.headers.authorization?.split(' ')[1];
-        console.log(`Verifying token for client ${clientId}`);
-        console.log(`Token: ${token}`);
-
-        if (!token) {
-            console.log('No token provided');
-            return res.status(401).json({ message: 'No token provided' });
-        }
-
-        try {
-            // Try multiple verification methods in sequence
-
-            // 1. First try to verify locally using the public key from file
-            try {
-                // Try public.key first
-                const publicKeyPath = path.join(__dirname, '../../../shared/keys/public.key');
-                if (fs.existsSync(publicKeyPath)) {
-                    const publicKey = fs.readFileSync(publicKeyPath, 'utf8');
-                    const decoded = jwt.verify(token, publicKey, { algorithms: ['RS256'] });
-                    console.log('Token verified locally with public.key');
-                    req.user = decoded;
-                    return next();
-                }
-
-                // Try public.pem if public.key doesn't exist
-                const publicPemPath = path.join(__dirname, '../../../shared/keys/public.pem');
-                if (fs.existsSync(publicPemPath)) {
-                    const publicKey = fs.readFileSync(publicPemPath, 'utf8');
-                    const decoded = jwt.verify(token, publicKey, { algorithms: ['RS256'] });
-                    console.log('Token verified locally with public.pem');
-                    req.user = decoded;
-                    return next();
-                }
-            } catch (localError) {
-                console.log('Local verification with file failed:', localError.message);
-            }
-
-            // 2. Try to fetch the public key from SecurityManager and verify
-            try {
-                const keyResponse = await axios.get(`http://${this.securityManagerUrl}/public-key`);
-                const publicKey = keyResponse.data;
-
-                // Save the key for future use
-                try {
-                    const keysDir = path.join(__dirname, '../../../shared/keys');
-                    if (!fs.existsSync(keysDir)) {
-                        fs.mkdirSync(keysDir, { recursive: true });
-                    }
-                    fs.writeFileSync(path.join(keysDir, 'public.key'), publicKey);
-                } catch (saveError) {
-                    console.warn('Failed to save public key:', saveError.message);
-                }
-
-                // Verify with the fetched key
-                const decoded = jwt.verify(token, publicKey, { algorithms: ['RS256'] });
-                console.log('Token verified with fetched public key');
-                req.user = decoded;
-                return next();
-            } catch (fetchError) {
-                console.log('Verification with fetched key failed:', fetchError.message);
-            }
-
-            // 3. Fall back to SecurityManager verification endpoint
-            try {
-                const response = await axios.post(`http://${this.securityManagerUrl}/verify`, {}, {
-                    headers: {
-                        'Authorization': `Bearer ${token}`
-                    }
-                });
-
-                if (response.data.valid) {
-                    console.log('Token verified by SecurityManager');
-                    req.user = response.data.user;
-                    return next();
-                } else {
-                    console.log('Token rejected by SecurityManager:', response.data.error);
-                    return res.status(401).json({ message: 'Invalid token' });
-                }
-            } catch (verifyError) {
-                console.error('SecurityManager verification failed:', verifyError.message);
-                if (axios.isAxiosError(verifyError)) {
-                    console.error('Response data:', verifyError.response?.data);
-                    console.error('Response status:', verifyError.response?.status);
-                }
-            }
-
-            // 4. Try legacy verification with shared secret
-            try {
-                const sharedSecret = process.env.JWT_SECRET || 'stage7AuthSecret';
-                const decoded = jwt.verify(token, sharedSecret);
-                console.log('Token verified with legacy shared secret');
-                req.user = decoded;
-                return next();
-            } catch (legacyError) {
-                console.log('Legacy verification failed:', legacyError.message);
-            }
-
-            // All verification methods failed
-            console.error('All token verification methods failed');
-            return res.status(401).json({ message: 'Invalid token' });
-        } catch (error) {
-            console.error(`Unexpected error verifying token for client ${clientId}:`, error);
-            return res.status(500).json({ message: 'Error verifying token' });
         }
     }
 }

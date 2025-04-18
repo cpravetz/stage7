@@ -60,47 +60,44 @@ export class ModelManager {
     }
 
     selectModel(optimization: OptimizationType, conversationType: LLMConversationType): BaseModel | null {
-        let bestModel: BaseModel | null = null;
-        let bestScore = -Infinity;
-        let bestNonOpenRouterModel: BaseModel | null = null;
-        let bestNonOpenRouterScore = -Infinity;
-
-        // Check if OpenRouter API key is set
-        const orService = serviceManager.getService('ORService');
-        const openRouterAvailable = orService && orService.apiKey && orService.apiKey.length > 0;
-
-        for (const model of this.models.values()) {
-            if (model.contentConversation.includes(conversationType)) {
-                // Skip blacklisted models
-                if (this.performanceTracker.isModelBlacklisted(model.name, conversationType)) {
-                    console.log(`Skipping blacklisted model: ${model.name} for conversation type ${conversationType}`);
-                    continue;
+        // Get all available models that support the conversation type
+        const availableModels = Array.from(this.models.values())
+            .filter(model => {
+                // Check if model supports the conversation type
+                if (!model.contentConversation.includes(conversationType)) {
+                    return false;
                 }
 
-                const score = this.calculateScore(model, optimization, conversationType);
-
-                // Track best overall model
-                if (score > bestScore) {
-                    bestScore = score;
-                    bestModel = model;
+                // Check if model's service is available
+                const service = serviceManager.getService(model.serviceName);
+                if (!service || !service.isAvailable()) {
+                    console.log(`Skipping model ${model.name} because service ${model.serviceName} is not available`);
+                    return false;
                 }
 
-                // Track best non-OpenRouter model
-                if (model.interfaceName !== 'openrouter' && score > bestNonOpenRouterScore) {
-                    bestNonOpenRouterScore = score;
-                    bestNonOpenRouterModel = model;
+                // Check if model is available
+                if (!model.isAvailable()) {
+                    console.log(`Skipping model ${model.name} because it's not available`);
+                    return false;
                 }
-            }
+
+                return true;
+            });
+
+        if (availableModels.length === 0) {
+            console.log(`No available models found for conversation type ${conversationType}`);
+            return null;
         }
 
-        // If best model uses OpenRouter but OpenRouter is not available, use best non-OpenRouter model
-        if (bestModel && bestModel.interfaceName === 'openrouter' && !openRouterAvailable && bestNonOpenRouterModel) {
-            console.log(`OpenRouter API key not set, using alternative model: ${bestNonOpenRouterModel.name} with score ${bestNonOpenRouterScore} for ${optimization} and conversation type ${conversationType}`);
-            return bestNonOpenRouterModel;
-        }
+        // Sort models by their score for the given optimization
+        availableModels.sort((a, b) => {
+            const scoreA = this.calculateScore(a, optimization, conversationType);
+            const scoreB = this.calculateScore(b, optimization, conversationType);
+            return scoreB - scoreA;
+        });
 
-        console.log(`Selected model: ${bestModel?.name} with score ${bestScore} for ${optimization} and conversation type ${conversationType}`);
-        return bestModel;
+        console.log(`Selected model ${availableModels[0].name} for ${optimization} optimization and conversation type ${conversationType}`);
+        return availableModels[0];
     }
 
     private calculateScore(model: BaseModel, optimization: OptimizationType, conversationType: LLMConversationType): number {
@@ -267,7 +264,22 @@ export class ModelManager {
      * @returns Performance summary for all models
      */
     getPerformanceSummary() {
-        const summary = {
+        const summary: {
+            totalRequests: number;
+            successfulRequests: number;
+            failedRequests: number;
+            averageLatency: number;
+            averageTokenCount: number;
+            modelPerformance: Array<{
+                modelName: string;
+                conversationType: string;
+                usageCount: number;
+                successRate: number;
+                averageLatency: number;
+                averageTokenCount: number;
+                feedbackScores: any;
+            }>;
+        } = {
             totalRequests: 0,
             successfulRequests: 0,
             failedRequests: 0,
@@ -278,33 +290,46 @@ export class ModelManager {
 
         const performanceData = this.performanceTracker.getAllPerformanceData();
 
-        for (const [modelName, modelData] of performanceData) {
-            for (const [conversationType, metrics] of Object.entries(modelData.metrics)) {
-                summary.totalRequests += metrics.usageCount;
-                summary.successfulRequests += metrics.successCount;
-                summary.failedRequests += metrics.failureCount;
+        // Convert the performance data to an array of entries
+        const entries = Object.entries(performanceData);
 
-                // Add model performance data
-                summary.modelPerformance.push({
-                    modelName,
-                    conversationType,
-                    usageCount: metrics.usageCount,
-                    successRate: metrics.successRate,
-                    averageLatency: metrics.averageLatency,
-                    averageTokenCount: metrics.averageTokenCount,
-                    feedbackScores: metrics.feedbackScores
-                });
+        for (const [modelName, modelData] of entries) {
+            if (modelData && modelData.metrics) {
+                for (const [conversationType, metrics] of Object.entries(modelData.metrics)) {
+                    if (metrics) {
+                        summary.totalRequests += metrics.usageCount || 0;
+                        summary.successfulRequests += metrics.successCount || 0;
+                        summary.failedRequests += metrics.failureCount || 0;
+
+                        // Add model performance data
+                        summary.modelPerformance.push({
+                            modelName,
+                            conversationType,
+                            usageCount: metrics.usageCount || 0,
+                            successRate: metrics.successRate || 0,
+                            averageLatency: metrics.averageLatency || 0,
+                            averageTokenCount: metrics.averageTokenCount || 0,
+                            feedbackScores: metrics.feedbackScores || {}
+                        });
+                    }
+                }
             }
         }
 
         // Calculate overall averages
         if (summary.totalRequests > 0) {
-            const totalLatency = summary.modelPerformance.reduce(
-                (sum, model) => sum + (model.averageLatency * model.usageCount), 0
-            );
-            const totalTokens = summary.modelPerformance.reduce(
-                (sum, model) => sum + (model.averageTokenCount * model.usageCount), 0
-            );
+            let totalLatency = 0;
+            let totalTokens = 0;
+
+            for (const model of summary.modelPerformance) {
+                if (model && typeof model.averageLatency === 'number' && typeof model.usageCount === 'number') {
+                    totalLatency += model.averageLatency * model.usageCount;
+                }
+
+                if (model && typeof model.averageTokenCount === 'number' && typeof model.usageCount === 'number') {
+                    totalTokens += model.averageTokenCount * model.usageCount;
+                }
+            }
 
             summary.averageLatency = totalLatency / summary.totalRequests;
             summary.averageTokenCount = totalTokens / summary.totalRequests;

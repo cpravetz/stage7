@@ -1,5 +1,5 @@
 /**
- * Comprehensive test script to create a mission in Stage7 and monitor its execution
+ * Test script to create a mission in Stage7 using RS256 tokens
  */
 
 const axios = require('axios');
@@ -9,7 +9,7 @@ const WebSocket = require('ws');
 const CONFIG = {
     securityManagerUrl: 'http://localhost:5010',
     postOfficeUrl: 'http://localhost:5020',
-    missionGoal: 'Invent a new business that can run fully automatically',
+    missionGoal: 'Create a marketing plan for a new software product',
     componentType: 'MissionControl',
     clientSecret: 'stage7AuthSecret',
     monitorDuration: 5 * 60 * 1000 // 5 minutes
@@ -17,39 +17,50 @@ const CONFIG = {
 
 // Get authentication token
 async function getAuthToken() {
-    console.log('BYPASSING authentication token...');
-    // Return a dummy token
-    return 'dummy-token';
+    console.log('Getting authentication token from SecurityManager...');
+    
+    try {
+        const response = await axios.post(`${CONFIG.securityManagerUrl}/auth/service`, {
+            componentType: CONFIG.componentType,
+            clientSecret: CONFIG.clientSecret
+        });
+        
+        if (response.data.authenticated && response.data.token) {
+            console.log('Authentication successful!');
+            console.log('Token:', response.data.token);
+            return response.data.token;
+        } else {
+            console.error('Authentication failed:', response.data);
+            return null;
+        }
+    } catch (error) {
+        console.error('Authentication error:', error.message);
+        if (error.response) {
+            console.error('Response status:', error.response.status);
+            console.error('Response data:', error.response.data);
+        }
+        return null;
+    }
 }
 
 // Create a mission
 async function createMission(token) {
     console.log('Creating mission with goal:', CONFIG.missionGoal);
-
+    
     try {
-        // Try direct call to MissionControl
-        const clientId = 'test-client-' + Date.now();
-        console.log('Using client ID:', clientId);
-
-        const response = await axios.post(`http://localhost:5030/message`, {
-            type: 'CREATE_MISSION',
-            sender: 'TestScript',
-            recipient: 'MissionControl',
-            clientId: clientId,
-            content: {
-                goal: CONFIG.missionGoal
-            },
-            timestamp: new Date().toISOString()
+        const response = await axios.post(`${CONFIG.postOfficeUrl}/createMission`, {
+            goal: CONFIG.missionGoal,
+            clientId: 'test-client-' + Date.now()
         }, {
             headers: {
-                'Content-Type': 'application/json'
+                'Authorization': `Bearer ${token}`
             }
         });
-
+        
         console.log('Mission created successfully!');
         console.log('Response:', response.data);
-
-        return { clientId, ...response.data };
+        
+        return response.data;
     } catch (error) {
         console.error('Failed to create mission:', error.message);
         if (error.response) {
@@ -66,29 +77,29 @@ function connectWebSocket(token) {
         console.error('No token provided for WebSocket connection');
         return null;
     }
-
+    
     const clientId = 'test-client-' + Date.now();
     const wsUrl = `ws://localhost:5020?clientId=${clientId}&token=${token}`;
-
+    
     console.log('Connecting to WebSocket:', wsUrl);
-
+    
     const ws = new WebSocket(wsUrl);
-
+    
     // Track mission progress
     let missionStarted = false;
     let planGenerated = false;
     let stepsExecuted = 0;
     let agentsCreated = 0;
-
+    
     ws.on('open', () => {
         console.log('WebSocket connection established!');
     });
-
+    
     ws.on('message', (data) => {
         try {
             const message = JSON.parse(data.toString());
             console.log(`Received message type: ${message.type}`);
-
+            
             // Track mission progress based on message types
             if (message.type === 'missionStarted') {
                 missionStarted = true;
@@ -115,7 +126,7 @@ function connectWebSocket(token) {
                     console.log(`- Agents by status: ${JSON.stringify(message.content.agentCountByStatus || {})}`);
                 }
             }
-
+            
             // Print message content
             if (message.content) {
                 if (typeof message.content === 'string') {
@@ -129,43 +140,22 @@ function connectWebSocket(token) {
             console.log('Received raw message:', data.toString());
         }
     });
-
+    
     ws.on('error', (error) => {
         console.error('WebSocket error:', error.message);
     });
-
+    
     ws.on('close', (code, reason) => {
         console.log(`WebSocket closed: ${code} - ${reason}`);
     });
-
+    
     // Keep the connection open
     const pingInterval = setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) {
             ws.ping();
         }
     }, 30000);
-
-    // Print summary after monitoring period
-    setTimeout(() => {
-        console.log('\n=== Mission Execution Summary ===');
-        console.log(`Mission started: ${missionStarted ? 'Yes' : 'No'}`);
-        console.log(`Plan generated: ${planGenerated ? 'Yes' : 'No'}`);
-        console.log(`Steps executed: ${stepsExecuted}`);
-        console.log(`Agents created: ${agentsCreated}`);
-
-        if (missionStarted && planGenerated && stepsExecuted > 0) {
-            console.log('\nMission is executing successfully!');
-        } else if (missionStarted && planGenerated) {
-            console.log('\nPlan was generated but no steps have been executed yet.');
-        } else if (missionStarted) {
-            console.log('\nMission started but no plan has been generated yet.');
-        } else {
-            console.log('\nMission has not started properly.');
-        }
-
-        console.log('\nContinuing to monitor...');
-    }, CONFIG.monitorDuration);
-
+    
     return { ws, pingInterval };
 }
 
@@ -178,10 +168,10 @@ async function runTest() {
             console.error('Failed to get authentication token');
             process.exit(1);
         }
-
+        
         // Connect to WebSocket
         const { ws, pingInterval } = connectWebSocket(token);
-
+        
         // Create mission
         const missionData = await createMission(token);
         if (!missionData) {
@@ -190,7 +180,7 @@ async function runTest() {
             clearInterval(pingInterval);
             process.exit(1);
         }
-
+        
         console.log('Test started successfully! Monitoring mission execution...');
         console.log('Press Ctrl+C to exit');
     } catch (error) {

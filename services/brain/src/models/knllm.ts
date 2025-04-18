@@ -4,11 +4,11 @@ import { LLMConversationType } from '../interfaces/baseInterface';
 export class KNLLMModel extends BaseModel {
     constructor() {
         const scoresByConversationType = new Map<LLMConversationType, ModelScore>([
-            // Give highest scores to make this model preferred over all others
-            [LLMConversationType.TextToText, { costScore: 100, accuracyScore: 110, creativityScore: 110, speedScore: 110 }],
-            [LLMConversationType.TextToCode, { costScore: 100, accuracyScore: 110, creativityScore: 110, speedScore: 110 }],
-            [LLMConversationType.CodeToText, { costScore: 100, accuracyScore: 110, creativityScore: 110, speedScore: 110 }],
-            [LLMConversationType.ImageToText, { costScore: 100, accuracyScore: 110, creativityScore: 110, speedScore: 110 }],
+            // Use reasonable scores for fair comparison with other models
+            [LLMConversationType.TextToText, { costScore: 80, accuracyScore: 85, creativityScore: 85, speedScore: 70 }],
+            [LLMConversationType.TextToCode, { costScore: 80, accuracyScore: 85, creativityScore: 85, speedScore: 70 }],
+            [LLMConversationType.CodeToText, { costScore: 80, accuracyScore: 85, creativityScore: 85, speedScore: 70 }],
+            [LLMConversationType.ImageToText, { costScore: 80, accuracyScore: 85, creativityScore: 85, speedScore: 70 }],
         ]);
 
         super({
