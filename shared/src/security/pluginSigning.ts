@@ -113,9 +113,41 @@ export function signPlugin(plugin: PluginDefinition, privateKey?: string): strin
  * @returns True if the signature is valid
  */
 export function verifyPluginSignature(plugin: PluginDefinition, publicKey?: string): boolean {
-  // TEMPORARY: Always return true to bypass signature verification
-  console.log('BYPASSING plugin signature verification - always returning true');
-  return true;
+  try {
+    if (!plugin.security?.trust?.signature) {
+      console.log('Plugin has no signature to verify');
+      return false;
+    }
+
+    // Get the signature and the data to verify
+    const signature = plugin.security.trust.signature;
+    const dataToVerify = JSON.stringify({
+      id: plugin.id,
+      verb: plugin.verb,
+      version: plugin.version,
+      description: plugin.description || '',
+      entryPoint: plugin.entryPoint || {}
+    });
+
+    // Use the provided public key or load from environment/file
+    const keyToUse = publicKey || process.env.PLUGIN_PUBLIC_KEY || '';
+    if (!keyToUse) {
+      console.error('No public key available for plugin signature verification');
+      return false;
+    }
+
+    // Verify the signature using crypto
+    const crypto = require('crypto');
+    const verifier = crypto.createVerify('RSA-SHA256');
+    verifier.update(dataToVerify);
+    const isValid = verifier.verify(keyToUse, signature, 'base64');
+
+    console.log(`Plugin signature verification: ${isValid ? 'passed' : 'failed'}`);
+    return isValid;
+  } catch (error) {
+    console.error('Error verifying plugin signature:', error);
+    return false;
+  }
 }
 
 /**

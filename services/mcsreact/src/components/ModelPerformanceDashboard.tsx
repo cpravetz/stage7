@@ -47,28 +47,28 @@ export enum LLMConversationType {
 
 
 interface ModelPerformanceMetrics {
-  usageCount: number;
-  successCount: number;
-  failureCount: number;
-  successRate: number;
-  averageLatency: number;
-  averageTokenCount: number;
-  lastUsed: string;
-  consecutiveFailures: number;
-  lastFailureTime: string | null;
-  blacklistedUntil: string | null;
-  feedbackScores: {
-    relevance: number;
-    accuracy: number;
-    helpfulness: number;
-    creativity: number;
-    overall: number;
+  usageCount?: number;
+  successCount?: number;
+  failureCount?: number;
+  successRate?: number;
+  averageLatency?: number;
+  averageTokenCount?: number;
+  lastUsed?: string;
+  consecutiveFailures?: number;
+  lastFailureTime?: string | null;
+  blacklistedUntil?: string | null;
+  feedbackScores?: {
+    relevance?: number;
+    accuracy?: number;
+    helpfulness?: number;
+    creativity?: number;
+    overall?: number;
   };
 }
 
 interface ModelRanking {
-  modelName: string;
-  score: number;
+  modelName?: string;
+  score?: number;
 }
 
 interface TabPanelProps {
@@ -109,7 +109,7 @@ const ModelPerformanceDashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [performanceData, setPerformanceData] = useState<Record<string, ModelPerformanceMetrics>>({});
-  const [rankings, setRankings] = useState<ModelRanking[]>([]);
+  const [rankings, setRankings] = useState<ModelRanking[]>([]);  // Initialize with empty array
   const [conversationType, setConversationType] = useState<LLMConversationType>(LLMConversationType.TextToText);
   const [rankingMetric, setRankingMetric] = useState<'successRate' | 'averageLatency' | 'overall'>('overall');
 
@@ -151,8 +151,18 @@ const ModelPerformanceDashboard: React.FC = () => {
         setPerformanceData(formattedData);
 
         // Fetch rankings
-        const rankingsResponse = await axios.get(`/brain/performance/rankings?conversationType=${conversationType}&metric=${rankingMetric}`);
-        setRankings(rankingsResponse.data.rankings);
+        try {
+          const rankingsResponse = await axios.get(`/brain/performance/rankings?conversationType=${conversationType}&metric=${rankingMetric}`);
+          if (rankingsResponse.data && Array.isArray(rankingsResponse.data.rankings)) {
+            setRankings(rankingsResponse.data.rankings);
+          } else {
+            console.warn('Rankings data is not in expected format:', rankingsResponse.data);
+            setRankings([]);
+          }
+        } catch (rankingError) {
+          console.error('Error fetching rankings:', rankingError);
+          setRankings([]);
+        }
 
         setLoading(false);
       } catch (error) {
@@ -175,14 +185,17 @@ const ModelPerformanceDashboard: React.FC = () => {
     return `${(ms / 1000).toFixed(2)}s`;
   };
 
-  const getStatusColor = (metrics: ModelPerformanceMetrics) => {
+  const getStatusColor = (metrics: ModelPerformanceMetrics | undefined) => {
+    if (!metrics) {
+      return 'default';
+    }
     if (metrics.blacklistedUntil && new Date(metrics.blacklistedUntil) > new Date()) {
       return 'error';
     }
-    if (metrics.consecutiveFailures > 0) {
+    if ((metrics.consecutiveFailures || 0) > 0) {
       return 'warning';
     }
-    if (metrics.successRate > 0.9) {
+    if ((metrics.successRate || 0) > 0.9) {
       return 'success';
     }
     return 'default';
@@ -237,16 +250,16 @@ const ModelPerformanceDashboard: React.FC = () => {
                       </TableCell>
                       <TableCell align="right">
                         <Chip
-                          label={data.blacklistedUntil && new Date(data.blacklistedUntil) > new Date() ? 'Blacklisted' : 'Active'}
+                          label={data?.blacklistedUntil && new Date(data.blacklistedUntil) > new Date() ? 'Blacklisted' : 'Active'}
                           color={getStatusColor(data)}
                           size="small"
                         />
                       </TableCell>
-                      <TableCell align="right">{(data.successRate * 100).toFixed(1)}%</TableCell>
-                      <TableCell align="right">{formatDuration(data.averageLatency)}</TableCell>
-                      <TableCell align="right">{data.averageTokenCount.toFixed(0)}</TableCell>
-                      <TableCell align="right">{data.usageCount}</TableCell>
-                      <TableCell align="right">{formatDate(data.lastUsed)}</TableCell>
+                      <TableCell align="right">{((data?.successRate || 0) * 100).toFixed(1)}%</TableCell>
+                      <TableCell align="right">{formatDuration(data?.averageLatency || 0)}</TableCell>
+                      <TableCell align="right">{(data?.averageTokenCount || 0).toFixed(0)}</TableCell>
+                      <TableCell align="right">{data?.usageCount || 0}</TableCell>
+                      <TableCell align="right">{formatDate(data?.lastUsed || null)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -303,18 +316,24 @@ const ModelPerformanceDashboard: React.FC = () => {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {rankings.map((ranking, index) => (
-                    <TableRow
-                      key={ranking.modelName}
-                      sx={{ '&:last-child td, &:last-child th': { border: 0 } }}
-                    >
-                      <TableCell component="th" scope="row">
-                        {index + 1}
-                      </TableCell>
-                      <TableCell>{ranking.modelName}</TableCell>
-                      <TableCell align="right">{ranking.score.toFixed(2)}</TableCell>
+                  {rankings && rankings.length > 0 ? (
+                    rankings.map((ranking, index) => (
+                      <TableRow
+                        key={ranking.modelName || `model-${index}`}
+                        sx={{ '&:last-child td, &:last-child th': { border: 0 } }}
+                      >
+                        <TableCell component="th" scope="row">
+                          {index + 1}
+                        </TableCell>
+                        <TableCell>{ranking.modelName || 'Unknown'}</TableCell>
+                        <TableCell align="right">{(ranking.score || 0).toFixed(2)}</TableCell>
+                      </TableRow>
+                    ))
+                  ) : (
+                    <TableRow>
+                      <TableCell colSpan={3} align="center">No ranking data available</TableCell>
                     </TableRow>
-                  ))}
+                  )}
                 </TableBody>
               </Table>
             </TableContainer>

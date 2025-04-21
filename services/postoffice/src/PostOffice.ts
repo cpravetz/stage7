@@ -4,11 +4,12 @@ import cors from 'cors';
 import WebSocket from 'ws';
 import http from 'http';
 import { Component } from './types/Component';
-import { Message, MessageType, MessageQueueClient, ServiceDiscovery, ServiceTokenManager } from '@cktmcs/shared';
+import { Message, MessageType, MessageQueueClient, ServiceDiscovery, ServiceTokenManager, BaseEntity } from '@cktmcs/shared';
 import axios from 'axios';
 import { analyzeError } from '@cktmcs/errorhandler';
 import bodyParser from 'body-parser';
 import rateLimit from 'express-rate-limit';
+import { v4 as uuidv4 } from 'uuid';
 
 const api = axios.create({
     headers: {
@@ -18,7 +19,7 @@ const api = axios.create({
   });
 
 
-export class PostOffice {
+export class PostOffice extends BaseEntity {
     private app: express.Express;
     private server: http.Server;
     private components: Map<string, Component> = new Map();
@@ -29,28 +30,18 @@ export class PostOffice {
     private messageQueue: Map<string, Message[]> = new Map();
     private subscriptions: Map<string, Set<string>> = new Map();
     private messageProcessingInterval: NodeJS.Timeout;
-    private securityManagerUrl: string = process.env.SECURITYMANAGER_URL || 'securitymanager:5010';
-    private url: string;
-    private mqClient: MessageQueueClient;
-    private tokenManager: ServiceTokenManager | null = null;
-    private componentType: string = 'PostOffice';
-    private serviceDiscovery: ServiceDiscovery;
 
 
     constructor() {
+        // Call the BaseEntity constructor with required parameters
+        const id = uuidv4();
+        const componentType = 'PostOffice';
+        const urlBase = process.env.POSTOFFICE_URL || 'postoffice';
+        const port = process.env.PORT || '5020';
+        super(id, componentType, urlBase, port);
         this.app = express();
         this.server = http.createServer(this.app);
         this.wss = new WebSocket.Server({ server: this.server });
-        this.url = process.env.POSTOFFICE_URL || 'postoffice:5020';
-
-        // Initialize message queue
-        this.mqClient = new MessageQueueClient();
-        this.initializeMessageQueue();
-
-        // Initialize service discovery
-        const consulUrl = process.env.CONSUL_URL || 'consul:8500';
-        this.serviceDiscovery = new ServiceDiscovery(consulUrl);
-        this.initializeServiceDiscovery();
 
         this.setupWebSocket();
 
@@ -70,7 +61,6 @@ export class PostOffice {
 
         this.app.use(bodyParser.json());
         this.app.use(bodyParser.urlencoded({ extended: true }));
-        //this.app.use(this.logRequest);
 
         // Add OPTIONS handler for preflight requests
         this.app.options('*', cors(corsOptions));
@@ -98,9 +88,10 @@ export class PostOffice {
         this.app.get('/librarian/retrieve/:id', (req, res) => this.retrieveWorkProduct(req, res));
         this.app.get('/getSavedMissions', (req, res) => this.getSavedMissions(req, res));
 
-        const port = parseInt(process.env.PORT || '5020', 10);
-        this.server.listen(port, '0.0.0.0', () => {
-            console.log(`PostOffice listening on all interfaces at port ${port}`);
+        // Use the port from BaseEntity
+        const serverPort = parseInt(this.port, 10);
+        this.server.listen(serverPort, '0.0.0.0', () => {
+            console.log(`PostOffice listening on all interfaces at port ${serverPort}`);
         });
         this.messageProcessingInterval = setInterval(() => this.processMessageQueue(), 100);
     }
@@ -122,119 +113,16 @@ export class PostOffice {
         }
     }
 
-    // Utility method for logging requests if needed
-    private logRequest = (req: express.Request, _res: express.Response, next: express.NextFunction) => {
-        console.log(`${req.method} ${req.url}`);
-        next();
-    }
-
-    private async initializeMessageQueue() {
-        // Set up a retry mechanism with exponential backoff
-        const maxRetries = 10;
-        const initialRetryDelay = 2000; // 2 seconds
-        let retryCount = 0;
-        let retryDelay = initialRetryDelay;
-
-        const connectWithRetry = async () => {
-            try {
-                await this.mqClient.connect();
-
-                // Create and bind a queue for this service
-                const queueName = 'postoffice';
-                await this.mqClient.subscribeToQueue(queueName, async (message: Message) => {
-                    await this.processQueueMessage(message);
-                });
-
-                // Bind the queue to the exchange with appropriate routing patterns
-                await this.mqClient.bindQueueToExchange(queueName, 'stage7', 'message.postoffice');
-                await this.mqClient.bindQueueToExchange(queueName, 'stage7', 'message.all');
-
-                console.log('PostOffice connected to message queue');
-                return true; // Connection successful
-            } catch (error) {
-                console.error(`Failed to initialize message queue (attempt ${retryCount + 1}/${maxRetries}):`, error);
-
-                if (retryCount < maxRetries) {
-                    retryCount++;
-                    console.log(`Retrying in ${retryDelay}ms...`);
-
-                    // Wait for the retry delay
-                    await new Promise(resolve => setTimeout(resolve, retryDelay));
-
-                    // Exponential backoff with a maximum of 30 seconds
-                    retryDelay = Math.min(retryDelay * 1.5, 30000);
-
-                    // Try again
-                    return connectWithRetry();
-                } else {
-                    console.error(`Failed to connect to message queue after ${maxRetries} attempts. The service will continue to operate in degraded mode.`);
-                    return false;
-                }
-            }
-        };
-
-        // Start the connection process
-        const connected = await connectWithRetry();
-
-        // If we couldn't connect after all retries, set up a background reconnection task
-        if (!connected) {
-            console.log('Setting up background reconnection task for message queue');
-            setInterval(async () => {
-                if (!this.mqClient.isConnected()) {
-                    console.log('Attempting to reconnect to message queue in background...');
-                    try {
-                        await this.mqClient.connect();
-                        console.log('Successfully reconnected to message queue!');
-                    } catch (error) {
-                        console.error('Background reconnection attempt failed:', error);
-                    }
-                }
-            }, 60000); // Try every minute
-        }
-    }
-
-    private async initializeServiceDiscovery() {
-        try {
-            // Register this service with Consul
-            const [_host, port] = this.url.split(':');
-            await this.serviceDiscovery.registerService(
-                'PostOffice',
-                'PostOffice',
-                this.url,
-                ['postoffice', 'service-registry'],
-                parseInt(port)
-            );
-
-            // Set up a health check endpoint
-            this.setupHealthCheck();
-
-            console.log('PostOffice registered with service discovery');
-
-            // Set up cleanup on process exit
-            process.on('SIGINT', async () => {
-                await this.cleanup();
-                process.exit(0);
-            });
-
-            process.on('SIGTERM', async () => {
-                await this.cleanup();
-                process.exit(0);
-            });
-        } catch (error) {
-            console.error('Failed to initialize service discovery:', error);
-        }
-    }
-
-    private setupHealthCheck() {
+    protected setupHealthCheck() {
         // Basic health check endpoint
         this.app.get('/health', (_req, res) => {
-            const rabbitMQConnected = this.mqClient.isConnected();
+            const rabbitMQConnected = this.mqClient && this.mqClient.isConnected();
             const status = {
                 status: rabbitMQConnected ? 'ok' : 'degraded',
                 timestamp: new Date().toISOString(),
                 services: {
                     rabbitMQ: rabbitMQConnected ? 'connected' : 'disconnected',
-                    serviceDiscovery: this.serviceDiscovery.isRegistered('PostOffice') ? 'registered' : 'not registered',
+                    serviceDiscovery: this.serviceDiscovery?.isRegistered('PostOffice') ? 'registered' : 'not registered',
                     components: this.components.size
                 },
                 ready: rabbitMQConnected
@@ -245,8 +133,8 @@ export class PostOffice {
 
         // Readiness check endpoint - returns 200 only when fully ready to accept connections
         this.app.get('/ready', (_req, res) => {
-            const rabbitMQConnected = this.mqClient.isConnected();
-            const serviceDiscoveryReady = this.serviceDiscovery.isRegistered('PostOffice');
+            const rabbitMQConnected = this.mqClient && this.mqClient.isConnected();
+            const serviceDiscoveryReady = this.serviceDiscovery?.isRegistered('PostOffice');
             const ready = rabbitMQConnected && serviceDiscoveryReady;
 
             if (ready) {
@@ -261,21 +149,7 @@ export class PostOffice {
         });
     }
 
-    private async cleanup() {
-        try {
-            // Deregister from service discovery
-            await this.serviceDiscovery.deregisterService('PostOffice');
-            console.log('PostOffice deregistered from service discovery');
-
-            // Close message queue connection
-            await this.mqClient.close();
-            console.log('PostOffice disconnected from message queue');
-        } catch (error) {
-            console.error('Error during cleanup:', error);
-        }
-    }
-
-    private async processQueueMessage(message: Message) {
+    protected async handleQueueMessage(message: Message) {
         console.log('Received message from queue:', message);
         if (message.type && message.recipient) {
             await this.routeMessage(message);
@@ -299,7 +173,7 @@ export class PostOffice {
                 return;
             }
 
-            const isValid = await this.verifyToken(clientId, token);
+            const isValid = await this.validateClientConnection(clientId, token);
             if (!isValid) {
                 console.log(`Invalid token for client ${clientId}`);
                 ws.close(1008, 'Invalid token');
@@ -331,7 +205,7 @@ export class PostOffice {
         });
     }
 
-    private handleMessage = async (req: express.Request, res: express.Response) => {
+    protected handleMessage = async (req: express.Request, res: express.Response) => {
         const message: Message = req.body;
         await this.routeMessage(message);
         res.status(200).send({ status: 'Message queued for processing' });
@@ -383,7 +257,7 @@ export class PostOffice {
         try {
             const routingKey = `message.${recipientId}`;
 
-            if (requiresSync && message.sender && (message as any).replyTo) {
+            if (this.mqClient && requiresSync && message.sender && (message as any).replyTo) {
                 // For synchronous messages with replyTo, just publish with correlation ID
                 await this.mqClient.publishMessage('stage7', routingKey, message);
                 console.log(`Published sync message to queue with routing key: ${routingKey}`);
@@ -399,7 +273,7 @@ export class PostOffice {
                 };
 
                 // Send the message and wait for response
-                const response = await this.mqClient.sendRpcRequest('stage7', routingKey, rpcMessage, 30000);
+                const response = await this.mqClient?.sendRpcRequest('stage7', routingKey, rpcMessage, 30000);
 
                 // If this is a request from a client, send the response back to the client
                 if (clientId) {
@@ -409,7 +283,7 @@ export class PostOffice {
                 return;
             } else {
                 // For asynchronous messages, just publish
-                await this.mqClient.publishMessage('stage7', routingKey, message);
+                await this.mqClient?.publishMessage('stage7', routingKey, message);
                 console.log(`Published async message to queue with routing key: ${routingKey}`);
                 return;
             }
@@ -471,12 +345,15 @@ export class PostOffice {
 
     private async createMission(req: express.Request, res: express.Response) {
         const { goal, clientId } = req.body;
-        const token = req.headers.authorization || 'Bearer dummy-token';
+        const token = req.headers.authorization;
 
         console.log(`PostOffice has request to createMission for goal`, goal);
 
-        // TEMPORARY: Don't require a token
-        console.log(`createMission token: ${token}`);
+        if (!token) {
+            res.status(401).send({ error: 'No authorization token provided' });
+            return;
+        }
+
         try {
             const missionControlUrl = this.getComponentUrl('MissionControl') || process.env.MISSIONCONTROL_URL;
             if (!missionControlUrl) {
@@ -486,10 +363,10 @@ export class PostOffice {
 
             console.log(`Using MissionControl URL: ${missionControlUrl}`);
 
-            // TEMPORARY: Don't pass any authorization header
+            // Pass the authorization header
             const headers = {
-                'Content-Type': 'application/json'
-                // No Authorization header
+                'Content-Type': 'application/json',
+                'Authorization': token
             };
 
             const response = await api.post(`http://${missionControlUrl}/message`, {
@@ -794,26 +671,17 @@ export class PostOffice {
     }
 
     /**
-     * Verify a token using the ServiceTokenManager with RS256
-     * This method is adapted to return a boolean for PostOffice's specific needs
+     * Helper method to check if a client should be allowed to connect
+     * Uses BaseEntity's token verification logic
      * @param clientId Client ID
      * @param token JWT token
-     * @returns Promise resolving to true if token is valid, false otherwise
+     * @returns Promise resolving to true if client should be allowed, false otherwise
      */
-    private async verifyToken(clientId: string, token: string): Promise<boolean> {
+    private async validateClientConnection(clientId: string, token: string): Promise<boolean> {
         try {
-            console.log(`Verifying token for client ${clientId}`);
-
-            // Initialize token manager if not already done
-            if (!this.tokenManager) {
-                const serviceId = this.componentType;
-                const serviceSecret = process.env.CLIENT_SECRET || 'stage7AuthSecret';
-                this.tokenManager = ServiceTokenManager.getInstance(`http://${this.securityManagerUrl}`, serviceId, serviceSecret);
-                console.log(`Created ServiceTokenManager for ${serviceId}`);
-            }
-
-            // Verify token using ServiceTokenManager
-            const decoded = await this.tokenManager.verifyToken(token);
+            // Use the token manager from BaseEntity to verify the token
+            const tokenManager = this.getTokenManager();
+            const decoded = await tokenManager.verifyToken(token);
 
             if (!decoded) {
                 console.log(`Token verification failed for client ${clientId}`);
@@ -827,7 +695,6 @@ export class PostOffice {
             return false;
         }
     }
-
 }
 
 new PostOffice();

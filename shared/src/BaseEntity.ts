@@ -563,42 +563,7 @@ export class BaseEntity implements IBaseEntity {
    * @param res Express response object
    * @param next Express next function
    */
-  public async verifyToken(req: express.Request, res: express.Response, next: express.NextFunction): Promise<any> {
-    console.log(`BaseEntity verifyToken called for ${this.componentType} - BYPASSING VERIFICATION`);
-    
-    // TEMPORARY: Bypass all token verification
-    // Add a mock user object to the request
-    (req as any).user = {
-      componentType: 'MissionControl',
-      roles: ['mission:manage', 'agent:control'],
-      issuedAt: Date.now()
-    };
-    
-    return next();
-  } - BYPASSING VERIFICATION`);
-    
-    // TEMPORARY: Bypass all token verification
-    // Add a mock user object to the request
-    (req as any).user = {
-      componentType: 'MissionControl',
-      roles: ['mission:manage', 'agent:control'],
-      issuedAt: Date.now()
-    };
-    
-    return next();
-  } - BYPASSING VERIFICATION`);
-    
-    // TEMPORARY: Bypass all token verification
-    // Add a mock user object to the request
-    (req as any).user = {
-      componentType: 'MissionControl',
-      roles: ['mission:manage', 'agent:control'],
-      issuedAt: Date.now()
-    };
-    
-    return next();
-  }`);
-
+  public async verifyToken(req: express.Request, res: express.Response, next: express.NextFunction): Promise<any> {` + `
     // Skip authentication for health endpoints
     if (req.path === '/health' || req.path === '/ready') {
       return next();

@@ -86,15 +86,15 @@ export class SecurityManager {
                     const publicKey = fs.readFileSync(publicKeyPath, 'utf8');
                     console.log('Serving public key from file');
                     res.set('Content-Type', 'text/plain');
-                    return res.send(publicKey);
+                    res.send(publicKey);
                 } else {
                     console.error('Public key file not found at', publicKeyPath);
-                    return res.status(500).json({ error: 'Public key not available' });
+                    res.status(500).json({ error: 'Public key not available' });
                 }
             } catch (error) {
                 analyzeError(error as Error);
                 console.error('Error serving public key:', error);
-                return res.status(500).json({ error: 'Failed to serve public key' });
+                res.status(500).json({ error: 'Failed to serve public key' });
             }
         });
 

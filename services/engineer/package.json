@@ -2,7 +2,7 @@
     "name": "@cktmcs/engineer",
     "version": "1.0.0",
     "description": "Central message routing component for the system",
-    "main": "src/Engineer.ts",
+    "main": "dist/Engineer.ts",
     "scripts": {
         "start": "ts-node src/Engineer.ts",
         "build": "tsc",

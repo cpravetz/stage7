@@ -2,10 +2,10 @@
     "name": "@cktmcs/security-manager",
     "version": "1.0.0",
     "description": "Security Manager component for user authentication and authorization",
-    "main": "src/SecurityManager.js",
+    "main": "dist/SecurityManager.js",
     "scripts": {
-        "start": "node src/SecurityManager.js",
-        "build": "node build.js",
+        "start": "ts-node src/SecurityManager.ts",
+        "build": "tsc",
         "test": "jest"
     },
     "dependencies": {

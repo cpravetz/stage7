@@ -201,9 +201,15 @@ export function generateServiceToken(componentType: string): string {
  * @returns Decoded token payload or null if invalid
  */
 export function verifyToken(token: string): any {
-  // Import the compatibility layer
-  const { verifyToken: compatVerifyToken } = require('../oauth/compatibility');
-  return compatVerifyToken(token);
+  try {
+    // Only use RS256 for verification - no fallback to HS256
+    const decoded = jwt.verify(token, PUBLIC_KEY, { algorithms: ['RS256'] });
+    console.log('Token verified successfully with RS256');
+    return decoded;
+  } catch (error) {
+    console.error('Token verification failed:', error);
+    return null;
+  }
 }
 
 /**
@@ -213,9 +219,25 @@ export function verifyToken(token: string): any {
  * @returns JWT token if authentication successful, null otherwise
  */
 export async function authenticateService(componentType: string, clientSecret: string): Promise<string | null> {
-  // Import the compatibility layer
-  const { authenticateService: compatAuthenticateService } = require('../oauth/compatibility');
-  return compatAuthenticateService(componentType, clientSecret);
+  try {
+    // Verify the component credentials
+    const isValid = await verifyComponentCredentials(componentType, clientSecret);
+    if (!isValid) {
+      console.error(`Authentication failed for componentType: ${componentType}`);
+      return null;
+    }
+
+    // Generate a token for the service
+    const token = generateServiceToken(componentType);
+
+    // Save the token
+    await saveToken(token, componentType);
+
+    return token;
+  } catch (error) {
+    console.error('Service authentication failed:', error);
+    return null;
+  }
 }
 
 /**

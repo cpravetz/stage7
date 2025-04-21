@@ -9,7 +9,7 @@ const router = express.Router();
 const pluginMarketplace = new PluginMarketplace();
 
 // Get GitHub configuration
-router.get('/config', (req, res) => {
+router.get('/config', (req: express.Request, res: express.Response) => {
     try {
         // Check if GitHub access is enabled
         const enableGithub = process.env.ENABLE_GITHUB === 'true';
@@ -31,11 +31,11 @@ router.get('/config', (req, res) => {
 });
 
 // Update GitHub configuration
-router.post('/config', (req, res) => {
+router.post('/config', (req: express.Request, res: express.Response) => {
     try {
         // Check if GitHub access is enabled
         if (process.env.ENABLE_GITHUB !== 'true') {
-            return res.status(403).json({
+            res.status(403).json({
                 error: 'GitHub access is disabled by configuration. Set ENABLE_GITHUB=true to enable.'
             });
         }
@@ -43,7 +43,7 @@ router.post('/config', (req, res) => {
         const { token, username, repository } = req.body;
 
         if (!token || !username || !repository) {
-            return res.status(400).json({ error: 'Missing required fields' });
+            res.status(400).json({ error: 'Missing required fields' });
         }
 
         // In a production environment, you would store these securely
@@ -64,11 +64,11 @@ router.post('/config', (req, res) => {
 });
 
 // List plugins from GitHub
-router.get('/plugins', async (req, res) => {
+router.get('/plugins', async (req: express.Request, res: express.Response) => {
     try {
         // Check if GitHub access is enabled
         if (process.env.ENABLE_GITHUB !== 'true') {
-            return res.status(403).json({
+            res.status(403).json({
                 error: 'GitHub access is disabled by configuration. Set ENABLE_GITHUB=true to enable.'
             });
         }
@@ -89,11 +89,11 @@ router.get('/plugins', async (req, res) => {
 });
 
 // Get a specific plugin from GitHub
-router.get('/plugins/:id', async (req, res) => {
+router.get('/plugins/:id', async (req: express.Request, res: express.Response) => {
     try {
         // Check if GitHub access is enabled
         if (process.env.ENABLE_GITHUB !== 'true') {
-            return res.status(403).json({
+            res.status(403).json({
                 error: 'GitHub access is disabled by configuration. Set ENABLE_GITHUB=true to enable.'
             });
         }
@@ -120,11 +120,11 @@ router.get('/plugins/:id', async (req, res) => {
 });
 
 // Delete a plugin from GitHub
-router.delete('/plugins/:id', async (req, res) => {
+router.delete('/plugins/:id', async (req: express.Request, res: express.Response) => {
     try {
         // Check if GitHub access is enabled
         if (process.env.ENABLE_GITHUB !== 'true') {
-            return res.status(403).json({
+            res.status(403).json({
                 error: 'GitHub access is disabled by configuration. Set ENABLE_GITHUB=true to enable.'
             });
         }
@@ -134,10 +134,10 @@ router.delete('/plugins/:id', async (req, res) => {
         const githubRepo = repositories.get('github');
 
         if (!githubRepo) {
-            return res.status(404).json({ error: 'GitHub repository not configured' });
+            res.status(404).json({ error: 'GitHub repository not configured' });
         } else {
             await githubRepo.delete(id);
-            return res.json({ success: true, message: 'Plugin deleted successfully' });
+            res.json({ success: true, message: 'Plugin deleted successfully' });
         }
     } catch (error) {
         analyzeError(error as Error);

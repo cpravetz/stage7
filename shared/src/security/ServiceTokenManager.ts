@@ -230,24 +230,29 @@ export class ServiceTokenManager {
       }
 
       try {
-        // First try to verify with RS256
+        // First check if the token is in the correct format
+        const tokenParts = token.split('.');
+        if (tokenParts.length !== 3) {
+          console.error('Invalid token format - not a valid JWT');
+          return null;
+        }
+
+        // Try to parse the header to check the algorithm
+        const headerStr = Buffer.from(tokenParts[0], 'base64').toString();
+        const header = JSON.parse(headerStr);
+
+        if (header.alg !== 'RS256') {
+          console.error(`Token uses unsupported algorithm: ${header.alg}. Only RS256 is supported.`);
+          return null;
+        }
+
+        // Verify with RS256 only - no fallback to HS256
         const decoded = jwt.verify(token, this.publicKey, { algorithms: ['RS256'] });
         console.log('Token verified locally with public key using RS256');
         return decoded;
       } catch (rs256Error) {
-        console.log('RS256 verification failed, trying HS256 fallback');
-
-        // If RS256 fails, try HS256 with a shared secret
-        // This is for backward compatibility with existing tokens
-        const sharedSecret = process.env.CLIENT_SECRET || 'stage7AuthSecret';
-        try {
-          const decoded = jwt.verify(token, sharedSecret, { algorithms: ['HS256'] });
-          console.log('Token verified locally with shared secret using HS256');
-          return decoded;
-        } catch (hs256Error) {
-          console.error('HS256 verification also failed:', hs256Error);
-          throw rs256Error; // Throw the original error
-        }
+        console.error('RS256 verification failed:', rs256Error);
+        return null;
       }
     } catch (error) {
       console.error('Local token verification failed:', error);

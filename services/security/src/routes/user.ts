@@ -32,20 +32,8 @@ const requireAuth = (req, res, next) => {
   try {
     let decoded;
 
-    if (isUsingAsymmetricKeys) {
-      try {
-        // First try to verify with RS256
-        decoded = jwt.verify(token, PUBLIC_KEY, { algorithms: ['RS256'] });
-      } catch (rsaError) {
-        // If that fails, try with the legacy HS256 method
-        console.log('RS256 verification failed, trying legacy HS256 verification');
-        const legacySecret = process.env.JWT_SECRET || 'your-secret-key';
-        decoded = jwt.verify(token, legacySecret);
-      }
-    } else {
-      // Verify the token using the JWT_SECRET from environment
-      decoded = jwt.verify(token, PUBLIC_KEY);
-    }
+    // Only use RS256 for verification - no fallback to HS256
+    decoded = jwt.verify(token, PUBLIC_KEY, { algorithms: ['RS256'] });
 
     req.user = decoded;
     next();

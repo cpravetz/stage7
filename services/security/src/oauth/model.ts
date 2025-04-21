@@ -88,6 +88,8 @@ interface ServiceRegistryEntry {
 interface Token {
     accessToken: string;
     accessTokenExpiresAt: Date;
+    refreshToken?: string;
+    refreshTokenExpiresAt?: Date;
     client: any;
     user: any;
     scope?: string;
@@ -116,34 +118,38 @@ interface AuthorizationCode {
 export async function getAccessToken(accessToken: string) {
     try {
         console.log('Getting access token:', accessToken);
-        
+
         // First, check if token exists in memory storage
         const token = Object.values(tokenStorage).find(t => t.accessToken === accessToken);
         if (token) {
             console.log('Token found in storage');
             return token;
         }
-        
+
         // If not in storage, try to verify JWT
         try {
             const decoded = jwt.verify(accessToken, publicKey, { algorithms: ['RS256'] });
             console.log('JWT token verified:', decoded);
-            
+
             // Create a token object from the decoded JWT
             const now = new Date();
             const expiresAt = new Date(now.getTime() + 3600 * 1000); // 1 hour from now
-            
+
+            // Check if decoded is a string or an object
+            const decodedObj = typeof decoded === 'string' ? JSON.parse(decoded) : decoded;
+            const componentType = decodedObj.componentType || 'unknown';
+
             const tokenObj = {
                 accessToken,
                 accessTokenExpiresAt: expiresAt,
-                client: { id: decoded.componentType },
-                user: decoded
+                client: { id: componentType, grants: ['client_credentials'] },
+                user: decodedObj
             };
-            
+
             // Store for future reference
             const tokenId = uuidv4();
             tokenStorage[tokenId] = tokenObj;
-            
+
             return tokenObj;
         } catch (jwtError) {
             console.error('JWT verification failed:', jwtError);
@@ -162,20 +168,20 @@ export async function getAccessToken(accessToken: string) {
 export async function getClient(clientId: string, clientSecret: string) {
     try {
         console.log(`Getting client: ${clientId}`);
-        
+
         // Check if client exists in service registry
         const client = serviceRegistry[clientId];
         if (!client) {
             console.error(`Unknown client: ${clientId}`);
             return null;
         }
-        
+
         // If clientSecret is provided, validate it
         if (clientSecret && client.secret !== clientSecret) {
             console.error(`Invalid client secret for ${clientId}`);
             return null;
         }
-        
+
         // Return client with grants
         return {
             id: clientId,
@@ -196,7 +202,7 @@ export async function getClient(clientId: string, clientSecret: string) {
 export async function saveToken(token: Token, client: any, user: any) {
     try {
         console.log('Saving token for client:', client.id);
-        
+
         // Create token object
         const tokenObj = {
             accessToken: token.accessToken,
@@ -206,11 +212,11 @@ export async function saveToken(token: Token, client: any, user: any) {
             client,
             user
         };
-        
+
         // Generate a unique ID for the token
         const tokenId = uuidv4();
         tokenStorage[tokenId] = tokenObj;
-        
+
         // If there's a refresh token, store it separately
         if (token.refreshToken) {
             refreshTokenStorage[token.refreshToken] = {
@@ -220,7 +226,7 @@ export async function saveToken(token: Token, client: any, user: any) {
                 user
             };
         }
-        
+
         console.log('Token saved with ID:', tokenId);
         return tokenObj;
     } catch (error) {
@@ -236,14 +242,14 @@ export async function saveToken(token: Token, client: any, user: any) {
 export async function getRefreshToken(refreshToken: string) {
     try {
         console.log('Getting refresh token:', refreshToken);
-        
+
         // Check if refresh token exists in storage
         const token = refreshTokenStorage[refreshToken];
         if (!token) {
             console.error('Refresh token not found');
             return null;
         }
-        
+
         return token;
     } catch (error) {
         analyzeError(error as Error);
@@ -258,23 +264,23 @@ export async function getRefreshToken(refreshToken: string) {
 export async function revokeToken(token: RefreshToken) {
     try {
         console.log('Revoking token:', token.refreshToken);
-        
+
         // Check if refresh token exists in storage
         if (!refreshTokenStorage[token.refreshToken]) {
             console.error('Refresh token not found');
             return false;
         }
-        
+
         // Remove refresh token from storage
         delete refreshTokenStorage[token.refreshToken];
-        
+
         // Also remove any access tokens associated with this refresh token
         for (const [id, accessToken] of Object.entries(tokenStorage)) {
             if (accessToken.refreshToken === token.refreshToken) {
                 delete tokenStorage[id];
             }
         }
-        
+
         console.log('Token revoked successfully');
         return true;
     } catch (error) {
@@ -290,7 +296,7 @@ export async function revokeToken(token: RefreshToken) {
 export async function generateAccessToken(client: any, user: any, scope: string) {
     try {
         console.log('Generating access token for client:', client.id);
-        
+
         // Create payload for JWT
         const payload = {
             componentType: client.id,
@@ -298,13 +304,13 @@ export async function generateAccessToken(client: any, user: any, scope: string)
             scope: scope || '',
             issuedAt: Date.now()
         };
-        
+
         // Sign JWT with private key
         const accessToken = jwt.sign(payload, privateKey, {
             algorithm: 'RS256',
             expiresIn: '1h'
         });
-        
+
         console.log('Access token generated');
         return accessToken;
     } catch (error) {
@@ -320,10 +326,10 @@ export async function generateAccessToken(client: any, user: any, scope: string)
 export async function generateRefreshToken(client: any, user: any, scope: string) {
     try {
         console.log('Generating refresh token for client:', client.id);
-        
+
         // Generate a random refresh token
         const refreshToken = uuidv4();
-        
+
         console.log('Refresh token generated');
         return refreshToken;
     } catch (error) {
@@ -339,14 +345,14 @@ export async function generateRefreshToken(client: any, user: any, scope: string
 export async function getUserFromClient(client: any) {
     try {
         console.log('Getting user from client:', client.id);
-        
+
         // Check if client exists in service registry
         const service = serviceRegistry[client.id];
         if (!service) {
             console.error(`Unknown client: ${client.id}`);
             return null;
         }
-        
+
         // Return user object with roles from service registry
         return {
             id: client.id,
@@ -365,23 +371,23 @@ export async function getUserFromClient(client: any) {
 export async function validateScope(user: any, client: any, scope: string) {
     try {
         console.log('Validating scope:', scope);
-        
+
         // If no scope is requested, return default scope
         if (!scope) {
             return 'read';
         }
-        
+
         // Split scope string into array
         const scopes = scope.split(' ');
-        
+
         // Filter out invalid scopes
         const validScopes = scopes.filter(s => ['read', 'write'].includes(s));
-        
+
         // If no valid scopes, return default scope
         if (validScopes.length === 0) {
             return 'read';
         }
-        
+
         // Return valid scopes
         return validScopes.join(' ');
     } catch (error) {
@@ -397,16 +403,16 @@ export async function validateScope(user: any, client: any, scope: string) {
 export async function verifyScope(token: Token, scope: string) {
     try {
         console.log('Verifying scope:', scope);
-        
+
         // If token has no scope, it can't access any scope
         if (!token.scope) {
             return false;
         }
-        
+
         // Split scope strings into arrays
         const tokenScopes = token.scope.split(' ');
         const requiredScopes = scope.split(' ');
-        
+
         // Check if token has all required scopes
         return requiredScopes.every(s => tokenScopes.includes(s));
     } catch (error) {
