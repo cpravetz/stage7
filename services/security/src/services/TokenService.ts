@@ -3,6 +3,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { User } from '../models/User';
 import { Token, TokenType, TokenPayload, TokenConfig, DEFAULT_TOKEN_CONFIG } from '../models/Token';
 import { analyzeError } from '@cktmcs/errorhandler';
+import * as fs from 'fs';
+import * as path from 'path';
 
 /**
  * Token service for managing JWT tokens
@@ -11,6 +13,8 @@ export class TokenService {
     private config: TokenConfig;
     private tokenRepository: any; // Replace with actual repository type
     private tokenBlacklistRepository: any; // Replace with actual repository type
+    private privateKey: string;
+    private publicKey: string;
 
     /**
      * Constructor
@@ -26,6 +30,31 @@ export class TokenService {
         this.config = { ...DEFAULT_TOKEN_CONFIG, ...config };
         this.tokenRepository = tokenRepository;
         this.tokenBlacklistRepository = tokenBlacklistRepository;
+
+        // Load RSA keys
+        try {
+            const keysDir = path.join(__dirname, '../../keys');
+            const privateKeyPath = path.join(keysDir, 'private.key');
+            const publicKeyPath = path.join(keysDir, 'public.key');
+
+            if (fs.existsSync(privateKeyPath) && fs.existsSync(publicKeyPath)) {
+                this.privateKey = fs.readFileSync(privateKeyPath, 'utf8');
+                this.publicKey = fs.readFileSync(publicKeyPath, 'utf8');
+                console.log('RSA key pair loaded from', keysDir);
+            } else {
+                console.error('RSA key files not found at', keysDir);
+                // Fall back to symmetric key for development
+                this.privateKey = this.config.secret;
+                this.publicKey = this.config.secret;
+                console.warn('Using symmetric key as fallback - NOT SECURE FOR PRODUCTION');
+            }
+        } catch (error) {
+            console.error('Error loading RSA keys:', error);
+            // Fall back to symmetric key for development
+            this.privateKey = this.config.secret;
+            this.publicKey = this.config.secret;
+            console.warn('Using symmetric key as fallback - NOT SECURE FOR PRODUCTION');
+        }
     }
 
     /**
@@ -88,7 +117,7 @@ export class TokenService {
             };
 
             // Sign token
-            const token = jwt.sign(payload, secret, {
+            const token = jwt.sign(payload, this.privateKey, {
                 algorithm: this.config.algorithm as jwt.Algorithm,
                 issuer: this.config.issuer,
                 audience: this.config.audience
@@ -139,7 +168,7 @@ export class TokenService {
             }
 
             // Verify token
-            const payload = jwt.verify(token, secret, {
+            const payload = jwt.verify(token, this.publicKey, {
                 algorithms: [this.config.algorithm as jwt.Algorithm],
                 issuer: this.config.issuer,
                 audience: this.config.audience

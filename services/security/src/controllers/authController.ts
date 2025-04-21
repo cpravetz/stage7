@@ -6,15 +6,20 @@ import { AuthorizationService } from '../services/AuthorizationService';
 import { User } from '../models/User';
 import { TokenType } from '../models/Token';
 import { analyzeError } from '@cktmcs/errorhandler';
+import { MongoUserRepository } from '../repositories/MongoUserRepository';
+
+// Initialize repositories
+const userRepository = new MongoUserRepository();
 
 // Initialize services
 const tokenService = new TokenService();
-const authenticationService = new AuthenticationService(null, tokenService);
-const authorizationService = new AuthorizationService();
+const authenticationService = new AuthenticationService(userRepository, tokenService);
+const authorizationService = new AuthorizationService(null, null, userRepository);
 
 export const register: AsyncRequestHandler = async (req, res, next) => {
     try {
-        const { email, password, firstName, lastName, username } = req.body;
+        console.log('Registration request received:', req.body);
+        const { email, password, firstName, lastName, username, name } = req.body;
 
         // Validate required fields
         if (!email || !password) {
@@ -27,19 +32,31 @@ export const register: AsyncRequestHandler = async (req, res, next) => {
             userAgent: req.headers['user-agent'],
         };
 
+        // Handle name field if provided instead of firstName/lastName
+        let parsedFirstName = firstName;
+        let parsedLastName = lastName;
+
+        if (name && !firstName && !lastName) {
+            const nameParts = name.split(' ');
+            parsedFirstName = nameParts[0];
+            parsedLastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
+        }
+
         // Register user
         const result = await authenticationService.register({
             email,
             password,
-            firstName,
-            lastName,
+            firstName: parsedFirstName,
+            lastName: parsedLastName,
             username: username || email.split('@')[0], // Use email username as default
             roles: ['user'], // Default role
             isActive: true,
-            isEmailVerified: false, // Require email verification
+            isEmailVerified: true, // Skip email verification for now
             mfaEnabled: false,
             failedLoginAttempts: 0
-        }, true); // Send verification email
+        }, false); // Don't send verification email
+
+        console.log('User registered successfully:', result.user.id);
 
         // Return tokens and user info
         res.status(201).json({
@@ -196,7 +213,6 @@ export const refreshToken: AsyncRequestHandler = async (req, res, next) => {
 
 export const verifyToken: AsyncRequestHandler = async (req, res, next) => {
     try {
-        return true;
         // Get token from header
         const authHeader = req.headers.authorization;
         if (!authHeader) {

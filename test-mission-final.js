@@ -16,20 +16,10 @@ const CONFIG = {
 
 // Get authentication token
 async function getAuthToken() {
-  console.log('Getting authentication token...');
+  console.log('Getting authentication token from SecurityManager...');
 
   try {
-    // First try to read token from file
-    try {
-      const fs = require('fs');
-      const token = fs.readFileSync('token.txt', 'utf8');
-      console.log('Using token from file');
-      return token;
-    } catch (fsError) {
-      console.log('Failed to read token from file:', fsError.message);
-    }
-
-    // If file read fails, get token from SecurityManager
+    // Get token from SecurityManager
     const response = await axios.post(`${CONFIG.securityManagerUrl}/auth/service`, {
       componentType: CONFIG.componentType,
       clientSecret: CONFIG.clientSecret

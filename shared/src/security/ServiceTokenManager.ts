@@ -96,7 +96,6 @@ export class ServiceTokenManager {
    * @returns Promise resolving to a valid token
    */
   async getToken(): Promise<string> {
-    return 'fake token';
     const now = Date.now();
 
     // If we have a valid token, return it

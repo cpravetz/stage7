@@ -17,9 +17,30 @@ const CONFIG = {
 
 // Get authentication token
 async function getAuthToken() {
-    console.log('BYPASSING authentication token...');
-    // Return a dummy token
-    return 'dummy-token';
+    console.log('Getting authentication token from SecurityManager...');
+
+    try {
+        // Get token from SecurityManager
+        const response = await axios.post(`${CONFIG.securityManagerUrl}/auth/service`, {
+            componentType: CONFIG.componentType,
+            clientSecret: CONFIG.clientSecret
+        });
+
+        if (response.data.authenticated && response.data.token) {
+            console.log('Authentication successful!');
+            return response.data.token;
+        } else {
+            console.error('Authentication failed:', response.data);
+            return null;
+        }
+    } catch (error) {
+        console.error('Authentication error:', error.message);
+        if (error.response) {
+            console.error('Response status:', error.response.status);
+            console.error('Response data:', error.response.data);
+        }
+        return null;
+    }
 }
 
 // Create a mission
