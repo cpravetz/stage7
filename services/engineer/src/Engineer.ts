@@ -5,6 +5,8 @@ import { analyzeError } from '@cktmcs/errorhandler';
 import { PluginMarketplace } from '@cktmcs/marketplace';
 import { createHash } from 'crypto';
 
+// NOTE: Don't use this directly - use this.authenticatedApi or this.getAuthenticatedAxios() instead
+// This is kept for backward compatibility only
 const api = axios.create({
     headers: {
       'Content-Type': 'application/json',
@@ -190,7 +192,7 @@ Types used in the plugin structure are:
             Determine any necessary environment variables or configuration items needed for the plugin to function correctly.
 `;
 
-            const response = await axios.post(`http://${this.brainUrl}/chat`, {
+            const response = await this.authenticatedApi.post(`http://${this.brainUrl}/chat`, {
                 exchanges: [{ role: 'user', message: engineeringPrompt }],
                 optimization: 'accuracy'
             });
@@ -325,7 +327,7 @@ Types used in the plugin structure are:
     private async generateExplanation(verb: string, context: Map<string, PluginInput>): Promise<string> {
         const prompt = `Given the action verb "${verb}" and the context "${context}", provide a detailed explanation of what a plugin for this verb should do. Include expected inputs and outputs.`;
         try {
-            const response = await axios.post(`http://${this.brainUrl}/chat`, {
+            const response = await this.authenticatedApi.post(`http://${this.brainUrl}/chat`, {
                 exchanges: [{ role: 'user', message: prompt }],
                 optimization: 'accuracy'
             });

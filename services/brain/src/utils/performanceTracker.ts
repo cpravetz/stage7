@@ -77,12 +77,46 @@ export class ModelPerformanceTracker {
   private dataFilePath: string;
   private requestHistory: Map<string, RequestData> = new Map();
 
+  private saveInterval: NodeJS.Timeout | null = null;
+
   constructor(dataDirectory: string = path.join(__dirname, '..', '..', 'data')) {
     this.dataFilePath = path.join(dataDirectory, 'model-performance.json');
     this.loadPerformanceData();
 
-    // Set up periodic saving
-    setInterval(() => this.savePerformanceData(), 5 * 60 * 1000); // Save every 5 minutes
+    // Reset any excessive blacklists on startup
+    this.resetExcessiveBlacklists();
+
+    // Set up periodic saving - more frequent (every 2 minutes)
+    this.saveInterval = setInterval(() => {
+      console.log('Saving performance data on regular interval...');
+      // Reset excessive blacklists during periodic save
+      this.resetExcessiveBlacklists();
+      this.savePerformanceData().catch(error => {
+        console.error('Error saving performance data on interval:', error);
+      });
+    }, 2 * 60 * 1000); // Save every 2 minutes
+
+    // Handle process exit to save data
+    process.on('SIGINT', this.handleExit.bind(this));
+    process.on('SIGTERM', this.handleExit.bind(this));
+  }
+
+  /**
+   * Handle process exit - save data and clear interval
+   */
+  private async handleExit() {
+    console.log('Process exiting, saving performance data...');
+    if (this.saveInterval) {
+      clearInterval(this.saveInterval);
+      this.saveInterval = null;
+    }
+
+    try {
+      await this.savePerformanceData();
+      console.log('Performance data saved successfully on exit');
+    } catch (error) {
+      console.error('Error saving performance data on exit:', error);
+    }
   }
 
   /**
@@ -96,14 +130,33 @@ export class ModelPerformanceTracker {
 
       // Try to read the performance data file
       const data = await fs.readFile(this.dataFilePath, 'utf-8');
-      const performanceArray = JSON.parse(data) as ModelPerformanceData[];
 
-      // Convert array to map
-      this.performanceData = new Map(
-        performanceArray.map(item => [item.modelName, item])
-      );
+      // Handle empty file
+      if (!data || data.trim() === '') {
+        console.log('Performance data file is empty, initializing with empty data');
+        this.performanceData = new Map();
+        // Save empty data to fix the file
+        await this.savePerformanceData();
+        return;
+      }
 
-      console.log(`Loaded performance data for ${this.performanceData.size} models`);
+      try {
+        const performanceArray = JSON.parse(data.trim()) as ModelPerformanceData[];
+
+        // Convert array to map
+        this.performanceData = new Map(
+          performanceArray.map(item => [item.modelName, item])
+        );
+
+        console.log(`Loaded performance data for ${this.performanceData.size} models`);
+      } catch (jsonError) {
+        console.error('Error parsing performance data JSON:', jsonError);
+        analyzeError(jsonError as Error);
+        // Initialize with empty data on JSON parse error
+        this.performanceData = new Map();
+        // Save empty data to fix the file
+        await this.savePerformanceData();
+      }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
         console.log('No performance data file found, starting with empty data');
@@ -116,8 +169,9 @@ export class ModelPerformanceTracker {
 
   /**
    * Save performance data to disk
+   * @public - This method is now public so it can be called from outside
    */
-  private async savePerformanceData(): Promise<void> {
+  async savePerformanceData(): Promise<void> {
     try {
       // Convert map to array for serialization
       const performanceArray = Array.from(this.performanceData.values());
@@ -306,16 +360,28 @@ export class ModelPerformanceTracker {
         // Calculate blacklist duration: 1 hour * 2^(consecutiveFailures-threshold)
         // For regular models: 3 failures: 1 hour, 4 failures: 2 hours, 5 failures: 4 hours, etc.
         // For Huggingface: 2 failures: 1 hour, 3 failures: 2 hours, 4 failures: 4 hours, etc.
-        const blacklistHours = Math.pow(2, metrics.consecutiveFailures - blacklistThreshold);
+        let blacklistHours = Math.pow(2, metrics.consecutiveFailures - blacklistThreshold);
+
+        // Set a reasonable maximum blacklist duration
+        const MAX_BLACKLIST_HOURS = 24; // Maximum 24 hours for regular models
+        const MAX_HUGGINGFACE_BLACKLIST_HOURS = 168; // Maximum 7 days (168 hours) for Huggingface models
+
+        // Cap the blacklist hours to the maximum
+        if (isHuggingfaceModel) {
+          blacklistHours = Math.min(blacklistHours, MAX_HUGGINGFACE_BLACKLIST_HOURS);
+        } else {
+          blacklistHours = Math.min(blacklistHours, MAX_BLACKLIST_HOURS);
+        }
 
         // Huggingface models get longer blacklist periods
         const multiplier = isHuggingfaceModel ? 4 : 1; // 4x longer blacklist for Huggingface models
-        const blacklistDuration = blacklistHours * multiplier * 60 * 60 * 1000; // Convert to milliseconds
+        const actualBlacklistHours = blacklistHours * multiplier;
+        const blacklistDuration = actualBlacklistHours * 60 * 60 * 1000; // Convert to milliseconds
 
         const blacklistedUntil = new Date(Date.now() + blacklistDuration);
         metrics.blacklistedUntil = blacklistedUntil.toISOString();
 
-        console.log(`Model ${modelName} blacklisted for ${blacklistHours * multiplier} hour(s) until ${blacklistedUntil.toLocaleString()} due to ${metrics.consecutiveFailures} consecutive failures`);
+        console.log(`Model ${modelName} blacklisted for ${actualBlacklistHours} hour(s) until ${blacklistedUntil.toLocaleString()} due to ${metrics.consecutiveFailures} consecutive failures`);
 
         if (isHuggingfaceModel) {
           console.log(`Huggingface model ${modelName} blacklisted more aggressively due to frequent failures`);
@@ -340,6 +406,14 @@ export class ModelPerformanceTracker {
 
     // Update model data
     modelData.lastUpdated = new Date().toISOString();
+
+    // Save performance data to disk after significant updates
+    // Only save after every 5 updates to avoid excessive disk I/O
+    if (metrics.usageCount % 5 === 0) {
+      this.savePerformanceData().catch(error => {
+        console.error('Error saving performance data after metrics update:', error);
+      });
+    }
   }
 
   /**
@@ -375,6 +449,11 @@ export class ModelPerformanceTracker {
 
     // Update model data
     modelData.lastUpdated = new Date().toISOString();
+
+    // Save performance data to disk after feedback is recorded
+    this.savePerformanceData().catch(error => {
+      console.error('Error saving performance data after feedback:', error);
+    });
   }
 
   /**
@@ -414,6 +493,8 @@ export class ModelPerformanceTracker {
     return Array.from(this.performanceData.values());
   }
 
+
+
   /**
    * Get request history
    * @param limit Maximum number of requests to return
@@ -448,12 +529,94 @@ export class ModelPerformanceTracker {
       const modelData = this.performanceData.get(modelName);
       if (modelData && modelData.metrics[conversationType]) {
         modelData.metrics[conversationType].blacklistedUntil = null;
+        console.log(`Model ${modelName} blacklist period has expired, removing from blacklist`);
       }
       return false;
     }
 
     // Model is still blacklisted
     return true;
+  }
+
+  /**
+   * Reset blacklisted models that have been blacklisted for too long
+   * This is a safety measure to prevent models from being blacklisted forever
+   */
+  resetExcessiveBlacklists(): void {
+    console.log('Checking for excessive blacklists...');
+    const MAX_BLACKLIST_DURATION_MS = 7 * 24 * 60 * 60 * 1000; // 7 days in milliseconds
+    const now = new Date();
+    let resetCount = 0;
+
+    for (const [modelName, modelData] of this.performanceData.entries()) {
+      if (modelData && modelData.metrics) {
+        for (const [conversationType, metrics] of Object.entries(modelData.metrics)) {
+          if (metrics && metrics.blacklistedUntil) {
+            const blacklistedUntil = new Date(metrics.blacklistedUntil);
+            const blacklistDuration = blacklistedUntil.getTime() - now.getTime();
+
+            // If blacklist duration is more than MAX_BLACKLIST_DURATION_MS, reset it
+            if (blacklistDuration > MAX_BLACKLIST_DURATION_MS) {
+              // Set a more reasonable blacklist duration (24 hours from now)
+              const newBlacklistedUntil = new Date(now.getTime() + (24 * 60 * 60 * 1000));
+              metrics.blacklistedUntil = newBlacklistedUntil.toISOString();
+              console.log(`Reset excessive blacklist for model ${modelName} (${conversationType}). ` +
+                          `Was blacklisted until ${blacklistedUntil.toLocaleString()}, ` +
+                          `now until ${newBlacklistedUntil.toLocaleString()}`);
+              resetCount++;
+            }
+          }
+        }
+      }
+    }
+
+    if (resetCount > 0) {
+      console.log(`Reset ${resetCount} excessive blacklists`);
+      this.savePerformanceData().catch(error => {
+        console.error('Error saving performance data after resetting blacklists:', error);
+      });
+    } else {
+      console.log('No excessive blacklists found');
+    }
+  }
+
+  /**
+   * Reset all blacklisted models
+   * This can be called manually to clear all blacklists
+   */
+  resetAllBlacklists(): void {
+    console.log('Resetting all blacklisted models...');
+    let resetCount = 0;
+
+    for (const [modelName, modelData] of this.performanceData.entries()) {
+      if (modelData && modelData.metrics) {
+        for (const [conversationType, metrics] of Object.entries(modelData.metrics)) {
+          if (metrics && metrics.blacklistedUntil) {
+            // Clear the blacklist
+            metrics.blacklistedUntil = null;
+            // Reset consecutive failures
+            metrics.consecutiveFailures = 0;
+            console.log(`Reset blacklist for model ${modelName} (${conversationType})`);
+            resetCount++;
+          }
+        }
+      }
+    }
+
+    if (resetCount > 0) {
+      console.log(`Reset ${resetCount} blacklisted models`);
+      this.savePerformanceData().catch(error => {
+        console.error('Error saving performance data after resetting all blacklists:', error);
+      });
+    } else {
+      console.log('No blacklisted models found');
+    }
+
+    // Also clear the global Huggingface blacklist if it exists
+    if ((global as any).huggingfaceBlacklistedUntil) {
+      (global as any).huggingfaceBlacklistedUntil = null;
+      console.log('Cleared global Huggingface blacklist');
+    }
   }
 
   /**

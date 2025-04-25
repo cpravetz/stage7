@@ -16,7 +16,6 @@ export class InterfaceManager {
 
         try {
             const files = await fs.readdir(interfaceDirectory);
-            console.log('Files in interface directory',interfaceDirectory,': ', files);
             for (const file of files) {
                 // Skip non-TS or non-JS files
                 if (!file.endsWith('.ts') && !file.endsWith('.js')) {

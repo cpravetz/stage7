@@ -78,6 +78,12 @@ export const analyzeError = async (error: Error) => {
     error = new Error(String(error));
   }
 
+  //Don't analyze simple connection issues
+  if (error.message.includes('ECONNREFUSED')) {
+    console.error('Error is ',error.message);
+    return;
+  }
+
   try {
     // Prevent concurrent analysis of the same error
     if (processingError) {
@@ -101,7 +107,12 @@ export const analyzeError = async (error: Error) => {
     // Check if Brain service is available before proceeding
     try {
       // Simple health check
-      await axios.get(`http://${brainUrl}/models`, { timeout: 2000 });
+      await axios.get(`http://${brainUrl}/models`, {
+        timeout: 2000,
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
     } catch (healthCheckError) {
       console.error(`Brain service at ${brainUrl} is not available:`,
         healthCheckError instanceof Error ? healthCheckError.message : String(healthCheckError));
@@ -135,7 +146,12 @@ export const analyzeError = async (error: Error) => {
     const response = await axios.post(`http://${brainUrl}/chat`, {
         exchanges: conversation,
         optimization: 'accuracy'
-    }, { timeout: 30000 }); // 30 second timeout
+    }, {
+        timeout: 30000, // 30 second timeout
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    });
 
     if (!response.data || !response.data.response) {
       throw new Error('Invalid response from Brain service');

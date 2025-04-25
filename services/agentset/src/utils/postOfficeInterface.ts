@@ -1,23 +1,19 @@
-import axios from 'axios';
 import { analyzeError } from '@cktmcs/errorhandler';
+import { BaseEntity } from '@cktmcs/shared';
 
-const POSTOFFICE_URL = process.env.POSTOFFICE_URL || 'postoffice:5020';
-const api = axios.create({
-    headers: {
-      'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
-    },
-  });
+// This utility should be used by an instance of AgentSet, which extends BaseEntity
+// We'll get the authenticatedApi from the AgentSet instance
 
-export async function getServiceUrls(): Promise<{
+export async function getServiceUrls(entity: BaseEntity): Promise<{
     capabilitiesManagerUrl: string,
     brainUrl: string,
     trafficManagerUrl: string,
     librarianUrl: string
 }> {
     try {
-        const response = await api.get(`http://${POSTOFFICE_URL}/getServices`);
-        const { capabilitiesManagerUrl, brainUrl, trafficManagerUrl, librarianUrl } = response.data;
+        // Use the entity's service URLs method which already uses authenticated API
+        const urls = await entity.getServiceUrls();
+        const { capabilitiesManagerUrl, brainUrl, trafficManagerUrl, librarianUrl } = urls;
 
         // Check if any of the URLs are undefined or empty
         const validCapabilitiesManagerUrl = capabilitiesManagerUrl || process.env.CAPABILITIESMANAGER_URL || 'capabilitiesmanager:5060';

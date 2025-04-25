@@ -10,50 +10,55 @@ export interface ServiceCredential {
 
 // Define service types and their credentials
 const serviceRegistry: Record<string, ServiceCredential> = {
-  'ConfigService': { 
-    id: 'ConfigService', 
-    secret: process.env.CONFIG_SERVICE_SECRET || 'stage7AuthSecret', 
-    roles: ['config:read', 'config:write'] 
+  'ConfigService': {
+    id: 'ConfigService',
+    secret: process.env.CONFIG_SERVICE_SECRET || 'stage7AuthSecret',
+    roles: ['config:read', 'config:write']
   },
-  'PostOffice': { 
-    id: 'PostOffice', 
-    secret: process.env.POSTOFFICE_SECRET || 'stage7AuthSecret', 
-    roles: ['message:send', 'message:receive', 'service:discover'] 
+  'PostOffice': {
+    id: 'PostOffice',
+    secret: process.env.POSTOFFICE_SECRET || 'stage7AuthSecret',
+    roles: ['message:send', 'message:receive', 'service:discover']
   },
-  'MissionControl': { 
-    id: 'MissionControl', 
-    secret: process.env.MISSIONCONTROL_SECRET || 'stage7AuthSecret', 
-    roles: ['mission:manage', 'agent:control'] 
+  'MissionControl': {
+    id: 'MissionControl',
+    secret: process.env.MISSIONCONTROL_SECRET || 'stage7AuthSecret',
+    roles: ['mission:manage', 'agent:control']
   },
-  'Brain': { 
-    id: 'Brain', 
-    secret: process.env.BRAIN_SECRET || 'stage7AuthSecret', 
-    roles: ['llm:invoke'] 
+  'Brain': {
+    id: 'Brain',
+    secret: process.env.BRAIN_SECRET || 'stage7AuthSecret',
+    roles: ['llm:invoke']
   },
-  'Librarian': { 
-    id: 'Librarian', 
-    secret: process.env.LIBRARIAN_SECRET || 'stage7AuthSecret', 
-    roles: ['data:read', 'data:write'] 
+  'Librarian': {
+    id: 'Librarian',
+    secret: process.env.LIBRARIAN_SECRET || 'stage7AuthSecret',
+    roles: ['data:read', 'data:write']
   },
-  'Engineer': { 
-    id: 'Engineer', 
-    secret: process.env.ENGINEER_SECRET || 'stage7AuthSecret', 
-    roles: ['plugin:execute'] 
+  'Engineer': {
+    id: 'Engineer',
+    secret: process.env.ENGINEER_SECRET || 'stage7AuthSecret',
+    roles: ['plugin:execute']
   },
-  'TrafficManager': { 
-    id: 'TrafficManager', 
-    secret: process.env.TRAFFICMANAGER_SECRET || 'stage7AuthSecret', 
-    roles: ['traffic:manage'] 
+  'TrafficManager': {
+    id: 'TrafficManager',
+    secret: process.env.TRAFFICMANAGER_SECRET || 'stage7AuthSecret',
+    roles: ['traffic:manage']
   },
-  'CapabilitiesManager': { 
-    id: 'CapabilitiesManager', 
-    secret: process.env.CAPABILITIESMANAGER_SECRET || 'stage7AuthSecret', 
-    roles: ['capability:manage'] 
+  'CapabilitiesManager': {
+    id: 'CapabilitiesManager',
+    secret: process.env.CAPABILITIESMANAGER_SECRET || 'stage7AuthSecret',
+    roles: ['capability:manage']
   },
-  'AgentSet': { 
-    id: 'AgentSet', 
-    secret: process.env.AGENTSET_SECRET || 'stage7AuthSecret', 
-    roles: ['agent:manage'] 
+  'AgentSet': {
+    id: 'AgentSet',
+    secret: process.env.AGENTSET_SECRET || 'stage7AuthSecret',
+    roles: ['agent:manage']
+  },
+  'Agent': {
+    id: 'Agent',
+    secret: process.env.AGENT_SECRET || 'stage7AuthSecret',
+    roles: ['agent:execute', 'agent:communicate']
   },
   // Add other services as needed
 };
@@ -70,16 +75,16 @@ export async function verifyComponentCredentials(componentType: string, clientSe
     console.error(`Unknown service type: ${componentType}`);
     return false;
   }
-  
+
   if (service.secret === clientSecret) {
     return true;
   }
-  
+
   if (process.env.NODE_ENV === 'development') {
     console.log(`Development mode: accepting any client secret for ${componentType}`);
     return true;
   }
-  
+
   return false;
 }
 

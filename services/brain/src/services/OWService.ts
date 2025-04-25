@@ -15,10 +15,7 @@ export class OWService extends BaseService {
 
         // Set baseUrl from apiUrl
         this.baseUrl = this.apiUrl;
-
-        // Log service configuration
-        console.log(`OWService initialized with URL: ${this.baseUrl}`);
-        console.log(`OWService API key: ${this.apiKey ? this.apiKey.substring(0, 10) + '...' : 'Not available'}`);
+        console.log(`Openweb Service created, ApiKey starts ${this.apiKey.substring(0,6)}`);
 
         // Validate configuration
         if (!this.apiKey || this.apiKey === 'default-key') {
@@ -32,10 +29,7 @@ export class OWService extends BaseService {
 
     isAvailable(): boolean {
         const available = !!this.apiKey && !!this.apiUrl && this.apiKey !== 'default-key';
-        console.log(`OWService availability check: ${available ? 'Available' : 'Not available'}`);
-        if (!available) {
-            console.error('OWService is not available. Check OPENWEBUI_API_KEY and OPENWEB_URL environment variables.');
-        }
+
         return available;
     }
 }

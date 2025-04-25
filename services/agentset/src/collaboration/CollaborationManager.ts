@@ -23,7 +23,8 @@ export class CollaborationManager implements CollaborationProtocol {
     agents: Map<string, Agent>,
     librarianUrl: string,
     trafficManagerUrl: string,
-    brainUrl: string
+    brainUrl: string,
+    private authenticatedApi: any // Using any type to avoid circular dependencies
   ) {
     this.agents = agents;
     this.librarianUrl = librarianUrl;
@@ -45,7 +46,7 @@ export class CollaborationManager implements CollaborationProtocol {
    */
   getSharedMemory(missionId: string): SharedMemory {
     if (!this.sharedMemories.has(missionId)) {
-      this.sharedMemories.set(missionId, new SharedMemory(this.librarianUrl, missionId));
+      this.sharedMemories.set(missionId, new SharedMemory(this.librarianUrl, missionId, this.authenticatedApi));
     }
 
     return this.sharedMemories.get(missionId)!;

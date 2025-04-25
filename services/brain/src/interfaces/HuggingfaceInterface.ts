@@ -3,12 +3,25 @@ import { HfInference } from '@huggingface/inference';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { BaseService, ExchangeType } from '../services/baseService';
 import fs from 'fs';
+import { ModelPerformanceTracker } from '../utils/performanceTracker';
 
 export class HuggingfaceInterface extends BaseInterface {
     interfaceName = 'huggingface';
+    private performanceTracker: ModelPerformanceTracker;
+    // Patterns to detect when we've exceeded our monthly credits
+    private static MONTHLY_CREDIT_ERROR_PATTERNS = [
+        /exceeded your monthly included credits/i,
+        /exceeded monthly credits/i,
+        /quota exceeded/i,
+        /rate limit exceeded/i
+    ];
+
+    // Flag to track if we've already blacklisted models for the month
+    private static modelsBlacklistedUntilNextMonth = false;
 
     constructor() {
         super();
+        this.performanceTracker = new ModelPerformanceTracker();
         this.converters.set(LLMConversationType.TextToText, {
             conversationType: LLMConversationType.TextToText,
             requiredParams: ['service', 'prompt'],
@@ -41,6 +54,77 @@ export class HuggingfaceInterface extends BaseInterface {
         });
     }
 
+    /**
+     * Check if an error message indicates that we've exceeded our monthly credits
+     * @param errorMessage The error message to check
+     * @returns True if the error indicates we've exceeded monthly credits
+     */
+    private isMonthlyCreditsExceededError(errorMessage: string): boolean {
+        // Check against all error patterns that indicate we've exceeded our monthly credits
+        return HuggingfaceInterface.MONTHLY_CREDIT_ERROR_PATTERNS.some(pattern =>
+            pattern.test(errorMessage)
+        );
+    }
+
+    /**
+     * Blacklist all Huggingface models until the first day of the next month
+     * @param errorMessage The error message that triggered the blacklisting
+     */
+    private blacklistAllHuggingfaceModelsUntilNextMonth(errorMessage: string): void {
+        // Only blacklist once per month to avoid excessive logging
+        if (HuggingfaceInterface.modelsBlacklistedUntilNextMonth) {
+            // If we've already blacklisted, just make sure the global variable is set
+            if (!(global as any).huggingfaceBlacklistedUntil) {
+                // Calculate the first day of the next month
+                const now = new Date();
+                const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+                (global as any).huggingfaceBlacklistedUntil = nextMonth.toISOString();
+                console.log(`Re-set global Huggingface blacklist until ${nextMonth.toLocaleString()}`);
+            }
+            return;
+        }
+
+        console.log('BLACKLISTING ALL HUGGINGFACE MODELS UNTIL NEXT MONTH due to:', errorMessage);
+
+        // Calculate the first day of the next month
+        const now = new Date();
+        const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+
+        // Set the global blacklist variable that BaseModel.isAvailable() checks
+        (global as any).huggingfaceBlacklistedUntil = nextMonth.toISOString();
+        console.log(`Set global Huggingface blacklist until ${nextMonth.toLocaleString()}`);
+
+        // Get all models from the performance tracker
+        const performanceData = this.performanceTracker.getAllPerformanceData();
+
+        // Find all Huggingface models and blacklist them
+        let blacklistedCount = 0;
+        for (const modelData of performanceData) {
+            if (modelData.modelName.toLowerCase().includes('huggingface') ||
+                modelData.modelName.toLowerCase().includes('hf/')) {
+
+                // Blacklist for all conversation types
+                for (const conversationType of Object.keys(modelData.metrics)) {
+                    const metrics = modelData.metrics[conversationType as LLMConversationType];
+                    if (metrics) {
+                        // Set blacklisted until next month
+                        metrics.blacklistedUntil = nextMonth.toISOString();
+                        metrics.consecutiveFailures = Math.max(metrics.consecutiveFailures, 5); // Ensure it stays blacklisted
+                        blacklistedCount++;
+                    }
+                }
+            }
+        }
+
+        console.log(`Blacklisted ${blacklistedCount} Huggingface model/conversation type combinations until ${nextMonth.toLocaleString()}`);
+
+        // The performance data will be saved automatically when the application exits
+        // or when the updateMetrics method is called
+
+        // Set the flag to avoid blacklisting again this month
+        HuggingfaceInterface.modelsBlacklistedUntilNextMonth = true;
+    }
+
     async getChatCompletion(inference: HfInference, messages: Array<{ role: string, content: string }>, options: { max_length?: number, temperature?: number, modelName?: string }): Promise<string> {
         try {
             let response: string = "";
@@ -60,14 +144,7 @@ export class HuggingfaceInterface extends BaseInterface {
         }
     }
 
-    private isResponseComplete(response: string): boolean {
-        try {
-            JSON.parse(response);
-            return true;
-        } catch (e) {
-            return false;
-        }
-    }
+    // Removed unused isResponseComplete method
 
     async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string, timeout?: number }): Promise<string> {
         try {
@@ -100,7 +177,7 @@ export class HuggingfaceInterface extends BaseInterface {
             const availableTokens = MODEL_MAX_TOKENS - inputTokens - SAFETY_MARGIN;
 
             if (availableTokens < 100) {
-                return `Error: Input too long: ${inputTokens} tokens used, only ${availableTokens} tokens available for response`;
+                throw new Error(`Input too long: ${inputTokens} tokens used, only ${availableTokens} tokens available for response`);
             }
 
             const max_new_tokens = Math.min(
@@ -134,9 +211,15 @@ export class HuggingfaceInterface extends BaseInterface {
 
                 return out || 'No response generated';
             } catch (streamError) {
-                analyzeError(streamError as Error);
                 const streamErrorMessage = streamError instanceof Error ? streamError.message : String(streamError);
                 console.error('Error in Huggingface stream:', streamErrorMessage);
+
+                // Check if this is a monthly credits exceeded error
+                if (this.isMonthlyCreditsExceededError(streamErrorMessage)) {
+                    // Blacklist all Huggingface models until the first of next month
+                    this.blacklistAllHuggingfaceModelsUntilNextMonth(streamErrorMessage);
+                    throw new Error(`Huggingface monthly credits exceeded. All Huggingface models have been blacklisted until the first of next month. Error: ${streamErrorMessage}`);
+                }
 
                 // Try a non-streaming fallback
                 try {
@@ -152,6 +235,15 @@ export class HuggingfaceInterface extends BaseInterface {
                     return response.generated_text || 'No response generated';
                 } catch (fallbackError) {
                     analyzeError(fallbackError as Error);
+
+                    // Check if the fallback error is also a monthly credits exceeded error
+                    const fallbackErrorMessage = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+                    if (this.isMonthlyCreditsExceededError(fallbackErrorMessage)) {
+                        // Blacklist all Huggingface models until the first of next month
+                        this.blacklistAllHuggingfaceModelsUntilNextMonth(fallbackErrorMessage);
+                        throw new Error(`Huggingface monthly credits exceeded. All Huggingface models have been blacklisted until the first of next month. Error: ${fallbackErrorMessage}`);
+                    }
+
                     throw fallbackError; // Let the outer catch handle this
                 }
             }
@@ -159,103 +251,189 @@ export class HuggingfaceInterface extends BaseInterface {
             analyzeError(error as Error);
             const errorMessage = error instanceof Error ? error.message : String(error);
             console.error('Error generating response from Huggingface:', errorMessage);
+
+            // Check if this is a monthly credits exceeded error in the outer catch
+            if (this.isMonthlyCreditsExceededError(errorMessage)) {
+                // Blacklist all Huggingface models until the first of next month
+                this.blacklistAllHuggingfaceModelsUntilNextMonth(errorMessage);
+                return `Error: Huggingface monthly credits exceeded. All Huggingface models have been blacklisted until the first of next month.`;
+            }
+
             // Return error message instead of throwing to prevent loops
             return `Error: ${errorMessage}`;
         }
     }
 
     async convertTextToText(args: ConvertParamsType): Promise<string> {
-        const { service, prompt, modelName } = args;
-        const inference = new HfInference(service.apiKey);
+        try {
+            const { service, prompt, modelName } = args;
+            const inference = new HfInference(service.apiKey);
 
-        // Estimate the number of tokens in the input prompt
-        // A rough estimate is 1 token per 4 characters
-        const estimatedInputTokens = Math.ceil((prompt?.length || 0) / 3.5);
+            // Estimate the number of tokens in the input prompt
+            // A rough estimate is 1 token per 4 characters
+            const estimatedInputTokens = Math.ceil((prompt?.length || 0) / 3.5);
 
-        // Calculate the maximum new tokens, ensuring we don't exceed the model's limit
-        const maxTotalTokens = args.max_length || 2048; // Default to 2048 if not specified
-        const maxNewTokens = Math.max(1, maxTotalTokens - estimatedInputTokens);
+            // Calculate the maximum new tokens, ensuring we don't exceed the model's limit
+            const maxTotalTokens = args.max_length || 2048; // Default to 2048 if not specified
+            const maxNewTokens = Math.max(1, maxTotalTokens - estimatedInputTokens);
 
-        const response = await inference.textGeneration({
-            model: modelName || 'gpt2',
-            inputs: prompt || '',
-            parameters: {
-                max_new_tokens: maxNewTokens,
-                temperature: args.temperature || 0.3,
-            },
-        });
-        return response.generated_text;
+            const response = await inference.textGeneration({
+                model: modelName || 'gpt2',
+                inputs: prompt || '',
+                parameters: {
+                    max_new_tokens: maxNewTokens,
+                    temperature: args.temperature || 0.3,
+                },
+            });
+            return response.generated_text;
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            console.error('Error in Huggingface text generation:', errorMessage);
+
+            // Check if this is a monthly credits exceeded error
+            if (this.isMonthlyCreditsExceededError(errorMessage)) {
+                // Blacklist all Huggingface models until the first of next month
+                this.blacklistAllHuggingfaceModelsUntilNextMonth(errorMessage);
+                return `Error: Huggingface monthly credits exceeded. All Huggingface models have been blacklisted until the first of next month.`;
+            }
+            analyzeError(error as Error);
+            return `Error: ${errorMessage}`;
+        }
     }
 
     async convertTextToImage(args: ConvertParamsType): Promise<Blob> {
-        const { service, prompt, modelName } = args;
-        const inference = new HfInference(service.apiKey);
-        const response = await inference.textToImage({
-            model: modelName || 'stabilityai/stable-diffusion-2',
-            inputs: prompt || '',
-        });
-        return response;  // This is a base64 encoded image
+        try {
+            const { service, prompt, modelName } = args;
+            const inference = new HfInference(service.apiKey);
+            const response = await inference.textToImage({
+                model: modelName || 'stabilityai/stable-diffusion-2',
+                inputs: prompt || '',
+            });
+            return response;  // This is a base64 encoded image
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            console.error('Error in Huggingface text-to-image:', errorMessage);
+
+            // Check if this is a monthly credits exceeded error
+            if (this.isMonthlyCreditsExceededError(errorMessage)) {
+                // Blacklist all Huggingface models until the first of next month
+                this.blacklistAllHuggingfaceModelsUntilNextMonth(errorMessage);
+            }
+            analyzeError(error as Error);
+            throw error; // Re-throw to be handled by the caller
+        }
     }
 
     async convertTextToAudio(args: ConvertParamsType): Promise<Blob> {
-        const { service, text, modelName } = args;
-        const inference = new HfInference(service.apiKey);
-        const response = await inference.textToSpeech({
-            model: modelName || 'facebook/fastspeech2-en-ljspeech',
-            inputs: text||'',
-        });
-        return response;
+        try {
+            const { service, text, modelName } = args;
+            const inference = new HfInference(service.apiKey);
+            const response = await inference.textToSpeech({
+                model: modelName || 'facebook/fastspeech2-en-ljspeech',
+                inputs: text||'',
+            });
+            return response;
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            console.error('Error in Huggingface text-to-audio:', errorMessage);
+
+            // Check if this is a monthly credits exceeded error
+            if (this.isMonthlyCreditsExceededError(errorMessage)) {
+                // Blacklist all Huggingface models until the first of next month
+                this.blacklistAllHuggingfaceModelsUntilNextMonth(errorMessage);
+            }
+            analyzeError(error as Error);
+            throw error; // Re-throw to be handled by the caller
+        }
     }
 
     async convertAudioToText(args: ConvertParamsType): Promise<string> {
-        const { service, audio, modelName } = args;
-        const inference = new HfInference(service.apiKey);
-        if (!inference || !audio) {
-            console.error('No audio file provided');
-            return '';
+        try {
+            const { service, audio, modelName } = args;
+            const inference = new HfInference(service.apiKey);
+            if (!inference || !audio) {
+                console.error('No audio file provided');
+                return '';
+            }
+            const audioBuffer = fs.readFileSync(audio);
+            const response = await inference.automaticSpeechRecognition({
+                model: modelName || 'facebook/wav2vec2-large-960h-lv60-self',
+                data: audioBuffer,
+            });
+            return response.text;
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            console.error('Error in Huggingface audio-to-text:', errorMessage);
+
+            // Check if this is a monthly credits exceeded error
+            if (this.isMonthlyCreditsExceededError(errorMessage)) {
+                // Blacklist all Huggingface models until the first of next month
+                this.blacklistAllHuggingfaceModelsUntilNextMonth(errorMessage);
+                return `Error: Huggingface monthly credits exceeded. All Huggingface models have been blacklisted until the first of next month.`;
+            }
+            analyzeError(error as Error);
+            return `Error: ${errorMessage}`;
         }
-        const audioBuffer = fs.readFileSync(audio);
-        const response = await inference.automaticSpeechRecognition({
-            model: modelName || 'facebook/wav2vec2-large-960h-lv60-self',
-            data: audioBuffer,
-        });
-        return response.text;
     }
 
     async convertImageToText(args: ConvertParamsType): Promise<string> {
-        const { service, image, modelName } = args;
-        const inference = new HfInference(service.apiKey);
-        if (!inference || !image) {
-            console.error('No image file provided');
-            return '';
+        try {
+            const { service, image, modelName } = args;
+            const inference = new HfInference(service.apiKey);
+            if (!inference || !image) {
+                console.error('No image file provided');
+                return '';
+            }
+            const imageBuffer = fs.readFileSync(image);
+            const response = await inference.imageToText({
+                model: modelName || 'nlpconnect/vit-gpt2-image-captioning',
+                data: imageBuffer,
+            });
+            return response.generated_text;
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            console.error('Error in Huggingface image-to-text:', errorMessage);
+
+            // Check if this is a monthly credits exceeded error
+            if (this.isMonthlyCreditsExceededError(errorMessage)) {
+                // Blacklist all Huggingface models until the first of next month
+                this.blacklistAllHuggingfaceModelsUntilNextMonth(errorMessage);
+                return `Error: Huggingface monthly credits exceeded. All Huggingface models have been blacklisted until the first of next month.`;
+            }
+            analyzeError(error as Error);
+            return `Error: ${errorMessage}`;
         }
-        const imageBuffer = fs.readFileSync(image);
-        const response = await inference.imageToText({
-            model: modelName || 'nlpconnect/vit-gpt2-image-captioning',
-            data: imageBuffer,
-        });
-        return response.generated_text;
     }
 
     async convert(service: BaseService, conversionType: LLMConversationType, convertParams: ConvertParamsType): Promise<any> {
-        const converter = this.converters.get(conversionType);
-        if (!converter) {
-            console.error(`Unsupported conversion type: ${conversionType}`);
-            return '';
+        try {
+            const converter = this.converters.get(conversionType);
+            if (!converter) {
+                console.error(`Unsupported conversion type: ${conversionType}`);
+                return '';
+            }
+            const requiredParams = converter.requiredParams;
+            convertParams.service = service;
+            const missingParams = requiredParams.filter(param => !(param in convertParams));
+            if (missingParams.length > 0) {
+                console.error(`HFinterface:Missing required parameters: ${missingParams.join(', ')}`);
+                return '';
+            }
+            return await converter.converter(convertParams);
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+
+            // Check if this is a monthly credits exceeded error
+            if (this.isMonthlyCreditsExceededError(errorMessage)) {
+                // Blacklist all Huggingface models until the first of next month
+                this.blacklistAllHuggingfaceModelsUntilNextMonth(errorMessage);
+                return `Error: Huggingface monthly credits exceeded. All Huggingface models have been blacklisted until the first of next month.`;
+            }
+            analyzeError(error as Error);
+            // For other errors, return a generic error message
+            return `Error: ${errorMessage}`;
         }
-        const requiredParams = converter.requiredParams;
-        convertParams.service = service;
-        const missingParams = requiredParams.filter(param => !(param in convertParams));
-        if (missingParams.length > 0) {
-            console.error(`HFinterface:Missing required parameters: ${missingParams.join(', ')}`);
-            return '';
-        }
-        return converter.converter(convertParams);
     }
-
-
-
-
 }
 
 const aiInterface = new HuggingfaceInterface();

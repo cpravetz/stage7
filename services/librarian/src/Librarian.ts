@@ -10,6 +10,8 @@ import { analyzeError } from '@cktmcs/errorhandler';
 
 dotenv.config();
 
+// NOTE: Don't use this directly - use this.authenticatedApi or this.getAuthenticatedAxios() instead
+// This is kept for backward compatibility only
 const api = axios.create({
     headers: {
       'Content-Type': 'application/json',
@@ -107,6 +109,7 @@ export class Librarian extends BaseEntity {
     private async loadData(req: express.Request, res: express.Response) {
         const { id } = req.params;
         const { storageType = 'mongo', collection = 'mcsdata' } = req.query;
+        console.log(`loadData for ${id} requested`)
         if (!id) {
             console.log('loadData failed for no id.')
             return res.status(400).send({ error: 'ID is required' });
@@ -119,11 +122,12 @@ export class Librarian extends BaseEntity {
             } else if (storageType === 'mongo') {
                 data = await loadFromMongo(collection as string, {_id: id });
             } else {
-                console.log('loadData failed for invalid storage type.');
+                console.log(`loadData failed for invalid storage type: ${storageType}.`);
                 return res.status(400).send({ error: 'Invalid storage type' });
             }
 
             if (!data) {
+                console.log(`loadData failed for no data for id ${id}`)
                 return res.status(404).send({ error: 'Data not found' });
             }
 
@@ -191,7 +195,7 @@ export class Librarian extends BaseEntity {
 
     private async queryData(req: express.Request, res: express.Response) {
         const { collection, query, limit } = req.body;
-        //console.log('Querying data:', { collection, query, limit });
+        console.log('Querying data:', { collection, query, limit });
 
         if (!collection || !query) {
             console.log(`queryData failed, ${!collection ? 'no collection' : ''} ${!query ? 'no query' : ''}`);
@@ -299,7 +303,7 @@ export class Librarian extends BaseEntity {
 
     private async loadDataByQuery(req: express.Request, res: express.Response) {
         const { storageType = 'mongo', collection = 'mcsdata' } = req.query;
-
+        console.log(`loadData by query: `,req.query);
         try {
             let data;
             if (storageType === 'redis') {

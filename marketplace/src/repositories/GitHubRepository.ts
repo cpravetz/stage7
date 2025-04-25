@@ -27,9 +27,13 @@ export class GitHubRepository implements PluginRepository {
             console.log('GitHub access is disabled by configuration. Set ENABLE_GITHUB=true to enable.');
         }
 
-        // Extract credentials
+        // Extract credentials with better error handling
         this.token = config.credentials?.token || process.env.GITHUB_TOKEN || '';
         this.username = config.credentials?.username || process.env.GITHUB_USERNAME || '';
+
+        if (enableGithub && (!this.token || !this.username)) {
+            throw new Error('GitHub repository requires GITHUB_TOKEN and GITHUB_USERNAME environment variables');
+        }
 
         // Parse repository URL
         const repoUrl = config.url || process.env.GIT_REPOSITORY_URL || '';
@@ -39,6 +43,9 @@ export class GitHubRepository implements PluginRepository {
             this.repoOwner = repoMatch[1];
             this.repoName = repoMatch[2];
         } else {
+            if (enableGithub && !repoUrl) {
+                throw new Error('GitHub repository requires a valid GIT_REPOSITORY_URL environment variable');
+            }
             this.repoOwner = this.username;
             this.repoName = 'plugins';
             console.warn(`Invalid GitHub repository URL: ${repoUrl}. Using default: ${this.repoOwner}/${this.repoName}`);
@@ -149,7 +156,7 @@ export class GitHubRepository implements PluginRepository {
 
                     if (response.status === 200 && Array.isArray(response.data)) {
                         // Filter out the manifest file and directories
-                        const files = response.data.filter(item =>
+                        const files = response.data.filter((item: { type: string; name: string }) =>
                             item.type === 'file' &&
                             item.name !== 'plugin-manifest.json'
                         );
@@ -295,7 +302,7 @@ export class GitHubRepository implements PluginRepository {
             }
 
             // Filter directories (each directory is a plugin)
-            const pluginDirs = response.data.filter(item => item.type === 'dir');
+            const pluginDirs = response.data.filter((item: { type: string; name: string }) => item.type === 'dir');
             const locators: PluginLocator[] = [];
 
             // Process each plugin directory
@@ -329,23 +336,42 @@ export class GitHubRepository implements PluginRepository {
     }
 
     /**
-     * Make a request to the GitHub API
+     * Make a request to the GitHub API with proper authentication
      * @param method HTTP method
      * @param url API URL
      * @param data Request data
      * @returns Axios response
      */
-    private async makeGitHubRequest(method: string, url: string, data?: any) {
-        return axios({
-            method,
-            url,
-            data,
-            headers: {
-                'Authorization': `token ${this.token}`,
-                'Accept': 'application/vnd.github.v3+json',
-                'Content-Type': 'application/json'
+    private async makeGitHubRequest(method: string, url: string, data?: any): Promise<any> {
+        try {
+            // Check if GitHub access is enabled
+            if (process.env.ENABLE_GITHUB !== 'true') {
+                throw new Error('GitHub access is disabled by configuration. Set ENABLE_GITHUB=true to enable.');
             }
-        });
+
+            if (!this.token) {
+                throw new Error('GitHub token not found. Set GITHUB_TOKEN environment variable.');
+            }
+
+            const response = await axios({
+                method,
+                url,
+                data,
+                headers: {
+                    'Authorization': `token ${this.token}`,
+                    'Accept': 'application/vnd.github.v3+json',
+                    'User-Agent': 'CktmcsPluginMarketplace'
+                }
+            });
+
+            return response;
+        } catch (error) {
+            if (axios.isAxiosError(error) && error.response) {
+                console.error(`GitHub API error (${error.response.status}): ${JSON.stringify(error.response.data)}`);
+                throw new Error(`GitHub API error: ${error.response.status} - ${JSON.stringify(error.response.data)}`);
+            }
+            throw error;
+        }
     }
 
     /**
@@ -420,3 +446,6 @@ export class GitHubRepository implements PluginRepository {
         }
     }
 }
+
+
+

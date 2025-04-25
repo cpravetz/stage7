@@ -20,7 +20,7 @@ COPY errorhandler ./errorhandler
 COPY services/configservice ./services/configservice
 
 # Build TypeScript
-RUN cd shared && npm run build:verbose
+RUN cd shared && npm run build
 RUN cd errorhandler && npm run build
 RUN npm run build --workspace=services/configservice
 

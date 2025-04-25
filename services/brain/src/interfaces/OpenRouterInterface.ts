@@ -29,7 +29,7 @@ export class OpenRouterInterface extends BaseInterface {
             conversationType: LLMConversationType.TextToCode,
             requiredParams: ['service', 'prompt'],
             converter: this.convertTextToCode,
-        });        
+        });
     }
 
     async convertTextToText(args: ConvertParamsType): Promise<string> {
@@ -71,7 +71,7 @@ export class OpenRouterInterface extends BaseInterface {
         ];
         return this.chat(service, messages, { modelName });
     }
-    
+
     async convertTextToImage(args: ConvertParamsType): Promise<string> {
         const { service, prompt, modelName } = args;
         const body = JSON.stringify({
@@ -98,30 +98,25 @@ export class OpenRouterInterface extends BaseInterface {
         const max_length = options.max_length || 4000;
         const temperature = options.temperature || 0.7;
         const trimmedMessages = this.trimMessages(messages, max_length);
-    
-        try {
-            const openRouterApiClient = new OpenAI({ apiKey: service.apiKey, baseURL: service.apiUrl });
-            const stream = await openRouterApiClient.chat.completions.create({
-                model: options.modelName || 'gpt-4',
-                messages: trimmedMessages as ChatCompletionMessageParam[],
-                temperature,
-                max_tokens: max_length,
-                stream: true,
-            });
-    
-            let fullResponse = '';
-            for await (const chunk of stream) {
-                const content = chunk.choices[0]?.delta?.content || '';
-                fullResponse += content;
-            }
-    
-   
-            return fullResponse || '';
-        } catch (error) {
-            console.error('Error generating response from OpenRouter:', error instanceof Error ? error.message : error);
-            analyzeError(error as Error);
-            return '';
+
+        // Don't catch errors here - let them propagate to the Brain service
+        // so it can properly track the failure and blacklist the model
+        const openRouterApiClient = new OpenAI({ apiKey: service.apiKey, baseURL: service.apiUrl });
+        const stream = await openRouterApiClient.chat.completions.create({
+            model: options.modelName || 'gpt-4',
+            messages: trimmedMessages as ChatCompletionMessageParam[],
+            temperature,
+            max_tokens: max_length,
+            stream: true,
+        });
+
+        let fullResponse = '';
+        for await (const chunk of stream) {
+            const content = chunk.choices[0]?.delta?.content || '';
+            fullResponse += content;
         }
+
+        return fullResponse || '';
     }
 
     async convert(service: BaseService, conversionType: LLMConversationType, convertParams: ConvertParamsType): Promise<any> {

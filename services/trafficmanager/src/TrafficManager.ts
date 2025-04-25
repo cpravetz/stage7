@@ -9,6 +9,8 @@ import { Message, MessageType,TrafficManagerStatistics,
 import { analyzeError } from '@cktmcs/errorhandler';
 
 
+// NOTE: This axios instance doesn't include authentication headers
+// Use this.authenticatedApi instead for all API calls that require authentication
 const api = axios.create({
     headers: {
       'Content-Type': 'application/json',
@@ -24,6 +26,10 @@ export class TrafficManager extends BaseEntity {
         super('TrafficManager', 'TrafficManager', `trafficmanager`, process.env.PORT || '5080');
         this.app = express();
         this.app.use(express.json());
+
+        // Update the agentSetManager with our authenticatedApi
+        agentSetManager.authenticatedApi = this.authenticatedApi;
+
         this.setupRoutes();
         this.startServer();
     }
@@ -56,6 +62,7 @@ export class TrafficManager extends BaseEntity {
         router.post('/distributeUserMessage', this.distributeUserMessageRoute.bind(this));
         router.get('/getAgentLocation/:agentId', this.getAgentLocationRoute.bind(this));
         router.post('/updateAgentLocation', this.updateAgentLocationRoute.bind(this));
+        router.post('/agentStatisticsUpdate', this.agentStatisticsUpdateRoute.bind(this));
 
         // Use the router
         this.app.use(router);
@@ -119,6 +126,10 @@ export class TrafficManager extends BaseEntity {
         await this.updateAgentLocation(req, res);
     }
 
+    private async agentStatisticsUpdateRoute(req: express.Request, res: express.Response) {
+        await this.handleAgentStatisticsUpdate(req, res);
+    }
+
     private getAgentSetsForMission(missionId: string) {
         // Implementation to return AgentSets for the given mission
         // This might involve looking up which AgentSets have agents for this mission
@@ -177,9 +188,6 @@ export class TrafficManager extends BaseEntity {
             // Fetch the agent's final output
             const agentOutput = await this.fetchAgentOutput(agentId);
 
-            // Send the results to the user
-            this.say(`Agent ${agentId} has completed its task. Result: ${JSON.stringify(agentOutput)}`);
-
             // Update the agent's status in storage
             await this.updateAgentStatusInStorage(agentId, AgentStatus.COMPLETED);
 
@@ -205,7 +213,7 @@ export class TrafficManager extends BaseEntity {
             }
 
             // Make a request to the AgentSet to fetch the agent's output
-            const response = await api.get(`http://${this.ensureProtocol(agentSetUrl)}/agent/${agentId}/output`);
+            const response = await this.authenticatedApi.get(`http://${this.ensureProtocol(agentSetUrl)}/agent/${agentId}/output`);
 
             if (response.status === 200 && response.data) {
                 return response.data.output;
@@ -631,6 +639,52 @@ export class TrafficManager extends BaseEntity {
         } catch (error) { analyzeError(error as Error);
             console.error('Error updating agent location:', error instanceof Error ? error.message : error);
             res.status(500).send({ error: 'Failed to update agent location' });
+        }
+    }
+
+    /**
+     * Handle agent statistics updates
+     * @param req Request
+     * @param res Response
+     */
+    private async handleAgentStatisticsUpdate(req: express.Request, res: express.Response) {
+        const { agentId, status, statistics, missionId, timestamp } = req.body;
+
+        try {
+            console.log(`Received statistics update for agent ${agentId} with status ${status}`);
+
+            // Update agent status in our cache
+            if (status) {
+                this.agentStatusMap.set(agentId, status);
+                await this.updateAgentStatusInStorage(agentId, status);
+            }
+
+            // Store the statistics for this agent
+            if (statistics && missionId) {
+                // Update the statistics in the agentSetManager
+                await agentSetManager.updateAgentStatistics(agentId, missionId, statistics);
+
+                // Forward the statistics to MissionControl
+                try {
+                    const missionControlUrl = process.env.MISSIONCONTROL_URL || 'missioncontrol:5010';
+                    await this.authenticatedApi.post(`http://${missionControlUrl}/agentStatisticsUpdate`, {
+                        agentId,
+                        missionId,
+                        statistics,
+                        timestamp: timestamp || new Date().toISOString()
+                    });
+                    console.log(`Forwarded statistics for agent ${agentId} to MissionControl`);
+                } catch (mcError) {
+                    console.error(`Failed to forward statistics to MissionControl:`,
+                        mcError instanceof Error ? mcError.message : mcError);
+                }
+            }
+
+            res.status(200).send({ message: 'Agent statistics updated successfully.' });
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error('Error updating agent statistics:', error instanceof Error ? error.message : error);
+            res.status(500).send({ error: 'Failed to update agent statistics' });
         }
     }
 }

@@ -26,10 +26,20 @@ services:
       CONFIG_SERVICE_URL: &configserviceUrl configservice:5090
       POSTOFFICE_CLIENT_SECRET: &sharedSecret stage7AuthSecret
       CLIENT_SECRET: *sharedSecret
+      # Temporarily allow bootstrapping without RabbitMQ to unblock other services
+      ALLOW_READY_WITHOUT_RABBITMQ: "true"
     volumes:
       - ./shared/keys:/usr/src/app/shared/keys
     ports:
       - "5020:5020"
+    healthcheck:
+      # Use /healthy endpoint which should always respond regardless of RabbitMQ status
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:5020/healthy"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
 
   missioncontrol:
     build:
@@ -39,7 +49,7 @@ services:
       rabbitmq:
         condition: service_healthy
       postoffice:
-        condition: service_started
+        condition: service_healthy
       librarian:
         condition: service_started
       securitymanager:
@@ -68,9 +78,12 @@ services:
       context: .
       dockerfile: services/trafficmanager/dockerfile
     depends_on:
-      - postoffice
-      - agentset
-      - securitymanager
+      postoffice:
+        condition: service_healthy
+      agentset:
+        condition: service_started
+      securitymanager:
+        condition: service_started
     environment:
       NODE_ENV: production
       PORT: &trafficmanagerPort 5080
@@ -93,9 +106,12 @@ services:
       context: .
       dockerfile: services/brain/dockerfile
     depends_on:
-      - postoffice
-      - librarian
-      - securitymanager
+      postoffice:
+        condition: service_healthy
+      librarian:
+        condition: service_started
+      securitymanager:
+        condition: service_started
     env_file:
       - services/brain/.env
     environment:
@@ -109,10 +125,9 @@ services:
       CONFIG_SERVICE_URL: *configserviceUrl
       BRAIN_CLIENT_SECRET: *sharedSecret
       CLIENT_SECRET: *sharedSecret
-      # Use environment variable for GROQ_API_KEY
-      GROQ_API_KEY: ${GROQ_API_KEY:-''}
     volumes:
       - ./shared/keys:/usr/src/app/shared/keys
+      - ./services/brain/.env:/usr/src/app/services/brain/.env
     ports:
       - "5070:5070"
 
@@ -121,9 +136,12 @@ services:
       context: .
       dockerfile: services/agentset/dockerfile
     depends_on:
-      - postoffice
-      - librarian
-      - securitymanager
+      postoffice:
+        condition: service_healthy
+      librarian:
+        condition: service_started
+      securitymanager:
+        condition: service_started
     environment:
       NODE_ENV: production
       PORT: 5100
@@ -144,11 +162,16 @@ services:
       context: .
       dockerfile: services/engineer/dockerfile
     depends_on:
-      - postoffice
-      - brain
-      - librarian
-      - rabbitmq
-      - securitymanager
+      postoffice:
+        condition: service_healthy
+      brain:
+        condition: service_started
+      librarian:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+      securitymanager:
+        condition: service_started
     environment:
       NODE_ENV: production
       PORT: &engineerPort 5050
@@ -163,12 +186,12 @@ services:
       CAPABILITIESMANAGER_URL: *capabilitiesmanagerUrl
       ENGINEER_CLIENT_SECRET: *sharedSecret
       CLIENT_SECRET: *sharedSecret
-      GITHUB_TOKEN: &githubToken ''
-      GITHUB_USERNAME: &githubUsername ''
+      GITHUB_TOKEN: &githubToken 'your_github_token_here'
+      GITHUB_USERNAME: &githubUsername 'cpravetz'
       GIT_DEFAULT_BRANCH: &gitDefaultBranch main
-      GIT_REPOSITORY_URL: &gitRepositoryUrl
-      GITHUB_EMAIL: &githubEmail
-      DEFAULT_PLUGIN_REPOSITORY: &defaultPluginRepository mongo
+      GIT_REPOSITORY_URL: &gitRepositoryUrl 'https://github.com/cpravetz/s7plugins.git'
+      GITHUB_EMAIL: &githubEmail 'chris@pravetz.net'
+      DEFAULT_PLUGIN_REPOSITORY: &defaultPluginRepository github
       DEFAULT_REPOSITORY_URL: &defaultRepositoryUrl
       REPOSITORY_USERNAME: &repositoryUserName
       REPOSITORY_TOKEN: &repositoryToken
@@ -183,11 +206,16 @@ services:
       context: .
       dockerfile: services/capabilitiesmanager/dockerfile
     depends_on:
-      - postoffice
-      - engineer
-      - librarian
-      - rabbitmq
-      - securitymanager
+      postoffice:
+        condition: service_healthy
+      engineer:
+        condition: service_started
+      librarian:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+      securitymanager:
+        condition: service_started
     environment:
       NODE_ENV: production
       PORT: &capabilitiesmanagerPort 5060
@@ -203,13 +231,13 @@ services:
       CAPABILITIESMANAGER_CLIENT_SECRET: *sharedSecret
       CLIENT_SECRET: *sharedSecret
       LOCAL_PLUGIN_PATH: /usr/src/app/services//capabilitiesmanager/src/plugins
-      ENABLE_GITHUB: "false"
+      ENABLE_GITHUB: "true"
       GITHUB_TOKEN: *githubToken
       GITHUB_USERNAME: *githubUsername
       GIT_DEFAULT_BRANCH: *gitDefaultBranch
       GIT_REPOSITORY_URL: *gitRepositoryUrl
       GITHUB_EMAIL: *githubEmail
-      DEFAULT_PLUGIN_REPOSITORY: "mongo"
+      DEFAULT_PLUGIN_REPOSITORY: "github"
       DEFAULT_REPOSITORY_URL: *defaultRepositoryUrl
       REPOSITORY_USERNAME: *repositoryUserName
       REPOSITORY_TOKEN: *repositoryToken
@@ -225,9 +253,12 @@ services:
       context: .
       dockerfile: services/librarian/dockerfile
     depends_on:
-      - postoffice
-      - rabbitmq
-      - securitymanager
+      postoffice:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      securitymanager:
+        condition: service_started
     environment:
       MONGO_URI: mongodb://mongo:27017
       MONGO_DB: librarianDB
@@ -280,6 +311,16 @@ services:
       CAPABILITIESMANAGER_CLIENT_SECRET: *sharedSecret
       LIBRARIAN_CLIENT_SECRET: *sharedSecret
       CLIENT_SECRET: *sharedSecret
+      # JWT configuration
+      JWT_ALGORITHM: RS256
+      JWT_EXPIRATION: 3600 # 1 hour in seconds
+      # Authentication configuration
+      AUTH_ENABLED: "true"
+      # For development only - set to false in production
+      ACCEPT_ANY_SERVICE: "false"
+      ACCEPT_ANY_SECRET: "false"
+      # Shared secret for all services
+      SHARED_CLIENT_SECRET: *sharedSecret
     volumes:
       - ./services/security/keys:/usr/src/app/services/security/keys
       - ./shared/keys:/usr/src/app/shared/keys
@@ -314,7 +355,8 @@ services:
     ports:
       - "80:80"
     depends_on:
-      - postoffice
+      postoffice:
+        condition: service_healthy
     environment:
       - ENV REACT_APP_API_BASE_URL=http://localhost:5020
       - ENV REACT_APP_WS_URL=ws://localhost:5020
@@ -345,12 +387,15 @@ services:
       - RABBITMQ_DEFAULT_USER=stage7
       - RABBITMQ_DEFAULT_PASS=stage7password
       - RABBITMQ_DEFAULT_VHOST=/
+      # Increase memory available to RabbitMQ
+      - RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS=-rabbit vm_memory_high_watermark 0.7
     healthcheck:
+      # Use a more reliable health check that ensures RabbitMQ is fully operational
       test: ["CMD", "rabbitmq-diagnostics", "ping"]
       interval: 10s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
+      timeout: 5s
+      retries: 10
+      start_period: 90s  # Increased to allow more time for RabbitMQ to fully initialize
     restart: unless-stopped
 
   consul:
@@ -361,6 +406,13 @@ services:
     volumes:
       - consul_data:/consul/data
     command: agent -server -ui -bootstrap-expect=1 -client=0.0.0.0
+    healthcheck:
+      test: ["CMD", "consul", "members"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
 
   # OpenWebUI is using an external server, not a local container
 

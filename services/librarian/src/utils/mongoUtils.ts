@@ -105,6 +105,18 @@ export async function loadManyFromMongo(collectionName: string, query: any, opti
         console.log(`Loading multiple documents from collection ${collectionName} with query:`, JSON.stringify(query));
 
         const collection: Collection = db.collection(collectionName);
+
+        // Special case for _id queries - don't use $eq operator
+        if (query && query._id) {
+            console.log(`Using direct _id query for ${query._id}`);
+            // Use the query directly without adding $eq
+            const cursor = collection.find(query, options);
+            const results = await cursor.toArray();
+            console.log(`Found ${results.length} documents in collection ${collectionName} with _id query`);
+            return results;
+        }
+
+        // For other queries, use the sanitized approach
         const sanitizedQuery: Record<string, any> = {};
 
         // Only sanitize if query is not empty

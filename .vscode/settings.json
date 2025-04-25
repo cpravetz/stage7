@@ -1,3 +1,7 @@
 {
-    "codium.codeCompletion.enable": true
+    "terminal.integrated.automationProfile.windows": {
+        "shellArgs": ["-i"]
+    },
+    "terminal.integrated.copyOnSelection": true,
+    "terminal.integrated.defaultProfile.windows": "PowerShell"
 }

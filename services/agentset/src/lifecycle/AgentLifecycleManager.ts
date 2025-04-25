@@ -199,11 +199,11 @@ export class AgentLifecycleManager {
     // Save agent state with this state ID
     const agentState = {
         ...agent,
-        inputs: agent.inputs || new Map<string, any>() // Ensure inputs is always defined
+        inputs: agent.inputs || new Map<string, any>(), // Ensure inputs is always defined
+        missionContext: agent.getMissionContext ? agent.getMissionContext() : ''
     };
     await this.persistenceManager.saveAgent({
-        ...agentState,
-        missionContext: agent.missionContext
+        ...agentState
     });
 
     // Create new version
@@ -475,7 +475,7 @@ export class AgentLifecycleManager {
     // Update diagnostics
     this.diagnostics.set(agent.id, {
       agentId: agent.id,
-      status,
+      status: status as AgentStatus,
       memoryUsage: process.memoryUsage().heapUsed, // Simplified - in a real system, would measure per-agent
       cpuUsage: 0, // Simplified - in a real system, would measure per-agent
       stepCount: steps.length,

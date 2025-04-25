@@ -15,7 +15,6 @@ export class ServiceManager {
 
         try {
             const files = await fs.readdir(serviceDirectory);
-            console.log('Files in service directory',serviceDirectory,': ', files);
             for (const file of files) {
                 // Skip non-TS or non-JS files
                 if (!file.endsWith('.ts') && !file.endsWith('.js')) {

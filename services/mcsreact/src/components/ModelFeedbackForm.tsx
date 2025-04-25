@@ -12,6 +12,7 @@ import {
   Divider
 } from '@mui/material';
 import axios from 'axios';
+import { API_BASE_URL } from '../config';
 
 interface ModelFeedbackFormProps {
   modelName: string;
@@ -52,7 +53,7 @@ const ModelFeedbackForm: React.FC<ModelFeedbackFormProps> = ({
       setLoading(true);
       setError(null);
 
-      await axios.post('/brain/evaluations', {
+      await axios.post(`${API_BASE_URL}/brain/evaluations`, {
         modelName,
         conversationType,
         requestId,

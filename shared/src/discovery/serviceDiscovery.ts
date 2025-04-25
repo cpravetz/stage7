@@ -98,6 +98,20 @@ export class ServiceDiscovery {
       return cachedService.url;
     }
 
+    // Special case for PostOffice - return the environment variable or default
+    if (serviceName === 'PostOffice') {
+      const postOfficeUrl = process.env.POSTOFFICE_URL || 'postoffice:5020';
+      console.log(`Using hardcoded PostOffice URL: ${postOfficeUrl}`);
+
+      // Update cache
+      this.serviceCache.set(cacheKey, {
+        url: postOfficeUrl,
+        timestamp: Date.now()
+      });
+
+      return postOfficeUrl;
+    }
+
     try {
       // Query Consul for healthy service instances
       const response = await axios.get(

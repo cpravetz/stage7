@@ -14,8 +14,12 @@ export type OptimizationType = 'cost' | 'accuracy' | 'creativity' | 'speed' | 'c
 
 export class ModelManager {
     private models: Map<string, BaseModel> = new Map();
-    private performanceTracker: ModelPerformanceTracker;
+    public performanceTracker: ModelPerformanceTracker;
     private activeRequests: Map<string, { modelName: string, conversationType: LLMConversationType, startTime: number }> = new Map();
+
+    // Cache for model selection results
+    private modelSelectionCache: Map<string, { model: BaseModel, timestamp: number }> = new Map();
+    private readonly CACHE_TTL = 60 * 1000; // 1 minute in milliseconds for testing
 
     constructor() {
         this.performanceTracker = new ModelPerformanceTracker();
@@ -27,7 +31,6 @@ export class ModelManager {
 
         try {
             const files = await fs.readdir(modelsDirectory);
-            console.log('Files in models directory', modelsDirectory, ':', files);
             for (const file of files) {
                 if (!file.endsWith('.ts') && !file.endsWith('.js')) {
                     continue;
@@ -60,27 +63,85 @@ export class ModelManager {
     }
 
     selectModel(optimization: OptimizationType, conversationType: LLMConversationType): BaseModel | null {
+        console.log(`Selecting model for optimization: ${optimization}, conversationType: ${conversationType}`);
+
+        // Check cache first
+        const cacheKey = `${optimization}-${conversationType}`;
+        const cachedResult = this.modelSelectionCache.get(cacheKey);
+
+        if (cachedResult && (Date.now() - cachedResult.timestamp) < this.CACHE_TTL) {
+            console.log(`**** CACHE HIT **** Using cached model selection result: ${cachedResult.model.name}`);
+            console.log(`Cache age: ${Math.floor((Date.now() - cachedResult.timestamp) / 1000)} seconds`);
+            return cachedResult.model;
+        }
+
+        console.log(`**** CACHE MISS **** No cached result for key: ${cacheKey}`);
+
+        console.log(`Cache miss or expired. Selecting model from scratch.`);
+        console.log(`Total models loaded: ${this.models.size}`);
+
         // Get all available models that support the conversation type
         const availableModels = Array.from(this.models.values())
             .filter(model => {
+                console.log(`Evaluating model: ${model.name}, interface: ${model.interfaceName}, service: ${model.serviceName}`);
+
+                // Skip problematic models
+                if (model.name.toLowerCase() === 'hf/meta-llama/llama-3.2-3b-instruct') {
+                    console.log(`Skipping model ${model.name} because it's known to have issues`);
+                    return false;
+                }
+
+                // Skip OpenRouter models due to connection issues
+                if (model.interfaceName.toLowerCase() === 'openrouter') {
+                    console.log(`Skipping model ${model.name} because OpenRouter interface is having connection issues`);
+                    return false;
+                }
+
+                // Skip Anthropic models due to potential fees
+                if (model.name.toLowerCase().includes('anthropic') || model.name.toLowerCase().includes('claude')) {
+                    console.log(`Skipping model ${model.name} because it may incur fees`);
+                    return false;
+                }
+
+                // Skip OpenAI models due to potential fees
+                if (model.name.toLowerCase().includes('openai') || model.name.toLowerCase().includes('gpt')) {
+                    console.log(`Skipping model ${model.name} because it may incur fees`);
+                    return false;
+                }
+
                 // Check if model supports the conversation type
                 if (!model.contentConversation.includes(conversationType)) {
+                    console.log(`Skipping model ${model.name} because it doesn't support conversation type ${conversationType}`);
+                    return false;
+                }
+
+                // Check if model's interface is available
+                const interfaceInstance = interfaceManager.getInterface(model.interfaceName);
+                if (!interfaceInstance) {
+                    console.log(`Skipping model ${model.name} because interface ${model.interfaceName} is not available`);
                     return false;
                 }
 
                 // Check if model's service is available
                 const service = serviceManager.getService(model.serviceName);
-                if (!service || !service.isAvailable()) {
+                if (!service) {
+                    console.log(`Skipping model ${model.name} because service ${model.serviceName} is not found`);
+                    return false;
+                }
+
+                if (!service.isAvailable()) {
                     console.log(`Skipping model ${model.name} because service ${model.serviceName} is not available`);
+                    console.log(`Service details - apiKey: ${service.apiKey ? 'Set' : 'Not set'}, apiUrl: ${service.apiUrl}`);
                     return false;
                 }
 
-                // Check if model is available
-                if (!model.isAvailable()) {
-                    console.log(`Skipping model ${model.name} because it's not available`);
+                // Check if model is blacklisted
+                if (this.performanceTracker.isModelBlacklisted(model.name, conversationType)) {
+                    console.log(`Skipping model ${model.name} because it is blacklisted for ${conversationType}`);
                     return false;
                 }
 
+                console.log(`Model ${model.name} is available for selection`);
                 return true;
             });
 
@@ -90,14 +151,33 @@ export class ModelManager {
         }
 
         // Sort models by their score for the given optimization
-        availableModels.sort((a, b) => {
-            const scoreA = this.calculateScore(a, optimization, conversationType);
-            const scoreB = this.calculateScore(b, optimization, conversationType);
-            return scoreB - scoreA;
+        const scoredModels = availableModels.map(model => {
+            const score = this.calculateScore(model, optimization, conversationType);
+            return { model, score };
         });
 
-        console.log(`Selected model ${availableModels[0].name} for ${optimization} optimization and conversation type ${conversationType}`);
-        return availableModels[0];
+        // Sort by score (highest first)
+        scoredModels.sort((a, b) => b.score - a.score);
+
+        // No longer prioritizing specific models - using pure score-based selection
+        console.log(`Using score-based model selection. Top model: ${scoredModels.length > 0 ? scoredModels[0].model.name : 'none'}`);
+
+        // Return the highest-scoring model
+        if (scoredModels.length > 0) {
+            const selectedModel = scoredModels[0].model;
+            console.log(`Selected model ${selectedModel.name} for ${optimization} optimization and conversation type ${conversationType}`);
+
+            // Store in cache
+            this.modelSelectionCache.set(cacheKey, {
+                model: selectedModel,
+                timestamp: Date.now()
+            });
+
+            return selectedModel;
+        }
+
+        console.log('No suitable models found after scoring');
+        return null;
     }
 
     private calculateScore(model: BaseModel, optimization: OptimizationType, conversationType: LLMConversationType): number {
@@ -202,8 +282,24 @@ export class ModelManager {
         // Track response in performance tracker
         this.performanceTracker.trackResponse(requestId, response, tokenCount, success, error);
 
+        // If the request failed, clear the model selection cache
+        // This ensures we don't keep using a model that's failing
+        if (!success) {
+            console.log(`Request failed for model ${request.modelName}. Clearing model selection cache.`);
+            this.clearModelSelectionCache();
+        }
+
         // Remove active request
         this.activeRequests.delete(requestId);
+    }
+
+    /**
+     * Clear the model selection cache
+     * This should be called when a model is blacklisted or when model availability changes
+     */
+    private clearModelSelectionCache(): void {
+        console.log('Clearing model selection cache');
+        this.modelSelectionCache.clear();
     }
 
     /**
@@ -222,8 +318,8 @@ export class ModelManager {
      * @param metric Metric to rank by
      * @returns Ranked models
      */
-    getModelRankings(conversationType: LLMConversationType, metric: 'successRate' | 'averageLatency' | 'overall' = 'overall') {
-        return this.performanceTracker.getModelRankings(conversationType, metric);
+    getModelRankings(conversationType: LLMConversationType | string, metric: 'successRate' | 'averageLatency' | 'overall' = 'overall') {
+        return this.performanceTracker.getModelRankings(conversationType as LLMConversationType, metric);
     }
 
     /**
@@ -257,6 +353,21 @@ export class ModelManager {
         }
 
         return blacklistedModels;
+    }
+
+    /**
+     * Save performance data to disk
+     * @returns Promise that resolves when data is saved
+     */
+    async savePerformanceData(): Promise<void> {
+        return this.performanceTracker.savePerformanceData();
+    }
+
+    /**
+     * Reset all blacklisted models
+     */
+    resetAllBlacklists(): void {
+        return this.performanceTracker.resetAllBlacklists();
     }
 
     /**

@@ -3,6 +3,7 @@ import { analyzeError } from '@cktmcs/errorhandler';
 import axios from 'axios';
 import { Agent } from '../agents/Agent';
 import { AgentRole, PredefinedRoles } from './AgentRole';
+import { AuthenticatedApiClient, BaseEntity } from '@cktmcs/shared';
 
 /**
  * Agent specialization
@@ -55,11 +56,24 @@ export class SpecializationFramework {
   private agents: Map<string, Agent>;
   private librarianUrl: string;
   private brainUrl: string;
+  private authenticatedApi: AuthenticatedApiClient;
 
   constructor(agents: Map<string, Agent>, librarianUrl: string, brainUrl: string) {
     this.agents = agents;
     this.librarianUrl = librarianUrl;
     this.brainUrl = brainUrl;
+
+    // Create a temporary BaseEntity for authentication
+    const tempEntity = {
+      id: 'specialization-framework',
+      componentType: 'AgentSet',
+      url: 'agentset:5100',
+      port: '5100',
+      postOfficeUrl: 'postoffice:5020'
+    };
+
+    // Create authenticated API client
+    this.authenticatedApi = new AuthenticatedApiClient(tempEntity);
 
     // Initialize predefined roles
     for (const [id, role] of Object.entries(PredefinedRoles)) {
@@ -78,7 +92,7 @@ export class SpecializationFramework {
    */
   private async loadSpecializations(): Promise<void> {
     try {
-      const response = await axios.get(`http://${this.librarianUrl}/loadData`, {
+      const response = await this.authenticatedApi.get(`http://${this.librarianUrl}/loadData`, {
         params: {
           storageType: 'mongo',
           collection: 'agent_specializations'
@@ -104,7 +118,7 @@ export class SpecializationFramework {
     try {
       const specializations = Array.from(this.specializations.values());
 
-      await axios.post(`http://${this.librarianUrl}/storeData`, {
+      await this.authenticatedApi.post(`http://${this.librarianUrl}/storeData`, {
         id: 'agent_specializations',
         data: specializations,
         storageType: 'mongo',
@@ -123,7 +137,7 @@ export class SpecializationFramework {
    */
   private async loadKnowledgeDomains(): Promise<void> {
     try {
-      const response = await axios.get(`http://${this.librarianUrl}/loadData`, {
+      const response = await this.authenticatedApi.get(`http://${this.librarianUrl}/loadData`, {
         params: {
           storageType: 'mongo',
           collection: 'knowledge_domains'
@@ -149,7 +163,7 @@ export class SpecializationFramework {
     try {
       const domains = Array.from(this.knowledgeDomains.values());
 
-      await axios.post(`http://${this.librarianUrl}/storeData`, {
+      await this.authenticatedApi.post(`http://${this.librarianUrl}/storeData`, {
         id: 'knowledge_domains',
         data: domains,
         storageType: 'mongo',

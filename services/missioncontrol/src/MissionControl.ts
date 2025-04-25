@@ -3,7 +3,7 @@ import express from 'express';
 import { Request, Response, NextFunction } from 'express';
 import { AgentStatistics, Mission, Status } from '@cktmcs/shared';
 import { generateGuid } from './utils/generateGuid';
-import { BaseEntity, MessageType, PluginInput, MapSerializer } from '@cktmcs/shared';
+import { BaseEntity, MessageType, PluginInput, MapSerializer, ServiceTokenManager } from '@cktmcs/shared';
 import { MissionStatistics } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { rateLimit } from 'express-rate-limit';
@@ -17,6 +17,8 @@ interface CustomRequest extends Request {
     };
   }
 
+// NOTE: Don't use this directly - use this.authenticatedApi or this.getAuthenticatedAxios() instead
+// This is kept for backward compatibility only
 const api = axios.create({
     headers: {
       'Content-Type': 'application/json',
@@ -29,11 +31,21 @@ class MissionControl extends BaseEntity {
     private clientMissions: Map<string, Set<string>> = new Map();
     private trafficManagerUrl: string = process.env.TRAFFICMANAGER_URL || 'trafficmanager:5080';
     private librarianUrl: string = process.env.LIBRARIAN_URL || 'librarian:5040';
-    private brainUrl: string = process.env.BRAIN_URL || 'brain:5060';
+    private brainUrl: string = process.env.BRAIN_URL || 'brain:5070';
     private engineerUrl: string = process.env.ENGINEER_URL || 'engineer:5050';
 
     constructor() {
         super('MissionControl', 'MissionControl', process.env.HOST || 'missioncontrol', process.env.PORT || '5050');
+
+        // Initialize token manager for service-to-service authentication
+        const serviceId = 'MissionControl';
+        const serviceSecret = process.env.CLIENT_SECRET || 'stage7AuthSecret';
+        this.tokenManager = ServiceTokenManager.getInstance(
+            `http://${this.securityManagerUrl}`,
+            serviceId,
+            serviceSecret
+        );
+
         this.initializeServer();
         setInterval(() => this.getAndPushAgentStatistics(), 5000);
     }
@@ -47,20 +59,21 @@ class MissionControl extends BaseEntity {
         }));
         app.use(express.json());
 
-        // Use the BaseEntity verifyToken method for authentication
+        // Use authentication middleware from BaseEntity
         app.use((req: Request, res: Response, next: NextFunction) => {
-            // Skip authentication for health endpoints
-            if (req.path === '/health' || req.path === '/ready') {
-                return next();
-            }
-
-            // Use the BaseEntity verifyToken method
             this.verifyToken(req, res, next);
         });
 
         app.post('/message', (req, res) => {
-            this.handleMessage(req, res).catch(error => {
+            this.handleMessage(req, res).catch((error: any) => {
                 console.error('Error in handleMessage:', error);
+                res.status(500).send({ error: 'Internal server error' });
+            });
+        });
+
+        app.post('/agentStatisticsUpdate', (req, res) => {
+            this.handleAgentStatisticsUpdate(req, res).catch((error: any) => {
+                console.error('Error in handleAgentStatisticsUpdate:', error);
                 res.status(500).send({ error: 'Internal server error' });
             });
         });
@@ -80,16 +93,17 @@ class MissionControl extends BaseEntity {
             // Special handling for CREATE_MISSION messages
             if (req.body.type === 'CREATE_MISSION') {
                 try {
-                    const { content, clientId } = req.body;
-                    const userId = (req as any).user?.id || 'system';
+                    const { content, clientId, userId } = req.body;
+                    // Use userId from message payload if available, otherwise fall back to req.user or 'system'
+                    const effectiveUserId = userId || (req as any).user?.id || 'system';
 
                     // TEMPORARY: Add debug logging
                     console.log('Creating mission with content:', content);
                     console.log('Client ID:', clientId);
-                    console.log('User ID:', userId);
+                    console.log('User ID:', effectiveUserId);
 
                     // Create the mission
-                    const mission = await this.createMission(content, clientId, userId);
+                    const mission = await this.createMission(content, clientId, effectiveUserId);
                     console.log(`Mission created successfully: ${mission.id}`);
 
                     return res.status(200).send({
@@ -110,6 +124,8 @@ class MissionControl extends BaseEntity {
             }
 
             // For other message types
+            // Pass both the user from req.user and the message itself to processMessage
+            // so it can extract userId from either source
             const result = await this.processMessage(req.body, (req as any).user);
             console.log(`Message processed successfully, result:`, result);
             res.status(200).send({ message: 'Message processed successfully', result });
@@ -140,12 +156,14 @@ class MissionControl extends BaseEntity {
             console.log(`Queue message of type ${message.type} processed successfully, result:`, result);
 
             // If the message has a replyTo field, send a response back to the queue
-            if (message.replyTo && this.mqClient) {
+            if (message.replyTo && this.mqClient && this.mqClient.isConnected()) {
                 try {
                     await this.mqClient.publishMessage('stage7', message.replyTo, {
                         type: 'RESPONSE',
                         correlationId: message.correlationId,
                         content: result
+                    }, {
+                        correlationId: message.correlationId
                     });
                     console.log(`Sent response to ${message.replyTo} for message ${message.correlationId}`);
                 } catch (replyError) {
@@ -160,7 +178,7 @@ class MissionControl extends BaseEntity {
             }
 
             // If the message has a replyTo field, send an error response back to the queue
-            if (message && message.replyTo && this.mqClient) {
+            if (message && message.replyTo && this.mqClient && this.mqClient.isConnected()) {
                 try {
                     await this.mqClient.publishMessage('stage7', message.replyTo, {
                         type: 'ERROR',
@@ -169,6 +187,8 @@ class MissionControl extends BaseEntity {
                             error: error instanceof Error ? error.message : 'Unknown error',
                             status: 'error'
                         }
+                    }, {
+                        correlationId: message.correlationId
                     });
                 } catch (replyError) {
                     console.error('Error sending error reply to queue:', replyError);
@@ -179,15 +199,19 @@ class MissionControl extends BaseEntity {
 
     // Common message processing logic for both HTTP and queue messages
     private async processMessage(message: any, user: any) {
-        const { type, sender, content, clientId } = message;
+        const { type, sender, content, clientId, userId } = message;
         console.log(`Processing message from user:`, user);
         const missionId = message.missionId ? message.missionId : (message.content?.missionId ? message.content.missionId : null);
         console.log(`Processing message of type ${type} from ${sender} for mission ${missionId}`);
 
+        // Use userId from message if available, otherwise fall back to user.id or 'system'
+        const effectiveUserId = userId || (user && user.id) || 'system';
+        console.log(`Using effectiveUserId: ${effectiveUserId}`);
+
         let result;
         switch (type) {
             case MessageType.CREATE_MISSION:
-                result = await this.createMission(content, clientId, user.id);
+                result = await this.createMission(content, clientId, effectiveUserId);
                 return { missionId: result?.id, status: result?.status };
             case MessageType.PAUSE:
                 if (missionId) {
@@ -216,7 +240,7 @@ class MissionControl extends BaseEntity {
                 }
                 break;
             case MessageType.LOAD:
-                const loadedMission = await this.loadMission(missionId, clientId, user.id);
+                const loadedMission = await this.loadMission(missionId, clientId, effectiveUserId);
                 return { missionId, status: 'loaded', mission: loadedMission };
             case MessageType.USER_MESSAGE:
                 await this.handleUserMessage(content, clientId, missionId);
@@ -280,7 +304,8 @@ class MissionControl extends BaseEntity {
 
             // Create the agent through TrafficManager
             console.log(`Sending createAgent request to TrafficManager for mission ${mission.id}`);
-            const createAgentResponse = await api.post(`http://${this.trafficManagerUrl}/createAgent`, {
+
+            const createAgentResponse = await this.authenticatedApi.post(`http://${this.trafficManagerUrl}/createAgent`, {
                 actionVerb: 'ACCOMPLISH',
                 inputs: serializedInputs,
                 missionId: mission.id,
@@ -321,7 +346,7 @@ class MissionControl extends BaseEntity {
         const mission = this.missions.get(missionId);
         if (mission) {
             mission.status = Status.PAUSED;
-            await api.post(`http://${this.trafficManagerUrl}/pauseAgents`, { missionId: missionId });
+            await this.authenticatedApi.post(`http://${this.trafficManagerUrl}/pauseAgents`, { missionId: missionId });
             this.sendStatusUpdate(mission, 'Mission paused');
         } else {
             console.error('Mission to pause not found:', missionId);
@@ -330,7 +355,7 @@ class MissionControl extends BaseEntity {
 
     private async clearActionPlanCache() {
         try {
-            await api.delete(`http://${this.librarianUrl}/deleteCollection`, {
+            await this.authenticatedApi.delete(`http://${this.librarianUrl}/deleteCollection`, {
                 params: {
                     collection: 'actionPlans'
                 }
@@ -346,7 +371,7 @@ class MissionControl extends BaseEntity {
         const mission = this.missions.get(missionId);
         if (mission) {
             mission.status = Status.RUNNING;
-            await api.post(`http://${this.trafficManagerUrl}/resumeAgents`, { missionId: missionId });
+            await this.authenticatedApi.post(`http://${this.trafficManagerUrl}/resumeAgents`, { missionId: missionId });
             this.sendStatusUpdate(mission, 'Mission resumed');
         } else {
             console.error('Mission to resume not found:', missionId);
@@ -357,7 +382,7 @@ class MissionControl extends BaseEntity {
         const mission = this.missions.get(missionId);
         if (mission) {
             mission.status = Status.ABORTED;
-            await api.post(`http://${this.trafficManagerUrl}/abortAgents`, { missionId: missionId });
+            await this.authenticatedApi.post(`http://${this.trafficManagerUrl}/abortAgents`, { missionId: missionId });
             this.sendStatusUpdate(mission, 'Mission aborted');
             this.missions.delete(missionId);
             for (const [clientId, missionIds] of this.clientMissions.entries()) {
@@ -388,7 +413,7 @@ class MissionControl extends BaseEntity {
             this.missions.set(missionId, mission);
 
             console.log(`Loading agents for mission ${missionId} from TrafficManager`);
-            const loadAgentsResponse = await api.post(`http://${this.trafficManagerUrl}/loadAgents`, { missionId });
+            const loadAgentsResponse = await this.authenticatedApi.post(`http://${this.trafficManagerUrl}/loadAgents`, { missionId });
             console.log(`TrafficManager loadAgents response:`, loadAgentsResponse.data);
 
             this.addClientMission(clientId, missionId);
@@ -412,7 +437,7 @@ class MissionControl extends BaseEntity {
         try {
             if (missionName) mission.name = missionName;
             await this.saveMissionState(mission);
-            await api.post(`http://${this.trafficManagerUrl}/saveAgents`, { missionId });
+            await this.authenticatedApi.post(`http://${this.trafficManagerUrl}/saveAgents`, { missionId });
             console.log(`Mission saved: ${missionId}, Name: ${mission.name || 'Unnamed'}`);
             this.sendStatusUpdate(mission, `Mission saved: ${mission.name || 'Unnamed'}`);
         } catch (error) { analyzeError(error as Error);
@@ -429,7 +454,7 @@ class MissionControl extends BaseEntity {
 
         try {
             // Send the user message to the TrafficManager for distribution
-            await api.post(`http://${this.trafficManagerUrl}/distributeUserMessage`, {
+            await this.authenticatedApi.post(`http://${this.trafficManagerUrl}/distributeUserMessage`, {
                 type: MessageType.USER_MESSAGE,
                 sender: 'user',
                 recipient: 'agents',
@@ -453,7 +478,7 @@ class MissionControl extends BaseEntity {
 
     private async saveMissionState(mission: Mission) {
         try {
-            await api.post(`http://${this.librarianUrl}/storeData`, {
+            await this.authenticatedApi.post(`http://${this.librarianUrl}/storeData`, {
                 id: mission.id,
                 userId: mission.userId,
                 data: mission,
@@ -467,7 +492,7 @@ class MissionControl extends BaseEntity {
 
     private async loadMissionState(missionId: string): Promise<Mission | null> {
         try {
-            const response = await api.get(`http://${this.librarianUrl}/loadData/${missionId}`, {
+            const response = await this.authenticatedApi.get(`http://${this.librarianUrl}/loadData/${missionId}`, {
                 params: {
                     storageType: 'mongo',
                     collection: 'missions'
@@ -496,38 +521,127 @@ class MissionControl extends BaseEntity {
 
         for (const [clientId, missionIds] of this.clientMissions.entries()) {
             if (missionIds.has(mission.id)) {
-                api.post(`http://${this.postOfficeUrl}/message`, {
+                this.authenticatedApi.post(`http://${this.postOfficeUrl}/message`, {
                     type: MessageType.STATUS_UPDATE,
                     sender: this.id,
                     recipient: 'user',
                     clientId: clientId,
                     data: statusUpdate
-                }).catch(error => {
+                }).catch((error: any) => {
                     console.error(`Error sending status update to client ${clientId}:`, error instanceof Error ? error.message : error);
                 });
             }
         }
     }
 
+    /**
+     * Handle agent statistics updates from TrafficManager
+     * @param req Request
+     * @param res Response
+     */
+    private async handleAgentStatisticsUpdate(req: express.Request, res: express.Response) {
+        try {
+            const { agentId, missionId, statistics, timestamp } = req.body;
+
+            console.log(`Received statistics update for agent ${agentId} in mission ${missionId}`);
+
+            // Store the statistics for this agent
+            // For now, we'll just log them and rely on the getAndPushAgentStatistics method
+            // to fetch the latest statistics from TrafficManager when needed
+            console.log(`Agent ${agentId} statistics:`, JSON.stringify(statistics, null, 2));
+
+            // Find the clients associated with this mission
+            if (missionId) {
+                for (const [clientId, missionIds] of this.clientMissions.entries()) {
+                    if (missionIds.has(missionId)) {
+                        console.log(`Found client ${clientId} for mission ${missionId}, sending statistics update`);
+                        // Push statistics directly to this client
+                        try {
+                            const [llmCallsResponse, engineerStatisticsResponse] = await Promise.all([
+                                this.authenticatedApi.get(`http://${this.brainUrl}/getLLMCalls`).catch((error: any) => {
+                                    console.warn('Failed to fetch LLM calls:', error instanceof Error ? error.message : error);
+                                    return { data: { llmCalls: 0 } };
+                                }),
+                                this.authenticatedApi.get(`http://${this.engineerUrl}/statistics`).catch((error: any) => {
+                                    console.warn('Failed to fetch engineer statistics:', error instanceof Error ? error.message : error);
+                                    return { data: { newPlugins: [] } };
+                                })
+                            ]);
+
+                            // Get agent statistics from TrafficManager
+                            const trafficManagerResponse = await this.authenticatedApi.get(`http://${this.trafficManagerUrl}/getAgentStatistics/${missionId}`);
+                            const trafficManagerStatistics = trafficManagerResponse.data;
+
+                            // Create mission statistics
+                            const missionStats: MissionStatistics = {
+                                llmCalls: llmCallsResponse.data.llmCalls,
+                                agentCountByStatus: trafficManagerStatistics.agentStatisticsByType.agentCountByStatus,
+                                agentStatistics: MapSerializer.transformForSerialization(trafficManagerStatistics.agentStatisticsByStatus),
+                                engineerStatistics: engineerStatisticsResponse.data
+                            };
+
+                            // Send statistics to client
+                            await this.authenticatedApi.post(`http://${this.postOfficeUrl}/message`, {
+                                type: MessageType.STATISTICS,
+                                sender: this.id,
+                                recipient: 'user',
+                                clientId: clientId, // Include clientId
+                                content: missionStats
+                            });
+                            console.log(`Statistics update sent to client ${clientId} for mission ${missionId}`);
+                        } catch (error) {
+                            console.error(`Error sending statistics to client ${clientId}:`, error instanceof Error ? error.message : error);
+                        }
+                    }
+                }
+            }
+
+            res.status(200).send({ message: 'Agent statistics updated successfully.' });
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error('Error updating agent statistics:', error instanceof Error ? error.message : error);
+            res.status(500).send({ error: 'Failed to update agent statistics' });
+        }
+    }
+
     private async getAndPushAgentStatistics() {
         try {
+            console.log('Fetching agent statistics...');
             const [llmCallsResponse, engineerStatisticsResponse] = await Promise.all([
-                api.get(`http://${this.brainUrl}/getLLMCalls`).catch(error => {
+                this.authenticatedApi.get(`http://${this.brainUrl}/getLLMCalls`).catch((error: any) => {
                     console.warn('Failed to fetch LLM calls:', error instanceof Error ? error.message : error);
-                    return { data: { llmCalls: null } };
+                    return { data: { llmCalls: 0 } };
                 }),
                 this.authenticatedApi.get(`http://${this.engineerUrl}/statistics`).catch((error: any) => {
                     console.warn('Failed to fetch engineer statistics:', error instanceof Error ? error.message : error);
-                    return { data: null };
+                    return { data: { newPlugins: [] } };
                 })
             ]);
 
-            for (const [clientId, missionIds] of this.clientMissions.entries()) {
-                for (const missionId of missionIds) {
-                    const mission = this.missions.get(missionId);
-                    if (!mission) continue;
+            console.log(`Received LLM calls count: ${llmCallsResponse.data.llmCalls}`);
+            console.log(`Received engineer statistics: ${JSON.stringify(engineerStatisticsResponse.data)}`);
 
-                    const trafficManagerResponse = await api.get(`http://${this.trafficManagerUrl}/getAgentStatistics/${missionId}`);
+            // Check if we have any client missions
+            if (this.clientMissions.size === 0) {
+                console.log('No client missions found, skipping statistics update');
+                return;
+            }
+
+            console.log(`Found ${this.clientMissions.size} client(s) with missions`);
+
+            for (const [clientId, missionIds] of this.clientMissions.entries()) {
+                console.log(`Processing statistics for client ${clientId} with ${missionIds.size} mission(s)`);
+
+                for (const missionId of missionIds) {
+                    console.log(`Fetching statistics for mission ${missionId}`);
+                    const mission = this.missions.get(missionId);
+                    if (!mission) {
+                        console.log(`Mission ${missionId} not found, skipping`);
+                        continue;
+                    }
+
+                    console.log(`Fetching agent statistics from TrafficManager for mission ${missionId}`);
+                    const trafficManagerResponse = await this.authenticatedApi.get(`http://${this.trafficManagerUrl}/getAgentStatistics/${missionId}`);
                     const trafficManagerStatistics = trafficManagerResponse.data;
                     trafficManagerStatistics.agentStatisticsByStatus = MapSerializer.transformFromSerialization(trafficManagerStatistics.agentStatisticsByStatus);
 
@@ -549,17 +663,24 @@ class MissionControl extends BaseEntity {
                         engineerStatistics: engineerStatisticsResponse.data
                     };
 
-                    await api.post(`http://${this.postOfficeUrl}/message`, {
+                    console.log(`Sending statistics update to PostOffice for client ${clientId}`);
+                    console.log(`Statistics summary: LLM calls: ${missionStats.llmCalls}, Agent count: ${Object.values(missionStats.agentCountByStatus || {}).reduce((sum, count) => sum + count, 0)}`);
+
+                    await this.authenticatedApi.post(`http://${this.postOfficeUrl}/message`, {
                         type: MessageType.STATISTICS,
                         sender: this.id,
                         recipient: 'user',
-                        clientId: clientId,
+                        clientId: clientId, // Make sure clientId is included
                         content: missionStats
                     });
+                    console.log(`Statistics update sent to PostOffice for client ${clientId}`);
                 }
             }
         } catch (error) { analyzeError(error as Error);
             console.error('Error fetching and pushing agent statistics:', error instanceof Error ? error.message : error);
+            if (error instanceof Error && error.stack) {
+                console.error(error.stack);
+            }
         }
     }
 

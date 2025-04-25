@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { analyzeError } from '@cktmcs/errorhandler';
 import axios from 'axios';
 import { KnowledgeDomain } from './SpecializationFramework';
+import { AuthenticatedApiClient, BaseEntity } from '@cktmcs/shared';
 
 /**
  * Knowledge item
@@ -39,11 +40,24 @@ export class DomainKnowledge {
   private domains: Map<string, KnowledgeDomain>;
   private librarianUrl: string;
   private brainUrl: string;
+  private authenticatedApi: AuthenticatedApiClient;
 
   constructor(domains: Map<string, KnowledgeDomain>, librarianUrl: string, brainUrl: string) {
     this.domains = domains;
     this.librarianUrl = librarianUrl;
     this.brainUrl = brainUrl;
+
+    // Create a temporary BaseEntity for authentication
+    const tempEntity = {
+      id: 'domain-knowledge',
+      componentType: 'AgentSet',
+      url: 'agentset:5100',
+      port: '5100',
+      postOfficeUrl: 'postoffice:5020'
+    };
+
+    // Create authenticated API client
+    this.authenticatedApi = new AuthenticatedApiClient(tempEntity);
 
     this.loadKnowledgeItems();
   }
@@ -53,7 +67,7 @@ export class DomainKnowledge {
    */
   private async loadKnowledgeItems(): Promise<void> {
     try {
-      const response = await axios.get(`http://${this.librarianUrl}/loadData`, {
+      const response = await this.authenticatedApi.get(`http://${this.librarianUrl}/loadData`, {
         params: {
           storageType: 'mongo',
           collection: 'domain_knowledge'
@@ -79,7 +93,7 @@ export class DomainKnowledge {
     try {
       const items = Array.from(this.knowledgeItems.values());
 
-      await axios.post(`http://${this.librarianUrl}/storeData`, {
+      await this.authenticatedApi.post(`http://${this.librarianUrl}/storeData`, {
         id: 'domain_knowledge',
         data: items,
         storageType: 'mongo',
@@ -299,22 +313,8 @@ export class DomainKnowledge {
     }
 
     try {
-      // Import AuthenticatedApiClient
-      const { AuthenticatedApiClient } = require('@cktmcs/shared');
-
-      // Create a temporary BaseEntity for authentication
-      const tempEntity = {
-        id: 'domain-knowledge-' + Date.now(),
-        componentType: 'AgentSet',
-        url: 'agentset:5100',
-        port: '5100'
-      };
-
-      // Create authenticated API client
-      const authenticatedApi = new AuthenticatedApiClient(tempEntity);
-
       // Use LLM to determine relevance with authenticated request
-      const response = await authenticatedApi.post(`http://${this.brainUrl}/chat`, {
+      const response = await this.authenticatedApi.post(`http://${this.brainUrl}/chat`, {
         exchanges: [
           {
             role: 'system',
@@ -389,22 +389,8 @@ export class DomainKnowledge {
         throw new Error(`Unsupported format: ${format}`);
       }
 
-      // Import AuthenticatedApiClient if not already imported
-      const { AuthenticatedApiClient } = require('@cktmcs/shared');
-
-      // Create a temporary BaseEntity for authentication
-      const tempEntity = {
-        id: 'domain-knowledge-import-' + Date.now(),
-        componentType: 'AgentSet',
-        url: 'agentset:5100',
-        port: '5100'
-      };
-
-      // Create authenticated API client
-      const authenticatedApi = new AuthenticatedApiClient(tempEntity);
-
       // Use LLM to extract knowledge items with authenticated request
-      const response = await authenticatedApi.post(`http://${this.brainUrl}/chat`, {
+      const response = await this.authenticatedApi.post(`http://${this.brainUrl}/chat`, {
         exchanges: [
           {
             role: 'system',

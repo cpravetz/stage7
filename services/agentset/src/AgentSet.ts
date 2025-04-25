@@ -2,7 +2,8 @@ import express from 'express';
 import { Agent } from './agents/Agent';
 import { MapSerializer, BaseEntity } from '@cktmcs/shared';
 import { v4 as uuidv4 } from 'uuid';
-import { AgentSetStatistics, AgentStatistics, PluginInput } from '@cktmcs/shared';
+import axios from 'axios';
+import { AgentSetStatistics, PluginInput } from '@cktmcs/shared';
 import { AgentPersistenceManager } from './utils/AgentPersistenceManager';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { setInterval } from 'timers';
@@ -11,15 +12,14 @@ import { CollaborationManager } from './collaboration/CollaborationManager';
 import { SpecializationFramework } from './specialization/SpecializationFramework';
 import { DomainKnowledge } from './specialization/DomainKnowledge';
 
-const app = express();
-
 export class AgentSet extends BaseEntity {
     agents: Map<string, Agent> = new Map(); // Store agents by their ID
     maxAgents: number = 10; // Example limit for agents in this set
     persistenceManager: AgentPersistenceManager = new AgentPersistenceManager();
     private trafficManagerUrl: string = process.env.TRAFFICMANAGER_URL || 'trafficmanager:5080';
     private librarianUrl: string = process.env.LIBRARIAN_URL || 'librarian:5040';
-    private brainUrl: string = process.env.BRAIN_URL || 'brain:5060';
+    private brainUrl: string = process.env.BRAIN_URL || 'brain:5070';
+    private app: express.Application;
 
 
     // Agent systems
@@ -29,11 +29,21 @@ export class AgentSet extends BaseEntity {
     private domainKnowledge: DomainKnowledge;
 
     constructor() {
-        super(uuidv4(), 'AgentSet', process.env.HOST || 'agentset', process.env.PORT || '5100');
+        // Use a fixed ID for the AgentSet to avoid multiple registrations
+        super('primary-agentset', 'AgentSet', process.env.HOST || 'agentset', process.env.PORT || '5100');
+
+        // Initialize Express app
+        this.app = express();
 
         // Initialize agent systems
         this.lifecycleManager = new AgentLifecycleManager(this.persistenceManager, this.trafficManagerUrl);
-        this.collaborationManager = new CollaborationManager(this.agents, this.librarianUrl, this.trafficManagerUrl, this.brainUrl);
+        this.collaborationManager = new CollaborationManager(
+            this.agents,
+            this.librarianUrl,
+            this.trafficManagerUrl,
+            this.brainUrl,
+            this.authenticatedApi
+        );
         this.specializationFramework = new SpecializationFramework(this.agents, this.librarianUrl, this.brainUrl);
         const knowledgeDomainsArray = this.specializationFramework.getAllKnowledgeDomains();
         const knowledgeDomainsMap = new Map(knowledgeDomainsArray.map(domain => [domain.id, domain]));
@@ -47,37 +57,64 @@ export class AgentSet extends BaseEntity {
                 global.gc();
             }
         }, 5 * 60 * 1000);
+
+        // Log that we're using a fixed ID
+        console.log(`AgentSet initialized with fixed ID: primary-agentset`);
     }
 
 
     // Initialize Express server to manage agent lifecycle
     private initializeServer() {
-        app.use(express.json());
-
-        // Use the BaseEntity verifyToken method for authentication
-        app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
-            // Skip authentication for health endpoints
-            if (req.path === '/health' || req.path === '/ready') {
-                return next();
-            }
-
-            // Use the BaseEntity verifyToken method
-            this.verifyToken(req, res, next);
+        // Add health check endpoints directly to the app
+        this.app.get('/healthy', (req: express.Request, res: express.Response) => {
+            console.log('Received request to /healthy endpoint');
+            res.status(200).json({
+                status: 'ok',
+                timestamp: new Date().toISOString(),
+                message: 'AgentSet service is running'
+            });
         });
 
-        app.post('/message', (req, res) => this.handleMessage(req, res));
+        this.app.get('/health', (req: express.Request, res: express.Response) => {
+            console.log('Received request to /health endpoint');
+            res.status(200).json({
+                status: 'healthy',
+                timestamp: new Date().toISOString(),
+                message: 'AgentSet service is healthy',
+                agentCount: this.agents.size
+            });
+        });
+
+        this.app.get('/ready', (req: express.Request, res: express.Response) => {
+            console.log('Received request to /ready endpoint');
+            res.status(200).json({
+                ready: true,
+                timestamp: new Date().toISOString(),
+                message: 'AgentSet service is ready',
+                registeredWithPostOffice: this.registeredWithPostOffice
+            });
+        });
+
+        // Apply JSON parsing middleware
+        this.app.use(express.json());
+
+        // Apply authentication middleware to all routes
+        // The BaseEntity.verifyToken method already handles skipping authentication for health check endpoints
+        this.app.use((req: express.Request, res: express.Response, next: express.NextFunction) => this.verifyToken(req, res, next));
+
+        this.app.post('/message', (req: express.Request, res: express.Response) => this.handleMessage(req, res));
 
         // Add a new agent to the set
-        app.post('/addAgent', (req, res) => this.addAgent(req, res));
+        this.app.post('/addAgent', (req: express.Request, res: express.Response) => this.addAgent(req, res));
 
-        app.post('/agent/:agentId/message', (req, res) => this.handleAgentMessage(req, res));
+        this.app.post('/agent/:agentId/message', (req: express.Request, res: express.Response) => this.handleAgentMessage(req, res));
 
-        app.get('/agent/:agentId', (req, res) => this.getAgent(req, res));
+        this.app.get('/agent/:agentId', (req: express.Request, res: express.Response) => this.getAgent(req, res));
 
-        app.get('/agent/:agentId/output', (req, res) => this.getAgentOutput(req, res));
+        this.app.get('/agent/:agentId/output', (req: express.Request, res: express.Response) => this.getAgentOutput(req, res));
 
         // Pause mission agents
-        app.post('/pauseAgents', async (req, res) => {
+        this.app.post('/pauseAgents', async (req: express.Request, res: express.Response) => {
             const { missionId } = req.body;
             console.log(`Agentset Pausing agents for mission ${missionId}`);
             const agents = Array.from(this.agents.values()).filter(agent => agent.getMissionId() === missionId);
@@ -91,7 +128,7 @@ export class AgentSet extends BaseEntity {
         // ===== Agent Lifecycle Management Endpoints =====
 
         // Pause an agent
-        app.post('/agent/:agentId/pause', async (req, res) => {
+        this.app.post('/agent/:agentId/pause', async (req: express.Request, res: express.Response) => {
             try {
                 const { agentId } = req.params;
                 await this.lifecycleManager.pauseAgent(agentId);
@@ -103,7 +140,7 @@ export class AgentSet extends BaseEntity {
         });
 
         // Resume an agent
-        app.post('/agent/:agentId/resume', async (req, res) => {
+        this.app.post('/agent/:agentId/resume', async (req: express.Request, res: express.Response) => {
             try {
                 const { agentId } = req.params;
                 await this.lifecycleManager.resumeAgent(agentId);
@@ -115,7 +152,7 @@ export class AgentSet extends BaseEntity {
         });
 
         // Create a checkpoint for an agent
-        app.post('/agent/:agentId/checkpoint', async (req, res) => {
+        this.app.post('/agent/:agentId/checkpoint', async (req: express.Request, res: express.Response) => {
             try {
                 const { agentId } = req.params;
                 await this.lifecycleManager.createCheckpoint(agentId);
@@ -127,7 +164,7 @@ export class AgentSet extends BaseEntity {
         });
 
         // Create a new version of an agent
-        app.post('/agent/:agentId/version', async (req, res) => {
+        this.app.post('/agent/:agentId/version', async (req: express.Request, res: express.Response) => {
             try {
                 const { agentId } = req.params;
                 const { description, changes } = req.body;
@@ -140,7 +177,7 @@ export class AgentSet extends BaseEntity {
         });
 
         // Restore an agent to a specific version
-        app.post('/agent/:agentId/restore/:version', async (req, res) => {
+        this.app.post('/agent/:agentId/restore/:version', async (req: express.Request, res: express.Response) => {
             try {
                 const { agentId, version } = req.params;
                 await this.lifecycleManager.restoreVersion(agentId, version);
@@ -152,7 +189,7 @@ export class AgentSet extends BaseEntity {
         });
 
         // Migrate an agent to another agent set
-        app.post('/agent/:agentId/migrate', async (req, res) => {
+        this.app.post('/agent/:agentId/migrate', async (req: express.Request, res: express.Response) => {
             try {
                 const { agentId } = req.params;
                 const { targetAgentSetUrl } = req.body;
@@ -165,7 +202,7 @@ export class AgentSet extends BaseEntity {
         });
 
         // Get lifecycle events for an agent
-        app.get('/agent/:agentId/lifecycle/events', (req, res) => {
+        this.app.get('/agent/:agentId/lifecycle/events', (req: express.Request, res: express.Response) => {
             try {
                 const { agentId } = req.params;
                 const events = this.lifecycleManager.getLifecycleEvents(agentId);
@@ -177,7 +214,7 @@ export class AgentSet extends BaseEntity {
         });
 
         // Get versions for an agent
-        app.get('/agent/:agentId/versions', (req, res) => {
+        this.app.get('/agent/:agentId/versions', (req: express.Request, res: express.Response) => {
             try {
                 const { agentId } = req.params;
                 const versions = this.lifecycleManager.getAgentVersions(agentId);
@@ -189,7 +226,7 @@ export class AgentSet extends BaseEntity {
         });
 
         // Get diagnostics for an agent
-        app.get('/agent/:agentId/diagnostics', (req, res) => {
+        this.app.get('/agent/:agentId/diagnostics', (req: express.Request, res: express.Response) => {
             try {
                 const { agentId } = req.params;
                 const diagnostics = this.lifecycleManager.getAgentDiagnostics(agentId);
@@ -201,7 +238,7 @@ export class AgentSet extends BaseEntity {
         });
 
         // Get all agent diagnostics
-        app.get('/diagnostics', (req, res) => {
+        this.app.get('/diagnostics', (_req: express.Request, res: express.Response) => {
             try {
                 const diagnostics = this.lifecycleManager.getAllAgentDiagnostics();
                 res.status(200).send({ diagnostics });
@@ -214,7 +251,7 @@ export class AgentSet extends BaseEntity {
         // ===== Agent Collaboration Endpoints =====
 
         // Delegate a task to an agent
-        app.post('/delegateTask', async (req, res) => {
+        this.app.post('/delegateTask', async (req: express.Request, res: express.Response) => {
             try {
                 const { delegatorId, recipientId, request } = req.body;
                 const response = await this.collaborationManager.getTaskDelegation().delegateTask(delegatorId, recipientId, request);
@@ -226,7 +263,7 @@ export class AgentSet extends BaseEntity {
         });
 
         // Update task status
-        app.post('/taskUpdate', async (req, res) => {
+       this.app.post('/taskUpdate', async (req: express.Request, res: express.Response) => {
             try {
                 const { taskId, status, result, error } = req.body;
                 await this.collaborationManager.getTaskDelegation().updateTaskStatus(taskId, status, result, error);
@@ -238,7 +275,7 @@ export class AgentSet extends BaseEntity {
         });
 
         // Submit a vote for a conflict
-        app.post('/conflictVote', async (req, res) => {
+       this.app.post('/conflictVote', async (req: express.Request, res: express.Response) => {
             try {
                 const { conflictId, agentId, vote, explanation } = req.body;
                 await this.collaborationManager.getConflictResolution().submitVote(conflictId, agentId, vote, explanation);
@@ -250,7 +287,7 @@ export class AgentSet extends BaseEntity {
         });
 
         // Resolve a conflict
-        app.post('/resolveConflict', async (req, res) => {
+       this.app.post('/resolveConflict', async (req: express.Request, res: express.Response) => {
             try {
                 const { conflictId } = req.body;
                 await this.collaborationManager.getConflictResolution().resolveConflict(conflictId);
@@ -262,7 +299,7 @@ export class AgentSet extends BaseEntity {
         });
 
         // Get conflicts involving an agent
-        app.get('/agent/:agentId/conflicts', (req, res) => {
+       this.app.get('/agent/:agentId/conflicts', (req: express.Request, res: express.Response) => {
             try {
                 const { agentId } = req.params;
                 const conflicts = this.collaborationManager.getConflictResolution().getConflictsInvolvingAgent(agentId);
@@ -274,7 +311,7 @@ export class AgentSet extends BaseEntity {
         });
 
         // Get unresolved conflicts
-        app.get('/conflicts/unresolved', (req, res) => {
+        this.app.get('/conflicts/unresolved', (req: express.Request, res: express.Response) => {
             try {
                 const conflicts = this.collaborationManager.getConflictResolution().getUnresolvedConflicts();
                 res.status(200).send({ conflicts });
@@ -287,7 +324,7 @@ export class AgentSet extends BaseEntity {
         // ===== Agent Specialization Endpoints =====
 
         // Assign a role to an agent
-        app.post('/agent/:agentId/role', async (req, res) => {
+       this.app.post('/agent/:agentId/role', async (req: express.Request, res: express.Response) => {
             try {
                 const { agentId } = req.params;
                 const { roleId, customizations } = req.body;
@@ -300,7 +337,7 @@ export class AgentSet extends BaseEntity {
         });
 
         // Get agent specialization
-        app.get('/agent/:agentId/specialization', (req, res) => {
+       this.app.get('/agent/:agentId/specialization', (req: express.Request, res: express.Response) => {
             try {
                 const { agentId } = req.params;
                 const specialization = this.specializationFramework.getAgentSpecialization(agentId);
@@ -312,7 +349,7 @@ export class AgentSet extends BaseEntity {
         });
 
         // Get agents with a specific role
-        app.get('/role/:roleId/agents', (req, res) => {
+       this.app.get('/role/:roleId/agents', (req: express.Request, res: express.Response) => {
             try {
                 const { roleId } = req.params;
                 const agents = this.specializationFramework.getAgentsWithRole(roleId);
@@ -324,7 +361,7 @@ export class AgentSet extends BaseEntity {
         });
 
         // Get all roles
-        app.get('/roles', (req, res) => {
+       this.app.get('/roles', (_req, res) => {
             try {
                 const roles = this.specializationFramework.getAllRoles();
                 res.status(200).send({ roles });
@@ -335,7 +372,7 @@ export class AgentSet extends BaseEntity {
         });
 
         // Create a new role
-        app.post('/roles', (req, res) => {
+       this.app.post('/roles', (req: express.Request, res: express.Response) => {
             try {
                 const role = this.specializationFramework.createRole(req.body);
                 res.status(200).send({ role });
@@ -346,7 +383,7 @@ export class AgentSet extends BaseEntity {
         });
 
         // Find the best agent for a task
-        app.post('/findBestAgent', (req, res) => {
+       this.app.post('/findBestAgent', (req: express.Request, res: express.Response) => {
             try {
                 const { roleId, knowledgeDomains, missionId } = req.body;
                 const agentId = this.specializationFramework.findBestAgentForTask(roleId, knowledgeDomains, missionId);
@@ -357,8 +394,40 @@ export class AgentSet extends BaseEntity {
             }
         });
 
+        // Find an agent with a specific role
+       this.app.post('/findAgentWithRole', (req: express.Request, res: express.Response) => {
+            try {
+                const { roleId, missionId } = req.body;
+                const agentId = this.specializationFramework.findBestAgentForTask(roleId, [], missionId);
+
+                if (agentId) {
+                    res.status(200).send({ agentId });
+                } else {
+                    // If no agent with the role exists, create a new one with the specified role
+                    const newAgentId = uuidv4();
+                    const newAgentConfig = {
+                        agentId: newAgentId,
+                        actionVerb: 'ACCOMPLISH',
+                        inputs: { goal: { inputValue: `Act as a ${roleId} agent`, inputName: 'goal', args: {} } },
+                        missionId: missionId || 'system',
+                        roleId: roleId
+                    };
+
+                    // Create the new agent asynchronously
+                    this.addAgentWithConfig(newAgentConfig)
+                        .then(() => console.log(`Created new agent ${newAgentId} with role ${roleId}`))
+                        .catch(err => console.error(`Failed to create new agent with role ${roleId}:`, err));
+
+                    res.status(200).send({ agentId: newAgentId, newlyCreated: true });
+                }
+            } catch (error) {
+                analyzeError(error as Error);
+                res.status(500).send({ error: error instanceof Error ? error.message : String(error) });
+            }
+        });
+
         // Generate a specialized system prompt for an agent
-        app.post('/agent/:agentId/prompt', async (req, res) => {
+       this.app.post('/agent/:agentId/prompt', async (req: express.Request, res: express.Response) => {
             try {
                 const { agentId } = req.params;
                 const { taskDescription } = req.body;
@@ -371,7 +440,7 @@ export class AgentSet extends BaseEntity {
         });
 
         // Get all knowledge domains
-        app.get('/knowledgeDomains', (req, res) => {
+       this.app.get('/knowledgeDomains', (_req, res) => {
             try {
                 const domains = this.specializationFramework.getAllKnowledgeDomains();
                 res.status(200).send({ domains });
@@ -382,7 +451,7 @@ export class AgentSet extends BaseEntity {
         });
 
         // Create a knowledge domain
-        app.post('/knowledgeDomains', async (req, res) => {
+       this.app.post('/knowledgeDomains', async (req: express.Request, res: express.Response) => {
             try {
                 const domain = await this.specializationFramework.createKnowledgeDomain(req.body);
                 res.status(200).send({ domain });
@@ -393,7 +462,7 @@ export class AgentSet extends BaseEntity {
         });
 
         // Add a knowledge item
-        app.post('/knowledgeItems', async (req, res) => {
+       this.app.post('/knowledgeItems', async (req: express.Request, res: express.Response) => {
             try {
                 const item = await this.domainKnowledge.addKnowledgeItem(req.body);
                 res.status(200).send({ item });
@@ -404,7 +473,7 @@ export class AgentSet extends BaseEntity {
         });
 
         // Query knowledge items
-        app.post('/knowledgeItems/query', (req, res) => {
+       this.app.post('/knowledgeItems/query', (req: express.Request, res: express.Response) => {
             try {
                 const items = this.domainKnowledge.queryKnowledgeItems(req.body);
                 res.status(200).send({ items });
@@ -415,7 +484,7 @@ export class AgentSet extends BaseEntity {
         });
 
         // Generate domain-specific context for a task
-        app.post('/domainContext', async (req, res) => {
+       this.app.post('/domainContext', async (req: express.Request, res: express.Response) => {
             try {
                 const { domainIds, taskDescription } = req.body;
                 const context = await this.domainKnowledge.generateDomainContext(domainIds, taskDescription);
@@ -427,7 +496,7 @@ export class AgentSet extends BaseEntity {
         });
 
         // Import knowledge from external source
-        app.post('/importKnowledge', async (req, res) => {
+       this.app.post('/importKnowledge', async (req: express.Request, res: express.Response) => {
             try {
                 const { domainId, source, format } = req.body;
                 const items = await this.domainKnowledge.importKnowledge(domainId, source, format);
@@ -439,7 +508,7 @@ export class AgentSet extends BaseEntity {
         });
 
         // Handle collaboration messages from other agent sets
-        app.post('/collaboration/message', async (req, res) => {
+       this.app.post('/collaboration/message', async (req: express.Request, res: express.Response) => {
             try {
                 const message = req.body;
                 await this.collaborationManager.handleMessage(message);
@@ -451,7 +520,7 @@ export class AgentSet extends BaseEntity {
         });
 
         // Resume mission agents
-        app.post('/resumeAgents', async (req, res) => {
+       this.app.post('/resumeAgents', async (req: express.Request, res: express.Response) => {
             const { missionId } = req.body;
             console.log(`Agentset Resuming agents for mission ${missionId}`);
             const agents = Array.from(this.agents.values()).filter(agent => agent.getMissionId() === missionId);
@@ -461,7 +530,7 @@ export class AgentSet extends BaseEntity {
             res.status(200).send({ message: 'All agents resumed' });
         });
 
-        app.post('/resumeAgent', async (req, res) => {
+       this.app.post('/resumeAgent', async (req: express.Request, res: express.Response) => {
             const { agentId } = req.body;
             console.log(`Agentset Resuming agent ${agentId}`);
             const agent = this.agents.get(agentId);
@@ -474,7 +543,7 @@ export class AgentSet extends BaseEntity {
         });
 
         // Abort mission agents
-        app.post('/abortAgent', async (req, res) => {
+       this.app.post('/abortAgent', async (req: express.Request, res: express.Response) => {
             const { agentId } = req.body;
             console.log(`Agentset Aborting agent ${agentId}`);
             const agent = this.agents.get(agentId);
@@ -486,9 +555,9 @@ export class AgentSet extends BaseEntity {
             }
         });
 
-        app.get('/statistics/:missionId', (req, res) => { this.getAgentStatistics(req, res) });
-        app.post('/updateFromAgent', (req, res) => { this.updateFromAgent(req, res) });
-        app.get('/agent/:agentId/output', async (req, res) => {
+       this.app.get('/statistics/:missionId', (req: express.Request, res: express.Response) => { this.getAgentStatistics(req, res) });
+       this.app.post('/updateFromAgent', (req: express.Request, res: express.Response) => { this.updateFromAgent(req, res) });
+       this.app.get('/agent/:agentId/output', async (req: express.Request, res: express.Response) => {
             const { agentId } = req.params;
             const agent = this.agents.get(agentId);
 
@@ -507,7 +576,7 @@ export class AgentSet extends BaseEntity {
         });
 
 
-        app.post('/saveAgent', async (req, res) => {
+       this.app.post('/saveAgent', async (req: express.Request, res: express.Response) => {
             const { agentId } = req.body;
             try {
                 const agent = this.agents.get(agentId);
@@ -523,14 +592,14 @@ export class AgentSet extends BaseEntity {
             }
         });
 
-        app.listen(this.port, () => {
+        this.app.listen(this.port, () => {
             console.log(`AgentSet application running on ${this.url}`);
         });
 
     }
 
     private async addAgent(req: express.Request, res: express.Response) {
-        const { agentId, actionVerb, inputs, missionId, missionContext } = req.body;
+        const { agentId, actionVerb, inputs, missionId, missionContext, roleId, roleCustomizations } = req.body;
         console.log('Adding agent with req.body', req.body);
         console.log('Adding agent with inputs', inputs);
         let inputsMap: Map<string, PluginInput>;
@@ -564,7 +633,8 @@ export class AgentSet extends BaseEntity {
             missionContext,
             id: agentId,
             postOfficeUrl: this.postOfficeUrl,
-            agentSetUrl: this.url
+            agentSetUrl: this.url,
+            role: roleId
         };
         const newAgent = new Agent(agentConfig);
         this.agents.set(newAgent.id, newAgent);
@@ -576,12 +646,12 @@ export class AgentSet extends BaseEntity {
         newAgent.setupCheckpointing(15); // Checkpoint every 15 minutes
 
         // Assign default role based on action verb if no role is specified
-        if (!req.body.roleId) {
-            const roleId = this.determineDefaultRole(actionVerb);
-            if (roleId) {
+        if (!roleId) {
+            const defaultRoleId = this.determineDefaultRole(actionVerb);
+            if (defaultRoleId) {
                 try {
-                    await this.specializationFramework.assignRole(newAgent.id, roleId);
-                    console.log(`Assigned default role ${roleId} to agent ${newAgent.id}`);
+                    await this.specializationFramework.assignRole(newAgent.id, defaultRoleId);
+                    console.log(`Assigned default role ${defaultRoleId} to agent ${newAgent.id}`);
                 } catch (error) {
                     console.error(`Error assigning default role to agent ${newAgent.id}:`, error);
                 }
@@ -589,14 +659,107 @@ export class AgentSet extends BaseEntity {
         } else {
             // Assign specified role
             try {
-                await this.specializationFramework.assignRole(newAgent.id, req.body.roleId, req.body.roleCustomizations);
-                console.log(`Assigned role ${req.body.roleId} to agent ${newAgent.id}`);
+                await this.specializationFramework.assignRole(newAgent.id, roleId, roleCustomizations);
+                console.log(`Assigned role ${roleId} to agent ${newAgent.id}`);
             } catch (error) {
                 console.error(`Error assigning role to agent ${newAgent.id}:`, error);
             }
         }
 
         res.status(200).send({ message: 'Agent added', agentId: newAgent.id });
+    }
+
+    // Add a new agent with a configuration object
+    private async addAgentWithConfig(config: any): Promise<string> {
+        try {
+            const { agentId, actionVerb, inputs, missionId, missionContext, roleId, roleCustomizations } = config;
+
+            if (!agentId || !actionVerb) {
+                throw new Error('Missing required parameters');
+            }
+
+            if (this.agents.size >= this.maxAgents) {
+                throw new Error('Maximum number of agents reached');
+            }
+
+            if (this.agents.has(agentId)) {
+                throw new Error('Agent with this ID already exists');
+            }
+
+            let inputsMap: Map<string, PluginInput>;
+
+            if (inputs?._type === 'Map') {
+                inputsMap = MapSerializer.transformFromSerialization(inputs);
+            } else {
+                if (inputs instanceof Map) {
+                    inputsMap = inputs;
+                } else {
+                    inputsMap = new Map();
+                    for (const [key, value] of Object.entries(inputs)) {
+                        if (typeof value === 'object' && value !== null && 'inputValue' in value) {
+                            inputsMap.set(key, value as PluginInput);
+                        } else {
+                            inputsMap.set(key, {
+                                inputName: key,
+                                inputValue: value,
+                                args: { [key]: value }
+                            });
+                        }
+                    }
+                }
+            }
+
+            // Create a new agent
+            const agentConfig = {
+                actionVerb,
+                inputs: inputsMap,
+                missionId,
+                missionContext,
+                id: agentId,
+                postOfficeUrl: this.postOfficeUrl,
+                agentSetUrl: this.url,
+                role: roleId
+            };
+
+            const newAgent = new Agent(agentConfig);
+            this.agents.set(newAgent.id, newAgent);
+
+            // Register agent with lifecycle manager
+            this.lifecycleManager.registerAgent(newAgent);
+
+            // Set up automatic checkpointing
+            newAgent.setupCheckpointing(15); // Checkpoint every 15 minutes
+
+            // If a role is specified, assign it to the agent
+            if (roleId) {
+                try {
+                    await this.specializationFramework.assignRole(agentId, roleId, roleCustomizations);
+                    console.log(`Assigned role ${roleId} to agent ${agentId}`);
+                } catch (error) {
+                    console.error(`Failed to assign role ${roleId} to agent ${agentId}:`, error);
+                    // Continue anyway, don't fail the agent creation
+                }
+            } else {
+                // Assign default role based on action verb
+                const defaultRoleId = this.determineDefaultRole(actionVerb);
+                if (defaultRoleId) {
+                    try {
+                        await this.specializationFramework.assignRole(newAgent.id, defaultRoleId);
+                        console.log(`Assigned default role ${defaultRoleId} to agent ${newAgent.id}`);
+                    } catch (error) {
+                        console.error(`Error assigning default role to agent ${newAgent.id}:`, error);
+                    }
+                }
+            }
+
+            // Start the agent
+            newAgent.start();
+
+            return agentId;
+        } catch (error) {
+            analyzeError(error as Error);
+            throw error;
+        }
     }
 
     private async handleAgentMessage(req: express.Request, res: express.Response) {
@@ -695,7 +858,7 @@ export class AgentSet extends BaseEntity {
             agentsByStatus: new Map(),
             agentsCount: 0
         };
-        console.log(`AgentSet:Getting statistics for mission ${missionId}`);
+        //console.log(`AgentSet:Getting statistics for mission ${missionId}`);
 
         for (const agent of this.agents.values()) {
             if (agent.getMissionId() === missionId) {
@@ -721,14 +884,35 @@ export class AgentSet extends BaseEntity {
         res.status(200).send(serializedStats);
     }
 
-        private updateFromAgent(req: express.Request, res: express.Response) {
-            const { agentId, status } = req.body;
+        private async updateFromAgent(req: express.Request, res: express.Response) {
+            const { agentId, status, statistics } = req.body;
+            console.log(`AgentSet received update from agent ${agentId} with status ${status}`);
+
             const agent = this.agents.get(agentId);
             if (agent) {
-                agent.saveAgentState();
+                // Save agent state
+                await agent.saveAgentState();
+
+                // If we have statistics, send them to TrafficManager
+                if (statistics) {
+                    try {
+                        console.log(`Forwarding statistics for agent ${agentId} to TrafficManager`);
+                        await axios.post(`http://${this.trafficManagerUrl}/agentStatisticsUpdate`, {
+                            agentId,
+                            status,
+                            statistics,
+                            timestamp: new Date().toISOString()
+                        });
+                    } catch (error) {
+                        console.error(`Failed to forward statistics to TrafficManager:`,
+                            error instanceof Error ? error.message : error);
+                    }
+                }
+
                 res.status(200).send({ message: 'Agent updated' });
             } else {
-                res.status(201).send({ error: 'Agent not found' });
+                console.warn(`Agent ${agentId} not found in this AgentSet`);
+                res.status(404).send({ error: 'Agent not found' });
             }
         }
 

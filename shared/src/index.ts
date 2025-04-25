@@ -23,6 +23,6 @@ export * from './security/pluginPermissions';
 export * from './security/isolatedPluginSandbox';
 export * from './security/pluginSigning';
 export * from './security/ServiceTokenManager';
-export * from './security/authMiddleware';
+//export * from './security/authMiddleware';
 export * from './errorhandler';
 // Add any other exports here

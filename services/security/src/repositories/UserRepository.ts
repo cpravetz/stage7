@@ -53,7 +53,7 @@ export class UserRepository {
 
             const response = await axios.post(`http://${this.librarianUrl}/queryData`, {
                 collection: this.collection,
-                query: { id },
+                query: { id:id },
                 limit: 1
             }, {
                 headers: {

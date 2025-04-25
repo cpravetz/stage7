@@ -68,54 +68,55 @@ const serviceRegistry: Record<string, ServiceCredential> = {
 // Load keys
 let PRIVATE_KEY: string;
 let PUBLIC_KEY: string;
-let isUsingAsymmetricKeys = false;
 
 try {
-  // Try to load private key (for signing)
-  try {
-    PRIVATE_KEY = fs.readFileSync(path.join(__dirname, '../../keys/private.pem'), 'utf8');
-    console.log('Loaded RSA private key for JWT signing');
-  } catch (privateKeyError) {
-    console.error('Failed to load RSA private key from private.pem:', privateKeyError);
+  // Load private key (for signing)
+  const privateKeyPaths = [
+    path.join(__dirname, '../../keys/private.pem'),
+    path.join(__dirname, '../../keys/private.key')
+  ];
 
-    try {
-      PRIVATE_KEY = fs.readFileSync(path.join(__dirname, '../../keys/private.key'), 'utf8');
-      console.log('Loaded RSA private key for JWT signing from alternate location');
-    } catch (alternatePrivateKeyError) {
-      console.error('Failed to load RSA private key from private.key:', alternatePrivateKeyError);
-      throw new Error('No private key available for JWT signing');
+  for (const keyPath of privateKeyPaths) {
+    if (fs.existsSync(keyPath)) {
+      PRIVATE_KEY = fs.readFileSync(keyPath, 'utf8');
+      console.log(`Loaded RSA private key from ${keyPath}`);
+      break;
     }
   }
 
-  // Try to load public key (for verification)
-  try {
-    PUBLIC_KEY = fs.readFileSync(path.join(__dirname, '../../keys/public.pem'), 'utf8');
-    console.log('Loaded RSA public key for JWT verification');
-  } catch (publicKeyError) {
-    console.error('Failed to load RSA public key from public.pem:', publicKeyError);
+  if (!PRIVATE_KEY) {
+    throw new Error('No private key available for JWT signing');
+  }
 
-    try {
-      PUBLIC_KEY = fs.readFileSync(path.join(__dirname, '../../keys/public.key'), 'utf8');
-      console.log('Loaded RSA public key for JWT verification from alternate location');
-    } catch (alternatePublicKeyError) {
-      console.error('Failed to load RSA public key from public.key:', alternatePublicKeyError);
-      throw new Error('No public key available for JWT verification');
+  // Load public key (for verification)
+  const publicKeyPaths = [
+    path.join(__dirname, '../../keys/public.pem'),
+    path.join(__dirname, '../../keys/public.key')
+  ];
+
+  for (const keyPath of publicKeyPaths) {
+    if (fs.existsSync(keyPath)) {
+      PUBLIC_KEY = fs.readFileSync(keyPath, 'utf8');
+      console.log(`Loaded RSA public key from ${keyPath}`);
+      break;
     }
   }
 
-  isUsingAsymmetricKeys = true;
+  if (!PUBLIC_KEY) {
+    throw new Error('No public key available for JWT verification');
+  }
+
   console.log('Successfully loaded RSA keys for JWT signing and verification');
 } catch (error) {
-  console.error('Failed to load any RSA keys:', error);
-  console.warn('Using fallback secret key for JWT signing and verification');
-  PRIVATE_KEY = process.env.JWT_SECRET || 'fallback-secret-key';
-  PUBLIC_KEY = PRIVATE_KEY;
+  console.error('Failed to load RSA keys:', error);
+  throw new Error('Cannot start security service without RSA keys');
 }
 
 // Constants for token storage
 const librarianUrl = process.env.LIBRARIAN_URL || 'librarian:5040';
 const MAX_RETRIES = 5;
 const INITIAL_RETRY_DELAY = 1000; // 1 second
+// Primary token storage - using in-memory array to avoid circular dependency with Librarian
 const inMemoryTokenStore: { [key: string]: any } = {};
 
 /**
@@ -135,23 +136,12 @@ export async function verifyComponentCredentials(componentType: string, clientSe
   const service = serviceRegistry[normalizedComponentType];
   if (!service) {
     console.error(`Unknown service type: ${componentType}`);
-    // For development or testing, accept any service type
-    if (process.env.NODE_ENV === 'development' || process.env.ACCEPT_ANY_SERVICE === 'true') {
-      console.log(`Development mode: accepting unknown service type ${componentType}`);
-      return true;
-    }
     return false;
   }
 
   // Check if the client secret matches
   if (service.secret === clientSecret) {
     console.log(`Client verified for componentType: ${normalizedComponentType} using service registry`);
-    return true;
-  }
-
-  // Check if we should accept any client secret (for development or testing)
-  if (process.env.NODE_ENV === 'development' || process.env.ACCEPT_ANY_SECRET === 'true') {
-    console.log(`Development mode: accepting any client secret for ${normalizedComponentType}`);
     return true;
   }
 
@@ -172,26 +162,48 @@ export async function verifyComponentCredentials(componentType: string, clientSe
  * @returns JWT token
  */
 export function generateServiceToken(componentType: string): string {
-  const service = serviceRegistry[componentType];
-  if (!service) {
-    throw new Error(`Unknown service type: ${componentType}`);
-  }
+  // Normalize component type to handle case differences
+  const normalizedComponentType = Object.keys(serviceRegistry).find(
+    key => key.toLowerCase() === componentType.toLowerCase()
+  ) || componentType;
 
-  const payload = {
-    componentType,
-    roles: service.roles,
-    issuedAt: Date.now()
+  // Get service from registry or create a default one
+  const service = serviceRegistry[normalizedComponentType] || {
+    id: normalizedComponentType,
+    secret: 'unknown',
+    roles: ['service:basic']
   };
 
-  if (isUsingAsymmetricKeys) {
-    return jwt.sign(payload, PRIVATE_KEY, {
-      algorithm: 'RS256',
-      expiresIn: '1h'
+  // Create the token payload with standard claims
+  const payload = {
+    // Standard JWT claims
+    iss: 'SecurityManager',                // Issuer
+    sub: service.id,                       // Subject (the service ID)
+    aud: 'stage7-services',                // Audience
+    exp: Math.floor(Date.now() / 1000) + 3600, // Expiration (1 hour from now)
+    iat: Math.floor(Date.now() / 1000),    // Issued at
+    jti: Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15), // JWT ID (random)
+
+    // Custom claims
+    componentType: normalizedComponentType,
+    roles: service.roles,
+    permissions: service.roles, // For backward compatibility
+    clientId: service.id
+  };
+
+  // Sign the token with RS256 algorithm
+  try {
+    // Don't use expiresIn option since we already set exp in the payload
+    const token = jwt.sign(payload, PRIVATE_KEY, {
+      algorithm: 'RS256'
+      // Removed expiresIn option to avoid conflict with exp in payload
     });
-  } else {
-    return jwt.sign(payload, PRIVATE_KEY, {
-      expiresIn: '1h'
-    });
+
+    console.log(`Token generated for ${normalizedComponentType} with roles: ${service.roles.join(', ')}`);
+    return token;
+  } catch (error) {
+    console.error(`Error generating token for ${normalizedComponentType}:`, error);
+    throw error;
   }
 }
 
@@ -201,13 +213,66 @@ export function generateServiceToken(componentType: string): string {
  * @returns Decoded token payload or null if invalid
  */
 export function verifyToken(token: string): any {
+  if (!token) {
+    console.log('No token provided for verification');
+    return null;
+  }
+
+  // First check if the token is in our in-memory store
+  // This avoids expensive cryptographic operations for tokens we've already issued
+  if (inMemoryTokenStore[token]) {
+    const tokenData = inMemoryTokenStore[token];
+    const now = new Date();
+
+    // Check if token has expired
+    if (tokenData.accessTokenExpiresAt && new Date(tokenData.accessTokenExpiresAt) > now) {
+      // Return a payload similar to what jwt.verify would return
+      return {
+        clientId: tokenData.clientId,
+        iat: Math.floor(now.getTime() / 1000) - 3600, // Approximate issue time (1 hour ago)
+        exp: Math.floor(new Date(tokenData.accessTokenExpiresAt).getTime() / 1000)
+      };
+    }
+  }
+
   try {
-    // Only use RS256 for verification - no fallback to HS256
-    const decoded = jwt.verify(token, PUBLIC_KEY, { algorithms: ['RS256'] });
-    console.log('Token verified successfully with RS256');
+    // First check if the token is in the correct format
+    const tokenParts = token.split('.');
+    if (tokenParts.length !== 3) {
+      console.log('Invalid token format - not a valid JWT');
+      return null;
+    }
+
+    // Try to parse the header to check the algorithm
+    try {
+      const headerStr = Buffer.from(tokenParts[0], 'base64').toString();
+      const header = JSON.parse(headerStr);
+
+      if (header.alg !== 'RS256') {
+        console.log(`Token uses unsupported algorithm: ${header.alg}. Only RS256 is supported.`);
+        return null;
+      }
+    } catch (headerError) {
+      console.log('Error parsing token header:', headerError);
+      return null;
+    }
+
+    // Verify with RS256 only - no fallback to HS256
+    const decoded = jwt.verify(token, PUBLIC_KEY, {
+      algorithms: ['RS256'],
+      complete: false // Return only the payload
+    });
+
+    // Check if the token has expired
+    const now = Math.floor(Date.now() / 1000);
+    if (typeof decoded === 'object' && decoded.exp && decoded.exp < now) {
+      console.log('Token has expired');
+      return null;
+    }
+
     return decoded;
   } catch (error) {
-    console.error('Token verification failed:', error);
+    console.log('Token verification failed:', error);
     return null;
   }
 }
@@ -252,12 +317,9 @@ async function saveToken(token: string, componentType: string): Promise<void> {
     clientId: componentType,
   };
 
-  try {
-    await storeTokenInMongoDB(token, tokenData);
-  } catch (error) {
-    console.error('Failed to save token to MongoDB. Using in-memory storage as fallback:', error);
-    inMemoryTokenStore[token] = tokenData;
-  }
+  // Store token in memory to avoid circular dependency
+  inMemoryTokenStore[token] = tokenData;
+  console.log(`Token for ${componentType} saved in memory`);
 }
 
 /**
@@ -266,6 +328,15 @@ async function saveToken(token: string, componentType: string): Promise<void> {
  * @param tokenData The token data to store
  */
 async function storeTokenInMongoDB(token: string, tokenData: any): Promise<void> {
+  // For now, just use in-memory storage to avoid circular dependency
+  // The SecurityManager needs to store tokens in Librarian, but Librarian needs
+  // to authenticate with SecurityManager, creating a circular dependency
+  inMemoryTokenStore[token] = tokenData;
+  console.log('Token stored in memory to avoid circular dependency with Librarian');
+  return;
+
+  // The code below is commented out to avoid the circular dependency
+  /*
   const storeTokenOperation = async () => {
     try {
       await axios.post(`http://${librarianUrl}/storeData`, {
@@ -299,4 +370,5 @@ async function storeTokenInMongoDB(token: string, tokenData: any): Promise<void>
   }
 
   throw new Error('Failed to store token in MongoDB after multiple retries');
+  */
 }

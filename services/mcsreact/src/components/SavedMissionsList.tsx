@@ -1,9 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import { API_BASE_URL } from '../config';
 import './SavedMissionsList.css';
-
-
-const API_BASE_URL = 'http://localhost:5020'; 
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -41,7 +39,7 @@ const SavedMissionsList: React.FC<SavedMissionsListProps> = ({ onMissionSelect, 
           }
         });
         setMissions(response.data);
-      } catch (error) { 
+      } catch (error) {
         console.error('Error fetching saved missions:', error instanceof Error ? error.message : error);
       }
     };
@@ -49,7 +47,7 @@ const SavedMissionsList: React.FC<SavedMissionsListProps> = ({ onMissionSelect, 
     fetchSavedMissions();
     }, []);
 
-  
+
   return (
     <div className="saved-missions-list">
       <div className="saved-missions-header">

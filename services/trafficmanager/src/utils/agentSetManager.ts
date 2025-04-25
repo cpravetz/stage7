@@ -1,9 +1,11 @@
 // No longer using Docker API directly
 import express from 'express';
 import axios from 'axios';
-import { MapSerializer, AgentSetManagerStatistics, AgentStatistics, PluginInput, MessageType } from '@cktmcs/shared';
+import { MapSerializer, AgentSetManagerStatistics, AgentStatistics, PluginInput, MessageType, ServiceTokenManager } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 
+// NOTE: This axios instance doesn't include authentication headers
+// We should use authenticatedApi from TrafficManager instead
 const api = axios.create({
     headers: {
       'Content-Type': 'application/json',
@@ -26,11 +28,43 @@ class AgentSetManager {
     private maxAgentsPerSet: number;
     private postOfficeUrl: string;
     private refreshInterval: NodeJS.Timeout;
+    private securityManagerUrl: string;
+    private tokenManager: ServiceTokenManager;
 
-    constructor(maxAgentsPerSet: number = 250, postOfficeUrl: string = 'postoffice:5020') {
+    constructor(
+        maxAgentsPerSet: number = 250,
+        postOfficeUrl: string = 'postoffice:5020',
+        securityManagerUrl: string = process.env.SECURITY_MANAGER_URL || 'securitymanager:5010',
+        public authenticatedApi?: any // Optional authenticatedApi from TrafficManager
+    ) {
         this.maxAgentsPerSet = maxAgentsPerSet;
         this.postOfficeUrl = postOfficeUrl;
+        this.securityManagerUrl = securityManagerUrl;
         this.refreshInterval = setInterval(() => this.refreshAgentSets(), 60000); // Refresh every minute
+
+        // Initialize token manager for service-to-service authentication
+        const serviceId = 'TrafficManager';
+        const serviceSecret = process.env.CLIENT_SECRET || 'stage7AuthSecret';
+        this.tokenManager = ServiceTokenManager.getInstance(
+            `http://${this.securityManagerUrl}`,
+            serviceId,
+            serviceSecret
+        );
+    }
+
+    /**
+     * Helper method to use authenticatedApi when available, falling back to regular api
+     * @param method HTTP method (get, post, put, delete)
+     * @param url URL to call
+     * @param data Optional data for POST/PUT requests
+     * @returns Promise with the response
+     */
+    private async apiCall(method: 'get' | 'post' | 'put' | 'delete', url: string, data?: any): Promise<any> {
+        if (this.authenticatedApi) {
+            return this.authenticatedApi[method](url, data);
+        } else {
+            return api[method](url, data);
+        }
     }
 
 
@@ -64,7 +98,7 @@ class AgentSetManager {
             while (retryCount > 0) {
                 try {
                     console.log('Attempting to find AgentSets through PostOffice as fallback...');
-                    const response = await api.get(`http://${this.postOfficeUrl}/requestComponent?type=AgentSet`);
+                    const response = await this.apiCall('get', `http://${this.postOfficeUrl}/requestComponent?type=AgentSet`);
                     const agentSetComponents = response.data.components;
                     console.log('AgentSet components response:', agentSetComponents.length);
 
@@ -323,7 +357,7 @@ class AgentSetManager {
                 missionContext
             };
             console.log('Adding agent to set with payload:', payload);
-            const response = await api.post(`http://${availableSet.url}/addAgent`, payload);
+            const response = await this.apiCall('post', `http://${availableSet.url}/addAgent`, payload);
 
             availableSet.agentCount++;
             return response.data;
@@ -343,7 +377,7 @@ class AgentSetManager {
         }
 
         try {
-            const response = await api.post(`http://${agentSetUrl}/agent/${agentId}/message`, message);
+            const response = await this.apiCall('post', `http://${agentSetUrl}/agent/${agentId}/message`, message);
             return response.data;
         } catch (error) { analyzeError(error as Error);
             console.error(`Error sending message to agent ${agentId}:`, error instanceof Error ? error.message : error);
@@ -353,7 +387,7 @@ class AgentSetManager {
     async pauseAgents(missionId: string) {
         const pausePromises = Array.from(this.agentSets.values()).map(async (set) => {
             try {
-                await api.post(`http://${set.url}/pauseAgents`, { missionId });
+                await this.apiCall('post', `http://${set.url}/pauseAgents`, { missionId });
             } catch (error) {
                 analyzeError(error as Error);
             }
@@ -372,7 +406,7 @@ class AgentSetManager {
     async abortAgents(missionId: string) {
         const abortPromises = Array.from(this.agentSets.values()).map(async (set) => {
             try {
-                await api.post(`http://${set.url}/abortAgents`, { missionId });
+                await this.apiCall('post', `http://${set.url}/abortAgents`, { missionId });
             } catch (error) {
                 analyzeError(error as Error);
             }
@@ -391,7 +425,7 @@ class AgentSetManager {
     async resumeAgents(missionId: string) {
         const resumePromises = Array.from(this.agentSets.values()).map(async (set) => {
             try {
-                await api.post(`http://${set.url}/resumeAgents`, { missionId });
+                await this.apiCall('post', `http://${set.url}/resumeAgents`, { missionId });
             } catch (error) {
                 analyzeError(error as Error);
             }
@@ -412,13 +446,31 @@ class AgentSetManager {
         if (!setUrl) {
             console.error(`No AgentSet found for agent ${agentId}`);
         }
-        await api.post(`http://${setUrl}/resumeAgent`, { agentId });
+
+        await this.apiCall('post', `http://${setUrl}/resumeAgent`, { agentId });
+    }
+
+    /**
+     * Update agent statistics
+     * @param agentId Agent ID
+     * @param missionId Mission ID
+     * @param statistics Agent statistics
+     */
+    async updateAgentStatistics(agentId: string, missionId: string, statistics: any): Promise<void> {
+        console.log(`Updating statistics for agent ${agentId} in mission ${missionId}`);
+
+        // Store the statistics in memory for quick access
+        // This could be expanded to store in a database for persistence
+
+        // For now, we'll just log the statistics and rely on the getAgentStatistics method
+        // to fetch the latest statistics from the AgentSet when needed
+        console.log(`Agent ${agentId} statistics:`, JSON.stringify(statistics, null, 2));
     }
 
     async distributeUserMessage(req: express.Request) {
         const messagePromises = Array.from(this.agentSets.values()).map(async (set) => {
             try {
-                await api.post(`http://${set.url}/message`, req.body);
+                await this.apiCall('post', `http://${set.url}/message`, req.body);
             } catch (error) {
                 analyzeError(error as Error);
             }
@@ -456,7 +508,7 @@ class AgentSetManager {
                         console.error(`Invalid URL: ${agentSet.url}`);
                         return stats;
                     }
-                    const response = await axios.get(`http://${agentSet.url}/statistics/${missionId}`);
+                    const response = await this.apiCall('get', `http://${agentSet.url}/statistics/${missionId}`);
                     const serializedStats = response.data;
                     serializedStats.agentsByStatus = MapSerializer.transformFromSerialization(serializedStats.agentsByStatus);
                     console.log(`AgentSetManager:AgentSet `,agentSet.url,` stats: `, serializedStats);
@@ -540,7 +592,7 @@ class AgentSetManager {
 
     private async loadAgentToSet(agentId: string, agentSetUrl: string): Promise<boolean> {
         try {
-            const response = await api.post(`http://${agentSetUrl}/loadAgent`, { agentId });
+            const response = await this.apiCall('post', `http://${agentSetUrl}/loadAgent`, { agentId });
             if (response.status === 200) {
                 this.agentToSetMap.set(agentId, agentSetUrl);
                 console.log(`Agent ${agentId} loaded successfully to ${agentSetUrl}`);
@@ -562,7 +614,7 @@ class AgentSetManager {
 
     private async getAgentIdsByMission(missionId: string): Promise<string[]> {
         try {
-            const response = await api.get(`http://${this.postOfficeUrl}/getAgentIdsByMission/${missionId}`);
+            const response = await this.apiCall('get', `http://${this.postOfficeUrl}/getAgentIdsByMission/${missionId}`);
             return response.data;
         } catch (error) { analyzeError(error as Error);
             console.error('Error getting agent IDs by mission:', error instanceof Error ? error.message : error);
@@ -612,7 +664,7 @@ class AgentSetManager {
 
     private async saveAgentInSet(agentId: string, agentSetUrl: string): Promise<boolean> {
         try {
-            const response = await api.post(`http://${agentSetUrl}/saveAgent`, { agentId });
+            const response = await this.apiCall('post', `http://${agentSetUrl}/saveAgent`, { agentId });
             if (response.status === 200) {
                 console.log(`Agent ${agentId} saved successfully in ${agentSetUrl}`);
                 return true;
@@ -628,13 +680,19 @@ class AgentSetManager {
 
     private async createNewAgentSet(): Promise<void> {
         try {
-            // Use the default AgentSet container that's already running
-            // FIXED: Changed port from 5090 to 5100 to match the actual AgentSet service port
+            // IMPORTANT: Always use the same AgentSet URL to avoid multiple instances
+            // This ensures we're always using the same AgentSet service
             const defaultAgentSetUrl = 'agentset:5100';
-            console.log('Creating new AgentSet with URL:', defaultAgentSetUrl);
+            console.log('Using AgentSet with URL:', defaultAgentSetUrl);
 
-            // Generate a unique ID for this AgentSet
-            const id = `agentset-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+            // Use a consistent ID for the AgentSet to avoid creating multiple references
+            const id = 'primary-agentset';
+
+            // Check if we already have this AgentSet in our map
+            if (this.agentSets.has(id)) {
+                console.log(`AgentSet ${id} already exists, reusing it`);
+                return;
+            }
 
             const newSet = {
                 id: id,
@@ -645,19 +703,8 @@ class AgentSetManager {
 
             this.agentSets.set(newSet.id, newSet);
 
-            // Try to register the AgentSet with PostOffice (but don't fail if it doesn't work)
-            try {
-                await axios.post(`http://${this.postOfficeUrl}/registerComponent`, {
-                    type: 'AgentSet',
-                    url: newSet.url,
-                    name: `AgentSet-${id}`,
-                    id: id
-                });
-                console.log(`Registered AgentSet ${id} with PostOffice`);
-            } catch (regError) {
-                console.warn(`Failed to register AgentSet with PostOffice, but continuing anyway:`,
-                    regError instanceof Error ? regError.message : regError);
-            }
+            // Skip PostOffice registration to avoid duplicate registrations
+            // The AgentSet service registers itself with Consul directly
 
             console.log('Created new AgentSet reference:', newSet);
             return;

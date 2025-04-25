@@ -31,19 +31,12 @@ router.get('/config', (req: express.Request, res: express.Response) => {
 });
 
 // Update GitHub configuration
-router.post('/config', (req: express.Request, res: express.Response) => {
+router.post('/config', async (req: express.Request, res: express.Response) => {
     try {
-        // Check if GitHub access is enabled
-        if (process.env.ENABLE_GITHUB !== 'true') {
-            res.status(403).json({
-                error: 'GitHub access is disabled by configuration. Set ENABLE_GITHUB=true to enable.'
-            });
-        }
-
-        const { token, username, repository } = req.body;
+        const { token, username, repository, enable } = req.body;
 
         if (!token || !username || !repository) {
-            res.status(400).json({ error: 'Missing required fields' });
+            res.status(400).json({ error: 'Missing required fields: token, username, repository' });
         }
 
         // In a production environment, you would store these securely
@@ -51,12 +44,31 @@ router.post('/config', (req: express.Request, res: express.Response) => {
         process.env.GITHUB_TOKEN = token;
         process.env.GITHUB_USERNAME = username;
         process.env.GIT_REPOSITORY_URL = repository;
+        process.env.ENABLE_GITHUB = enable === true ? 'true' : 'false';
 
         // Reinitialize the plugin marketplace to use the new configuration
-        // This is a simplified approach - in production, you might want to restart the service
-        // or use a more robust configuration management system
+        try {
+            // Get the plugin registry from the CapabilitiesManager
+            const pluginRegistry = req.app.get('pluginRegistry');
+            if (pluginRegistry) {
+                // Create a new PluginMarketplace instance to refresh the repositories
+                const newMarketplace = new PluginMarketplace();
+                // Update the plugin registry with the new marketplace
+                pluginRegistry.updatePluginMarketplace(newMarketplace);
+                
+                console.log('Plugin marketplace reinitialized with new GitHub configuration');
+            } else {
+                console.warn('Could not access plugin registry to reinitialize marketplace');
+            }
+        } catch (reinitError) {
+            console.error('Failed to reinitialize plugin marketplace:', reinitError);
+        }
 
-        res.json({ success: true, message: 'GitHub configuration updated successfully' });
+        res.json({ 
+            success: true, 
+            message: 'GitHub configuration updated successfully',
+            enabled: process.env.ENABLE_GITHUB === 'true'
+        });
     } catch (error) {
         analyzeError(error as Error);
         res.status(500).json({ error: 'Failed to update GitHub configuration' });
@@ -146,3 +158,4 @@ router.delete('/plugins/:id', async (req: express.Request, res: express.Response
 });
 
 export default router;
+

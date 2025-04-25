@@ -4,14 +4,8 @@ import {
   Typography,
   Paper,
   Button,
-  TextField,
   CircularProgress,
   Alert,
-  List,
-  ListItem,
-  ListItemText,
-  ListItemSecondaryAction,
-  IconButton,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -32,13 +26,11 @@ import {
 import {
   Refresh as RefreshIcon,
   Delete as DeleteIcon,
-  Edit as EditIcon,
   GitHub as GitHubIcon,
-  Add as AddIcon,
-  Code as CodeIcon,
-  CloudUpload as CloudUploadIcon
+  Code as CodeIcon
 } from '@mui/icons-material';
 import axios from 'axios';
+import { API_BASE_URL } from '../config';
 
 interface Plugin {
   id: string;
@@ -74,23 +66,34 @@ const GitHubPluginManager: React.FC<GitHubPluginManagerProps> = ({ onPluginSelec
     checkGitHubConfiguration();
   }, [selectedRepository]);
 
+  // We don't need to check GitHub configuration directly from the frontend
+  // The CapabilitiesManager will handle this internally
   const checkGitHubConfiguration = async () => {
     try {
-      const response = await axios.get('/api/github/config');
+      setLoading(true);
+      setError(null);
+
+      // Just fetch the plugins to see if they're available
+      await fetchPlugins();
+
+      // If we get here, we can assume the configuration is working
       setGithubConfig({
-        token: response.data.token ? '********' : '',
-        username: response.data.username || '',
-        repository: response.data.repository || '',
-        configured: response.data.configured || false
+        token: '********', // We don't need to show the actual token
+        username: 'Managed by CapabilitiesManager',
+        repository: 'Managed by CapabilitiesManager',
+        configured: true
       });
+
+      setLoading(false);
     } catch (error) {
-      console.error('Failed to fetch GitHub configuration:', error);
+      console.error('Failed to fetch plugins:', error);
       setGithubConfig({
         token: '',
         username: '',
         repository: '',
         configured: false
       });
+      setLoading(false);
     }
   };
 
@@ -99,7 +102,11 @@ const GitHubPluginManager: React.FC<GitHubPluginManagerProps> = ({ onPluginSelec
       setLoading(true);
       setError(null);
 
-      const response = await axios.get(`/api/plugins?repository=${selectedRepository}`);
+      // Use the PostOffice service to get plugins from the CapabilitiesManager
+      const response = await axios.get(`${API_BASE_URL}/plugins`, {
+        params: { repository: selectedRepository }
+      });
+
       setPlugins(response.data.plugins || []);
       setLoading(false);
     } catch (error) {
@@ -118,7 +125,12 @@ const GitHubPluginManager: React.FC<GitHubPluginManagerProps> = ({ onPluginSelec
 
     try {
       setLoading(true);
-      await axios.delete(`/api/plugins/${pluginToDelete.id}?repository=${selectedRepository}`);
+
+      // Use the PostOffice service to delete the plugin from the CapabilitiesManager
+      await axios.delete(`${API_BASE_URL}/plugins/${pluginToDelete.id}`, {
+        params: { repository: selectedRepository }
+      });
+
       setPlugins(plugins.filter(plugin => plugin.id !== pluginToDelete.id));
       setOpenDeleteDialog(false);
       setPluginToDelete(null);
@@ -140,40 +152,7 @@ const GitHubPluginManager: React.FC<GitHubPluginManagerProps> = ({ onPluginSelec
     setPluginToDelete(null);
   };
 
-  const handleSaveGitHubConfig = async (event: React.FormEvent) => {
-    event.preventDefault();
-    
-    try {
-      setLoading(true);
-      setError(null);
-
-      await axios.post('/api/github/config', {
-        token: githubConfig.token,
-        username: githubConfig.username,
-        repository: githubConfig.repository
-      });
-
-      setGithubConfig({
-        ...githubConfig,
-        configured: true
-      });
-      
-      setLoading(false);
-      fetchPlugins();
-    } catch (error) {
-      console.error('Failed to save GitHub configuration:', error);
-      setError('Failed to save GitHub configuration. Please try again later.');
-      setLoading(false);
-    }
-  };
-
-  const handleGitHubConfigChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = event.target;
-    setGithubConfig({
-      ...githubConfig,
-      [name]: value
-    });
-  };
+  // We no longer need GitHub configuration functions since the CapabilitiesManager handles this internally
 
   return (
     <Box sx={{ width: '100%' }}>
@@ -211,58 +190,13 @@ const GitHubPluginManager: React.FC<GitHubPluginManagerProps> = ({ onPluginSelec
         {selectedRepository === 'github' && (
           <Box sx={{ mb: 3 }}>
             <Typography variant="h6" gutterBottom>
-              GitHub Configuration
+              GitHub Plugin Repository
             </Typography>
-            <Box component="form" onSubmit={handleSaveGitHubConfig}>
-              <Grid container spacing={2}>
-                <Grid item xs={12} sm={4}>
-                  <TextField
-                    fullWidth
-                    label="GitHub Username"
-                    name="username"
-                    value={githubConfig.username}
-                    onChange={handleGitHubConfigChange}
-                    margin="normal"
-                    required
-                  />
-                </Grid>
-                <Grid item xs={12} sm={4}>
-                  <TextField
-                    fullWidth
-                    label="GitHub Token"
-                    name="token"
-                    type="password"
-                    value={githubConfig.token}
-                    onChange={handleGitHubConfigChange}
-                    margin="normal"
-                    required
-                    placeholder={githubConfig.configured ? '********' : ''}
-                  />
-                </Grid>
-                <Grid item xs={12} sm={4}>
-                  <TextField
-                    fullWidth
-                    label="Repository (owner/name)"
-                    name="repository"
-                    value={githubConfig.repository}
-                    onChange={handleGitHubConfigChange}
-                    margin="normal"
-                    required
-                  />
-                </Grid>
-                <Grid item xs={12}>
-                  <Button
-                    type="submit"
-                    variant="contained"
-                    color="primary"
-                    startIcon={<CloudUploadIcon />}
-                    disabled={loading}
-                  >
-                    Save Configuration
-                  </Button>
-                </Grid>
-              </Grid>
-            </Box>
+            <Alert severity="info" sx={{ mb: 2 }}>
+              GitHub plugin repository is configured in the CapabilitiesManager service.
+              Use environment variables ENABLE_GITHUB, GITHUB_TOKEN, GITHUB_USERNAME, and GIT_REPOSITORY_URL
+              to configure the GitHub plugin repository.
+            </Alert>
             <Divider sx={{ my: 2 }} />
           </Box>
         )}

@@ -1,37 +1,14 @@
-import * as amqplib from 'amqplib';
-
-// Define missing types
-declare module 'amqplib' {
-  namespace Options {
-    interface Publish {
-      persistent?: boolean;
-      contentType?: string;
-      correlationId?: string;
-      replyTo?: string;
-      [key: string]: any;
-    }
-
-    interface AssertQueue {
-      durable?: boolean;
-      [key: string]: any;
-    }
-
-    interface AssertExchange {
-      durable?: boolean;
-      [key: string]: any;
-    }
-  }
-}
+import { connect, AmqpConnectionManager, ChannelWrapper, Channel } from 'amqp-connection-manager';
+import { ConsumeMessage } from 'amqplib';
+import { v4 as uuidv4 } from 'uuid';
 
 /**
- * Message queue client for RabbitMQ
- * Provides a robust interface for publishing and consuming messages
- * with automatic reconnection and error handling
+ * Message queue client for RabbitMQ using amqp-connection-manager
+ * Provides a robust interface with automatic reconnection and error handling
  */
-
 export class MessageQueueClient {
-  private connection: amqplib.Connection | null = null;
-  private channel: amqplib.Channel | null = null;
+  private connection: AmqpConnectionManager | null = null;
+  private channelWrapper: ChannelWrapper | null = null;
   private url: string;
   private isConnecting: boolean = false;
   private connectionPromise: Promise<void> | null = null;
@@ -40,8 +17,12 @@ export class MessageQueueClient {
     this.url = url;
   }
 
-  async connect(): Promise<void> {
-    if (this.connection && this.channel) {
+  /**
+   * Connect to RabbitMQ with automatic reconnection
+   * @param options Connection options
+   */
+  async connect(options: any = {}): Promise<void> {
+    if (this.connection && this.channelWrapper) {
       return;
     }
 
@@ -51,383 +32,271 @@ export class MessageQueueClient {
     }
 
     this.isConnecting = true;
-    this.connectionPromise = this._connect();
-    return this.connectionPromise;
-  }
 
-  private async _connect(): Promise<void> {
     try {
-      console.log(`Attempting to connect to RabbitMQ at ${this.url}`);
-      // Use type assertion to fix the type error
-      this.connection = await amqplib.connect(this.url) as unknown as amqplib.Connection;
+      console.log(`Connecting to RabbitMQ at ${this.url}`);
 
-      if (this.connection) {
-        // Use type assertion to fix the type error
-        this.channel = await (this.connection as any).createChannel();
+      // Create connection with automatic reconnection
+      this.connection = connect([this.url], {
+        heartbeatIntervalInSeconds: options.heartbeat || 60,
+        reconnectTimeInSeconds: options.reconnectDelay ? options.reconnectDelay / 1000 : 5,
+      });
 
-        // Set up connection error handlers
-        this.connection.on('error', (err: Error) => {
-          console.error('RabbitMQ connection error:', err);
-          this.connection = null;
-          this.channel = null;
-          this.reconnect();
-        });
+      // Set up connection event handlers
+      this.connection.on('connect', () => console.log('Connected to RabbitMQ'));
+      this.connection.on('disconnect', (err) => console.log('Disconnected from RabbitMQ', err));
 
-        this.connection.on('close', () => {
-          console.log('RabbitMQ connection closed, attempting to reconnect...');
-          this.connection = null;
-          this.channel = null;
-          this.reconnect();
-        });
-      }
+      // Create channel wrapper with automatic setup
+      this.channelWrapper = this.connection.createChannel({
+        setup: async (channel: Channel) => {
+          // Create the main exchange if it doesn't exist
+          await channel.assertExchange('stage7', 'topic', { durable: true });
+          console.log('Channel created successfully');
+        }
+      });
 
-      console.log('Connected to RabbitMQ');
+      // Wait for channel to be ready
+      await this.channelWrapper.waitForConnect();
+      console.log('RabbitMQ channel ready');
+
       this.isConnecting = false;
     } catch (error) {
       console.error('Failed to connect to RabbitMQ:', error);
       this.connection = null;
-      this.channel = null;
+      this.channelWrapper = null;
       this.isConnecting = false;
-
-      // Don't throw the error, just return - this allows the caller to handle the failure gracefully
-      // without crashing the application
-      throw error; // Throw the error so the caller can handle it with retries
-    }
-  }
-
-  private async reconnect(): Promise<void> {
-    if (this.isConnecting) return;
-
-    this.connection = null;
-    this.channel = null;
-    this.isConnecting = true;
-
-    console.log('Attempting to reconnect to RabbitMQ...');
-    try {
-      await this._connect(); // Use _connect directly to avoid potential issues with connect()
-    } catch (error) {
-      console.error('Reconnection attempt failed:', error);
-      this.isConnecting = false;
-      // Schedule another reconnection attempt with exponential backoff
-      const delay = Math.floor(Math.random() * 5000) + 5000; // 5-10 seconds
-      console.log(`Will try to reconnect again in ${delay}ms`);
-      setTimeout(() => this.reconnect(), delay);
-    }
-  }
-
-  /**
-   * Publish a message to an exchange with a routing key
-   * @param exchange Exchange name
-   * @param routingKey Routing key
-   * @param message Message to publish
-   * @param options Optional publishing options
-   * @returns Promise that resolves to true if the message was published successfully
-   */
-  async publishMessage(exchange: string, routingKey: string, message: any, options: amqplib.Options.Publish = {}): Promise<boolean> {
-    const maxRetries = 3;
-    let retries = 0;
-
-    while (retries < maxRetries) {
-      try {
-        if (!this.channel || !this.isConnected()) {
-          console.log('Channel not available, connecting to RabbitMQ...');
-          await this.connect();
-
-          if (!this.channel) {
-            throw new Error('Failed to establish channel after connection');
-          }
-        }
-
-        await this.channel.assertExchange(exchange, 'topic', { durable: true });
-        // Set default options
-        const publishOptions: amqplib.Options.Publish = {
-          persistent: true,  // Make message persistent by default
-          contentType: 'application/json',
-          ...options
-        };
-
-        const result = this.channel.publish(
-          exchange,
-          routingKey,
-          Buffer.from(JSON.stringify(message)),
-          publishOptions
-        );
-
-        if (result) {
-          return true;
-        } else {
-          console.warn('Channel.publish returned false, retrying...');
-          retries++;
-          await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second before retry
-        }
-      } catch (error) {
-        console.error(`Error publishing message (attempt ${retries + 1}/${maxRetries}):`, error);
-        retries++;
-
-        if (retries < maxRetries) {
-          console.log(`Retrying in 1 second...`);
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          await this.reconnect();
-        } else {
-          console.error('Max retries reached, giving up on publishing message');
-          return false;
-        }
-      }
-    }
-
-    return false;
-  }
-
-  /**
-   * Subscribe to a queue and process messages
-   * @param queueName Queue name
-   * @param callback Callback function to process messages
-   * @param options Optional queue options
-   * @returns Promise that resolves when subscription is set up
-   */
-  async subscribeToQueue(queueName: string, callback: (message: any) => Promise<void>, options: amqplib.Options.AssertQueue = {}): Promise<void> {
-    const maxRetries = 3;
-    let retries = 0;
-
-    while (retries < maxRetries) {
-      try {
-        if (!this.channel || !this.isConnected()) {
-          console.log(`Channel not available for queue ${queueName}, connecting to RabbitMQ...`);
-          await this.connect();
-
-          if (!this.channel) {
-            throw new Error('Failed to establish channel after connection');
-          }
-        }
-
-        // Set default options
-        const queueOptions: amqplib.Options.AssertQueue = {
-          durable: true,  // Make queue durable by default
-          ...options
-        };
-
-        await this.channel.assertQueue(queueName, queueOptions);
-        const consumeResult = await this.channel.consume(queueName, async (msg: amqplib.ConsumeMessage | null) => {
-          if (msg) {
-            try {
-              const content = JSON.parse(msg.content.toString());
-              await callback(content);
-              if (this.channel) {
-                this.channel.ack(msg);
-              } else {
-                console.error('Cannot acknowledge message: channel is null');
-              }
-            } catch (error) {
-              console.error('Error processing message:', error);
-              // Requeue the message if processing failed and channel is available
-              if (this.channel) {
-                this.channel.nack(msg, false, true);
-              } else {
-                console.error('Cannot nack message: channel is null');
-              }
-            }
-          }
-        });
-
-        console.log(`Subscribed to queue: ${queueName} with consumer tag: ${consumeResult.consumerTag}`);
-        return; // Success, exit the retry loop
-      } catch (error) {
-        console.error(`Error subscribing to queue ${queueName} (attempt ${retries + 1}/${maxRetries}):`, error);
-        retries++;
-
-        if (retries < maxRetries) {
-          console.log(`Retrying subscription to ${queueName} in 1 second...`);
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          await this.reconnect();
-        } else {
-          console.error(`Max retries reached, giving up on subscribing to queue ${queueName}`);
-          throw error;
-        }
-      }
-    }
-  }
-
-  /**
-   * Bind a queue to an exchange with a routing pattern
-   * @param queueName Queue name
-   * @param exchange Exchange name
-   * @param routingPattern Routing pattern
-   * @param exchangeOptions Optional exchange options
-   * @param queueOptions Optional queue options
-   * @returns Promise that resolves when binding is complete
-   */
-  async bindQueueToExchange(
-    queueName: string,
-    exchange: string,
-    routingPattern: string,
-    exchangeOptions: amqplib.Options.AssertExchange = {},
-    queueOptions: amqplib.Options.AssertQueue = {}
-  ): Promise<void> {
-    const maxRetries = 3;
-    let retries = 0;
-
-    while (retries < maxRetries) {
-      try {
-        if (!this.channel || !this.isConnected()) {
-          console.log(`Channel not available for binding queue ${queueName}, connecting to RabbitMQ...`);
-          await this.connect();
-
-          if (!this.channel) {
-            throw new Error('Failed to establish channel after connection');
-          }
-        }
-
-        // Set default options
-        const defaultExchangeOptions: amqplib.Options.AssertExchange = {
-          durable: true,  // Make exchange durable by default
-          ...exchangeOptions
-        };
-
-        const defaultQueueOptions: amqplib.Options.AssertQueue = {
-          durable: true,  // Make queue durable by default
-          ...queueOptions
-        };
-
-        await this.channel.assertExchange(exchange, 'topic', defaultExchangeOptions);
-        await this.channel.assertQueue(queueName, defaultQueueOptions);
-        await this.channel.bindQueue(queueName, exchange, routingPattern);
-
-        console.log(`Bound queue ${queueName} to exchange ${exchange} with pattern ${routingPattern}`);
-        return; // Success, exit the retry loop
-      } catch (error) {
-        console.error(`Error binding queue ${queueName} to exchange ${exchange} (attempt ${retries + 1}/${maxRetries}):`, error);
-        retries++;
-
-        if (retries < maxRetries) {
-          console.log(`Retrying binding queue ${queueName} to exchange ${exchange} in 1 second...`);
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          await this.reconnect();
-        } else {
-          console.error(`Max retries reached, giving up on binding queue ${queueName} to exchange ${exchange}`);
-          throw error;
-        }
-      }
-    }
-  }
-
-  /**
-   * Check if the client is connected to RabbitMQ
-   * @returns true if connected, false otherwise
-   */
-  isConnected(): boolean {
-    // Check if both connection and channel exist and are in a good state
-    return this.connection !== null && this.channel !== null &&
-           (this.connection as any)?.connection?.writable === true;
-  }
-
-  async close(): Promise<void> {
-    try {
-      if (this.channel) {
-        await this.channel.close();
-      }
-      if (this.connection) {
-        // Use type assertion to fix the type error
-        await (this.connection as any).close();
-      }
-    } catch (error) {
-      console.error('Error closing connection:', error);
-    } finally {
-      this.channel = null;
-      this.connection = null;
-    }
-  }
-
-  /**
-   * Create a direct reply-to queue for RPC-style communication
-   * @param callback Callback function to process reply messages
-   * @returns Promise that resolves with the correlation ID and reply queue
-   */
-  async createReplyQueue(callback: (message: any) => Promise<void>): Promise<{ correlationId: string, replyTo: string }> {
-    try {
-      if (!this.channel) {
-        await this.connect();
-      }
-
-      // Generate a correlation ID for this request
-      const correlationId = Math.random().toString() + Date.now().toString();
-
-      // Use the amqp.node direct reply-to feature
-      const replyTo = 'amq.rabbitmq.reply-to';
-
-      // Set up consumer for the reply queue
-      await this.channel!.consume(
-        replyTo,
-        async (msg) => {
-          if (msg && msg.properties.correlationId === correlationId) {
-            try {
-              const content = JSON.parse(msg.content.toString());
-              await callback(content);
-              this.channel!.ack(msg);
-            } catch (error) {
-              console.error('Error processing reply message:', error);
-              this.channel!.nack(msg, false, false); // Don't requeue, as this is a reply
-            }
-          }
-        },
-        { noAck: false }
-      );
-
-      return { correlationId, replyTo };
-    } catch (error) {
-      console.error('Error creating reply queue:', error);
-      await this.reconnect();
       throw error;
     }
   }
 
   /**
-   * Send an RPC-style request and wait for a response
-   * @param exchange Exchange name
-   * @param routingKey Routing key
-   * @param message Message to send
+   * Get the channel wrapper for direct operations
+   * This allows consumers to use the channel directly for operations
+   */
+  getChannel(): ChannelWrapper | null {
+    return this.channelWrapper;
+  }
+
+  /**
+   * Check if connected to RabbitMQ
+   */
+  isConnected(): boolean {
+    return !!(this.connection && this.channelWrapper);
+  }
+
+  /**
+   * Test the connection by publishing and consuming a test message
+   */
+  async testConnection(): Promise<boolean> {
+    if (!this.isConnected() || !this.channelWrapper) {
+      return false;
+    }
+
+    try {
+      const testId = uuidv4();
+      const testQueue = `test-${testId}`;
+      const testMessage = { test: true, timestamp: Date.now() };
+
+      // Create a temporary queue and test the connection
+      await this.channelWrapper.addSetup(async (channel: Channel) => {
+        // Create a temporary queue
+        await channel.assertQueue(testQueue, { exclusive: true, autoDelete: true });
+
+        // Publish a message to the queue
+        const success = await channel.sendToQueue(testQueue, Buffer.from(JSON.stringify(testMessage)));
+
+        if (!success) {
+          throw new Error('Failed to publish test message');
+        }
+
+        // Set up a promise to consume the message
+        const messagePromise = new Promise<boolean>((resolve, reject) => {
+          // Set a timeout
+          const timeoutId = setTimeout(() => {
+            reject(new Error('Timed out waiting for test message'));
+          }, 5000);
+
+          // Consume the message
+          channel.consume(testQueue, (msg: ConsumeMessage | null) => {
+            if (msg) {
+              // Acknowledge the message
+              channel.ack(msg);
+
+              // Clean up
+              clearTimeout(timeoutId);
+
+              // Resolve the promise
+              resolve(true);
+            }
+          }, { noAck: false })
+            .then((result: any) => {
+              const consumerTag = result.consumerTag;
+              // Set up another timeout to cancel the consumer if no message is received
+              setTimeout(() => {
+                try {
+                  channel.cancel(consumerTag);
+                } catch (err) {
+                  console.error('Error canceling consumer:', err);
+                }
+              }, 5000);
+            })
+            .catch(reject);
+        });
+
+        // Wait for the message to be consumed
+        await messagePromise;
+
+        // Delete the queue
+        await channel.deleteQueue(testQueue);
+
+        return true;
+      });
+
+      return true;
+    } catch (error) {
+      console.error('Connection test failed:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Publish a message to an exchange with a routing key
+   * @param exchange Name of the exchange to publish to
+   * @param routingKey Routing key for the message
+   * @param message Message to publish
+   * @param options Publishing options
+   * @returns Promise that resolves to true if the message was published, false otherwise
+   */
+  async publishMessage(
+    exchange: string,
+    routingKey: string,
+    message: any,
+    options: any = {}
+  ): Promise<boolean> {
+    if (!this.isConnected() || !this.channelWrapper) {
+      throw new Error('Not connected to RabbitMQ');
+    }
+
+    try {
+      // Convert the message to a buffer
+      const content = Buffer.from(JSON.stringify(message));
+
+      // Publish the message
+      const result = await this.channelWrapper.publish(exchange, routingKey, content, {
+        persistent: true,
+        ...options
+      });
+
+      return result;
+    } catch (error) {
+      console.error(`Failed to publish message to ${exchange} with routing key ${routingKey}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Send an RPC request and wait for a response
+   * @param exchange Name of the exchange to publish to
+   * @param routingKey Routing key for the message
+   * @param message Message to publish
    * @param timeout Timeout in milliseconds
    * @returns Promise that resolves with the response
    */
-  async sendRpcRequest(exchange: string, routingKey: string, message: any, timeout: number = 30000): Promise<any> {
+  async sendRpcRequest(
+    exchange: string,
+    routingKey: string,
+    message: any,
+    timeout: number = 30000
+  ): Promise<any> {
+    if (!this.isConnected() || !this.channelWrapper) {
+      throw new Error('Not connected to RabbitMQ');
+    }
+
     return new Promise(async (resolve, reject) => {
       try {
-        if (!this.channel) {
-          await this.connect();
-        }
+        // Create a unique correlation ID for this request
+        const correlationId = uuidv4();
 
-        // Create a reply queue
-        const { correlationId, replyTo } = await this.createReplyQueue(async (response) => {
-          clearTimeout(timeoutId);
-          resolve(response);
-        });
+        // Create a temporary queue for the response
+        const replyQueueName = `rpc-reply-${uuidv4()}`;
 
-        // Set up timeout
-        const timeoutId = setTimeout(() => {
-          reject(new Error(`RPC request timed out after ${timeout}ms`));
-        }, timeout);
+        // Set up the temporary queue and consumer
+        await this.channelWrapper!.addSetup(async (channel: Channel) => {
+          // Create the reply queue
+          const { queue } = await channel.assertQueue(replyQueueName, {
+            exclusive: true,
+            autoDelete: true
+          });
 
-        // Publish the message with reply-to and correlation ID
-        await this.channel!.assertExchange(exchange, 'topic', { durable: true });
-        const success = this.channel!.publish(
-          exchange,
-          routingKey,
-          Buffer.from(JSON.stringify(message)),
-          {
-            persistent: true,
-            contentType: 'application/json',
+          // Set up a consumer for the reply queue
+          const { consumerTag } = await channel.consume(queue, (msg: ConsumeMessage | null) => {
+            if (msg && msg.properties.correlationId === correlationId) {
+              try {
+                // Parse the response
+                const response = JSON.parse(msg.content.toString());
+
+                // Clean up
+                channel.ack(msg);
+                // Cancel the consumer - using type assertion for TypeScript
+                (channel as any).cancel(consumerTag);
+
+                // Resolve the promise with the response
+                resolve(response);
+              } catch (error) {
+                reject(error);
+              }
+            }
+          }, { noAck: false });
+
+          // Set up a timeout
+          setTimeout(() => {
+            // Clean up the reply queue
+            try {
+              (channel as any).cancel(consumerTag);
+              channel.deleteQueue(replyQueueName);
+            } catch (err) {
+              console.error(`Error cleaning up RPC resources:`, err);
+            }
+
+            reject(new Error(`RPC request timed out after ${timeout}ms`));
+          }, timeout);
+
+          // Publish the message with the reply queue and correlation ID
+          const content = Buffer.from(JSON.stringify(message));
+          channel.publish(exchange, routingKey, content, {
             correlationId,
-            replyTo
-          }
-        );
-
-        if (!success) {
-          clearTimeout(timeoutId);
-          reject(new Error('Failed to publish RPC request'));
-        }
+            replyTo: replyQueueName,
+            persistent: true
+          });
+        });
       } catch (error) {
         reject(error);
       }
     });
   }
+
+  /**
+   * Close the connection to RabbitMQ
+   */
+  async close(): Promise<void> {
+    try {
+      if (this.channelWrapper) {
+        await this.channelWrapper.close();
+        this.channelWrapper = null;
+      }
+
+      if (this.connection) {
+        await this.connection.close();
+        this.connection = null;
+      }
+
+      console.log('Closed RabbitMQ connection');
+    } catch (error) {
+      console.error('Error closing RabbitMQ connection:', error);
+      throw error;
+    }
+  }
 }
+
+
 

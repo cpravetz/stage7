@@ -54,8 +54,28 @@ export class CapabilitiesManager extends BaseEntity {
 
     private async initialize() {
         try {
+            console.log('Initializing CapabilitiesManager...');
             this.configManager = await ConfigManager.initialize(this.librarianUrl);
+
+            // Set up the server
             await this.start();
+
+            // Explicitly register with PostOffice
+            if (!this.registeredWithPostOffice) {
+                console.log('CapabilitiesManager not registered with PostOffice yet, registering now...');
+                await this.registerWithPostOffice(15, 2000); // Increase retries and initial delay
+
+                if (this.registeredWithPostOffice) {
+                    console.log('CapabilitiesManager successfully registered with PostOffice');
+                } else {
+                    console.error('Failed to register CapabilitiesManager with PostOffice after multiple attempts');
+                    // Continue running even if registration fails - PostOffice might come online later
+                }
+            } else {
+                console.log('CapabilitiesManager already registered with PostOffice');
+            }
+
+            console.log('CapabilitiesManager initialization complete');
         } catch (error) {
             console.error('Failed to initialize CapabilitiesManager:', error);
             process.exit(1);
@@ -69,7 +89,7 @@ export class CapabilitiesManager extends BaseEntity {
                 app.use(bodyParser.json());
 
                 // Add basic request logging
-                app.use((req, res, next) => {
+                app.use((req, _res, next) => {
                     console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
                     next();
                 });
@@ -87,28 +107,43 @@ export class CapabilitiesManager extends BaseEntity {
 
                 app.post('/executeAction', (req, res) => this.executeActionVerb(req, res));
                 app.post('/message', (req, res) => this.handleMessage(req, res));
-                app.get('/availablePlugins', async (req, res) => {res.json(await this.pluginRegistry.list())});
+                app.get('/availablePlugins', async (_req, res) => {res.json(await this.pluginRegistry.list())});
                 app.post('/storeNewPlugin', (req, res) => {this.storeNewPlugin(req, res)});
 
                 // GitHub integration routes
                 app.use('/github', githubRoutes);
 
-                // Generic plugin API routes
+                // Generic plugin API routes with better GitHub integration
                 app.get('/plugins', async (req, res) => {
                     try {
                         const repositoryType = req.query.repository as string || 'mongo';
+
+                        // Special handling for GitHub repository
+                        if (repositoryType === 'github' && process.env.ENABLE_GITHUB !== 'true') {
+                            res.status(403).json({
+                                error: 'GitHub access is disabled by configuration. Set ENABLE_GITHUB=true to enable.'
+                            });
+                            return;
+                        }
+
                         const repositories = this.pluginRegistry.getPluginMarketplace().getRepositories();
                         const repository = repositories.get(repositoryType);
 
                         if (!repository) {
-                            res.status(404).json({ error: `Repository type ${repositoryType} not found` });
+                            res.status(404).json({
+                                error: `Repository type ${repositoryType} not found`,
+                                availableRepositories: Array.from(repositories.keys())
+                            });
                         } else {
                             const plugins = await repository.list();
-                            res.json({ plugins });
+                            res.json({ plugins, repository: repositoryType });
                         }
                     } catch (error) {
                         analyzeError(error as Error);
-                        res.status(500).json({ error: 'Failed to list plugins' });
+                        res.status(500).json({
+                            error: 'Failed to list plugins',
+                            message: error instanceof Error ? error.message : String(error)
+                        });
                     }
                 });
 
@@ -116,22 +151,37 @@ export class CapabilitiesManager extends BaseEntity {
                     try {
                         const { id } = req.params;
                         const repositoryType = req.query.repository as string || 'mongo';
+
+                        // Special handling for GitHub repository
+                        if (repositoryType === 'github' && process.env.ENABLE_GITHUB !== 'true') {
+                            res.status(403).json({
+                                error: 'GitHub access is disabled by configuration. Set ENABLE_GITHUB=true to enable.'
+                            });
+                            return;
+                        }
+
                         const repositories = this.pluginRegistry.getPluginMarketplace().getRepositories();
                         const repository = repositories.get(repositoryType);
 
                         if (!repository) {
-                            res.status(404).json({ error: `Repository type ${repositoryType} not found` });
+                            res.status(404).json({
+                                error: `Repository type ${repositoryType} not found`,
+                                availableRepositories: Array.from(repositories.keys())
+                            });
                         } else {
                             const plugin = await repository.fetch(id);
                             if (!plugin) {
-                                res.status(404).json({ error: 'Plugin not found' });
+                                res.status(404).json({ error: `Plugin with ID ${id} not found in ${repositoryType} repository` });
+                            } else {
+                                res.json({ plugin, repository: repositoryType });
                             }
-                            res.json({ plugin });
                         }
-
                     } catch (error) {
                         analyzeError(error as Error);
-                        res.status(500).json({ error: 'Failed to get plugin' });
+                        res.status(500).json({
+                            error: 'Failed to get plugin',
+                            message: error instanceof Error ? error.message : String(error)
+                        });
                     }
                 });
 
@@ -155,7 +205,7 @@ export class CapabilitiesManager extends BaseEntity {
                 });
 
                 // Error handling middleware
-                app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
+                app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
                     console.error('Express error:', err);
                     res.status(500).send({
                         success: false,
@@ -185,11 +235,53 @@ export class CapabilitiesManager extends BaseEntity {
         try {
             console.log('Setting up express server...');
             await this.setupServer();
-            console.log('CapabilitiesManager initialization complete');
+
+            // Set up periodic re-registration with PostOffice
+            this.setupPeriodicReregistration();
+
+            console.log('CapabilitiesManager server setup complete');
         } catch (error) {
             //analyzeError(error as Error);
             console.error('Failed to start CapabilitiesManager:', error instanceof Error ? error.message : error);
         }
+    }
+
+    /**
+     * Set up periodic re-registration with PostOffice to ensure we stay registered
+     * even if PostOffice restarts
+     */
+    private setupPeriodicReregistration(): void {
+        // Re-register every 5 minutes
+        setInterval(async () => {
+            if (!this.registeredWithPostOffice) {
+                console.log('CapabilitiesManager not registered with PostOffice, attempting to register...');
+                await this.registerWithPostOffice(5, 1000);
+
+                if (this.registeredWithPostOffice) {
+                    console.log('CapabilitiesManager successfully re-registered with PostOffice');
+                } else {
+                    console.error('Failed to re-register CapabilitiesManager with PostOffice');
+                }
+            } else {
+                // Verify registration is still valid by checking with PostOffice
+                try {
+                    const response = await this.authenticatedApi.get(`http://${this.postOfficeUrl}/getServices`);
+                    const services = response.data;
+
+                    // Check if CapabilitiesManager is in the services list
+                    if (!services || !services.capabilitiesManagerUrl) {
+                        console.log('CapabilitiesManager not found in PostOffice services, re-registering...');
+                        this.registeredWithPostOffice = false; // Reset flag
+                        await this.registerWithPostOffice(5, 1000);
+                    } else {
+                        console.log('CapabilitiesManager registration with PostOffice verified');
+                    }
+                } catch (error) {
+                    console.error('Error verifying registration with PostOffice:', error instanceof Error ? error.message : error);
+                    // Don't reset the flag here, as the error might be temporary
+                }
+            }
+        }, 5 * 60 * 1000); // 5 minutes
     }
 
     private async handleMessage(req: express.Request, res: express.Response) {
@@ -217,19 +309,21 @@ export class CapabilitiesManager extends BaseEntity {
             if (existingPlugin) {
                 // Check version compatibility
                 if (compareVersions(newPlugin.version, existingPlugin.version) <= 0) {
-                    return res.status(400).json({
+                    res.status(400).json({
                         error: `New plugin version ${newPlugin.version} is not newer than existing version ${existingPlugin.version}`
                     });
+                    return;
                 }
 
                 // Perform compatibility check
                 const compatibilityResult = checkPluginCompatibility(existingPlugin, newPlugin);
 
                 if (!compatibilityResult.compatible) {
-                    return res.status(400).json({
+                    res.status(400).json({
                         error: 'Plugin is not compatible with the existing version',
                         issues: compatibilityResult.issues
                     });
+                    return;
                 }
 
                 console.log(`CapabilitiesManager: Updating plugin ${newPlugin.id} from version ${existingPlugin.version} to ${newPlugin.version}`);
@@ -242,9 +336,10 @@ export class CapabilitiesManager extends BaseEntity {
             // Validate plugin permissions
             const permissionErrors = validatePluginPermissions(newPlugin);
             if (permissionErrors.length > 0) {
-                return res.status(400).json({
+                res.status(400).json({
                     error: `Plugin permission validation failed: ${permissionErrors.join(', ')}`
                 });
+                return;
             }
 
             // Store the plugin
@@ -272,20 +367,6 @@ export class CapabilitiesManager extends BaseEntity {
             inputs: MapSerializer.transformFromSerialization(req.body.inputs)
         };
         console.log('CM: Executing action verb:', step.actionVerb);
-
-        // TEMPORARY: Special handling for ACCOMPLISH verb
-        if (step.actionVerb === 'ACCOMPLISH') {
-            console.log('CM: SPECIAL HANDLING for ACCOMPLISH verb');
-            res.status(200).send([{
-                success: true,
-                name: 'marketing_plan',
-                resultType: PluginParameterType.STRING,
-                resultDescription: 'Marketing plan created successfully',
-                result: 'Here is a marketing plan for your new software product:\n\n1. Executive Summary\n2. Target Market Analysis\n3. Competitive Analysis\n4. Product Positioning\n5. Marketing Channels\n6. Budget and Timeline\n7. Success Metrics',
-                mimeType: 'text/plain'
-            }]);
-            return;
-        }
 
         if (!step.actionVerb || typeof step.actionVerb !== 'string') {
             console.log('CM: Invalid or missing verb', step.actionVerb);
@@ -385,7 +466,16 @@ export class CapabilitiesManager extends BaseEntity {
 
             // Execute plugin with validated inputs
             const result = await this.executePlugin(plugin, validatedInputs.inputs || new Map<string, PluginInput>());
-            console.log('CM: Plugin executed successfully');//:, result);
+
+            // Log the result in a more readable format
+            console.log('CM: Plugin executed successfully:', JSON.stringify(MapSerializer.transformForSerialization(result), null, 2));
+
+            // For PLAN results, log more details about the plan
+            if (result.length > 0 && result[0].resultType === PluginParameterType.PLAN) {
+                console.log('CM: Plan details:', JSON.stringify(result[0].result, null, 2));
+            }
+
+            // Send the serialized result
             res.status(200).send(MapSerializer.transformForSerialization(result));
 
         } catch (error) {
@@ -493,7 +583,9 @@ export class CapabilitiesManager extends BaseEntity {
             }
 
             // Execute the plugin
-            return await pluginModule.execute(inputs, environment);
+            const pluginResult = await pluginModule.execute(inputs, environment);
+            console.log(`CM: Plugin ${plugin.verb} result:`, pluginResult);
+            return pluginResult;
         } catch (error) {
             console.error(`Error executing plugin ${plugin.verb}:`, error);
             return [{
@@ -574,7 +666,7 @@ export class CapabilitiesManager extends BaseEntity {
                 case PluginParameterType.PLUGIN:
                     // Need to create a new plugin
                     console.log('CM: Creating new plugin for unknown verb:', step.actionVerb);
-                    const engineerResult = await requestPluginFromEngineer(step, JSON.stringify(accomplishResult.result));
+                    const engineerResult = await requestPluginFromEngineer(this, step, JSON.stringify(accomplishResult.result));
                     if (!engineerResult.success) {
                         return engineerResult;
                     }
@@ -600,7 +692,7 @@ export class CapabilitiesManager extends BaseEntity {
 
                 case PluginParameterType.PLAN:
                     // Return the plan for execution
-                    console.log('CM: Returning plan for execution:', accomplishResult.result);
+                    console.log('CM: Returning plan for execution:', JSON.stringify(accomplishResult.result, null, 2));
                     return {
                         success: true,
                         name: 'plan_created',
@@ -715,7 +807,8 @@ export class CapabilitiesManager extends BaseEntity {
 
 }
 
-// Create and start the CapabilitiesManager
-const manager = new CapabilitiesManager();
+// Create and export a singleton instance
+export const capabilitiesManager = new CapabilitiesManager();
 
+// Also export the class for type usage
 export default CapabilitiesManager;

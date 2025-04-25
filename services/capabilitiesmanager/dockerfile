@@ -33,4 +33,4 @@ WORKDIR /usr/src/app/services/capabilitiesmanager
 EXPOSE 5060
 
 # Define the command to run the application
-CMD ["node", "--experimental-vm-modules", "dist/CapabilitiesManager.js"]
+CMD ["node", "--experimental-vm-modules", "dist/index.js"]

@@ -1,11 +1,13 @@
-import axios from 'axios';
-import { PluginOutput, PluginParameterType, Step } from '@cktmcs/shared';
+import { PluginOutput, PluginParameterType, Step, BaseEntity } from '@cktmcs/shared';
 
-
-export const requestPluginFromEngineer = async (step: Step, accomplishGuidance: String): Promise<PluginOutput> => {
+// This utility should be used by an instance of CapabilitiesManager, which extends BaseEntity
+export const requestPluginFromEngineer = async (entity: BaseEntity, step: Step, accomplishGuidance: String): Promise<PluginOutput> => {
     try {
-        const engineerUrl = process.env.ENGINEER_URL || 'engineer:5070';
-        const response = await axios.post(`http://${engineerUrl}/createPlugin`, {
+        // Get the engineer URL from the entity's service URLs
+        const { engineerUrl } = await entity.getServiceUrls();
+
+        // Use the entity's authenticated API
+        const response = await entity.authenticatedApi.post(`http://${engineerUrl}/createPlugin`, {
             verb: step.actionVerb,
             context: step.inputs,
             accomplishGuidance: accomplishGuidance

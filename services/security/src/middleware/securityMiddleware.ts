@@ -12,7 +12,7 @@ import { analyzeError } from '@cktmcs/errorhandler';
  * @param message Error message
  * @returns Express middleware
  */
-export function createRateLimiter(windowMs: number = 15 * 60 * 1000, max: number = 100, message: string = 'Too many requests, please try again later.') {
+export function createRateLimiter(windowMs: number = 15 * 60 * 1000, max: number = 1000, message: string = 'Too many requests, please try again later.') {
     return rateLimit({
         windowMs,
         max,

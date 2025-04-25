@@ -12,7 +12,7 @@ import { MongoUserRepository } from '../repositories/MongoUserRepository';
 const userRepository = new MongoUserRepository();
 
 // Initialize services
-const tokenService = new TokenService();
+const tokenService = new TokenService({}, null, null, userRepository);
 const authenticationService = new AuthenticationService(userRepository, tokenService);
 const authorizationService = new AuthorizationService(null, null, userRepository);
 

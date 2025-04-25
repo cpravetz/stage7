@@ -11,6 +11,7 @@ export class GeminiService extends BaseService {
             'https://generativelanguage.googleapis.com/v1',
             ['gemini']
         );
+        console.log(`Gemini Service created, ApiKey starts ${this.apiKey.substring(0,6)}`);
     }
 
     isAvailable(): boolean {

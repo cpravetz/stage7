@@ -26,6 +26,8 @@ export interface AgentState {
     librarianUrl: string;
     conversation: any[];
     missionContext: string;
+    role?: string;
+    roleCustomizations?: any;
 }
 
 export class AgentPersistenceManager {

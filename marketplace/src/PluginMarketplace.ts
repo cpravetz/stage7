@@ -35,94 +35,108 @@ export class PluginMarketplace {
 
         this.repositories = new Map();
         for (const repoConfig of repositoryConfig.Repositories) {
-            // Skip GitHub repository if GitHub access is disabled
-            if (repoConfig.type === 'github' && process.env.ENABLE_GITHUB !== 'true') {
-                console.log('Skipping GitHub repository initialization as ENABLE_GITHUB is not set to true');
-                continue;
-            }
-
-            const repository = this.createRepository({
-                ...repoConfig,
-                type: repoConfig.type as PluginRepositoryType
-            });
-
-            if (repository) {
-                this.repositories.set(repoConfig.type, repository);
-            } else {
-                console.warn(`Failed to create repository of type ${repoConfig.type}`);
-            }
-        }
-    }
-
-    async list(): Promise<PluginLocator[]> {
-        const locators: PluginLocator[] = [];
-        for (const repository of this.repositories.values()) {
             try {
-                const repoPlugins = await repository.list();
-                console.log('Marketplace: Adding ',repoPlugins.length,' Locators from ',repository.type);
-                locators.push(...repoPlugins);
-            } catch (error) {
-                console.warn(`Error listing from repository: ${error}`);
-                continue;
-            }
-        }
-        console.log('Marketplace: Locators ',locators);
-        return locators;
-    }
-
-    private createRepository(config: RepositoryConfig): PluginRepository | undefined {
-        switch (config.type) {
-            case 'git':
-                return new GitRepository(config);
-            case 'github':
-                return new GitHubRepository(config);
-            case 'mongo':
-                return new MongoRepository(config);
-            //case 'npm':
-            //    return new NpmPluginRepository(config);
-            case 'local':
-                return new LocalRepository(config);
-            default:
-                console.log(`Unsupported repository type: ${config.type}`);
-                return undefined;
-        }
-    }
-
-    async findOne(id: string): Promise<PluginManifest | undefined> {
-        try {
-            const localRepo = this.repositories.get('local');
-            if (localRepo) {
-                const plugin = await localRepo.fetch(id);
-                if (plugin) {
-                    return plugin;
-                }
-            }
-            for (const repository of this.repositories.values()) {
-                try {
-                    const plugin = await repository.fetch(id);
-                    if (plugin) {
-                        return plugin;
-                    }
-                } catch (error) {
-                    console.warn(`Error fetching from repository: ${error}`);
+                // Skip GitHub repository if GitHub access is disabled
+                if (repoConfig.type === 'github' && process.env.ENABLE_GITHUB !== 'true') {
+                    console.log('Skipping GitHub repository initialization as ENABLE_GITHUB is not set to true');
                     continue;
                 }
+
+                // For GitHub repository, verify required credentials are present
+                if (repoConfig.type === 'github' && process.env.ENABLE_GITHUB === 'true') {
+                    if (!process.env.GITHUB_TOKEN || !process.env.GITHUB_USERNAME || !process.env.GIT_REPOSITORY_URL) {
+                        console.warn('GitHub repository is enabled but missing required credentials. Set GITHUB_TOKEN, GITHUB_USERNAME, and GIT_REPOSITORY_URL environment variables.');
+                        continue;
+                    }
+                    console.log('Initializing GitHub repository with provided credentials');
+                }
+
+                const repository = this.createRepository({
+                    ...repoConfig,
+                    type: repoConfig.type as PluginRepositoryType
+                });
+
+                if (repository) {
+                    this.repositories.set(repoConfig.type, repository);
+                    console.log(`Successfully initialized repository of type: ${repoConfig.type}`);
+                } else {
+                    console.warn(`Failed to create repository of type ${repoConfig.type}`);
+                }
+            } catch (error) {
+                console.error(`Error initializing repository of type ${repoConfig.type}:`, error);
             }
-            return undefined;
-        } catch {
+        }
+    }
+
+    /**
+     * List all plugins from a specific repository
+     * @param repository Repository type to list from
+     * @returns Array of plugin locators
+     */
+    async list(repository?: PluginRepositoryType): Promise<PluginLocator[]> {
+        if (repository) {
+            const repo = this.repositories.get(repository);
+            if (!repo) {
+                throw new Error(`Repository ${repository} not found`);
+            }
+            return await repo.list();
+        }
+        
+        // If no repository specified, use default
+        const defaultRepo = this.repositories.get(this.defaultRepository);
+        if (!defaultRepo) {
+            throw new Error(`Default repository ${this.defaultRepository} not found`);
+        }
+        return await defaultRepo.list();
+    }
+
+    /**
+     * Create a repository instance based on the provided configuration
+     * @param config Repository configuration
+     * @returns Repository instance or undefined if creation failed
+     */
+    private createRepository(config: RepositoryConfig): PluginRepository | undefined {
+        try {
+            switch (config.type) {
+                case 'mongo':
+                    return new MongoRepository(config);
+                case 'git':
+                    return new GitRepository(config);
+                case 'github':
+                    return new GitHubRepository(config);
+                case 'local':
+                    return new LocalRepository(config);
+                default:
+                    console.warn(`Unknown repository type: ${config.type}`);
+                    return undefined;
+            }
+        } catch (error) {
+            console.error(`Failed to create repository of type ${config.type}:`, error);
             return undefined;
         }
     }
 
+    /**
+     * Fetch a plugin by ID from a specific repository
+     * @param id Plugin ID
+     * @param repository Repository type to fetch from
+     * @returns Plugin manifest or undefined if not found
+     */
     async fetchOne(id: string, repository?: PluginRepositoryType): Promise<PluginManifest | undefined> {
-        if (!repository) {
-            repository = this.defaultRepository;
+        if (repository) {
+            const repo = this.repositories.get(repository);
+            if (!repo) {
+                throw new Error(`Repository ${repository} not found`);
+            }
+            return await repo.fetch(id);
         }
-        const repo = this.repositories.get(repository);
-        if (!repo) {
-            throw new Error(`Repository ${repository} not found`);
+        
+        // If no repository specified, use default
+        const defaultRepo = this.repositories.get(this.defaultRepository);
+        if (!defaultRepo) {
+            throw new Error(`Default repository ${this.defaultRepository} not found`);
         }
-        return await repo.fetch(id);
+        return await defaultRepo.fetch(id);
     }
 
     public async fetchOneByVerb(verb: string): Promise<PluginManifest | undefined> {

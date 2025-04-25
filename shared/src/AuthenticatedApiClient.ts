@@ -1,49 +1,20 @@
-import axios, { AxiosInstance, AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios';
+import { AxiosInstance, AxiosRequestConfig } from 'axios';
 import { IBaseEntity } from './interfaces/IBaseEntity.js';
-import { ServiceTokenManager } from './security/ServiceTokenManager.js';
+import { createAuthenticatedAxios } from './http/createAuthenticatedAxios.js';
 
 /**
  * Client for making authenticated API requests
  */
-
 export class AuthenticatedApiClient {
   private api: AxiosInstance;
-  private securityManagerUrl: string;
-  private tokenManager: ServiceTokenManager;
 
   constructor(private baseEntity: IBaseEntity) {
-    this.securityManagerUrl = process.env.SECURITY_MANAGER_URL || 'securitymanager:5010';
-
-    // Create a token manager for this service
+    const securityManagerUrl = process.env.SECURITY_MANAGER_URL || 'securitymanager:5010';
     const componentType = this.baseEntity.componentType;
     const clientSecret = process.env.CLIENT_SECRET || 'stage7AuthSecret';
-    this.tokenManager = new ServiceTokenManager(
-      `http://${this.securityManagerUrl}`,
-      componentType,
-      clientSecret
-    );
 
-    this.api = axios.create({
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-      },
-    });
-
-    this.api.interceptors.request.use(this.authInterceptor.bind(this));
-  }
-
-  private async authInterceptor(config: InternalAxiosRequestConfig): Promise<InternalAxiosRequestConfig> {
-    try {
-      // Get token
-      const token = await this.tokenManager.getToken();
-      // Set Authorization header
-      config.headers.set('Authorization', `Bearer ${token}`);
-      return config;
-    } catch (error) {
-      console.error('Error adding auth header to request:', error);
-      throw error;
-    }
+    // Use the shared authenticated axios instance
+    this.api = createAuthenticatedAxios(componentType, securityManagerUrl, clientSecret);
   }
 
   public async get(url: string, config?: AxiosRequestConfig) {

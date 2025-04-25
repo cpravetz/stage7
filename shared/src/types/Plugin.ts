@@ -145,4 +145,5 @@ export interface ActionVerbTask {
     expectedOutputs?: Map<string, string>;
     description?: string;
     dependencies?: PlanDependency[];
+    recommendedRole?: string;
 }

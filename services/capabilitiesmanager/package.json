@@ -2,10 +2,10 @@
     "name": "@cktmcs/capabilities-manager",
     "version": "1.0.0",
     "description": "Capabilities Manager component to handle ActionVerbs and Plugins",
-    "main": "dist/CapabilitiesManager.js",
+    "main": "dist/index.js",
     "type": "commonjs",
     "scripts": {
-        "start": "ts-node src/CapabilitiesManager.ts",
+        "start": "ts-node src/index.ts",
         "build": "tsc",
         "test": "jest"
     },

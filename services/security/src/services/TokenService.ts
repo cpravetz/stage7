@@ -13,6 +13,7 @@ export class TokenService {
     private config: TokenConfig;
     private tokenRepository: any; // Replace with actual repository type
     private tokenBlacklistRepository: any; // Replace with actual repository type
+    private userRepository: any; // Replace with actual repository type
     private privateKey: string;
     private publicKey: string;
 
@@ -21,15 +22,18 @@ export class TokenService {
      * @param config Token configuration
      * @param tokenRepository Token repository
      * @param tokenBlacklistRepository Token blacklist repository
+     * @param userRepository User repository
      */
     constructor(
         config: Partial<TokenConfig> = {},
         tokenRepository: any = null,
-        tokenBlacklistRepository: any = null
+        tokenBlacklistRepository: any = null,
+        userRepository: any = null
     ) {
         this.config = { ...DEFAULT_TOKEN_CONFIG, ...config };
         this.tokenRepository = tokenRepository;
         this.tokenBlacklistRepository = tokenBlacklistRepository;
+        this.userRepository = userRepository;
 
         // Load RSA keys
         try {
@@ -294,13 +298,20 @@ export class TokenService {
     }
 
     /**
-     * Get user by ID (placeholder - implement in actual service)
+     * Get user by ID
      * @param userId User ID
      * @returns User or null
      */
     private async getUserById(userId: string): Promise<User | null> {
-        // This is a placeholder - implement actual user retrieval
-        return null;
+        try {
+            if (!this.userRepository) {
+                throw new Error('User repository is not available');
+            }
+            return await this.userRepository.findById(userId);
+        } catch (error) {
+            console.error('Error getting user by ID:', error);
+            throw error;
+        }
     }
 
     /**

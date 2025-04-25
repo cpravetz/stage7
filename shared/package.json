@@ -12,6 +12,7 @@
     "test": "jest"
   },
   "dependencies": {
+    "amqp-connection-manager": "^4.1.14",
     "amqplib": "^0.10.7",
     "axios": "^1.7.7",
     "isolated-vm": "^4.6.0",
