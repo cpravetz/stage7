@@ -60,6 +60,8 @@ export class Brain extends BaseEntity {
             res.json({ status: 'ok', message: 'Brain service is running' });
         });
 
+
+
         // Global error handler
         app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
             console.error('Express error in Brain:', err instanceof Error ? err.message : String(err));
@@ -103,30 +105,6 @@ export class Brain extends BaseEntity {
             } catch (error) {
                 analyzeError(error as Error);
                 res.status(500).json({ error: 'Failed to reset blacklisted models' });
-            }
-        });
-
-        // API endpoint to get performance data for all models
-        app.get('/performance', (_req: express.Request, res: express.Response) => {
-            try {
-                const performanceData = this.modelManager.performanceTracker.getAllPerformanceData();
-                res.json({ success: true, performanceData });
-            } catch (error) {
-                analyzeError(error as Error);
-                res.status(500).json({ error: 'Failed to get performance data' });
-            }
-        });
-
-        // API endpoint to get model rankings
-        app.get('/performance/rankings', (req: express.Request, res: express.Response) => {
-            try {
-                const conversationType = req.query.conversationType as string || 'text/text';
-                const metric = req.query.metric as 'successRate' | 'averageLatency' | 'overall' || 'overall';
-                const rankings = this.modelManager.getModelRankings(conversationType, metric);
-                res.json({ success: true, rankings });
-            } catch (error) {
-                analyzeError(error as Error);
-                res.status(500).json({ error: 'Failed to get model rankings' });
             }
         });
 
@@ -253,10 +231,16 @@ export class Brain extends BaseEntity {
                     console.log(`Model response received:`,modelResponse);
 
                     // Track successful response
+                    // Estimate token count: ~4 chars per token is a rough approximation
+                    const estimatedTokenCount = typeof modelResponse === 'string'
+                        ? Math.ceil(modelResponse.length / 4)
+                        : 0;
+                    console.log(`[Brain] Estimated token count for response: ${estimatedTokenCount}`);
+
                     this.modelManager.trackModelResponse(
                         requestId,
                         modelResponse,
-                        modelResponse.length,
+                        estimatedTokenCount,
                         true
                     );
 
@@ -298,6 +282,17 @@ export class Brain extends BaseEntity {
      */
     getAvailableModels(): string[] {
         return this.modelManager.getAvailableModels();
+    }
+
+    /**
+     * Skip authentication for certain endpoints
+     * @param req Request
+     * @param res Response
+     * @param next Next function
+     */
+    private skipAuth(req: express.Request, _res: express.Response, next: express.NextFunction): void {
+        console.log('[Brain] Skipping authentication for endpoint:', req.path);
+        next();
     }
 
     private determineMimeType(response: string): string {
@@ -398,15 +393,52 @@ export class Brain extends BaseEntity {
             if (!this.librarianUrl) {
                 await this.discoverLibrarianService();
                 if (!this.librarianUrl) {
-                    console.error('Cannot sync performance data: Librarian service not found');
+                    console.error('[Brain] Cannot sync performance data: Librarian service not found');
                     return;
                 }
             }
 
-            console.log('Syncing model performance data to Librarian...');
+            console.log('[Brain] Syncing model performance data to Librarian...');
 
             // Get performance data
             const performanceData = this.modelManager.performanceTracker.getAllPerformanceData();
+            console.log(`[Brain] Performance data contains ${performanceData.length} models`);
+
+            // Check if we have any performance data to sync
+            if (performanceData.length === 0) {
+                console.log(`[Brain] No model performance data available to sync, skipping`);
+
+                // Check if we have any blacklisted models that should be in the performance data
+                const blacklistedModels = this.modelManager.getBlacklistedModels();
+                if (blacklistedModels.length > 0) {
+                    console.log(`[Brain] Found ${blacklistedModels.length} blacklisted models but no performance data. This is inconsistent.`);
+                    console.log('[Brain] Blacklisted models:', JSON.stringify(blacklistedModels, null, 2));
+                }
+
+                // Check active requests
+                console.log(`[Brain] Current active model requests: ${this.modelManager.getActiveRequestsCount()}`);
+
+                return;
+            }
+
+            // Log details about each model for debugging
+            console.log('[Brain] Detailed performance data:');
+            for (const model of performanceData) {
+                console.log(`[Brain] Model: ${model.modelName}`);
+                for (const [conversationType, metrics] of Object.entries(model.metrics)) {
+                    console.log(`[Brain]   - Conversation type: ${conversationType}`);
+                    console.log(`[Brain]     - Usage count: ${metrics.usageCount}`);
+                    console.log(`[Brain]     - Success count: ${metrics.successCount}`);
+                    console.log(`[Brain]     - Failure count: ${metrics.failureCount}`);
+                    console.log(`[Brain]     - Success rate: ${metrics.successRate.toFixed(2)}`);
+                    console.log(`[Brain]     - Average latency: ${metrics.averageLatency.toFixed(2)}ms`);
+                    console.log(`[Brain]     - Average token count: ${metrics.averageTokenCount.toFixed(2)}`);
+                    console.log(`[Brain]     - Consecutive failures: ${metrics.consecutiveFailures}`);
+                    console.log(`[Brain]     - Blacklisted: ${metrics.blacklistedUntil ? `Yes, until ${new Date(metrics.blacklistedUntil).toLocaleString()}` : 'No'}`);
+                    console.log(`[Brain]     - Last used: ${new Date(metrics.lastUsed).toLocaleString()}`);
+                    console.log(`[Brain]     - Feedback scores:`, JSON.stringify(metrics.feedbackScores, null, 2));
+                }
+            }
 
             // Get rankings for different conversation types and metrics
             const conversationTypes = ['text/text', 'text/code', 'image/text'];
@@ -417,10 +449,20 @@ export class Brain extends BaseEntity {
             for (const conversationType of conversationTypes) {
                 rankings[conversationType] = {};
                 for (const metric of metrics) {
-                    rankings[conversationType][metric] = this.modelManager.getModelRankings(
+                    const modelRankings = this.modelManager.getModelRankings(
                         conversationType,
                         metric as 'successRate' | 'averageLatency' | 'overall'
                     );
+                    rankings[conversationType][metric] = modelRankings;
+                    console.log(`[Brain] Rankings for ${conversationType}/${metric}: ${modelRankings.length} models`);
+
+                    // Log top 3 models for each ranking if available
+                    if (modelRankings.length > 0) {
+                        console.log(`[Brain] Top models for ${conversationType}/${metric}:`);
+                        modelRankings.slice(0, 3).forEach((item, index) => {
+                            console.log(`[Brain]   ${index + 1}. ${item.modelName} (score: ${item.score.toFixed(2)})`);
+                        });
+                    }
                 }
             }
 
@@ -433,6 +475,8 @@ export class Brain extends BaseEntity {
 
             // Store in Librarian using authenticatedApi to ensure proper authorization
             try {
+                console.log(`[Brain] Sending performance data to Librarian at ${this.librarianUrl}`);
+
                 const response = await this.authenticatedApi.post(`http://${this.librarianUrl}/storeData`, {
                     id: 'model-performance-data',
                     data: modelPerformanceData,
@@ -441,16 +485,29 @@ export class Brain extends BaseEntity {
                 });
 
                 if (response.status === 200) {
-                    console.log('Successfully synced model performance data to Librarian');
+                    console.log(`[Brain] Successfully synced model performance data to Librarian: ${JSON.stringify(response.data)}`);
                 } else {
-                    console.error('Failed to sync model performance data to Librarian:', response.data);
+                    console.error(`[Brain] Failed to sync model performance data to Librarian: ${JSON.stringify(response.data)}`);
                 }
             } catch (apiError) {
-                console.error('API error syncing performance data to Librarian:',
+                console.error('[Brain] API error syncing performance data to Librarian:',
                     apiError instanceof Error ? apiError.message : String(apiError));
+
+                // Log more details about the error
+                if (apiError instanceof Error && (apiError as any).response) {
+                    const errorResponse = (apiError as any).response;
+                    console.error(`[Brain] API error status: ${errorResponse.status}`);
+                    console.error(`[Brain] API error data: ${JSON.stringify(errorResponse.data)}`);
+                }
+
+                // Log the error but continue operation
+                console.log('[Brain] Will retry syncing performance data on next scheduled interval');
             }
         } catch (error) {
-            console.error('Error syncing performance data to Librarian:', error instanceof Error ? error.message : String(error));
+            console.error('[Brain] Error syncing performance data to Librarian:', error instanceof Error ? error.message : String(error));
+
+            // Log the error but continue operation
+            console.log('[Brain] Will retry syncing performance data on next scheduled interval');
         }
     }
 }

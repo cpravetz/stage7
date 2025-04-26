@@ -15,7 +15,7 @@ import { DomainKnowledge } from './specialization/DomainKnowledge';
 export class AgentSet extends BaseEntity {
     agents: Map<string, Agent> = new Map(); // Store agents by their ID
     maxAgents: number = 10; // Example limit for agents in this set
-    persistenceManager: AgentPersistenceManager = new AgentPersistenceManager();
+    persistenceManager: AgentPersistenceManager;
     private trafficManagerUrl: string = process.env.TRAFFICMANAGER_URL || 'trafficmanager:5080';
     private librarianUrl: string = process.env.LIBRARIAN_URL || 'librarian:5040';
     private brainUrl: string = process.env.BRAIN_URL || 'brain:5070';
@@ -34,6 +34,9 @@ export class AgentSet extends BaseEntity {
 
         // Initialize Express app
         this.app = express();
+
+        // Initialize persistence manager with authenticated API
+        this.persistenceManager = new AgentPersistenceManager(this.librarianUrl, this.authenticatedApi);
 
         // Initialize agent systems
         this.lifecycleManager = new AgentLifecycleManager(this.persistenceManager, this.trafficManagerUrl);

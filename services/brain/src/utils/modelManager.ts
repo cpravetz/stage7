@@ -250,6 +250,8 @@ export class ModelManager {
     trackModelRequest(modelName: string, conversationType: LLMConversationType, prompt: string): string {
         const requestId = uuidv4();
 
+        console.log(`[ModelManager] Tracking model request: ${requestId} for model ${modelName}, conversation type ${conversationType}`);
+
         // Track request in performance tracker
         this.performanceTracker.trackRequest(requestId, modelName, conversationType, prompt);
 
@@ -259,6 +261,8 @@ export class ModelManager {
             conversationType,
             startTime: Date.now()
         });
+
+        console.log(`[ModelManager] Active requests count: ${this.activeRequests.size}`);
 
         return requestId;
     }
@@ -272,12 +276,16 @@ export class ModelManager {
      * @param error Error message
      */
     trackModelResponse(requestId: string, response: string, tokenCount: number, success: boolean, error?: string): void {
+        console.log(`[ModelManager] Tracking model response for request ${requestId}, success: ${success}, token count: ${tokenCount}`);
+
         // Get active request
         const request = this.activeRequests.get(requestId);
         if (!request) {
             console.error(`No active request found for request ID ${requestId}`);
             return;
         }
+
+        console.log(`[ModelManager] Found active request for model ${request.modelName}, conversation type ${request.conversationType}`);
 
         // Track response in performance tracker
         this.performanceTracker.trackResponse(requestId, response, tokenCount, success, error);
@@ -287,10 +295,13 @@ export class ModelManager {
         if (!success) {
             console.log(`Request failed for model ${request.modelName}. Clearing model selection cache.`);
             this.clearModelSelectionCache();
+        } else {
+            console.log(`[ModelManager] Successfully tracked response for model ${request.modelName}`);
         }
 
         // Remove active request
         this.activeRequests.delete(requestId);
+        console.log(`[ModelManager] Removed request ${requestId} from active requests. Remaining: ${this.activeRequests.size}`);
     }
 
     /**
@@ -368,6 +379,34 @@ export class ModelManager {
      */
     resetAllBlacklists(): void {
         return this.performanceTracker.resetAllBlacklists();
+    }
+
+    /**
+     * Update model performance data based on evaluation
+     * @param modelName Model name
+     * @param conversationType Conversation type
+     * @param scores Evaluation scores
+     */
+    updateModelPerformanceFromEvaluation(
+        modelName: string,
+        conversationType: LLMConversationType,
+        scores: any
+    ): void {
+        console.log(`[ModelManager] Updating performance for model ${modelName} with scores:`, scores);
+
+        // Forward to performance tracker
+        this.performanceTracker.updateModelFeedback(modelName, conversationType, scores);
+
+        // Clear model selection cache to ensure updated scores are used
+        this.clearModelSelectionCache();
+    }
+
+    /**
+     * Get the count of active model requests
+     * @returns Number of active requests
+     */
+    getActiveRequestsCount(): number {
+        return this.activeRequests.size;
     }
 
     /**

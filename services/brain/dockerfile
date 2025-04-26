@@ -28,6 +28,9 @@ COPY services/brain/src/models/*.?s ./services/brain/src/models
 RUN mkdir -p ./services/brain/src/interfaces
 COPY services/brain/src/interfaces/*.?s ./services/brain/src/interfaces
 
+# Create data directory for model performance tracking
+RUN mkdir -p ./services/brain/data
+
 # Build the TypeScript code - ensure shared is built first
 RUN cd shared && npm run build
 RUN cd errorhandler && npm run build
