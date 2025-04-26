@@ -3,6 +3,7 @@ import { analyzeError } from '@cktmcs/errorhandler';
 import axios from 'axios';
 import { Agent } from '../agents/Agent';
 import { CollaborationMessageType, ConflictResolutionRequest, ConflictResolutionResponse, createCollaborationMessage } from './CollaborationProtocol';
+import { ServiceTokenManager } from '@cktmcs/shared';
 
 /**
  * Conflict status
@@ -54,11 +55,22 @@ export class ConflictResolution {
   private agents: Map<string, Agent>;
   private trafficManagerUrl: string;
   private brainUrl: string;
+  private tokenManager: ServiceTokenManager;
 
   constructor(agents: Map<string, Agent>, trafficManagerUrl: string, brainUrl: string) {
     this.agents = agents;
     this.trafficManagerUrl = trafficManagerUrl;
     this.brainUrl = brainUrl;
+
+    // Initialize token manager for service-to-service authentication
+    const securityManagerUrl = process.env.SECURITY_MANAGER_URL || 'securitymanager:5010';
+    const serviceId = 'ConflictResolution';
+    const serviceSecret = process.env.CLIENT_SECRET || 'stage7AuthSecret';
+    this.tokenManager = ServiceTokenManager.getInstance(
+        `http://${securityManagerUrl}`,
+        serviceId,
+        serviceSecret
+    );
   }
 
   /**
@@ -138,6 +150,9 @@ export class ConflictResolution {
           const agentLocation = await this.findAgentLocation(participantId);
 
           if (agentLocation) {
+            // Get a token for authentication
+            const token = await this.tokenManager.getToken();
+
             // Forward conflict notification to the agent's location
             await axios.post(`http://${agentLocation}/conflictNotification`, {
               conflictId: conflict.id,
@@ -146,6 +161,11 @@ export class ConflictResolution {
               conflictingData: conflict.conflictingData,
               strategy: conflict.strategy,
               deadline: conflict.deadline
+            }, {
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+              }
             });
           }
         }
@@ -163,7 +183,15 @@ export class ConflictResolution {
    */
   private async findAgentLocation(agentId: string): Promise<string | undefined> {
     try {
-      const response = await axios.get(`http://${this.trafficManagerUrl}/getAgentLocation/${agentId}`);
+      // Get a token for authentication
+      const token = await this.tokenManager.getToken();
+
+      const response = await axios.get(`http://${this.trafficManagerUrl}/getAgentLocation/${agentId}`, {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      });
 
       if (response.data && response.data.agentSetUrl) {
         return response.data.agentSetUrl;
@@ -417,6 +445,9 @@ export class ConflictResolution {
 
     // Use LLM to negotiate a resolution
     try {
+      // Get a token for authentication
+      const token = await this.tokenManager.getToken();
+
       const response = await axios.post(`http://${this.brainUrl}/chat`, {
         exchanges: [
           {
@@ -429,6 +460,11 @@ export class ConflictResolution {
           }
         ],
         optimization: 'accuracy'
+      }, {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
       });
 
       // Parse LLM response
@@ -487,12 +523,20 @@ export class ConflictResolution {
           const agentLocation = await this.findAgentLocation(participantId);
 
           if (agentLocation) {
+            // Get a token for authentication
+            const token = await this.tokenManager.getToken();
+
             // Forward resolution notification to the agent's location
             await axios.post(`http://${agentLocation}/conflictResolution`, {
               conflictId: conflict.id,
               status: conflict.status,
               resolution: conflict.resolution,
               explanation: conflict.explanation
+            }, {
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+              }
             });
           }
         }
@@ -509,6 +553,9 @@ export class ConflictResolution {
    */
   private async notifyEscalation(conflict: Conflict): Promise<void> {
     try {
+      // Get a token for authentication
+      const token = await this.tokenManager.getToken();
+
       // Notify TrafficManager about escalation
       await axios.post(`http://${this.trafficManagerUrl}/escalateConflict`, {
         conflictId: conflict.id,
@@ -516,6 +563,11 @@ export class ConflictResolution {
         conflictingData: conflict.conflictingData,
         participants: conflict.participants,
         votes: conflict.votes
+      }, {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
       });
 
       // Notify participants about escalation

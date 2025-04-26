@@ -29,6 +29,9 @@ const EmailVerification: React.FC = () => {
 
         // Send verification request
         const securityUrl = process.env.REACT_APP_SECURITY_URL || 'http://localhost:5010';
+
+        // Email verification is a public endpoint that doesn't require authentication
+        // This is by design since the user is not logged in yet
         const response = await axios.post(`${securityUrl}/verify-email`, { token });
 
         setSuccess(true);

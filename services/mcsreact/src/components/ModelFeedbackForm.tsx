@@ -11,8 +11,8 @@ import {
   Grid,
   Divider
 } from '@mui/material';
-import axios from 'axios';
 import { API_BASE_URL } from '../config';
+import { SecurityClient } from '../SecurityClient';
 
 interface ModelFeedbackFormProps {
   modelName: string;
@@ -53,7 +53,9 @@ const ModelFeedbackForm: React.FC<ModelFeedbackFormProps> = ({
       setLoading(true);
       setError(null);
 
-      await axios.post(`${API_BASE_URL}/brain/evaluations`, {
+      // Use SecurityClient for authenticated API calls
+      const securityClient = new SecurityClient();
+      await securityClient.api.post(`/brain/evaluations`, {
         modelName,
         conversationType,
         requestId,

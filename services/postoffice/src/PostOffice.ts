@@ -259,6 +259,7 @@ export class PostOffice extends BaseEntity {
         this.app.get('/agentset/health', async (_req, res) => {
             try {
                 const agentSetUrl = process.env.AGENTSET_URL || 'agentset:5100';
+                // Health check endpoints don't need authentication
                 const response = await axios.get(`http://${agentSetUrl}/health`);
                 res.status(200).json(response.data);
             } catch (error) {
@@ -271,6 +272,7 @@ export class PostOffice extends BaseEntity {
         this.app.get('/agentset/healthy', async (_req, res) => {
             try {
                 const agentSetUrl = process.env.AGENTSET_URL || 'agentset:5100';
+                // Health check endpoints don't need authentication
                 const response = await axios.get(`http://${agentSetUrl}/healthy`);
                 res.status(200).json(response.data);
             } catch (error) {
@@ -283,6 +285,7 @@ export class PostOffice extends BaseEntity {
         this.app.get('/agentset/ready', async (_req, res) => {
             try {
                 const agentSetUrl = process.env.AGENTSET_URL || 'agentset:5100';
+                // Health check endpoints don't need authentication
                 const response = await axios.get(`http://${agentSetUrl}/ready`);
                 res.status(200).json(response.data);
             } catch (error) {

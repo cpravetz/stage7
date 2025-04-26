@@ -900,7 +900,7 @@ export class AgentSet extends BaseEntity {
                 if (statistics) {
                     try {
                         console.log(`Forwarding statistics for agent ${agentId} to TrafficManager`);
-                        await axios.post(`http://${this.trafficManagerUrl}/agentStatisticsUpdate`, {
+                        await this.authenticatedApi(`http://${this.trafficManagerUrl}/agentStatisticsUpdate`, {
                             agentId,
                             status,
                             statistics,

@@ -94,7 +94,7 @@ export class CollaborationManager implements CollaborationProtocol {
    */
   private async findAgentLocation(agentId: string): Promise<string | undefined> {
     try {
-      const response = await axios.get(`http://${this.trafficManagerUrl}/getAgentLocation/${agentId}`);
+      const response = await this.authenticatedApi.get(`http://${this.trafficManagerUrl}/getAgentLocation/${agentId}`);
 
       if (response.data && response.data.agentSetUrl) {
         return response.data.agentSetUrl;
@@ -117,7 +117,7 @@ export class CollaborationManager implements CollaborationProtocol {
     try {
       console.log(`Forwarding collaboration message to agent ${message.recipientId} at ${agentSetUrl}`);
 
-      await axios.post(`http://${agentSetUrl}/collaboration/message`, message);
+      await this.authenticatedApi.post(`http://${agentSetUrl}/collaboration/message`, message);
 
       console.log(`Successfully forwarded collaboration message to agent ${message.recipientId}`);
     } catch (error) {

@@ -1,10 +1,21 @@
 import axios from 'axios';
 import * as fs from 'node:fs/promises';
 import path from 'path';
+import { ServiceTokenManager } from '@cktmcs/shared';
 
 
 let processingError: boolean = false;
 const analyzedErrors: Set<string> = new Set();
+
+// Initialize token manager for service-to-service authentication
+const securityManagerUrl = process.env.SECURITY_MANAGER_URL || 'securitymanager:5010';
+const serviceId = 'ErrorHandler';
+const serviceSecret = process.env.CLIENT_SECRET || 'stage7AuthSecret';
+const tokenManager = ServiceTokenManager.getInstance(
+    `http://${securityManagerUrl}`,
+    serviceId,
+    serviceSecret
+);
 
 function serializeError(error: Error): string {
     const seen = new WeakSet();
@@ -106,11 +117,15 @@ export const analyzeError = async (error: Error) => {
 
     // Check if Brain service is available before proceeding
     try {
-      // Simple health check
+      // Get a token for authentication
+      const token = await tokenManager.getToken();
+
+      // Simple health check with authentication
       await axios.get(`http://${brainUrl}/models`, {
         timeout: 2000,
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
         }
       });
     } catch (healthCheckError) {
@@ -142,6 +157,9 @@ export const analyzeError = async (error: Error) => {
          ${sourceCode.substring(0,10000)}` }
       ];
 
+    // Get a token for authentication
+    const token = await tokenManager.getToken();
+
     // Send the error information to the Brain for analysis with timeout
     const response = await axios.post(`http://${brainUrl}/chat`, {
         exchanges: conversation,
@@ -149,7 +167,8 @@ export const analyzeError = async (error: Error) => {
     }, {
         timeout: 30000, // 30 second timeout
         headers: {
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
         }
     });
 

@@ -3,6 +3,7 @@ import { analyzeError } from '@cktmcs/errorhandler';
 import axios from 'axios';
 import { Agent } from '../agents/Agent';
 import { CollaborationMessageType, TaskDelegationRequest, TaskDelegationResponse, TaskResult, createCollaborationMessage } from './CollaborationProtocol';
+import { ServiceTokenManager } from '@cktmcs/shared';
 
 
 // Import AgentStatus from utils
@@ -52,10 +53,21 @@ export class TaskDelegation {
   private tasks: Map<string, DelegatedTask> = new Map();
   private agents: Map<string, Agent>;
   private trafficManagerUrl: string;
+  private tokenManager: ServiceTokenManager;
 
   constructor(agents: Map<string, Agent>, trafficManagerUrl: string) {
     this.agents = agents;
     this.trafficManagerUrl = trafficManagerUrl;
+
+    // Initialize token manager for service-to-service authentication
+    const securityManagerUrl = process.env.SECURITY_MANAGER_URL || 'securitymanager:5010';
+    const serviceId = 'TaskDelegation';
+    const serviceSecret = process.env.CLIENT_SECRET || 'stage7AuthSecret';
+    this.tokenManager = ServiceTokenManager.getInstance(
+        `http://${securityManagerUrl}`,
+        serviceId,
+        serviceSecret
+    );
   }
 
   /**
@@ -169,10 +181,18 @@ export class TaskDelegation {
     agentSetUrl: string
   ): Promise<TaskDelegationResponse> {
     try {
+      // Get a token for authentication
+      const token = await this.tokenManager.getToken();
+
       const response = await axios.post(`http://${agentSetUrl}/delegateTask`, {
         delegatorId,
         recipientId,
         request
+      }, {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
       });
 
       return response.data;
@@ -195,7 +215,15 @@ export class TaskDelegation {
    */
   private async findAgentLocation(agentId: string): Promise<string | undefined> {
     try {
-      const response = await axios.get(`http://${this.trafficManagerUrl}/getAgentLocation/${agentId}`);
+      // Get a token for authentication
+      const token = await this.tokenManager.getToken();
+
+      const response = await axios.get(`http://${this.trafficManagerUrl}/getAgentLocation/${agentId}`, {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      });
 
       if (response.data && response.data.agentSetUrl) {
         return response.data.agentSetUrl;
@@ -324,12 +352,20 @@ export class TaskDelegation {
         const agentLocation = await this.findAgentLocation(task.delegatedBy);
 
         if (agentLocation) {
+          // Get a token for authentication
+          const token = await this.tokenManager.getToken();
+
           // Forward task update to the agent's location
           await axios.post(`http://${agentLocation}/taskUpdate`, {
             taskId: task.id,
             status: task.status,
             result: task.result,
             error: task.error
+          }, {
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            }
           });
         }
       }

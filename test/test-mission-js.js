@@ -4,6 +4,7 @@
 
 const axios = require('axios');
 const WebSocket = require('ws');
+const { createAuthenticatedAxios } = require('@cktmcs/shared');
 
 // Configuration
 const CONFIG = {
@@ -13,6 +14,13 @@ const CONFIG = {
     componentType: 'MissionControl',
     clientSecret: 'stage7AuthSecret'
 };
+
+// Create an authenticated axios instance
+const authenticatedApi = createAuthenticatedAxios(
+    CONFIG.componentType,
+    CONFIG.securityManagerUrl,
+    CONFIG.clientSecret
+);
 
 // Get authentication token
 async function getAuthToken() {
@@ -153,3 +161,5 @@ async function runTest() {
 
 // Run the test
 runTest();
+
+

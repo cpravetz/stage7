@@ -1,7 +1,14 @@
 import axios from 'axios';
 import { load } from 'cheerio';
-import { PluginInput, PluginOutput, PluginParameterType } from '@cktmcs/shared';
+import { PluginInput, PluginOutput, PluginParameterType, createAuthenticatedAxios } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
+
+// Create an authenticated API client for service-to-service communication
+const authenticatedApi = createAuthenticatedAxios(
+    'SEARCH_Plugin',
+    process.env.SECURITY_MANAGER_URL || 'securitymanager:5010',
+    process.env.CLIENT_SECRET || 'stage7AuthSecret'
+);
 
 export async function execute(inputs: Map<string, PluginInput>): Promise<PluginOutput[]> {
     try {
@@ -18,6 +25,8 @@ export async function execute(inputs: Map<string, PluginInput>): Promise<PluginO
             }
 
         const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(searchTerm)}`;
+        // DuckDuckGo is a public API that doesn't require authentication
+        // Using direct axios for external public APIs is acceptable
         const response = await axios.get(url);
         const $ = load(response.data);
 

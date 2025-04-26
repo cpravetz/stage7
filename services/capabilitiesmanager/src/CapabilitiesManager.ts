@@ -24,12 +24,8 @@ const configPath = path.join(os.homedir(), '.cktmcs', 'capabilitiesmanager.json'
 
 const execAsync = promisify(exec);
 
-const api = axios.create({
-    headers: {
-      'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
-    },
-});
+// NOTE: Don't use this directly - use this.authenticatedApi or this.getAuthenticatedAxios() instead
+// This is kept for backward compatibility only
 
 export class CapabilitiesManager extends BaseEntity {
     private librarianUrl: string = process.env.LIBRARIAN_URL || 'librarian:5040';

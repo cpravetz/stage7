@@ -4,7 +4,7 @@ import { AgentPersistenceManager } from '../utils/AgentPersistenceManager';
 import { v4 as uuidv4 } from 'uuid';
 import { analyzeError } from '@cktmcs/errorhandler';
 import axios from 'axios';
-import { MessageType } from '@cktmcs/shared';
+import { MessageType, ServiceTokenManager } from '@cktmcs/shared';
 
 /**
  * Agent version information
@@ -56,10 +56,21 @@ export class AgentLifecycleManager {
   private checkpointIntervals: Map<string, NodeJS.Timeout> = new Map();
   private monitoringInterval: NodeJS.Timeout;
   private trafficManagerUrl: string;
+  private tokenManager: ServiceTokenManager;
 
   constructor(persistenceManager: AgentPersistenceManager, trafficManagerUrl: string) {
     this.persistenceManager = persistenceManager;
     this.trafficManagerUrl = trafficManagerUrl;
+
+    // Initialize token manager for service-to-service authentication
+    const securityManagerUrl = process.env.SECURITY_MANAGER_URL || 'securitymanager:5010';
+    const serviceId = 'AgentLifecycleManager';
+    const serviceSecret = process.env.CLIENT_SECRET || 'stage7AuthSecret';
+    this.tokenManager = ServiceTokenManager.getInstance(
+        `http://${securityManagerUrl}`,
+        serviceId,
+        serviceSecret
+    );
 
     // Set up monitoring interval
     this.monitoringInterval = setInterval(() => this.monitorAgents(), 60000); // Monitor every minute
@@ -393,10 +404,18 @@ export class AgentLifecycleManager {
       // Get agent state
       const state = await this.persistenceManager.loadAgent(agentId);
 
+      // Get a token for authentication
+      const token = await this.tokenManager.getToken();
+
       // Send state to target agent set
       const response = await axios.post(`http://${targetAgentSetUrl}/migrateAgent`, {
         agentId,
         state
+      }, {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
       });
 
       if (response.status >= 300) {
@@ -412,10 +431,18 @@ export class AgentLifecycleManager {
       // Unregister agent from this agent set
       this.unregisterAgent(agentId);
 
+      // Get a token for authentication
+      const updateToken = await this.tokenManager.getToken();
+
       // Notify TrafficManager about migration
       await axios.post(`http://${this.trafficManagerUrl}/updateAgentLocation`, {
         agentId,
         agentSetUrl: targetAgentSetUrl
+      }, {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${updateToken}`
+        }
       });
 
       console.log(`Migrated agent ${agentId} to ${targetAgentSetUrl}`);

@@ -5,11 +5,19 @@
 
 const axios = require('axios');
 const readline = require('readline');
+const { createAuthenticatedAxios } = require('@cktmcs/shared');
 
 // Configuration
 const securityManagerUrl = process.env.SECURITYMANAGER_URL || 'http://localhost:5010';
 const clientId = 'TestClient';
 const clientSecret = process.env.CLIENT_SECRET || 'stage7AuthSecret';
+
+// Create an authenticated axios instance
+const authenticatedApi = createAuthenticatedAxios(
+  clientId, // Use appropriate service ID
+  securityManagerUrl,
+  clientSecret
+);
 
 // Create readline interface for user input
 const rl = readline.createInterface({
@@ -40,11 +48,7 @@ async function testClientAuthentication() {
     
     // Step 2: Verify token with SecurityManager
     console.log('\n2. Verifying token with SecurityManager...');
-    const verifyResponse = await axios.post(`${securityManagerUrl}/verify`, {}, {
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
-    });
+    const verifyResponse = await authenticatedApi.post(`${securityManagerUrl}/verify`, {});
     
     if (!verifyResponse.data.valid) {
       throw new Error('Token verification failed with SecurityManager');
@@ -61,11 +65,7 @@ async function testClientAuthentication() {
         
         try {
           console.log(`\nAccessing protected resource at ${serviceUrl}...`);
-          const response = await axios.get(serviceUrl, {
-            headers: {
-              'Authorization': `Bearer ${token}`
-            }
-          });
+          const response = await authenticatedApi.get(serviceUrl);
           
           console.log('✅ Successfully accessed protected resource');
           console.log('Response:', JSON.stringify(response.data, null, 2));
@@ -104,3 +104,4 @@ function promptForServiceUrl() {
 }
 
 testClientAuthentication();
+

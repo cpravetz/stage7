@@ -151,7 +151,7 @@ Please consider this context and the available plugins when planning and executi
 
     private async getAvailablePlugins() {
         try {
-            const response = await axios.get(`http://${this.capabilitiesManagerUrl}/availablePlugins`);
+            const response = await this.authenticatedApi.get(`http://${this.capabilitiesManagerUrl}/availablePlugins`);
             return response.data;
         } catch (error) { analyzeError(error as Error);
             console.error('Error fetching available plugins:', error instanceof Error ? error.message : error);
@@ -318,7 +318,7 @@ Please consider this context and the available plugins when planning and executi
 
     private async checkAndResumeBlockedAgents() {
         try {
-            await api.post(`http://${this.trafficManagerUrl}/checkBlockedAgents`, { completedAgentId: this.id });
+            await this.authenticatedApi.post(`http://${this.trafficManagerUrl}/checkBlockedAgents`, { completedAgentId: this.id });
         } catch (error) { analyzeError(error as Error);
             console.error('Error checking blocked agents:', error instanceof Error ? error.message : error);
         }
@@ -480,7 +480,7 @@ Please consider this context and the available plugins when planning and executi
             };
 
             console.log(`Creating sub-agent with role: ${finalRoleId}`);
-            const response = await axios.post(`http://${this.agentSetUrl}/addAgent`, subAgentConfig);
+            const response = await this.authenticatedApi.post(`http://${this.agentSetUrl}/addAgent`, subAgentConfig);
 
             if (response.status >= 300) {
                 console.error('Failed to create sub-agent:', response.data.error || 'Unknown error');
@@ -566,7 +566,7 @@ Please consider this context and the available plugins when planning and executi
         };
 
         try {
-            const response = await api.post(`http://${this.brainUrl}/chat`, reasoningInput);
+            const response = await this.authenticatedApi.post(`http://${this.brainUrl}/chat`, reasoningInput);
             const brainResponse = response.data.response;
             const mimeType = response.data.mimeType || 'text/plain';
 
@@ -621,7 +621,7 @@ Please consider this context and the available plugins when planning and executi
             //console.log('Agent: Executing serialized action with CapabilitiesManager:', payload);
 
             // Add timeout and abort signal to the request
-            const response = await api.post(
+            const response = await this.authenticatedApi.post(
                 `http://${this.capabilitiesManagerUrl}/executeAction`,
                 payload
             );
@@ -677,7 +677,7 @@ Please consider this context and the available plugins when planning and executi
                     });
 
                     // Send message to TrafficManager
-                    await axios.post(`http://${this.trafficManagerUrl}/handleStepFailure`, {
+                    await this.authenticatedApi.post(`http://${this.trafficManagerUrl}/handleStepFailure`, {
                         agentId: this.id,
                         stepId: failedStepId,
                         status: status
@@ -823,7 +823,7 @@ Please consider this context and the available plugins when planning and executi
 
             // Also notify AgentSet
             try {
-                await axios.post(`http://${this.agentSetUrl}/updateFromAgent`, {
+                await this.authenticatedApi.post(`http://${this.agentSetUrl}/updateFromAgent`, {
                     agentId: this.id,
                     status: this.status,
                     statistics: stats
@@ -842,7 +842,7 @@ Please consider this context and the available plugins when planning and executi
 
     private async hasDependentAgents(): Promise<boolean> {
         try {
-          const response = await axios.get(`http://${this.trafficManagerUrl}/dependentAgents/${this.id}`);
+          const response = await this.authenticatedApi.get(`http://${this.trafficManagerUrl}/dependentAgents/${this.id}`);
           const dependentAgents = response.data;
           return dependentAgents.length > 0;
         } catch (error) { analyzeError(error as Error);
@@ -1065,7 +1065,7 @@ Please consider this context and the available plugins when planning and executi
 
             // Find an agent with the appropriate role
             try {
-                const response = await axios.post(`http://${this.agentSetUrl}/findAgentWithRole`, {
+                const response = await this.authenticatedApi.post(`http://${this.agentSetUrl}/findAgentWithRole`, {
                     roleId: step.recommendedRole,
                     missionId: this.missionId
                 });
@@ -1075,7 +1075,7 @@ Please consider this context and the available plugins when planning and executi
                     console.log(`Found agent ${recipientId} with role ${step.recommendedRole}`);
 
                     // Delegate the task to the specialized agent
-                    const delegationResponse = await axios.post(`http://${this.agentSetUrl}/delegateTask`, {
+                    const delegationResponse = await this.authenticatedApi.post(`http://${this.agentSetUrl}/delegateTask`, {
                         delegatorId: this.id,
                         recipientId: recipientId,
                         request: delegationRequest

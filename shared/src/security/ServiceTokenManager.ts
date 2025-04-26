@@ -9,6 +9,7 @@ import axios from 'axios';
 import * as jwt from 'jsonwebtoken';
 import * as fs from 'fs';
 import * as path from 'path';
+import { createAuthenticatedAxios } from '@cktmcs/shared';
 
 export class ServiceTokenManager {
   private token: string = '';
@@ -52,6 +53,7 @@ export class ServiceTokenManager {
 
   /**
    * Fetch the public key from the security manager
+   * This is used to verify tokens locally
    */
   private async fetchPublicKey(): Promise<void> {
     try {
@@ -219,11 +221,16 @@ export class ServiceTokenManager {
 
       console.log(`Authenticating ${this.serviceId} with security manager at ${this.authUrl}`);
 
+      // Use a dedicated axios instance with proper timeout but no auth
+      // This is the auth endpoint itself, so we can't authenticate this request
       const response = await axios.post(this.authUrl + '/auth/service', {
         componentType: this.serviceId,
         clientSecret: this.serviceSecret
       }, {
-        timeout: 5000 // 5 second timeout
+        timeout: 5000, // 5 second timeout
+        headers: {
+          'Content-Type': 'application/json'
+        }
       });
 
       if (response.data.authenticated && response.data.token) {
@@ -307,6 +314,8 @@ export class ServiceTokenManager {
       // Set a timeout for the request to prevent hanging
       const timeoutMs = 5000; // 5 seconds
 
+      // We're sending the token to verify in the Authorization header
+      // This is correct - we don't need to authenticate this request with our own token
       const response = await axios.post(`${this.authUrl}/verify`, {}, {
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -552,3 +561,7 @@ export class ServiceTokenManager {
     }
   }
 }
+
+
+
+

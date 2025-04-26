@@ -8,10 +8,22 @@ const jwt = require('jsonwebtoken');
 const fs = require('fs');
 const path = require('path');
 
+// Import the authenticated axios creator
+const { createAuthenticatedAxios } = require('@cktmcs/shared');
+
 // Configuration
 const securityManagerUrl = process.env.SECURITYMANAGER_URL || 'http://localhost:5010';
 const serviceId = 'TestService';
 const serviceSecret = process.env.CLIENT_SECRET || 'stage7AuthSecret';
+
+// Create an authenticated axios instance
+// Note: For authentication endpoints, we still need to use direct axios
+// But for subsequent authenticated calls, use the authenticated instance
+const authenticatedApi = createAuthenticatedAxios(
+  serviceId,
+  securityManagerUrl,
+  serviceSecret
+);
 
 // Load public key for local verification
 const publicKeyPath = path.join(__dirname, '../keys/public.key');
@@ -41,11 +53,7 @@ async function testAuthentication() {
     
     // Step 2: Verify token with SecurityManager
     console.log('\n2. Verifying token with SecurityManager...');
-    const verifyResponse = await axios.post(`${securityManagerUrl}/verify`, {}, {
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
-    });
+    const verifyResponse = await authenticatedApi.post(`${securityManagerUrl}/verify`, {});
     
     if (!verifyResponse.data.valid) {
       throw new Error('Token verification failed with SecurityManager');
@@ -104,3 +112,4 @@ async function testAuthentication() {
 }
 
 testAuthentication();
+

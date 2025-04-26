@@ -29,8 +29,8 @@ import {
   GitHub as GitHubIcon,
   Code as CodeIcon
 } from '@mui/icons-material';
-import axios from 'axios';
 import { API_BASE_URL } from '../config';
+import { SecurityClient } from '../SecurityClient';
 
 interface Plugin {
   id: string;
@@ -102,8 +102,9 @@ const GitHubPluginManager: React.FC<GitHubPluginManagerProps> = ({ onPluginSelec
       setLoading(true);
       setError(null);
 
-      // Use the PostOffice service to get plugins from the CapabilitiesManager
-      const response = await axios.get(`${API_BASE_URL}/plugins`, {
+      // Use SecurityClient for authenticated API calls
+      const securityClient = new SecurityClient();
+      const response = await securityClient.api.get(`/plugins`, {
         params: { repository: selectedRepository }
       });
 
@@ -126,8 +127,9 @@ const GitHubPluginManager: React.FC<GitHubPluginManagerProps> = ({ onPluginSelec
     try {
       setLoading(true);
 
-      // Use the PostOffice service to delete the plugin from the CapabilitiesManager
-      await axios.delete(`${API_BASE_URL}/plugins/${pluginToDelete.id}`, {
+      // Use SecurityClient for authenticated API calls
+      const securityClient = new SecurityClient();
+      await securityClient.api.delete(`/plugins/${pluginToDelete.id}`, {
         params: { repository: selectedRepository }
       });
 

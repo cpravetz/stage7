@@ -380,10 +380,10 @@ export class DomainKnowledge {
 
       // Fetch content from source
       if (format === 'url') {
-        const response = await axios.get(source);
+        const response = await this.authenticatedApi.get(source);
         content = response.data;
       } else if (format === 'api') {
-        const response = await axios.get(source);
+        const response = await this.authenticatedApi.get(source);
         content = JSON.stringify(response.data);
       } else {
         throw new Error(`Unsupported format: ${format}`);

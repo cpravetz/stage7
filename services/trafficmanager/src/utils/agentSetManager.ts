@@ -63,7 +63,31 @@ class AgentSetManager {
         if (this.authenticatedApi) {
             return this.authenticatedApi[method](url, data);
         } else {
-            return api[method](url, data);
+            // If authenticatedApi is not available, create a token and use it
+            try {
+                const token = await this.tokenManager.getToken();
+                const headers = {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*',
+                    'Authorization': `Bearer ${token}`
+                };
+
+                switch (method) {
+                    case 'get':
+                        return axios.get(url, { headers });
+                    case 'post':
+                        return axios.post(url, data, { headers });
+                    case 'put':
+                        return axios.put(url, data, { headers });
+                    case 'delete':
+                        return axios.delete(url, { headers });
+                    default:
+                        throw new Error(`Unsupported method: ${method}`);
+                }
+            } catch (error) {
+                console.error(`Error in authenticated apiCall: ${error instanceof Error ? error.message : error}`);
+                throw error;
+            }
         }
     }
 

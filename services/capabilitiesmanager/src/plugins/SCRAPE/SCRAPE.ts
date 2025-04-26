@@ -1,7 +1,14 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import { PluginInput, PluginOutput, PluginParameterType } from '@cktmcs/shared';
+import { PluginInput, PluginOutput, PluginParameterType, createAuthenticatedAxios } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
+
+// Create an authenticated API client for service-to-service communication
+const authenticatedApi = createAuthenticatedAxios(
+    'SCRAPE_Plugin',
+    process.env.SECURITY_MANAGER_URL || 'securitymanager:5010',
+    process.env.CLIENT_SECRET || 'stage7AuthSecret'
+);
 
 interface ScrapeConfig {
     selector?: string;
@@ -68,22 +75,33 @@ function parseConfig(inputs: Map< string, PluginInput>): ScrapeConfig {
     }
 
 async function fetchHtml(url: string): Promise<string> {
-        const response = await axios.get(url);
-        return response.data;
+        // For external public websites, we use direct axios
+        // For internal services, we would use authenticatedApi
+        if (url.includes('localhost') ||
+            url.includes('.local') ||
+            /^https?:\/\/[^\/]+:\d+/.test(url)) {
+            // This appears to be an internal URL, use authenticated API
+            const response = await authenticatedApi.get(url);
+            return response.data;
+        } else {
+            // This appears to be an external URL, use direct axios
+            const response = await axios.get(url);
+            return response.data;
+        }
     }
 
 
-    
+
 function scrapeContent(html: string, config: ScrapeConfig): string[] {
         try {
             const $ = cheerio.load(html);
             const elements = config.selector ? $(config.selector) : $('body');
-    
+
             if (elements.length === 0) {
                 console.warn(`No elements found for selector: ${config.selector || 'body'}`);
                 return [];
             }
-    
+
             let result: string[] = elements.map((_, el) => {
                 if (config.attribute) {
                     return $(el).attr(config.attribute) || '';
@@ -91,26 +109,26 @@ function scrapeContent(html: string, config: ScrapeConfig): string[] {
                     return $(el).text().trim();
                 }
             }).get();
-    
+
             // Apply custom transform function if provided
             if (config.transform && typeof config.transform === 'function') {
                 result = result.map(config.transform);
             }
-    
+
             // Filter out empty strings
             result = result.filter(item => item !== '');
-    
+
             // Apply limit if specified
             if (config.limit && config.limit > 0) {
                 result = result.slice(0, config.limit);
             }
-    
+
             return result;
         } catch (error) { analyzeError(error as Error);
             console.error('Error in scrapeContent:', error instanceof Error ? error.message : error);
             return [];
         }
     }
-    
+
 
 export default execute;
