@@ -774,7 +774,7 @@ export class CapabilitiesManager extends BaseEntity {
 
     private async checkCachedPlan(actionVerb: string): Promise<PluginOutput | null> {
         try {
-            const cachedPlan = await axios.get(`http://${this.librarianUrl}/loadData`, {
+            const cachedPlan = await this.authenticatedApi.get(`http://${this.librarianUrl}/loadData`, {
                 params: {
                     collection: 'actionPlans',
                     id: actionVerb
@@ -794,7 +794,7 @@ export class CapabilitiesManager extends BaseEntity {
 
     private async cachePlan(actionVerb: string, plan: PluginOutput): Promise<void> {
         try {
-            await axios.post(`http://${this.librarianUrl}/storeData`, {
+            await this.authenticatedApi.post(`http://${this.librarianUrl}/storeData`, {
                 collection: 'actionPlans',
                 id: actionVerb,
                 data: plan

@@ -1,20 +1,29 @@
-import { PluginManifest, PluginRepository, RepositoryConfig, PluginLocator } from '@cktmcs/shared';
-import axios from 'axios';
+import { PluginManifest, PluginRepository, RepositoryConfig, PluginLocator, createAuthenticatedAxios } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 
 export class MongoRepository implements PluginRepository {
     type: 'mongo' = 'mongo';
     private librarianUrl: string;
     private collection: string;
+    private authenticatedApi: any;
+    private securityManagerUrl: string;
 
     constructor(config: RepositoryConfig) {
         this.librarianUrl = config.url || process.env.LIBRARIAN_URL || 'librarian:5040';
         this.collection = config.options?.collection || 'plugins';
+        this.securityManagerUrl = process.env.SECURITY_MANAGER_URL || 'securitymanager:5010';
+
+        // Create authenticated API client
+        this.authenticatedApi = createAuthenticatedAxios(
+            'MarketplaceMongoRepository',
+            this.securityManagerUrl,
+            process.env.CLIENT_SECRET || 'stage7AuthSecret'
+        );
     }
 
     async store(manifest: PluginManifest): Promise<void> {
         try {
-            await axios.post(`http://${this.librarianUrl}/storeData`, {
+            await this.authenticatedApi.post(`http://${this.librarianUrl}/storeData`, {
                 id: manifest.id,
                 data: manifest,
                 collection: this.collection,
@@ -28,7 +37,7 @@ export class MongoRepository implements PluginRepository {
 
     async fetch(id: string): Promise<PluginManifest | undefined> {
         try {
-            const response = await axios.get(`http://${this.librarianUrl}/getData/${id}`, {
+            const response = await this.authenticatedApi.get(`http://${this.librarianUrl}/getData/${id}`, {
                 params: {
                     collection: this.collection,
                     storageType: 'mongo'
@@ -48,7 +57,7 @@ export class MongoRepository implements PluginRepository {
 
     async fetchByVerb(verb: string): Promise<PluginManifest | undefined> {
         try {
-            const response = await axios.post(`http://${this.librarianUrl}/searchData`, {
+            const response = await this.authenticatedApi.post(`http://${this.librarianUrl}/searchData`, {
                 collection: this.collection,
                 query: { verb },
                 options: { limit: 1 }
@@ -67,7 +76,7 @@ export class MongoRepository implements PluginRepository {
 
     async delete(id: string): Promise<void> {
         try {
-            await axios.delete(`http://${this.librarianUrl}/deleteData/${id}`, {
+            await this.authenticatedApi.delete(`http://${this.librarianUrl}/deleteData/${id}`, {
                 params: {
                     collection: this.collection,
                     storageType: 'mongo'
@@ -81,7 +90,7 @@ export class MongoRepository implements PluginRepository {
 
     async list(): Promise<PluginLocator[]> {
         try {
-            const response = await axios.post(`http://${this.librarianUrl}/searchData`, {
+            const response = await this.authenticatedApi.post(`http://${this.librarianUrl}/searchData`, {
                 collection: this.collection,
                 query: {},
                 options: {

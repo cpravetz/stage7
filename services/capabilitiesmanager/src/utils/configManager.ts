@@ -1,4 +1,4 @@
-import { ConfigItem, MetadataType } from '@cktmcs/shared';
+import { ConfigItem, MetadataType, createAuthenticatedAxios } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 import axios from 'axios';
 
@@ -14,6 +14,7 @@ export class ConfigManager {
     private librarianUrl: string;
     private configId: string = 'capabilitiesmanager';
     private initialized: boolean = false;
+    private authenticatedApi: any;
 
     private constructor(librarianUrl: string) {
         this.librarianUrl = librarianUrl;
@@ -22,6 +23,13 @@ export class ConfigManager {
             pluginConfigurations: {},
             pluginMetadata: {}
         };
+
+        // Create authenticated API client
+        this.authenticatedApi = createAuthenticatedAxios(
+            'CapabilitiesManagerConfig',
+            process.env.SECURITY_MANAGER_URL || 'securitymanager:5010',
+            process.env.CLIENT_SECRET || 'stage7AuthSecret'
+        );
     }
 
     static async initialize(librarianUrl: string): Promise<ConfigManager> {
@@ -31,22 +39,22 @@ export class ConfigManager {
         }
         return ConfigManager.instance;
     }
-    
+
         // Plugin Configuration Management
         async getPluginConfig(pluginId: string): Promise<ConfigItem[]> {
             return this.config.pluginConfigurations[pluginId] || [];
         }
-    
+
         async updatePluginConfig(pluginId: string, config: ConfigItem[]): Promise<void> {
             this.config.pluginConfigurations[pluginId] = config;
             await this.saveConfig();
         }
-    
+
         // Plugin Metadata Management
         async getPluginMetadata(pluginId: string): Promise<MetadataType | undefined> {
             return this.config.pluginMetadata[pluginId];
         }
-    
+
         async updatePluginMetadata(pluginId: string, metadata: Partial<MetadataType>): Promise<void> {
             this.config.pluginMetadata[pluginId] = {
                 ...this.config.pluginMetadata[pluginId],
@@ -54,7 +62,7 @@ export class ConfigManager {
             };
             await this.saveConfig();
         }
-    
+
         // Usage Tracking
         async recordPluginUsage(pluginId: string): Promise<void> {
             const metadata = this.config.pluginMetadata[pluginId] || {};
@@ -73,7 +81,7 @@ export class ConfigManager {
 
     private async loadConfig() {
         try {
-            const response = await axios.get(`http://${this.librarianUrl}/loadData/${this.configId}`, {
+            const response = await this.authenticatedApi.get(`http://${this.librarianUrl}/loadData/${this.configId}`, {
                 params: {
                     storageType: 'mongo',
                     collection: 'configurations'
@@ -102,7 +110,7 @@ export class ConfigManager {
 
     private async saveConfig() {
         try {
-            await axios.post(`http://${this.librarianUrl}/storeData`, {
+            await this.authenticatedApi.post(`http://${this.librarianUrl}/storeData`, {
                 id: this.configId,
                 data: this.config,
                 storageType: 'mongo',

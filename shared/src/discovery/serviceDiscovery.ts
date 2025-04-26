@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { createAuthenticatedAxios } from '../http/createAuthenticatedAxios.js';
 
 /**
  * Service Discovery client for Consul
@@ -8,9 +9,19 @@ export class ServiceDiscovery {
   private serviceCache: Map<string, { url: string, timestamp: number }> = new Map();
   private cacheTTL: number = 60000; // 1 minute cache TTL
   private registeredServices: Set<string> = new Set();
+  private authenticatedApi: any;
+  private securityManagerUrl: string;
 
   constructor(consulUrl: string = process.env.CONSUL_URL || 'consul:8500') {
     this.consulUrl = consulUrl;
+    this.securityManagerUrl = process.env.SECURITY_MANAGER_URL || 'securitymanager:5010';
+
+    // Create authenticated API client
+    this.authenticatedApi = createAuthenticatedAxios(
+      'ServiceDiscovery',
+      this.securityManagerUrl,
+      process.env.CLIENT_SECRET || 'stage7AuthSecret'
+    );
   }
 
   /**
@@ -36,7 +47,7 @@ export class ServiceDiscovery {
       const actualPort = url.port ? parseInt(url.port) : port;
 
       // Register the service with Consul
-      await axios.put(`http://${this.consulUrl}/v1/agent/service/register`, {
+      await this.authenticatedApi.put(`http://${this.consulUrl}/v1/agent/service/register`, {
         ID: serviceId,
         Name: serviceName,
         Tags: tags,
@@ -65,7 +76,7 @@ export class ServiceDiscovery {
    */
   async deregisterService(serviceId: string): Promise<void> {
     try {
-      await axios.put(`http://${this.consulUrl}/v1/agent/service/deregister/${serviceId}`);
+      await this.authenticatedApi.put(`http://${this.consulUrl}/v1/agent/service/deregister/${serviceId}`);
       // Remove from local tracking
       this.registeredServices.delete(serviceId);
       console.log(`Service ${serviceId} deregistered from Consul`);
@@ -114,7 +125,7 @@ export class ServiceDiscovery {
 
     try {
       // Query Consul for healthy service instances
-      const response = await axios.get(
+      const response = await this.authenticatedApi.get(
         `http://${this.consulUrl}/v1/health/service/${serviceName}?passing=true${tag ? `&tag=${tag}` : ''}`
       );
 
@@ -148,7 +159,7 @@ export class ServiceDiscovery {
   async getAllServiceInstances(serviceName: string, tag?: string): Promise<string[]> {
     try {
       // Query Consul for healthy service instances
-      const response = await axios.get(
+      const response = await this.authenticatedApi.get(
         `http://${this.consulUrl}/v1/health/service/${serviceName}?passing=true${tag ? `&tag=${tag}` : ''}`
       );
 

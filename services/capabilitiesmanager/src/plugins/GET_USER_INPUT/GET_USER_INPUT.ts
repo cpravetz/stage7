@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { PluginParameterType, PluginInput, PluginOutput } from '@cktmcs/shared';
+import { PluginParameterType, PluginInput, PluginOutput, createAuthenticatedAxios } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 
 interface UserInputRequest {
@@ -46,12 +46,20 @@ export async function execute(inputs: Map<string, PluginInput>): Promise<PluginO
         }
     }
 
+// Create an authenticated API client
+const securityManagerUrl = process.env.SECURITY_MANAGER_URL || 'securitymanager:5010';
+const authenticatedApi = createAuthenticatedAxios(
+    'GET_USER_INPUT_Plugin',
+    securityManagerUrl,
+    process.env.CLIENT_SECRET || 'stage7AuthSecret'
+);
+
 async function sendUserInputRequest(request: { question: string; choices?: string[]; answerType?: string }): Promise<string> {
         try {
             const postOfficeUrl = process.env.POSTOFFICE_URL || 'postoffice:5020';
-            const response = await axios.post(`http://${postOfficeUrl}/sendUserInputRequest`, request);
+            const response = await authenticatedApi.post(`http://${postOfficeUrl}/sendUserInputRequest`, request);
             return response.data.result;
-        } catch (error) { 
+        } catch (error) {
             analyzeError(error as Error);
             console.error('Error sending user input request:', error instanceof Error ? error.message : error);
             return '';

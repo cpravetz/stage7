@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { ServiceDiscovery } from '../discovery/serviceDiscovery';
+import { createAuthenticatedAxios } from '../http/createAuthenticatedAxios.js';
 
 /**
  * Client for the configuration service
@@ -10,6 +11,8 @@ export class ConfigClient {
   private configCache: Map<string, { value: any, timestamp: number }> = new Map();
   private cacheTTL: number = 60000; // 1 minute cache TTL
   private environment: string;
+  private authenticatedApi: any;
+  private securityManagerUrl: string;
 
   constructor(
     configServiceUrl: string = process.env.CONFIG_SERVICE_URL || 'configservice:5090',
@@ -17,7 +20,15 @@ export class ConfigClient {
   ) {
     this.configServiceUrl = configServiceUrl;
     this.environment = environment;
-    
+    this.securityManagerUrl = process.env.SECURITY_MANAGER_URL || 'securitymanager:5010';
+
+    // Create authenticated API client
+    this.authenticatedApi = createAuthenticatedAxios(
+      'ConfigClient',
+      this.securityManagerUrl,
+      process.env.CLIENT_SECRET || 'stage7AuthSecret'
+    );
+
     // Initialize service discovery if CONSUL_URL is set
     if (process.env.CONSUL_URL) {
       this.serviceDiscovery = new ServiceDiscovery(process.env.CONSUL_URL);
@@ -34,7 +45,7 @@ export class ConfigClient {
     // Check cache first
     const cacheKey = `${this.environment}:${key}`;
     const cachedConfig = this.configCache.get(cacheKey);
-    
+
     if (cachedConfig && (Date.now() - cachedConfig.timestamp) < this.cacheTTL) {
       return cachedConfig.value as T;
     }
@@ -42,7 +53,7 @@ export class ConfigClient {
     try {
       // Try to discover config service via service discovery
       let configServiceUrl = this.configServiceUrl;
-      
+
       if (this.serviceDiscovery) {
         try {
           const discoveredUrl = await this.serviceDiscovery.discoverService('ConfigService');
@@ -56,19 +67,19 @@ export class ConfigClient {
       }
 
       // Get configuration from service
-      const response = await axios.get(
+      const response = await this.authenticatedApi.get(
         `http://${configServiceUrl}/config/${key}?environment=${this.environment}`
       );
 
       if (response.status === 200 && response.data) {
         const value = response.data.value;
-        
+
         // Update cache
-        this.configCache.set(cacheKey, { 
-          value, 
-          timestamp: Date.now() 
+        this.configCache.set(cacheKey, {
+          value,
+          timestamp: Date.now()
         });
-        
+
         return value as T;
       }
     } catch (error) {
@@ -90,7 +101,7 @@ export class ConfigClient {
     try {
       // Try to discover config service via service discovery
       let configServiceUrl = this.configServiceUrl;
-      
+
       if (this.serviceDiscovery) {
         try {
           const discoveredUrl = await this.serviceDiscovery.discoverService('ConfigService');
@@ -104,16 +115,16 @@ export class ConfigClient {
       }
 
       // Set configuration in service
-      await axios.put(
+      await this.authenticatedApi.put(
         `http://${configServiceUrl}/config/${key}?environment=${this.environment}`,
         { value, description }
       );
 
       // Update cache
       const cacheKey = `${this.environment}:${key}`;
-      this.configCache.set(cacheKey, { 
-        value, 
-        timestamp: Date.now() 
+      this.configCache.set(cacheKey, {
+        value,
+        timestamp: Date.now()
       });
     } catch (error) {
       console.error(`Failed to set configuration ${key}:`, error);

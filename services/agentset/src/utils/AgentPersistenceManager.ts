@@ -1,7 +1,6 @@
 import { Agent } from '../agents/Agent';
 import { WorkProduct } from './WorkProduct';
-import axios from 'axios';
-import { MapSerializer, PluginOutput } from '@cktmcs/shared';
+import { MapSerializer, PluginOutput, createAuthenticatedAxios } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 
 
@@ -26,13 +25,26 @@ export interface AgentState {
 export class AgentPersistenceManager {
     private librarianUrl: string;
     private authenticatedApi: any;
+    private securityManagerUrl: string;
 
     constructor(
         librarianUrl: string = process.env.LIBRARIAN_URL || 'librarian:5040',
         authenticatedApi?: any
     ) {
         this.librarianUrl = librarianUrl;
-        this.authenticatedApi = authenticatedApi;
+        this.securityManagerUrl = process.env.SECURITY_MANAGER_URL || 'securitymanager:5010';
+
+        // If authenticatedApi is provided, use it, otherwise create a new one
+        if (authenticatedApi) {
+            this.authenticatedApi = authenticatedApi;
+        } else {
+            // Create authenticated API client
+            this.authenticatedApi = createAuthenticatedAxios(
+                'AgentPersistenceManager',
+                this.securityManagerUrl,
+                process.env.CLIENT_SECRET || 'stage7AuthSecret'
+            );
+        }
     }
 
     async saveAgent(agent: AgentState): Promise<void> {
@@ -44,22 +56,12 @@ export class AgentPersistenceManager {
         const state = MapSerializer.transformForSerialization(agent);
 
         try {
-            // Use authenticatedApi if available, otherwise fall back to direct axios call
-            if (this.authenticatedApi) {
-                await this.authenticatedApi.post(`http://${this.librarianUrl}/storeData`, {
-                    id: agent.id,
-                    data: state,
-                    storageType: 'mongo',
-                    collection: 'agents'
-                });
-            } else {
-                await axios.post(`http://${this.librarianUrl}/storeData`, {
-                    id: agent.id,
-                    data: state,
-                    storageType: 'mongo',
-                    collection: 'agents'
-                });
-            }
+            await this.authenticatedApi.post(`http://${this.librarianUrl}/storeData`, {
+                id: agent.id,
+                data: state,
+                storageType: 'mongo',
+                collection: 'agents'
+            });
             console.log(`Agent state saved successfully for agent ${agent.id}.`);
         } catch (error) { analyzeError(error as Error);
             console.error(`Error saving agent state for agent ${agent.id}:`, error instanceof Error ? error.message : error);
@@ -68,16 +70,9 @@ export class AgentPersistenceManager {
 
     async loadAgent(agentId: string): Promise<any | null> {
         try {
-            let response;
-            if (this.authenticatedApi) {
-                response = await this.authenticatedApi.get(`http://${this.librarianUrl}/loadData/${agentId}`, {
-                    params: { storageType: 'mongo', collection: 'agents' }
-                });
-            } else {
-                response = await axios.get(`http://${this.librarianUrl}/loadData/${agentId}`, {
-                    params: { storageType: 'mongo', collection: 'agents' }
-                });
-            }
+            const response = await this.authenticatedApi.get(`http://${this.librarianUrl}/loadData/${agentId}`, {
+                params: { storageType: 'mongo', collection: 'agents' }
+            });
             return MapSerializer.transformFromSerialization(response.data.data);
         } catch (error) { analyzeError(error as Error);
             console.error('Error loading agent state:', error instanceof Error ? error.message : error);
@@ -87,6 +82,15 @@ export class AgentPersistenceManager {
 
     async deleteAgent(agentId: string): Promise<void> {
         // Implement logic to delete agent state from persistent storage
+        try {
+            await this.authenticatedApi.delete(`http://${this.librarianUrl}/deleteData/${agentId}`, {
+                params: { collection: 'agents' }
+            });
+            console.log(`Agent ${agentId} deleted successfully`);
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error(`Error deleting agent ${agentId}:`, error instanceof Error ? error.message : error);
+        }
     }
 
     async saveWorkProduct(workProduct: WorkProduct): Promise<void> {
@@ -107,19 +111,11 @@ export class AgentPersistenceManager {
                 })
                 : MapSerializer.transformForSerialization(workProduct.data);
 
-            if (this.authenticatedApi) {
-                return await this.authenticatedApi.post(`http://${this.librarianUrl}/storeWorkProduct`, {
-                    agentId: workProduct.agentId,
-                    stepId: workProduct.stepId,
-                    data: serializedData
-                });
-            } else {
-                return await axios.post(`http://${this.librarianUrl}/storeWorkProduct`, {
-                    agentId: workProduct.agentId,
-                    stepId: workProduct.stepId,
-                    data: serializedData
-                });
-            }
+            return await this.authenticatedApi.post(`http://${this.librarianUrl}/storeWorkProduct`, {
+                agentId: workProduct.agentId,
+                stepId: workProduct.stepId,
+                data: serializedData
+            });
         } catch (error) { analyzeError(error as Error);
             console.error(`Error saving work product for agent ${workProduct.agentId}, step ${workProduct.stepId}:`, error instanceof Error ? error.message : String(error));
         }
@@ -133,12 +129,7 @@ export class AgentPersistenceManager {
 
         try {
             console.log(`Loading work product for agent ${agentId}, step ${stepId}`);
-            let response;
-            if (this.authenticatedApi) {
-                response = await this.authenticatedApi.get(`http://${this.librarianUrl}/loadWorkProduct/${stepId}`);
-            } else {
-                response = await axios.get(`http://${this.librarianUrl}/loadWorkProduct/${stepId}`);
-            }
+            const response = await this.authenticatedApi.get(`http://${this.librarianUrl}/loadWorkProduct/${stepId}`);
 
             if (!response.data || !response.data.data) {
                 console.error(`No data found for work product ${agentId}_${stepId}`);
@@ -164,12 +155,7 @@ export class AgentPersistenceManager {
 
         try {
             console.log(`Loading all work products for agent ${agentId}`);
-            let response;
-            if (this.authenticatedApi) {
-                response = await this.authenticatedApi.get(`http://${this.librarianUrl}/loadAllWorkProducts/${agentId}`);
-            } else {
-                response = await axios.get(`http://${this.librarianUrl}/loadAllWorkProducts/${agentId}`);
-            }
+            const response = await this.authenticatedApi.get(`http://${this.librarianUrl}/loadAllWorkProducts/${agentId}`);
 
             if (!response.data || !Array.isArray(response.data)) {
                 console.error(`No work products found for agent ${agentId}`);
