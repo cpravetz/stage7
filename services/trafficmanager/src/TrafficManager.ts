@@ -358,7 +358,7 @@ export class TrafficManager extends BaseEntity {
         }
 
         try {
-            const response = await api.post(`${this.ensureProtocol(agentSetUrl)}/message`, {
+            const response = await this.authenticatedApi.post(`${this.ensureProtocol(agentSetUrl)}/message`, {
                 ...message,
                 forAgent: agentId
             });

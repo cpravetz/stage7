@@ -661,10 +661,10 @@ export class PostOffice extends BaseEntity {
             }
             message.type = message.type || message.content.type;
             console.log(`Sending message to: ${url}: ${message}`);
-            await api.post(url, message, {
+            await this.authenticatedApi.post(url, message, {
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': token // Forward the token
+                    'Authorization': `Bearer ${token}` // Forward the token
                 }
             });
         } catch (error) {

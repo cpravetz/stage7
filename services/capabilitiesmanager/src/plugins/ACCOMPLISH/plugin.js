@@ -33,11 +33,22 @@ const accomplishPlugin = {
             {
                 'accomplish.js': `
 const axios = require('axios');
+const { ServiceTokenManager } = require('@cktmcs/shared');
+
+// Initialize token manager for service-to-service authentication
+const securityManagerUrl = process.env.SECURITY_MANAGER_URL || 'securitymanager:5010';
+const serviceId = 'CapabilitiesManager';
+const serviceSecret = process.env.CLIENT_SECRET || 'stage7AuthSecret';
+const tokenManager = ServiceTokenManager.getInstance(
+    `http://${securityManagerUrl}`,
+    serviceId,
+    serviceSecret
+);
 
 async function execute(input) {
     try {
         const goal = input.args?.goal || input.inputValue;
-        
+
         if (!goal) {
             console.log('Goal or description is required for ACCOMPLISH plugin');
             return [{
@@ -52,7 +63,7 @@ async function execute(input) {
 
         const prompt = generatePrompt(goal);
         const response = await queryBrain(prompt);
-        
+
         try {
             const parsedResponse = JSON.parse(response);
             if (parsedResponse.type === 'PLAN') {
@@ -87,7 +98,7 @@ async function execute(input) {
             }
             throw new Error(errorMessage);
         }
-    
+
     } catch (error) { analyzeError(error as Error);
         console.error('ACCOMPLISH plugin failed', error instanceof Error ? error.message : error);
         return {
@@ -163,9 +174,18 @@ Ensure your response is a valid JSON object starting with either "type": "DIRECT
 async function queryBrain(prompt) {
     try {
         const brainUrl = process.env.BRAIN_URL || 'brain:5070';
+
+        // Get a token for authentication
+        const token = await tokenManager.getToken();
+
         const response = await axios.post(\`http://\${brainUrl}/chat\`, {
-            exchanges: [{ role: 'user', message: prompt }],
+            exchanges: [{ role: 'user', content: prompt }],
             optimization: 'accuracy'
+        }, {
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': \`Bearer \${token}\`
+            }
         });
         return response.data.response;
     } catch (error) { analyzeError(error as Error);

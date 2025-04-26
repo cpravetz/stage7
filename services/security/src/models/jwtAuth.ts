@@ -63,6 +63,11 @@ const serviceRegistry: Record<string, ServiceCredential> = {
     roles: ['agent:manage']
   },
   // Add other services as needed
+  'ErrorHandler': {
+    id: 'ErrorHandler',
+    secret: process.env.ERRORHANDLER_SECRET || 'stage7AuthSecret',
+    roles: ['error:assess']
+  }
 };
 
 // Load keys

@@ -1,9 +1,19 @@
 import axios from 'axios';
 // @ts-ignore
 import { parseJSON } from 'json-alexander';
-import { MapSerializer, PluginInput, PluginOutput, PluginParameterType, ActionVerbTask, PlanDependency } from '@cktmcs/shared';
+import { MapSerializer, PluginInput, PluginOutput, PluginParameterType, ActionVerbTask, PlanDependency, ServiceTokenManager } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { v4 as uuidv4 } from 'uuid';
+
+// Initialize token manager for service-to-service authentication
+const securityManagerUrl = process.env.SECURITY_MANAGER_URL || 'securitymanager:5010';
+const serviceId = 'CapabilitiesManager';
+const serviceSecret = process.env.CLIENT_SECRET || 'stage7AuthSecret';
+const tokenManager = ServiceTokenManager.getInstance(
+    `http://${securityManagerUrl}`,
+    serviceId,
+    serviceSecret
+);
 
 interface JsonPlanStep {
     number: number;
@@ -463,10 +473,18 @@ async function parseJsonWithErrorCorrection(jsonString: string): Promise<any> {
         const prompt = `The following JSON is malformed. Please correct it and return only the corrected JSON:\n\n${correctedJson}`;
 
         try {
+            // Get a token for authentication
+            const token = await tokenManager.getToken();
+
             const response = await axios.post(`http://${brainUrl}/chat`, {
                 exchanges: [{ role: 'user', content: prompt }],
                 optimization: 'accuracy',
                 optionals: { temperature: 0.2, response_format: { "type": "json_object" }}
+            }, {
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                }
             });
             const fullResponse = response.data.response;
             const startIndex = fullResponse.indexOf('{');
@@ -508,6 +526,9 @@ async function queryBrain(messages: { role: string, content: string }[]): Promis
 
         logToFile(`Formatted messages: ${JSON.stringify(formattedMessages, null, 2)}`);
 
+        // Get a token for authentication
+        const token = await tokenManager.getToken();
+
         // Make the request to the Brain service
         const response = await axios.post(`http://${brainUrl}/chat`, {
             exchanges: formattedMessages,
@@ -520,7 +541,8 @@ async function queryBrain(messages: { role: string, content: string }[]): Promis
         }, {
             timeout: 60000, // Increased timeout to 60 seconds
             headers: {
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
             }
         });
 

@@ -9,7 +9,7 @@ import axios from 'axios';
 import * as jwt from 'jsonwebtoken';
 import * as fs from 'fs';
 import * as path from 'path';
-import { createAuthenticatedAxios } from '@cktmcs/shared';
+import { createAuthenticatedAxios } from '../http/createAuthenticatedAxios';
 
 export class ServiceTokenManager {
   private token: string = '';
@@ -561,6 +561,7 @@ export class ServiceTokenManager {
     }
   }
 }
+
 
 
 

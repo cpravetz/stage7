@@ -62,7 +62,7 @@ function createClientAuthenticatedAxios(
 
 export class SecurityClient {
     private postOfficeUrl: string;
-    private api: AxiosInstance;
+    api: AxiosInstance;
     private refreshTokenTimeout: NodeJS.Timeout | null = null;
     private static instance: SecurityClient | null = null;
 
