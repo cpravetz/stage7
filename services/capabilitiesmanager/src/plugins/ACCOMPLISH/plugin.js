@@ -33,17 +33,6 @@ const accomplishPlugin = {
             {
                 'accomplish.js': `
 const axios = require('axios');
-const { ServiceTokenManager } = require('@cktmcs/shared');
-
-// Initialize token manager for service-to-service authentication
-const securityManagerUrl = process.env.SECURITY_MANAGER_URL || 'securitymanager:5010';
-const serviceId = 'CapabilitiesManager';
-const serviceSecret = process.env.CLIENT_SECRET || 'stage7AuthSecret';
-const tokenManager = ServiceTokenManager.getInstance(
-    `http://${securityManagerUrl}`,
-    serviceId,
-    serviceSecret
-);
 
 async function execute(input) {
     try {
@@ -175,20 +164,12 @@ async function queryBrain(prompt) {
     try {
         const brainUrl = process.env.BRAIN_URL || 'brain:5070';
 
-        // Get a token for authentication
-        const token = await tokenManager.getToken();
-
         const response = await axios.post(\`http://\${brainUrl}/chat\`, {
             exchanges: [{ role: 'user', content: prompt }],
             optimization: 'accuracy'
-        }, {
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': \`Bearer \${token}\`
-            }
         });
         return response.data.response;
-    } catch (error) { analyzeError(error as Error);
+    } catch (error) { //analyzeError(error as Error);
         console.error('Error querying Brain:', error instanceof Error ? error.message : error);
         throw new Error('Failed to query Brain');
     }

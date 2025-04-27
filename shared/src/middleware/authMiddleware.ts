@@ -7,10 +7,11 @@ import { Request, Response, NextFunction } from 'express';
 import { BaseEntity } from '../BaseEntity.js';
 
 /**
- * Standard health check paths that should bypass authentication
+ * Standard paths that should bypass authentication
  * Note: /health is kept for backward compatibility but redirects to /ready?detail=full
+ * Note: /chat is included to allow the Brain service to be accessed without authentication
  */
-export const HEALTH_CHECK_PATHS = ['/healthy', '/ready', '/health', '/status'];
+export const HEALTH_CHECK_PATHS = ['/healthy', '/ready', '/health', '/status', '/chat'];
 
 /**
  * Check if a path is a health check endpoint

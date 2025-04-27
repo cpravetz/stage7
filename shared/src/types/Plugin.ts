@@ -116,7 +116,8 @@ export interface PluginOutput {
     result: any;
     resultDescription: string,
     error?: string,
-    mimeType?: string
+    mimeType?: string,
+    console?: any[]
 }
 
 export interface StepDependency {

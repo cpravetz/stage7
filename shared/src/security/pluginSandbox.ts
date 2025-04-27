@@ -85,7 +85,9 @@ export async function executePluginInSandbox(
     }
 
     // Execute the plugin
-    return await result.execute(inputs, environment);
+    const execResult = await result.execute(inputs, environment);
+    console.log('[Sandbox Result] ',execResult);
+    return execResult;
   } catch (error) {
     return [{
       success: false,

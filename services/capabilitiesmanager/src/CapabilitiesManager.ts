@@ -2,7 +2,7 @@ import express from 'express';
 import bodyParser from 'body-parser';
 import axios from 'axios';
 import path from 'path';
-import { Step, MapSerializer, BaseEntity  } from '@cktmcs/shared';
+import { Step, MapSerializer, BaseEntity, ServiceTokenManager } from '@cktmcs/shared';
 import { PluginInput, PluginOutput, PluginDefinition, PluginParameterType, environmentType } from '@cktmcs/shared';
 import { executePluginInSandbox } from '@cktmcs/shared';
 import { verifyPluginSignature, verifyTrustCertificate } from '@cktmcs/shared';
@@ -463,12 +463,21 @@ export class CapabilitiesManager extends BaseEntity {
             // Execute plugin with validated inputs
             const result = await this.executePlugin(plugin, validatedInputs.inputs || new Map<string, PluginInput>());
 
+            console.log('executePlugin result: ',result);
             // Log the result in a more readable format
             console.log('CM: Plugin executed successfully:', JSON.stringify(MapSerializer.transformForSerialization(result), null, 2));
 
             // For PLAN results, log more details about the plan
             if (result.length > 0 && result[0].resultType === PluginParameterType.PLAN) {
                 console.log('CM: Plan details:', JSON.stringify(result[0].result, null, 2));
+            }
+
+            // Log the console output from the plugin if available
+            if (result.length > 0 && result[0].console) {
+                console.log('CM: Plugin console output:');
+                result[0].console.forEach((logEntry, index) => {
+                    console.log(`[Plugin Log ${index}]:`, logEntry);
+                });
             }
 
             // Send the serialized result
@@ -488,9 +497,6 @@ export class CapabilitiesManager extends BaseEntity {
 
     protected async executePlugin(plugin: PluginDefinition, inputs: Map<string, PluginInput>): Promise<PluginOutput[]> {
         try {
-            // TEMPORARY: Completely bypass plugin signature verification
-            console.log('CM: COMPLETELY BYPASSING plugin signature verification');
-            // Skipping all signature verification code
 
             // Validate plugin permissions
             const permissionErrors = validatePluginPermissions(plugin);
@@ -528,11 +534,134 @@ export class CapabilitiesManager extends BaseEntity {
             await this.configManager.recordPluginUsage(plugin.id);
             await this.configManager.updatePluginConfig(plugin.id, configSet);
 
+            // Get the current token for the CapabilitiesManager to pass to the plugin
+            // This allows plugins to use the CapabilitiesManager's token for authenticated requests
+            let token = null;
+            let brainToken = null;
+
+            try {
+                // Get a token for the CapabilitiesManager
+                const tokenManager = this.getTokenManager();
+                token = await tokenManager.getToken();
+
+                if (token) {
+                    console.log('CM: Got authentication token for plugin execution');
+                } else {
+                    console.warn('CM: Failed to get authentication token for plugin');
+                }
+
+                // Get a token specifically for the Brain service
+                // This is needed for the ACCOMPLISH plugin to call the Brain's /chat endpoint
+                if (plugin.verb === 'ACCOMPLISH') {
+                    try {
+                        // Create a new ServiceTokenManager for the Brain service
+                        const brainTokenManager = new ServiceTokenManager(
+                            `http://${this.securityManagerUrl}`,
+                            'Brain', // Use 'Brain' as the service ID
+                            process.env.CLIENT_SECRET || 'stage7AuthSecret'
+                        );
+
+                        brainToken = await brainTokenManager.getToken();
+
+                        if (brainToken) {
+                            console.log('CM: Got Brain-specific authentication token for ACCOMPLISH plugin');
+                        } else {
+                            console.warn('CM: Failed to get Brain-specific authentication token');
+                        }
+                    } catch (brainTokenError) {
+                        console.error('CM: Error getting Brain-specific authentication token:',
+                            brainTokenError instanceof Error ? brainTokenError.message : String(brainTokenError));
+                    }
+                }
+            } catch (tokenError) {
+                console.error('CM: Error getting authentication token:', tokenError instanceof Error ? tokenError.message : String(tokenError));
+            }
+
+            // Create a custom environment with the tokens
+            const customEnv = { ...process.env };
+
+            // Add the CapabilitiesManager token to the environment variables
+            if (token) {
+                customEnv.CM_AUTH_TOKEN = token;
+                console.log('CM: Added authentication token to environment variables');
+            }
+
+            // Add the Brain-specific token to the environment variables if available
+            if (brainToken) {
+                customEnv.BRAIN_AUTH_TOKEN = brainToken;
+                console.log('CM: Added Brain-specific authentication token to environment variables');
+            }
+
             // Inject configuration into plugin environment
             const environment: environmentType = {
-                env: process.env,
+                env: customEnv,
                 credentials: configSet ?? []
             };
+
+            // Add the tokens to the inputs
+            if (token) {
+                console.log('CM: Adding authentication token to plugin inputs');
+                // Add the token to the inputs map with a special key
+                inputs.set('__auth_token', {
+                    inputName: '__auth_token',
+                    inputValue: token,
+                    args: { token }
+                });
+            }
+
+            // Add the Brain-specific token to the inputs if available
+            if (brainToken) {
+                console.log('CM: Adding Brain-specific authentication token to plugin inputs');
+
+                // Log token details for debugging (without revealing the full token)
+                try {
+                    const tokenParts = brainToken.split('.');
+                    if (tokenParts.length === 3) {
+                        const header = JSON.parse(Buffer.from(tokenParts[0], 'base64').toString());
+                        const payload = JSON.parse(Buffer.from(tokenParts[1], 'base64').toString());
+                        console.log(`CM: Brain token header:`, header);
+                        console.log(`CM: Brain token payload exp:`, payload.exp);
+                        console.log(`CM: Brain token payload iat:`, payload.iat);
+
+                        // Check if token is expired
+                        const now = Math.floor(Date.now() / 1000);
+                        if (payload.exp && payload.exp < now) {
+                            console.error(`CM: Brain token is expired. Expired at ${new Date(payload.exp * 1000).toISOString()}, current time is ${new Date().toISOString()}`);
+
+                            // Get a fresh token
+                            try {
+                                const brainTokenManager = new ServiceTokenManager(
+                                    `http://${this.securityManagerUrl}`,
+                                    'Brain',
+                                    process.env.CLIENT_SECRET || 'stage7AuthSecret'
+                                );
+
+                                brainToken = await brainTokenManager.getToken();
+                                console.log('CM: Got fresh Brain-specific authentication token');
+                            } catch (refreshError) {
+                                console.error('CM: Error getting fresh Brain-specific token:',
+                                    refreshError instanceof Error ? refreshError.message : String(refreshError));
+                            }
+                        }
+                    }
+                } catch (parseError) {
+                    console.error(`CM: Error parsing Brain token:`, parseError);
+                }
+
+                // Add the token to the inputs in multiple ways to ensure it's accessible
+                inputs.set('__brain_auth_token', {
+                    inputName: '__brain_auth_token',
+                    inputValue: brainToken,
+                    args: { token: brainToken }
+                });
+
+                // Also add it as a direct token property for easier access
+                inputs.set('token', {
+                    inputName: 'token',
+                    inputValue: brainToken,
+                    args: { token: brainToken }
+                });
+            }
 
             // Execute with environment based on language
             if (plugin.language === 'javascript') {

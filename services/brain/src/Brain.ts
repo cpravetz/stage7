@@ -46,8 +46,9 @@ export class Brain extends BaseEntity {
 
         // Use the BaseEntity verifyToken method for authentication
         app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
-            // Skip authentication for health endpoint
-            if (req.path === '/health') {
+            // Skip authentication for health endpoint and chat endpoint
+            if (req.path === '/health' || req.path === '/chat') {
+                console.log(`[Brain] Skipping authentication for exempt path: ${req.path}`);
                 return next();
             }
 
