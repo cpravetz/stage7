@@ -1,157 +1,264 @@
 
 services:
   postoffice:
-    build: 
+    build:
       context: .
       dockerfile: services/postoffice/dockerfile
     depends_on:
-      - securitymanager
+      rabbitmq:
+        condition: service_healthy
+      securitymanager:
+        condition: service_started
+      consul:
+        condition: service_started
+      redis:
+        condition: service_started
+      mongo:
+        condition: service_started
     environment:
       NODE_ENV: production
       PORT: &postofficePort 5020
       POSTOFFICE_URL: &postofficeUrl postoffice:5020
       SECURITYMANAGER_URL: &securitymanagerUrl securitymanager:5010
       MISSIONCONTROL_URL: &missioncontrolUrl missioncontrol:5030
-      POSTOFFICE_CLIENT_SECRET: &postofficeSecret postOfficeAuthSecret
-      CLIENT_SECRET: *postofficeSecret
+      RABBITMQ_URL: &rabbitmqUrl amqp://stage7:stage7password@rabbitmq:5672
+      CONSUL_URL: &consulUrl consul:8500
+      CONFIG_SERVICE_URL: &configserviceUrl configservice:5090
+      POSTOFFICE_CLIENT_SECRET: &sharedSecret stage7AuthSecret
+      CLIENT_SECRET: *sharedSecret
+      # Temporarily allow bootstrapping without RabbitMQ to unblock other services
+      ALLOW_READY_WITHOUT_RABBITMQ: "true"
+    volumes:
+      - ./shared/keys:/usr/src/app/shared/keys
     ports:
       - "5020:5020"
+    healthcheck:
+      # Use /healthy endpoint which should always respond regardless of RabbitMQ status
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:5020/healthy"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
 
   missioncontrol:
-    build: 
+    build:
       context: .
       dockerfile: services/missioncontrol/dockerfile
     depends_on:
-      - postoffice
-      - librarian
+      rabbitmq:
+        condition: service_healthy
+      postoffice:
+        condition: service_healthy
+      librarian:
+        condition: service_started
+      securitymanager:
+        condition: service_started
     environment:
       NODE_ENV: production
       PORT: &missioncontrolPort 5030
       MISSIONCONTROL_URL: *missioncontrolUrl
       SECURITYMANAGER_URL: *securitymanagerUrl
       POSTOFFICE_URL: *postofficeUrl
+      RABBITMQ_URL: *rabbitmqUrl
+      CONSUL_URL: *consulUrl
+      CONFIG_SERVICE_URL: *configserviceUrl
       TRAFFICMANAGER_URL: &trafficmanagerUrl trafficmanager:5080
       LIBRARIAN_URL: &librarianUrl librarian:5040
       BRAIN_URL: &brainUrl brain:5070
       ENGINEER_URL: &engineerUrl engineer:5050
 
-      MISSIONCONTROL_CLIENT_SECRET: &missioncontrolSecret missionControlAuthSecret
-      CLIENT_SECRET: *missioncontrolSecret
+      MISSIONCONTROL_CLIENT_SECRET: *sharedSecret
+      CLIENT_SECRET: *sharedSecret
+    volumes:
+      - ./shared/keys:/usr/src/app/shared/keys
 
   trafficmanager:
-    build: 
+    build:
       context: .
       dockerfile: services/trafficmanager/dockerfile
     depends_on:
-      - postoffice
-      - agentset
+      postoffice:
+        condition: service_healthy
+      agentset:
+        condition: service_started
+      securitymanager:
+        condition: service_started
     environment:
       NODE_ENV: production
       PORT: &trafficmanagerPort 5080
       TRAFFICMANAGER_URL: *trafficmanagerUrl
+      SECURITYMANAGER_URL: *securitymanagerUrl
       POSTOFFICE_URL: *postofficeUrl
+      RABBITMQ_URL: *rabbitmqUrl
+      CONSUL_URL: *consulUrl
+      CONFIG_SERVICE_URL: *configserviceUrl
       LIBRARIAN_URL: *librarianUrl
-      TRAFFICMANAGER_CLIENT_SECRET: &trafficmanagerSecret trafficManagerAuthSecret
-      CLIENT_SECRET: *trafficmanagerSecret
+      TRAFFICMANAGER_CLIENT_SECRET: *sharedSecret
+      CLIENT_SECRET: *sharedSecret
+    volumes:
+      - ./shared/keys:/usr/src/app/shared/keys
+    ports:
+      - "5080:5080"
 
   brain:
-    build: 
+    build:
       context: .
       dockerfile: services/brain/dockerfile
     depends_on:
-      - postoffice
-      - librarian
+      postoffice:
+        condition: service_healthy
+      librarian:
+        condition: service_started
+      securitymanager:
+        condition: service_started
+    env_file:
+      - services/brain/.env
     environment:
       NODE_ENV: production
       PORT: &brainPort 5070
       BRAIN_URL: *brainUrl
+      SECURITYMANAGER_URL: *securitymanagerUrl
       POSTOFFICE_URL: *postofficeUrl
-      BRAIN_CLIENT_SECRET: &brainSecret brainAuthSecret
-      CLIENT_SECRET: *brainSecret
+      RABBITMQ_URL: *rabbitmqUrl
+      CONSUL_URL: *consulUrl
+      CONFIG_SERVICE_URL: *configserviceUrl
+      BRAIN_CLIENT_SECRET: *sharedSecret
+      CLIENT_SECRET: *sharedSecret
+    volumes:
+      - ./shared/keys:/usr/src/app/shared/keys
+      - ./services/brain/.env:/usr/src/app/services/brain/.env
+    ports:
+      - "5070:5070"
 
   agentset:
     build:
       context: .
       dockerfile: services/agentset/dockerfile
     depends_on:
-      - postoffice
-      - librarian
+      postoffice:
+        condition: service_healthy
+      librarian:
+        condition: service_started
+      securitymanager:
+        condition: service_started
     environment:
       NODE_ENV: production
+      PORT: 5100
+      SECURITYMANAGER_URL: *securitymanagerUrl
       POSTOFFICE_URL: *postofficeUrl
-      TRAFFICMANAGER_URL: &trafficmanagerUrl
+      RABBITMQ_URL: *rabbitmqUrl
+      TRAFFICMANAGER_URL: *trafficmanagerUrl
       CAPABILITIESMANAGER_URL: &capabilitiesmanagerUrl capabilitiesmanager:5060
-      AGENTSET_CLIENT_SECRET: &agentsetSecret agentSetAuthSecret
-      CLIENT_SECRET: *agentsetSecret
+      AGENTSET_CLIENT_SECRET: *sharedSecret
+      CLIENT_SECRET: *sharedSecret
+    volumes:
+      - ./shared/keys:/usr/src/app/shared/keys
+    ports:
+      - "5100:5100"
 
   engineer:
     build:
       context: .
       dockerfile: services/engineer/dockerfile
     depends_on:
-      - postoffice
-      - brain
-      - librarian
+      postoffice:
+        condition: service_healthy
+      brain:
+        condition: service_started
+      librarian:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+      securitymanager:
+        condition: service_started
     environment:
       NODE_ENV: production
       PORT: &engineerPort 5050
       ENGINEER_URL: *engineerUrl
+      SECURITYMANAGER_URL: *securitymanagerUrl
       POSTOFFICE_URL: *postofficeUrl
+      RABBITMQ_URL: *rabbitmqUrl
+      CONSUL_URL: *consulUrl
+      CONFIG_SERVICE_URL: *configserviceUrl
       BRAIN_URL: *brainUrl
       LIBRARIAN_URL: *librarianUrl
       CAPABILITIESMANAGER_URL: *capabilitiesmanagerUrl
-      ENGINEER_CLIENT_SECRET: &engineerSecret engineerAuthSecret
-      CLIENT_SECRET: *engineerSecret
-      GITHUB_TOKEN: &githubToken ''
-      GITHUB_USERNAME: &githubUsername ''
+      ENGINEER_CLIENT_SECRET: *sharedSecret
+      CLIENT_SECRET: *sharedSecret
+      GITHUB_TOKEN: &githubToken 'your_github_token_here'
+      GITHUB_USERNAME: &githubUsername 'cpravetz'
       GIT_DEFAULT_BRANCH: &gitDefaultBranch main
-      GIT_REPOSITORY_URL: &gitRepositoryUrl
-      GITHUB_EMAIL: &githubEmail
-      DEFAULT_PLUGIN_REPOSITORY: &defaultPluginRepository mongo
+      GIT_REPOSITORY_URL: &gitRepositoryUrl 'https://github.com/cpravetz/s7plugins.git'
+      GITHUB_EMAIL: &githubEmail 'chris@pravetz.net'
+      DEFAULT_PLUGIN_REPOSITORY: &defaultPluginRepository github
       DEFAULT_REPOSITORY_URL: &defaultRepositoryUrl
       REPOSITORY_USERNAME: &repositoryUserName
       REPOSITORY_TOKEN: &repositoryToken
       REPOSITORY_EMAIL: &repositoryEmail
       MONGO_COLLECTION: &mongoCollection plugins
+    volumes:
+      - ./shared/keys:/usr/src/app/shared/keys
 
 
   capabilitiesmanager:
-    build: 
+    build:
       context: .
       dockerfile: services/capabilitiesmanager/dockerfile
     depends_on:
-      - postoffice
-      - engineer
-      - librarian
+      postoffice:
+        condition: service_healthy
+      engineer:
+        condition: service_started
+      librarian:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+      securitymanager:
+        condition: service_started
     environment:
       NODE_ENV: production
       PORT: &capabilitiesmanagerPort 5060
       CAPABILITIESMANAGER_URL: *capabilitiesmanagerUrl
+      SECURITYMANAGER_URL: *securitymanagerUrl
       POSTOFFICE_URL: *postofficeUrl
+      RABBITMQ_URL: *rabbitmqUrl
+      CONSUL_URL: *consulUrl
+      CONFIG_SERVICE_URL: *configserviceUrl
       LIBRARIAN_URL: *librarianUrl
       BRAIN_URL: *brainUrl
       ENGINEER_URL: &engineerUrl
-      CAPABILITIESMANAGER_CLIENT_SECRET: &capabilitiesmanagerSecret capabilitiesManagerAuthSecret
-      CLIENT_SECRET: *capabilitiesmanagerSecret
+      CAPABILITIESMANAGER_CLIENT_SECRET: *sharedSecret
+      CLIENT_SECRET: *sharedSecret
       LOCAL_PLUGIN_PATH: /usr/src/app/services//capabilitiesmanager/src/plugins
+      ENABLE_GITHUB: "true"
       GITHUB_TOKEN: *githubToken
       GITHUB_USERNAME: *githubUsername
       GIT_DEFAULT_BRANCH: *gitDefaultBranch
       GIT_REPOSITORY_URL: *gitRepositoryUrl
       GITHUB_EMAIL: *githubEmail
-      DEFAULT_PLUGIN_REPOSITORY: *defaultPluginRepository
+      DEFAULT_PLUGIN_REPOSITORY: "github"
       DEFAULT_REPOSITORY_URL: *defaultRepositoryUrl
       REPOSITORY_USERNAME: *repositoryUserName
       REPOSITORY_TOKEN: *repositoryToken
       REPOSITORY_EMAIL: *repositoryEmail
       MONGO_COLLECTION: *mongoCollection
+    volumes:
+      - ./shared/keys:/usr/src/app/shared/keys
+    ports:
+      - "5060:5060"
 
   librarian:
-    build: 
+    build:
       context: .
       dockerfile: services/librarian/dockerfile
     depends_on:
-      - postoffice
+      postoffice:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      securitymanager:
+        condition: service_started
     environment:
       MONGO_URI: mongodb://mongo:27017
       MONGO_DB: librarianDB
@@ -160,32 +267,86 @@ services:
       NODE_ENV: production
       PORT: &librarianPort 5040
       LIBRARIAN_URL: *librarianUrl
+      SECURITYMANAGER_URL: *securitymanagerUrl
       POSTOFFICE_URL: *postofficeUrl
-      LIBRARIAN_CLIENT_SECRET: &librarianSecret librarianAuthSecret
-      CLIENT_SECRET: *librarianSecret
+      RABBITMQ_URL: *rabbitmqUrl
+      CONSUL_URL: *consulUrl
+      CONFIG_SERVICE_URL: *configserviceUrl
+      LIBRARIAN_CLIENT_SECRET: *sharedSecret
+      CLIENT_SECRET: *sharedSecret
+    volumes:
+      - ./shared/keys:/usr/src/app/shared/keys
+    ports:
+      - "5040:5040"
 
   securitymanager:
     build:
       context: .
-      dockerfile: services/security/dockerfile
+      dockerfile: services/security/Dockerfile
+    depends_on:
+      - mongo
+      - rabbitmq
+      - consul
     environment:
       NODE_ENV: production
       PORT:  &securitymanagerPort 5010
       SECURITYMANAGER_URL: *securitymanagerUrl
       POSTOFFICE_URL: *postofficeUrl
-      JWT_SECRET: your-secret-key
+      RABBITMQ_URL: *rabbitmqUrl
+      CONSUL_URL: *consulUrl
+      CONFIG_SERVICE_URL: &configserviceUrl configservice:5090
+      # Using RS256 asymmetric keys for JWT signing and verification
+      KEYS_DIR: /usr/src/app/services/security/keys
       ADMIN_SECRET: adminSecret
       LIBRARIAN_URL: *librarianUrl
-      SECURITYMANAGER_CLIENT_SECRET: &securitymanagerSecret securityManagerAuthSecret
-      CLIENT_SECRET: *securitymanagerSecret
-      AGENTSET_CLIENT_SECRET: *agentsetSecret
-      AGENT_CLIENT_SECRET: *agentsetSecret
-      BRAIN_CLIENT_SECRET: *brainSecret
-      CAPABILITIESMANAGER_CLIENT_SECRET: *capabilitiesmanagerSecret
-      ENGINEER_CLIENT_SECRET: *engineerSecret
-      LIBRARIAN_CLIENT_SECRET: *librarianSecret
-      MISSIONCONTROL_CLIENT_SECRET: *missioncontrolSecret
-      TRAFFICMANAGER_CLIENT_SECRET: *trafficmanagerSecret
+      # Using a single shared client secret for all services
+      SECURITYMANAGER_CLIENT_SECRET: *sharedSecret
+      POSTOFFICE_CLIENT_SECRET: *sharedSecret
+      CONFIGSERVICE_CLIENT_SECRET: *sharedSecret
+      MISSIONCONTROL_CLIENT_SECRET: *sharedSecret
+      TRAFFICMANAGER_CLIENT_SECRET: *sharedSecret
+      BRAIN_CLIENT_SECRET: *sharedSecret
+      AGENTSET_CLIENT_SECRET: *sharedSecret
+      ENGINEER_CLIENT_SECRET: *sharedSecret
+      CAPABILITIESMANAGER_CLIENT_SECRET: *sharedSecret
+      LIBRARIAN_CLIENT_SECRET: *sharedSecret
+      CLIENT_SECRET: *sharedSecret
+      # JWT configuration
+      JWT_ALGORITHM: RS256
+      JWT_EXPIRATION: 3600 # 1 hour in seconds
+      # Authentication configuration
+      AUTH_ENABLED: "true"
+      # For development only - set to false in production
+      ACCEPT_ANY_SERVICE: "false"
+      ACCEPT_ANY_SECRET: "false"
+      # Shared secret for all services
+      SHARED_CLIENT_SECRET: *sharedSecret
+    volumes:
+      - ./services/security/keys:/usr/src/app/services/security/keys
+      - ./shared/keys:/usr/src/app/shared/keys
+    ports:
+      - "5010:5010"
+
+  configservice:
+    build:
+      context: .
+      dockerfile: services/configservice/dockerfile
+    depends_on:
+      - securitymanager
+    environment:
+      NODE_ENV: production
+      PORT: &configservicePort 5090
+      CONFIG_SERVICE_URL: *configserviceUrl
+      SECURITYMANAGER_URL: *securitymanagerUrl
+      POSTOFFICE_URL: *postofficeUrl
+      RABBITMQ_URL: *rabbitmqUrl
+      CONSUL_URL: *consulUrl
+      CONFIG_DIR: /usr/src/app/config
+      CONFIGSERVICE_CLIENT_SECRET: *sharedSecret
+      CLIENT_SECRET: *sharedSecret
+    volumes:
+      - config_data:/usr/src/app/config
+      - ./shared/keys:/usr/src/app/shared/keys
 
   frontend:
     build:
@@ -194,11 +355,12 @@ services:
     ports:
       - "80:80"
     depends_on:
-      - postoffice
+      postoffice:
+        condition: service_healthy
     environment:
       - ENV REACT_APP_API_BASE_URL=http://localhost:5020
       - ENV REACT_APP_WS_URL=ws://localhost:5020
-      
+
 
   mongo:
     image: mongo:latest
@@ -214,9 +376,53 @@ services:
     volumes:
       - redis_data:/data
 
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"  # AMQP port
+      - "15672:15672"  # Management UI
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    environment:
+      - RABBITMQ_DEFAULT_USER=stage7
+      - RABBITMQ_DEFAULT_PASS=stage7password
+      - RABBITMQ_DEFAULT_VHOST=/
+      # Increase memory available to RabbitMQ
+      - RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS=-rabbit vm_memory_high_watermark 0.7
+    healthcheck:
+      # Use a more reliable health check that ensures RabbitMQ is fully operational
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 90s  # Increased to allow more time for RabbitMQ to fully initialize
+    restart: unless-stopped
+
+  consul:
+    image: consul:1.15
+    ports:
+      - "8500:8500"  # HTTP API and UI
+      - "8600:8600/udp"  # DNS interface
+    volumes:
+      - consul_data:/consul/data
+    command: agent -server -ui -bootstrap-expect=1 -client=0.0.0.0
+    healthcheck:
+      test: ["CMD", "consul", "members"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  # OpenWebUI is using an external server, not a local container
+
 volumes:
   mongo_data:
   redis_data:
+  rabbitmq_data:
+  consul_data:
+  config_data:
+  security_keys:
 
 networks:
   default:

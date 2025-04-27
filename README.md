@@ -130,15 +130,54 @@ should not be changed.
 ### Installation
 
 1. Clone the repository:
-   `git clone https://github.com/cpravetz/stage7.git`
-2. Provide API keys for the LLMs you want to useby editing the docker-compose file.
-   You do not need all LLM services - one will suffice.
+   ```bash
+   git clone https://github.com/cpravetz/stage7.git
+   cd stage7
+   ```
 
-3. Build the system containers, in the root directory (likely /stage7):
-   `docker compose build`
-4. Start the containers:
-   `docker compose up`
-5. On the host machine, the application will be available at [http://localhost:80](http://localhost:80).
+2. Configure API keys for the LLMs you want to use by creating a `.env` file in the root directory with the following variables (you only need to provide keys for the LLMs you want to use):
+   ```
+   # OpenAI API
+   OPENAI_API_KEY=your_openai_api_key
+
+   # Gemini API
+   GEMINI_API_KEY=your_gemini_api_key
+
+   # Huggingface API
+   HUGGINGFACE_API_KEY=your_huggingface_api_key
+
+   # Anthropic API
+   ANTHROPIC_API_KEY=your_anthropic_api_key
+
+   # OpenRouter API
+   OPENROUTER_API_KEY=your_openrouter_api_key
+   ```
+
+3. (Optional) Configure self-hosted LLMs by adding the following to your `.env` file:
+   ```
+   # Self-hosted LLM configuration
+   OPENWEBUI_API_URL=http://your-openwebui-server:5000
+   OPENWEBUI_API_KEY=your_openwebui_api_key
+   ```
+
+4. Build the system containers:
+   ```bash
+   docker compose build
+   ```
+
+5. Start the containers:
+   ```bash
+   docker compose up -d
+   ```
+
+6. Generate RSA keys for authentication (first time only):
+   ```bash
+   docker compose exec securitymanager node src/scripts/generate-keys.js
+   ```
+
+   **IMPORTANT SECURITY NOTE**: Never commit private keys to the repository. The `.gitignore` file is configured to exclude private keys, but always verify that sensitive files are not being committed.
+
+7. On the host machine, the application will be available at [http://localhost:80](http://localhost:80).
 
 
 ### Usage
@@ -162,6 +201,33 @@ Here are some example missions to get you started:
 2. "Analyze the Python code in my GitHub repository and suggest improvements"
 3. "Create a marketing plan for a new mobile app"
 
+### Using Self-Hosted LLMs
+
+Stage7 supports integration with self-hosted LLM models through various interfaces. Here's a quick overview:
+
+1. **Supported Interfaces**:
+   - OpenWebUI Interface (compatible with OpenWebUI, LM Studio, Ollama, etc.)
+   - Direct Llama.cpp Interface
+   - Hugging Face Text Generation Interface
+
+2. **Basic Configuration**:
+   - Add the following to your `.env` file:
+     ```
+     # For OpenWebUI or compatible servers
+     OPENWEBUI_API_URL=http://your-openwebui-server:5000
+     OPENWEBUI_API_KEY=your_openwebui_api_key
+     ```
+
+3. **Supported Models**:
+   - Llama 3 (8B, 70B)
+   - Mistral (7B, 8x7B)
+   - Qwen (7B, 14B, 72B)
+   - Phi-3 (3.8B, 14B)
+   - Any other model compatible with the OpenAI API format
+
+4. **Detailed Guide**:
+   - For comprehensive instructions, see [SELF_HOSTED_LLM_GUIDE.md](SELF_HOSTED_LLM_GUIDE.md)
+
 ### Troubleshooting
 
 Common issues and solutions:
@@ -170,16 +236,20 @@ Common issues and solutions:
    - Verify all containers are running: `docker compose ps`
    - Check container logs: `docker compose logs [service-name]`
    - Ensure all required ports are available
+   - For authentication issues: `docker compose logs securitymanager`
 
 2. **LLM Integration Issues**
    - Verify API keys are correctly set in environment variables
-   - Check Brain service logs for API response errors
+   - Check Brain service logs for API response errors: `docker compose logs brain`
    - Ensure sufficient API credits/quota
+   - For self-hosted LLMs, check network connectivity between containers and the LLM server
+   - Verify the LLM server supports the OpenAI API format
 
 3. **Performance Issues**
    - Monitor container resource usage: `docker stats`
    - Consider increasing container resource limits
    - Check Redis and MongoDB performance
+   - For self-hosted LLMs, ensure the host has sufficient resources
 
 
 ## Development
@@ -261,16 +331,30 @@ the library of initial plugins.
 
 ### Security Guidelines
 
-1. **Code Security**
+1. **Authentication and Authorization**
+   - Stage7 uses RS256 asymmetric key authentication for service-to-service communication
+   - RSA keys are generated during first-time setup and stored in the `services/security/keys` directory
+   - The public key is distributed to all services for token verification
+   - Each service has its own client secret defined in the environment variables
+   - **CRITICAL**: Never commit private keys to the repository
+   - If you suspect keys have been compromised, use the `regenerate-keys.js` script to create new keys
+   - Always verify that `.gitignore` is properly configured to exclude sensitive files
+
+2. **Code Security**
    - No hardcoded credentials
    - Proper input validation
    - Secure communication between services
    - Regular dependency updates
 
-2. **Data Protection**
+3. **Data Protection**
    - Proper handling of sensitive data
    - Compliance with data protection regulations
    - Secure storage practices
+
+4. **Plugin Security**
+   - Plugins are signed using RSA keys
+   - Signatures are verified before plugin execution
+   - Sandbox environment for plugin execution
 
 ## Support
 
@@ -1149,4 +1233,3 @@ Note: Other fields may be added as needed
 **Output:**
 - 200: `{ "message": "User message distributed successfully" }`
 - 500: `{ "error": "Failed to distribute user message" }`
-  

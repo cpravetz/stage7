@@ -58,6 +58,57 @@ export abstract class BaseInterface {
 
     abstract convert(service: BaseService, conversionType: LLMConversationType, convertParams: ConvertParamsType): Promise<any> ;
 
+    /**
+     * Helper method to ensure a response is in JSON format
+     * @param response The response from the LLM
+     * @param requireJson Whether JSON is required
+     * @returns The response, possibly converted to JSON
+     */
+    protected ensureJsonResponse(response: string, requireJson: boolean = false): string {
+        if (!requireJson) {
+            return response;
+        }
+
+        // Check if the response is already valid JSON
+        try {
+            JSON.parse(response.trim());
+            console.log('Response is already valid JSON');
+            return response;
+        } catch (e) {
+            console.log('Response is not valid JSON, attempting to fix');
+        }
+
+        // If the response doesn't contain any JSON-like structure, wrap it in a DIRECT_ANSWER
+        if (!response.includes('{') && !response.includes('}')) {
+            console.log('Response does not contain any JSON-like structure, wrapping in DIRECT_ANSWER');
+            return JSON.stringify({
+                type: 'DIRECT_ANSWER',
+                answer: response.trim()
+            });
+        }
+
+        // Try to extract JSON from the response
+        const jsonRegex = /\{[\s\S]*\}/;
+        const match = response.match(jsonRegex);
+        if (match) {
+            console.log('Found JSON-like structure in response, attempting to parse');
+            try {
+                const extracted = match[0];
+                JSON.parse(extracted); // Validate it's valid JSON
+                return extracted;
+            } catch (e) {
+                console.log('Extracted JSON-like structure is not valid JSON');
+            }
+        }
+
+        // If all else fails, wrap the response in a DIRECT_ANSWER
+        console.log('Could not extract valid JSON, wrapping in DIRECT_ANSWER');
+        return JSON.stringify({
+            type: 'DIRECT_ANSWER',
+            answer: response.trim()
+        });
+    }
+
     protected trimMessages(messages: ExchangeType, maxTokens: number): ExchangeType {
         const targetTokens = Math.floor(maxTokens / 2);
         let estimatedTokens = 0;
@@ -73,7 +124,7 @@ export abstract class BaseInterface {
 
             if (typeof message.content === 'string') {
                 messageTokens = estimateTokens(message.content);
-            } 
+            }
 
             if (i === messages.length - 1 || estimatedTokens + messageTokens <= targetTokens) {
                 trimmedMessages.unshift(message);

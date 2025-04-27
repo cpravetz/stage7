@@ -3,6 +3,7 @@
     "version": "1.0.0",
     "description": "Central message routing component for the system",
     "main": "dist/PostOffice.js",
+
     "scripts": {
         "start": "ts-node src/PostOffice.ts",
         "build": "tsc",

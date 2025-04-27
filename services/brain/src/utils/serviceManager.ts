@@ -15,7 +15,6 @@ export class ServiceManager {
 
         try {
             const files = await fs.readdir(serviceDirectory);
-            console.log('Files in service directory',serviceDirectory,': ', files);
             for (const file of files) {
                 // Skip non-TS or non-JS files
                 if (!file.endsWith('.ts') && !file.endsWith('.js')) {
@@ -48,6 +47,14 @@ export class ServiceManager {
             return undefined;
         }
         return this.services.get(name.toLowerCase());
+    }
+
+    /**
+     * Get all services
+     * @returns Map of all services
+     */
+    getAllServices(): Map<string, BaseService> {
+        return this.services;
     }
 
 }

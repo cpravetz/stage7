@@ -23,6 +23,7 @@ export class Step {
     status: StepStatus;
     result?: PluginOutput[];
     timeout?: number;
+    recommendedRole?: string;
     private tempData: Map<string, any> = new Map();
     private persistenceManager: AgentPersistenceManager;
 
@@ -34,6 +35,7 @@ export class Step {
         description?: string,
         dependencies?: StepDependency[],
         status?: StepStatus,
+        recommendedRole?: string,
         persistenceManager: AgentPersistenceManager
     }) {
         this.id = params.id || uuidv4();
@@ -43,6 +45,7 @@ export class Step {
         this.description = params.description;
         this.dependencies = params.dependencies || [];
         this.status = params.status || StepStatus.PENDING;
+        this.recommendedRole = params.recommendedRole;
         this.persistenceManager = params.persistenceManager;
         //console.log(`Constructing new step ${this.id} created. Dependencies ${this.dependencies.map(dep => dep.sourceStepId).join(', ')}`);
     }
@@ -76,7 +79,7 @@ export class Step {
      * @returns Boolean indicating if this is an endpoint step
      */
     isEndpoint(allSteps: Step[]): boolean {
-        const dependents = allSteps.filter(s => 
+        const dependents = allSteps.filter(s =>
             s.dependencies.some(dep => dep.sourceStepId === this.id)
         );
         return dependents.length === 0;
@@ -141,8 +144,8 @@ export class Step {
                 result = [result];
             }
 
-            result = result.map(item => {
-                if (!('success' in item && 'name' in item && 'resultType' in item && 'resultDescription' in item && 'result' in item)) {
+            /*result = result.map(item => {
+                if (!('success' in item && 'resultType' in item && 'resultDescription' in item && 'result' in item)) {
                     return {
                         success: true,
                         name: 'result',
@@ -153,7 +156,7 @@ export class Step {
                     };
                 }
                 return item;
-            });
+            });*/
 
             result.forEach(resultItem => {
                 if (!resultItem.mimeType) { resultItem.mimeType = 'text/plain'; }
@@ -204,7 +207,7 @@ export class Step {
         const condition = this.inputs.get('condition')?.inputValue;
         const trueSteps = this.inputs.get('trueSteps')?.inputValue as ActionVerbTask[];
         const falseSteps = this.inputs.get('falseSteps')?.inputValue as ActionVerbTask[];
-        
+
         let result: boolean;
         if (typeof condition === 'function') {
             result = await condition();
@@ -216,7 +219,7 @@ export class Step {
         if (stepsToExecute) {
             const newSteps = createFromPlan(stepsToExecute, this.stepNo + 1, this.persistenceManager);
             // Add these steps to the agent's step queue
-            return [{ 
+            return [{
                 success: true,
                 name: 'steps',
                 resultType: PluginParameterType.PLAN,
@@ -250,7 +253,7 @@ export class Step {
         const timeoutMs = this.inputs.get('timeout')?.inputValue as number;
         const steps = this.inputs.get('steps')?.inputValue as ActionVerbTask[];
         const newSteps = createFromPlan(steps, this.stepNo + 1, this.persistenceManager);
-        
+
         newSteps.forEach(step => {
             step.timeout = timeoutMs;
         });
@@ -268,7 +271,7 @@ export class Step {
         const conditionInput = this.inputs.get('condition');
         const stepsInput = this.inputs.get('steps');
         const maxIterations = 100; // Safety limit
-        
+
         if (!conditionInput || !stepsInput) {
             return [{
                 success: false,
@@ -279,13 +282,13 @@ export class Step {
                 error: 'Missing required inputs: condition and steps are required'
             }];
         }
-    
+
         const steps = stepsInput.inputValue as ActionVerbTask[];
         const condition = conditionInput.inputValue;
-        
+
         let currentIteration = 0;
         const newSteps: Step[] = [];
-    
+
         // Initial condition check step
         const checkStep = new Step({
             actionVerb: 'THINK',
@@ -300,12 +303,12 @@ export class Step {
             description: 'While loop condition evaluation',
             persistenceManager: this.persistenceManager
         });
-    
+
         newSteps.push(checkStep);
-    
+
         // Create steps for first potential iteration
         const iterationSteps = createFromPlan(steps, this.stepNo + 2, this.persistenceManager);
-        
+
         // Add dependency on condition check for all first iteration steps
         iterationSteps.forEach(step => {
             step.dependencies.push({
@@ -314,9 +317,9 @@ export class Step {
                 outputName: 'result'
             });
         });
-    
+
         newSteps.push(...iterationSteps);
-    
+
         // Add next condition check step that will determine if another iteration is needed
         const nextCheckStep = new Step({
             actionVerb: 'THINK',
@@ -332,23 +335,23 @@ export class Step {
             persistenceManager: this.persistenceManager
 
         });
-    
+
         newSteps.push(nextCheckStep);
-    
+
         return [{
             success: true,
             name: 'steps',
-            resultType: PluginParameterType.PLAN,  
+            resultType: PluginParameterType.PLAN,
             resultDescription: 'Initial steps created from while loop',
             result: newSteps
         }];
-    
+
     }
-    
+
     private async handleUntil(): Promise<PluginOutput[]> {
         const conditionInput = this.inputs.get('condition');
         const stepsInput = this.inputs.get('steps');
-        
+
         if (!conditionInput || !stepsInput) {
             return [{
                 success: false,
@@ -359,16 +362,16 @@ export class Step {
                 error: 'Missing required inputs: condition and steps are required'
             }];
         }
-    
+
         const steps = stepsInput.inputValue as ActionVerbTask[];
         const condition = conditionInput.inputValue;
-        
+
         const newSteps: Step[] = [];
-    
+
         // Create first iteration steps (UNTIL executes at least once)
         const iterationSteps = createFromPlan(steps, this.stepNo + 1, this.persistenceManager);
         newSteps.push(...iterationSteps);
-    
+
         // Add condition check step after first iteration
         const checkStep = new Step({
             actionVerb: 'THINK',
@@ -384,7 +387,7 @@ export class Step {
             persistenceManager: this.persistenceManager
 
         });
-    
+
         // Add dependencies from condition check to all iteration steps
         iterationSteps.forEach(step => {
             checkStep.dependencies.push({
@@ -393,9 +396,9 @@ export class Step {
                 outputName: 'result'
             });
         });
-    
+
         newSteps.push(checkStep);
-    
+
         return [{
             success: true,
             name: 'steps',
@@ -404,10 +407,10 @@ export class Step {
             result: newSteps
         }];
     }
-    
+
     private async handleSequence(): Promise<PluginOutput[]> {
         const stepsInput = this.inputs.get('steps');
-        
+
         if (!stepsInput) {
             return [{
                 success: false,
@@ -418,13 +421,13 @@ export class Step {
                 error: 'Missing required input: steps'
             }];
         }
-    
+
         const steps = stepsInput.inputValue as ActionVerbTask[];
         const newSteps: Step[] = [];
-        
+
         // Create steps with explicit dependencies to force sequential execution
         let previousStepId: string | undefined;
-        
+
         steps.forEach((task, index) => {
             const newStep = new Step({
                 actionVerb: task.verb,
@@ -433,7 +436,7 @@ export class Step {
                 description: task.description || `Sequential step ${index + 1}`,
                 persistenceManager: this.persistenceManager
             });
-    
+
             if (previousStepId) {
                 // Add dependency on previous step
                 newStep.dependencies.push({
@@ -442,11 +445,11 @@ export class Step {
                     outputName: 'result'
                 });
             }
-    
+
             previousStepId = newStep.id;
             newSteps.push(newStep);
         });
-    
+
         return [{
             success: true,
             name: 'steps',
@@ -487,7 +490,7 @@ export class Step {
     public getTempData(key: string): any {
         return this.tempData.get(key);
     }
-    
+
     /**
      * Converts the step to a simple JSON-serializable object
      * @returns Simplified representation of the step
@@ -501,7 +504,8 @@ export class Step {
             description: this.description,
             dependencies: MapSerializer.transformForSerialization(this.dependencies),
             status: this.status,
-            result: this.result
+            result: this.result,
+            recommendedRole: this.recommendedRole
         };
     }
 }
@@ -543,6 +547,7 @@ export class Step {
                 inputs: inputs,
                 description: task.description,
                 dependencies: dependencies,
+                recommendedRole: task.recommendedRole,
                 persistenceManager: persistenceManager
             });
 

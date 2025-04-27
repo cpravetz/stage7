@@ -1,10 +1,12 @@
 import axios from 'axios';
 import express from 'express';
-import { MapSerializer, BaseEntity, PluginInput, PluginDefinition, PluginParameter, ConfigItem, MetadataType } from '@cktmcs/shared';
+import { MapSerializer, BaseEntity, PluginInput, PluginDefinition, PluginParameter, ConfigItem, MetadataType, signPlugin } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { PluginMarketplace } from '@cktmcs/marketplace';
 import { createHash } from 'crypto';
 
+// NOTE: Don't use this directly - use this.authenticatedApi or this.getAuthenticatedAxios() instead
+// This is kept for backward compatibility only
 const api = axios.create({
     headers: {
       'Content-Type': 'application/json',
@@ -32,6 +34,17 @@ export class Engineer extends BaseEntity {
         const app = express();
         app.use(express.json());
 
+        // Use the BaseEntity verifyToken method for authentication
+        app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
+            // Skip authentication for health endpoints
+            if (req.path === '/health' || req.path === '/ready') {
+                return next();
+            }
+
+            // Use the BaseEntity verifyToken method
+            this.verifyToken(req, res, next);
+        });
+
         app.post('/createPlugin', async (req, res) => {
             const { verb, context, guidance } = MapSerializer.transformFromSerialization(req.body);
             try {
@@ -44,8 +57,8 @@ export class Engineer extends BaseEntity {
             }
         });
 
-        app.post('/message', (req, res) => this.handleMessage(req, res))
-        ;app.get('/statistics', (req, res) => { this.getStatistics(req, res) });
+        app.post('/message', (req, res) => this.handleMessage(req, res));
+        app.get('/statistics', (req, res) => { this.getStatistics(req, res) });
 
         app.listen(this.port, () => {
             console.log(`Engineer listening at ${this.url}`);
@@ -62,7 +75,7 @@ export class Engineer extends BaseEntity {
         let pluginStructure: PluginDefinition;
         let configItems: ConfigItem[];
         let metadata: MetadataType;
-  
+
         try {
             const contextString = JSON.stringify(Array.from(context.entries()));
             const engineeringPrompt = `Create a javascript or python based plugin for the action verb "${verb}" with the following context: ${explanation}
@@ -136,7 +149,7 @@ export class Engineer extends BaseEntity {
                 }
             }
 Types used in the plugin structure are:
-    
+
     export interface Plugin {
         id: string;
         verb: string;
@@ -147,7 +160,7 @@ Types used in the plugin structure are:
         entryPoint?: EntryPointType;
         language: 'javascript' | 'python';
     }
-    
+
     export enum PluginParameterType {
         STRING = 'string',
         NUMBER = 'number',
@@ -158,12 +171,12 @@ Types used in the plugin structure are:
         PLUGIN = 'plugin',
         ERROR = 'error'
     }
-    
+
     export interface EntryPointType {
         main: string; //Name of entry point file
         files: Record<string,string>; //files defined as filename: filecontent
     }
-    
+
     export interface PluginParameter {
         name: string;
         required: boolean;
@@ -178,30 +191,30 @@ Types used in the plugin structure are:
             The code should be immediately executable without any compilation step.
             Determine any necessary environment variables or configuration items needed for the plugin to function correctly.
 `;
-    
-            const response = await axios.post(`http://${this.brainUrl}/chat`, {
-                exchanges: [{ role: 'user', message: engineeringPrompt }],
+
+            const response = await this.authenticatedApi.post(`http://${this.brainUrl}/chat`, {
+                exchanges: [{ role: 'user', content: engineeringPrompt }],
                 optimization: 'accuracy'
             });
             const pluginStructure = JSON.parse(response.data.result);
-        
+
             // Validate the generated plugin structure
             if (!this.validatePluginStructure(pluginStructure)) {
                 throw new Error('Generated plugin structure is invalid');
             }
-    
+
             // Run basic syntax validation on the generated code
             if (!await this.validatePluginCode(pluginStructure.entryPoint)) {
                 throw new Error('Generated plugin code contains syntax errors');
             }
-    
+
             return this.finalizePlugin(pluginStructure, explanation);
-        } catch (error) { 
+        } catch (error) {
             analyzeError(error as Error);
             console.error('Error querying Brain for plugin structure:', error instanceof Error ? error.message : error);
             return undefined;
         }
-    
+
         const newPlugin: PluginDefinition = {
             id: `plugin-${verb}`,
             verb: verb,
@@ -231,7 +244,7 @@ Types used in the plugin structure are:
         return newPlugin;
     }
 
-    
+
     private async handleMessage(req: express.Request, res: express.Response) {
         const message = req.body;
         console.log('Received message:', message);
@@ -239,10 +252,10 @@ Types used in the plugin structure are:
 
         // Process the message based on its content
         // This might involve managing agent traffic or assignments
-    
+
         res.status(200).send({ status: 'Message received and processed' });
     }
-    
+
     private determineRequiredPermissions(plugin: PluginDefinition): string[] {
         const permissions: string[] = [];
         if (!plugin.entryPoint?.files) return permissions;
@@ -252,17 +265,17 @@ Types used in the plugin structure are:
             if (file.toString().includes('http.')) permissions.push('net.http');
             // Add more permission checks as needed
         }
-        
+
         return [...new Set(permissions)]; // Remove duplicates
     }
-    
+
     private validatePluginStructure(plugin: any): boolean {
       const requiredFields = ['id', 'verb', 'inputDefinitions', 'outputDefinitions', 'entryPoint'];
       return requiredFields.every(field => plugin[field]) &&
              plugin.entryPoint.files &&
              Object.keys(plugin.entryPoint.files).length > 0;
     }
-  
+
     private async validatePluginCode(entryPoint: any): Promise<boolean> {
       try {
           // Basic syntax check for JavaScript/TypeScript files
@@ -279,7 +292,8 @@ Types used in the plugin structure are:
     }
 
     private finalizePlugin(pluginStructure: any, explanation: string): PluginDefinition {
-      return {
+      // Create the plugin definition
+      const plugin: PluginDefinition = {
           ...pluginStructure,
           explanation,
           version: '1.0.0',
@@ -293,50 +307,33 @@ Types used in the plugin structure are:
                   allowedAPIs: ['fetch', 'console']
               },
               trust: {
-                  publisher: 'system-generated',
-                  signature: this.signPlugin(pluginStructure)
+                  publisher: 'system-generated'
               }
           }
       };
+
+      // Sign the plugin
+      try {
+          // Sign the plugin using the RSA key if available
+          plugin.security.trust.signature = signPlugin(plugin);
+          console.log(`Plugin ${plugin.id} signed successfully`);
+      } catch (error) {
+          console.error(`Error signing plugin ${plugin.id}:`, error instanceof Error ? error.message : error);
+      }
+
+      return plugin;
   }
-
-
-  private signPlugin(plugin: PluginDefinition): string {
-    try {
-        // Create a deterministic subset of plugin properties for signing
-        const contentToSign = {
-            id: plugin.id,
-            verb: plugin.verb,
-            version: plugin.version,
-            entryPoint: plugin.entryPoint,
-            security: {
-                permissions: plugin.security.permissions,
-                sandboxOptions: plugin.security.sandboxOptions
-            }
-        };
-
-        // Create a deterministic string representation
-        const content = JSON.stringify(contentToSign, Object.keys(contentToSign).sort());
-
-        // Generate SHA-256 hash
-        return createHash('sha256').update(content).digest('hex');
-    } catch (error) {
-        console.error('Error signing plugin:', error instanceof Error ? error.message : error);
-        // Return a null signature that will fail verification
-        return '';
-    }
-}
 
     private async generateExplanation(verb: string, context: Map<string, PluginInput>): Promise<string> {
         const prompt = `Given the action verb "${verb}" and the context "${context}", provide a detailed explanation of what a plugin for this verb should do. Include expected inputs and outputs.`;
         try {
-            const response = await axios.post(`http://${this.brainUrl}/chat`, {
-                exchanges: [{ role: 'user', message: prompt }],
+            const response = await this.authenticatedApi.post(`http://${this.brainUrl}/chat`, {
+                exchanges: [{ role: 'user', content: prompt }],
                 optimization: 'accuracy'
             });
 
             return response.data.result;
-        } catch (error) { 
+        } catch (error) {
             analyzeError(error as Error);
             console.error('Error querying Brain:', error instanceof Error ? error.message : error);
             return '';

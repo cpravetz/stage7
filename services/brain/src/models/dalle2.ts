@@ -22,7 +22,7 @@ export class DALLE2Model extends BaseModel {
             name: "openai/dall-e-2",
             modelName: "dall-e-2",
             interfaceName: "openai",
-            serviceName: "OAIService",
+            serviceName: "OAService",
             tokenLimit: 1000, // Adjust as needed
             scoresByConversationType: scoresByConversationType,
             contentConversation: [LLMConversationType.TextToImage, LLMConversationType.ImageToImage]

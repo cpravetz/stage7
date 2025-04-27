@@ -1,5 +1,7 @@
 export * from './BaseEntity';
 //export * from './SecurityMiddleware';
+export * from './interfaces/IBaseEntity';
+export * from './AuthenticatedApiClient';
 export * from './types/Message';
 export * from './types/Plugin';
 export * from './types/PluginManifest';
@@ -11,4 +13,16 @@ export * from './types/Mission';
 export * from './types/Agent';
 export * from './types/Statistics';
 export * from './Serializer';
+export * from './messaging/queueClient';
+export * from './utils/asyncLLM';
+export * from './discovery/serviceDiscovery';
+export * from './config/configClient';
+export * from './versioning/semver';
+export * from './versioning/compatibilityChecker';
+export * from './security/pluginPermissions';
+export * from './security/isolatedPluginSandbox';
+export * from './security/pluginSigning';
+export * from './security/ServiceTokenManager';
+//export * from './security/authMiddleware';
+export * from './errorhandler';
 // Add any other exports here

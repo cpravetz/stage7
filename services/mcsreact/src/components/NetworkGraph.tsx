@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useMemo } from 'react';
 import { Network } from 'vis-network';
 import { DataSet } from 'vis-data';
 import { Edge, Node, Options } from 'vis-network';
-import { MapSerializer, AgentStatistics } from '@cktmcs/shared';
+import { MapSerializer, AgentStatistics } from '../shared-browser';
 import './NetworkGraph.css';
 
 interface NetworkGraphProps {
@@ -53,15 +53,17 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics }) =
                         group: agent.id
                     });
 
-                    step.dependencies.forEach(depId => {
-                        edges.add({
-                            from: depId,
-                            to: step.id,
-                            arrows: 'to',
-                            color: agent.color,
-                            width: 2
+                    if (step.dependencies) {
+                        step.dependencies.forEach(depId => {
+                            edges.add({
+                                from: depId,
+                                to: step.id,
+                                arrows: 'to',
+                                color: agent.color,
+                                width: 2
+                            });
                         });
-                    });
+                    }
                 });
             });
         }

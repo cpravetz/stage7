@@ -3,7 +3,7 @@ import express from 'express';
 import { Request, Response, NextFunction } from 'express';
 import { AgentStatistics, Mission, Status } from '@cktmcs/shared';
 import { generateGuid } from './utils/generateGuid';
-import { BaseEntity, MessageType, PluginInput, MapSerializer } from '@cktmcs/shared';
+import { BaseEntity, MessageType, PluginInput, MapSerializer, ServiceTokenManager } from '@cktmcs/shared';
 import { MissionStatistics } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { rateLimit } from 'express-rate-limit';
@@ -17,6 +17,8 @@ interface CustomRequest extends Request {
     };
   }
 
+// NOTE: Don't use this directly - use this.authenticatedApi or this.getAuthenticatedAxios() instead
+// This is kept for backward compatibility only
 const api = axios.create({
     headers: {
       'Content-Type': 'application/json',
@@ -27,18 +29,27 @@ const api = axios.create({
 class MissionControl extends BaseEntity {
     private missions: Map<string, Mission> = new Map();
     private clientMissions: Map<string, Set<string>> = new Map();
-    private trafficManagerUrl: string = process.env.TRAFFIC_MANAGER_URL || 'trafficmanager:5080';
+    private trafficManagerUrl: string = process.env.TRAFFICMANAGER_URL || 'trafficmanager:5080';
     private librarianUrl: string = process.env.LIBRARIAN_URL || 'librarian:5040';
-    private brainUrl: string = process.env.BRAIN_URL || 'brain:5060';
+    private brainUrl: string = process.env.BRAIN_URL || 'brain:5070';
     private engineerUrl: string = process.env.ENGINEER_URL || 'engineer:5050';
-    private securityManagerUrl: string = process.env.SECURITY_MANAGER_URL || 'securitymanager:5010';
-    
+
     constructor() {
         super('MissionControl', 'MissionControl', process.env.HOST || 'missioncontrol', process.env.PORT || '5050');
+
+        // Initialize token manager for service-to-service authentication
+        const serviceId = 'MissionControl';
+        const serviceSecret = process.env.CLIENT_SECRET || 'stage7AuthSecret';
+        this.tokenManager = ServiceTokenManager.getInstance(
+            `http://${this.securityManagerUrl}`,
+            serviceId,
+            serviceSecret
+        );
+
         this.initializeServer();
         setInterval(() => this.getAndPushAgentStatistics(), 5000);
     }
-    
+
     private initializeServer() {
         const app = express();
 
@@ -47,10 +58,25 @@ class MissionControl extends BaseEntity {
             max: 1000, // max 100 requests per windowMs
         }));
         app.use(express.json());
-    
-        app.use((req: Request, res: Response, next: NextFunction) => {this.verifyToken(req, res, next)});
 
-        app.post('/message', (req, res) => this.handleMessage(req, res));
+        // Use authentication middleware from BaseEntity
+        app.use((req: Request, res: Response, next: NextFunction) => {
+            this.verifyToken(req, res, next);
+        });
+
+        app.post('/message', (req, res) => {
+            this.handleMessage(req, res).catch((error: any) => {
+                console.error('Error in handleMessage:', error);
+                res.status(500).send({ error: 'Internal server error' });
+            });
+        });
+
+        app.post('/agentStatisticsUpdate', (req, res) => {
+            this.handleAgentStatisticsUpdate(req, res).catch((error: any) => {
+                console.error('Error in handleAgentStatisticsUpdate:', error);
+                res.status(500).send({ error: 'Internal server error' });
+            });
+        });
 
         app.listen(this.port, () => {
             console.log(`MissionControl is running on port ${this.port}`);
@@ -58,96 +84,260 @@ class MissionControl extends BaseEntity {
     }
 
     private async handleMessage(req: express.Request, res: express.Response) {
-        const { type, sender, content, clientId } = req.body;
-        const user = (req as any).user;
-        console.log(`user: `, user);
-        const missionId = req.body.missionId ? req.body.missionId : (req.body.content.missionId ? req.body.content.missionId : null);
-        console.log(`Received message of type ${type} from ${sender} for mission ${missionId}`);
         try {
-            switch (type) {
-                case MessageType.CREATE_MISSION:
-                    await this.createMission(content, clientId, user.id);
-                    break;
-                case MessageType.PAUSE:
-                    if (missionId) {
-                        await this.pauseMission(missionId);
+            console.log(`MissionControl received HTTP message:`, req.body);
+
+            // Log the message type for debugging
+            console.log(`MissionControl handling message of type ${req.body.type} from ${req.body.sender}`);
+
+            // Special handling for CREATE_MISSION messages
+            if (req.body.type === 'CREATE_MISSION') {
+                try {
+                    const { content, clientId, userId } = req.body;
+                    // Use userId from message payload if available, otherwise fall back to req.user or 'system'
+                    const effectiveUserId = userId || (req as any).user?.id || 'system';
+
+                    // TEMPORARY: Add debug logging
+                    console.log('Creating mission with content:', content);
+                    console.log('Client ID:', clientId);
+                    console.log('User ID:', effectiveUserId);
+
+                    // Create the mission
+                    const mission = await this.createMission(content, clientId, effectiveUserId);
+                    console.log(`Mission created successfully: ${mission.id}`);
+
+                    return res.status(200).send({
+                        message: 'Mission created successfully',
+                        missionId: mission.id,
+                        status: mission.status
+                    });
+                } catch (missionError) {
+                    console.error('Error creating mission:', missionError instanceof Error ? missionError.message : missionError);
+                    if (missionError instanceof Error && missionError.stack) {
+                        console.error(missionError.stack);
                     }
-                    break;
-                case MessageType.RESUME:
-                    if (missionId) {
-                        await this.resumeMission(missionId);
-                    }
-                    break;
-                case MessageType.ABORT:
-                    if (missionId) {
-                        await this.abortMission(missionId);
-                    }
-                    break;
-                case MessageType.SAVE:
-                    const mission = missionId ? this.missions.get(missionId) : null;
-                    if (mission) {
-                        const missionName = req.body.missionName ? req.body.missionName : (mission.name ? mission.name : `mission ${new Date()}`);
-                        await this.saveMission(missionId, missionName);
-                    }
-                    break;
-                case MessageType.LOAD:
-                    await this.loadMission(missionId, clientId, user.id);
-                    break;
-                case MessageType.USER_MESSAGE:
-                    await this.handleUserMessage(content, clientId, missionId);
-                    break;
-                default:
-                    console.log(`Unhandled message type: ${type}`);
+                    return res.status(500).send({
+                        error: 'Error creating mission',
+                        message: missionError instanceof Error ? missionError.message : 'Unknown error'
+                    });
+                }
             }
-            res.status(200).send({ message: 'Message processed successfully' });
-        } catch (error) { analyzeError(error as Error);
+
+            // For other message types
+            // Pass both the user from req.user and the message itself to processMessage
+            // so it can extract userId from either source
+            const result = await this.processMessage(req.body, (req as any).user);
+            console.log(`Message processed successfully, result:`, result);
+            res.status(200).send({ message: 'Message processed successfully', result });
+        } catch (error) {
+            analyzeError(error as Error);
             console.error('Error processing message:', error instanceof Error ? error.message : error);
-            res.status(502).send({ error: 'Internal server error' });
+            if (error instanceof Error) {
+                console.error(error.stack);
+            }
+            res.status(500).send({
+                error: 'Error processing message',
+                message: error instanceof Error ? error.message : 'Unknown error'
+            });
         }
     }
 
-    private async createMission(content: any, clientId: string, userId: string) {
-        this.logAndSay(`Creating mission with goal: ${content.goal}`);
-
-        // Clear action plan cache before creating new mission
-        await this.clearActionPlanCache();
-
-        const mission: Mission = {
-            id: generateGuid(),
-            userId: userId,
-            name: content.name,
-            goal: content.goal,
-            missionContext: content.missionContext || '',
-            status: Status.INITIALIZING,
-            createdAt: new Date(),
-            updatedAt: new Date()
-        };
-
-        this.missions.set(mission.id, mission);
-        this.addClientMission(clientId, mission.id);
-
-        console.log(`Mission created: ${mission.id}, Name: ${mission.name}, Client: ${clientId}`);
-        this.sendStatusUpdate(mission, 'Mission created');
-
+    // Override the handleQueueMessage method from BaseEntity
+    protected async handleQueueMessage(message: any) {
         try {
+            console.log(`MissionControl received queue message:`, message);
+
+            // For queue messages, we don't have user info from JWT
+            // We'll need to handle authorization differently or get user info another way
+            const userId = message.userId || 'system';
+            const user = { id: userId };
+
+            const result = await this.processMessage(message, user);
+            console.log(`Queue message of type ${message.type} processed successfully, result:`, result);
+
+            // If the message has a replyTo field, send a response back to the queue
+            if (message.replyTo && this.mqClient && this.mqClient.isConnected()) {
+                try {
+                    await this.mqClient.publishMessage('stage7', message.replyTo, {
+                        type: 'RESPONSE',
+                        correlationId: message.correlationId,
+                        content: result
+                    }, {
+                        correlationId: message.correlationId
+                    });
+                    console.log(`Sent response to ${message.replyTo} for message ${message.correlationId}`);
+                } catch (replyError) {
+                    console.error('Error sending reply to queue:', replyError);
+                }
+            }
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error('Error processing queue message:', error instanceof Error ? error.message : error);
+            if (error instanceof Error) {
+                console.error(error.stack);
+            }
+
+            // If the message has a replyTo field, send an error response back to the queue
+            if (message && message.replyTo && this.mqClient && this.mqClient.isConnected()) {
+                try {
+                    await this.mqClient.publishMessage('stage7', message.replyTo, {
+                        type: 'ERROR',
+                        correlationId: message.correlationId,
+                        content: {
+                            error: error instanceof Error ? error.message : 'Unknown error',
+                            status: 'error'
+                        }
+                    }, {
+                        correlationId: message.correlationId
+                    });
+                } catch (replyError) {
+                    console.error('Error sending error reply to queue:', replyError);
+                }
+            }
+        }
+    }
+
+    // Common message processing logic for both HTTP and queue messages
+    private async processMessage(message: any, user: any) {
+        const { type, sender, content, clientId, userId } = message;
+        console.log(`Processing message from user:`, user);
+        const missionId = message.missionId ? message.missionId : (message.content?.missionId ? message.content.missionId : null);
+        console.log(`Processing message of type ${type} from ${sender} for mission ${missionId}`);
+
+        // Use userId from message if available, otherwise fall back to user.id or 'system'
+        const effectiveUserId = userId || (user && user.id) || 'system';
+        console.log(`Using effectiveUserId: ${effectiveUserId}`);
+
+        let result;
+        switch (type) {
+            case MessageType.CREATE_MISSION:
+                result = await this.createMission(content, clientId, effectiveUserId);
+                return { missionId: result?.id, status: result?.status };
+            case MessageType.PAUSE:
+                if (missionId) {
+                    await this.pauseMission(missionId);
+                    return { missionId, status: 'paused' };
+                }
+                break;
+            case MessageType.RESUME:
+                if (missionId) {
+                    await this.resumeMission(missionId);
+                    return { missionId, status: 'resumed' };
+                }
+                break;
+            case MessageType.ABORT:
+                if (missionId) {
+                    await this.abortMission(missionId);
+                    return { missionId, status: 'aborted' };
+                }
+                break;
+            case MessageType.SAVE:
+                const mission = missionId ? this.missions.get(missionId) : null;
+                if (mission) {
+                    const missionName = message.missionName ? message.missionName : (mission.name ? mission.name : `mission ${new Date()}`);
+                    await this.saveMission(missionId, missionName);
+                    return { missionId, status: 'saved', name: missionName };
+                }
+                break;
+            case MessageType.LOAD:
+                const loadedMission = await this.loadMission(missionId, clientId, effectiveUserId);
+                return { missionId, status: 'loaded', mission: loadedMission };
+            case MessageType.USER_MESSAGE:
+                await this.handleUserMessage(content, clientId, missionId);
+                return { missionId, status: 'message_sent' };
+            default:
+                // Call the base class handler for standard message types
+                await super.handleBaseMessage(message);
+                return { status: 'message_handled' };
+        }
+
+        return { status: 'no_action_taken' };
+    }
+
+    private async createMission(content: any, clientId: string, userId: string) {
+        try {
+            this.logAndSay(`Creating mission with goal: ${content.goal}`);
+            console.log(`MissionControl creating mission with goal: ${content.goal} for client: ${clientId}`);
+
+            // Clear action plan cache before creating new mission
+            await this.clearActionPlanCache();
+
+            const missionId = generateGuid();
+            console.log(`Generated mission ID: ${missionId}`);
+
+            const mission: Mission = {
+                id: missionId,
+                userId: userId,
+                name: content.name || `Mission ${new Date().toISOString().slice(0, 10)}`,
+                goal: content.goal,
+                missionContext: content.missionContext || '',
+                status: Status.INITIALIZING,
+                createdAt: new Date(),
+                updatedAt: new Date()
+            };
+
+            this.missions.set(mission.id, mission);
+            this.addClientMission(clientId, mission.id);
+
+            console.log(`Mission created: ${mission.id}, Name: ${mission.name}, Client: ${clientId}`);
+            this.sendStatusUpdate(mission, 'Mission created');
+
+            // Create the inputs map for the agent
             const inputs = new Map<string, PluginInput>();
             inputs.set('goal', {
                 inputName: 'goal',
                 inputValue: mission.goal,
                 args: {}
             });
-            console.log('Serializing inputs: ', inputs);
-            console.log('Serialized: ', MapSerializer.transformForSerialization(inputs));
-            await api.post(`http://${this.trafficManagerUrl}/createAgent`, { actionVerb: 'ACCOMPLISH', 
-                inputs: MapSerializer.transformForSerialization(inputs), 
-                missionId: mission.id, 
-                dependencies: [] });
+
+            // Add mission context if available
+            if (mission.missionContext) {
+                inputs.set('missionContext', {
+                    inputName: 'missionContext',
+                    inputValue: mission.missionContext,
+                    args: {}
+                });
+            }
+
+            console.log('Serializing inputs for TrafficManager...');
+            const serializedInputs = MapSerializer.transformForSerialization(inputs);
+
+            // Create the agent through TrafficManager
+            console.log(`Sending createAgent request to TrafficManager for mission ${mission.id}`);
+
+            const createAgentResponse = await this.authenticatedApi.post(`http://${this.trafficManagerUrl}/createAgent`, {
+                actionVerb: 'ACCOMPLISH',
+                inputs: serializedInputs,
+                missionId: mission.id,
+                missionContext: mission.missionContext,
+                dependencies: []
+            });
+
+            console.log(`TrafficManager createAgent response:`, createAgentResponse.data);
             mission.status = Status.RUNNING;
             this.sendStatusUpdate(mission, 'Mission started');
-        } catch (error) { analyzeError(error as Error);
-            console.error('Error starting mission:', error instanceof Error ? error.message : error);
-            mission.status = Status.ERROR;
-            this.sendStatusUpdate(mission, 'Error starting mission');
+
+            // Save the mission state
+            await this.saveMissionState(mission);
+            console.log(`Mission ${mission.id} state saved`);
+
+            return mission;
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error('Error creating/starting mission:', error instanceof Error ? error.message : error);
+
+            // If we have a mission object, update its status
+            if (content && content.goal) {
+                const failedMission = Array.from(this.missions.values())
+                    .find(m => m.goal === content.goal && m.status === Status.INITIALIZING);
+
+                if (failedMission) {
+                    failedMission.status = Status.ERROR;
+                    this.sendStatusUpdate(failedMission, `Error starting mission: ${error instanceof Error ? error.message : 'Unknown error'}`);
+                }
+            }
+
+            throw error; // Re-throw to allow caller to handle
         }
     }
 
@@ -156,7 +346,7 @@ class MissionControl extends BaseEntity {
         const mission = this.missions.get(missionId);
         if (mission) {
             mission.status = Status.PAUSED;
-            await api.post(`http://${this.trafficManagerUrl}/pauseAgents`, { missionId: missionId });
+            await this.authenticatedApi.post(`http://${this.trafficManagerUrl}/pauseAgents`, { missionId: missionId });
             this.sendStatusUpdate(mission, 'Mission paused');
         } else {
             console.error('Mission to pause not found:', missionId);
@@ -165,7 +355,7 @@ class MissionControl extends BaseEntity {
 
     private async clearActionPlanCache() {
         try {
-            await api.delete(`http://${this.librarianUrl}/deleteCollection`, {
+            await this.authenticatedApi.delete(`http://${this.librarianUrl}/deleteCollection`, {
                 params: {
                     collection: 'actionPlans'
                 }
@@ -176,12 +366,12 @@ class MissionControl extends BaseEntity {
             // Don't throw - we don't want to block mission creation if cache clear fails
         }
     }
-    
+
     private async resumeMission(missionId: string) {
         const mission = this.missions.get(missionId);
         if (mission) {
             mission.status = Status.RUNNING;
-            await api.post(`http://${this.trafficManagerUrl}/resumeAgents`, { missionId: missionId });
+            await this.authenticatedApi.post(`http://${this.trafficManagerUrl}/resumeAgents`, { missionId: missionId });
             this.sendStatusUpdate(mission, 'Mission resumed');
         } else {
             console.error('Mission to resume not found:', missionId);
@@ -192,7 +382,7 @@ class MissionControl extends BaseEntity {
         const mission = this.missions.get(missionId);
         if (mission) {
             mission.status = Status.ABORTED;
-            await api.post(`http://${this.trafficManagerUrl}/abortAgents`, { missionId: missionId });
+            await this.authenticatedApi.post(`http://${this.trafficManagerUrl}/abortAgents`, { missionId: missionId });
             this.sendStatusUpdate(mission, 'Mission aborted');
             this.missions.delete(missionId);
             for (const [clientId, missionIds] of this.clientMissions.entries()) {
@@ -207,23 +397,34 @@ class MissionControl extends BaseEntity {
 
     private async loadMission(missionId: string, clientId: string, userId: string) {
         try {
+            console.log(`Loading mission ${missionId} for client ${clientId} and user ${userId}`);
+
             const mission = await this.loadMissionState(missionId);
             if (!mission) {
                 console.error('Mission not found:', missionId);
-                return;
+                throw new Error(`Mission ${missionId} not found`);
             }
+
             if (mission.userId !== userId) {
-                console.error('User not authorized to load this mission');
-                return;
+                console.error(`User ${userId} not authorized to load mission ${missionId}`);
+                throw new Error('Access denied: You do not have permission to access this mission');
             }
-    
+
             this.missions.set(missionId, mission);
-            await api.post(`http://${this.trafficManagerUrl}/loadAgents`, { missionId });
+
+            console.log(`Loading agents for mission ${missionId} from TrafficManager`);
+            const loadAgentsResponse = await this.authenticatedApi.post(`http://${this.trafficManagerUrl}/loadAgents`, { missionId });
+            console.log(`TrafficManager loadAgents response:`, loadAgentsResponse.data);
+
             this.addClientMission(clientId, missionId);
             console.log(`Mission loaded: ${missionId}, Name: ${mission.name || 'Unnamed'}, Client: ${clientId}`);
             this.sendStatusUpdate(mission, `Mission loaded: ${mission.name || 'Unnamed'}`);
-        } catch (error) { analyzeError(error as Error);
+
+            return mission;
+        } catch (error) {
+            analyzeError(error as Error);
             console.error('Error loading mission:', error instanceof Error ? error.message : error);
+            throw error; // Re-throw to allow caller to handle
         }
     }
 
@@ -236,7 +437,7 @@ class MissionControl extends BaseEntity {
         try {
             if (missionName) mission.name = missionName;
             await this.saveMissionState(mission);
-            await api.post(`http://${this.trafficManagerUrl}/saveAgents`, { missionId });
+            await this.authenticatedApi.post(`http://${this.trafficManagerUrl}/saveAgents`, { missionId });
             console.log(`Mission saved: ${missionId}, Name: ${mission.name || 'Unnamed'}`);
             this.sendStatusUpdate(mission, `Mission saved: ${mission.name || 'Unnamed'}`);
         } catch (error) { analyzeError(error as Error);
@@ -250,10 +451,10 @@ class MissionControl extends BaseEntity {
             console.error('Mission not found:', missionId);
             return;
         }
-    
+
         try {
             // Send the user message to the TrafficManager for distribution
-            await api.post(`http://${this.trafficManagerUrl}/distributeUserMessage`, {
+            await this.authenticatedApi.post(`http://${this.trafficManagerUrl}/distributeUserMessage`, {
                 type: MessageType.USER_MESSAGE,
                 sender: 'user',
                 recipient: 'agents',
@@ -263,13 +464,13 @@ class MissionControl extends BaseEntity {
                 },
                 clientId: clientId
             });
-    
+
             console.log(`User message for mission ${missionId} sent to TrafficManager for distribution`);
-    
+
             // Update mission status
             mission.updatedAt = new Date();
             this.sendStatusUpdate(mission, 'User message received and sent to agents');
-    
+
         } catch (error) { analyzeError(error as Error);
             console.error('Error handling user message:', error instanceof Error ? error.message : error);
         }
@@ -277,7 +478,7 @@ class MissionControl extends BaseEntity {
 
     private async saveMissionState(mission: Mission) {
         try {
-            await api.post(`http://${this.librarianUrl}/storeData`, {
+            await this.authenticatedApi.post(`http://${this.librarianUrl}/storeData`, {
                 id: mission.id,
                 userId: mission.userId,
                 data: mission,
@@ -291,7 +492,7 @@ class MissionControl extends BaseEntity {
 
     private async loadMissionState(missionId: string): Promise<Mission | null> {
         try {
-            const response = await api.get(`http://${this.librarianUrl}/loadData/${missionId}`, {
+            const response = await this.authenticatedApi.get(`http://${this.librarianUrl}/loadData/${missionId}`, {
                 params: {
                     storageType: 'mongo',
                     collection: 'missions'
@@ -320,38 +521,127 @@ class MissionControl extends BaseEntity {
 
         for (const [clientId, missionIds] of this.clientMissions.entries()) {
             if (missionIds.has(mission.id)) {
-                api.post(`http://${this.postOfficeUrl}/message`, {
+                this.authenticatedApi.post(`http://${this.postOfficeUrl}/message`, {
                     type: MessageType.STATUS_UPDATE,
                     sender: this.id,
                     recipient: 'user',
                     clientId: clientId,
                     data: statusUpdate
-                }).catch(error => {
+                }).catch((error: any) => {
                     console.error(`Error sending status update to client ${clientId}:`, error instanceof Error ? error.message : error);
                 });
             }
         }
     }
 
+    /**
+     * Handle agent statistics updates from TrafficManager
+     * @param req Request
+     * @param res Response
+     */
+    private async handleAgentStatisticsUpdate(req: express.Request, res: express.Response) {
+        try {
+            const { agentId, missionId, statistics, timestamp } = req.body;
+
+            console.log(`Received statistics update for agent ${agentId} in mission ${missionId}`);
+
+            // Store the statistics for this agent
+            // For now, we'll just log them and rely on the getAndPushAgentStatistics method
+            // to fetch the latest statistics from TrafficManager when needed
+            console.log(`Agent ${agentId} statistics:`, JSON.stringify(statistics, null, 2));
+
+            // Find the clients associated with this mission
+            if (missionId) {
+                for (const [clientId, missionIds] of this.clientMissions.entries()) {
+                    if (missionIds.has(missionId)) {
+                        console.log(`Found client ${clientId} for mission ${missionId}, sending statistics update`);
+                        // Push statistics directly to this client
+                        try {
+                            const [llmCallsResponse, engineerStatisticsResponse] = await Promise.all([
+                                this.authenticatedApi.get(`http://${this.brainUrl}/getLLMCalls`).catch((error: any) => {
+                                    console.warn('Failed to fetch LLM calls:', error instanceof Error ? error.message : error);
+                                    return { data: { llmCalls: 0 } };
+                                }),
+                                this.authenticatedApi.get(`http://${this.engineerUrl}/statistics`).catch((error: any) => {
+                                    console.warn('Failed to fetch engineer statistics:', error instanceof Error ? error.message : error);
+                                    return { data: { newPlugins: [] } };
+                                })
+                            ]);
+
+                            // Get agent statistics from TrafficManager
+                            const trafficManagerResponse = await this.authenticatedApi.get(`http://${this.trafficManagerUrl}/getAgentStatistics/${missionId}`);
+                            const trafficManagerStatistics = trafficManagerResponse.data;
+
+                            // Create mission statistics
+                            const missionStats: MissionStatistics = {
+                                llmCalls: llmCallsResponse.data.llmCalls,
+                                agentCountByStatus: trafficManagerStatistics.agentStatisticsByType.agentCountByStatus,
+                                agentStatistics: MapSerializer.transformForSerialization(trafficManagerStatistics.agentStatisticsByStatus),
+                                engineerStatistics: engineerStatisticsResponse.data
+                            };
+
+                            // Send statistics to client
+                            await this.authenticatedApi.post(`http://${this.postOfficeUrl}/message`, {
+                                type: MessageType.STATISTICS,
+                                sender: this.id,
+                                recipient: 'user',
+                                clientId: clientId, // Include clientId
+                                content: missionStats
+                            });
+                            console.log(`Statistics update sent to client ${clientId} for mission ${missionId}`);
+                        } catch (error) {
+                            console.error(`Error sending statistics to client ${clientId}:`, error instanceof Error ? error.message : error);
+                        }
+                    }
+                }
+            }
+
+            res.status(200).send({ message: 'Agent statistics updated successfully.' });
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error('Error updating agent statistics:', error instanceof Error ? error.message : error);
+            res.status(500).send({ error: 'Failed to update agent statistics' });
+        }
+    }
+
     private async getAndPushAgentStatistics() {
         try {
+            console.log('Fetching agent statistics...');
             const [llmCallsResponse, engineerStatisticsResponse] = await Promise.all([
-                api.get(`http://${this.brainUrl}/getLLMCalls`).catch(error => {
+                this.authenticatedApi.get(`http://${this.brainUrl}/getLLMCalls`).catch((error: any) => {
                     console.warn('Failed to fetch LLM calls:', error instanceof Error ? error.message : error);
-                    return { data: { llmCalls: null } };
+                    return { data: { llmCalls: 0 } };
                 }),
-                api.get(`http://${this.engineerUrl}/statistics`).catch(error => {
+                this.authenticatedApi.get(`http://${this.engineerUrl}/statistics`).catch((error: any) => {
                     console.warn('Failed to fetch engineer statistics:', error instanceof Error ? error.message : error);
-                    return { data: null };
+                    return { data: { newPlugins: [] } };
                 })
             ]);
 
-            for (const [clientId, missionIds] of this.clientMissions.entries()) {
-                for (const missionId of missionIds) {
-                    const mission = this.missions.get(missionId);
-                    if (!mission) continue;
+            console.log(`Received LLM calls count: ${llmCallsResponse.data.llmCalls}`);
+            console.log(`Received engineer statistics: ${JSON.stringify(engineerStatisticsResponse.data)}`);
 
-                    const trafficManagerResponse = await api.get(`http://${this.trafficManagerUrl}/getAgentStatistics/${missionId}`);
+            // Check if we have any client missions
+            if (this.clientMissions.size === 0) {
+                console.log('No client missions found, skipping statistics update');
+                return;
+            }
+
+            console.log(`Found ${this.clientMissions.size} client(s) with missions`);
+
+            for (const [clientId, missionIds] of this.clientMissions.entries()) {
+                console.log(`Processing statistics for client ${clientId} with ${missionIds.size} mission(s)`);
+
+                for (const missionId of missionIds) {
+                    console.log(`Fetching statistics for mission ${missionId}`);
+                    const mission = this.missions.get(missionId);
+                    if (!mission) {
+                        console.log(`Mission ${missionId} not found, skipping`);
+                        continue;
+                    }
+
+                    console.log(`Fetching agent statistics from TrafficManager for mission ${missionId}`);
+                    const trafficManagerResponse = await this.authenticatedApi.get(`http://${this.trafficManagerUrl}/getAgentStatistics/${missionId}`);
                     const trafficManagerStatistics = trafficManagerResponse.data;
                     trafficManagerStatistics.agentStatisticsByStatus = MapSerializer.transformFromSerialization(trafficManagerStatistics.agentStatisticsByStatus);
 
@@ -359,8 +649,8 @@ class MissionControl extends BaseEntity {
                     if (trafficManagerStatistics.agentStatisticsByStatus?.values) {
                         totalDependencies = Array.from(trafficManagerStatistics.agentStatisticsByStatus.values())
                         .flat()
-                        .reduce<number>((totalCount, agent) => 
-                            totalCount + (agent as AgentStatistics).steps.reduce<number>((stepCount, step) => 
+                        .reduce<number>((totalCount, agent) =>
+                            totalCount + (agent as AgentStatistics).steps.reduce<number>((stepCount, step) =>
                                 stepCount + (step.dependencies?.length || 0), 0
                             ), 0);
                     }
@@ -373,17 +663,24 @@ class MissionControl extends BaseEntity {
                         engineerStatistics: engineerStatisticsResponse.data
                     };
 
-                    await api.post(`http://${this.postOfficeUrl}/message`, {
+                    console.log(`Sending statistics update to PostOffice for client ${clientId}`);
+                    console.log(`Statistics summary: LLM calls: ${missionStats.llmCalls}, Agent count: ${Object.values(missionStats.agentCountByStatus || {}).reduce((sum, count) => sum + count, 0)}`);
+
+                    await this.authenticatedApi.post(`http://${this.postOfficeUrl}/message`, {
                         type: MessageType.STATISTICS,
                         sender: this.id,
                         recipient: 'user',
-                        clientId: clientId,
+                        clientId: clientId, // Make sure clientId is included
                         content: missionStats
                     });
+                    console.log(`Statistics update sent to PostOffice for client ${clientId}`);
                 }
             }
         } catch (error) { analyzeError(error as Error);
             console.error('Error fetching and pushing agent statistics:', error instanceof Error ? error.message : error);
+            if (error instanceof Error && error.stack) {
+                console.error(error.stack);
+            }
         }
     }
 
@@ -400,39 +697,6 @@ class MissionControl extends BaseEntity {
             if (this.clientMissions.get(clientId)!.size === 0) {
                 this.clientMissions.delete(clientId);
             }
-        }
-    }
-
-    private async verifyToken(req: CustomRequest, res: Response, next: NextFunction) {
-        const clientId = req.body.clientId || req.query.clientId;
-        const token = req.headers.authorization?.split(' ')[1];
-        console.log(`Verifying token for client ${clientId}`);
-        console.log(`Token: ${token}`);
-    
-        if (!token) {
-            console.log('No token provided');
-            return res.status(401).json({ message: 'No token provided' });
-        }
-    
-        try {
-            const response = await axios.post(`http://${this.securityManagerUrl}/verify`, {}, {
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                }
-            });
-            console.log('Token verification response:', response.data);
-    
-            if (response.data.valid) {
-                console.log('Token verified successfully');
-                req.user = response.data.user;
-                next();
-            } else {
-                console.log('Token verification failed');
-                res.status(401).json({ message: 'Invalid token' });
-            }
-        } catch (error) {
-            console.error('Error during token verification:', error);
-            res.status(500).json({ message: 'Error verifying token' });
         }
     }
 }

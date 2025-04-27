@@ -26,7 +26,7 @@ export class BaseModel {
             serviceName: string,
             tokenLimit: number,
             scoresByConversationType: Map<LLMConversationType, ModelScore>,
-            contentConversation: LLMConversationType[] }) 
+            contentConversation: LLMConversationType[] })
     {
         this.name = options.name;
         this.modelName = options.modelName;
@@ -70,7 +70,7 @@ export class BaseModel {
         return this.getScore(conversationType).speedScore;
     }
 
-    chat(messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName: string, timeout?: number }): Promise<string> {
+    chat(messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string, timeout?: number, response_format?: any, [key: string]: any }): Promise<string> {
         if (!this.llminterface || !this.service) {
             console.log(`No interface or service set for model ${this.name} `);
             return Promise.resolve('');
@@ -97,6 +97,18 @@ export class BaseModel {
     }
 
     isAvailable(): boolean {
-        return (this.service?.isAvailable() && this.modelName !== '') || false;
+        // First check if the service is available and the model name is valid
+        if (!this.service?.isAvailable() || this.modelName === '') {
+            return false;
+        }
+
+        // DISABLED: No longer checking for Huggingface blacklisting
+        // Clear any existing blacklist to ensure all models are available
+        if ((global as any).huggingfaceBlacklistedUntil) {
+            console.log('Clearing existing Huggingface blacklist');
+            (global as any).huggingfaceBlacklistedUntil = null;
+        }
+
+        return true;
     }
 }

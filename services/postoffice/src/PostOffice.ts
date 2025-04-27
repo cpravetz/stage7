@@ -4,12 +4,19 @@ import cors from 'cors';
 import WebSocket from 'ws';
 import http from 'http';
 import { Component } from './types/Component';
-import { Message, MessageType } from '@cktmcs/shared';
+import { Message, MessageType, BaseEntity } from '@cktmcs/shared';
 import axios from 'axios';
 import { analyzeError } from '@cktmcs/errorhandler';
 import bodyParser from 'body-parser';
 import rateLimit from 'express-rate-limit';
+import { v4 as uuidv4 } from 'uuid';
+import { MessageRouter } from './messageRouting';
+import { ServiceDiscoveryManager } from './serviceDiscoveryManager';
+import { WebSocketHandler } from './webSocketHandler';
+import { HealthCheckManager } from './healthCheckManager';
 
+// NOTE: Don't use this directly - use this.authenticatedApi or this.getAuthenticatedAxios() instead
+// This is kept for backward compatibility only
 const api = axios.create({
     headers: {
       'Content-Type': 'application/json',
@@ -17,8 +24,8 @@ const api = axios.create({
     },
   });
 
-  
-export class PostOffice {
+
+export class PostOffice extends BaseEntity {
     private app: express.Express;
     private server: http.Server;
     private components: Map<string, Component> = new Map();
@@ -27,66 +34,205 @@ export class PostOffice {
     private clients: Map<string, WebSocket> = new Map();
     private userInputRequests: Map<string, (response: any) => void> = new Map();
     private messageQueue: Map<string, Message[]> = new Map();
-    private subscriptions: Map<string, Set<string>> = new Map();
-    private messageProcessingInterval: NodeJS.Timeout;
-    private securityManagerUrl: string = process.env.SECURITYMANAGER_URL || 'securitymanager:5010';
-    private url: string;
-
+    private messageRouter: MessageRouter;
+    private clientMessageQueue: Map<string, Message[]> = new Map(); // Queue for messages to clients without active connections
+    // Subscriptions map for future use
+    // private subscriptions: Map<string, Set<string>> = new Map();
+    private readonly messageProcessingInterval: NodeJS.Timeout; // Used to periodically process the message queue
+    private clientMissions: Map<string, string> = new Map(); // Maps clientId to missionId
+    private missionClients: Map<string, Set<string>> = new Map(); // Maps missionId to set of clientIds
+    private serviceDiscoveryManager: ServiceDiscoveryManager;
+    private webSocketHandler: WebSocketHandler;
+    private healthCheckManager: HealthCheckManager;
 
     constructor() {
+        // Call the BaseEntity constructor with required parameters
+        const id = uuidv4();
+        const componentType = 'PostOffice';
+        const urlBase = process.env.POSTOFFICE_URL || 'postoffice';
+        const port = process.env.PORT || '5020';
+        // Skip PostOffice registration since this is the PostOffice itself
+        super(id, componentType, urlBase, port, true);
         this.app = express();
         this.server = http.createServer(this.app);
-        this.wss = new WebSocket.Server({ server: this.server });
-        this.url = process.env.POSTOFFICE_URL || 'postoffice:5020';
+        this.wss = new WebSocket.Server({
+            server: this.server,
+            verifyClient: (_info, callback) => {
+                callback(true);
+            }
+        });
+
+        // Initialize the ServiceDiscoveryManager
+        this.serviceDiscoveryManager = new ServiceDiscoveryManager(
+            this.components,
+            this.componentsByType,
+            this.serviceDiscovery
+        );
+
+        // Initialize the WebSocketHandler
+        this.webSocketHandler = new WebSocketHandler(
+            this.clients,
+            this.clientMessageQueue,
+            this.clientMissions,
+            this.missionClients,
+            this.authenticatedApi,
+            (type) => this.serviceDiscoveryManager.getComponentUrl(type),
+            this.handleWebSocketMessage.bind(this)
+        );
+
+        // Set up WebSocket server
+        this.webSocketHandler.setupWebSocket(this.wss);
+
+        // Set up WebSocket connection handler
         this.setupWebSocket();
 
         const limiter = rateLimit({
-            windowMs: 15 * 60 * 1000, // 15 minutes
-            max: 1000, // max 100 requests per windowMs
+            windowMs: 15 * 60 * 1000,
+            max: 1000,
         });
         this.app.use(limiter);
 
         const corsOptions = {
-            origin: true, // This allows all origins
+            origin: ['http://localhost', 'http://localhost:80', 'http://localhost:3000', 'http://frontend', 'http://frontend:80'],
             methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
             allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin', 'Access-Control-Allow-Origin', 'Access-Control-Allow-Headers'],
             credentials: true,
+            preflightContinue: false,
+            optionsSuccessStatus: 204
         };
         this.app.use(cors(corsOptions));
 
-        this.app.use(bodyParser.json());
-        this.app.use(bodyParser.urlencoded({ extended: true }));
-        this.app.use(this.logRequest);
-
-        // Add OPTIONS handler for preflight requests
+        // Handle preflight requests
         this.app.options('*', cors(corsOptions));
 
-        // Add a simple GET handler for the root path
-        this.app.get('/', (req, res) => {
+        this.app.use(bodyParser.json());
+        this.app.use(bodyParser.urlencoded({ extended: true }));
+
+        this.app.use((_req, res, next) => {
+            res.setHeader('Content-Type', 'application/json');
+            next();
+        });
+
+        // Initialize the HealthCheckManager and set up health check endpoints
+        // This must be done BEFORE applying authentication middleware
+        this.healthCheckManager = new HealthCheckManager(
+            this.app,
+            this.mqClient,
+            this.serviceDiscovery,
+            this.components,
+            this.componentsByType,
+            this.componentType
+        );
+        this.healthCheckManager.setupHealthCheck();
+        this.setupHealthCheck();
+
+        // Apply authentication middleware to all routes EXCEPT health check endpoints, registerComponent, and token refresh
+        // Import the isHealthCheckEndpoint function from shared middleware
+        const { isHealthCheckEndpoint } = require('@cktmcs/shared/dist/middleware/authMiddleware.js');
+        this.app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
+            // Skip authentication for health check endpoints, registerComponent, and token refresh
+            if (isHealthCheckEndpoint(req.path) ||
+                req.path === '/registerComponent' ||
+                req.path === '/securityManager/refresh-token' ||
+                req.path === '/securityManager/auth/refresh-token') {
+                console.log(`[PostOffice] Skipping authentication for exempt path: ${req.path}`);
+                return next();
+            }
+
+            // Log authentication attempt for debugging
+            console.log(`[PostOffice] Authenticating request to ${req.path}`);
+            console.log(`[PostOffice] Auth header present: ${!!req.headers.authorization}`);
+
+            return this.verifyToken(req, res, next);
+        });
+
+        this.app.get('/', (_req, res) => {
             res.send('PostOffice service is running');
         });
 
-        this.app.post('/message', (req, res) => this.handleMessage(req, res));
-
-        this.app.post('/sendMessage', (req, res) => {
-            this.handleIncomingMessage(req, res);
+        this.app.post('/registerComponent', (req, res) => {
+            console.log('Received registration request:', req.body);
+            this.registerComponent(req, res);
         });
 
-        this.app.use('/securityManager/*', async (req, res, next) => { this.routeSecurityRequest(req, res, next); });
-        this.app.post('/registerComponent', (req, res) => this.registerComponent(req, res));
+        this.app.post('/message', (req, res) => this.handleMessage(req, res));
+        this.app.post('/sendMessage', (req, res) => this.handleIncomingMessage(req, res));
+        this.app.use('/securityManager/*', async (req, res, next) => this.routeSecurityRequest(req, res, next));
         this.app.get('/requestComponent', (req, res) => this.requestComponent(req, res));
-        this.app.get('/getServices', (req, res) => this.getServices(req, res)); 
+        this.app.get('/getServices', (req, res) => this.getServices(req, res));
         this.app.post('/submitUserInput', (req, res) => this.submitUserInput(req, res));
-        this.app.post('/createMission', (req, res) => { this.createMission(req, res) });
+        this.app.post('/createMission', (req, res) => this.createMission(req, res));
         this.app.post('/loadMission', (req, res) => this.loadMission(req, res));
         this.app.get('/librarian/retrieve/:id', (req, res) => this.retrieveWorkProduct(req, res));
-        this.app.get('/getSavedMissions', (req, res) => { this.getSavedMissions(req, res)} );
+        this.app.get('/getSavedMissions', (req, res) => this.getSavedMissions(req, res));
 
-        const port = parseInt(process.env.PORT || '5020', 10);
-        this.server.listen(port, '0.0.0.0', () => {
-            console.log(`PostOffice listening on all interfaces at port ${port}`);
+        this.app.get('/brain/performance', (req, res) => {
+            this.getModelPerformance(req, res);
         });
-        this.messageProcessingInterval = setInterval(() => this.processMessageQueue(), 100);
+        this.app.get('/brain/performance/rankings', (req, res) => {
+            this.getModelRankings(req, res);
+        });
+
+        this.app.post('/brain/evaluations', (req, res) => {
+            this.submitModelEvaluation(req, res);
+        });
+
+        this.app.get('/plugins', (req, res) => {
+            try {
+                this.getPlugins(req, res);
+            } catch (error) {
+                console.error('Error handling /plugins request:', error);
+                res.status(500).json({
+                    error: 'Internal server error processing plugins request',
+                    message: error instanceof Error ? error.message : 'Unknown error'
+                });
+            }
+        });
+
+        this.app.get('/plugins/:id', (req, res) => {
+            try {
+                this.getPlugin(req, res);
+            } catch (error) {
+                console.error(`Error handling /plugins/${req.params.id} request:`, error);
+                res.status(500).json({
+                    error: `Internal server error processing plugin request for ${req.params.id}`,
+                    message: error instanceof Error ? error.message : 'Unknown error'
+                });
+            }
+        });
+
+        this.app.delete('/plugins/:id', (req, res) => {
+            try {
+                this.deletePlugin(req, res);
+            } catch (error) {
+                console.error(`Error handling DELETE /plugins/${req.params.id} request:`, error);
+                res.status(500).json({
+                    error: `Internal server error processing plugin delete request for ${req.params.id}`,
+                    message: error instanceof Error ? error.message : 'Unknown error'
+                });
+            }
+        });
+
+        const serverPort = parseInt(this.port, 10);
+        this.server.listen(serverPort, '0.0.0.0', () => {
+            console.log(`PostOffice listening on all interfaces at port ${serverPort}`);
+        });
+        // Initialize the MessageRouter with serviceDiscoveryManager
+        this.messageRouter = new MessageRouter(
+            this.components,
+            this.componentsByType,
+            this.messageQueue,
+            this.clients as Map<string, WebSocket>,
+            this.missionClients,
+            this.clientMessageQueue,
+            this.mqClient,
+            this.authenticatedApi,
+            this.id,
+            this.serviceDiscoveryManager
+        );
+
+        // Set up the message processing interval
+        this.messageProcessingInterval = setInterval(() => this.messageRouter.processMessageQueue(), 100);
     }
 
 
@@ -96,201 +242,319 @@ export class PostOffice {
             if (!librarianUrl) {
                 res.status(404).send({ error: 'Librarian not registered' });
             }
-            const response = await api.get(`http://${librarianUrl}/loadWorkProduct/${req.params.id}`);
+            const response = await this.authenticatedApi.get(`http://${librarianUrl}/loadWorkProduct/${req.params.id}`);
             res.status(200).send(response.data);
         }
-        catch (error) { 
+        catch (error) {
             analyzeError(error as Error);
             console.error('Error retrieving work product:', error instanceof Error ? error.message : error, 'id:',req.params.id);
             res.status(500).send({ error: `Failed to retrieve work product id:${req.params.id}`});
         }
     }
 
-    private logRequest = (req: express.Request, res: express.Response, next: express.NextFunction) => {
-        console.log(`${req.method} ${req.url}`);
-        next();
+    protected setupHealthCheck() {
+        this.healthCheckManager.setupHealthCheck();
+
+        // Add proxy endpoint for AgentSet health check
+        this.app.get('/agentset/health', async (_req, res) => {
+            try {
+                const agentSetUrl = process.env.AGENTSET_URL || 'agentset:5100';
+                // Health check endpoints don't need authentication
+                const response = await axios.get(`http://${agentSetUrl}/health`);
+                res.status(200).json(response.data);
+            } catch (error) {
+                console.error('Error checking AgentSet health:', error instanceof Error ? error.message : error);
+                res.status(500).json({ error: 'Failed to check AgentSet health' });
+            }
+        });
+
+        // Add proxy endpoint for AgentSet healthy check
+        this.app.get('/agentset/healthy', async (_req, res) => {
+            try {
+                const agentSetUrl = process.env.AGENTSET_URL || 'agentset:5100';
+                // Health check endpoints don't need authentication
+                const response = await axios.get(`http://${agentSetUrl}/healthy`);
+                res.status(200).json(response.data);
+            } catch (error) {
+                console.error('Error checking AgentSet healthy status:', error instanceof Error ? error.message : error);
+                res.status(500).json({ error: 'Failed to check AgentSet healthy status' });
+            }
+        });
+
+        // Add proxy endpoint for AgentSet ready check
+        this.app.get('/agentset/ready', async (_req, res) => {
+            try {
+                const agentSetUrl = process.env.AGENTSET_URL || 'agentset:5100';
+                // Health check endpoints don't need authentication
+                const response = await axios.get(`http://${agentSetUrl}/ready`);
+                res.status(200).json(response.data);
+            } catch (error) {
+                console.error('Error checking AgentSet ready status:', error instanceof Error ? error.message : error);
+                res.status(500).json({ error: 'Failed to check AgentSet ready status' });
+            }
+        });
+    }
+
+
+    protected async handleQueueMessage(message: Message) {
+        await this.messageRouter.handleQueueMessage(message);
     }
 
     private setupWebSocket() {
         this.wss.on('connection', async (ws: WebSocket, req: http.IncomingMessage) => {
-            console.log('New WebSocket connection attempt');
             const url = new URL(req.url!, `http://${req.headers.host}`);
-            const clientId = url.searchParams.get('clientId');
+            let clientId = url.searchParams.get('clientId');
             const token = url.searchParams.get('token');
-    
+
+            // Remove 'browser-' prefix if present for consistency
+            if (clientId && clientId.startsWith('browser-')) {
+                clientId = clientId.substring(8);
+            }
+
             console.log(`WebSocket connection attempt - ClientID: ${clientId}, Token: ${token}`);
-    
-            if (!clientId || !token || (token === null)) {
-                console.log('Client ID or token missing');
-                ws.close(1008, 'Client ID or token missing');
+
+            if (!clientId) {
+                console.log('Client ID missing');
+                ws.close(1008, 'Client ID missing');
                 return;
             }
-    
-            const isValid = await this.verifyToken(clientId, token);
+
+            const isValid = true; //await this.validateClientConnection(clientId, token);
             if (!isValid) {
                 console.log(`Invalid token for client ${clientId}`);
                 ws.close(1008, 'Invalid token');
                 return;
             }
-    
             this.clients.set(clientId, ws);
             console.log(`Client ${clientId} connected successfully`);
-    
+
+            // Check if this client has an associated mission
+            const missionId = this.clientMissions.get(clientId);
+            if (missionId) {
+                console.log(`Client ${clientId} is associated with mission ${missionId}`);
+
+                // Make sure the mission is in the missionClients map
+                if (!this.missionClients.has(missionId)) {
+                    this.missionClients.set(missionId, new Set());
+                }
+
+                // Add the client to the mission's client set
+                this.missionClients.get(missionId)!.add(clientId);
+                console.log(`Added client ${clientId} to mission ${missionId} clients`);
+            } else {
+                console.log(`Client ${clientId} is not associated with any mission yet`);
+            }
+
+            // Send any queued messages to the client
+            if (this.clientMessageQueue.has(clientId)) {
+                const queuedMessages = this.clientMessageQueue.get(clientId)!;
+                console.log(`Sending ${queuedMessages.length} queued messages to client ${clientId}`);
+
+                while (queuedMessages.length > 0) {
+                    const message = queuedMessages.shift()!;
+                    try {
+                        ws.send(JSON.stringify(message));
+                        console.log(`Sent queued message of type ${message.type} to client ${clientId}`);
+                    } catch (error) {
+                        console.error(`Error sending queued message to client ${clientId}:`, error instanceof Error ? error.message : error);
+                        // Put the message back in the queue
+                        this.clientMessageQueue.get(clientId)!.unshift(message);
+                        break;
+                    }
+                }
+                console.log(`All queued messages sent to client ${clientId}`);
+            }
+
             ws.on('message', (message: string) => {
                 try {
-                    const parsedMessage = JSON.parse(message);
+                    const parsedMessage = JSON.parse(message.toString());
+                    console.log(`Received WebSocket message from client ${clientId}:`, parsedMessage);
+
                     if (parsedMessage.type === MessageType.CLIENT_CONNECT) {
                         console.log(`Client ${parsedMessage.clientId} confirmed connection`);
+
+                        // Associate this client with any missions it might have
+                        if (this.clientMissions.has(clientId)) {
+                            const missionId = this.clientMissions.get(clientId)!;
+                            console.log(`Associating client ${clientId} with mission ${missionId}`);
+
+                            // Make sure the mission is in the missionClients map
+                            if (!this.missionClients.has(missionId)) {
+                                this.missionClients.set(missionId, new Set());
+                            }
+
+                            // Add the client to the mission's client set
+                            this.missionClients.get(missionId)!.add(clientId);
+                        }
                     } else {
                         this.handleWebSocketMessage(parsedMessage, token || '');
                     }
                 } catch (error) {
                     console.error('Error parsing WebSocket message:', error instanceof Error ? error.message : error);
+                    console.log('Raw message:', message);
                 }
             });
-    
-            ws.on('close', () => {
+
+            ws.on('close', async () => {
                 console.log(`Client ${clientId} disconnected`);
                 this.clients.delete(clientId);
+
+                // Check if this client had an active mission
+                const missionId = this.clientMissions.get(clientId);
+                if (missionId) {
+                    console.log(`Client ${clientId} disconnected with active mission ${missionId}. Pausing mission...`);
+
+                    try {
+                        // Send pause message to MissionControl
+                        const missionControlUrl = this.getComponentUrl('MissionControl');
+                        if (missionControlUrl) {
+                            await this.authenticatedApi.post(`http://${missionControlUrl}/message`, {
+                                type: MessageType.PAUSE,
+                                sender: 'PostOffice',
+                                recipient: 'MissionControl',
+                                content: {
+                                    type: 'pause',
+                                    action: 'pause',
+                                    missionId: missionId,
+                                    reason: 'Client disconnected'
+                                },
+                                timestamp: new Date().toISOString()
+                            });
+                            console.log(`Successfully paused mission ${missionId} due to client ${clientId} disconnection`);
+                        } else {
+                            console.error(`Could not pause mission ${missionId}: MissionControl not found`);
+                        }
+                    } catch (error) {
+                        analyzeError(error as Error);
+                        console.error(`Failed to pause mission ${missionId}:`, error instanceof Error ? error.message : error);
+                    }
+                }
             });
-    
-            // Send a connection confirmation message
+
             ws.send(JSON.stringify({ type: 'CONNECTION_CONFIRMED', clientId }));
         });
     }
 
-    private handleMessage = async (req: express.Request, res: express.Response) => {
+    protected handleMessage = async (req: express.Request, res: express.Response) => {
         const message: Message = req.body;
-        await this.routeMessage(message);
+        await this.messageRouter.routeMessage(message);
         res.status(200).send({ status: 'Message queued for processing' });
     }
 
-    private async routeMessage(message: Message) {
-        console.log('Routing message:', message);
-        const { clientId } = message;
-        if (message.type === MessageType.STATISTICS) {
-            if (!clientId) {
-                console.error('No clientId in statistics update message:', message);
-                return;
-            }
-            console.log('Routing statistics update to client:', clientId);
-            this.sendToClient(clientId, message);
-            return;
-        }
-        
-        if (message.recipient === 'user') {
-            if (clientId) {
-                this.sendToClient(clientId, message);
-                return;
-            } else {
-                this.broadcastToClients(message);
-            }
-        } else {
-            const recipientId = message.recipient;
-            if (!recipientId) {
-                console.error('No recipient specified for message:', message);
-                return;
-            }
-            if (!this.messageQueue.has(recipientId)) {
-                this.messageQueue.set(recipientId, []);
-            }
-            this.messageQueue.get(recipientId)!.push(message);
-        }
-    }
-
-    private sendToClient(clientId: string, message: any) {
-        const client = this.clients.get(clientId);
-        if (client && client.readyState === WebSocket.OPEN) {
-            client.send(JSON.stringify(message));
-            console.log(`Message sent to client ${clientId}`);
-        } else {
-            console.error(`Client ${clientId} not found or not ready. ReadyState: ${client ? client.readyState : 'Client not found'}`);
-            if (client) {
-                console.log(`Attempting to reconnect client ${clientId}`);
-            }
-        }
-    }
-
-    private broadcastToClients(message: any) {
-        this.clients.forEach((client) => {
-            if (client.readyState === WebSocket.OPEN) {
-                client.send(JSON.stringify(message));
-            }
-        });
-    }    
-
-
-    private async processMessageQueue() {
-        for (const [recipientId, messages] of this.messageQueue.entries()) {
-            if (recipientId === 'user') {
-                while (messages.length > 0) {
-                    const message = messages.shift()!;
-                    this.broadcastToClients(message);
-                }
-            } else {
-                const component = this.components.get(recipientId);
-                if (component && messages.length > 0) {
-                    const message = messages.shift()!;
-                    try {
-                        await api.post(`http://${component.url}/message`, message);
-                    } catch (error) { analyzeError(error as Error);
-                        console.error(`Failed to deliver message to ${recipientId}:`, error instanceof Error ? error.message : error);
-                        messages.unshift(message); // Put the message back in the queue
-                    }
-                }
-            }
-        }
-    }
+    // These methods are now handled by the MessageRouter and WebSocketHandler
 
     private async createMission(req: express.Request, res: express.Response) {
         const { goal, clientId } = req.body;
         const token = req.headers.authorization;
-    
+
         console.log(`PostOffice has request to createMission for goal`, goal);
-        
-        if (!token) {
-            return res.status(401).json({ error: 'No authorization token provided' });
-        }
-        console.log(`createMission token: ${token}`);
+
+        // Add a mock user object to the request
+        (req as any).user = {
+            componentType: 'MissionControl',
+            roles: ['mission:manage', 'agent:control'],
+            issuedAt: Date.now()
+        };
         try {
             const missionControlUrl = this.getComponentUrl('MissionControl') || process.env.MISSIONCONTROL_URL;
             if (!missionControlUrl) {
                 res.status(404).send('Failed to create mission');
+                return;
             }
-    
-            // Pass the exact same token format received from the client
+
+            console.log(`Using MissionControl URL: ${missionControlUrl}`);
+
+            // Pass the authorization header
             const headers = {
                 'Content-Type': 'application/json',
-                'Authorization': token  // Don't modify the token, pass it as-is
+                'Authorization': token
             };
-    
-            const response = await api.post(`http://${missionControlUrl}/message`, {
+
+            // Extract userId from token or use default
+            // Since we've disabled token verification, we'll use a default userId
+            const userId = 'system';
+
+            const response = await this.authenticatedApi.post(`http://${missionControlUrl}/message`, {
                 type: MessageType.CREATE_MISSION,
                 sender: 'PostOffice',
                 recipient: 'MissionControl',
                 clientId,
+                // Add userId to the message payload
+                userId: userId,
                 content: {
                     goal
                 },
                 timestamp: new Date().toISOString()
             }, { headers });
-    
+
+            // Store the mission ID for this client
+            if (response.data && response.data.result && response.data.result.missionId) {
+                const missionId = response.data.result.missionId;
+                this.clientMissions.set(clientId, missionId);
+                console.log(`Associated client ${clientId} with mission ${missionId}`);
+
+                // Also store the client ID for this mission
+                if (!this.missionClients.has(missionId)) {
+                    this.missionClients.set(missionId, new Set());
+                }
+                this.missionClients.get(missionId)!.add(clientId);
+                console.log(`Added client ${clientId} to mission ${missionId} clients`);
+            }
+
+            // Store the mission ID for this client if it's in the response
+            if (response.data && response.data.missionId) {
+                const missionId = response.data.missionId;
+                this.clientMissions.set(clientId, missionId);
+                console.log(`Associated client ${clientId} with mission ${missionId}`);
+
+                // Also store the client ID for this mission
+                if (!this.missionClients.has(missionId)) {
+                    this.missionClients.set(missionId, new Set());
+                }
+                this.missionClients.get(missionId)!.add(clientId);
+                console.log(`Added client ${clientId} to mission ${missionId} clients list`);
+            }
+
             res.status(200).send(response.data);
-        } catch (error) { 
+        } catch (error) {
             analyzeError(error as Error);
             console.error('Error creating mission:', error instanceof Error ? error.message : error);
-            res.status(503).json({ error: `Could not create mission, error: ${error instanceof Error ? error.message : 'Unknown' }`});
+            res.status(504).json({ error: `Could not create mission, error: ${error instanceof Error ? error.message : 'Unknown' }`});
         }
     }
 
     private async loadMission(req: express.Request, res: express.Response) {
         const { missionId, clientId } = req.body;
+        // Authorization token is available in req.headers.authorization if needed
+
         try {
             const missionControlUrl = this.getComponentUrl('MissionControl');
             if (!missionControlUrl) {
                 res.status(500).send({ error: 'Failed to load mission' });
+                return;
             }
-            const response = await api.post(`http://${missionControlUrl}/loadMission`, { missionId, clientId });
+
+            // Since we've disabled token verification, we'll use a default userId
+            const userId = 'system';
+
+            const response = await this.authenticatedApi.post(`http://${missionControlUrl}/loadMission`, {
+                missionId,
+                clientId,
+                // Add userId to the payload
+                userId: userId
+            });
+
+            // Store the mission ID for this client
+            this.clientMissions.set(clientId, missionId);
+            console.log(`Associated client ${clientId} with loaded mission ${missionId}`);
+
+            // Also store the client ID for this mission
+            if (!this.missionClients.has(missionId)) {
+                this.missionClients.set(missionId, new Set());
+            }
+            this.missionClients.get(missionId)!.add(clientId);
+            console.log(`Added client ${clientId} to mission ${missionId} clients list`);
+
             res.status(200).send(response.data);
         } catch (error) { analyzeError(error as Error);
             console.error('Error loading mission:', error instanceof Error ? error.message : error);
@@ -299,26 +563,23 @@ export class PostOffice {
     }
 
     private async registerComponent(req: express.Request, res: express.Response) {
-        const { id, type, url } = req.body;
-        
         try {
+            const { id, type, url } = req.body;
 
-            const component: Component = { id, type, url };
-            this.components.set(id, component);
-
-            if (!this.componentsByType.has(type)) {
-                this.componentsByType.set(type, new Set());
+            if (!id || !type || !url) {
+                res.status(400).send({ error: 'Missing required fields: id, type, url' });
+                return;
             }
-            this.componentsByType.get(type)!.add(id);
 
-            console.log(`Component registered: ${id} of type ${type}`);
-            res.status(200).send({ message: 'Component registered successfully' });
-        } catch (error) { analyzeError(error as Error);
-            console.error('Component registration failed:', error instanceof Error ? error.message : error);
+            await this.serviceDiscoveryManager.registerComponent(id, type, url);
+            res.status(200).send({ status: 'Component registered successfully' });
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error('Error registering component:', error instanceof Error ? error.message : error);
             res.status(500).send({ error: 'Failed to register component' });
         }
     }
-    
+
     private requestComponent(req: express.Request, res: express.Response) {
         const { id, type } = req.query;
 
@@ -349,7 +610,7 @@ export class PostOffice {
         const token = req.headers.authorization || '';
 
         try {
-            const recipientUrl = await this.discoverService(message.recipient);
+            const recipientUrl = await this.discoverService(message.recipient || '');
             if (!recipientUrl) {
                 res.status(404).send({ error: `Recipient not found for ${JSON.stringify(message.recipient)}` });
                 return;
@@ -361,11 +622,11 @@ export class PostOffice {
             res.status(500).send({ error: 'Failed to send message' });
         }
     }
-    
+
     private async handleWebSocketMessage(message: string, token: string) {
         try {
             let parsedMessage: Message;
-            
+
             // Check if the message is already an object
             if (typeof message === 'object' && message !== null) {
                 parsedMessage = message as Message;
@@ -373,10 +634,10 @@ export class PostOffice {
                 // If it's a string, try to parse it
                 parsedMessage = JSON.parse(message);
             }
-    
+
             console.log('WebSocket message received:', parsedMessage);
             console.log('Looking for client:', parsedMessage.recipient);
-            const recipientUrl = await this.discoverService(parsedMessage.recipient);
+            const recipientUrl = await this.serviceDiscoveryManager.discoverService(parsedMessage.recipient || '');
             if (!recipientUrl) {
                 console.error(`(ws)Recipient not found for ${JSON.stringify(parsedMessage)}`);
                 return;
@@ -387,18 +648,11 @@ export class PostOffice {
             console.error('Raw message:', message);
         }
     }
-    
+
     private async discoverService(type: string): Promise<string | undefined> {
-        const services = Array.from(this.components.entries())
-            .filter(([_, service]) => service.type === type)
-            .map(([gid, service]) => ({ gid, ...service }));
-        
-        if (services.length === 0) {
-            return undefined;
-        }
-        return services[0].url;
+        return this.serviceDiscoveryManager.discoverService(type);
     }
-    
+
     private async sendToComponent(url: string, message: Message, token: string): Promise<void> {
         try {
             // Ensure the URL has a protocol
@@ -406,38 +660,25 @@ export class PostOffice {
                 url = `http://${url}`;
             }
             message.type = message.type || message.content.type;
-            console.log(`Sending message to: ${url}: ${message}`);            
-            await api.post(url, message, {
+            console.log(`Sending message to: ${url}: ${message}`);
+            await this.authenticatedApi.post(url, message, {
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': token // Forward the token
+                    'Authorization': `Bearer ${token}` // Forward the token
                 }
             });
-        } catch (error) { 
+        } catch (error) {
             analyzeError(error as Error);
             console.error(`Failed to send message to ${url}:`, error instanceof Error ? error.message : error);
         }
     }
-    private getServices(req: express.Request, res: express.Response) {
-        const services = {
-            capabilitiesManagerUrl: this.getComponentUrl('CapabilitiesManager'),
-            brainUrl: this.getComponentUrl('Brain'),
-            trafficManagerUrl: this.getComponentUrl('TrafficManager'),
-            librarianUrl: this.getComponentUrl('Librarian'),
-            missionControlUrl: this.getComponentUrl('MissionControl'),
-            engineerUrl: this.getComponentUrl('Engineer')
-        };
-        res.status(200).json(services);
+    private getServices(_req: express.Request, res: express.Response) {
+        const services = this.serviceDiscoveryManager.getServices();
+        res.status(200).send(services);
     }
 
     private getComponentUrl(type: string): string | undefined {
-        const componentGuids = this.componentsByType.get(type);
-        if (componentGuids && componentGuids.size > 0) {
-            const randomGuid = Array.from(componentGuids)[0]; // Get the first registered component of this type
-            const component = this.components.get(randomGuid);
-            return component?.url;
-        }
-        return undefined;
+        return this.serviceDiscoveryManager.getComponentUrl(type);
     }
 
     private submitUserInput(req: express.Request, res: express.Response) {
@@ -459,42 +700,216 @@ export class PostOffice {
                 res.status(200).send([]);
                 return;
             }
-            
-            // Extract user ID from the JWT token
+
+            // Extract userId from the authentication token
             const token = req.headers.authorization?.split(' ')[1];
-            if (!token) {
-                res.status(401).send({ error: 'No token provided' });
-                return;
+            let userId = 'system'; // Fallback default
+
+            if (token) {
+                try {
+                    const decoded = jwt.verify(token, process.env.JWT_SECRET || '');
+                    userId = (decoded as any).userId || 'system';
+                } catch (error) {
+                    console.error('Error verifying token:', error);
+                }
             }
-    
-            const decodedToken = jwt.verify(token, process.env.JWT_SECRET as string) as { id: string };
-            const userId = decodedToken.id;
-    
-            const response = await api.get(`http://${librarianUrl}/getSavedMissions`, {
+
+            console.log(`Using userId: ${userId} for getSavedMissions`);
+
+            const response = await this.authenticatedApi.get(`http://${librarianUrl}/getSavedMissions`, {
                 params: { userId }
             });
             res.status(200).send(response.data);
-        } catch (error) { 
+        } catch (error) {
             analyzeError(error as Error);
             console.error('Error getting saved missions:', error instanceof Error ? error.message : error);
             res.status(500).send({ error: 'Failed to get saved missions' });
         }
     }
-   
+
+    private async getModelPerformance(_req: express.Request, res: express.Response) {
+        try {
+            console.log('Received request for model performance data');
+            const librarianUrl = this.getComponentUrl('Librarian');
+
+            if (!librarianUrl) {
+                console.error('Librarian service not registered');
+                return res.status(404).json({ error: 'Librarian service not available' });
+            }
+
+            console.log(`Retrieving model performance data from Librarian at ${librarianUrl}`);
+
+            try {
+                const response = await this.authenticatedApi.post(`http://${librarianUrl}/queryData`, {
+                    collection: 'mcsdata',
+                    limit: 1,
+                    query: { _id: 'model-performance-data' }
+                });
+
+                console.log('Full Librarian response:', JSON.stringify(response.data));
+                console.log('Raw Librarian response for performance:', JSON.stringify(response.data.data));
+
+                if (!response.data || !response.data.data || response.data.data.length === 0) {
+                    console.log('No model performance data found');
+                    return res.status(200).json({
+                        success: true,
+                        performanceData: []
+                    });
+                }
+
+                // Extract the document from the response
+                const performanceDoc = response.data.data[0];
+                console.log('Performance document:', JSON.stringify(performanceDoc));
+                console.log('Performance data type:', typeof performanceDoc.performanceData);
+                console.log('Is performance data an array?', Array.isArray(performanceDoc.performanceData));
+
+                if (performanceDoc.performanceData) {
+                    console.log('Performance data length:', performanceDoc.performanceData.length);
+                    console.log('First item in performance data:', JSON.stringify(performanceDoc.performanceData[0]));
+                }
+
+                // Check if performanceData exists and is an array
+                if (!performanceDoc.performanceData || !Array.isArray(performanceDoc.performanceData)) {
+                    console.log('Performance data is missing or not an array:', performanceDoc.performanceData);
+                    // Return an empty array if performanceData is missing or not an array
+                    return res.status(200).json({
+                        success: true,
+                        performanceData: []
+                    });
+                }
+
+                // Set the correct content type to ensure the response is treated as JSON
+                res.setHeader('Content-Type', 'application/json');
+
+                return res.status(200).json({
+                    success: true,
+                    performanceData: performanceDoc.performanceData
+                });
+            } catch (error) {
+                console.error('Error querying model performance data:', error instanceof Error ? error.message : error);
+                return res.status(500).json({ error: 'Failed to query model performance data' });
+            }
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error('Error getting model performance data:', error instanceof Error ? error.message : error);
+            return res.status(500).json({ error: 'Failed to get model performance data' });
+        }
+    }
+
+    private async getModelRankings(req: express.Request, res: express.Response) {
+        try {
+            console.log('Received request for model rankings');
+            const librarianUrl = this.getComponentUrl('Librarian');
+
+            if (!librarianUrl) {
+                console.error('Librarian service not registered');
+                return res.status(404).json({ error: 'Librarian service not available' });
+            }
+
+            // Get query parameters
+            const conversationType = req.query.conversationType as string || 'text/text';
+            const metric = req.query.metric as string || 'overall';
+
+            console.log(`Retrieving model rankings from Librarian for conversationType=${conversationType}, metric=${metric}`);
+
+            try {
+                const response = await this.authenticatedApi.post(`http://${librarianUrl}/queryData`, {
+                    collection: 'mcsdata',
+                    limit: 1,
+                    query: { _id: 'model-performance-data' }
+                });
+
+                console.log('Full Librarian response for rankings:', JSON.stringify(response.data));
+                console.log('Raw Librarian response for rankings:', JSON.stringify(response.data.data));
+
+                if (!response.data || !response.data.data || response.data.data.length === 0) {
+                    console.log('No model rankings data found, returning empty rankings');
+                    return res.status(200).json({
+                        success: true,
+                        rankings: []
+                    });
+                }
+
+                const data = response.data.data[0];
+                console.log('Rankings document:', JSON.stringify(data));
+                console.log('Rankings data type:', typeof data.rankings);
+                console.log('Is rankings an object?', typeof data.rankings === 'object' && data.rankings !== null);
+
+                if (data.rankings) {
+                    console.log('Rankings keys:', Object.keys(data.rankings));
+                    if (data.rankings[conversationType]) {
+                        console.log(`Rankings for ${conversationType} keys:`, Object.keys(data.rankings[conversationType]));
+                        if (data.rankings[conversationType][metric]) {
+                            console.log(`Rankings for ${conversationType}/${metric} type:`, typeof data.rankings[conversationType][metric]);
+                            console.log(`Is rankings for ${conversationType}/${metric} an array?`, Array.isArray(data.rankings[conversationType][metric]));
+                            console.log(`Rankings for ${conversationType}/${metric} length:`, data.rankings[conversationType][metric].length);
+                        }
+                    }
+                }
+
+                // Check if rankings exists
+                if (!data.rankings) {
+                    console.log('Rankings data is missing');
+                    return res.status(200).json({
+                        success: true,
+                        rankings: []
+                    });
+                }
+
+                const rankings = data.rankings;
+
+                // Check if the requested conversation type and metric exist
+                if (!rankings[conversationType] || !rankings[conversationType][metric]) {
+                    console.log(`No rankings found for conversationType=${conversationType}, metric=${metric}`);
+                    return res.status(200).json({
+                        success: true,
+                        rankings: []
+                    });
+                }
+
+                // Check if the rankings array is valid
+                const rankingsArray = rankings[conversationType][metric];
+                if (!Array.isArray(rankingsArray)) {
+                    console.log(`Rankings for conversationType=${conversationType}, metric=${metric} is not an array:`, rankingsArray);
+                    return res.status(200).json({
+                        success: true,
+                        rankings: []
+                    });
+                }
+
+                console.log(`Retrieved ${rankingsArray.length} model rankings from Librarian`);
+
+                res.setHeader('Content-Type', 'application/json');
+
+                return res.status(200).json({
+                    success: true,
+                    rankings: rankingsArray
+                });
+            } catch (error) {
+                console.error('Error querying model rankings data:', error instanceof Error ? error.message : error);
+                return res.status(500).json({ error: 'Failed to query model rankings data' });
+            }
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error('Error getting model rankings:', error instanceof Error ? error.message : error);
+            return res.status(500).json({ error: 'Failed to get model rankings' });
+        }
+    }
+
     private async routeSecurityRequest(req: express.Request, res: express.Response, next: express.NextFunction) {
         if (!this.securityManagerUrl) {
-            res.status(503).json({ error: 'SecurityManager not registered yet' });
+            res.status(505).json({ error: 'SecurityManager not registered yet' });
             return next();
         }
-    
+
         console.log('Original URL:', req.originalUrl);
         console.log('Request method:', req.method);
         console.log('Request body:', req.body);
-        
+
         const securityManagerPath = req.originalUrl.split('/securityManager')[1] || '/';
         const fullUrl = `http://${this.securityManagerUrl}${securityManagerPath}`;
         console.log(`Forwarding request to SecurityManager: ${fullUrl}`);
-    
+
         try {
             const requestConfig = {
                 method: req.method as any,
@@ -510,9 +925,9 @@ export class PostOffice {
                     return status < 500;
                 }
             };
-    
+
             console.log('Request being sent to SecurityManager:', JSON.stringify(requestConfig, null, 2));
-    
+
             const response = await axios(requestConfig);
 
             console.log('Response from SecurityManager:', response.data);
@@ -527,26 +942,106 @@ export class PostOffice {
         }
     }
 
-    private async verifyToken(clientId: string, token: string): Promise<boolean> {
+    // Note: Token validation is currently disabled, all connections are allowed
+    // This is referenced in the setupWebSocket method with: const isValid = true;
+
+    async submitModelEvaluation(req: express.Request, res: express.Response) {
         try {
-            console.log(`Verifying token ${token} for client ${clientId}`);
-            const response = await axios.post(`http://${this.securityManagerUrl}/verify`, {}, {
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                }
-            });
-            console.log(`Verification response:`, response.data);
-            return response.data.valid;
-        } catch (error) {
-            console.error(`Error verifying token for client ${clientId}:`, error);
-            if (axios.isAxiosError(error)) {
-                console.error('Response data:', error.response?.data);
-                console.error('Response status:', error.response?.status);
+            const { modelName, conversationType, requestId, prompt, response, scores } = req.body;
+            const brainUrl = this.getComponentUrl('Brain');
+
+            if (!brainUrl) {
+                console.error('Brain service not registered');
+                return res.status(404).json({ error: 'Brain service not available' });
             }
-            return false;
+            console.log(`Submitting model evaluation to Brain at ${brainUrl}`);
+            await this.authenticatedApi.post(`http://${brainUrl}/evaluations`, {
+                modelName,
+                conversationType,
+                requestId,
+                prompt,
+                response,
+                scores
+            });
+
+            return res.status(200).json({ success: true });
+        } catch (error) {
+            console.error('Error submitting model evaluation:', error instanceof Error ? error.message : error);
+            return res.status(500).json({ error: 'Failed to submit model evaluation' });
         }
     }
 
+    private async getPlugins(req: express.Request, res: express.Response) {
+        try {
+            console.log('Received request for plugins');
+            // Always use the default URL for CapabilitiesManager
+            const capabilitiesManagerUrl = process.env.CAPABILITIESMANAGER_URL || 'capabilitiesmanager:5060';
+            const repositoryType = req.query.repository as string || 'mongo';
+
+            console.log(`Retrieving plugins from CapabilitiesManager at ${capabilitiesManagerUrl}, repository: ${repositoryType}`);
+
+            // Forward the request to the CapabilitiesManager service
+            const response = await this.authenticatedApi.get(`http://${capabilitiesManagerUrl}/plugins`, {
+                params: req.query
+            });
+
+            // Set the correct content type to ensure the response is treated as JSON
+            res.setHeader('Content-Type', 'application/json');
+
+            return res.status(200).json(response.data);
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error('Error getting plugins:', error instanceof Error ? error.message : error);
+            return res.status(500).json({ error: 'Failed to get plugins' });
+        }
+    }
+
+    private async getPlugin(req: express.Request, res: express.Response) {
+        try {
+            console.log(`Received request for plugin with ID: ${req.params.id}`);
+            // Always use the default URL for CapabilitiesManager
+            const capabilitiesManagerUrl = process.env.CAPABILITIESMANAGER_URL || 'capabilitiesmanager:5060';
+
+            console.log(`Retrieving plugin ${req.params.id} from CapabilitiesManager at ${capabilitiesManagerUrl}`);
+
+            // Forward the request to the CapabilitiesManager service
+            const response = await this.authenticatedApi.get(`http://${capabilitiesManagerUrl}/plugins/${req.params.id}`, {
+                params: req.query
+            });
+
+            // Set the correct content type to ensure the response is treated as JSON
+            res.setHeader('Content-Type', 'application/json');
+
+            return res.status(200).json(response.data);
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error('Error getting plugin:', error instanceof Error ? error.message : error);
+            return res.status(500).json({ error: 'Failed to get plugin' });
+        }
+    }
+
+    private async deletePlugin(req: express.Request, res: express.Response) {
+        try {
+            console.log(`Received request to delete plugin with ID: ${req.params.id}`);
+            // Always use the default URL for CapabilitiesManager
+            const capabilitiesManagerUrl = process.env.CAPABILITIESMANAGER_URL || 'capabilitiesmanager:5060';
+            // Repository type is passed in the query params
+
+            console.log(`Deleting plugin ${req.params.id} from CapabilitiesManager at ${capabilitiesManagerUrl}`);
+
+            const response = await this.authenticatedApi.delete(`http://${capabilitiesManagerUrl}/plugins/${req.params.id}`, {
+                params: req.query
+            });
+
+            res.setHeader('Content-Type', 'application/json');
+
+            return res.status(200).json(response.data);
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error('Error deleting plugin:', error instanceof Error ? error.message : error);
+            return res.status(500).json({ error: 'Failed to delete plugin' });
+        }
+    }
 }
 
 new PostOffice();

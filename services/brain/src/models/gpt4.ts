@@ -11,11 +11,11 @@ export class GPT4Model extends BaseModel {
         ]);
 
         super({
-            name: "openai/gpt-4",
-            modelName: "gpt-4",
+            name: "openai/gpt-4.1-nano",
+            modelName: "gpt-4.1-nano-2025-04-14",
             interfaceName: "openai",
-            serviceName: "OAIService",
-            tokenLimit: 8192,
+            serviceName: "OAService",
+            tokenLimit: 4096,
             scoresByConversationType: scoresByConversationType,
             contentConversation: [
                 LLMConversationType.TextToCode,

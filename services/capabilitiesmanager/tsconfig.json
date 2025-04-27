@@ -1,8 +1,7 @@
 {
   "compilerOptions": {
       "target": "ES2020",
-      "module": "ES2020",
-      "moduleResolution": "bundler",
+      "module": "commonjs", 
       "outDir": "./dist",
       "rootDir": "./src",
       "strict": true,
@@ -11,7 +10,13 @@
       "forceConsistentCasingInFileNames": true,
       "allowJs": true,
       "resolveJsonModule": true,
-      "sourceMap": true
+      "sourceMap": true,
+      "importHelpers": true,
+      "baseUrl": ".",
+      "paths": {
+        "@cktmcs/shared": ["../../shared/dist"],
+        "@cktmcs/shared/*": ["../../shared/dist/*"]
+      }
   },
   "include": [
       "src/**/*"

@@ -32,9 +32,24 @@ export class StateManager {
         }
     }
 
-    async loadState(agent: any): Promise<void> {
+    async loadState(agentId?: string): Promise<any> {
         try {
-            const state = await this.agentPersistenceManager.loadAgent(this.agentId);
+            const id = agentId || this.agentId;
+            const state = await this.agentPersistenceManager.loadAgent(id);
+            if (state) {
+                console.log(`Agent state loaded successfully for ${id}.`);
+                return state;
+            }
+            return null;
+        } catch (error) {
+            console.error('Error loading agent state:', error instanceof Error ? error.message : error);
+            throw error;
+        }
+    }
+
+    async applyState(agent: any): Promise<void> {
+        try {
+            const state = await this.loadState();
             if (state) {
                 agent.status = state.status;
                 agent.output = state.output;
@@ -48,10 +63,12 @@ export class StateManager {
                 agent.librarianUrl = state.librarianUrl;
                 agent.conversation = state.conversation || [];
                 agent.missionContext = state.missionContext;
-                console.log('Agent state loaded successfully.');
+                agent.role = state.role || 'executor';
+                agent.roleCustomizations = state.roleCustomizations;
+                console.log('Agent state applied successfully.');
             }
         } catch (error) {
-            console.error('Error loading agent state:', error instanceof Error ? error.message : error);
+            console.error('Error applying agent state:', error instanceof Error ? error.message : error);
         }
     }
 }

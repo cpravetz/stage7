@@ -1,7 +1,7 @@
 import { PluginManifest } from './PluginManifest';
 import { PluginLocator } from './PluginManifest';
 
-export type PluginRepositoryType = 'git' | 'npm' | 'local' | 'mongo';
+export type PluginRepositoryType = 'git' | 'npm' | 'local' | 'mongo' | 'github';
 
 
 export interface PluginRepository {

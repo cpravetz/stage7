@@ -2,6 +2,7 @@
   "compilerOptions": {
     "target": "ES2020",                  // Target modern JavaScript (ES2020)
     "module": "commonjs",                // Use CommonJS module system (for Node.js)
+
     "strict": true,                      // Enable strict type checking
     "esModuleInterop": true,             // Enables compatibility with ES6 modules
     "skipLibCheck": true,                // Skips type checking of declaration files
@@ -10,11 +11,14 @@
     "rootDir": "./src",                      // Root directory of source files
     "baseUrl": ".",
     "paths": {
-      "@cktmcs/shared": ["../../shared"]
+      "@cktmcs/shared": ["../../shared/dist"],
+      "@cktmcs/shared/*": ["../../shared/dist/*"]
     },
     "types": ["express"],
     "resolveJsonModule": true,           // Allow importing JSON modules
-    "sourceMap": true                    // Generate source maps for debugging
+    "sourceMap": true,                   // Generate source maps for debugging
+    "allowJs": true,                     // Allow JavaScript files to be compiled
+    "importHelpers": true                // Import helper functions from tslib
   },
   "include": ["src/**/*", "src/models/**/*", "src/interfaces/**/*"],
   "exclude": ["node_modules"]            // Exclude `node_modules` directory

@@ -12,6 +12,9 @@ COPY services/missioncontrol/package*.json ./services/missioncontrol/
 
 # Install the application dependencies
 RUN npm install
+RUN cd shared && npm install
+RUN cd errorhandler && npm install
+RUN cd services/missioncontrol && npm install
 
 # Copy the application code to the working directory
 COPY shared ./shared
@@ -19,8 +22,8 @@ COPY errorhandler ./errorhandler
 COPY services/missioncontrol ./services/missioncontrol
 
 # Build the TypeScript code
-RUN npm run build --workspace=shared
-RUN npm run build --workspace=errorhandler
+RUN cd shared && npm run build
+RUN cd errorhandler && npm run build
 RUN npm run build --workspace=services/missioncontrol
 
 # Set the working directory to the service

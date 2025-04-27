@@ -12,16 +12,19 @@ COPY services/postoffice/package*.json ./services/postoffice/
 
 # Install the application dependencies
 RUN npm install
+RUN cd shared && npm install
+RUN cd errorhandler && npm install
+RUN cd services/postoffice && npm install
 
 # Copy the application code to the working directory
 COPY shared ./shared
 COPY errorhandler ./errorhandler
 COPY services/postoffice ./services/postoffice
 
-# Build the TypeScript code
-RUN npm run build --workspace=shared
-RUN npm run build --workspace=errorhandler
-RUN npm run build --workspace=services/postoffice
+# Build the TypeScript code - ensure shared is built first
+RUN cd shared && npm run build
+RUN cd errorhandler && npm run build
+RUN cd services/postoffice && npm run build
 
 # Set the working directory to the service
 WORKDIR /usr/src/app/services/postoffice
