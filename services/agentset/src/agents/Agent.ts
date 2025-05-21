@@ -61,7 +61,7 @@ export class Agent extends BaseEntity {
         console.log(`Agent ${config.id} created. missionId=${config.missionId}. Inputs: ${JSON.stringify(config.inputs)}` );
         this.agentPersistenceManager = new AgentPersistenceManager();
         this.stateManager = new StateManager(config.id, this.agentPersistenceManager);
-        this.inputs = new Map(config.inputs instanceof Map ? config.inputs : Object.entries(config.inputs||{}));
+        this.inputs = config.inputs instanceof Map ? config.inputs : new Map(Object.entries(config.inputs||{}));
         this.missionId = config.missionId;
         this.agentSetUrl = config.agentSetUrl;
         this.status = AgentStatus.INITIALIZING;
@@ -93,7 +93,7 @@ export class Agent extends BaseEntity {
             eventType: 'agent_created',
             agentId: this.id,
             missionId: this.missionId,
-            inputs: this.inputs,
+            inputs: MapSerializer.transformForSerialization(this.inputs),
             status: this.status,
             timestamp: new Date().toISOString()
         });

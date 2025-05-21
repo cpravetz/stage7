@@ -55,8 +55,8 @@ export class Step {
             stepId: this.id,
             stepNo: this.stepNo,
             actionVerb: this.actionVerb,
-            inputs: this.inputs,
-            dependencies: this.dependencies,
+            inputs: MapSerializer.transformForSerialization(this.inputs),
+            dependencies: MapSerializer.transformForSerialization(this.dependencies),
             status: this.status,
             description: this.description,
             recommendedRole: this.recommendedRole,
@@ -561,6 +561,13 @@ export class Step {
      * @returns Array of Step instances
      */
     export function createFromPlan(plan: ActionVerbTask[], startingStepNo: number, persistenceManager: AgentPersistenceManager): Step[] {
+        // Ensure each task has an id before processing dependencies
+        plan.forEach(task => {
+            if (!task.id) {
+                task.id = uuidv4();
+            }
+        });
+
         return plan.map((task, index) => {
             const inputs = new Map<string, PluginInput>();
             if (task.inputs) {
@@ -584,8 +591,7 @@ export class Step {
                     : undefined;
                 return {
                     inputName: dep.inputName,
-                    sourceStepId: sourceStepId || '', // fallback to empty string if undefined
-                    outputName: dep.outputName
+                    sourceStepId: sourceStepId || undefined, // fallback to empty string if undefined
                 };
             });
 
