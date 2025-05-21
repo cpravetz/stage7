@@ -68,6 +68,28 @@ export class AgentPersistenceManager {
         }
     }
 
+    async logEvent(event: any): Promise<void> {
+        if (!event) {
+            console.error('Cannot log event: event is undefined or null');
+            return;
+        }
+        try {
+            const eventWithTimestamp = {
+                ...event,
+                timestamp: new Date().toISOString()
+            };
+            await this.authenticatedApi.post(`http://${this.librarianUrl}/storeData`, {
+                id: event.id || undefined,
+                data: eventWithTimestamp,
+                storageType: 'mongo',
+                collection: 'events'
+            });
+            console.log(`Event logged successfully: ${JSON.stringify(eventWithTimestamp)}`);
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error logging event:', error instanceof Error ? error.message : error);
+        }
+    }
+
     async loadAgent(agentId: string): Promise<any | null> {
         try {
             const response = await this.authenticatedApi.get(`http://${this.librarianUrl}/loadData/${agentId}`, {

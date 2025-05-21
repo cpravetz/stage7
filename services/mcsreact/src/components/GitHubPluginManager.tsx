@@ -103,8 +103,9 @@ const GitHubPluginManager: React.FC<GitHubPluginManagerProps> = ({ onPluginSelec
       setError(null);
 
       // Use SecurityClient for authenticated API calls
-      const securityClient = new SecurityClient();
-      const response = await securityClient.api.get(`/plugins`, {
+      const securityClient = SecurityClient.getInstance(API_BASE_URL);
+      
+      const response = await securityClient.getApi().get(`/plugins`, {
         params: { repository: selectedRepository }
       });
 
@@ -128,8 +129,8 @@ const GitHubPluginManager: React.FC<GitHubPluginManagerProps> = ({ onPluginSelec
       setLoading(true);
 
       // Use SecurityClient for authenticated API calls
-      const securityClient = new SecurityClient();
-      await securityClient.api.delete(`/plugins/${pluginToDelete.id}`, {
+      const securityClient = SecurityClient.getInstance(API_BASE_URL);
+      await securityClient.getApi().delete(`/plugins/${pluginToDelete.id}`, {
         params: { repository: selectedRepository }
       });
 

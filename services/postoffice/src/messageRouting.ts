@@ -66,11 +66,16 @@ export class MessageRouter {
     }
 
     // Handle messages to users (via WebSocket)
-    if (message.recipient === 'user') {
-      await this.handleUserMessage(message, clientId);
-      return;
+    if (clientId) {
+        this.sendToClient(clientId, message);
+        return;
     }
 
+    if (message.recipient === 'user') {
+        this.broadcastToClients(message);
+        return;
+    }
+    
     // Handle messages to services
     const recipientId = message.recipient;
     if (!recipientId) {

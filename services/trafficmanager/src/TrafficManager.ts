@@ -547,6 +547,7 @@ export class TrafficManager extends BaseEntity {
 
     private async checkBlockedAgents(req: express.Request, res: express.Response) {
         const { completedAgentId } = req.body;
+        console.log('Checking agents blocked by completedAgentId:', completedAgentId);
 
         if (!completedAgentId) {
             return res.status(400).send({ error: 'completedAgentId is required' });
@@ -554,13 +555,16 @@ export class TrafficManager extends BaseEntity {
 
         try {
             const blockedAgents = await dependencyManager.getDependencies(completedAgentId);
-
+            let unblockedCount = 0;
             for (const blockedAgentId of blockedAgents) {
                 const canResume = await this.checkDependenciesRecursive(blockedAgentId);
                 if (canResume) {
+                    unblockedCount++;
+                    console.log('Resuming blocked agent:', blockedAgentId);
                     agentSetManager.resumeAgent(blockedAgentId);
                 }
             }
+            console.log(`Unblocked ${unblockedCount} of ${blockedAgents.length} agents that were blocked by ${completedAgentId}`);
 
             res.status(200).send({ message: 'Blocked agents checked and resumed if possible' });
         } catch (error) { analyzeError(error as Error);

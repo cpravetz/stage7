@@ -102,8 +102,6 @@ function shouldBypassAuth(path: string): boolean {
     }
   }
 
-  // All other paths require authentication
-  console.log(`[shouldBypassAuth] Authentication required for path: ${finalPath}`);
   return false;
 }
 

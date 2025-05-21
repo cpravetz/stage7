@@ -52,54 +52,48 @@ const MainApp: React.FC = () => {
 
   const ws = useRef<WebSocket | null>(null);
 
-  // We're now using the AuthContext for authentication and token management
-  // The WebSocketContext handles WebSocket connections
 
-
-  // We no longer need to check for tokens here as the AuthContext handles this
-  // The WebSocketContext will automatically connect when needed
-
-const handleLogin = async (email: string, password: string) => {
-  try {
-      await login(email, password);
-      enqueueSnackbar('Login successful', { variant: 'success' });
-  } catch (error) {
-      console.error('Login failed:', error instanceof Error ? error.message : error);
-      enqueueSnackbar(`Login failed: ${error instanceof Error ? error.message : 'Unknown error'}`, { variant: 'error' });
-  }
-};
-
-const handleRegister = async (name: string, email: string, password: string) => {
-  try {
-      await securityClient.register(name, email, password);
-      // After registration, we should be authenticated
-      // The AuthContext will handle token management
-      enqueueSnackbar('Registration successful', { variant: 'success' });
-  } catch (error) {
-      console.error('Registration failed:', error instanceof Error ? error.message : error);
-      enqueueSnackbar(`Registration failed: ${error instanceof Error ? error.message : 'Unknown error'}`, { variant: 'error' });
-  }
-};
-
-const handleLogout = async () => {
-  try {
-    await logout();
-    // The AuthContext will handle token management
-    if (ws.current) {
-      ws.current.close();
-      ws.current = null;
+  const handleLogin = async (email: string, password: string) => {
+    try {
+        await login(email, password);
+        enqueueSnackbar('Login successful', { variant: 'success' });
+        window.location.href = '/';
+    } catch (error) {
+        console.error('Login failed:', error instanceof Error ? error.message : error);
+        enqueueSnackbar(`Login failed: ${error instanceof Error ? error.message : 'Unknown error'}`, { variant: 'error' });
     }
-    enqueueSnackbar('Logged out successfully', { variant: 'success' });
-  } catch (error) {
-    console.error('Logout failed:', error instanceof Error ? error.message : error);
-    enqueueSnackbar(`Logout failed: ${error instanceof Error ? error.message : 'Unknown error'}`, { variant: 'error' });
-  }
-};
+  };
 
-// We're now using the WebSocketContext for WebSocket connections
+  const handleRegister = async (name: string, email: string, password: string) => {
+    try {
+        await securityClient.register({name, email, password});
+        // After registration, we should be authenticated
+        // The AuthContext will handle token management
+        enqueueSnackbar('Registration successful', { variant: 'success' });
+        // Redirect to home page after successful registration
+        window.location.href = '/';
+    } catch (error) {
+        console.error('Registration failed:', error instanceof Error ? error.message : error);
+        enqueueSnackbar(`Registration failed: ${error instanceof Error ? error.message : 'Unknown error'}`, { variant: 'error' });
+    }
+  };
 
-// WebSocket connection is now managed by WebSocketContext
-// No need for a separate useEffect here
+  const handleLogout = async () => {
+    try {
+      await logout();
+      // The AuthContext will handle token management
+      if (ws.current) {
+        ws.current.close();
+        ws.current = null;
+      }
+      enqueueSnackbar('Logged out successfully', { variant: 'success' });
+      window.location.href = '/';
+    } catch (error) {
+      console.error('Logout failed:', error instanceof Error ? error.message : error);
+      enqueueSnackbar(`Logout failed: ${error instanceof Error ? error.message : 'Unknown error'}`, { variant: 'error' });
+    }
+  };
+
 
   // Use the sendMessage function from WebSocketContext
   const handleSendMessage = async (message: string) => {

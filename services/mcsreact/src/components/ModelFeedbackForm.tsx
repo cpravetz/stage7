@@ -54,8 +54,8 @@ const ModelFeedbackForm: React.FC<ModelFeedbackFormProps> = ({
       setError(null);
 
       // Use SecurityClient for authenticated API calls
-      const securityClient = new SecurityClient();
-      await securityClient.api.post(`/brain/evaluations`, {
+      const securityClient = SecurityClient.getInstance(API_BASE_URL);
+      await securityClient.getApi().post(`/brain/evaluations`, {
         modelName,
         conversationType,
         requestId,

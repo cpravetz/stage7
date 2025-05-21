@@ -481,26 +481,7 @@ protected async cleanup() {
     }
   }
 
-  /**
-   * Send a message to another component
-   * @param type Message type
-   * @param recipient Recipient ID
-   * @param content Message content
-   * @param requiresSync Whether the message requires a synchronous response
-   * @returns Promise that resolves when the message is sent, or with the response if sync
-   */
-  async sendMessage(type: string, recipient: string, content: any, requiresSync: boolean = false): Promise<any> {
-    console.log(`${this.componentType} ${this.id} sending message of type ${type} to ${recipient}`);
-
-    const message = {
-      type: type,
-      content,
-      sender: this.id,
-      recipient,
-      requiresSync,
-      timestamp: new Date().toISOString()
-    };
-
+  async sendViaRabbitMQ(message: any): Promise<any> {
     // Always try to use RabbitMQ first (primary method)
     if (this.mqClient && this.mqClient.isConnected()) {
       try {
@@ -509,12 +490,12 @@ protected async cleanup() {
           throw new Error('Failed to get channel wrapper');
         }
 
-        const routingKey = `message.${recipient}`;
+        const routingKey = `message.${message.recipient}`;
         console.log(`Publishing message to RabbitMQ with routing key: ${routingKey}`);
 
-        if (requiresSync) {
+        if (message.requiresSync) {
           // For synchronous messages, use RPC pattern
-          console.log(`Sending RPC request to ${recipient}`);
+          console.log(`Sending RPC request to ${message.recipient}`);
 
           // Create a unique correlation ID for this request
           const correlationId = uuidv4();
@@ -576,7 +557,7 @@ protected async cleanup() {
 
           // Wait for the response
           const response = await responsePromise;
-          console.log(`Received RPC response from ${recipient}`);
+          console.log(`Received RPC response from ${message.recipient}`);
           return response;
         } else {
           // For asynchronous messages, just publish
@@ -597,7 +578,35 @@ protected async cleanup() {
     } else {
       console.warn('RabbitMQ not connected, falling back to HTTP-based communication');
     }
+  }
 
+  /**
+   * Send a message to another component
+   * @param type Message type
+   * @param recipient Recipient ID
+   * @param content Message content
+   * @param requiresSync Whether the message requires a synchronous response
+   * @returns Promise that resolves when the message is sent, or with the response if sync
+   */
+  async sendMessage(type: string, recipient: string, content: any, requiresSync: boolean = false): Promise<any> {
+    console.log(`${this.componentType} ${this.id} sending message of type ${type} to ${recipient}`);
+
+    const message = {
+      type: type,
+      content,
+      sender: this.id,
+      recipient,
+      requiresSync,
+      timestamp: new Date().toISOString()
+    };
+
+    // Always try to use RabbitMQ first (primary method)
+    /*
+    if (this.mqClient && this.mqClient.isConnected()) {
+      return this.sendViaRabbitMQ(message);
+    }
+    */
+    
     // Fall back to HTTP-based communication (secondary method)
     try {
       // Use environment variable for PostOffice URL if available (highest priority)
@@ -943,14 +952,12 @@ protected async cleanup() {
         return res.status(401).json({ error: 'Invalid authorization header format' });
       }
 
-      console.log(`[BaseEntity] Verifying token for ${this.componentType} on path ${req.path}`);
 
       // Check if token is in cache and not expired
       const now = Date.now();
       const cachedToken = BaseEntity.tokenCache.get(token);
       if (cachedToken && cachedToken.expiry > now) {
         // Use cached token verification result
-        console.log(`[BaseEntity] Using cached token verification for ${this.componentType}`);
         (req as any).user = cachedToken.decoded;
         return next();
       }
@@ -960,7 +967,6 @@ protected async cleanup() {
       if (timeSinceLastVerification < BaseEntity.verificationThrottleMs) {
         // If we have a cached result, use it even if expired
         if (cachedToken) {
-          console.log(`[BaseEntity] Using expired cached token due to throttling for ${this.componentType}`);
           (req as any).user = cachedToken.decoded;
           return next();
         }
@@ -970,7 +976,6 @@ protected async cleanup() {
 
       // Get the token manager instance
       const tokenManager = this.getTokenManager();
-      console.log(`[BaseEntity] Got token manager for ${this.componentType}`);
 
       // Log token details for debugging (without revealing the full token)
       try {
@@ -978,9 +983,6 @@ protected async cleanup() {
         if (tokenParts.length === 3) {
           const header = JSON.parse(Buffer.from(tokenParts[0], 'base64').toString());
           const payload = JSON.parse(Buffer.from(tokenParts[1], 'base64').toString());
-          console.log(`[BaseEntity] Token header:`, header);
-          console.log(`[BaseEntity] Token payload exp:`, payload.exp);
-          console.log(`[BaseEntity] Token payload iat:`, payload.iat);
 
           // Check if token is expired
           const now = Math.floor(Date.now() / 1000);
@@ -994,7 +996,6 @@ protected async cleanup() {
       }
 
       // Verify the token
-      console.log(`[BaseEntity] Verifying token with token manager for ${this.componentType}`);
       const decoded = await tokenManager.verifyToken(token);
       if (!decoded) {
         console.log(`[BaseEntity] Invalid or expired token for ${this.componentType}`);

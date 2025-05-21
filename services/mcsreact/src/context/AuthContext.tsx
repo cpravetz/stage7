@@ -2,13 +2,34 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { SecurityClient } from '../SecurityClient';
 import { API_BASE_URL } from '../config';
 
-// Define the context type
+// Define the context type with methods matching SecurityClient
 interface AuthContextType {
   isAuthenticated: boolean;
   isInitializing: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  register: (registerData: RegisterData) => Promise<RegisterResponse>;
   getToken: () => string | null;
+  getAuthHeader: () => { Authorization?: string };
+  refreshToken: () => Promise<string | null>;
+}
+
+// Match the SecurityClient interfaces
+interface RegisterData {
+  email: string;
+  password: string;
+  name?: string;
+  firstName?: string;
+  lastName?: string;
+  role?: string;
+}
+
+interface RegisterResponse {
+  success: boolean;
+  message: string;
+  user?: any;
+  accessToken?: string;
+  refreshToken?: string;
 }
 
 // Create the context with default values
@@ -27,27 +48,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         console.log('[AuthContext] Initializing authentication...');
         setIsInitializing(true);
         
-        // Check if we have a token
-        const token = securityClient.getAccessToken();
-        if (token) {
+        // Check if user is already authenticated
+        if (securityClient.isAuthenticated()) {
           console.log('[AuthContext] Found existing token, validating...');
           try {
-            // Try to use the token to make an authenticated request
-            await securityClient.refreshAccessToken();
-            console.log('[AuthContext] Token is valid or was refreshed successfully');
-            setIsAuthenticated(true);
-          } catch (error) {
-            console.log('[AuthContext] Token validation failed, attempting to initialize with default credentials');
-            
-            // Try to initialize with default credentials
-            const initialized = await securityClient.initializeWithDefaultCredentials();
-            setIsAuthenticated(initialized);
-            
-            if (initialized) {
-              console.log('[AuthContext] Successfully authenticated with default credentials');
+            // Validate the token by refreshing it
+            const newToken = await securityClient.refreshToken();
+            if (newToken) {
+              console.log('[AuthContext] Token is valid or was refreshed successfully');
+              setIsAuthenticated(true);
             } else {
-              console.log('[AuthContext] Failed to authenticate with default credentials');
+              // If refresh failed, try default credentials
+              console.log('[AuthContext] Token validation failed, attempting to initialize with default credentials');
+              const initialized = await securityClient.initializeWithDefaultCredentials();
+              setIsAuthenticated(initialized);
+              
+              if (initialized) {
+                console.log('[AuthContext] Successfully authenticated with default credentials');
+              } else {
+                console.log('[AuthContext] Failed to authenticate with default credentials');
+              }
             }
+          } catch (error) {
+            console.error('[AuthContext] Token validation failed:', error);
+            setIsAuthenticated(false);
           }
         } else {
           console.log('[AuthContext] No token found, attempting to initialize with default credentials');
@@ -84,6 +108,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  // Register function
+  const register = async (registerData: RegisterData): Promise<RegisterResponse> => {
+    try {
+      const response = await securityClient.register(registerData);
+      
+      // Update authentication state if registration was successful and tokens were provided
+      if (response.success && response.accessToken) {
+        setIsAuthenticated(true);
+      }
+      
+      return response;
+    } catch (error) {
+      console.error('[AuthContext] Registration error:', error);
+      throw error;
+    }
+  };
+
   // Logout function
   const logout = async () => {
     try {
@@ -100,13 +141,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return securityClient.getAccessToken();
   };
 
+  // Get authorization header
+  const getAuthHeader = () => {
+    return securityClient.getAuthHeader();
+  };
+
+  // Refresh token
+  const refreshToken = async () => {
+    try {
+      const newToken = await securityClient.refreshToken();
+      setIsAuthenticated(!!newToken);
+      return newToken;
+    } catch (error) {
+      console.error('[AuthContext] Token refresh error:', error);
+      setIsAuthenticated(false);
+      throw error;
+    }
+  };
+
   // Provide the context value
   const contextValue: AuthContextType = {
     isAuthenticated,
     isInitializing,
     login,
     logout,
-    getToken
+    register,
+    getToken,
+    getAuthHeader,
+    refreshToken
   };
 
   return (

@@ -48,6 +48,35 @@ export class Step {
         this.recommendedRole = params.recommendedRole;
         this.persistenceManager = params.persistenceManager;
         //console.log(`Constructing new step ${this.id} created. Dependencies ${this.dependencies.map(dep => dep.sourceStepId).join(', ')}`);
+
+        // Log step creation event
+        this.logEvent({
+            eventType: 'step_created',
+            stepId: this.id,
+            stepNo: this.stepNo,
+            actionVerb: this.actionVerb,
+            inputs: MapSerializer.transformForSerialization(this.inputs),
+            dependencies: this.dependencies.map(dep => ({
+                inputName: dep.inputName,
+                sourceStepId: dep.sourceStepId,
+                outputName: dep.outputName
+            })),
+            status: this.status,
+            recommendedRole: this.recommendedRole,
+            timestamp: new Date().toISOString()
+        });
+    }
+
+    async logEvent(event: any): Promise<void> {
+        if (!event) {
+            console.error('Step logEvent called with empty event');
+            return;
+        }
+        try {
+            await this.persistenceManager.logEvent(event);
+        } catch (error) {
+            console.error('Step logEvent error:', error instanceof Error ? error.message : error);
+        }
     }
 
     populateInputsFromDependencies(allSteps: Step[]): void {
@@ -56,10 +85,10 @@ export class Step {
             if (sourceStep?.result) {
                 const outputValue = sourceStep.result.find(r => r.name === dep.outputName)?.result;
                 if (outputValue !== undefined) {
-                    this.inputs.set(dep.inputName, {
-                        inputName: dep.inputName,
+                    this.inputs.set(dep.outputName, {
+                        inputName: dep.outputName,
                         inputValue: outputValue,
-                        args: { outputKey: dep.outputName }
+                        args: {}
                     });
                 }
             }
@@ -67,9 +96,14 @@ export class Step {
     }
 
     areDependenciesSatisfied(allSteps: Step[]): boolean {
+        // Check if all dependencies have a sourceStepId that exists in allSteps and that source step is completed
         return this.dependencies.every(dep => {
+            if (!dep.sourceStepId) {
+                // If dependency has no sourceStepId, consider it unsatisfied
+                return true;
+            }
             const sourceStep = allSteps.find(s => s.id === dep.sourceStepId);
-            return sourceStep && sourceStep.status === StepStatus.COMPLETED;
+            return sourceStep !== undefined && sourceStep.status === StepStatus.COMPLETED;
         });
     }
 
@@ -105,36 +139,36 @@ export class Step {
                 case MessageType.REQUEST:
                     result = await askAction(this.inputs);
                     break;
-                    case 'DECIDE':
-                        result = await this.handleDecide();
-                        break;
-                    case 'REPEAT':
-                        result = await this.handleRepeat();
-                        break;
-                    case 'WHILE':
-                        result = await this.handleWhile();
-                        break;
-                    case 'UNTIL':
-                        result = await this.handleUntil();
-                        break;
-                    case 'SEQUENCE':
-                        result = await this.handleSequence();
-                        break;
-                    case 'TIMEOUT':
-                        result = await this.handleTimeout();
-                        break;
-/*                    case 'TRANSFORM':
-                        result = await this.handleTransform();
-                        break;
-                    case 'MERGE':
-                        result = await this.handleMerge();
-                        break;
-                    case 'FILTER':
-                        result = await this.handleFilter();
-                        break;
-                    case 'MAP':
-                        result = await this.handleMap();
-                        break;*/
+                case 'DECIDE':
+                    result = await this.handleDecide();
+                    break;
+                case 'REPEAT':
+                    result = await this.handleRepeat();
+                    break;
+                case 'WHILE':
+                    result = await this.handleWhile();
+                    break;
+                case 'UNTIL':
+                    result = await this.handleUntil();
+                    break;
+                case 'SEQUENCE':
+                    result = await this.handleSequence();
+                    break;
+                case 'TIMEOUT':
+                    result = await this.handleTimeout();
+                    break;
+            /*                    case 'TRANSFORM':
+                                result = await this.handleTransform();
+                                break;
+                            case 'MERGE':
+                                result = await this.handleMerge();
+                                break;
+                            case 'FILTER':
+                                result = await this.handleFilter();
+                                break;
+                            case 'MAP':
+                                result = await this.handleMap();
+                                break;*/
                 default:
                     result = await executeAction(this);
             }
@@ -144,25 +178,21 @@ export class Step {
                 result = [result];
             }
 
-            /*result = result.map(item => {
-                if (!('success' in item && 'resultType' in item && 'resultDescription' in item && 'result' in item)) {
-                    return {
-                        success: true,
-                        name: 'result',
-                        resultType: typeof item as PluginParameterType,
-                        resultDescription: 'Action result',
-                        result: item,
-                        mimeType: 'text/plain'
-                    };
-                }
-                return item;
-            });*/
-
             result.forEach(resultItem => {
                 if (!resultItem.mimeType) { resultItem.mimeType = 'text/plain'; }
             });
 
             this.status = StepStatus.COMPLETED;
+
+            // Log step result event
+            await this.logEvent({
+                eventType: 'step_result',
+                stepId: this.id,
+                stepNo: this.stepNo,
+                result: result,
+                timestamp: new Date().toISOString()
+            });
+
             await this.persistenceManager.saveWorkProduct({
                 agentId: this.id.split('_')[0], // Assuming the step ID is in the format 'agentId_stepId'
                 stepId: this.id,
@@ -196,11 +226,19 @@ export class Step {
      * @param newStatus New status for the step
      * @param result Optional result of the step
      */
-    updateStatus(newStatus: StepStatus, result?: PluginOutput[]): void {
-        this.status = newStatus;
+    private updateStatus(status: StepStatus, result?: PluginOutput[]): void {
+        this.status = status;
         if (result) {
             this.result = result;
         }
+        // Log step status change event
+        this.logEvent({
+            eventType: 'step_status_changed',
+            stepId: this.id,
+            newStatus: status,
+            result: result,
+            timestamp: new Date().toISOString()
+        });
     }
 
     private async handleDecide(): Promise<PluginOutput[]> {
@@ -534,11 +572,17 @@ export class Step {
                 }
             }
 
-            const dependencies = (task.dependencies || []).map(dep => ({
-                inputName: dep.inputName,
-                sourceStepId: plan[dep.sourceStepNo - 1]?.id || '', // This should now always be present
-                outputName: dep.outputName
-            }));
+            const dependencies = (task.dependencies || []).map(dep => {
+                // Defensive check: dep.sourceStepNo should be > 0 and within plan length
+                const sourceStepId = (dep.sourceStepNo && dep.sourceStepNo > 0 && dep.sourceStepNo <= plan.length)
+                    ? plan[dep.sourceStepNo - 1]?.id
+                    : undefined;
+                return {
+                    inputName: dep.inputName,
+                    sourceStepId: sourceStepId || '', // fallback to empty string if undefined
+                    outputName: dep.outputName
+                };
+            });
 
             const step = new Step({
                 id: task.id, // Preserve the original ID from the plan

@@ -36,7 +36,7 @@ const axios = require('axios');
 
 async function execute(input) {
     try {
-        const goal = input.args?.goal || input.inputValue;
+        const goal = input.inputs?.goal || input.inputValue;
 
         if (!goal) {
             console.log('Goal or description is required for ACCOMPLISH plugin');
@@ -55,7 +55,7 @@ async function execute(input) {
 
         try {
             const parsedResponse = JSON.parse(response);
-            if (parsedResponse.type === 'PLAN') {
+            if (parsedResponse.type.toUpperCase() === 'PLAN') {
                 const tasks = convertJsonToTasks(parsedResponse.plan);
                 //console.log('ACCOMPLISH plugin succeeded creating a plan', { tasks });
                 return {
@@ -65,7 +65,7 @@ async function execute(input) {
                     result: tasks,
                     mimeType: 'application/json'
                 };
-            } else if (parsedResponse.type === 'DIRECT_ANSWER') {
+            } else if (parsedResponse.type.toUpperCase() === 'DIRECT_ANSWER') {
                 return {
                     success: true,
                     resultType: 'string',
@@ -119,11 +119,11 @@ If a plan is needed, respond with a JSON object in this format:
             "number": 1,
             "verb": "ACTION_VERB",
             "description": "Brief description of the step",
-            "args": {
+            "inputs": {
                 "key1": "value1",
                 "key2": "value2"
             },
-            "dependencies": [0],
+            "dependencies": [],
             "outputs": {
                 "output1": "Description of output1",
                 "output2": "Description of output2"
@@ -133,10 +133,10 @@ If a plan is needed, respond with a JSON object in this format:
             "number": 2,
             "verb": "ANOTHER_ACTION",
             "description": "Description of another step",
-            "args": {
+            "inputs": {
                 "key3": "value3"
             },
-            "dependencies": [1],
+            "dependencies": [{sourceStepNo: 1, sourceOutputName: "output2"}],
             "outputs": {
                 "output3": "Description of output3"
             }
@@ -149,7 +149,7 @@ Guidelines for creating a plan:
 2. Use specific, actionable verbs for each step (e.g., SCRAPE, ANALYZE, PREDICT).
 3. Ensure each step has a clear, concise description.
 4. Provide detailed arguments for each step, including data sources or specific parameters.
-5. List dependencies as an array of step numbers. Use [0] if the step has no dependencies.
+5. List dependencies as an array of step numbers. Use [] if the step has no dependencies.
 6. Specify the outputs of each step that may be used by dependent steps.
 7. Aim for 5-10 steps in the plan, breaking down complex tasks if necessary.
 8. Be thorough in your description fields.  This is the only instruction the performer will have.
@@ -178,11 +178,12 @@ async function queryBrain(prompt) {
 function convertJsonToTasks(jsonPlan) {
     return jsonPlan.map(step => ({
         verb: step.verb,
-        args: {
+        inputs: {
+            ...step.inputs,
             ...step.args,
-            description: step.description,
-            expectedOutputs: step.outputs
         },
+        description: step.description,
+        expectedOutputs: step.outputs,
         dependencies: step.dependencies
     }));
 }

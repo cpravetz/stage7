@@ -7,6 +7,8 @@ import { storeInMongo, loadFromMongo, loadManyFromMongo, aggregateInMongo, delet
 import { WorkProduct } from './types/WorkProduct';
 import { BaseEntity, MapSerializer } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
+import { v4 as uuidv4 } from 'uuid';
+
 
 dotenv.config();
 
@@ -78,10 +80,10 @@ export class Librarian extends BaseEntity {
         let { id, data, storageType, collection } = req.body;
         collection = collection || 'mcsdata';
 
-        if (!id) {
+        /*if (!id) {
             console.log(`storeData failed: id is ${id === undefined ? 'undefined' : 'null'}`);
             return res.status(400).send({ error: 'ID is required' });
-        }
+        }*/
 
         if (!data) {
             console.log(`storeData failed: data is ${data === undefined ? 'undefined' : 'null'} for id ${id}`);
@@ -91,10 +93,12 @@ export class Librarian extends BaseEntity {
         try {
             let result;
             if (storageType === 'mongo') {
-                const documentToStore = { ...data, _id: id };
+                const documentToStore = { ...data, _id: id ? id : undefined };
                 result = await storeInMongo(collection, documentToStore);
             } else if (storageType === 'redis') {
+                id = id || uuidv4();
                 result = await storeInRedis(`data:${id}`, JSON.stringify(data));
+                result = id;
             } else {
                 console.log('storeData failed for invalid storage type');
                 return res.status(400).send({ error: 'Invalid storage type' });
