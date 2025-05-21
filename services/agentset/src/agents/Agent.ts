@@ -93,7 +93,7 @@ export class Agent extends BaseEntity {
             eventType: 'agent_created',
             agentId: this.id,
             missionId: this.missionId,
-            inputs: JSON.stringify(this.inputs),
+            inputs: MapSerializer.transformForSerialization(this.inputs),
             status: this.status,
             timestamp: new Date().toISOString()
         });
