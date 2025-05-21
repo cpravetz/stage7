@@ -7,7 +7,7 @@ import { authenticateService, verifyToken } from './models/jwtAuth';
 import * as fs from 'fs';
 import * as path from 'path';
 import { analyzeError } from '@cktmcs/errorhandler';
-import { refreshToken } from './controllers/authController';
+import { refreshToken, register, login, logout } from './controllers/authController';
 
 // Define Request and Response types for consistency
 type Request = express.Request;
@@ -179,6 +179,14 @@ export class SecurityManager {
 
         // Refresh token endpoint
         app.post('/auth/refresh-token', refreshToken);
+
+        // Register endpoint
+        app.post('/register', register);
+
+                // Register endpoint
+        app.post('/login', login);
+        // Register endpoint
+        app.post('/logout', logout);
 
         // Health check endpoint
         app.get('/health', (_req: Request, res: Response) => {

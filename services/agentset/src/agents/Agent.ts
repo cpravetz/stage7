@@ -88,11 +88,33 @@ export class Agent extends BaseEntity {
         });
         this.steps.push(initialStep);
 
+        // Log agent creation event
+        this.logEvent({
+            eventType: 'agent_created',
+            agentId: this.id,
+            missionId: this.missionId,
+            inputs: this.inputs,
+            status: this.status,
+            timestamp: new Date().toISOString()
+        });
+
         this.initializeAgent().then(() => {
             this.runUntilDone();
         }).catch(() => {
             this.status = AgentStatus.ERROR;
         });
+    }
+
+    async logEvent(event: any): Promise<void> {
+        if (!event) {
+            console.error('Agent logEvent called with empty event');
+            return;
+        }
+        try {
+            await this.agentPersistenceManager.logEvent(event);
+        } catch (error) {
+            console.error('Agent logEvent error:', error instanceof Error ? error.message : error);
+        }
     }
 
     private async runUntilDone() {
@@ -421,7 +443,7 @@ Please consider this context and the available plugins when planning and executi
             const isMissionOutput = this.steps.length === 1 || (isFinal && !(await this.hasDependentAgents()));
 
             // Send message to client
-            this.sendMessage(MessageType.WORK_PRODUCT_UPDATE,'user', {
+            this.sendMessage(MessageType.WORK_PRODUCT_UPDATE, 'user', {
                 id: stepId,
                 type: isFinal ? 'Final' : 'Interim',
                 scope: isMissionOutput ? 'MissionOutput' : (isFinal ? 'AgentOutput' : 'AgentStep'),

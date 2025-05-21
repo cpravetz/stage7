@@ -279,22 +279,24 @@ export class TokenService {
      * @returns New access token
      */
     async refreshAccessToken(refreshToken: string, clientInfo?: Token['clientInfo']): Promise<Token> {
+        let payload;
         try {
             // Verify refresh token
-            const payload = await this.verifyToken(refreshToken, TokenType.REFRESH);
-
-            // Find user
-            const user = await this.getUserById(payload.sub);
-            if (!user) {
-                throw new Error(`User not found: ${payload.sub}`);
-            }
-
-            // Generate new access token
-            return this.generateToken(user, TokenType.ACCESS, clientInfo);
+            payload = await this.verifyToken(refreshToken, TokenType.REFRESH);
         } catch (error) {
-            analyzeError(error as Error);
-            throw error;
+            console.error('[TokenService] Refresh token verification failed:', error);
+            throw new Error('Invalid or expired refresh token');
         }
+
+        // Find user
+        const user = await this.getUserById(payload.sub);
+        if (!user) {
+            console.error(`[TokenService] User not found for ID: ${payload.sub}`);
+            throw new Error(`User not found: ${payload.sub}`);
+        }
+
+        // Generate new access token
+        return this.generateToken(user, TokenType.ACCESS, clientInfo);
     }
 
     /**

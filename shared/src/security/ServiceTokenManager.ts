@@ -297,8 +297,6 @@ export class ServiceTokenManager {
    */
   async verifyTokenWithSecurityManager(token: string): Promise<any | null> {
     try {
-      console.log(`[ServiceTokenManager] Verifying token with SecurityManager endpoint for ${this.serviceId}`);
-      console.log(`[ServiceTokenManager] SecurityManager URL: ${this.authUrl}/verify`);
 
       // Log token details for debugging (without revealing the full token)
       try {
@@ -365,11 +363,6 @@ export class ServiceTokenManager {
         console.error(`[ServiceTokenManager] Failed to fetch public key for ${this.serviceId}`);
         return null;
       }
-
-      console.log(`[ServiceTokenManager] Public key available for verification (first 40 chars): ${this.publicKey.substring(0, 40)}...`);
-
-      console.log(`[ServiceTokenManager] Verifying token for ${this.serviceId} using public key (length: ${this.publicKey.length})`);
-      console.log(`[ServiceTokenManager] Public key starts with: ${this.publicKey.substring(0, 40)}...`);
 
       try {
         // First check if the token is in the correct format

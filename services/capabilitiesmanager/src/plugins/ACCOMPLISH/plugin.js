@@ -36,7 +36,7 @@ const axios = require('axios');
 
 async function execute(input) {
     try {
-        const goal = input.args?.goal || input.inputValue;
+        const goal = input.inputs?.goal || input.inputValue;
 
         if (!goal) {
             console.log('Goal or description is required for ACCOMPLISH plugin');
@@ -44,7 +44,7 @@ async function execute(input) {
                 success: false,
                 name: 'error',
                 resultType: PluginParameterType.ERROR,
-                resultDescription: 'Inputs did not contain a goal.',
+                resultDescription: 'JS: Inputs did not contain a goal.',
                 result: null,
                 error: 'No goal provided to ACCOMPLISH plugin'
             }];
@@ -55,21 +55,21 @@ async function execute(input) {
 
         try {
             const parsedResponse = JSON.parse(response);
-            if (parsedResponse.type === 'PLAN') {
+            if (parsedResponse.type.toUpperCase() === 'PLAN') {
                 const tasks = convertJsonToTasks(parsedResponse.plan);
                 //console.log('ACCOMPLISH plugin succeeded creating a plan', { tasks });
                 return {
                     success: true,
                     resultType: 'plan',
-                    resultDescription: \`A plan to: \${goal}\`,
+                    resultDescription: \`JS: A plan to: \${goal}\`,
                     result: tasks,
                     mimeType: 'application/json'
                 };
-            } else if (parsedResponse.type === 'DIRECT_ANSWER') {
+            } else if (parsedResponse.type.toUpperCase() === 'DIRECT_ANSWER') {
                 return {
                     success: true,
                     resultType: 'string',
-                    resultDescription: \`LLM Response\`,
+                    resultDescription: \`JS: LLM Response\`,
                     result: parsedResponse.answer,
                     mimeType: 'text/plain'
                 };
@@ -93,7 +93,7 @@ async function execute(input) {
         return {
             success: false,
             resultType: 'error',
-            resultDescription: 'Error',
+            resultDescription: 'JS: Error',
             result: null,
             error: error instanceof Error ? error.message : 'An unknown error occurred',
             mimeType: 'text/plain'
@@ -105,25 +105,23 @@ function generatePrompt(goal) {
     return \`
 Accomplish the following goal: \${goal}
 
-If you can provide a complete and direct answer or solution, respond with a JSON object in this format:
-{
-    "type": "DIRECT_ANSWER",
-    "answer": "Your direct answer here"
-}
+Crucially, you must directly respond with a JSON object in one of the following formats based on whether a complete answer or a plan is required. Do not provide descriptive text or recommendations; directly output the complete JSON.
 
-If a plan is needed, respond with a JSON object in this format:
+
+If a plan is needed to reach the goal, respond with a JSON object in this format:
 {
     "type": "PLAN",
+    "created": "A plan for reaching the goal",
     "plan": [
         {
             "number": 1,
             "verb": "ACTION_VERB",
             "description": "Brief description of the step",
-            "args": {
+            "inputs": {
                 "key1": "value1",
                 "key2": "value2"
             },
-            "dependencies": [0],
+            "dependencies": [],
             "outputs": {
                 "output1": "Description of output1",
                 "output2": "Description of output2"
@@ -133,10 +131,10 @@ If a plan is needed, respond with a JSON object in this format:
             "number": 2,
             "verb": "ANOTHER_ACTION",
             "description": "Description of another step",
-            "args": {
+            "inputs": {
                 "key3": "value3"
             },
-            "dependencies": [1],
+            "dependencies": [{sourceStepNo: 1, sourceOutputName: "output2"}],
             "outputs": {
                 "output3": "Description of output3"
             }
@@ -149,12 +147,21 @@ Guidelines for creating a plan:
 2. Use specific, actionable verbs for each step (e.g., SCRAPE, ANALYZE, PREDICT).
 3. Ensure each step has a clear, concise description.
 4. Provide detailed arguments for each step, including data sources or specific parameters.
-5. List dependencies as an array of step numbers. Use [0] if the step has no dependencies.
+5. List dependencies as an array of step numbers. Use [] if the step has no dependencies.
 6. Specify the outputs of each step that may be used by dependent steps.
 7. Aim for 5-10 steps in the plan, breaking down complex tasks if necessary.
 8. Be thorough in your description fields.  This is the only instruction the performer will have.
 9. Ensure the final step produces the desired outcome or prediction.
 10. The actionVerb DELEGATE is available to use to create sub-agents with goals of their own.
+11. Always use the "inputs" property within each step of the plan to define its parameters. The term "args" is not used for this purpose in the plan structure.
+12. For each step, include a "recommendedRole" field with one of the available agent roles that would be best suited for the task.
+
+If a plan is unnecessary and you can provide a complete, factual answer or solution, not a recommendation, respond with a JSON object in this format:
+{
+    "type": "DIRECT_ANSWER",
+    "answer": "Your direct answer here"
+}
+
 
 Ensure your response is a valid JSON object starting with either "type": "DIRECT_ANSWER" or "type": "PLAN".
 \`;
@@ -178,11 +185,12 @@ async function queryBrain(prompt) {
 function convertJsonToTasks(jsonPlan) {
     return jsonPlan.map(step => ({
         verb: step.verb,
-        args: {
+        inputs: {
+            ...step.inputs,
             ...step.args,
-            description: step.description,
-            expectedOutputs: step.outputs
         },
+        description: step.description,
+        expectedOutputs: step.outputs,
         dependencies: step.dependencies
     }));
 }

@@ -47,7 +47,6 @@ export async function storeInMongo(collectionName: string, document: any) {
         console.log(`Storing document in collection ${collectionName} with ID ${document._id}`);
 
         const collection: Collection = db.collection(collectionName);
-        const filter = { _id: document._id };
         const sanitizedDocument: Record<string, any> = {};
 
         for (const key in document) {
@@ -56,14 +55,20 @@ export async function storeInMongo(collectionName: string, document: any) {
             }
         }
 
-        const result = await collection.updateOne(
-            filter,
-            { $set: sanitizedDocument },
-            { upsert: true }
-        );
+        if (document._id) {
+            const filter = { _id: document._id };
+            const result = await collection.updateOne(
+                filter,
+                { $set: sanitizedDocument },
+                { upsert: true }
+            );
 
-        console.log(`Document stored successfully in collection ${collectionName} with ID ${document._id}`);
-        return document._id;
+            console.log(`Document stored successfully in collection ${collectionName} with ID ${document._id}`);
+            return result.upsertedId;
+        }
+        const result = await collection.insertOne(document);
+        console.log(`Document stored successfully in collection ${collectionName} with ID ${result.insertedId}`);
+        return result.insertedId;
     } catch (error) {
         analyzeError(error as Error);
         console.error(`Error storing document in collection ${collectionName}:`, error instanceof Error ? error.message : error);
