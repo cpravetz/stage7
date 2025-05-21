@@ -230,7 +230,7 @@ export async function execute(inputs: Map<string, PluginInput> | Record<string, 
                 success: false,
                 name: 'error',
                 resultType: PluginParameterType.ERROR,
-                resultDescription: 'Inputs did not contain a goal.',
+                resultDescription: 'TS: Inputs did not contain a goal.',
                 result: null,
                 error: 'No goal provided to ACCOMPLISH plugin'
             }];
@@ -278,7 +278,7 @@ export async function execute(inputs: Map<string, PluginInput> | Record<string, 
                         success: false,
                         name: 'error',
                         resultType: PluginParameterType.ERROR,
-                        resultDescription: `Generated plan contains ${verbToAvoid} verb`,
+                        resultDescription: `TS: Generated plan contains ${verbToAvoid} verb`,
                         result: null,
                         error: `Plan contains ${verbToAvoid} verb`
                     }];
@@ -298,7 +298,7 @@ export async function execute(inputs: Map<string, PluginInput> | Record<string, 
                     success: true,
                     name: 'plan', // Use 'plan' as the name to make it clear this is a plan
                     resultType: PluginParameterType.PLAN,
-                    resultDescription: `A plan to: ${goal}`,
+                    resultDescription: `TS: A plan to: ${goal}`,
                     result: tasks // Return the original tasks array, not the serialized version
                 };
                 return [result];
@@ -309,7 +309,7 @@ export async function execute(inputs: Map<string, PluginInput> | Record<string, 
                     success: true,
                     name: 'answer',
                     resultType: PluginParameterType.STRING,
-                    resultDescription: `LLM Response`,
+                    resultDescription: `TS: LLM Response`,
                     result: parsedResponse.answer
                 };
                 return [answerResult];
@@ -321,7 +321,7 @@ export async function execute(inputs: Map<string, PluginInput> | Record<string, 
                     success: false,
                     name: 'error',
                     resultType: PluginParameterType.ERROR,
-                    resultDescription: 'Failed to parse Brain response',
+                    resultDescription: 'TS: Failed to parse Brain response',
                     result: null,
                     error: `Response type not PLAN, PLUGIN or DIRECT_ANSWER: ${parsedResponse.type}`
             };
@@ -333,7 +333,7 @@ export async function execute(inputs: Map<string, PluginInput> | Record<string, 
                 success: false,
                 name: 'error',
                 resultType: PluginParameterType.ERROR,
-                resultDescription: 'Failed to parse Brain response',
+                resultDescription: 'TS: Failed to parse Brain response',
                 result: null,
                 error: error instanceof Error ? error.message : 'Unknown parsing error'
             }];
@@ -344,7 +344,7 @@ export async function execute(inputs: Map<string, PluginInput> | Record<string, 
             success: false,
             name: 'error',
             resultType: PluginParameterType.ERROR,
-            resultDescription: 'Error in ACCOMPLISH plugin',
+            resultDescription: 'TS: Error in ACCOMPLISH plugin',
             result: null,
             error: error instanceof Error ? error.message : 'An unknown error occurred'
         }];

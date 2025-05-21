@@ -55,13 +55,10 @@ export class Step {
             stepId: this.id,
             stepNo: this.stepNo,
             actionVerb: this.actionVerb,
-            inputs: MapSerializer.transformForSerialization(this.inputs),
-            dependencies: this.dependencies.map(dep => ({
-                inputName: dep.inputName,
-                sourceStepId: dep.sourceStepId,
-                outputName: dep.outputName
-            })),
+            inputs: this.inputs,
+            dependencies: this.dependencies,
             status: this.status,
+            description: this.description,
             recommendedRole: this.recommendedRole,
             timestamp: new Date().toISOString()
         });
@@ -205,10 +202,18 @@ export class Step {
                 success: false,
                 name: 'error',
                 resultType: PluginParameterType.ERROR,
-                resultDescription: 'Error executing step',
+                resultDescription: '[Step]Error executing step',
                 result: error instanceof Error ? error.message : String(error),
                 error: error instanceof Error ? error.message : String(error)
             }];
+
+            await this.logEvent({
+                eventType: 'step_result',
+                stepId: this.id,
+                stepNo: this.stepNo,
+                result: errorResult,
+                timestamp: new Date().toISOString()
+            });
 
             // Push error output to Librarian
             await this.persistenceManager.saveWorkProduct({
@@ -261,7 +266,7 @@ export class Step {
                 success: true,
                 name: 'steps',
                 resultType: PluginParameterType.PLAN,
-                resultDescription: 'New steps created from decision',
+                resultDescription: '[Step]New steps created from decision',
                 result: newSteps
             }];
         }
@@ -282,7 +287,7 @@ export class Step {
             success: true,
             name: 'steps',
             resultType: PluginParameterType.PLAN,
-            resultDescription: 'New steps created from repeat',
+            resultDescription: '[Step]New steps created from repeat',
             result: newSteps
         }];
     }
@@ -300,7 +305,7 @@ export class Step {
             success: true,
             name: 'steps',
             resultType: PluginParameterType.PLAN,
-            resultDescription: 'New steps created with timeout',
+            resultDescription: '[Step]New steps created with timeout',
             result: newSteps
         }];
     }
@@ -315,7 +320,7 @@ export class Step {
                 success: false,
                 name: 'error',
                 resultType: PluginParameterType.ERROR,
-                resultDescription: 'Error in WHILE step',
+                resultDescription: '[Step]Error in WHILE step',
                 result: null,
                 error: 'Missing required inputs: condition and steps are required'
             }];
@@ -380,7 +385,7 @@ export class Step {
             success: true,
             name: 'steps',
             resultType: PluginParameterType.PLAN,
-            resultDescription: 'Initial steps created from while loop',
+            resultDescription: '[Step]Initial steps created from while loop',
             result: newSteps
         }];
 
@@ -395,7 +400,7 @@ export class Step {
                 success: false,
                 name: 'error',
                 resultType: PluginParameterType.ERROR,
-                resultDescription: 'Error in UNTIL step',
+                resultDescription: '[Step]Error in UNTIL step',
                 result: null,
                 error: 'Missing required inputs: condition and steps are required'
             }];
@@ -441,7 +446,7 @@ export class Step {
             success: true,
             name: 'steps',
             resultType: PluginParameterType.PLAN,
-            resultDescription: 'Initial steps created from until loop',
+            resultDescription: '[Step]Initial steps created from until loop',
             result: newSteps
         }];
     }
@@ -454,7 +459,7 @@ export class Step {
                 success: false,
                 name: 'error',
                 resultType: PluginParameterType.ERROR,
-                resultDescription: 'Error in SEQUENCE step',
+                resultDescription: '[Step]Error in SEQUENCE step',
                 result: null,
                 error: 'Missing required input: steps'
             }];
@@ -492,7 +497,7 @@ export class Step {
             success: true,
             name: 'steps',
             resultType: PluginParameterType.PLAN,
-            resultDescription: 'New steps created in sequence',
+            resultDescription: '[Step]New steps created in sequence',
             result: newSteps
         }];
     }

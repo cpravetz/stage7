@@ -24,8 +24,6 @@ const configPath = path.join(os.homedir(), '.cktmcs', 'capabilitiesmanager.json'
 
 const execAsync = promisify(exec);
 
-// NOTE: Don't use this directly - use this.authenticatedApi or this.getAuthenticatedAxios() instead
-// This is kept for backward compatibility only
 
 export class CapabilitiesManager extends BaseEntity {
     private librarianUrl: string = process.env.LIBRARIAN_URL || 'librarian:5040';
@@ -769,9 +767,8 @@ export class CapabilitiesManager extends BaseEntity {
     private async handleUnknownVerb(step: Step): Promise<PluginOutput> {
         try {
             const context = ` ${step.description || ''} with inputs ${MapSerializer.transformForSerialization(step.inputs)}`;
-            const goal = `How should I handle the action verb "${step.actionVerb}" in our plan with the following context: ${context}
-            Can we accomplish it with a subplan using one or more steps or should we create a plugin that can run code to accomplish it?
-            Avoid using this action verb, ${step.actionVerb}, in the plan.
+            const goal = `Handle the action verb "${step.actionVerb}" in our plan with the following context: ${context} by defining a plan, generating an answer from the inputs, or recommending a new plugin for handling the actionVerb.
+            Respond with a plan, a plugin request, or a literal result.  Avoid using this action verb, ${step.actionVerb}, in the plan.
             `;
             const verbToAvoid = step.actionVerb;
 
@@ -803,7 +800,7 @@ export class CapabilitiesManager extends BaseEntity {
                             name: 'error',
                             resultType: PluginParameterType.ERROR,
                             error: 'Failed to create plugin',
-                            resultDescription: 'Failed to create plugin',
+                            resultDescription: 'CM: Failed to create plugin',
                             result: null
                         };
                     }
@@ -812,7 +809,7 @@ export class CapabilitiesManager extends BaseEntity {
                         name: 'plugin_created',
                         resultType: PluginParameterType.PLUGIN,
                         result: plugin,
-                        resultDescription: `Created new plugin for ${step.actionVerb}`
+                        resultDescription: `CM: Created new plugin for ${step.actionVerb}`
                     };
 
                 case PluginParameterType.PLAN:
@@ -823,7 +820,7 @@ export class CapabilitiesManager extends BaseEntity {
                         name: 'plan_created',
                         resultType: PluginParameterType.PLAN,
                         result: accomplishResult.result,
-                        resultDescription: `Created plan to handle ${step.actionVerb}`
+                        resultDescription: `CM: Created plan to handle ${step.actionVerb}`
                     };
 
                 case PluginParameterType.STRING:
@@ -836,7 +833,7 @@ export class CapabilitiesManager extends BaseEntity {
                         name: 'direct_result',
                         resultType: accomplishResult.resultType,
                         result: accomplishResult.result,
-                        resultDescription: `Direct result for ${step.actionVerb}`
+                        resultDescription: `CM: Direct result for ${step.actionVerb}`
                     };
 
                 default:
@@ -845,7 +842,7 @@ export class CapabilitiesManager extends BaseEntity {
                         name: 'error',
                         resultType: PluginParameterType.ERROR,
                         error: `Unexpected result type: ${accomplishResult.resultType}`,
-                        resultDescription: 'Unexpected response from ACCOMPLISH plugin',
+                        resultDescription: 'CM: Unexpected response from ACCOMPLISH plugin',
                         result: null
                     };
             }
