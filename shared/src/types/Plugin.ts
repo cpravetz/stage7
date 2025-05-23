@@ -6,92 +6,7 @@ export enum PluginParameterType {
     OBJECT = 'object',
     PLAN = 'plan',
     PLUGIN = 'plugin',
-    ERROR = 'error',
-    ANY = 'any'
-}
-
-export enum ConfigItemType {
-    CREDENTIAL = 'credential',  // Sensitive data like passwords
-    SETTING = 'setting',       // Regular configuration
-    SECRET = 'secret',         // Encrypted values
-    ENVIRONMENT = 'environment' // Environment variables
-}
-
-export interface ConfigItem {
-    key: string;
-    type: ConfigItemType;
-    description: string;
-    required: boolean;
-    default?: string;
-    validation?: {
-        pattern?: string;
-        minLength?: number;
-        maxLength?: number;
-        options?: string[];
-    };
-    value?: string;
-}
-
-export type environmentType = {
-    env: NodeJS.ProcessEnv;
-    credentials: ConfigItem[];
-};
-
-export interface EntryPointType {
-    main: string;
-    files: Record<string,string>;
-    test: Record<string,string>;
-}
-
-export interface Step {
-    id: string;
-    stepNo: number;
-    actionVerb: string;
-    description?: string;
-    inputs: Map<string, PluginInput>;
-    dependencies: StepDependency[];
-    status: 'pending' | 'running' | 'completed' | 'error';
-    result?: PluginOutput[];
-    timeout?: number;
-}
-
-export interface MetadataType {
-    category: string[];
-    tags: string[];
-    complexity: number;
-    dependencies: string[];
-    version: string;
-    lastUsed?: Date;
-    usageCount?: number;
-}
-
-export interface PluginDefinition {
-    id: string;
-    verb: string;
-    description?: string;
-    explanation?: string;
-    inputDefinitions: PluginParameter[];
-    outputDefinitions: PluginParameter[];
-    entryPoint?: EntryPointType;
-    language: 'javascript' | 'python' | 'typescript';
-    version : string;
-    configuration?: ConfigItem[];
-    metadata?: MetadataType;
-    security: {
-        permissions: string[];        // Required permissions like 'fs.read', 'net.fetch'
-        sandboxOptions: {            // VM sandbox configuration
-            allowEval: boolean;
-            timeout: number;
-            memory: number;
-            allowedModules: string[];
-            allowedAPIs: string[];
-        };
-        trust: {                     // Trust and verification
-            signature?: string;      // Code signature
-            publisher?: string;      // Verified publisher
-            certificateHash?: string;// Certificate hash for verification
-        };
-    };
+    ERROR = 'error'
 }
 
 export interface PluginParameter {
@@ -99,52 +14,76 @@ export interface PluginParameter {
     required: boolean;
     type: PluginParameterType;
     description: string;
-    mimeType?: string;
+    mimeType?: string; // Optional: Specify MIME type for inputs/outputs if relevant (e.g., 'application/json', 'text/plain', 'image/png')
+    defaultValue?: any; // Optional: A default value for an input if not provided
 }
 
-export interface PluginInput {
-    inputName: string;
-    inputValue: any;
-    inputSource?: string;
-    args: Record<string, any>;
+export interface EntryPointType {
+    main: string; // Name of entry point file (e.g., 'main.py', 'index.js')
+    files?: Record<string, string>; // Code content as filename: filecontent. Optional if using packageSource.
 }
 
-export interface PluginOutput {
-    success: boolean;
-    name: string;
-    resultType: PluginParameterType;
-    result: any;
-    resultDescription: string,
-    error?: string,
-    mimeType?: string,
-    console?: any[]
+// New interface for defining plugin package source
+export interface PluginPackage {
+    type: 'git' | 'archive' | 'inline'; // 'inline' refers to current entryPoint.files model
+    url?: string;       // For 'git' (repo URL) or 'archive' (URL to .zip/.tar.gz)
+    commitHash?: string; // For 'git' to pin to a specific commit
+    branch?: string;    // For 'git' to pin to a specific branch/tag (defaults to repo default if not set)
+    subPath?: string;   // Optional sub-directory within the repo/archive where the plugin's main entrypoint and files reside
 }
 
-export interface StepDependency {
-    inputName: string;      // The input variable that needs the value
-    sourceStepId: string;   // The step that provides the value
-    outputName: string;     // The specific output to use from the source step
+export interface PluginSecurity {
+    permissions: string[]; // e.g., 'fs.read', 'net.fetch', 'llm.query'
+    sandboxOptions: {
+        allowEval: boolean;
+        timeout: number; // in milliseconds
+        memory: number; // in MB
+        allowedModules: string[]; // for JS sandbox
+        allowedAPIs: string[]; // specific external APIs plugin can call
+    };
+    trust: {
+        signature?: string;
+        publisher?: string; // ID or name of the publisher
+        certificateHash?: string; // Hash of a code-signing certificate
+    };
 }
 
-export interface PlanDependency {
-    inputName: string;
-    sourceStepNo: number;  // Using step number instead of ID during planning
-    sourceStepId?: string;
-    outputName: string;
+export interface PluginConfigurationItem {
+    key: string;
+    value: string | number | boolean | null;
+    description: string;
+    required: boolean;
+    type: 'string' | 'number' | 'boolean' | 'secret'; // 'secret' for sensitive values
 }
 
-export type PluginChangeEvent = {
-    type: 'PUBLISHED' | 'UPDATED' | 'DELETED';
-    plugin: PluginDefinition;
-    signature?: string;
-};
+export interface PluginMetadata {
+    author?: string;
+    website?: string;
+    license?: string;
+    category?: string[]; // e.g., 'text_generation', 'file_processing', 'communication'
+    tags?: string[];
+    versionScheme?: 'semver' | 'custom'; // How versioning is handled
+    dependencies?: Record<string, string>; // e.g., other plugins or library versions like {"python": ">=3.8"}
+    compatibility?: {
+        minHostVersion?: string; // Minimum version of the host system/CapabilitiesManager
+    };
+    [key: string]: any; // For other custom metadata
+}
 
-export interface ActionVerbTask {
-    id?: string;
-    verb: string;
-    inputs: Map<string, PluginInput>;
-    expectedOutputs?: Map<string, string>;
-    description?: string;
-    dependencies?: PlanDependency[];
-    recommendedRole?: string;
+export interface PluginDefinition {
+    id: string; // Unique identifier for the plugin (e.g., "plugin-text-summarizer-v1")
+    verb: string; // The action verb this plugin handles (e.g., "SUMMARIZE_TEXT")
+    description: string;
+    explanation?: string; // More detailed explanation of what the plugin does, its inputs, outputs, and how it works.
+    inputDefinitions: PluginParameter[];
+    outputDefinitions: PluginParameter[];
+    language: 'javascript' | 'python' | 'openapi' | string; // Allow string for future extensibility
+    entryPoint?: EntryPointType; // Optional if language is 'openapi' or if code comes purely from packageSource
+    packageSource?: PluginPackage; // New field for defining package source
+    security: PluginSecurity;
+    configuration?: PluginConfigurationItem[]; // Configuration needed by the plugin
+    version: string; // e.g., "1.0.0"
+    metadata?: PluginMetadata;
+    createdAt?: string; // ISO 8601 date string
+    updatedAt?: string; // ISO 8601 date string
 }
