@@ -1,8 +1,15 @@
 import axios from 'axios';
 import express from 'express';
-import { MapSerializer, BaseEntity, PluginInput, PluginDefinition, PluginParameter, ConfigItem, MetadataType, signPlugin } from '@cktmcs/shared';
+import { MapSerializer, BaseEntity, PluginInput, PluginDefinition, PluginParameter, ConfigItem, MetadataType, signPlugin, EntryPointType, PluginParameterType } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { PluginMarketplace } from '@cktmcs/marketplace';
+import { promises as fs } from 'fs';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import path from 'path'; // Added for temp file path
+import os from 'os'; // Added for temp directory
+
+const execAsync = promisify(exec);
 import { createHash } from 'crypto';
 
 // NOTE: Don't use this directly - use this.authenticatedApi or this.getAuthenticatedAxios() instead
@@ -78,7 +85,7 @@ export class Engineer extends BaseEntity {
 
         try {
             const contextString = JSON.stringify(Array.from(context.entries()));
-            const engineeringPrompt = `Create a javascript or python based plugin for the action verb "${verb}" with the following context: ${explanation}
+            const engineeringPrompt = `Create a Python 3.9+ based plugin for the action verb "${verb}" with the following context: ${explanation}. If Python is not suitable for this specific task (provide a brief justification if so), you may generate a JavaScript plugin instead.
 
             The planner provides this additional guidance: ${guidance}
 
@@ -86,110 +93,90 @@ export class Engineer extends BaseEntity {
 
             interface PluginInput {
                 inputValue: string | number | boolean | any[] | object | null;
-                args: Record<string, any>;
-                dependencyOutputs: Record<string, any>;
-                agentDependencies?: Record<string, any>;
+                args: Record<string, any>; // Note: For Python, this structure will be part of the JSON received on stdin
+                // dependencyOutputs, agentDependencies are less relevant for direct code generation prompt
             }
 
             Use this context to determine the required inputs: ${contextString}
 
              Important requirements:
-              1. The plugin MUST include comprehensive error handling
-              2. All external dependencies must be explicitly declared
-              3. Include input validation for all parameters
-              4. Add logging for important operations
-              5. If the plugin might generate a plan, include PLAN in outputDefinitions
-              6. Include unit tests in a separate file
-              7. Add retry logic for external service calls
-              8. Include proper TypeScript types/interfaces
+              1. The plugin MUST include comprehensive error handling.
+              2. All external dependencies must be explicitly declared (e.g., in requirements.txt for Python).
+              3. Include input validation for all parameters within the plugin logic.
+              4. Add logging for important operations.
+              5. If the plugin might generate a plan, include PLAN in outputDefinitions.
+              6. Include comprehensive unit tests in a separate file (e.g., 'test_main.py' for Python or 'plugin.test.js' for JavaScript) covering primary functionality, input validation, and edge cases.
+              7. Add retry logic for external service calls if applicable.
+              8. Python plugins MUST read their inputs (a JSON string representing Map<string, PluginInput> equivalent) from standard input (stdin) and print their results (a JSON string representing PluginOutput[] array) to standard output (stdout).
+              9. Generated code should follow security best practices, including sanitizing any inputs used in shell commands or file paths, and avoiding common vulnerabilities.
+              10. For Python plugins, ensure the main logic is in a 'main.py' file.
+              11. If the Python plugin requires external Python packages, include a 'requirements.txt' file in the entryPoint.files listing these dependencies (e.g., requests==2.25.1).
 
             Provide a JSON object with the following structure:
             {
-                id: 'plugin-{verb}',
-                verb: '{verb}',
-                description: A short description of the plugin,
-                explanation: A more complete description including inputs, process overview, and outputs,
-                inputDefinitions: [{
-                  name: string,
-                  required: boolean,
-                  type: PluginParameterType,
-                  description: string,
-                  validation?: {
-                      pattern?: string,
-                      min?: number,
-                      max?: number,
-                      allowedValues?: any[]
-                  }
+                "id": "plugin-${verb}",
+                "verb": "${verb}",
+                "description": "A short description of the plugin",
+                "explanation": "A more complete description including inputs, process overview, and outputs",
+                "inputDefinitions": [{
+                  "name": "string",
+                  "required": true, // or false
+                  "type": "PluginParameterType (e.g. string, number, object)",
+                  "description": "string"
                 }],
-                outputDefinitions: [{
-                  name: string,
-                  required: boolean,
-                  type: PluginParameterType,
-                  description: string
+                "outputDefinitions": [{
+                  "name": "string",
+                  "required": true, // or false
+                  "type": "PluginParameterType (e.g. string, object, plan)",
+                  "description": "string"
                 }],
-                language: 'javascript',
-                entryPoint: {
-                    main: {name of primary code file to run},
-                    files: Record<filename, code>,
-                    test:  Record<filename, code>,
+                // Example for Python:
+                "language": "python",
+                "entryPoint": {
+                    "main": "main.py",
+                    "files": {
+                        "main.py": "# Python code here...\nimport json, sys\nif __name__ == '__main__':\n  try:\n    inputs_map = json.load(sys.stdin)\n    # Example: process inputs_map['input_name']['inputValue']\n    # Replace with actual plugin logic \n    result = [{'name': 'outputName', 'result': 'resultValue', 'resultType': 'string', 'success': True, 'resultDescription': 'Operation successful'}]\n  except Exception as e:\n    result = [{'name': 'error', 'result': str(e), 'resultType': 'ERROR', 'success': False, 'resultDescription': 'An error occurred'}]\n  print(json.dumps(result))",
+                        "requirements.txt": "# e.g., requests>=2.20"
+                    },
+                    "test": {
+                        "test_main.py": "# Python unit tests here..."
+                    }
                 },
-                configuration: array of configuration items formed like
-                {
-                    key: {configuration key},
-                    value: {default value if any},
-                    description: {description of the configuration item},
-                    required: true/false
-                },
-                metadata: {
-                    category: [array of categories],
-                    tags: [array of tags],
-                    complexity: {number from 1 to 10},
-                    dependencies: [array of dependencies],
-                    version: {version string}
+                // Example for JavaScript:
+                // "language": "javascript",
+                // "entryPoint": {
+                //     "main": "plugin.js",
+                //     "files": {
+                //         "plugin.js": "// JavaScript code here..."
+                //     },
+                //     "test": {
+                //         "plugin.test.js": "// JavaScript unit tests here..."
+                //     }
+                // },
+                "configuration": [{ // array of configuration items
+                    "key": "API_KEY_EXAMPLE",
+                    "value": "default_value_if_any",
+                    "description": "Description of the configuration item",
+                    "required": true
+                }],
+                "metadata": {
+                    "category": ["category1", "category2"],
+                    "tags": ["tag1", "tag2"],
+                    "complexity": 5, // number from 1 to 10
+                    "dependencies": ["dependency1", "dependency2"], // e.g., other plugins or services
+                    "version": "1.0.0"
                 }
             }
-Types used in the plugin structure are:
 
-    export interface Plugin {
-        id: string;
-        verb: string;
-        description?: string;
-        explanation?: string;
-        inputDefinitions: PluginParameter[];
-        outputDefinitions: PluginParameter[];
-        entryPoint?: EntryPointType;
-        language: 'javascript' | 'python';
-    }
+            Relevant TypeScript type definitions for structure:
+            PluginParameterType: ${JSON.stringify(Object.values(PluginParameterType))}
 
-    export enum PluginParameterType {
-        STRING = 'string',
-        NUMBER = 'number',
-        BOOLEAN = 'boolean',
-        ARRAY = 'array',
-        OBJECT = 'object',
-        PLAN = 'plan',
-        PLUGIN = 'plugin',
-        ERROR = 'error'
-    }
-
-    export interface EntryPointType {
-        main: string; //Name of entry point file
-        files: Record<string,string>; //files defined as filename: filecontent
-    }
-
-    export interface PluginParameter {
-        name: string;
-        required: boolean;
-        type: PluginParameterType;
-        description: string;
-        mimeType?: string;
-    }
             Ensure the plugin's 'inputDefinitions' field accurately defines the expected PluginInputs based on the provided context.
-            The main file should implement the plugin logic and handle the inputs correctly, expecting a Map<string, PluginInput>.
+            The main file should implement the plugin logic and handle the inputs correctly.
             Include appropriate error handling and logging.
             Use publicly available web services where possible.
-            The code should be immediately executable without any compilation step.
-            Determine any necessary environment variables or configuration items needed for the plugin to function correctly.
+            The code should be immediately executable (Python scripts, JavaScript).
+            Determine any necessary environment variables or configuration items needed for the plugin to function correctly and list them in 'configuration'.
 `;
 
             const response = await this.authenticatedApi.post(`http://${this.brainUrl}/chat`, {
@@ -200,12 +187,13 @@ Types used in the plugin structure are:
 
             // Validate the generated plugin structure
             if (!this.validatePluginStructure(pluginStructure)) {
-                throw new Error('Generated plugin structure is invalid');
+                // More specific error or logging can be added in validatePluginStructure
+                throw new Error('Generated plugin structure is invalid or incomplete.');
             }
 
             // Run basic syntax validation on the generated code
-            if (!await this.validatePluginCode(pluginStructure.entryPoint)) {
-                throw new Error('Generated plugin code contains syntax errors');
+            if (!await this.validatePluginCode(pluginStructure.entryPoint, pluginStructure.language)) {
+                throw new Error('Generated plugin code failed validation');
             }
 
             return this.finalizePlugin(pluginStructure, explanation);
@@ -270,25 +258,62 @@ Types used in the plugin structure are:
     }
 
     private validatePluginStructure(plugin: any): boolean {
-      const requiredFields = ['id', 'verb', 'inputDefinitions', 'outputDefinitions', 'entryPoint'];
-      return requiredFields.every(field => plugin[field]) &&
-             plugin.entryPoint.files &&
-             Object.keys(plugin.entryPoint.files).length > 0;
-    }
-
-    private async validatePluginCode(entryPoint: any): Promise<boolean> {
-      try {
-          // Basic syntax check for JavaScript/TypeScript files
-          for (const [filename, content] of Object.entries(entryPoint.files)) {
-              if (filename.endsWith('.js') || filename.endsWith('.ts')) {
-                  new Function(content as string);
-              }
+      // TODO: Implement JSON schema validation for comprehensive manifest checking.
+      const requiredFields = ['id', 'verb', 'inputDefinitions', 'outputDefinitions', 'entryPoint', 'language'];
+      for (const field of requiredFields) {
+          if (!plugin[field]) {
+              console.error(`Plugin structure validation failed: Missing required field '${field}'.`);
+              return false;
           }
-          return true;
-      } catch (error) {
-          console.error('Code validation error:', error);
+      }
+
+      if (!plugin.entryPoint.main || typeof plugin.entryPoint.main !== 'string' || plugin.entryPoint.main.trim() === '') {
+        console.error(`Plugin structure validation failed: 'entryPoint.main' must be a non-empty string.`);
+        return false;
+      }
+
+      if (!plugin.entryPoint.files || typeof plugin.entryPoint.files !== 'object' || Object.keys(plugin.entryPoint.files).length === 0) {
+          console.error(`Plugin structure validation failed: 'entryPoint.files' must be a non-empty object.`);
           return false;
       }
+      return true;
+    }
+
+    private async validatePluginCode(entryPoint: EntryPointType, language: string): Promise<boolean> {
+        if (!entryPoint || !entryPoint.files) {
+            console.warn('Code validation warning: entryPoint or entryPoint.files is missing. Skipping code validation.');
+            return true; // Or false, depending on strictness requirements
+        }
+        try {
+            for (const [filename, content] of Object.entries(entryPoint.files)) {
+                if (typeof content !== 'string') {
+                    console.error(`Code validation error: Content of ${filename} is not a string.`);
+                    return false;
+                }
+                if (language === 'javascript' && (filename.endsWith('.js') || filename.endsWith('.ts'))) {
+                    console.log(`Validating JavaScript syntax for ${filename}...`);
+                    new Function(content as string); // Basic syntax check
+                    console.log(`JavaScript syntax OK for ${filename}`);
+                } else if (language === 'python' && filename.endsWith('.py')) {
+                    console.log(`Validating Python syntax for ${filename}...`);
+                    const tempPyFile = path.join(os.tmpdir(), `validate_${Date.now()}.py`);
+                    try {
+                        await fs.writeFile(tempPyFile, content as string);
+                        await execAsync(`python3 -m py_compile ${tempPyFile}`);
+                        console.log(`Python syntax OK for ${filename}`);
+                    } catch (compileError: any) {
+                        console.error(`Python syntax error in ${filename}:`, compileError.stderr || compileError.message);
+                        throw new Error(`Python syntax error in ${filename}: ${compileError.stderr || compileError.message}`);
+                    } finally {
+                        await fs.unlink(tempPyFile).catch(e => console.error(`Failed to delete temp file ${tempPyFile}:`, e));
+                    }
+                }
+            }
+            return true;
+        } catch (error) {
+            console.error('Code validation error during processing:', error);
+            return false;
+        }
     }
 
     private finalizePlugin(pluginStructure: any, explanation: string): PluginDefinition {

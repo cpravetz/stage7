@@ -99,14 +99,17 @@ export class GitHubRepository implements PluginRepository {
                 `Publishing plugin ${manifest.id} - ${manifest.verb}`
             );
 
-            // Create or update entry point files if they exist
-            if (manifest.entryPoint?.files) {
-                for (const [filename, content] of Object.entries(manifest.entryPoint.files)) {
-                    await this.createOrUpdateFile(
-                        `${pluginPath}/${filename}`,
-                        content,
-                        `Adding file ${filename} for plugin ${manifest.id}`
-                    );
+            // For git-sourced plugins, we only store the manifest. The code is in the git repo.
+            // For inline plugins, we store the files if provided.
+            if (!(manifest.packageSource && manifest.packageSource.type === 'git')) {
+                if (manifest.entryPoint?.files) {
+                    for (const [filename, content] of Object.entries(manifest.entryPoint.files)) {
+                        await this.createOrUpdateFile(
+                            `${pluginPath}/${filename}`,
+                            content,
+                            `Adding file ${filename} for plugin ${manifest.id}`
+                        );
+                    }
                 }
             }
 
@@ -146,31 +149,35 @@ export class GitHubRepository implements PluginRepository {
             // Parse manifest
             const manifest = JSON.parse(manifestContent) as PluginManifest;
 
-            // If the manifest has entry point files, fetch them
-            if (manifest.entryPoint && !manifest.entryPoint.files) {
-                manifest.entryPoint.files = {};
-
-                // Try to get directory contents to find entry point files
-                try {
-                    const response = await this.makeGitHubRequest('GET', `${this.baseContentUrl}/${this.pluginsDir}/${id}`);
-
-                    if (response.status === 200 && Array.isArray(response.data)) {
-                        // Filter out the manifest file and directories
-                        const files = response.data.filter((item: { type: string; name: string }) =>
-                            item.type === 'file' &&
-                            item.name !== 'plugin-manifest.json'
-                        );
-
-                        // Fetch each file content
-                        for (const file of files) {
-                            const fileContent = await this.getFileContent(`${this.pluginsDir}/${id}/${file.name}`);
-                            if (fileContent) {
-                                manifest.entryPoint.files[file.name] = fileContent;
+            // If the plugin is git-sourced, do not attempt to fetch entryPoint files from the marketplace repo.
+            // The PluginRegistry will handle fetching code from the specified git repository.
+            if (manifest.packageSource && manifest.packageSource.type === 'git') {
+                // Optional: Clear entryPoint.files if it somehow got populated,
+                // as it might be misleading for a git-sourced plugin.
+                // if (manifest.entryPoint) {
+                //     manifest.entryPoint.files = undefined;
+                // }
+                console.log(`Fetched manifest for git-sourced plugin ${id}. Code will be handled by PluginRegistry.`);
+            } else {
+                // For non-git-sourced plugins (inline), fetch files if entryPoint.files is not already populated.
+                if (manifest.entryPoint && !manifest.entryPoint.files) {
+                    manifest.entryPoint.files = {};
+                    try {
+                        const response = await this.makeGitHubRequest('GET', `${this.baseContentUrl}/${this.pluginsDir}/${id}`);
+                        if (response.status === 200 && Array.isArray(response.data)) {
+                            const filesToFetch = response.data.filter((item: { type: string; name: string }) =>
+                                item.type === 'file' && item.name !== 'plugin-manifest.json'
+                            );
+                            for (const file of filesToFetch) {
+                                const fileContent = await this.getFileContent(`${this.pluginsDir}/${id}/${file.name}`);
+                                if (fileContent) {
+                                    manifest.entryPoint.files[file.name] = fileContent;
+                                }
                             }
                         }
+                    } catch (error) {
+                        console.warn(`Failed to fetch entry point files for inline plugin ${id}: ${error instanceof Error ? error.message : String(error)}`);
                     }
-                } catch (error) {
-                    console.warn(`Failed to fetch entry point files for plugin ${id}: ${error instanceof Error ? error.message : String(error)}`);
                 }
             }
 
