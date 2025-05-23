@@ -87,3 +87,49 @@ export interface PluginDefinition {
     createdAt?: string; // ISO 8601 date string
     updatedAt?: string; // ISO 8601 date string
 }
+
+export interface PluginInput {
+    inputName: string;
+    inputValue: any;
+    inputSource?: string;
+    args: Record<string, any>;
+}
+
+export interface PluginOutput {
+    success: boolean;
+    name: string;
+    resultType: PluginParameterType;
+    result: any;
+    resultDescription: string,
+    error?: string,
+    mimeType?: string,
+    console?: any[]
+}
+
+export type environmentType = {
+    env: NodeJS.ProcessEnv;
+    credentials: ConfigItem[];
+};
+
+export enum ConfigItemType {
+    CREDENTIAL = 'credential',  // Sensitive data like passwords
+    SETTING = 'setting',       // Regular configuration
+    SECRET = 'secret',         // Encrypted values
+    ENVIRONMENT = 'environment' // Environment variables
+}
+
+export interface ConfigItem {
+    key: string;
+    type: ConfigItemType;
+    description: string;
+    required: boolean;
+    default?: string;
+    validation?: {
+        pattern?: string;
+        minLength?: number;
+        maxLength?: number;
+        options?: string[];
+    };
+    value?: string;
+}
+
