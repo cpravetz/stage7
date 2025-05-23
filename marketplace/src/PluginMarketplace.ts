@@ -177,8 +177,10 @@ export class PluginMarketplace {
             if (existingPlugin) {
                 repository = existingPlugin.repository.type;
             }
-            const signature = await this.signPluginWithShared(plugin);
-            plugin.security.trust.signature = signature;
+            // Signing is now expected to be done by the Engineer service before storing.
+            // The manifest should arrive with a signature if it's a new plugin.
+            // const signature = await this.signPluginWithShared(plugin); // REMOVE THIS
+            // plugin.security.trust.signature = signature; // REMOVE THIS
             const repo = this.repositories.get(repository);
             if (repo) {
                 await repo.store(plugin);

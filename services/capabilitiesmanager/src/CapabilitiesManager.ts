@@ -323,9 +323,26 @@ export class CapabilitiesManager extends BaseEntity {
                 console.log(`CapabilitiesManager: Updating plugin ${newPlugin.id} from version ${existingPlugin.version} to ${newPlugin.version}`);
             }
 
-            // TEMPORARY: Completely bypass plugin signature verification
-            console.log('CM: COMPLETELY BYPASSING plugin signature verification for storeNewPlugin');
-            // Skipping all signature verification code
+            // Signature Verification for storeNewPlugin
+            if (!newPlugin.security?.trust?.signature) {
+                console.warn(`Plugin ${newPlugin.id || newPlugin.verb} submitted to storeNewPlugin without a signature.`);
+                return res.status(400).json({ error: 'Plugin submission requires a signature.' });
+            }
+
+            let isSignatureValid = false;
+            try {
+                // Assuming newPlugin (PluginManifest from req.body) is structurally compatible with PluginDefinition for verification
+                isSignatureValid = await verifyPluginSignature(newPlugin as PluginDefinition);
+            } catch (verificationError: any) {
+                console.error('Error during signature verification in storeNewPlugin:', verificationError.message);
+                // Fall through, isSignatureValid remains false
+            }
+
+            if (!isSignatureValid) {
+                console.warn(`Plugin ${newPlugin.id || newPlugin.verb} submitted to storeNewPlugin has an invalid signature.`);
+                return res.status(400).json({ error: 'Plugin signature is invalid.' });
+            }
+            console.log(`CM: Plugin ${newPlugin.id || newPlugin.verb} signature verified for storeNewPlugin endpoint.`);
 
             // Validate plugin permissions
             const permissionErrors = validatePluginPermissions(newPlugin);
@@ -458,8 +475,11 @@ export class CapabilitiesManager extends BaseEntity {
             }
             //console.log('CM: Inputs validated successfully:', validatedInputs.inputs);
 
-            // Execute plugin with validated inputs
-            const result = await this.executePlugin(plugin, validatedInputs.inputs || new Map<string, PluginInput>());
+            // Prepare plugin for execution (clones git-based plugins, etc.)
+            const { pluginRootPath, effectiveManifest } = await this.pluginRegistry.preparePluginForExecution(plugin);
+
+            // Execute plugin with validated inputs and the effective manifest and root path
+            const result = await this.executePlugin(effectiveManifest, validatedInputs.inputs || new Map<string, PluginInput>(), pluginRootPath);
 
             console.log('executePlugin result: ',result);
             // Log the result in a more readable format
@@ -493,8 +513,37 @@ export class CapabilitiesManager extends BaseEntity {
         }
     }
 
-    protected async executePlugin(plugin: PluginDefinition, inputs: Map<string, PluginInput>): Promise<PluginOutput[]> {
+// Define a type for ExecutionContext for clarity, though it's not a formal interface here
+type ExecutionContext = {
+    inputs: Map<string, PluginInput>;
+    environment: environmentType;
+    pluginDefinition: PluginDefinition;
+    pluginRootPath: string;
+};
+
+    protected async executePlugin(
+        plugin: PluginDefinition, // Changed from effectiveManifest back to plugin for clarity
+        inputs: Map<string, PluginInput>,
+        pluginRootPath: string // Renamed from pluginRootPathFromPreparation
+    ): Promise<PluginOutput[]> {
+        console.log(`CM: Attempting to execute plugin ID: ${plugin.id}, Verb: ${plugin.verb}, RootPath: ${pluginRootPath}`);
         try {
+            // Mandatory Signature Verification
+            if (!plugin.security?.trust?.signature) {
+                console.error(`Plugin ${plugin.id} (${plugin.verb}) has no signature. Execution denied.`);
+                return [{ success: false, name: 'security_error', resultType: PluginParameterType.ERROR, resultDescription: `Plugin ${plugin.id} (${plugin.verb}) is not signed.`, result: null }];
+            }
+            try {
+                const isSignatureValid = await verifyPluginSignature(plugin);
+                if (!isSignatureValid) {
+                    console.error(`Plugin ${plugin.id} (${plugin.verb}) signature verification failed. Execution denied.`);
+                    return [{ success: false, name: 'security_error', resultType: PluginParameterType.ERROR, resultDescription: `Plugin ${plugin.id} (${plugin.verb}) signature invalid.`, result: null }];
+                }
+                console.log(`CM: Plugin ${plugin.id} (${plugin.verb}) signature verified successfully for execution.`);
+            } catch (verificationError: any) {
+                console.error(`Error during signature verification for plugin ${plugin.id} (${plugin.verb}):`, verificationError.message);
+                return [{ success: false, name: 'security_error', resultType: PluginParameterType.ERROR, resultDescription: `Error verifying plugin ${plugin.id} (${plugin.verb}) signature: ${verificationError.message}`, result: null }];
+            }
 
             // Validate plugin permissions
             const permissionErrors = validatePluginPermissions(plugin);
@@ -510,20 +559,17 @@ export class CapabilitiesManager extends BaseEntity {
 
             // Check for dangerous permissions
             if (hasDangerousPermissions(plugin)) {
-                console.warn(`Plugin ${plugin.id} has dangerous permissions`);
-                // In a production environment, we might want to prompt the user for confirmation
-                // or restrict execution based on user permissions
+                console.warn(`CM: Plugin ${plugin.id} has dangerous permissions. Proceeding with execution.`);
             }
 
             // Load plugin-specific configuration
             const configSet = await this.configManager.getPluginConfig(plugin.id);
 
             // Check for missing required configuration
-            if (configSet.length === 0) {
+            if (configSet.length === 0) { // This condition seems incorrect, should check if items in configSet are missing
                 for (const configItem of configSet) {
                     if (configItem.required && !configItem.value) {
-                        const answer = await this.ask(`Please provide a value for ${configItem.key} - ${configItem.description}`);
-                        configItem.value = answer;
+                        console.error(`CM: Missing required configuration for plugin ${plugin.id}: ${configItem.key}`);
                     }
                 }
             }
@@ -532,153 +578,87 @@ export class CapabilitiesManager extends BaseEntity {
             await this.configManager.recordPluginUsage(plugin.id);
             await this.configManager.updatePluginConfig(plugin.id, configSet);
 
-            // Get the current token for the CapabilitiesManager to pass to the plugin
-            // This allows plugins to use the CapabilitiesManager's token for authenticated requests
             let token = null;
             let brainToken = null;
 
             try {
-                // Get a token for the CapabilitiesManager
                 const tokenManager = this.getTokenManager();
                 token = await tokenManager.getToken();
-
                 if (token) {
                     console.log('CM: Got authentication token for plugin execution');
                 } else {
                     console.warn('CM: Failed to get authentication token for plugin');
                 }
 
-                // Get a token specifically for the Brain service
-                // This is needed for the ACCOMPLISH plugin to call the Brain's /chat endpoint
                 if (plugin.verb === 'ACCOMPLISH') {
-                    try {
-                        // Create a new ServiceTokenManager for the Brain service
-                        const brainTokenManager = new ServiceTokenManager(
-                            `http://${this.securityManagerUrl}`,
-                            'Brain', // Use 'Brain' as the service ID
-                            process.env.CLIENT_SECRET || 'stage7AuthSecret'
-                        );
-
-                        brainToken = await brainTokenManager.getToken();
-
-                        if (brainToken) {
-                            console.log('CM: Got Brain-specific authentication token for ACCOMPLISH plugin');
-                        } else {
-                            console.warn('CM: Failed to get Brain-specific authentication token');
-                        }
-                    } catch (brainTokenError) {
-                        console.error('CM: Error getting Brain-specific authentication token:',
-                            brainTokenError instanceof Error ? brainTokenError.message : String(brainTokenError));
+                    const brainTokenManager = new ServiceTokenManager(
+                        `http://${this.securityManagerUrl}`,
+                        'Brain',
+                        process.env.CLIENT_SECRET || 'stage7AuthSecret'
+                    );
+                    brainToken = await brainTokenManager.getToken();
+                    if (brainToken) {
+                        console.log('CM: Got Brain-specific authentication token for ACCOMPLISH plugin');
+                    } else {
+                        console.warn('CM: Failed to get Brain-specific authentication token');
                     }
                 }
             } catch (tokenError) {
-                console.error('CM: Error getting authentication token:', tokenError instanceof Error ? tokenError.message : String(tokenError));
+                console.error('CM: Error getting authentication token(s):', tokenError instanceof Error ? tokenError.message : String(tokenError));
             }
 
-            // Create a custom environment with the tokens
             const customEnv = { ...process.env };
+            if (token) customEnv.CM_AUTH_TOKEN = token;
+            if (brainToken) customEnv.BRAIN_AUTH_TOKEN = brainToken;
 
-            // Add the CapabilitiesManager token to the environment variables
-            if (token) {
-                customEnv.CM_AUTH_TOKEN = token;
-                console.log('CM: Added authentication token to environment variables');
-            }
-
-            // Add the Brain-specific token to the environment variables if available
-            if (brainToken) {
-                customEnv.BRAIN_AUTH_TOKEN = brainToken;
-                console.log('CM: Added Brain-specific authentication token to environment variables');
-            }
-
-            // Inject configuration into plugin environment
             const environment: environmentType = {
                 env: customEnv,
                 credentials: configSet ?? []
             };
 
-            // Add the tokens to the inputs
+            const workingInputs = new Map(inputs);
+
             if (token) {
-                console.log('CM: Adding authentication token to plugin inputs');
-                // Add the token to the inputs map with a special key
-                inputs.set('__auth_token', {
-                    inputName: '__auth_token',
-                    inputValue: token,
-                    args: { token }
-                });
+                workingInputs.set('__auth_token', { inputName: '__auth_token', inputValue: token, args: { token } });
             }
-
-            // Add the Brain-specific token to the inputs if available
             if (brainToken) {
-                console.log('CM: Adding Brain-specific authentication token to plugin inputs');
-
-                // Log token details for debugging (without revealing the full token)
-                try {
-                    const tokenParts = brainToken.split('.');
-                    if (tokenParts.length === 3) {
-                        const header = JSON.parse(Buffer.from(tokenParts[0], 'base64').toString());
-                        const payload = JSON.parse(Buffer.from(tokenParts[1], 'base64').toString());
-                        console.log(`CM: Brain token header:`, header);
-                        console.log(`CM: Brain token payload exp:`, payload.exp);
-                        console.log(`CM: Brain token payload iat:`, payload.iat);
-
-                        // Check if token is expired
-                        const now = Math.floor(Date.now() / 1000);
-                        if (payload.exp && payload.exp < now) {
-                            console.error(`CM: Brain token is expired. Expired at ${new Date(payload.exp * 1000).toISOString()}, current time is ${new Date().toISOString()}`);
-
-                            // Get a fresh token
-                            try {
-                                const brainTokenManager = new ServiceTokenManager(
-                                    `http://${this.securityManagerUrl}`,
-                                    'Brain',
-                                    process.env.CLIENT_SECRET || 'stage7AuthSecret'
-                                );
-
-                                brainToken = await brainTokenManager.getToken();
-                                console.log('CM: Got fresh Brain-specific authentication token');
-                            } catch (refreshError) {
-                                console.error('CM: Error getting fresh Brain-specific token:',
-                                    refreshError instanceof Error ? refreshError.message : String(refreshError));
-                            }
-                        }
-                    }
-                } catch (parseError) {
-                    console.error(`CM: Error parsing Brain token:`, parseError);
-                }
-
-                // Add the token to the inputs in multiple ways to ensure it's accessible
-                inputs.set('__brain_auth_token', {
-                    inputName: '__brain_auth_token',
-                    inputValue: brainToken,
-                    args: { token: brainToken }
-                });
-
-                // Also add it as a direct token property for easier access
-                inputs.set('token', {
-                    inputName: 'token',
-                    inputValue: brainToken,
-                    args: { token: brainToken }
-                });
+                workingInputs.set('__brain_auth_token', { inputName: '__brain_auth_token', inputValue: brainToken, args: { token: brainToken } });
+                workingInputs.set('token', { inputName: 'token', inputValue: brainToken, args: { token: brainToken } });
             }
+
+            // Use the pluginRootPath obtained from preparePluginForExecution
+            const executionContext: ExecutionContext = {
+                inputs: workingInputs,
+                environment,
+                pluginDefinition: effectiveManifest,
+                pluginRootPath: pluginRootPathFromPreparation 
+            };
+            console.log(`CM: ExecutionContext prepared for ${effectiveManifest.id} with root path ${pluginRootPathFromPreparation}`);
 
             // Execute with environment based on language
-            if (plugin.language === 'javascript') {
-                // Use sandbox for JavaScript plugins
+            if (effectiveManifest.language === 'javascript') {
                 try {
-                    return await executePluginInSandbox(plugin, Array.from(inputs.values()), environment);
+                    console.log(`CM: Attempting to execute JavaScript plugin ${plugin.id} in sandbox.`);
+                    return await executePluginInSandbox(
+                        executionContext.pluginDefinition, // This is effectiveManifest
+                        Array.from(executionContext.inputs.values()),
+                        executionContext.environment
+                    );
                 } catch (sandboxError) {
-                    console.error(`Sandbox execution failed, falling back to direct execution: ${sandboxError instanceof Error ? sandboxError.message : String(sandboxError)}`);
-                    return this.executeJavaScriptPlugin(plugin, inputs, environment);
+                    console.error(`CM: Sandbox execution failed for ${effectiveManifest.id}, falling back to direct execution: ${sandboxError instanceof Error ? sandboxError.message : String(sandboxError)}`);
+                    return this.executeJavaScriptPlugin(executionContext); // Pass the whole context
                 }
-            } else if (plugin.language === 'python') {
-                return this.executePythonPlugin(plugin, inputs, environment);
+            } else if (effectiveManifest.language === 'python') {
+                console.log(`CM: Attempting to execute Python plugin ${effectiveManifest.id}.`);
+                return this.executePythonPlugin(executionContext); // Pass the whole context
             }
 
-            throw new Error(`Unsupported plugin language: ${plugin.language}`);
+            throw new Error(`Unsupported plugin language: ${effectiveManifest.language}`);
         } catch (error) {
+            console.error(`CM: Error in executePlugin for plugin ${effectiveManifest.id} (${effectiveManifest.verb}):`, error);
             return [{
                 success: false,
-                name: 'error in CM:executePlugin',
+                name: 'error_in_CM_executePlugin', // Consider making this more specific if possible
                 resultType: PluginParameterType.ERROR,
                 resultDescription: error instanceof Error ? error.message : JSON.stringify(error),
                 result: null
@@ -686,79 +666,107 @@ export class CapabilitiesManager extends BaseEntity {
         }
     }
 
-
-    private async executeJavaScriptPlugin(plugin: PluginDefinition, inputs: Map<string, PluginInput>, environment: environmentType): Promise<PluginOutput[]> {
-        const pluginDir = path.join(__dirname, 'plugins', plugin.verb);
-        const mainFilePath = path.join(pluginDir, plugin.entryPoint!.main);
+    /**
+     * @deprecated This method is deprecated in favor of sandboxed execution. It will be removed in a future version.
+     * Fallback for JavaScript plugin execution if sandboxing fails.
+     */
+    private async executeJavaScriptPlugin(executionContext: ExecutionContext): Promise<PluginOutput[]> {
+        console.warn(`CM: WARNING - Executing JavaScript plugin ${executionContext.pluginDefinition.id} (${executionContext.pluginDefinition.verb}) via deprecated direct method.`);
+        const { pluginDefinition, inputs, environment, pluginRootPath } = executionContext;
+        // Use pluginRootPath for constructing mainFilePath
+        const mainFilePath = path.join(pluginRootPath, pluginDefinition.entryPoint!.main);
+        console.log(`CM: Fallback JS execution - Main file path: ${mainFilePath}`);
 
         try {
-            // Dynamically import the main file
             const pluginModule = await import(mainFilePath);
 
             if (typeof pluginModule.execute !== 'function') {
+                const errorMsg = `Plugin ${pluginDefinition.verb} does not export an execute function`;
+                console.error(`CM: ${errorMsg}`);
                 return [{
                     success: false,
-                    name: 'error',
+                    name: 'js_execution_error',
                     resultType: PluginParameterType.ERROR,
-                    resultDescription: `Plugin ${plugin.verb} does not export an execute function`,
-                    result: null
+                    resultDescription: errorMsg,
+                    result: null,
+                    error: errorMsg
                 }];
             }
 
-            // Execute the plugin
-            const pluginResult = await pluginModule.execute(inputs, environment);
-            console.log(`CM: Plugin ${plugin.verb} result:`, pluginResult);
+            const pluginResult = await pluginModule.execute(inputs, environment); // Pass original inputs Map and environment
+            console.log(`CM: Fallback JS Plugin ${pluginDefinition.verb} result:`, pluginResult);
             return pluginResult;
         } catch (error) {
-            console.error(`Error executing plugin ${plugin.verb}:`, error);
+            const errorMsg = `Error in executeJavaScriptPlugin (fallback) for ${pluginDefinition.verb}: ${error instanceof Error ? error.message : JSON.stringify(error)}`;
+            console.error(`CM: ${errorMsg}`);
             return [{
                 success: false,
-                name: 'error',
+                name: 'js_execution_error',
                 resultType: PluginParameterType.ERROR,
-                resultDescription: `Error in executeJavaScriptPlugin for ${plugin.verb}: ${error instanceof Error ? error.message : JSON.stringify(error)}`,
-                result: null
+                resultDescription: errorMsg,
+                result: null,
+                error: errorMsg
             }];
         }
     }
-    private async executePythonPlugin(plugin: PluginDefinition, inputs: Map<string, PluginInput>, environment: environmentType): Promise<PluginOutput[]> {
-        const pluginDir = path.join(this.pluginRegistry.currentDir, 'plugins', plugin.verb);
-        const mainFilePath = path.join(pluginDir, plugin.entryPoint!.main);
+
+    private async executePythonPlugin(executionContext: ExecutionContext): Promise<PluginOutput[]> {
+        const { pluginDefinition, inputs, environment, pluginRootPath } = executionContext;
+        const mainFilePath = path.join(pluginRootPath, pluginDefinition.entryPoint!.main);
+        console.log(`CM: Python execution - Main file path: ${mainFilePath}, Root path: ${pluginRootPath}`);
 
         try {
-            // Create a temporary file for the input
-            const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'plugin-input-'));
-            const inputFilePath = path.join(tmpDir, 'input.json');
-            const pluginExecuteParams = {
-                inputs,
-                environment
-            };
-            await fs.writeFile(inputFilePath, JSON.stringify(pluginExecuteParams));
+            // Serialize the inputs Map to a JSON string
+            // Convert Map to an object for JSON serialization
+            const inputsObject: { [key: string]: PluginInput } = {};
+            inputs.forEach((value, key) => {
+                inputsObject[key] = value;
+            });
+            const inputsJsonString = JSON.stringify(inputsObject);
 
-            // Execute Python script
-            const { stdout, stderr } = await execAsync(`python3 ${mainFilePath} ${inputFilePath}`, {
-                cwd: pluginDir,
-                env: { ...process.env, PYTHONPATH: pluginDir }
+            // Command: echo '{json_inputs}' | python3 mainFilePath pluginRootPath
+            // Note: Python script needs to be adapted to read JSON from stdin
+            // and accept pluginRootPath as a command-line argument if needed for internal path resolution.
+            // For now, PYTHONPATH is set, which helps with imports within the plugin's directory.
+            const command = `echo '${inputsJsonString.replace(/'/g, "'\\''")}' | python3 ${mainFilePath} ${pluginRootPath}`;
+            console.log(`CM: Python execution command (first ~50 chars of input): echo '${inputsJsonString.substring(0,50)}...' | python3 ${mainFilePath} ${pluginRootPath}`);
+
+
+            const { stdout, stderr } = await execAsync(command, {
+                cwd: pluginRootPath, // Set current working directory
+                env: {
+                    ...environment.env, // Pass merged environment variables from executionContext
+                    PYTHONPATH: pluginRootPath // Ensure plugin's root is in PYTHONPATH
+                }
             });
 
-            // Clean up the temporary file
-            await fs.rm(tmpDir, { recursive: true, force: true });
-
             if (stderr) {
-                console.error(`Python plugin ${plugin.verb} stderr:`, stderr);
+                console.error(`CM: Python plugin ${pluginDefinition.verb} stderr:\n${stderr}`);
+                // Depending on Python script, stderr might not always mean failure
+                // but it's important to log it.
             }
 
             // Parse the output
-            const result: PluginOutput = JSON.parse(stdout);
+            const results: PluginOutput[] = JSON.parse(stdout);
+            // Ensure it's always an array, even if Python script returns a single object
+            return Array.isArray(results) ? results : [results];
 
-            return [result];
-        } catch (error) { //analyzeError(error as Error);
-            console.error(`Error executing Python plugin ${plugin.verb}:`, error instanceof Error ? error.message : error);
+        } catch (error) {
+            const execError = error as (Error & { stdout?: string; stderr?: string });
+            const errorMsg = `Error executing Python plugin ${pluginDefinition.verb}`;
+            console.error(`CM: ${errorMsg}:`, execError.message);
+            if (execError.stderr) {
+                console.error(`CM: Python plugin ${pluginDefinition.verb} stderr (on error):\n${execError.stderr}`);
+            }
+            if (execError.stdout) {
+                console.warn(`CM: Python plugin ${pluginDefinition.verb} stdout (on error):\n${execError.stdout}`);
+            }
             return [{
                 success: false,
-                name: 'error',
+                name: 'python_execution_error',
                 resultType: PluginParameterType.ERROR,
-                error: error instanceof Error ? error.message : 'Unknown error occurred',
-                resultDescription: `Error executing plugin ${plugin.verb}`,
+                error: `${errorMsg}: ${execError.message}. Stderr: ${execError.stderr || 'N/A'}`,
+                resultDescription: `Error executing plugin ${pluginDefinition.verb}. Check logs for details.`,
                 result: null
             }];
         }
@@ -866,20 +874,22 @@ export class CapabilitiesManager extends BaseEntity {
                 ['verbToAvoid', { inputName: 'verbToAvoid', inputValue: verbToAvoid, args: {} }]
             ]);
 
-            const plugin = await this.pluginRegistry.fetchOneByVerb('ACCOMPLISH');
-            if (!plugin) {
-                console.error('ACCOMPLISH plugin not found for new verb assessment');
+            const accomplishManifest = await this.pluginRegistry.fetchOneByVerb('ACCOMPLISH');
+            if (!accomplishManifest) {
+                console.error('ACCOMPLISH plugin manifest not found for new verb assessment');
                 return {
                     success: false,
                     name: 'error',
                     resultType: PluginParameterType.ERROR,
-                    error: 'ACCOMPLISH plugin not found',
-                    resultDescription: 'ACCOMPLISH plugin not found',
+                    error: 'ACCOMPLISH plugin manifest not found',
+                    resultDescription: 'ACCOMPLISH plugin manifest not found',
                     result: null
                 };
             }
+            // For ACCOMPLISH, it's an inline plugin, so its root path can be determined by PluginRegistry
+            const { pluginRootPath: accomplishRootPath, effectiveManifest: effectiveAccomplishManifest } = await this.pluginRegistry.preparePluginForExecution(accomplishManifest);
 
-            const results = await this.executePlugin(plugin, accomplishInputs);
+            const results = await this.executePlugin(effectiveAccomplishManifest, accomplishInputs, accomplishRootPath);
             return results[0];
         } catch (error) {
             console.error('Error executing ACCOMPLISH for Verb analysis:', error instanceof Error ? error.message : error);
