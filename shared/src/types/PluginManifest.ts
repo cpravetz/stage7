@@ -13,6 +13,7 @@ export interface PluginLocator {
     verb: string;
     version?: string;
     repository: PluginRepositoryLink;
+    // Potentially add 'publisher' or 'namespace' here for better unique identification
 }
 
 export interface PluginManifest {
