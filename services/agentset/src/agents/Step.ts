@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
-import { PluginInput, PluginParameterType, PluginOutput, PlanDependency, StepDependency } from '@cktmcs/shared';
+import { PluginInput, PluginParameterType, PluginOutput, PlanDependency, StepDependency, ActionVerbTask } from '@cktmcs/shared'; // Ensured ActionVerbTask is here
 import { MapSerializer } from '@cktmcs/shared';
-import { MessageType, ActionVerbTask } from '@cktmcs/shared';
+import { MessageType } from '@cktmcs/shared'; // Ensured MessageType is here, assuming it's separate or also from shared index
 import { AgentPersistenceManager } from '../utils/AgentPersistenceManager';
 
 
@@ -572,36 +572,41 @@ export class Step {
             const inputs = new Map<string, PluginInput>();
             if (task.inputs) {
                 if (task.inputs instanceof Map) {
-                    task.inputs.forEach((value, key) => inputs.set(key, value));
+                    task.inputs.forEach((value: PluginInput, key: string) => inputs.set(key, value)); // Explicit types
                 } else {
-                    Object.entries(task.inputs).forEach(([key, value]) => {
+                    Object.entries(task.inputs).forEach(([key, value]: [string, any]) => { // Explicit types
                         inputs.set(key, {
                             inputName: key,
-                            inputValue: value,
-                            args: {}
+                            inputValue: value.inputValue !== undefined ? value.inputValue : value, // Handle if value is already shaped like PluginInput or is direct value
+                            args: value.args || {}
                         } as PluginInput);
                     });
                 }
             }
 
-            const dependencies = (task.dependencies || []).map(dep => {
+            const dependencies = (task.dependencies || []).map((dep: PlanDependency) => { // Explicit type
                 // Defensive check: dep.sourceStepNo should be > 0 and within plan length
-                const sourceStepId = (dep.sourceStepNo && dep.sourceStepNo > 0 && dep.sourceStepNo <= plan.length)
-                    ? plan[dep.sourceStepNo - 1]?.id
+                const sourceTaskInPlan = (dep.sourceStepNo && dep.sourceStepNo > 0 && dep.sourceStepNo <= plan.length)
+                    ? plan[dep.sourceStepNo - 1]
                     : undefined;
+                
+                // Ensure sourceTaskInPlan and its id are defined before trying to access id
+                const sourceStepId = sourceTaskInPlan?.id;
+
                 return {
                     inputName: dep.inputName,
-                    sourceStepId: sourceStepId || undefined, // fallback to empty string if undefined
+                    sourceStepId: sourceStepId, // Will be undefined if sourceTaskInPlan or its id is undefined
+                    outputName: dep.outputName // Added outputName as it's part of StepDependency
                 };
             });
 
             const step = new Step({
-                id: task.id, // Preserve the original ID from the plan
+                id: task.id!, // task.id is ensured to be defined above
                 actionVerb: task.verb,
                 stepNo: startingStepNo + index,
                 inputs: inputs,
                 description: task.description,
-                dependencies: dependencies,
+                dependencies: dependencies as StepDependency[], // Cast here after ensuring outputName is present
                 recommendedRole: task.recommendedRole,
                 persistenceManager: persistenceManager
             });

@@ -123,7 +123,6 @@ export class LocalRepository implements PluginRepository {
                         verb: manifest.verb,
                         repository: {
                             type: this.type,
-                            signature: manifest.repository.signature,
                             dependencies: manifest.repository.dependencies
                         }
                     });

@@ -251,7 +251,6 @@ export class GitRepository implements PluginRepository {
                             repository: {
                                 type: this.type,
                                 url: this.config.url,
-                                signature: manifest.repository.signature,
                                 dependencies: manifest.repository.dependencies
                             }
                         });
