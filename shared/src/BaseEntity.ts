@@ -923,7 +923,11 @@ protected async cleanup() {
         console.log(`[BaseEntity] Skipping authentication for health check endpoint: ${req.path}`);
         return next();
       }
-
+      const AUTH_PATHS = ['/auth/', '/login', '/securityManager/login', '/securityManager/register', '/public-key', '/refresh-token', '/registerComponent'];
+      if (AUTH_PATHS.some(path => req.path.startsWith(path))) {
+        console.log(`[BaseEntity] Skipping authentication for path: ${req.path}`);
+        return next();
+      }
       // Get the token from the Authorization header
       const authHeader = req.headers.authorization;
       if (!authHeader) {
@@ -942,7 +946,7 @@ protected async cleanup() {
           - Body: ${JSON.stringify(req.body).substring(0, 200)}...
         `);
 
-        return res.status(401).json({ error: 'No authorization token provided' });
+        return res.status(401).json({ error: `[BE] No authorization token provided for ${req.path}` });
       }
 
       // Extract the token from the Authorization header

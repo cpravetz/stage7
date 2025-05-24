@@ -6,7 +6,8 @@ export enum PluginParameterType {
     OBJECT = 'object',
     PLAN = 'plan',
     PLUGIN = 'plugin',
-    ERROR = 'error'
+    ERROR = 'error',
+    ANY = 'any' // Retained from a previous version, useful for flexibility
 }
 
 export interface PluginParameter {
@@ -14,87 +15,116 @@ export interface PluginParameter {
     required: boolean;
     type: PluginParameterType;
     description: string;
-    mimeType?: string; // Optional: Specify MIME type for inputs/outputs if relevant (e.g., 'application/json', 'text/plain', 'image/png')
-    defaultValue?: any; // Optional: A default value for an input if not provided
+    mimeType?: string;
+    defaultValue?: any;
 }
 
 export interface EntryPointType {
-    main: string; // Name of entry point file (e.g., 'main.py', 'index.js')
-    files?: Record<string, string>; // Code content as filename: filecontent. Optional if using packageSource.
+    main: string;
+    files?: Record<string, string>;
 }
 
-// New interface for defining plugin package source
 export interface PluginPackage {
-    type: 'git' | 'archive' | 'inline'; // 'inline' refers to current entryPoint.files model
-    url?: string;       // For 'git' (repo URL) or 'archive' (URL to .zip/.tar.gz)
-    commitHash?: string; // For 'git' to pin to a specific commit
-    branch?: string;    // For 'git' to pin to a specific branch/tag (defaults to repo default if not set)
-    subPath?: string;   // Optional sub-directory within the repo/archive where the plugin's main entrypoint and files reside
+    type: 'git' | 'archive' | 'inline';
+    url?: string;
+    commitHash?: string;
+    branch?: string;
+    subPath?: string;
 }
 
 export interface PluginSecurity {
-    permissions: string[]; // e.g., 'fs.read', 'net.fetch', 'llm.query'
+    permissions: string[];
     sandboxOptions: {
         allowEval: boolean;
-        timeout: number; // in milliseconds
-        memory: number; // in MB
-        allowedModules: string[]; // for JS sandbox
-        allowedAPIs: string[]; // specific external APIs plugin can call
+        timeout: number;
+        memory: number;
+        allowedModules: string[];
+        allowedAPIs: string[];
     };
     trust: {
         signature?: string;
-        publisher?: string; // ID or name of the publisher
-        certificateHash?: string; // Hash of a code-signing certificate
+        publisher?: string;
+        certificateHash?: string;
     };
 }
 
+// Updated PluginConfigurationItem
 export interface PluginConfigurationItem {
     key: string;
-    value: string | number | boolean | null;
+    value?: string | number | boolean | null; // Made value optional and can be null
     description: string;
-    required: boolean;
-    type: 'string' | 'number' | 'boolean' | 'secret'; // 'secret' for sensitive values
+    required: boolean; // If true, 'value' must be provided (not undefined, though null might be acceptable if type allows)
+    type: 'string' | 'number' | 'boolean' | 'secret';
 }
 
+// This is the standard, replacing MetadataType
 export interface PluginMetadata {
     author?: string;
     website?: string;
     license?: string;
-    category?: string[]; // e.g., 'text_generation', 'file_processing', 'communication'
+    category?: string[];
     tags?: string[];
-    versionScheme?: 'semver' | 'custom'; // How versioning is handled
-    dependencies?: Record<string, string>; // e.g., other plugins or library versions like {"python": ">=3.8"}
+    versionScheme?: 'semver' | 'custom';
+    dependencies?: Record<string, string>;
     compatibility?: {
-        minHostVersion?: string; // Minimum version of the host system/CapabilitiesManager
+        minHostVersion?: string;
     };
-    [key: string]: any; // For other custom metadata
+    [key: string]: any;
 }
 
 export interface PluginDefinition {
-    id: string; // Unique identifier for the plugin (e.g., "plugin-text-summarizer-v1")
-    verb: string; // The action verb this plugin handles (e.g., "SUMMARIZE_TEXT")
+    id: string;
+    verb: string;
     description: string;
-    explanation?: string; // More detailed explanation of what the plugin does, its inputs, outputs, and how it works.
+    explanation?: string;
     inputDefinitions: PluginParameter[];
     outputDefinitions: PluginParameter[];
-    language: 'javascript' | 'python' | 'openapi' | string; // Allow string for future extensibility
-    entryPoint?: EntryPointType; // Optional if language is 'openapi' or if code comes purely from packageSource
-    packageSource?: PluginPackage; // New field for defining package source
+    language: 'javascript' | 'python' | 'openapi' | string;
+    entryPoint?: EntryPointType;
+    packageSource?: PluginPackage;
     security: PluginSecurity;
-    configuration?: PluginConfigurationItem[]; // Configuration needed by the plugin
-    version: string; // e.g., "1.0.0"
-    metadata?: PluginMetadata;
-    createdAt?: string; // ISO 8601 date string
-    updatedAt?: string; // ISO 8601 date string
+    configuration?: PluginConfigurationItem[]; // Uses the updated PluginConfigurationItem
+    version: string;
+    metadata?: PluginMetadata; // Uses PluginMetadata
+    createdAt?: string;
+    updatedAt?: string;
 }
 
+// Types confirmed by user as needed and previously defined here
+export interface StepDependency {
+    inputName: string;
+    sourceStepId: string;
+    outputName: string;
+}
+
+export interface PlanDependency {
+    inputName: string;
+    sourceStepNo: number;
+    sourceStepId?: string;
+    outputName: string;
+}
+
+export interface ActionVerbTask {
+    id?: string;
+    verb: string;
+    inputs: Map<string, PluginInput>; // Assuming PluginInput is defined/imported
+    expectedOutputs?: Map<string, string>;
+    description?: string;
+    dependencies?: PlanDependency[];
+    recommendedRole?: string;
+}
+
+// Assuming PluginInput is also defined in this file or another commonly imported one
+// If not, it needs to be defined or imported. For now, I'll add its definition here
+// based on previous context if it was missed.
 export interface PluginInput {
     inputName: string;
     inputValue: any;
-    inputSource?: string;
-    args: Record<string, any>;
+    inputSource?: string; // Optional: to trace where an input value came from (e.g., stepId.outputName)
+    args: Record<string, any>; // Optional: any additional arguments relevant to this input
 }
 
+// Assuming PluginOutput is also needed here for completeness
 export interface PluginOutput {
     success: boolean;
     name: string;
@@ -106,30 +136,27 @@ export interface PluginOutput {
     console?: any[]
 }
 
+// For environmentType, ensure ConfigItem is also defined or imported if it's distinct
+// For now, assuming ConfigItem from original Plugin.ts was meant to be PluginConfigurationItem
+export enum ConfigItemType { // Re-adding if it was part of an old ConfigItem that PluginConfigurationItem replaces
+    CREDENTIAL = 'credential',
+    SETTING = 'setting',
+    SECRET = 'secret',
+    ENVIRONMENT = 'environment'
+}
 export type environmentType = {
-    env: NodeJS.ProcessEnv;
-    credentials: ConfigItem[];
+    env: NodeJS.ProcessEnv; // or Record<string, string | undefined>
+    credentials: PluginConfigurationItem[]; // Using the updated one
 };
 
-export enum ConfigItemType {
-    CREDENTIAL = 'credential',  // Sensitive data like passwords
-    SETTING = 'setting',       // Regular configuration
-    SECRET = 'secret',         // Encrypted values
-    ENVIRONMENT = 'environment' // Environment variables
+export interface Step {
+    id: string;
+    stepNo: number;
+    actionVerb: string;
+    description?: string;
+    inputs: Map<string, PluginInput>;
+    dependencies: StepDependency[];
+    status: 'pending' | 'running' | 'completed' | 'error';
+    result?: PluginOutput[];
+    timeout?: number;
 }
-
-export interface ConfigItem {
-    key: string;
-    type: ConfigItemType;
-    description: string;
-    required: boolean;
-    default?: string;
-    validation?: {
-        pattern?: string;
-        minLength?: number;
-        maxLength?: number;
-        options?: string[];
-    };
-    value?: string;
-}
-

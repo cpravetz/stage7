@@ -1,4 +1,4 @@
-import { PluginDefinition, PluginManifest, PluginRepositoryType, PluginLocator, PluginPackage } from '../../../../shared/src/types/';
+import { PluginDefinition, PluginManifest, PluginRepositoryType, PluginLocator, PluginPackage } from '@cktmcs/shared';
 import express from 'express';
 import path from 'path';
 import os from 'os';
@@ -190,7 +190,6 @@ export class PluginRegistry {
             repository: {
                 type: manifest.repository.type,
                 url: manifest.repository.url,
-                signature: manifest.repository.signature,
                 dependencies: manifest.repository.dependencies
             }
         };

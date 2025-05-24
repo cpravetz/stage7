@@ -70,11 +70,12 @@ export class SecurityManager {
         // Token verification endpoint
         app.post('/verify', async (req: Request, res: Response) => {
             try {
+      
                 // Get token from Authorization header
                 const authHeader = req.headers.authorization;
                 if (!authHeader) {
                     console.error('[SM] No authorization header provided');
-                    res.status(400).json({ valid: false, error: 'No authorization token provided' });
+                    res.status(400).json({ valid: false, error: '[SM] No authorization token provided' });
                     return;
                 }
 

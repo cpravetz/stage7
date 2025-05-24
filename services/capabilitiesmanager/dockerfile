@@ -26,6 +26,10 @@ RUN cd errorhandler && npm run build
 RUN cd marketplace && npm run build
 RUN npm run build --workspace=services/capabilitiesmanager
 
+# Copy the local plugins from the source 'src/plugins' to the build output 'dist/plugins'
+# The source path is relative to the build context root (/usr/src/app)
+COPY services/capabilitiesmanager/src/plugins ./services/capabilitiesmanager/dist/plugins/
+
 # Set the working directory to the service
 WORKDIR /usr/src/app/services/capabilitiesmanager
 
