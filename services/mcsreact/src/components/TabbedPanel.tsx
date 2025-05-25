@@ -6,6 +6,7 @@ import AccountTreeIcon from '@mui/icons-material/AccountTree';
 import ConversationHistory from './ConversationHistory';
 import { AgentStatistics } from '../shared-browser';
 import { NetworkGraph } from './NetworkGraph';
+import { SecurityClient } from '../SecurityClient';
 
 interface WorkProduct {
   type: 'Interim' | 'Final';
@@ -59,6 +60,25 @@ export const TabbedPanel: React.FC<TabbedPanelProps> = ({
 
   const handleChange = (_event: React.SyntheticEvent, newValue: string) => {
     setActiveTab(newValue);
+  };
+
+  const securityClient = SecurityClient.getInstance(window.location.origin);
+
+  const handleWorkProductClick = async (event: React.MouseEvent<HTMLAnchorElement>, url: string) => {
+    event.preventDefault();
+    try {
+      const headers = securityClient.getAuthHeader();
+      const response = await fetch(url, { headers });
+      if (!response.ok) {
+        throw new Error(`Failed to fetch work product: ${response.statusText}`);
+      }
+      const blob = await response.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      window.open(blobUrl, '_blank', 'noopener,noreferrer');
+    } catch (error) {
+      console.error('Error fetching work product:', error);
+      alert('Failed to open work product. Please try again.');
+    }
   };
 
   return (
@@ -136,15 +156,15 @@ export const TabbedPanel: React.FC<TabbedPanelProps> = ({
                         </Typography>
                       </TableCell>
                       <TableCell>
-                        <Link
+                        <a
                           href={product.url}
+                          onClick={(e) => handleWorkProductClick(e, product.url)}
+                          style={{ color: theme.palette.secondary.main, textDecoration: 'underline', cursor: 'pointer' }}
                           target="_blank"
                           rel="noopener noreferrer"
-                          underline="hover"
-                          color="secondary"
                         >
                           {product.name}
-                        </Link>
+                        </a>
                       </TableCell>
                     </TableRow>
                   ))
