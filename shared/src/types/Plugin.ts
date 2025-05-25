@@ -159,4 +159,5 @@ export interface Step {
     status: 'pending' | 'running' | 'completed' | 'error';
     result?: PluginOutput[];
     timeout?: number;
+
 }
