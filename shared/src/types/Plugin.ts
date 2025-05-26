@@ -133,6 +133,7 @@ export interface PluginOutput {
     resultDescription: string,
     error?: string,
     mimeType?: string,
+    fileName?: string, // Optional suggested filename for the result
     console?: any[]
 }
 

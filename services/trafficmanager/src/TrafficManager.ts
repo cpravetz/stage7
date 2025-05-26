@@ -665,8 +665,6 @@ export class TrafficManager extends BaseEntity {
 
             // Store the statistics for this agent
             if (statistics && missionId) {
-                // Update the statistics in the agentSetManager
-                await agentSetManager.updateAgentStatistics(agentId, missionId, statistics);
 
                 // Forward the statistics to MissionControl
                 try {

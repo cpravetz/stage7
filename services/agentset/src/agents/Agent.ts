@@ -451,7 +451,8 @@ Please consider this context and the available plugins when planning and executi
                 agentId: this.id,
                 stepId: stepId,
                 missionId: this.missionId,
-                mimeType: data[0]?.mimeType || 'text/plain'
+                mimeType: data[0]?.mimeType || 'text/plain',
+                fileName: data[0]?.fileName // Add fileName here
             });
         } catch (error) { analyzeError(error as Error);
             console.error('Error saving work product:', error instanceof Error ? error.message : error);

@@ -1,4 +1,4 @@
-import { PluginDefinition, PluginManifest, PluginRepositoryType, PluginLocator, PluginPackage } from '@cktmcs/shared';
+import { PluginDefinition, PluginManifest, PluginRepositoryType, PluginLocator, PluginPackage, compareVersions } from '@cktmcs/shared'; // Added compareVersions
 import express from 'express';
 import path from 'path';
 import os from 'os';
@@ -124,41 +124,90 @@ export class PluginRegistry {
 
     public async initialize(): Promise<void> {
         // Initialize existing plugins
-        const locators = await this.pluginMarketplace.list();
-        for (const locator of locators) {
-            this.updateCache(locator);
+        try {
+            const locators = await this.pluginMarketplace.list();
+            for (const locator of locators) {
+                this.updateCache(locator);
+            }
+        } catch (error) {
+            console.error("PluginRegistry.initialize: Failed to list plugins from marketplace", error);
+            // Decide if we should throw or continue with an empty/partially initialized registry
         }
     }
 
-    async fetchOne(id: string, repository?: PluginRepositoryType): Promise<PluginManifest | undefined> {
-        const plugin = await this.pluginMarketplace.fetchOne(id, repository);
-        if (plugin && !this.cache.has(plugin.id)) {
+    async fetchOne(id: string, version?: string, repository?: PluginRepositoryType): Promise<PluginManifest | undefined> { // Added version parameter
+        // Assuming pluginMarketplace.fetchOne can take an optional version
+        const plugin = await this.pluginMarketplace.fetchOne(id, version, repository);
+        if (plugin && !this.cache.has(plugin.id)) { // Cache might need to be version-aware if storing specific versions
             this.updateCache(this.getLocatorFromManifest(plugin));
         }
         return plugin;
     }
 
-    async fetchOneByVerb(verb: string): Promise<PluginManifest | undefined> {
+    async fetchOneByVerb(verb: string, version?: string): Promise<PluginManifest | undefined> { // Added version parameter
+        // This method, by design, fetches *a* plugin for a verb, typically the latest or a default.
+        // For specific version by verb, client should first resolve verb to ID, then use fetchAllVersionsOfPlugin.
         if (this.verbIndex.has(verb)) {
             const id = this.verbIndex.get(verb);
             if (!id) {
                 return undefined;
             }
             const repository = this.cache.get(id);
-            return this.pluginMarketplace.fetchOne(id, repository);
+            // Assuming pluginMarketplace.fetchOne can take an optional version.
+            // If version is specified, it will try to get that version.
+            return this.pluginMarketplace.fetchOne(id, version, repository);
         }
-        const plugin = await this.pluginMarketplace.fetchOneByVerb(verb);
+        // If version is specified here, fetchOneByVerb in marketplace needs to support it.
+        // This typically means the marketplace might have a concept of a "default" or "latest pinned" version for a verb.
+        const plugin = await this.pluginMarketplace.fetchOneByVerb(verb, version);
         if (plugin && !this.cache.has(plugin.id)) {
             this.updateCache(this.getLocatorFromManifest(plugin));
         }
         return plugin;
     }
 
-    async findOne(id: string): Promise<PluginDefinition | undefined> {
-        if (this.cache.has(id)) {
-            return this.pluginMarketplace.fetchOne(id, this.cache.get(id));
+    /**
+     * Fetches all available versions of a plugin by its ID.
+     * Assumes the PluginMarketplace will have a method like `fetchAllVersionsOfPlugin`.
+     */
+    async fetchAllVersionsOfPlugin(pluginId: string, repositoryType?: PluginRepositoryType): Promise<PluginManifest[] | undefined> {
+        console.log(`PluginRegistry: Fetching all versions for plugin ID ${pluginId} from repository ${repositoryType || 'default'}`);
+        try {
+            // @ts-ignore // Assuming this method will be added to PluginMarketplace
+            const versions = await this.pluginMarketplace.fetchAllVersionsOfPlugin(pluginId, repositoryType);
+            if (versions && versions.length > 0) {
+                // Sort versions using compareVersions utility (newest first)
+                versions.sort((a, b) => compareVersions(b.version, a.version));
+                return versions;
+            }
+            return undefined;
+        } catch (error) {
+            console.error(`PluginRegistry: Error fetching all versions for plugin ID ${pluginId}:`, error);
+            return undefined;
         }
-        const plugin = await this.pluginMarketplace.fetchOne(id);
+    }
+
+    /**
+     * Fetches all available versions of a plugin by its verb.
+     * This first resolves the verb to a plugin ID.
+     */
+    async fetchAllVersionsByVerb(verb: string, repositoryType?: PluginRepositoryType): Promise<PluginManifest[] | undefined> {
+        console.log(`PluginRegistry: Fetching all versions for verb ${verb} from repository ${repositoryType || 'default'}`);
+        const anyVersionPlugin = await this.fetchOneByVerb(verb); // Get any version to find the ID
+        if (!anyVersionPlugin) {
+            console.warn(`PluginRegistry: No plugin found for verb ${verb} to determine plugin ID.`);
+            return undefined;
+        }
+        const pluginId = anyVersionPlugin.id;
+        return this.fetchAllVersionsOfPlugin(pluginId, repositoryType);
+    }
+
+
+    async findOne(id: string, version?: string): Promise<PluginDefinition | undefined> { // Added version
+        if (this.cache.has(id)) { // Cache needs to be version aware if we want to hit it here
+            return this.pluginMarketplace.fetchOne(id, version, this.cache.get(id));
+        }
+        const plugin = await this.pluginMarketplace.fetchOne(id, version);
         if (plugin && !this.cache.has(plugin.id)) {
             this.updateCache(this.getLocatorFromManifest(plugin));
         }
@@ -209,20 +258,25 @@ export class PluginRegistry {
             for (const [repoType, repository] of repositories.entries()) {
                 try {
                     console.log(`Loading plugins from ${repoType} repository...`);
-                    const plugins = await repository.list();
-                    
-                    for (const plugin of plugins) {
+                    const plugins = await repository.list(); // Lists PluginLocators
+
+                    for (const locator of plugins) {
                         try {
-                            const manifest = await repository.fetch(plugin.id);
+                            // Fetch the default/latest manifest for caching basic info
+                            // More sophisticated caching might cache all versions or have a separate version index
+                            const manifest = await repository.fetch(locator.id); // Fetches a single manifest
                             if (manifest) {
+                                // This basic cache does not store version specific manifests,
+                                // it just maps ID to repo and verb to ID for initial discovery.
+                                // Version resolution happens in fetchAllVersions or when fetchOne is called with a version.
                                 this.cache.set(manifest.id, repoType as PluginRepositoryType);
                                 this.verbIndex.set(manifest.verb, manifest.id);
                             }
                         } catch (pluginError) {
-                            console.error(`Failed to fetch plugin ${plugin.id} from ${repoType} repository:`, pluginError);
+                            console.error(`Failed to fetch manifest for plugin ${locator.id} from ${repoType} repository during cache refresh:`, pluginError);
                         }
                     }
-                    
+
                     console.log(`Loaded ${plugins.length} plugins from ${repoType} repository`);
                 } catch (repoError) {
                     console.error(`Failed to list plugins from ${repoType} repository:`, repoError);

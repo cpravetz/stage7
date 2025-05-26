@@ -1,48 +1,20 @@
 import { PluginManifest, PluginRepository, RepositoryConfig, PluginLocator } from '@cktmcs/shared';
 import axios, { AxiosError, AxiosResponse } from 'axios'; // Import AxiosError and AxiosResponse
-// import { analyzeError } from '@cktmcs/errorhandler'; // To be replaced by embedded error handling
-
-// --- Embedded Error Reporting Logic ---
-const GitHubRepositoryErrorCodes_EMBEDDED = {
-  AUTH_FAILED: 'GITHUB_AUTH_FAILED',
-  FORBIDDEN: 'GITHUB_FORBIDDEN',
-  RESOURCE_NOT_FOUND: 'GITHUB_RESOURCE_NOT_FOUND',
-  API_RATE_LIMIT: 'GITHUB_API_RATE_LIMIT',
-  SERVER_ERROR: 'GITHUB_SERVER_ERROR',
-  API_ERROR: 'GITHUB_API_ERROR', // Generic API error
-  CONFIG_ERROR: 'GITHUB_CONFIG_ERROR',
-  FETCH_DEFAULT_BRANCH_FAILED: 'GITHUB_FETCH_DEFAULT_BRANCH_FAILED',
-};
-
-function generateGhApiError(
-    code: string,
-    message: string,
-    status?: number,
-    originalError?: any
-): Error {
-    let fullMessage = `${code}: ${message}`;
-    if (status) {
-        fullMessage = `Status ${status} - ${fullMessage}`;
-    }
-    const error = new Error(fullMessage);
-    (error as any).code = code; // Attach custom error code
-    if (originalError) {
-        (error as any).originalError = originalError;
-        if (originalError.response?.data) {
-             (error as any).details = originalError.response.data;
-        }
-    }
-    // console.error(fullMessage, (error as any).details || originalError); // Log error internally
-    return error;
-}
+import { analyzeError } from '@cktmcs/errorhandler'; // Restored analyzeError for error handling
 
 // Utility for retry logic
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-// --- End of Embedded Error Reporting Logic ---
-
 /**
- * GitHub Repository implementation for plugin storage and retrieval
- * Uses GitHub API directly instead of git commands
+ * GitHub Repository implementation for plugin storage and retrieval.
+ * Uses GitHub API directly.
+ *
+ * --- Assumed GitHub Repository Structure ---
+ * Base plugin directory: `this.pluginsDir` (e.g., "plugins/")
+ * Plugin ID directory: `plugins/{pluginId}/`
+ *  - Default/Latest Manifest (optional): `plugins/{pluginId}/plugin-manifest.json` (used if no version specified in fetch)
+ * Versioned plugin directory: `plugins/{pluginId}/{versionString}/` (e.g., "plugins/my-plugin/1.0.0/")
+ *  - Versioned Manifest: `plugins/{pluginId}/{versionString}/plugin-manifest.json`
+ *  - Other plugin files (for inline plugins) are relative to this versioned directory.
  */
 export class GitHubRepository implements PluginRepository {
     type: 'github' = 'github';
@@ -76,7 +48,7 @@ export class GitHubRepository implements PluginRepository {
         this.username = config.credentials?.username || process.env.GITHUB_USERNAME || ''; // Used as default owner
 
         if (!this.token) { // Username might not be strictly needed if repoOwner is from URL
-            throw generateGhApiError(GitHubRepositoryErrorCodes_EMBEDDED.CONFIG_ERROR, 'GitHub repository requires GITHUB_TOKEN.');
+            throw analyzeError(new Error('GitHub repository requires GITHUB_TOKEN.'));
         }
 
         const repoUrl = config.url || process.env.GIT_REPOSITORY_URL || '';
@@ -102,7 +74,7 @@ export class GitHubRepository implements PluginRepository {
 
         this.baseApiUrl = `https://api.github.com/repos/${this.repoOwner}/${this.repoName}`;
         this.baseContentUrl = `${this.baseApiUrl}/contents`;
-        this.pluginsDir = config.options?.pluginsPath || 'plugins'; // Use config or default
+        this.pluginsDir = (config.options as any)?.pluginsPath || 'plugins'; // Use config or default
 
         console.log(`GitHubRepository: Initialized for ${this.repoOwner}/${this.repoName}. Plugins dir: '${this.pluginsDir}'. Default branch from config/env: ${this.defaultBranch || "not set, will fetch"}`);
         
@@ -119,17 +91,17 @@ export class GitHubRepository implements PluginRepository {
     }
 
     private async _fetchDefaultBranchFromServer(): Promise<string> {
-        if (!this.isEnabled) throw generateGhApiError(GitHubRepositoryErrorCodes_EMBEDDED.CONFIG_ERROR, "GitHub access disabled.");
+        if (!this.isEnabled) throw analyzeError(new Error("GitHub access disabled."));
         console.log(`GitHubRepository: Fetching default branch for ${this.repoOwner}/${this.repoName}...`);
         try {
             const response = await this.makeGitHubRequest('GET', this.baseApiUrl); // Get repo metadata
             if (response.data && response.data.default_branch) {
                 return response.data.default_branch;
             } else {
-                throw generateGhApiError(GitHubRepositoryErrorCodes_EMBEDDED.FETCH_DEFAULT_BRANCH_FAILED, `Could not determine default branch from GitHub API response for ${this.repoOwner}/${this.repoName}. Response missing default_branch field.`);
+                throw analyzeError(new Error(`Could not determine default branch from GitHub API response for ${this.repoOwner}/${this.repoName}. Response missing default_branch field.`));
             }
         } catch (error) {
-            console.warn(`GitHubRepository: Failed to fetch default branch from server for ${this.repoOwner}/${this.repoName}. Error: ${error.message}. Defaulting to 'main' for this operation.`);
+            console.warn(`GitHubRepository: Failed to fetch default branch from server for ${this.repoOwner}/${this.repoName}. Defaulting to 'main' for this operation.`);
             // Fallback to 'main' as a common default, but issue warning.
             // This prevents total failure if repo exists but initial metadata call fails for transient reason.
             return 'main'; 
@@ -158,7 +130,7 @@ export class GitHubRepository implements PluginRepository {
             throw err;
         }
         if (!this.token) {
-             throw generateGhApiError(GitHubRepositoryErrorCodes_EMBEDDED.CONFIG_ERROR, 'GitHub token not configured or missing.');
+             throw analyzeError(new Error('GitHub token not configured or missing.'));
         }
 
         try {
@@ -174,10 +146,9 @@ export class GitHubRepository implements PluginRepository {
                 }
             });
             return response;
-        } catch (error) {
-            const axiosError = error as AxiosError;
-            if (axiosError.isAxiosError && axiosError.response) {
-                const { status, data: responseData } = axiosError.response;
+        } catch (error: unknown) {
+            if (axios.isAxiosError(error) && error.response) {
+                const { status, data: responseData } = error.response;
                 const retryableStatuses = [429, 500, 502, 503, 504];
 
                 if (retryableStatuses.includes(status) && attempt <= 3) {
@@ -187,221 +158,282 @@ export class GitHubRepository implements PluginRepository {
                     return this.makeGitHubRequest(method, url, data, params, attempt + 1);
                 }
 
-                const messageDetails = responseData ? ( (typeof responseData === 'string' ? responseData : JSON.stringify(responseData)) || "No additional details from API.") : (axiosError.message || "Unknown Axios error");
+                const messageDetails = responseData ? ( (typeof responseData === 'string' ? responseData : JSON.stringify(responseData)) || "No additional details from API.") : (error.message || "Unknown Axios error");
 
-                if (status === 401) throw generateGhApiError(GitHubRepositoryErrorCodes_EMBEDDED.AUTH_FAILED, `Authentication failed. Check GITHUB_TOKEN validity and permissions. Details: ${messageDetails}`, status, axiosError);
-                if (status === 403) throw generateGhApiError(GitHubRepositoryErrorCodes_EMBEDDED.FORBIDDEN, `Access forbidden. Check GITHUB_TOKEN permissions or API rate limits. Details: ${messageDetails}`, status, axiosError);
-                if (status === 404) throw generateGhApiError(GitHubRepositoryErrorCodes_EMBEDDED.RESOURCE_NOT_FOUND, `Resource not found at ${url}. Details: ${messageDetails}`, status, axiosError);
-                if (status === 429) throw generateGhApiError(GitHubRepositoryErrorCodes_EMBEDDED.API_RATE_LIMIT, `Rate limit exceeded. Details: ${messageDetails}`, status, axiosError);
-                if (status >= 500) throw generateGhApiError(GitHubRepositoryErrorCodes_EMBEDDED.SERVER_ERROR, `GitHub server error. Details: ${messageDetails}`, status, axiosError);
-                
-                throw generateGhApiError(GitHubRepositoryErrorCodes_EMBEDDED.API_ERROR, `GitHub API Error for ${method} ${url}. Details: ${messageDetails}`, status, axiosError);
+                // Instead of throwing custom errors, use analyzeError to wrap the error
+                throw analyzeError(new Error(`GitHub API Error for ${method} ${url}. Status: ${status}. Details: ${messageDetails}`));
             }
             // Non-Axios error or Axios error without response
-            throw generateGhApiError(GitHubRepositoryErrorCodes_EMBEDDED.API_ERROR, `Unexpected error during GitHub request to ${url}: ${error.message}`, undefined, error);
+            if (error instanceof Error) {
+                throw analyzeError(new Error(`Unexpected error during GitHub request to ${url}: ${error.message}`));
+            } else {
+                throw analyzeError(new Error(`Unexpected error during GitHub request to ${url}: Unknown error`));
+            }
         }
     }
 
     async store(manifest: PluginManifest): Promise<void> {
         if (!this.isEnabled) return;
-        const branch = await this._getEffectiveBranch(); // Use default branch for storing manifests
+        const branch = await this._getEffectiveBranch();
 
-        const pluginPath = `${this.pluginsDir}/${manifest.id}`;
-        // Check if plugin directory already exists - this call itself might not be needed if createOrUpdateFile handles it
-        // For simplicity, we assume createOrUpdateFile will create path if necessary or update if exists.
-        // GitHub API for contents will create/update files. Directories are implicit.
-
+        // Path includes version: plugins/{pluginId}/{version}/plugin-manifest.json
+        const manifestPath = `${this.pluginsDir}/${manifest.id}/${manifest.version}/plugin-manifest.json`;
+        
         await this.createOrUpdateFile(
-            `${pluginPath}/plugin-manifest.json`,
+            manifestPath,
             JSON.stringify(manifest, null, 2),
             `Publishing plugin ${manifest.id} v${manifest.version} - ${manifest.verb}`,
-            branch // Pass branch to createOrUpdateFile
+            branch
         );
 
         if (!(manifest.packageSource && manifest.packageSource.type === 'git')) {
             if (manifest.entryPoint?.files) {
+                const basePluginVersionPath = `${this.pluginsDir}/${manifest.id}/${manifest.version}`;
                 for (const [filename, content] of Object.entries(manifest.entryPoint.files)) {
                     await this.createOrUpdateFile(
-                        `${pluginPath}/${filename}`,
+                        `${basePluginVersionPath}/${filename}`,
                         content,
                         `Adding file ${filename} for plugin ${manifest.id} v${manifest.version}`,
-                        branch // Pass branch
+                        branch
                     );
                 }
             }
         }
-        console.log(`GitHubRepository: Successfully published plugin ${manifest.id} v${manifest.version} to ${this.repoOwner}/${this.repoName} on branch ${branch}`);
+        console.log(`GitHubRepository: Successfully published plugin ${manifest.id} v${manifest.version} to ${this.repoOwner}/${this.repoName} on branch ${branch} at path ${manifestPath}`);
     }
 
-    async fetch(id: string, version?: string): Promise<PluginManifest | undefined> { // Version parameter added
+    async fetch(pluginId: string, version?: string): Promise<PluginManifest | undefined> {
         if (!this.isEnabled) return undefined;
-        if (!id) { console.warn('GitHubRepository.fetch: ID must be provided'); return undefined; }
+        if (!pluginId) { console.warn('GitHubRepository.fetch: pluginId must be provided'); return undefined; }
 
-        // Versioning note: If this GitHub repo itself is versioned (e.g. by tags for each plugin version's manifest),
-        // then the 'ref' for getFileContent should be that tag.
-        // For now, assume manifests are on the default branch and version is in manifest.id or a versioned path.
-        // If versioning implies paths like /plugins/pluginId/1.0.0/plugin-manifest.json, then id should include version.
-        // For this iteration, we assume 'id' is the unique identifier that might already include version,
-        // or that manifests on default branch are the "latest" discoverable ones.
-        // The `feature_plugin_versioning.md` implies plugin definitions are stored like `plugins/{plugin_id}/{plugin_version}/plugin_definition.json`.
-        // So, the `id` parameter should ideally be `plugin_id/plugin_version`.
+        const effectiveBranch = await this._getEffectiveBranch();
+        let manifestPath: string;
+        let baseContentFetchingPath: string;
+
+        if (version) {
+            manifestPath = `${this.pluginsDir}/${pluginId}/${version}/plugin-manifest.json`;
+            baseContentFetchingPath = `${this.pluginsDir}/${pluginId}/${version}`;
+        } else {
+            // Fallback to default/latest manifest directly under pluginId directory
+            manifestPath = `${this.pluginsDir}/${pluginId}/plugin-manifest.json`;
+            baseContentFetchingPath = `${this.pluginsDir}/${pluginId}`;
+            console.log(`GitHubRepository.fetch: No version specified for pluginId '${pluginId}'. Attempting to fetch from default path: ${manifestPath}`);
+        }
         
-        const manifestPath = `${this.pluginsDir}/${id}/plugin-manifest.json`; // If id is "pluginA/1.0.0" -> "plugins/pluginA/1.0.0/plugin-manifest.json"
-        const ref = await this._getEffectiveBranch(); // Use default branch to find the manifest of this version.
-
-        const manifestContent = await this.getFileContent(manifestPath, ref);
-        if (!manifestContent) return undefined;
+        const manifestContent = await this.getFileContent(manifestPath, effectiveBranch);
+        if (!manifestContent) {
+            console.log(`GitHubRepository.fetch: Manifest not found for pluginId '${pluginId}' ${version ? `version '${version}'` : '(default/latest)'} at path '${manifestPath}' on branch '${effectiveBranch}'.`);
+            return undefined;
+        }
 
         const manifest = JSON.parse(manifestContent) as PluginManifest;
 
         // For non-git-sourced plugins (inline), fetch files if entryPoint.files is not already populated.
         if (!(manifest.packageSource && manifest.packageSource.type === 'git')) {
             if (manifest.entryPoint && (!manifest.entryPoint.files || Object.keys(manifest.entryPoint.files).length === 0) ) {
-                manifest.entryPoint.files = {};
+                manifest.entryPoint.files = {}; // Initialize if null/undefined
                 try {
-                    const filesInDirResponse = await this.makeGitHubRequest('GET', `${this.baseContentUrl}/${this.pluginsDir}/${id}`, undefined, { ref });
+                    // List files in the baseContentFetchingPath (versioned or default path)
+                    const filesInDirResponse = await this.makeGitHubRequest('GET', `${this.baseContentUrl}/${baseContentFetchingPath}`, undefined, { ref: effectiveBranch });
                     if (filesInDirResponse.status === 200 && Array.isArray(filesInDirResponse.data)) {
                         const filesToFetch = filesInDirResponse.data.filter((item: { type: string; name: string }) =>
                             item.type === 'file' && item.name !== 'plugin-manifest.json'
                         );
                         for (const file of filesToFetch) {
-                            const fileContent = await this.getFileContent(`${this.pluginsDir}/${id}/${file.name}`, ref);
+                            const fileContent = await this.getFileContent(`${baseContentFetchingPath}/${file.name}`, effectiveBranch);
                             if (fileContent) {
                                 manifest.entryPoint.files[file.name] = fileContent;
                             }
                         }
                     }
-                } catch (error) { // Could be 404 if no other files
-                    if (error.code !== GitHubRepositoryErrorCodes_EMBEDDED.RESOURCE_NOT_FOUND) {
-                         console.warn(`GitHubRepository: Failed to fetch entry point files for inline plugin ${id} on ref ${ref}: ${error.message}`);
+                } catch (error) {
+                    if (typeof error === 'object' && error !== null && 'code' in error && 'message' in error && (error as any).code !== 'RESOURCE_NOT_FOUND') {
+                         console.warn(`GitHubRepository: Failed to fetch entry point files for inline plugin ${pluginId} ${version ? `v${version}` : '(default)'} on branch ${effectiveBranch}: ${error.message}`);
                     } else {
-                         console.log(`GitHubRepository: No additional entry point files found for inline plugin ${id} on ref ${ref}.`)
+                         console.log(`GitHubRepository: No additional entry point files found for inline plugin ${pluginId} ${version ? `v${version}` : '(default)'} on branch ${effectiveBranch}.`)
                     }
                 }
             }
         }
         return manifest;
     }
+
+    async fetchAllVersionsOfPlugin(pluginId: string): Promise<PluginManifest[] | undefined> {
+        if (!this.isEnabled) return undefined;
+        if (!pluginId) { console.warn('GitHubRepository.fetchAllVersionsOfPlugin: pluginId must be provided'); return undefined; }
+
+        const effectiveBranch = await this._getEffectiveBranch();
+        const pluginBaseDir = `${this.pluginsDir}/${pluginId}`;
+        let versionDirs: any[];
+
+        try {
+            const response = await this.makeGitHubRequest('GET', `${this.baseContentUrl}/${pluginBaseDir}`, undefined, { ref: effectiveBranch });
+            if (response.status !== 200 || !Array.isArray(response.data)) {
+                console.warn(`GitHubRepository: No versions found or error listing versions for plugin ${pluginId} at ${pluginBaseDir}`);
+                return undefined; // Or empty array
+            }
+            versionDirs = response.data.filter((item: { type: string }) => item.type === 'dir');
+        } catch (error) {
+            if (typeof error === 'object' && error !== null && 'code' in error && (error as any).code !== 'RESOURCE_NOT_FOUND') {
+                console.log(`GitHubRepository: Plugin directory not found for pluginId '${pluginId}' at ${pluginBaseDir}`);
+                return undefined; // Or empty array
+            }
+            throw error; // Re-throw other errors
+        }
+
+        const manifests: PluginManifest[] = [];
+        for (const versionDir of versionDirs) {
+            const version = versionDir.name;
+            try {
+                const manifest = await this.fetch(pluginId, version); // Use existing fetch with specific version
+                if (manifest) {
+                    manifests.push(manifest);
+                }
+            } catch (error) {
+                if (typeof error === 'object' && error !== null && 'message' in error ) {
+                    console.warn(`GitHubRepository: Failed to fetch manifest for ${pluginId} version ${version}: ${error.message}`);
+                }
+            }
+        }
+        return manifests.length > 0 ? manifests : undefined;
+    }
     
     async fetchByVerb(verb: string, version?: string): Promise<PluginManifest | undefined> {
         if (!this.isEnabled) return undefined;
-        // This is inefficient. Ideally, we'd have an index or query capability.
-        // For now, it lists all and filters. If versioning by path, list needs to be smarter.
-        const plugins = await this.list(); // list() itself needs to be version-aware if paths are versioned
-        for (const locator of plugins) {
-            // If versioning is path-based, locator.id might be "pluginId/version"
-            // This simple check assumes verb is unique across versions for now, or fetches latest if multiple match verb.
-            // For true versioned fetchByVerb, list() needs to provide versioned locators.
+        // This remains inefficient and needs an index for optimal performance.
+        // For now, it lists all plugins and versions, then filters.
+        const allLocators = await this.list(); 
+        
+        for (const locator of allLocators) {
             if (locator.verb === verb) {
-                // If a version is specified, we need to ensure the locator matches that version.
-                // This requires list() and PluginLocator to be version-aware.
-                // For now, if version is passed, we'd ideally use it in fetch(locator.id, version)
-                // but locator.id might already be versioned.
-                // This part needs refinement once versioning strategy in GitHub repo is fully decided.
-                // Let's assume for now fetch(locator.id) gets the specific version if id includes it.
-                return this.fetch(locator.id); // Pass version if available and fetch supports it
+                if (version) { // If a specific version is requested for the verb
+                    if (locator.version === version) {
+                        return this.fetch(locator.id, locator.version); // locator.id is base pluginId
+                    }
+                } else {
+                    // No specific version requested for the verb, return the first one found (likely latest if list is sorted, or arbitrary)
+                    // To get the "latest" reliably, list() needs to sort versions or fetchAllVersions + sort here.
+                    // For simplicity now, just fetching the located one.
+                    return this.fetch(locator.id, locator.version); 
+                }
             }
         }
         return undefined;
     }
 
-    async delete(id: string, version?: string): Promise<void> { // Version parameter added
+    async delete(pluginId: string, version?: string): Promise<void> {
         if (!this.isEnabled) return;
-        if (!id) { console.warn('GitHubRepository.delete: ID must be provided'); return; }
+        if (!pluginId) { console.warn('GitHubRepository.delete: pluginId must be provided'); return; }
 
         const effectiveBranch = await this._getEffectiveBranch();
-        const pluginPath = `${this.pluginsDir}/${id}`; // If id is "pluginA/1.0.0", this path is correct for versioned delete
+        let pathToDelete: string;
 
-        const response = await this.makeGitHubRequest('GET', `${this.baseContentUrl}/${pluginPath}`, undefined, { ref: effectiveBranch });
-
-        if (response.status !== 200 || !Array.isArray(response.data)) {
-            console.log(`GitHubRepository: Plugin with ID ${id} (version path) not found on branch ${effectiveBranch}.`);
-            return;
+        if (version) {
+            pathToDelete = `${this.pluginsDir}/${pluginId}/${version}`;
+        } else {
+            pathToDelete = `${this.pluginsDir}/${pluginId}`; // Delete entire plugin directory if no version
         }
 
-        for (const file of response.data) {
-            await this.deleteFile(
-                `${pluginPath}/${file.name}`,
-                file.sha,
-                `Deleting file ${file.name} for plugin ${id}`,
-                effectiveBranch
-            );
+        try {
+            // List all files/dirs under pathToDelete to get their SHAs for deletion
+            const response = await this.makeGitHubRequest('GET', `${this.baseContentUrl}/${pathToDelete}`, undefined, { ref: effectiveBranch });
+            if (response.status === 200 && Array.isArray(response.data)) {
+                for (const item of response.data) { // item can be file or dir
+                    // Note: GitHub API doesn't directly delete folders. Must delete all files within.
+                    // This simplified delete assumes we are deleting a version folder or a plugin folder that contains files.
+                    // For recursive delete of a folder, one would list contents recursively and delete files.
+                    // For now, if it's a file, delete it. If it's a folder (e.g. deleting a pluginId with version subfolders), this won't recurse.
+                     if (item.type === 'file') {
+                        await this.deleteFile(
+                            item.path, // Full path from item.path
+                            item.sha,
+                            `Deleting file ${item.name} for ${pluginId}${version ? ` v${version}` : ''}`,
+                            effectiveBranch
+                        );
+                    } else if (item.type === 'dir' && version) { // If deleting a specific version, we might have files in that version dir
+                        // This means pathToDelete was plugins/{pluginId}/{version}
+                        // We need to list files inside this item.path (which is plugins/{pluginId}/{version}/{fileName})
+                        // This part is complex for a simple delete. The current logic will only delete files directly under pathToDelete.
+                        // A true recursive delete is needed if we expect nested structures beyond manifest + files.
+                         console.warn(`GitHubRepository.delete: item ${item.path} is a directory. Recursive delete for directories not fully implemented here. Only direct files under ${pathToDelete} will be attempted for deletion.`);
+                    }
+                }
+                 console.log(`GitHubRepository: Attempted to delete files for ${pathToDelete} from branch ${effectiveBranch}.`);
+            } else {
+                console.log(`GitHubRepository: No files found to delete for ${pathToDelete} on branch ${effectiveBranch}.`);
+            }
+        } catch (error: unknown) {
+            if (typeof error === 'object' && error !== null && 'code' in error && (error as any).code === 'RESOURCE_NOT_FOUND') {
+                console.log(`GitHubRepository: Path ${pathToDelete} not found for deletion on branch ${effectiveBranch}. Nothing to delete.`);
+                return;
+            }
+            throw error; // Re-throw other errors
         }
-        // Deleting the folder itself is tricky with GitHub API (delete all files, folder disappears if empty)
-        console.log(`GitHubRepository: Successfully deleted files for plugin ${id} from branch ${effectiveBranch}.`);
     }
 
     async list(): Promise<PluginLocator[]> {
         if (!this.isEnabled) return [];
         const effectiveBranch = await this._getEffectiveBranch();
-        let response;
+        const locators: PluginLocator[] = [];
+        let pluginIdDirs: any[];
+
         try {
-            response = await this.makeGitHubRequest('GET', `${this.baseContentUrl}/${this.pluginsDir}`, undefined, { ref: effectiveBranch });
+            const response = await this.makeGitHubRequest('GET', `${this.baseContentUrl}/${this.pluginsDir}`, undefined, { ref: effectiveBranch });
+            if (!Array.isArray(response.data)) {
+                 console.warn(`GitHubRepository: Failed to list plugin ID directories or directory is empty at ${this.pluginsDir}`);
+                 return [];
+            }
+            pluginIdDirs = response.data.filter((item: { type: string }) => item.type === 'dir');
         } catch (error) {
-            if (error.code === GitHubRepositoryErrorCodes_EMBEDDED.RESOURCE_NOT_FOUND) {
-                // If plugins directory doesn't exist, try to create it with a README.md
+            if ((error as any).code === 'RESOURCE_NOT_FOUND') {
                 console.log(`GitHubRepository: pluginsDir '${this.pluginsDir}' not found on branch ${effectiveBranch}. Attempting to create.`);
                 try {
-                    await this.createOrUpdateFile(
-                        `${this.pluginsDir}/README.md`,
-                        '# Plugins Directory\n\nThis directory contains plugin manifests.',
-                        'Creating plugins directory',
-                        effectiveBranch
-                    );
-                    console.log(`GitHubRepository: Created pluginsDir '${this.pluginsDir}' with a README.`);
-                } catch (initError) {
-                    console.error(`GitHubRepository: Failed to create pluginsDir '${this.pluginsDir}' on branch ${effectiveBranch}: ${initError.message}`);
-                }
-                return []; // Return empty list as directory was just (attempted to be) created
+                    await this.createOrUpdateFile(`${this.pluginsDir}/README.md`, '# Plugins', 'Creating plugins directory', effectiveBranch);
+                } catch (initError) { console.error(`GitHubRepository: Failed to create pluginsDir: ${(initError as Error).message}`); }
+                return [];
             }
-            console.error(`GitHubRepository: Failed to list plugins from branch ${effectiveBranch}: ${error.message}`);
+            console.error(`GitHubRepository: Error listing plugin ID dirs from ${this.pluginsDir}: ${(error as Error).message}`);
             return [];
         }
 
-        if (!Array.isArray(response.data)) return [];
-
-        const pluginDirsOrFiles = response.data.filter((item: { type: string; name: string }) => item.type === 'dir' || item.name === 'plugin-manifest.json');
-        const locators: PluginLocator[] = [];
-
-        for (const item of pluginDirsOrFiles) {
-            let manifestPath: string;
-            let pluginIdToUse: string;
-
-            if (item.type === 'dir') {
-                // Assumes structure: plugins/{pluginId}/{version}/plugin-manifest.json
-                // or plugins/{pluginId}/plugin-manifest.json (if not versioned by path)
-                // For now, let's assume 'item.name' is pluginId or pluginId/version segment.
-                manifestPath = `${this.pluginsDir}/${item.name}/plugin-manifest.json`;
-                pluginIdToUse = item.name; // This might need adjustment if item.name is versioned.
-            } else { // It's a plugin-manifest.json at the root of pluginsDir (less likely for multiple plugins)
-                // This case is less robust, better to have each plugin in its own directory.
-                // Assuming the name of the manifest indicates the plugin ID if structure is flat.
-                // manifestPath = `${this.pluginsDir}/${item.name}`;
-                // pluginIdToUse = item.name.replace('plugin-manifest.json', '');
-                console.warn(`GitHubRepository: Found manifest directly in pluginsDir: ${item.name}. Recommend organizing plugins in subdirectories.`);
-                continue; 
-            }
-            
-            try {
-                const manifestContent = await this.getFileContent(manifestPath, effectiveBranch);
-                if (manifestContent) {
-                    const manifest = JSON.parse(manifestContent) as PluginManifest;
-                    // If id in manifest is different from dir name, prefer manifest.id
-                    const finalPluginId = manifest.id || pluginIdToUse; 
+        for (const pluginIdDir of pluginIdDirs) {
+            const pluginId = pluginIdDir.name;
+            const versions = await this.fetchAllVersionsOfPlugin(pluginId); // This will fetch manifests
+            if (versions) {
+                for (const manifest of versions) {
+                    if (manifest.id !== pluginId) {
+                        console.warn(`GitHubRepository.list: Manifest ID '${manifest.id}' does not match directory ID '${pluginId}'. Using manifest ID.`);
+                    }
                     locators.push({
-                        id: finalPluginId, // This ID should incorporate version if paths are versioned.
+                        id: manifest.id, // Use ID from manifest
                         verb: manifest.verb,
-                        name: manifest.name, // Added name to locator
-                        version: manifest.version, // Added version to locator
-                        description: manifest.description, // Added description
+                        version: manifest.version,
                         repository: {
                             type: 'github',
-                            url: `https://github.com/${this.repoOwner}/${this.repoName}/tree/${effectiveBranch}/${this.pluginsDir}/${finalPluginId}`
+                            url: `https://github.com/${this.repoOwner}/${this.repoName}/tree/${effectiveBranch}/${this.pluginsDir}/${manifest.id}/${manifest.version}`
                         }
                     });
                 }
+            }
+            // Check for a default/latest manifest directly under pluginId dir as well
+            try {
+                const defaultManifest = await this.fetch(pluginId); // Fetch without version
+                if (defaultManifest) {
+                    // Avoid duplicates if already listed via fetchAllVersions (e.g. if 'latest' is also a numbered version dir)
+                    if (!locators.some(loc => loc.id === defaultManifest.id && loc.version === defaultManifest.version)) {
+                         locators.push({
+                            id: defaultManifest.id,
+                            verb: defaultManifest.verb,
+                            version: defaultManifest.version, // This might be "latest" or a specific version
+                            repository: {
+                                type: 'github',
+                                url: `https://github.com/${this.repoOwner}/${this.repoName}/tree/${effectiveBranch}/${this.pluginsDir}/${defaultManifest.id}`
+                            }
+                        });
+                    }
+                }
             } catch (error) {
-                console.warn(`GitHubRepository: Failed to process item ${item.name} on branch ${effectiveBranch}: ${error.message}`);
+                // It's okay if default manifest doesn't exist, already logged by fetch
             }
         }
         return locators;
@@ -415,8 +447,8 @@ export class GitHubRepository implements PluginRepository {
                 return Buffer.from(response.data.content, 'base64').toString('utf-8');
             }
             return undefined;
-        } catch (error) {
-            if (error.code === GitHubRepositoryErrorCodes_EMBEDDED.RESOURCE_NOT_FOUND) {
+        } catch (error: unknown) {
+            if (typeof error === 'object' && error !== null && 'code' in error && (error as any).code === 'RESOURCE_NOT_FOUND') {
                 return undefined;
             }
             throw error; // Re-throw other errors
@@ -431,8 +463,8 @@ export class GitHubRepository implements PluginRepository {
             if (response.status === 200) {
                 sha = response.data.sha;
             }
-        } catch (error) {
-            if (error.code !== GitHubRepositoryErrorCodes_EMBEDDED.RESOURCE_NOT_FOUND) {
+        } catch (error: unknown) {
+            if (!(typeof error === 'object' && error !== null && 'code' in error && (error as any).code === 'RESOURCE_NOT_FOUND')) {
                 throw error; // Re-throw if not a 404 (file doesn't exist is fine for creation)
             }
         }

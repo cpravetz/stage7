@@ -474,23 +474,6 @@ class AgentSetManager {
         await this.apiCall('post', `http://${setUrl}/resumeAgent`, { agentId });
     }
 
-    /**
-     * Update agent statistics
-     * @param agentId Agent ID
-     * @param missionId Mission ID
-     * @param statistics Agent statistics
-     */
-    async updateAgentStatistics(agentId: string, missionId: string, statistics: any): Promise<void> {
-        console.log(`Updating statistics for agent ${agentId} in mission ${missionId}`);
-
-        // Store the statistics in memory for quick access
-        // This could be expanded to store in a database for persistence
-
-        // For now, we'll just log the statistics and rely on the getAgentStatistics method
-        // to fetch the latest statistics from the AgentSet when needed
-        console.log(`Agent ${agentId} statistics:`, JSON.stringify(statistics, null, 2));
-    }
-
     async distributeUserMessage(req: express.Request) {
         const messagePromises = Array.from(this.agentSets.values()).map(async (set) => {
             try {
@@ -516,7 +499,17 @@ class AgentSetManager {
         return urlPattern.test(url);
     }
 
+    isValidMissionId(missionId: string): boolean {
+        // Allow only alphanumeric mission IDs (no special characters)
+        const missionIdPattern = /^[a-zA-Z0-9]+$/;
+        return missionIdPattern.test(missionId);
+    }
+
+
     public async getAgentStatistics(missionId: string): Promise<AgentSetManagerStatistics> {
+        if (!this.isValidMissionId(missionId)) {
+            throw new Error(`Invalid missionId: ${missionId}`);
+        }
         let stats: AgentSetManagerStatistics = {
             agentSetsCount: 0,
             totalAgentsCount: 0,
@@ -532,7 +525,7 @@ class AgentSetManager {
                         console.error(`Invalid URL: ${agentSet.url}`);
                         return stats;
                     }
-                    const response = await this.apiCall('get', `http://${agentSet.url}/statistics/${missionId}`);
+                    const response = await this.apiCall('get', `http://${agentSet.url}/statistics/${encodeURIComponent(missionId)}`);
                     const serializedStats = response.data;
                     serializedStats.agentsByStatus = MapSerializer.transformFromSerialization(serializedStats.agentsByStatus);
                     console.log(`AgentSetManager:AgentSet `,agentSet.url,` stats: `, serializedStats);
