@@ -4,7 +4,7 @@ import { Request, Response } from 'express'; // For Request, Response types in h
 import {
     Step, MapSerializer, BaseEntity, ServiceTokenManager, PluginInput, PluginOutput,
     PluginDefinition, PluginParameterType, environmentType, PluginManifest,
-    verifyPluginSignature, validatePluginPermissions, checkPluginCompatibility
+    verifyPluginSignature, validatePluginPermissions, checkPluginToPluginCompatibility
 } from '@cktmcs/shared';
 
 import { generateStructuredError, ErrorSeverity, GlobalErrorCodes, StructuredError } from '../utils/errorReporter';
@@ -125,7 +125,7 @@ export class PluginOrchestrator extends BaseEntity implements EngineerRequesterC
                     const response = await this.authenticatedApi.get(`http://${this.postOfficeUrl}/getServices`);
                     const services = response.data;
                     // Adjust service name if it changed from 'capabilitiesManagerUrl' to 'pluginOrchestratorUrl'
-                    if (!services || !services[this.name + 'Url']) { // Using this.name which is 'PluginOrchestrator'
+                    if (!services || !services[this.serviceName + 'Url']) { // Using this.serviceName which is 'PluginOrchestrator'
                         console.warn(`[${trace_id}] ${source_component}: Not found in PostOffice services list. Re-registering...`);
                         this.registeredWithPostOffice = false;
                         await this.registerWithPostOffice(5, 1000);
@@ -186,7 +186,7 @@ export class PluginOrchestrator extends BaseEntity implements EngineerRequesterC
                 res.status(400).json(createPluginOutputError(err));
                 return;
             }
-            if (!await verifyPluginSignature(newPlugin)) { // Cast to PluginDefinition
+            if (!await verifyPluginSignature(newPlugin as PluginDefinition)) { // Cast to PluginDefinition
                 const err = generateStructuredError({
                     error_code: GlobalErrorCodes.CAPABILITIES_MANAGER_PLUGIN_STORE_FAILED, severity: ErrorSeverity.ERROR,
                     message: 'Plugin signature is invalid.', contextual_info: { plugin_id: newPlugin.id }, trace_id_param: trace_id, source_component
@@ -242,7 +242,7 @@ export class PluginOrchestrator extends BaseEntity implements EngineerRequesterC
 
         console.log(`[${trace_id}] ${source_component}: Executing action: ${step.actionVerb}, PluginID: ${pluginIdToFetch}, Version: ${pluginVersionToFetch || 'default/latest'}`);
 
-        let plugin: PluginManifest | undefined;
+        let plugin: PluginDefinition | undefined;
         try {
             if (pluginDetails && pluginDetails.plugin_id && pluginDetails.plugin_version) {
                 plugin = await this.pluginRegistry.fetchOne(pluginDetails.plugin_id, pluginDetails.plugin_version);
@@ -254,11 +254,7 @@ export class PluginOrchestrator extends BaseEntity implements EngineerRequesterC
                     });
                 }
                 console.log(`[${trace_id}] ${source_component}: Successfully fetched specific plugin ${plugin.id} v${plugin.version}`);
-                // Note: checkPluginCompatibility expects PluginDefinition.
-                // Casting `plugin as PluginDefinition` here if `checkPluginCompatibility` strictly requires it
-                // and cannot be updated to accept `PluginManifest`.
-                // For now, assuming structural compatibility is sufficient or `checkPluginCompatibility` will be updated.
-                const compatibility = checkPluginCompatibility(plugin as PluginDefinition, hostCapabilities);
+                const compatibility = checkPluginToPluginCompatibility(plugin, hostCapabilities);
                 if (!compatibility.compatible) {
                     console.warn(`[${trace_id}] ${source_component}: Warning - Explicitly requested plugin ${plugin.id} v${plugin.version} may not be fully compatible. Reason: ${compatibility.reason || 'N/A'}`);
                 } else {
@@ -267,12 +263,11 @@ export class PluginOrchestrator extends BaseEntity implements EngineerRequesterC
             } else {
                 const allVersions = await this.pluginRegistry.fetchAllVersionsByVerb(step.actionVerb);
                 if (allVersions && allVersions.length > 0) {
-                    for (const p of allVersions) { // p is PluginManifest
-                        // Casting `p as PluginDefinition` for `checkPluginCompatibility`
-                        const compatibility = checkPluginCompatibility(p as PluginDefinition, hostCapabilities);
+                    for (const p of allVersions) {
+                const compatibility = checkPluginToPluginCompatibility(p, hostCapabilities);
                         console.log(`[${trace_id}] ${source_component}: Checking compatibility for plugin ${p.id} v${p.version}. Compatible: ${compatibility.compatible}. Reason: ${compatibility.reason || 'N/A'}`);
                         if (compatibility.compatible) {
-                            plugin = p; // p is PluginManifest, plugin is PluginManifest
+                            plugin = p;
                             console.log(`[${trace_id}] ${source_component}: Selected plugin ${plugin.id} v${plugin.version} for verb ${step.actionVerb} based on compatibility.`);
                             break;
                         }
@@ -283,7 +278,7 @@ export class PluginOrchestrator extends BaseEntity implements EngineerRequesterC
                             severity: ErrorSeverity.ERROR,
                             message: `No compatible version of plugin for action verb '${step.actionVerb}' found for host ${hostCapabilities.hostAppName} v${hostCapabilities.hostVersion}.`,
                             source_component, trace_id_param: trace_id,
-                            contextual_info: { actionVerb: step.actionVerb, hostCapabilities, checkedVersions: allVersions.map(v => ({id: v.id, version: v.version, requirements: v.requirements})) }
+                            contextual_info: { actionVerb: step.actionVerb, hostCapabilities, checkedVersions: allVersions.map(v => ({id: v.id, version: v.version, requirements: v.hostEnvironment?.requirements})) }
                         });
                     }
                 } else {
@@ -319,10 +314,9 @@ export class PluginOrchestrator extends BaseEntity implements EngineerRequesterC
             return;
         }
 
-        if (plugin) { // plugin is PluginManifest
+        if (plugin) {
             try {
-                // Casting `plugin as PluginDefinition` for `validateAndStandardizeInputs`
-                const validatedInputsResult = await validateAndStandardizeInputs(plugin as PluginDefinition, step.inputs);
+                const validatedInputsResult = await validateAndStandardizeInputs(plugin, step.inputs);
                 if (!validatedInputsResult.success) {
                     throw generateStructuredError({
                         error_code: GlobalErrorCodes.INPUT_VALIDATION_FAILED,
@@ -331,10 +325,9 @@ export class PluginOrchestrator extends BaseEntity implements EngineerRequesterC
                     });
                 }
 
-                // `plugin` is already PluginManifest, so no cast needed for `preparePluginForExecution`
-                const { pluginRootPath, effectiveManifest } = await this.pluginRegistry.preparePluginForExecution(plugin);
+                const { pluginRootPath, effectiveManifest } = await this.pluginRegistry.preparePluginForExecution(plugin as PluginManifest);
                 
-                const configSet = await this.configManager.getPluginConfig(effectiveManifest.id); // effectiveManifest is PluginManifest
+                const configSet = await this.configManager.getPluginConfig(effectiveManifest.id);
                 const currentEnv = { ...process.env }; // Base environment variables
                 const environmentForPlugin: environmentType = { env: currentEnv, credentials: configSet ?? [] };
 
@@ -422,12 +415,14 @@ export class PluginOrchestrator extends BaseEntity implements EngineerRequesterC
     // Example of a handler method for ApiRouterService
     public healthCheckHandler(req: Request, res: Response) {
         const trace_id = (req as any).trace_id || uuidv4();
-        super.healthCheckHandler(req, res, trace_id); // Call BaseEntity's healthCheckHandler
+        // super.healthCheckHandler(req, res, trace_id); // Call BaseEntity's healthCheckHandler
+        res.status(200).json({ status: 'OK', service: this.serviceId, timestamp: new Date().toISOString(), trace_id });
     }
     
     public readinessCheckHandler(req: Request, res: Response) {
         const trace_id = (req as any).trace_id || uuidv4();
-        super.readinessCheckHandler(req, res, trace_id); // Call BaseEntity's readinessCheckHandler
+        // super.readinessCheckHandler(req, res, trace_id); // Call BaseEntity's readinessCheckHandler
+        res.status(200).json({ status: 'READY', service: this.serviceId, timestamp: new Date().toISOString(), trace_id, checks: [{ name: 'PostOffice', status: this.registeredWithPostOffice ? 'REGISTERED' : 'NOT_REGISTERED' }] });
     }
 
     public async handleBaseMessageHandler(message: any, trace_id: string) {
@@ -442,7 +437,9 @@ export class PluginOrchestrator extends BaseEntity implements EngineerRequesterC
     }
 
     public async requestPluginFromEngineer(step: Step, pluginDetails: string, trace_id: string): Promise<PluginOutput> {
-        return actualRequestPluginFromEngineer(this, step, pluginDetails, trace_id);
+        // trace_id is not used by actualRequestPluginFromEngineer, but we keep it in the signature for now
+        // in case the shared function is updated to include it for logging/tracing.
+        return actualRequestPluginFromEngineer(this, step, pluginDetails);
     }
 }
 

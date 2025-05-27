@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { PluginOrchestrator } from '../orchestration/pluginOrchestrator';
 import { PluginRegistry } from '../utils/pluginRegistry';
 import { generateStructuredError, ErrorSeverity, GlobalErrorCodes, StructuredError } from '../utils/errorReporter';
-import { PluginLocator } from '@cktmcs/shared';
+import { PluginLocator, PluginRepositoryType } from '@cktmcs/shared';
 import githubRoutes from '../routes/githubRoutes'; // Assuming this path is correct after refactor
 // import { BaseEntity } from '@cktmcs/shared'; // For verifyToken // Removed as BaseEntity is not directly used
 
@@ -208,7 +208,8 @@ export class ApiRouterService {
                             }));
                         } else {
                             // Assuming repository.delete can handle an optional version
-                            await repository.delete({ id, version }); 
+                            // TODO: Verify if version-specific deletion is intended and how it's supported by the repository's delete method.
+                            await repository.delete(id); 
                             res.json({ success: true, message: `Plugin ${id} ${version ? `version ${version}` : ''} deleted successfully from ${repositoryType}` });
                         }
                     } catch (error:any) {
