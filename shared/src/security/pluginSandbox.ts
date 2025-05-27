@@ -1,4 +1,5 @@
-import { PluginDefinition, environmentType, PluginInput, PluginOutput, PluginParameterType } from '../types/Plugin';
+import { PluginDefinition, environmentType, PluginInput, PluginOutput, PluginParameterType } from '../types/Plugin'; // PluginDefinition is kept for loadPluginCode
+import { PluginManifest } from '../types/PluginManifest';
 import { VM, VMScript } from 'vm2';
 import * as fs from 'fs/promises';
 import * as path from 'path';
@@ -33,7 +34,7 @@ export const DEFAULT_SANDBOX_OPTIONS: SandboxOptions = {
  * @returns Plugin outputs
  */
 export async function executePluginInSandbox(
-  plugin: PluginDefinition,
+  plugin: PluginManifest,
   inputs: Map<string, PluginInput>,
   environment: environmentType
 ): Promise<PluginOutput[]> {
@@ -104,7 +105,7 @@ export async function executePluginInSandbox(
  * @param plugin Plugin definition
  * @returns Plugin code as a string
  */
-async function loadPluginCode(plugin: PluginDefinition): Promise<string> {
+async function loadPluginCode(plugin: PluginManifest): Promise<string> { // Changed to PluginManifest
   if (!plugin.entryPoint || !plugin.entryPoint.main) {
     throw new Error('Plugin entry point is missing');
   }

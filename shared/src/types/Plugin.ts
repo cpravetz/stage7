@@ -17,6 +17,7 @@ export interface PluginParameter {
     description: string;
     mimeType?: string;
     defaultValue?: any;
+    args?: Record<string, any>; // Added field
 }
 
 export interface EntryPointType {

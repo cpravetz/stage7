@@ -186,7 +186,7 @@ export class PluginOrchestrator extends BaseEntity implements EngineerRequesterC
                 res.status(400).json(createPluginOutputError(err));
                 return;
             }
-            if (!await verifyPluginSignature(newPlugin as PluginDefinition)) { // Cast to PluginDefinition
+            if (!await verifyPluginSignature(newPlugin)) { // Cast to PluginDefinition
                 const err = generateStructuredError({
                     error_code: GlobalErrorCodes.CAPABILITIES_MANAGER_PLUGIN_STORE_FAILED, severity: ErrorSeverity.ERROR,
                     message: 'Plugin signature is invalid.', contextual_info: { plugin_id: newPlugin.id }, trace_id_param: trace_id, source_component
@@ -242,7 +242,7 @@ export class PluginOrchestrator extends BaseEntity implements EngineerRequesterC
 
         console.log(`[${trace_id}] ${source_component}: Executing action: ${step.actionVerb}, PluginID: ${pluginIdToFetch}, Version: ${pluginVersionToFetch || 'default/latest'}`);
 
-        let plugin: PluginDefinition | undefined;
+        let plugin: PluginManifest | undefined;
         try {
             if (pluginDetails && pluginDetails.plugin_id && pluginDetails.plugin_version) {
                 plugin = await this.pluginRegistry.fetchOne(pluginDetails.plugin_id, pluginDetails.plugin_version);
@@ -254,7 +254,11 @@ export class PluginOrchestrator extends BaseEntity implements EngineerRequesterC
                     });
                 }
                 console.log(`[${trace_id}] ${source_component}: Successfully fetched specific plugin ${plugin.id} v${plugin.version}`);
-                const compatibility = checkPluginCompatibility(plugin, hostCapabilities);
+                // Note: checkPluginCompatibility expects PluginDefinition.
+                // Casting `plugin as PluginDefinition` here if `checkPluginCompatibility` strictly requires it
+                // and cannot be updated to accept `PluginManifest`.
+                // For now, assuming structural compatibility is sufficient or `checkPluginCompatibility` will be updated.
+                const compatibility = checkPluginCompatibility(plugin as PluginDefinition, hostCapabilities);
                 if (!compatibility.compatible) {
                     console.warn(`[${trace_id}] ${source_component}: Warning - Explicitly requested plugin ${plugin.id} v${plugin.version} may not be fully compatible. Reason: ${compatibility.reason || 'N/A'}`);
                 } else {
@@ -263,11 +267,12 @@ export class PluginOrchestrator extends BaseEntity implements EngineerRequesterC
             } else {
                 const allVersions = await this.pluginRegistry.fetchAllVersionsByVerb(step.actionVerb);
                 if (allVersions && allVersions.length > 0) {
-                    for (const p of allVersions) {
-                        const compatibility = checkPluginCompatibility(p, hostCapabilities);
+                    for (const p of allVersions) { // p is PluginManifest
+                        // Casting `p as PluginDefinition` for `checkPluginCompatibility`
+                        const compatibility = checkPluginCompatibility(p as PluginDefinition, hostCapabilities);
                         console.log(`[${trace_id}] ${source_component}: Checking compatibility for plugin ${p.id} v${p.version}. Compatible: ${compatibility.compatible}. Reason: ${compatibility.reason || 'N/A'}`);
                         if (compatibility.compatible) {
-                            plugin = p;
+                            plugin = p; // p is PluginManifest, plugin is PluginManifest
                             console.log(`[${trace_id}] ${source_component}: Selected plugin ${plugin.id} v${plugin.version} for verb ${step.actionVerb} based on compatibility.`);
                             break;
                         }
@@ -314,9 +319,10 @@ export class PluginOrchestrator extends BaseEntity implements EngineerRequesterC
             return;
         }
 
-        if (plugin) {
+        if (plugin) { // plugin is PluginManifest
             try {
-                const validatedInputsResult = await validateAndStandardizeInputs(plugin, step.inputs);
+                // Casting `plugin as PluginDefinition` for `validateAndStandardizeInputs`
+                const validatedInputsResult = await validateAndStandardizeInputs(plugin as PluginDefinition, step.inputs);
                 if (!validatedInputsResult.success) {
                     throw generateStructuredError({
                         error_code: GlobalErrorCodes.INPUT_VALIDATION_FAILED,
@@ -325,9 +331,10 @@ export class PluginOrchestrator extends BaseEntity implements EngineerRequesterC
                     });
                 }
 
-                const { pluginRootPath, effectiveManifest } = await this.pluginRegistry.preparePluginForExecution(plugin as PluginManifest);
+                // `plugin` is already PluginManifest, so no cast needed for `preparePluginForExecution`
+                const { pluginRootPath, effectiveManifest } = await this.pluginRegistry.preparePluginForExecution(plugin);
                 
-                const configSet = await this.configManager.getPluginConfig(effectiveManifest.id);
+                const configSet = await this.configManager.getPluginConfig(effectiveManifest.id); // effectiveManifest is PluginManifest
                 const currentEnv = { ...process.env }; // Base environment variables
                 const environmentForPlugin: environmentType = { env: currentEnv, credentials: configSet ?? [] };
 

@@ -206,7 +206,7 @@ export function createTrustCertificate(
  * @returns True if the plugin is trusted
  */
 export function verifyTrustCertificate(
-  plugin: PluginDefinition,
+  plugin: PluginManifest,
   trustedPublishers: string[],
   publicKeys?: Map<string, string>
 ): boolean {

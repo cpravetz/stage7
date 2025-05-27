@@ -3,7 +3,7 @@ import { promisify } from 'util';
 import { exec as execCallback } from 'child_process';
 
 import {
-    PluginInput, PluginOutput, PluginDefinition, PluginParameterType, environmentType,
+    PluginManifest, PluginInput, PluginOutput, PluginDefinition, PluginParameterType, environmentType,
     executePluginInSandbox, validatePluginPermissions, hasDangerousPermissions, ServiceTokenManager
 } from '@cktmcs/shared';
 
@@ -33,7 +33,7 @@ const execAsyncLocal = promisify(execCallback);
 export interface ExecutionContext {
     inputs: Map<string, PluginInput>;
     environment: environmentType; // Contains credentials and env vars
-    pluginDefinition: PluginDefinition;
+    pluginDefinition: PluginManifest;
     pluginRootPath: string;
     trace_id: string;
 }

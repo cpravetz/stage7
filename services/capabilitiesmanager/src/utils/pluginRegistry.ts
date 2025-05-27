@@ -206,7 +206,7 @@ export class PluginRegistry {
     }
 
 
-    async findOne(id: string, version?: string): Promise<PluginDefinition | undefined> { // Added version
+    async findOne(id: string, version?: string): Promise<PluginManifest | undefined> { // Added version
         if (this.cache.has(id)) { // Cache needs to be version aware if we want to hit it here
             // Corrected based on "Expected 1-2 arguments, but got 3" for the internal fetchOne call
             return this.pluginMarketplace.fetchOne(id, version);
