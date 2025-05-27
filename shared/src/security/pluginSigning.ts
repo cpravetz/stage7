@@ -1,4 +1,5 @@
-import { PluginDefinition, PluginManifest } from '../types/Plugin';
+import { PluginDefinition } from '../types/Plugin';
+import { PluginManifest } from '../types/PluginManifest';
 import { createHash, createSign, createVerify } from 'crypto';
 import fs from 'fs';
 import path from 'path';
