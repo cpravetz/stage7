@@ -6,7 +6,7 @@ import { PluginRegistry } from '../utils/pluginRegistry';
 import { generateStructuredError, ErrorSeverity, GlobalErrorCodes, StructuredError } from '../utils/errorReporter';
 import { PluginLocator } from '@cktmcs/shared';
 import githubRoutes from '../routes/githubRoutes'; // Assuming this path is correct after refactor
-import { BaseEntity } from '@cktmcs/shared'; // For verifyToken
+// import { BaseEntity } from '@cktmcs/shared'; // For verifyToken // Removed as BaseEntity is not directly used
 
 // Helper to create PluginOutput error from a StructuredError - Duplicating temporarily, ideally from a shared util
 function createPluginOutputError(structuredError: StructuredError): any[] { // Return type might need adjustment
@@ -169,7 +169,8 @@ export class ApiRouterService {
                             }));
                         } else {
                             // Assuming repository.fetch can handle an optional version
-                            const plugin = await repository.fetch(id, version); 
+                            // const plugin = await repository.fetch(id, version); // Old call
+                            const plugin = await this.pluginRegistry.fetchOne(id, version, repositoryType as PluginRepositoryType);
                             if (!plugin) {
                                 res.status(404).json(generateStructuredError({
                                     error_code: GlobalErrorCodes.PLUGIN_VERSION_NOT_FOUND, severity: ErrorSeverity.ERROR,
@@ -207,7 +208,7 @@ export class ApiRouterService {
                             }));
                         } else {
                             // Assuming repository.delete can handle an optional version
-                            await repository.delete(id, version); 
+                            await repository.delete({ id, version }); 
                             res.json({ success: true, message: `Plugin ${id} ${version ? `version ${version}` : ''} deleted successfully from ${repositoryType}` });
                         }
                     } catch (error:any) {

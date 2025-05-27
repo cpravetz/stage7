@@ -6,7 +6,7 @@ import { generateStructuredError, ErrorSeverity, GlobalErrorCodes, StructuredErr
 import { PluginRegistry } from '../utils/pluginRegistry';
 import { PluginExecutionService, ExecutionContext } from './pluginExecutionService'; // Assuming ExecutionContext is exported
 import { requestPluginFromEngineer } from '../utils/engineer'; // Path might need adjustment
-// import { PluginOrchestrator } from '../orchestration/pluginOrchestrator'; // Circular dependency if PluginOrchestrator directly uses this. Pass necessary methods/refs.
+import { EngineerRequesterContext } from '../orchestration/pluginOrchestrator'; // Import EngineerRequesterContext
 
 // Helper to create PluginOutput error from a StructuredError - Duplicating temporarily
 function createPluginOutputError(structuredError: StructuredError): PluginOutput[] {
@@ -20,24 +20,17 @@ function createPluginOutputError(structuredError: StructuredError): PluginOutput
     }];
 }
 
-// Forward declaration for methods that might be on PluginOrchestrator if not passed directly
-interface EngineerRequester {
-    requestPluginFromEngineer(step: Step, pluginDetails: string, trace_id: string): Promise<PluginOutput>;
-    // We need a way to get the authenticatedApi for requestPluginFromEngineer if it uses 'this.authenticatedApi'
-    // This might mean passing the orchestrator or a specific http client configured like orchestrator's authenticatedApi
-    getAuthenticatedApi(): any; 
-}
-
+// Removed local EngineerRequester interface definition
 
 export class UnknownVerbWorkflowService {
     private pluginRegistry: PluginRegistry;
     private pluginExecutionService: PluginExecutionService;
-    private engineerRequester: EngineerRequester; // Or pass orchestrator instance
+    private engineerRequester: EngineerRequesterContext; // Changed type to EngineerRequesterContext
 
     constructor(
         pluginRegistry: PluginRegistry,
         pluginExecutionService: PluginExecutionService,
-        engineerRequester: EngineerRequester // e.g. the PluginOrchestrator instance
+        engineerRequester: EngineerRequesterContext // Changed type to EngineerRequesterContext
     ) {
         this.pluginRegistry = pluginRegistry;
         this.pluginExecutionService = pluginExecutionService;

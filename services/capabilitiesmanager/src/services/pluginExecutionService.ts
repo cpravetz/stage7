@@ -1,6 +1,6 @@
 import path from 'path';
 import { promisify } from 'util';
-import { exec as execCallback, execAsync as sharedExecAsync } from 'child_process'; // Assuming execAsync might be from a shared utility or defined if not
+import { exec as execCallback } from 'child_process';
 
 import {
     PluginInput, PluginOutput, PluginDefinition, PluginParameterType, environmentType,
@@ -158,6 +158,7 @@ export class PluginExecutionService {
             const inputsJsonString = JSON.stringify(inputsObject);
             const command = `echo '${inputsJsonString.replace(/'/g, "'\\''")}' | python3 "${mainFilePath}" "${pluginRootPath}"`;
 
+            // Ensure execAsyncLocal is used (it already was, this is just for verification)
             const { stdout, stderr } = await execAsyncLocal(command, {
                 cwd: pluginRootPath,
                 env: { ...(environment.env || process.env), PYTHONPATH: pluginRootPath } // Ensure environment.env is used
@@ -268,7 +269,7 @@ export class PluginExecutionService {
             const requestBodyContentType = operationSpec.requestBody?.content && Object.keys(operationSpec.requestBody.content)[0] || 'application/json';
 
             for (const [inputName, pluginInput] of inputs.entries()) {
-                const inputDef = pluginDefinition.inputDefinitions?.find(def => def.inputName === inputName);
+                const inputDef = pluginDefinition.inputDefinitions?.find(def => def.name === inputName); // Changed def.inputName to def.name
                 if (!inputDef || !inputDef.args) continue;
 
                 const openApiName = inputDef.args['x-openapi-name'] as string;
@@ -334,7 +335,7 @@ export class PluginExecutionService {
                     console.warn(`[${trace_id}] ${source_component}: OpenAPI request for ${pluginDefinition.id} completed with non-2xx status: ${response.status}. Response data: ${JSON.stringify(response.data)}`);
                 } else {
                     throw generateStructuredError({
-                        error_code: GlobalErrorCodes.CAPABILITIES_MANAGER_API_CALL_FAILED,
+                        error_code: GlobalErrorCodes.CAPABILITIES_MANAGER_PLUGIN_FETCH_FAILED, // Changed from CAPABILITIES_MANAGER_API_CALL_FAILED
                         severity: ErrorSeverity.ERROR, message: `OpenAPI request failed for ${pluginDefinition.verb}: ${error.message}`,
                         source_component, trace_id_param: trace_id, original_error: error,
                         contextual_info: { plugin_id: pluginDefinition.id, verb: pluginDefinition.verb, url: requestConfig.url }
@@ -378,7 +379,7 @@ export class PluginExecutionService {
             }
 
 
-            const outputName = pluginDefinition.outputDefinitions?.[0]?.outputName || `${pluginDefinition.verb}_response`;
+            const outputName = pluginDefinition.outputDefinitions?.[0]?.name || `${pluginDefinition.verb}_response`; // Changed outputName to name
 
             return [{
                 success: isSuccessStatus,

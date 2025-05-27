@@ -27,7 +27,7 @@ const main = async () => {
     
     // 4. Start the HTTP Server via ApiRouterService
     // The port is typically managed by BaseEntity, accessed via pluginOrchestrator.port
-    const port = pluginOrchestrator.getPort(); // Assuming getPort() method exists on BaseEntity/PluginOrchestrator
+    const port = pluginOrchestrator.port; // Assuming getPort() method exists on BaseEntity/PluginOrchestrator
     try {
         await apiRouterService.startServer(port, `main-${instanceId}`);
         console.log(`[${instanceId}] ApiRouterService started successfully on port ${port}.`);

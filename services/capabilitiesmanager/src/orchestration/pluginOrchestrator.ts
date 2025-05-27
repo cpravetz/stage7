@@ -1,9 +1,9 @@
 import { v4 as uuidv4 } from 'uuid';
-import express from 'express'; // For Request, Response types in handlers
+import { Request, Response } from 'express'; // For Request, Response types in handlers
 
 import {
     Step, MapSerializer, BaseEntity, ServiceTokenManager, PluginInput, PluginOutput,
-    PluginDefinition, PluginParameterType, environmentType, PluginManifest, PluginLocator,
+    PluginDefinition, PluginParameterType, environmentType, PluginManifest,
     verifyPluginSignature, validatePluginPermissions, checkPluginCompatibility
 } from '@cktmcs/shared';
 
@@ -11,7 +11,7 @@ import { generateStructuredError, ErrorSeverity, GlobalErrorCodes, StructuredErr
 import { ConfigManager } from '../utils/configManager';
 import { PluginRegistry } from '../utils/pluginRegistry';
 import { validateAndStandardizeInputs } from '../utils/validator';
-// import { requestPluginFromEngineer } from '../utils/engineer'; // This will be used by UnknownVerbWorkflowService
+import { requestPluginFromEngineer as actualRequestPluginFromEngineer } from '../utils/engineer'; // This will be used by UnknownVerbWorkflowService
 
 import { PluginExecutionService, ExecutionContext as PluginServiceExecutionContext } from '../services/pluginExecutionService';
 import { UnknownVerbWorkflowService } from '../services/unknownVerbWorkflowService';
@@ -43,8 +43,8 @@ export class PluginOrchestrator extends BaseEntity implements EngineerRequesterC
     public pluginRegistry: PluginRegistry; // Made public for ApiRouterService and other services
     
     // Services
-    private pluginExecutionService: PluginExecutionService;
-    private unknownVerbWorkflowService: UnknownVerbWorkflowService;
+    private pluginExecutionService!: PluginExecutionService;
+    private unknownVerbWorkflowService!: UnknownVerbWorkflowService;
     
     private serviceId = 'PluginOrchestrator'; // Updated serviceId
 
@@ -148,7 +148,7 @@ export class PluginOrchestrator extends BaseEntity implements EngineerRequesterC
     }
 
     // Handler for /storeNewPlugin route (called by ApiRouterService)
-    public async storeNewPluginHandler(req: express.Request, res: express.Response) {
+    public async storeNewPluginHandler(req: Request, res: Response) {
         const trace_id = (req as any).trace_id || uuidv4();
         const source_component = "PluginOrchestrator.storeNewPluginHandler";
         try {
@@ -221,7 +221,7 @@ export class PluginOrchestrator extends BaseEntity implements EngineerRequesterC
     }
 
     // Handler for /executeAction route (called by ApiRouterService)
-    public async executeActionVerbHandler(req: express.Request, res: express.Response) {
+    public async executeActionVerbHandler(req: Request, res: Response) {
         const trace_id = (req as any).trace_id || uuidv4();
         const source_component = "PluginOrchestrator.executeActionVerbHandler";
         const step = { ...req.body, inputs: MapSerializer.transformFromSerialization(req.body.inputs) } as Step;
@@ -255,7 +255,7 @@ export class PluginOrchestrator extends BaseEntity implements EngineerRequesterC
                 }
                 console.log(`[${trace_id}] ${source_component}: Successfully fetched specific plugin ${plugin.id} v${plugin.version}`);
                 const compatibility = checkPluginCompatibility(plugin, hostCapabilities);
-                if (!compatibility.isCompatible) {
+                if (!compatibility.compatible) {
                     console.warn(`[${trace_id}] ${source_component}: Warning - Explicitly requested plugin ${plugin.id} v${plugin.version} may not be fully compatible. Reason: ${compatibility.reason || 'N/A'}`);
                 } else {
                     console.log(`[${trace_id}] ${source_component}: Explicitly requested plugin ${plugin.id} v${plugin.version} is compatible.`);
@@ -265,8 +265,8 @@ export class PluginOrchestrator extends BaseEntity implements EngineerRequesterC
                 if (allVersions && allVersions.length > 0) {
                     for (const p of allVersions) {
                         const compatibility = checkPluginCompatibility(p, hostCapabilities);
-                        console.log(`[${trace_id}] ${source_component}: Checking compatibility for plugin ${p.id} v${p.version}. Compatible: ${compatibility.isCompatible}. Reason: ${compatibility.reason || 'N/A'}`);
-                        if (compatibility.isCompatible) {
+                        console.log(`[${trace_id}] ${source_component}: Checking compatibility for plugin ${p.id} v${p.version}. Compatible: ${compatibility.compatible}. Reason: ${compatibility.reason || 'N/A'}`);
+                        if (compatibility.compatible) {
                             plugin = p;
                             console.log(`[${trace_id}] ${source_component}: Selected plugin ${plugin.id} v${plugin.version} for verb ${step.actionVerb} based on compatibility.`);
                             break;
@@ -274,7 +274,7 @@ export class PluginOrchestrator extends BaseEntity implements EngineerRequesterC
                     }
                     if (!plugin) {
                         throw generateStructuredError({
-                            error_code: GlobalErrorCodes.PLUGIN_VERSION_NOT_COMPATIBLE,
+                            error_code: GlobalErrorCodes.PLUGIN_VERSION_NOT_FOUND,
                             severity: ErrorSeverity.ERROR,
                             message: `No compatible version of plugin for action verb '${step.actionVerb}' found for host ${hostCapabilities.hostAppName} v${hostCapabilities.hostVersion}.`,
                             source_component, trace_id_param: trace_id,
@@ -307,7 +307,7 @@ export class PluginOrchestrator extends BaseEntity implements EngineerRequesterC
                 severity: ErrorSeverity.ERROR, message: `Failed to fetch or determine compatible plugin for action '${step.actionVerb}'. ${error.message}`,
                 source_component, original_error: error, trace_id_param: trace_id, contextual_info: { actionVerb: step.actionVerb, plugin_id: pluginIdToFetch, plugin_version: pluginVersionToFetch, hostCapabilities }
             });
-            const httpStatus = error.error_code === GlobalErrorCodes.PLUGIN_VERSION_NOT_COMPATIBLE ? 400 :
+            const httpStatus = error.error_code === GlobalErrorCodes.PLUGIN_VERSION_NOT_FOUND ? 400 : // Changed from PLUGIN_VERSION_NOT_COMPATIBLE
                                error.error_code === GlobalErrorCodes.PLUGIN_VERSION_NOT_FOUND ? 404 :
                                (error.originalError?.response?.status || 500);
             res.status(httpStatus).json(createPluginOutputError(sError));
@@ -325,7 +325,7 @@ export class PluginOrchestrator extends BaseEntity implements EngineerRequesterC
                     });
                 }
 
-                const { pluginRootPath, effectiveManifest } = await this.pluginRegistry.preparePluginForExecution(plugin);
+                const { pluginRootPath, effectiveManifest } = await this.pluginRegistry.preparePluginForExecution(plugin as PluginManifest);
                 
                 const configSet = await this.configManager.getPluginConfig(effectiveManifest.id);
                 const currentEnv = { ...process.env }; // Base environment variables
@@ -413,14 +413,14 @@ export class PluginOrchestrator extends BaseEntity implements EngineerRequesterC
     }
 
     // Example of a handler method for ApiRouterService
-    public healthCheckHandler(req: express.Request, res: express.Response) {
+    public healthCheckHandler(req: Request, res: Response) {
         const trace_id = (req as any).trace_id || uuidv4();
-        super.healthCheck(req, res, trace_id); // Call BaseEntity's healthCheck
+        super.healthCheckHandler(req, res, trace_id); // Call BaseEntity's healthCheckHandler
     }
     
-    public readinessCheckHandler(req: express.Request, res: express.Response) {
+    public readinessCheckHandler(req: Request, res: Response) {
         const trace_id = (req as any).trace_id || uuidv4();
-        super.readinessCheck(req, res, trace_id); // Call BaseEntity's readinessCheck
+        super.readinessCheckHandler(req, res, trace_id); // Call BaseEntity's readinessCheckHandler
     }
 
     public async handleBaseMessageHandler(message: any, trace_id: string) {
@@ -432,6 +432,10 @@ export class PluginOrchestrator extends BaseEntity implements EngineerRequesterC
     // Make authenticatedApi accessible to UnknownVerbWorkflowService via EngineerRequesterContext
     public getAuthenticatedApi() {
         return this.authenticatedApi;
+    }
+
+    public async requestPluginFromEngineer(step: Step, pluginDetails: string, trace_id: string): Promise<PluginOutput> {
+        return actualRequestPluginFromEngineer(this, step, pluginDetails, trace_id);
     }
 }
 
