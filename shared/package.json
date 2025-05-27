@@ -14,7 +14,7 @@
   "dependencies": {
     "amqp-connection-manager": "^4.1.14",
     "amqplib": "^0.10.7",
-    "axios": "^1.7.7",
+    "axios": "^1.8.4",
     "isolated-vm": "^4.6.0",
     "jsonwebtoken": "^9.0.2",
     "tslib": "^2.6.2",

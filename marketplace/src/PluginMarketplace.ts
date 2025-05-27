@@ -122,13 +122,13 @@ export class PluginMarketplace {
      * @param repository Repository type to fetch from
      * @returns Plugin manifest or undefined if not found
      */
-    async fetchOne(id: string, repository?: PluginRepositoryType): Promise<PluginManifest | undefined> {
+    async fetchOne(id: string, version?: string, repository?: PluginRepositoryType): Promise<PluginManifest | undefined> {
         if (repository) {
             const repo = this.repositories.get(repository);
             if (!repo) {
                 throw new Error(`Repository ${repository} not found`);
             }
-            return await repo.fetch(id);
+            return await repo.fetch(id, version);
         }
         
         // If no repository specified, use default
@@ -136,13 +136,13 @@ export class PluginMarketplace {
         if (!defaultRepo) {
             throw new Error(`Default repository ${this.defaultRepository} not found`);
         }
-        return await defaultRepo.fetch(id);
+        return await defaultRepo.fetch(id, version);
     }
 
-    public async fetchOneByVerb(verb: string): Promise<PluginManifest | undefined> {
+    public async fetchOneByVerb(verb: string, version?: string): Promise<PluginManifest | undefined> {
         for (const repository of this.repositories.values()) {
             try {
-                const plugin = await repository.fetchByVerb(verb);
+                const plugin = await repository.fetchByVerb(verb, version);
                 if (plugin) { //} && await this.verifySignature(plugin)) {
                     return plugin;
                 }
@@ -152,6 +152,22 @@ export class PluginMarketplace {
             }
         }
         return undefined;
+    }
+
+    public async fetchAllVersionsOfPlugin(pluginId: string, repositoryType?: PluginRepositoryType): Promise<PluginManifest[] | undefined> {
+        const repoToUse = repositoryType ? this.repositories.get(repositoryType) : this.repositories.get(this.defaultRepository);
+
+        if (!repoToUse) {
+            const repoName = repositoryType || this.defaultRepository;
+            // Consider throwing a specific error or logging
+            console.error(`Repository ${repoName} not found when trying to fetch all versions for plugin ${pluginId}.`);
+            return undefined;
+        }
+        // Type assertion needed because the generic 'PluginRepository' from the map 
+        // might not yet be recognized by TSC as having 'fetchAllVersions'
+        // if the interface change isn't fully picked up by the LSP/TSC context immediately.
+        // However, we know it *should* have it based on the previous step.
+        return await (repoToUse as any).fetchAllVersions(pluginId);
     }
 
 

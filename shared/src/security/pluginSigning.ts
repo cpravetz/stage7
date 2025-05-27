@@ -1,4 +1,4 @@
-import { PluginDefinition } from '../types/Plugin';
+import { PluginDefinition, PluginManifest } from '../types/Plugin';
 import { createHash, createSign, createVerify } from 'crypto';
 import fs from 'fs';
 import path from 'path';
@@ -38,7 +38,7 @@ function createCanonicalRepresentation(plugin: PluginDefinition): string {
     id: plugin.id,
     verb: plugin.verb,
     version: plugin.version,
-    entryPoint: plugin.entryPoint,
+    entryPoint: plugin.entryPoint || {},
     security: {
       permissions: plugin.security.permissions,
       sandboxOptions: plugin.security.sandboxOptions
@@ -112,7 +112,7 @@ export function signPlugin(plugin: PluginDefinition, privateKey?: string): strin
  * @param publicKey Public key for verification (optional)
  * @returns True if the signature is valid
  */
-export function verifyPluginSignature(plugin: PluginDefinition, publicKey?: string): boolean {
+export function verifyPluginSignature(plugin: PluginManifest, publicKey?: string): boolean {
   try {
     if (!plugin.security?.trust?.signature) {
       console.log('Plugin has no signature to verify');
@@ -121,13 +121,17 @@ export function verifyPluginSignature(plugin: PluginDefinition, publicKey?: stri
 
     // Get the signature and the data to verify
     const signature = plugin.security.trust.signature;
-    const dataToVerify = JSON.stringify({
+    const objectToVerify = {
       id: plugin.id,
       verb: plugin.verb,
       version: plugin.version,
-      description: plugin.description || '',
-      entryPoint: plugin.entryPoint || {}
-    });
+      entryPoint: plugin.entryPoint || {}, // Match canonical representation's handling of optional entryPoint
+      security: {
+        permissions: plugin.security.permissions,
+        sandboxOptions: plugin.security.sandboxOptions
+      }
+    };
+    const dataToVerify = JSON.stringify(objectToVerify, Object.keys(objectToVerify).sort());
 
     // Use the provided public key or load from environment/file
     const keyToUse = publicKey || process.env.PLUGIN_PUBLIC_KEY || '';

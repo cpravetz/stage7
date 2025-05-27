@@ -11,10 +11,10 @@
     "dependencies": {
         "@cktmcs/shared": "file:../../shared",
         "@cktmcs/errorhandler": "file:../../errorhandler",
-        "axios": "^1.7.7",
-        "dockerode": "^4.0.2",
-        "dotenv": "^16.0.3",
-        "express": "^4.18.2",
+        "axios": "^1.8.4",
+        "dockerode": "^4.0.6",
+        "dotenv": "^16.5.0",
+        "express": "^4.21.1",
         "uuid": "^10.0.0"
     },
     "devDependencies": {
