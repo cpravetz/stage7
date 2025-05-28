@@ -1,0 +1,79 @@
+{
+  "id": "plugin-TEMPLATE",
+  "verb": "TEMPLATE",
+  "description": "Template Python plugin for Stage7 system",
+  "explanation": "This is a template plugin that demonstrates the structure and format for Python plugins in the Stage7 system. Replace with your actual plugin implementation.",
+  "inputDefinitions": [
+    {
+      "name": "example_input",
+      "required": true,
+      "type": "string",
+      "description": "Example input parameter - replace with your actual inputs"
+    }
+  ],
+  "outputDefinitions": [
+    {
+      "name": "result",
+      "required": true,
+      "type": "string",
+      "description": "Example output result - replace with your actual outputs"
+    }
+  ],
+  "language": "python",
+  "entryPoint": {
+    "main": "main.py",
+    "function": "execute_plugin"
+  },
+  "security": {
+    "permissions": [
+      "fs.read",
+      "net.fetch"
+    ],
+    "sandboxOptions": {
+      "allowEval": false,
+      "timeout": 30000,
+      "memory": 134217728,
+      "allowedModules": [
+        "json",
+        "sys",
+        "os",
+        "typing",
+        "datetime",
+        "re",
+        "urllib",
+        "requests"
+      ],
+      "allowedAPIs": [
+        "print",
+        "input"
+      ]
+    },
+    "trust": {
+      "publisher": "template",
+      "signature": null
+    }
+  },
+  "version": "1.0.0",
+  "metadata": {
+    "author": "Stage7 System",
+    "tags": [
+      "template",
+      "python",
+      "example"
+    ],
+    "category": "utility",
+    "license": "MIT",
+    "documentation": "README.md"
+  },
+  "configuration": [
+    {
+      "name": "timeout",
+      "type": "number",
+      "description": "Plugin execution timeout in milliseconds",
+      "defaultValue": 30000,
+      "required": false
+    }
+  ],
+  "createdAt": "2024-12-01T00:00:00Z",
+  "updatedAt": "2024-12-01T00:00:00Z"
+}

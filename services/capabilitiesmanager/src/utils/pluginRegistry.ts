@@ -225,6 +225,39 @@ export class PluginRegistry {
         return this.pluginMarketplace.list();
     }
 
+    /**
+     * Check if a plugin is a container plugin
+     */
+    isContainerPlugin(plugin: PluginManifest): boolean {
+        return plugin.language === 'container' &&
+               !!(plugin as any).container &&
+               !!(plugin as any).api;
+    }
+
+    /**
+     * Validate container plugin manifest
+     */
+    validateContainerPlugin(plugin: PluginManifest): boolean {
+        if (!this.isContainerPlugin(plugin)) {
+            return false;
+        }
+
+        const containerConfig = (plugin as any).container;
+        const apiConfig = (plugin as any).api;
+
+        // Check required container fields
+        if (!containerConfig.image || !containerConfig.ports || !Array.isArray(containerConfig.ports)) {
+            return false;
+        }
+
+        // Check required API fields
+        if (!apiConfig.endpoint || !apiConfig.method) {
+            return false;
+        }
+
+        return true;
+    }
+
     private async updateCache(pluginLocator: PluginLocator): Promise<void> {
         // console.log('Registry: Update cache with ', pluginLocator.verb, pluginLocator.id); // Original log
         // Quieter logging for cache updates unless debugging

@@ -1,16 +1,23 @@
 import axios from 'axios';
 import express from 'express';
-import { 
-    MapSerializer, 
-    BaseEntity, 
-    PluginInput, 
-    PluginDefinition, 
-    PluginParameter, 
+import {
+    MapSerializer,
+    BaseEntity,
+    PluginInput,
+    PluginDefinition,
+    PluginParameter,
     PluginMetadata, // Changed from MetadataType
     PluginConfigurationItem, // Changed from ConfigItem
     signPlugin,
     EntryPointType,      // Added for clarity if used directly
-    PluginParameterType  // Added for clarity if used directly
+    PluginParameterType,  // Added for clarity if used directly
+    OpenAPITool,
+    OpenAPIToolRegistrationRequest,
+    OpenAPIParsingResult,
+    OpenAPIActionMapping,
+    OpenAPIAuthentication,
+    OpenAPIParameterMapping,
+    OpenAPIResponseMapping
 } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { PluginMarketplace } from '@cktmcs/marketplace';
@@ -53,18 +60,59 @@ export class Engineer extends BaseEntity {
         app.post('/createPlugin', async (req, res) => {
             // Ensure req.body is properly deserialized if it's not auto-parsed as JSON
             // For MapSerializer, it expects a specific structure if inputs are Maps.
-            // Assuming 'verb', 'context', 'guidance' are top-level properties in req.body.
-            const { verb, context, guidance } = req.body; // Simpler destructuring if MapSerializer is not strictly needed here for these top-level fields
-            
+            // Assuming 'verb', 'context', 'guidance', 'language' are top-level properties in req.body.
+            const { verb, context, guidance, language } = req.body; // Include language parameter
+
             try {
                 // If context is expected to be a Map and is serialized, deserialize it
                 const deserializedContext = context instanceof Map ? context : MapSerializer.transformFromSerialization(context || {});
 
-                const plugin = await this.createPlugin(verb, deserializedContext, guidance);
+                const plugin = await this.createPlugin(verb, deserializedContext, guidance, language);
                 res.json(plugin || {}); // Ensure to send a valid JSON response even if plugin is undefined
             } catch (error) {
                 analyzeError(error as Error);
                 console.error('Failed to create plugin:', error instanceof Error ? error.message : error);
+                res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+            }
+        });
+
+        // OpenAPI tool registration endpoints
+        app.post('/tools/openapi', async (req, res) => {
+            try {
+                const registrationRequest: OpenAPIToolRegistrationRequest = req.body;
+                const result = await this.registerOpenAPITool(registrationRequest);
+                res.json(result);
+            } catch (error) {
+                analyzeError(error as Error);
+                console.error('Failed to register OpenAPI tool:', error instanceof Error ? error.message : error);
+                res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+            }
+        });
+
+        app.post('/validate', async (req, res) => {
+            try {
+                const { manifest, code } = req.body;
+                const result = await this.validateTool(manifest, code);
+                res.json(result);
+            } catch (error) {
+                analyzeError(error as Error);
+                console.error('Failed to validate tool:', error instanceof Error ? error.message : error);
+                res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+            }
+        });
+
+        app.get('/tools/openapi/:id', async (req, res) => {
+            try {
+                const { id } = req.params;
+                const tool = await this.getOpenAPITool(id);
+                if (!tool) {
+                    res.status(404).json({ error: 'OpenAPI tool not found' });
+                    return;
+                }
+                res.json(tool);
+            } catch (error) {
+                analyzeError(error as Error);
+                console.error('Failed to get OpenAPI tool:', error instanceof Error ? error.message : error);
                 res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
             }
         });
@@ -81,14 +129,20 @@ export class Engineer extends BaseEntity {
         res.status(200).json({ newPlugins: this.newPlugins });
     }
 
-    async createPlugin(verb: string, context: Map<string, PluginInput>, guidance: string): Promise<PluginDefinition | undefined> {
-        console.log('Creating plugin for verb:', verb);
+    async createPlugin(verb: string, context: Map<string, PluginInput>, guidance: string, language?: string): Promise<PluginDefinition | undefined> {
+        console.log('Creating plugin for verb:', verb, 'with language:', language || 'auto-detect');
         this.newPlugins.push(verb);
         const explanation = await this.generateExplanation(verb, context);
         // Removed unused pluginStructure, configItems, metadata variable declarations from here
 
         try {
             const contextString = JSON.stringify(Array.from(context.entries()));
+
+            // Determine plugin type and generate accordingly
+            if (language === 'container') {
+                return await this.createContainerPlugin(verb, context, explanation, guidance);
+            }
+
             const engineeringPrompt = `Create a Python 3.9+ based plugin for the action verb "${verb}" with the following context: ${explanation}
             If Python is not suitable for this specific task (provide a brief justification if so), you may generate a JavaScript plugin instead.
 
@@ -227,6 +281,126 @@ export class Engineer extends BaseEntity {
         return [...new Set(permissions)]; // Remove duplicates
     }
 
+    /**
+     * Create a containerized plugin
+     */
+    async createContainerPlugin(verb: string, context: Map<string, PluginInput>, explanation: string, guidance: string): Promise<PluginDefinition | undefined> {
+        try {
+            const contextString = JSON.stringify(Array.from(context.entries()));
+
+            const containerPrompt = `Create a containerized plugin for the action verb "${verb}" with the following context: ${explanation}
+
+The planner provides this additional guidance: ${guidance}
+
+Generate a complete containerized plugin with the following structure:
+1. A Dockerfile for the plugin container
+2. A Python Flask application that implements the plugin logic
+3. A manifest.json with container and API configuration
+4. Requirements.txt for Python dependencies
+
+The plugin should:
+- Expose an HTTP API on port 8080
+- Implement POST /execute endpoint for plugin execution
+- Implement GET /health endpoint for health checks
+- Handle inputs and outputs according to the plugin specification
+- Include proper error handling and logging
+
+Return a JSON object with this exact structure:
+{
+    "id": "plugin-${verb}",
+    "verb": "${verb}",
+    "description": "Brief description",
+    "explanation": "Detailed explanation",
+    "inputDefinitions": [...],
+    "outputDefinitions": [...],
+    "language": "container",
+    "container": {
+        "dockerfile": "Dockerfile",
+        "buildContext": "./",
+        "image": "stage7/plugin-${verb.toLowerCase()}:1.0.0",
+        "ports": [{"container": 8080, "host": 0}],
+        "environment": {},
+        "resources": {
+            "memory": "256m",
+            "cpu": "0.5"
+        },
+        "healthCheck": {
+            "path": "/health",
+            "interval": "30s",
+            "timeout": "10s",
+            "retries": 3
+        }
+    },
+    "api": {
+        "endpoint": "/execute",
+        "method": "POST",
+        "timeout": 30000
+    },
+    "entryPoint": {
+        "main": "app.py",
+        "files": {
+            "app.py": "# Flask application code here",
+            "Dockerfile": "# Dockerfile content here",
+            "requirements.txt": "# Python dependencies here"
+        }
+    },
+    "version": "1.0.0",
+    "metadata": {...},
+    "security": {...}
+}
+
+Context: ${contextString}`;
+
+            const response = await this.queryBrain(containerPrompt);
+            const pluginStructure = JSON.parse(response);
+
+            if (!this.validateContainerPluginStructure(pluginStructure)) {
+                console.error('Generated container plugin structure is invalid:', pluginStructure);
+                throw new Error('Generated container plugin structure is invalid');
+            }
+
+            return this.finalizePlugin(pluginStructure, explanation);
+        } catch (error) {
+            console.error('Error creating container plugin:', error instanceof Error ? error.message : String(error));
+            return undefined;
+        }
+    }
+
+    /**
+     * Validate container plugin structure
+     */
+    private validateContainerPluginStructure(plugin: any): boolean {
+        const requiredFields = ['id', 'verb', 'description', 'inputDefinitions', 'outputDefinitions', 'language', 'container', 'api', 'entryPoint'];
+        const allPresent = requiredFields.every(field => plugin[field]);
+
+        if (!allPresent) {
+            console.error('Missing required fields in container plugin structure:', requiredFields.filter(f => !plugin[f]));
+            return false;
+        }
+
+        // Validate container configuration
+        const container = plugin.container;
+        if (!container.dockerfile || !container.image || !container.ports) {
+            console.error('Container configuration missing required fields');
+            return false;
+        }
+
+        // Validate API configuration
+        const api = plugin.api;
+        if (!api.endpoint || !api.method) {
+            console.error('API configuration missing required fields');
+            return false;
+        }
+
+        // Validate entry point
+        if (!plugin.entryPoint.main || !plugin.entryPoint.files) {
+            console.error('Entry point configuration missing required fields');
+            return false;
+        }
+
+        return true;
+    }
+
     private validatePluginStructure(plugin: any): boolean {
       // TODO: Implement JSON schema validation for comprehensive manifest checking.
       const requiredFields = ['id', 'verb', 'description', 'inputDefinitions', 'outputDefinitions', 'language', 'entryPoint'];
@@ -342,6 +516,348 @@ export class Engineer extends BaseEntity {
             analyzeError(error as Error);
             console.error('Error querying Brain for explanation:', error instanceof Error ? error.message : String(error));
             return ''; // Return empty string or throw, depending on how critical this is
+        }
+    }
+
+    // OpenAPI Tool Management Methods
+
+    async registerOpenAPITool(request: OpenAPIToolRegistrationRequest): Promise<OpenAPIParsingResult> {
+        console.log('Registering OpenAPI tool:', request.name);
+
+        try {
+            // Fetch and parse the OpenAPI specification
+            const specResponse = await axios.get(request.specUrl);
+            const spec = specResponse.data;
+
+            // Parse the OpenAPI specification
+            const parsingResult = await this.parseOpenAPISpec(spec, request);
+
+            if (parsingResult.success && parsingResult.tool) {
+                // Store the tool in the librarian
+                await this.storeOpenAPITool(parsingResult.tool);
+                console.log(`OpenAPI tool ${parsingResult.tool.id} registered successfully`);
+            }
+
+            return parsingResult;
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error('Error registering OpenAPI tool:', error instanceof Error ? error.message : error);
+            return {
+                success: false,
+                errors: [error instanceof Error ? error.message : String(error)]
+            };
+        }
+    }
+
+    private async parseOpenAPISpec(spec: any, request: OpenAPIToolRegistrationRequest): Promise<OpenAPIParsingResult> {
+        const errors: string[] = [];
+        const warnings: string[] = [];
+        const discoveredOperations: any[] = [];
+
+        try {
+            // Validate basic OpenAPI structure
+            if (!spec.openapi && !spec.swagger) {
+                errors.push('Invalid OpenAPI specification: missing version field');
+                return { success: false, errors };
+            }
+
+            const specVersion = spec.openapi || spec.swagger;
+            const isV3 = specVersion.startsWith('3.');
+            const isV2 = specVersion.startsWith('2.');
+
+            if (!isV2 && !isV3) {
+                errors.push(`Unsupported OpenAPI version: ${specVersion}`);
+                return { success: false, errors };
+            }
+
+            // Extract basic info
+            const info = spec.info || {};
+            const baseUrl = request.baseUrl || this.extractBaseUrl(spec);
+
+            // Parse paths and operations
+            const paths = spec.paths || {};
+            const actionMappings: OpenAPIActionMapping[] = [];
+
+            for (const [pathPattern, pathItem] of Object.entries(paths)) {
+                if (typeof pathItem !== 'object' || pathItem === null) continue;
+
+                for (const [method, operation] of Object.entries(pathItem as any)) {
+                    if (!['get', 'post', 'put', 'delete', 'patch'].includes(method.toLowerCase())) continue;
+                    if (typeof operation !== 'object' || operation === null) continue;
+
+                    const op = operation as any;
+                    const operationId = op.operationId || `${method}_${pathPattern.replace(/[^a-zA-Z0-9]/g, '_')}`;
+
+                    // Discover operation details
+                    discoveredOperations.push({
+                        operationId,
+                        method: method.toUpperCase(),
+                        path: pathPattern,
+                        summary: op.summary,
+                        description: op.description,
+                        parameters: op.parameters || [],
+                        responses: op.responses || {}
+                    });
+
+                    // Create action mapping
+                    const actionMapping = this.createActionMapping(
+                        operationId,
+                        method.toUpperCase(),
+                        pathPattern,
+                        op,
+                        isV3
+                    );
+
+                    if (actionMapping) {
+                        actionMappings.push(actionMapping);
+                    }
+                }
+            }
+
+            // Create the OpenAPI tool
+            const tool: OpenAPITool = {
+                id: this.generateToolId(request.name),
+                name: request.name,
+                description: request.description || info.description || `OpenAPI tool for ${request.name}`,
+                version: info.version || '1.0.0',
+                specUrl: request.specUrl,
+                specVersion: isV3 ? '3.0' : '2.0',
+                baseUrl,
+                authentication: request.authentication,
+                actionMappings,
+                metadata: {
+                    author: request.metadata?.author || info.contact?.name || 'Unknown',
+                    created: new Date(),
+                    tags: request.metadata?.tags || [],
+                    category: request.metadata?.category || 'external-api'
+                }
+            };
+
+            return {
+                success: true,
+                tool,
+                warnings,
+                discoveredOperations
+            };
+
+        } catch (error) {
+            analyzeError(error as Error);
+            errors.push(`Error parsing OpenAPI spec: ${error instanceof Error ? error.message : String(error)}`);
+            return { success: false, errors };
+        }
+    }
+
+    private extractBaseUrl(spec: any): string {
+        // OpenAPI 3.x
+        if (spec.servers && spec.servers.length > 0) {
+            return spec.servers[0].url;
+        }
+
+        // OpenAPI 2.x (Swagger)
+        if (spec.host) {
+            const scheme = spec.schemes && spec.schemes.length > 0 ? spec.schemes[0] : 'https';
+            const basePath = spec.basePath || '';
+            return `${scheme}://${spec.host}${basePath}`;
+        }
+
+        return '';
+    }
+
+    private createActionMapping(
+        operationId: string,
+        method: string,
+        path: string,
+        operation: any,
+        isV3: boolean
+    ): OpenAPIActionMapping | null {
+        try {
+            const inputs: OpenAPIParameterMapping[] = [];
+            const outputs: OpenAPIResponseMapping[] = [];
+
+            // Parse parameters
+            const parameters = operation.parameters || [];
+            for (const param of parameters) {
+                const input: OpenAPIParameterMapping = {
+                    name: param.name,
+                    in: param.in as any,
+                    type: this.mapOpenAPITypeToPluginType(param.type || param.schema?.type),
+                    required: param.required || false,
+                    description: param.description,
+                    schema: isV3 ? param.schema : undefined
+                };
+                inputs.push(input);
+            }
+
+            // Parse request body (OpenAPI 3.x)
+            if (isV3 && operation.requestBody) {
+                const requestBody = operation.requestBody;
+                const content = requestBody.content;
+
+                if (content) {
+                    for (const [mediaType, mediaTypeObject] of Object.entries(content)) {
+                        if (mediaType.includes('json')) {
+                            const input: OpenAPIParameterMapping = {
+                                name: 'body',
+                                in: 'body',
+                                type: PluginParameterType.OBJECT,
+                                required: requestBody.required || false,
+                                description: requestBody.description || 'Request body',
+                                schema: (mediaTypeObject as any).schema
+                            };
+                            inputs.push(input);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Parse responses
+            const responses = operation.responses || {};
+            for (const [statusCode, response] of Object.entries(responses)) {
+                if (statusCode.startsWith('2')) { // Success responses
+                    const output: OpenAPIResponseMapping = {
+                        name: 'result',
+                        type: PluginParameterType.OBJECT,
+                        description: (response as any).description || 'API response',
+                        statusCode: parseInt(statusCode),
+                        schema: isV3 ? (response as any).content?.['application/json']?.schema : (response as any).schema
+                    };
+                    outputs.push(output);
+                }
+            }
+
+            // Generate action verb from operation ID
+            const actionVerb = this.generateActionVerb(operationId);
+
+            return {
+                actionVerb,
+                operationId,
+                method: method as any,
+                path,
+                description: operation.summary || operation.description,
+                inputs,
+                outputs,
+                timeout: 30000 // Default 30 second timeout
+            };
+
+        } catch (error) {
+            console.error(`Error creating action mapping for ${operationId}:`, error);
+            return null;
+        }
+    }
+
+    private mapOpenAPITypeToPluginType(openApiType: string): PluginParameterType {
+        switch (openApiType?.toLowerCase()) {
+            case 'string':
+                return PluginParameterType.STRING;
+            case 'number':
+            case 'integer':
+                return PluginParameterType.NUMBER;
+            case 'boolean':
+                return PluginParameterType.BOOLEAN;
+            case 'array':
+                return PluginParameterType.ARRAY;
+            case 'object':
+                return PluginParameterType.OBJECT;
+            default:
+                return PluginParameterType.STRING;
+        }
+    }
+
+    private generateToolId(name: string): string {
+        return `openapi-${name.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
+    }
+
+    private generateActionVerb(operationId: string): string {
+        // Convert camelCase or snake_case to UPPER_CASE
+        return operationId
+            .replace(/([a-z])([A-Z])/g, '$1_$2')
+            .replace(/[^a-zA-Z0-9]/g, '_')
+            .toUpperCase();
+    }
+
+    private async storeOpenAPITool(tool: OpenAPITool): Promise<void> {
+        try {
+            await this.authenticatedApi.post(`http://${this.librarianUrl}/storeData`, {
+                collection: 'openApiTools',
+                id: tool.id,
+                data: tool,
+                storageType: 'mongo'
+            });
+            console.log(`Stored OpenAPI tool: ${tool.id}`);
+        } catch (error) {
+            analyzeError(error as Error);
+            throw new Error(`Failed to store OpenAPI tool: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+
+    async getOpenAPITool(id: string): Promise<OpenAPITool | null> {
+        try {
+            const response = await this.authenticatedApi.get(`http://${this.librarianUrl}/loadData/${id}`, {
+                params: {
+                    collection: 'openApiTools',
+                    storageType: 'mongo'
+                }
+            });
+            return response.data?.data || null;
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error('Error retrieving OpenAPI tool:', error instanceof Error ? error.message : error);
+            return null;
+        }
+    }
+
+    async validateTool(manifest: any, code?: string): Promise<{ valid: boolean; issues: string[] }> {
+        const issues: string[] = [];
+
+        try {
+            // Basic manifest validation
+            if (!manifest.id) issues.push('Tool ID is required');
+            if (!manifest.name) issues.push('Tool name is required');
+            if (!manifest.description) issues.push('Tool description is required');
+
+            // Type-specific validation
+            if (manifest.type === 'openapi') {
+                if (!manifest.specUrl) issues.push('OpenAPI spec URL is required');
+                if (!manifest.authentication) issues.push('Authentication configuration is required');
+            } else if (manifest.type === 'plugin') {
+                if (!manifest.language) issues.push('Plugin language is required');
+                if (!manifest.entryPoint) issues.push('Plugin entry point is required');
+                if (code && !this.validatePluginCodeString(code, manifest.language)) {
+                    issues.push('Plugin code validation failed');
+                }
+            }
+
+            return {
+                valid: issues.length === 0,
+                issues
+            };
+
+        } catch (error) {
+            analyzeError(error as Error);
+            issues.push(`Validation error: ${error instanceof Error ? error.message : String(error)}`);
+            return { valid: false, issues };
+        }
+    }
+
+    private validatePluginCodeString(code: string, language: string): boolean {
+        // Basic code validation - can be enhanced
+        if (!code || code.trim().length === 0) return false;
+
+        switch (language.toLowerCase()) {
+            case 'python':
+                // Basic Python syntax check
+                return !code.includes('import os') || code.includes('# SAFE_OS_IMPORT');
+            case 'javascript':
+                // Basic JavaScript syntax check
+                try {
+                    new Function(code);
+                    return true;
+                } catch {
+                    return false;
+                }
+            default:
+                return true; // Allow unknown languages for now
         }
     }
 }

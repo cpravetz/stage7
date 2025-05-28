@@ -22,9 +22,7 @@
   "language": "javascript",
   "entryPoint": {
     "main": "SEARCH.js",
-    "files": {
-      "SEARCH.js": "const axios = require('axios');\n\nasync function execute(input) {\n    try {\n        const { searchTerm } = input.args;\n        if (!searchTerm) {\n            throw new Error('Search term is required');\n        }\n\n        const response = await axios.get('https://api.duckduckgo.com/', {\n            params: {\n                q: searchTerm,\n                format: 'json'\n            }\n        });\n\n        const results = response.data.RelatedTopics.map(topic => ({\n            title: topic.Text,\n            url: topic.FirstURL\n        }));\n\n        return {\n            success: true,\n            resultType: 'array',\n            resultDescription: 'Search results from DuckDuckGo',\n            result: results,\n            mimeType: 'application/json'\n        };\n    } catch (error) {\n        console.error('SEARCH plugin failed:', error instanceof Error ? error.message : error);\n        return {\n            success: false,\n            resultType: 'error',\n            resultDescription: 'Error performing search',\n            result: null,\n            error: error instanceof Error ? error.message : 'An unknown error occurred',\n            mimeType: 'text/plain'\n        };\n    }\n}\n\nmodule.exports = { execute };"
-    }
+    "function": "execute"
   },
   "repository": {
     "type": "local"

@@ -1,0 +1,3 @@
+# TEXT_ANALYSIS Plugin Dependencies
+# This plugin uses only Python standard library modules
+# No external dependencies required

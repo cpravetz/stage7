@@ -110,26 +110,33 @@ async function loadPluginCode(plugin: PluginManifest): Promise<string> { // Chan
     throw new Error('Plugin entry point is missing');
   }
 
-  // If the plugin has inline files, use them
-  if (plugin.entryPoint.files && Object.keys(plugin.entryPoint.files).length > 0) {
-    // Find the main file
-    const mainFile = Object.entries(plugin.entryPoint.files).find(
-      ([filename]) => filename === plugin.entryPoint!.main
-    );
-
-    if (mainFile) {
-      return mainFile[1];
-    }
-  }
-
-  // Otherwise, load the file from disk
-  const pluginDir = path.join(process.cwd(), 'plugins', plugin.verb);
+  // NEW PACKAGING SCHEME: Load from disk first (preferred method)
+  // Try to load from the plugin's root directory first
+  const pluginDir = path.join(process.cwd(), 'services', 'capabilitiesmanager', 'src', 'plugins', plugin.verb);
   const mainFilePath = path.join(pluginDir, plugin.entryPoint.main);
 
   try {
-    return await fs.readFile(mainFilePath, 'utf-8');
-  } catch (error) {
-    throw new Error(`Failed to load plugin code: ${error instanceof Error ? error.message : String(error)}`);
+    const code = await fs.readFile(mainFilePath, 'utf-8');
+    console.log(`Loaded plugin code from file: ${mainFilePath}`);
+    return code;
+  } catch (fileError) {
+    console.log(`Failed to load from file ${mainFilePath}, trying embedded code...`);
+
+    // LEGACY SUPPORT: Fall back to embedded files if file loading fails
+    if (plugin.entryPoint.files && Object.keys(plugin.entryPoint.files).length > 0) {
+      // Find the main file
+      const mainFile = Object.entries(plugin.entryPoint.files).find(
+        ([filename]) => filename === plugin.entryPoint!.main
+      );
+
+      if (mainFile) {
+        console.log(`Using embedded code for plugin: ${plugin.verb}`);
+        return mainFile[1];
+      }
+    }
+
+    // If both methods fail, throw an error
+    throw new Error(`Failed to load plugin code for ${plugin.verb}: ${fileError instanceof Error ? fileError.message : String(fileError)}`);
   }
 }
 

@@ -1,6 +1,8 @@
 import { PluginDefinition, environmentType, PluginInput, PluginOutput, PluginParameterType } from '../types/Plugin';
 import { verifyPluginSignature } from './pluginSigning';
 import { validatePluginPermissions } from './pluginPermissions';
+import * as fs from 'fs/promises';
+import * as path from 'path';
 
 // List of environment variables that should always be passed to plugins
 // regardless of permissions
@@ -12,6 +14,46 @@ const ALWAYS_ALLOWED_ENV_VARS = [
   'SECURITY_MANAGER_URL', // SecurityManager service URL
   'CLIENT_SECRET'   // Service client secret
 ];
+
+/**
+ * Load the plugin code from the plugin definition
+ * @param plugin Plugin definition
+ * @returns Plugin code as a string
+ */
+async function loadPluginCode(plugin: PluginDefinition): Promise<string> {
+  if (!plugin.entryPoint || !plugin.entryPoint.main) {
+    throw new Error('Plugin entry point is missing');
+  }
+
+  // NEW PACKAGING SCHEME: Load from disk first (preferred method)
+  // Try to load from the plugin's root directory first
+  const pluginDir = path.join(process.cwd(), 'services', 'capabilitiesmanager', 'src', 'plugins', plugin.verb);
+  const mainFilePath = path.join(pluginDir, plugin.entryPoint.main);
+
+  try {
+    const code = await fs.readFile(mainFilePath, 'utf-8');
+    console.log(`Loaded plugin code from file: ${mainFilePath}`);
+    return code;
+  } catch (fileError) {
+    console.log(`Failed to load from file ${mainFilePath}, trying embedded code...`);
+
+    // LEGACY SUPPORT: Fall back to embedded files if file loading fails
+    if (plugin.entryPoint.files && Object.keys(plugin.entryPoint.files).length > 0) {
+      // Find the main file
+      const mainFile = Object.entries(plugin.entryPoint.files).find(
+        ([filename]) => filename === plugin.entryPoint!.main
+      );
+
+      if (mainFile) {
+        console.log(`Using embedded code for plugin: ${plugin.verb}`);
+        return mainFile[1];
+      }
+    }
+
+    // If both methods fail, throw an error
+    throw new Error(`Failed to load plugin code for ${plugin.verb}: ${fileError instanceof Error ? fileError.message : String(fileError)}`);
+  }
+}
 
 /**
  * Executes a plugin in a simple sandbox (not using isolated-vm for now)
@@ -46,11 +88,8 @@ export async function executePluginInSandbox(
 
     // Simple execution without isolated-vm
     try {
-      // Get the plugin code
-      const pluginCode = plugin.entryPoint?.files?.[plugin.entryPoint.main];
-      if (!pluginCode) {
-        throw new Error('Plugin code not found');
-      }
+      // Get the plugin code using the new loading mechanism
+      const pluginCode = await loadPluginCode(plugin);
 
       // Ensure authentication-related environment variables are available to the plugin
       // This is critical for plugins that need to make authenticated API calls

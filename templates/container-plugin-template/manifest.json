@@ -1,0 +1,76 @@
+{
+  "id": "container-plugin-template",
+  "verb": "CONTAINER_TEMPLATE",
+  "name": "Container Plugin Template",
+  "description": "Template for creating containerized plugins",
+  "version": "1.0.0",
+  "language": "container",
+  "inputDefinitions": [
+    {
+      "name": "example_input",
+      "type": "string",
+      "required": true,
+      "description": "Example input parameter for the container plugin"
+    }
+  ],
+  "outputDefinitions": [
+    {
+      "name": "result",
+      "type": "string",
+      "description": "Processed result from the container plugin"
+    },
+    {
+      "name": "processed_at",
+      "type": "string",
+      "description": "Processing trace ID"
+    },
+    {
+      "name": "input_length",
+      "type": "number",
+      "description": "Length of input value"
+    }
+  ],
+  "container": {
+    "dockerfile": "Dockerfile",
+    "buildContext": "./",
+    "image": "stage7/container-plugin-template:1.0.0",
+    "ports": [
+      {
+        "container": 8080,
+        "host": 0
+      }
+    ],
+    "environment": {
+      "PLUGIN_ENV": "production",
+      "LOG_LEVEL": "INFO"
+    },
+    "resources": {
+      "memory": "256m",
+      "cpu": "0.5"
+    },
+    "healthCheck": {
+      "path": "/health",
+      "interval": "30s",
+      "timeout": "10s",
+      "retries": 3
+    }
+  },
+  "api": {
+    "endpoint": "/execute",
+    "method": "POST",
+    "timeout": 30000
+  },
+  "security": {
+    "permissions": ["network_access"],
+    "sandboxOptions": {
+      "timeout": 30000,
+      "memoryLimit": "256m"
+    }
+  },
+  "metadata": {
+    "author": "Stage7 Team",
+    "category": "template",
+    "tags": ["container", "template", "example"],
+    "documentation": "https://github.com/cpravetz/stage7/docs/container-plugins.md"
+  }
+}

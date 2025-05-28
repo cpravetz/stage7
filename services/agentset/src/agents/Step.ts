@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { PluginInput, PluginParameterType, PluginOutput, PlanDependency, StepDependency, ActionVerbTask } from '@cktmcs/shared'; // Ensured ActionVerbTask is here
+import { PluginInput, PluginParameterType, PluginOutput, PlanDependency, StepDependency, ActionVerbTask, PlanTemplate, PlanExecutionRequest, ExecutionContext as PlanExecutionContext } from '@cktmcs/shared'; // Ensured ActionVerbTask is here
 import { MapSerializer } from '@cktmcs/shared';
 import { MessageType } from '@cktmcs/shared'; // Ensured MessageType is here, assuming it's separate or also from shared index
 import { AgentPersistenceManager } from '../utils/AgentPersistenceManager';
@@ -153,6 +153,9 @@ export class Step {
                     break;
                 case 'TIMEOUT':
                     result = await this.handleTimeout();
+                    break;
+                case 'EXECUTE_PLAN_TEMPLATE':
+                    result = await this.handleExecutePlanTemplate(executeAction);
                     break;
             /*                    case 'TRANSFORM':
                                 result = await this.handleTransform();
@@ -550,6 +553,70 @@ export class Step {
             result: this.result,
             recommendedRole: this.recommendedRole
         };
+    }
+
+    /**
+     * Handle execution of a plan template
+     * This creates a new execution context and delegates to the CapabilitiesManager
+     */
+    private async handleExecutePlanTemplate(executeAction: (step: Step) => Promise<PluginOutput[]>): Promise<PluginOutput[]> {
+        const templateIdInput = this.inputs.get('templateId');
+        const templateInputsInput = this.inputs.get('inputs');
+        const userIdInput = this.inputs.get('userId');
+        const executionModeInput = this.inputs.get('executionMode');
+
+        if (!templateIdInput) {
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: '[Step]Error in EXECUTE_PLAN_TEMPLATE step',
+                result: null,
+                error: 'Missing required input: templateId'
+            }];
+        }
+
+        const templateId = templateIdInput.inputValue as string;
+        const templateInputs = templateInputsInput?.inputValue || {};
+        const userId = userIdInput?.inputValue as string || 'agent-user';
+        const executionMode = executionModeInput?.inputValue as string || 'automatic';
+
+        // Create a special step that will be sent to CapabilitiesManager for plan template execution
+        const planExecutionStep = new Step({
+            actionVerb: 'EXECUTE_PLAN_TEMPLATE_INTERNAL',
+            stepNo: this.stepNo,
+            inputs: new Map([
+                ['templateId', { inputName: 'templateId', inputValue: templateId, args: {} }],
+                ['inputs', { inputName: 'inputs', inputValue: templateInputs, args: {} }],
+                ['userId', { inputName: 'userId', inputValue: userId, args: {} }],
+                ['executionMode', { inputName: 'executionMode', inputValue: executionMode, args: {} }]
+            ]),
+            description: `Execute plan template: ${templateId}`,
+            persistenceManager: this.persistenceManager
+        });
+
+        // Execute through the CapabilitiesManager
+        const result = await executeAction(planExecutionStep);
+
+        // Check if the result contains an execution ID for monitoring
+        const executionIdResult = result.find(r => r.name === 'executionId');
+        if (executionIdResult && executionIdResult.success) {
+            // Return the execution ID so the agent can monitor progress
+            return [{
+                success: true,
+                name: 'planExecution',
+                resultType: PluginParameterType.OBJECT,
+                resultDescription: '[Step]Plan template execution started',
+                result: {
+                    executionId: executionIdResult.result,
+                    templateId: templateId,
+                    status: 'started'
+                }
+            }];
+        }
+
+        // If no execution ID, return the raw result
+        return result;
     }
 }
 

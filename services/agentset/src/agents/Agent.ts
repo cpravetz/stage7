@@ -6,7 +6,7 @@ import { getServiceUrls } from '../utils/postOfficeInterface';
 import { WorkProduct } from '../utils/WorkProduct';
 import { MapSerializer, BaseEntity } from '@cktmcs/shared';
 import { AgentPersistenceManager } from '../utils/AgentPersistenceManager';
-import { PluginInput, PluginOutput, PluginParameterType } from '@cktmcs/shared';
+import { PluginInput, PluginOutput, PluginParameterType, PlanTemplate, PlanExecutionRequest, ExecutionContext as PlanExecutionContext } from '@cktmcs/shared';
 import { ActionVerbTask } from '@cktmcs/shared';
 import { AgentConfig, AgentStatistics } from '@cktmcs/shared';
 import { MessageType } from '@cktmcs/shared';
@@ -1225,5 +1225,116 @@ Please consider this context and the available plugins when planning and executi
      */
     getSteps(): Step[] {
         return this.steps;
+    }
+
+    /**
+     * Execute a plan template directly
+     * This creates a new step that executes the plan template
+     * @param templateId - The ID of the plan template to execute
+     * @param inputs - Inputs for the plan template
+     * @param executionMode - Execution mode (automatic, interactive, debug)
+     * @returns Promise resolving to the execution result
+     */
+    async executePlanTemplate(templateId: string, inputs: any, executionMode: string = 'automatic'): Promise<PluginOutput[]> {
+        console.log(`Agent ${this.id} executing plan template: ${templateId}`);
+
+        // Create a new step for plan template execution
+        const planStep = new Step({
+            actionVerb: 'EXECUTE_PLAN_TEMPLATE',
+            stepNo: this.steps.length + 1,
+            inputs: new Map([
+                ['templateId', { inputName: 'templateId', inputValue: templateId, args: {} }],
+                ['inputs', { inputName: 'inputs', inputValue: inputs, args: {} }],
+                ['userId', { inputName: 'userId', inputValue: this.id, args: {} }],
+                ['executionMode', { inputName: 'executionMode', inputValue: executionMode, args: {} }]
+            ]),
+            description: `Execute plan template: ${templateId}`,
+            persistenceManager: this.agentPersistenceManager
+        });
+
+        // Add the step to the agent's steps
+        this.steps.push(planStep);
+
+        // Execute the step
+        const result = await planStep.execute(
+            this.executeActionWithCapabilitiesManager.bind(this),
+            this.useBrainForReasoning.bind(this),
+            this.createSubAgent.bind(this),
+            this.handleAskStep.bind(this)
+        );
+
+        // Save the work product
+        await this.saveWorkProduct(planStep.id, result, true);
+
+        console.log(`Agent ${this.id} completed plan template execution: ${templateId}`);
+        return result;
+    }
+
+    /**
+     * Monitor a plan template execution
+     * @param executionId - The execution ID to monitor
+     * @returns Promise resolving to the final execution context
+     */
+    async monitorPlanExecution(executionId: string): Promise<PlanExecutionContext | null> {
+        console.log(`Agent ${this.id} monitoring plan execution: ${executionId}`);
+
+        let attempts = 0;
+        const maxAttempts = 120; // 2 minutes with 1-second intervals
+
+        while (attempts < maxAttempts) {
+            try {
+                const response = await this.authenticatedApi.get(`http://${this.capabilitiesManagerUrl}/executions/${executionId}`);
+                const context: PlanExecutionContext = response.data;
+
+                if (context.status === 'completed' || context.status === 'failed') {
+                    console.log(`Plan execution ${executionId} finished with status: ${context.status}`);
+                    return context;
+                }
+
+                // Wait 1 second before checking again
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                attempts++;
+
+            } catch (error) {
+                console.error(`Error monitoring plan execution ${executionId}:`, error instanceof Error ? error.message : error);
+                attempts++;
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+        }
+
+        console.warn(`Plan execution monitoring timed out for ${executionId}`);
+        return null;
+    }
+
+    /**
+     * Execute a plan template and wait for completion
+     * @param templateId - The ID of the plan template to execute
+     * @param inputs - Inputs for the plan template
+     * @param executionMode - Execution mode (automatic, interactive, debug)
+     * @returns Promise resolving to the final execution context
+     */
+    async executePlanTemplateAndWait(templateId: string, inputs: any, executionMode: string = 'automatic'): Promise<PlanExecutionContext | null> {
+        console.log(`Agent ${this.id} executing plan template and waiting: ${templateId}`);
+
+        // Execute the plan template
+        const result = await this.executePlanTemplate(templateId, inputs, executionMode);
+
+        // Extract the execution ID from the result
+        const executionResult = result.find(r => r.name === 'planExecution');
+        if (!executionResult || !executionResult.success) {
+            console.error('Failed to start plan template execution');
+            return null;
+        }
+
+        const executionData = executionResult.result as any;
+        const executionId = executionData.executionId;
+
+        if (!executionId) {
+            console.error('No execution ID returned from plan template execution');
+            return null;
+        }
+
+        // Monitor the execution until completion
+        return await this.monitorPlanExecution(executionId);
     }
 }

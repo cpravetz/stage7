@@ -37,11 +37,13 @@
       "description": "Array of scraped content"
     }
   ],
-  "language": "javascript",
+  "language": "python",
   "entryPoint": {
-    "main": "SCRAPE.js",
-    "files": {
-      "SCRAPE.js": "const axios = require('axios');\nconst cheerio = require('cheerio');\n\nasync function execute(input) {\n    try {\n        const { url, selector, attribute, limit } = input.args;\n\n        if (!url) {\n            throw new Error('URL is required for SCRAPE plugin');\n        }\n\n        const response = await axios.get(url);\n        const $ = cheerio.load(response.data);\n        \n        let elements = selector ? $(selector) : $('body');\n        let results = [];\n        \n        elements.each((i, el) => {\n            if (limit && i >= limit) return false;\n            \n            let content;\n            if (attribute) {\n                content = $(el).attr(attribute);\n            } else {\n                content = $(el).text().trim();\n            }\n            \n            if (content) results.push(content);\n        });\n\n        return {\n            success: true,\n            resultType: 'array',\n            resultDescription: 'Scraped content',\n            result: results,\n            mimeType: 'application/json'\n        };\n    } catch (error) {\n        console.error('SCRAPE plugin failed:', error instanceof Error ? error.message : error);\n        return {\n            success: false,\n            resultType: 'error',\n            resultDescription: 'Error scraping content',\n            result: null,\n            error: error instanceof Error ? error.message : 'An unknown error occurred',\n            mimeType: 'text/plain'\n        };\n    }\n}\n\nmodule.exports = { execute };"
+    "main": "main.py",
+    "packageSource": {
+      "type": "local",
+      "path": "./",
+      "requirements": "requirements.txt"
     }
   },
   "repository": {

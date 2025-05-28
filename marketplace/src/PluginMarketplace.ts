@@ -84,23 +84,26 @@ export class PluginMarketplace {
     /**
      * List all plugins from a specific repository
      * @param repository Repository type to list from
+     * @param includeContainerPlugins Whether to include container plugins in results
      * @returns Array of plugin locators
      */
-    async list(repository?: PluginRepositoryType): Promise<PluginLocator[]> {
+    async list(repository?: PluginRepositoryType, includeContainerPlugins: boolean = true): Promise<PluginLocator[]> {
         if (repository) {
             const repo = this.repositories.get(repository); // repo is InlinedPluginRepository | undefined
             if (!repo) {
                 throw new Error(`Repository ${repository} not found`);
             }
-            return await repo.list();
+            const plugins = await repo.list();
+            return includeContainerPlugins ? plugins : plugins.filter(p => p.language !== 'container');
         }
-        
+
         // If no repository specified, use default
         const defaultRepo = this.repositories.get(this.defaultRepository); // defaultRepo is InlinedPluginRepository | undefined
         if (!defaultRepo) {
             throw new Error(`Default repository ${this.defaultRepository} not found`);
         }
-        return await defaultRepo.list();
+        const plugins = await defaultRepo.list();
+        return includeContainerPlugins ? plugins : plugins.filter(p => p.language !== 'container');
     }
 
     /**
@@ -204,12 +207,17 @@ export class PluginMarketplace {
 
     public async store(plugin: PluginManifest): Promise<void> {
         try {
+            // Validate container plugin manifest if it's a container plugin
+            if (plugin.language === 'container') {
+                this.validateContainerPlugin(plugin);
+            }
+
             let repositoryType = plugin.repository.type || this.defaultRepository; // Changed variable name for clarity
             const existingPlugin = await this.fetchOneByVerb(plugin.verb); // This now correctly uses the InlinedPluginRepository type
             if (existingPlugin) {
                 repositoryType = existingPlugin.repository.type;
             }
-            
+
             const repo = this.repositories.get(repositoryType); // repo is InlinedPluginRepository | undefined
             if (repo) {
                 await repo.store(plugin);
@@ -217,6 +225,49 @@ export class PluginMarketplace {
         } catch (error) {
             analyzeError(error as Error);
             throw new Error(`Failed to store plugin: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+
+    /**
+     * Validate container plugin manifest
+     * @param plugin Plugin manifest to validate
+     */
+    private validateContainerPlugin(plugin: PluginManifest): void {
+        const containerConfig = (plugin as any).container;
+        const apiConfig = (plugin as any).api;
+
+        if (!containerConfig) {
+            throw new Error('Container plugin missing container configuration');
+        }
+
+        if (!apiConfig) {
+            throw new Error('Container plugin missing API configuration');
+        }
+
+        // Validate required container fields
+        const requiredContainerFields = ['dockerfile', 'buildContext', 'image', 'ports'];
+        for (const field of requiredContainerFields) {
+            if (!containerConfig[field]) {
+                throw new Error(`Container configuration missing required field: ${field}`);
+            }
+        }
+
+        // Validate API configuration
+        if (!apiConfig.endpoint || !apiConfig.method) {
+            throw new Error('Container API configuration missing endpoint or method');
+        }
+
+        // Validate ports configuration
+        if (!Array.isArray(containerConfig.ports) || containerConfig.ports.length === 0) {
+            throw new Error('Container configuration must specify at least one port mapping');
+        }
+
+        // Validate health check configuration if present
+        if (containerConfig.healthCheck) {
+            const healthCheck = containerConfig.healthCheck;
+            if (!healthCheck.path) {
+                throw new Error('Container health check configuration missing path');
+            }
         }
     }
 }

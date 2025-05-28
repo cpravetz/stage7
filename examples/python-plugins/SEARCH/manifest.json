@@ -1,0 +1,78 @@
+{
+  "id": "plugin-SEARCH",
+  "verb": "SEARCH",
+  "description": "Searches DuckDuckGo for a given term and returns a list of links",
+  "explanation": "This plugin takes a search term and returns a JSON array of search results from DuckDuckGo, including titles and URLs. Converted from JavaScript to Python for better maintainability.",
+  "inputDefinitions": [
+    {
+      "name": "searchTerm",
+      "required": true,
+      "type": "string",
+      "description": "The term to search for on DuckDuckGo"
+    }
+  ],
+  "outputDefinitions": [
+    {
+      "name": "results",
+      "required": true,
+      "type": "array",
+      "description": "Array of search results, each containing a title and URL"
+    }
+  ],
+  "language": "python",
+  "entryPoint": {
+    "main": "main.py",
+    "function": "execute_plugin"
+  },
+  "security": {
+    "permissions": [
+      "net.fetch"
+    ],
+    "sandboxOptions": {
+      "allowEval": false,
+      "timeout": 15000,
+      "memory": 67108864,
+      "allowedModules": [
+        "json",
+        "sys",
+        "os",
+        "typing",
+        "requests",
+        "urllib3"
+      ],
+      "allowedAPIs": [
+        "print"
+      ]
+    },
+    "trust": {
+      "publisher": "stage7-core",
+      "signature": null
+    }
+  },
+  "version": "2.0.0",
+  "metadata": {
+    "author": "Stage7 Development Team",
+    "tags": [
+      "search",
+      "duckduckgo",
+      "web",
+      "api"
+    ],
+    "category": "utility",
+    "license": "MIT",
+    "documentation": "README.md",
+    "migrated_from": "javascript",
+    "migration_date": "2024-12-01"
+  },
+  "configuration": [
+    {
+      "name": "timeout",
+      "type": "number",
+      "description": "Search request timeout in milliseconds",
+      "defaultValue": 15000,
+      "required": false
+    }
+  ],
+  "createdAt": "2024-12-01T00:00:00Z",
+  "updatedAt": "2024-12-01T00:00:00Z"
+}

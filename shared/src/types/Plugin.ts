@@ -80,7 +80,7 @@ export interface PluginDefinition {
     explanation?: string;
     inputDefinitions: PluginParameter[];
     outputDefinitions: PluginParameter[];
-    language: 'javascript' | 'python' | 'openapi' | string;
+    language: 'javascript' | 'python' | 'openapi' | 'container' | string;
     entryPoint?: EntryPointType;
     packageSource?: PluginPackage;
     security: PluginSecurity;
@@ -89,6 +89,30 @@ export interface PluginDefinition {
     metadata?: PluginMetadata; // Uses PluginMetadata
     createdAt?: string;
     updatedAt?: string;
+    // Container-specific configuration for containerized plugins
+    container?: {
+        dockerfile: string;
+        buildContext: string;
+        image: string;
+        ports: Array<{ container: number; host: number }>;
+        environment: { [key: string]: string };
+        resources: {
+            memory: string;
+            cpu: string;
+        };
+        healthCheck: {
+            path: string;
+            interval: string;
+            timeout: string;
+            retries: number;
+        };
+    };
+    // API configuration for container communication
+    api?: {
+        endpoint: string;
+        method: 'GET' | 'POST' | 'PUT' | 'DELETE';
+        timeout: number;
+    };
 }
 
 // Types confirmed by user as needed and previously defined here
