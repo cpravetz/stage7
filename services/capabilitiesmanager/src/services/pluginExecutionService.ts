@@ -216,7 +216,7 @@ export class PluginExecutionService {
             let serverUrl = "";
             const serverUrlConfig = pluginDefinition.configuration?.find(item => item.key === "serverUrl" && item.type === "string");
             if (serverUrlConfig) {
-                serverUrl = serverUrlConfig.value;
+                serverUrl = serverUrlConfig.value?.toString() || '';
             } else if (specContent.servers && specContent.servers.length > 0) {
                 serverUrl = specContent.servers[0].url;
                 if (specContent.servers[0].variables) {
@@ -270,7 +270,11 @@ export class PluginExecutionService {
 
             for (const [inputName, pluginInput] of inputs.entries()) {
                 const inputDef = pluginDefinition.inputDefinitions?.find(def => def.name === inputName); // Changed def.inputName to def.name
-                if (!inputDef || !inputDef.args) continue;
+                
+                if (!inputDef || !inputDef.args) {
+                    console.warn(`[${trace_id}] ${source_component}: Skipping input '${inputName}' for plugin ${pluginDefinition.id} due to missing definition or args in manifest.`);
+                    continue; 
+                }
 
                 const openApiName = inputDef.args['x-openapi-name'] as string;
                 const openApiIn = inputDef.args['x-openapi-in'] as string;
@@ -282,13 +286,14 @@ export class PluginExecutionService {
 
                 switch (openApiIn) {
                     case 'path':
-                        requestConfig.url = requestConfig.url?.replace(`{${openApiName}}`, encodeURIComponent(String(pluginInput.inputValue)));
+                        requestConfig.url = requestConfig.url?.replace(`{${openApiName}}`, encodeURIComponent(String(pluginInput.inputValue ?? '')));
                         break;
                     case 'query':
                         requestConfig.params[openApiName] = pluginInput.inputValue;
                         break;
                     case 'header':
-                        requestConfig.headers![openApiName] = String(pluginInput.inputValue);
+                        // Ensuring the fix is applied: using ?? '' for potentially undefined inputValue
+                        requestConfig.headers![openApiName] = String(pluginInput.inputValue ?? '');
                         break;
                     case 'requestBody':
                         requestBodyInput = pluginInput;

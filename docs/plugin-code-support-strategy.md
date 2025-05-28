@@ -1,167 +1,259 @@
-# Plugin Code Support Strategy
+Stage7 Capability Support Strategy
+Table of Contents:
 
-This document outlines the strategy for programming language support within the plugin ecosystem, focusing on Python as the preferred language, the approach for JavaScript, and a plan for integrating external tools via OpenAPI.
+Introduction: Capabilities in the Stage7 Architecture
 
-## 1. Python as the Preferred Language
+Internal Plugin Development Strategy
 
-To ensure consistency, maintainability, and leverage a rich ecosystem of libraries, Python will be the preferred language for developing new plugins.
+2.1. Python as the Preferred Language
 
-*   **Recommendation for `Engineer` Service:**
-    *   Prompts used by the `Engineer` service for generating new plugin code should be explicitly designed to prioritize Python output.
-    *   If the capability can be reasonably implemented in Python, Python should be the default generation target.
-*   **Recommendation for Documentation and Examples:**
-    *   All new plugin development documentation, tutorials, and code examples should primarily feature Python.
-    *   Existing documentation should be updated over time to include Python examples where applicable.
-*   **Benefits:**
-    *   **Simplified Development:** A common language reduces the learning curve for developers.
-    *   **Code Reusability:** Easier to share code and utilities across plugins.
-    *   **Strong AI/ML Ecosystem:** Python is dominant in AI/ML, aligning with potential future directions.
-    *   **Mature Tooling:** Excellent linters, debuggers, and testing frameworks.
+2.2. Polyglot Support via Containerization
 
-## 2. JavaScript Support Strategy
+2.3. Manifest for Internal & Containerized Plugins
 
-This section addresses the approach for existing and future JavaScript-based plugins.
+JavaScript Capability Support Strategy
 
-### 2.1. Current JavaScript Execution Model (Hypothesized)
+3.1. Legacy JavaScript Execution
 
-It is assumed that JavaScript plugins are currently executed within a sandboxed environment (e.g., using a library like `vm2` or a similar V8-based sandbox) to isolate plugin code from the host system and other plugins. This sandbox likely provides a limited set of APIs and controls resource usage. Some older plugins might still be using direct Node.js execution if not properly migrated.
+3.2. Migration and Containerization Path
 
-### 2.2. Security and Deprecation Recommendations
+3.3. Recommendation for JavaScript
 
-*   **Security Audit:**
-    *   **Proposal:** Conduct a thorough security audit of the current JavaScript sandboxing environment. This audit should identify potential vulnerabilities, escape vectors, and resource abuse risks.
-    *   **Rationale:** Ensure the integrity and security of the platform, especially if JS plugins interact with sensitive data or critical system operations.
-*   **Deprecate Direct JS Execution:**
-    *   **Recommendation:** Any existing JavaScript plugins found to be executing directly using Node.js (i.e., not within the standard sandbox) must be flagged for immediate migration to the sandboxed environment or deprecation.
-    *   **Rationale:** Unsandboxed code poses a significant security risk.
+External Tool Integration via OpenAPI
 
-### 2.3. Long-Term Options for JavaScript Support
+4.1. OpenAPI Tools as First-Class Capabilities
 
-Two primary options are considered for the long-term strategy for JavaScript plugins:
+4.2. OpenAPI Tool Definition and Registration
 
-#### Option JS-A: Maintain and Secure
+4.3. Execution by the Tool Manager
 
-*   **Description:** Continue to support JavaScript as a language for plugins, but significantly harden and maintain the sandboxing environment. This includes:
-    *   Regular updates to the sandbox library/technology.
-    *   Strict controls over allowed Node.js modules and global objects.
-    *   Runtime monitoring for suspicious behavior.
-    *   Clear guidelines and best practices for secure JS plugin development.
-*   **Pros:**
-    *   Supports existing JS plugins and developer skills.
-    *   Allows for JS-specific use cases where it might offer an advantage (e.g., certain frontend integrations or specific NPM packages).
-*   **Cons:**
-    *   Ongoing maintenance overhead for the sandbox.
-    *   Inherent security risks associated with executing external JavaScript code, even when sandboxed.
-    *   Platform complexity by supporting multiple primary languages.
+4.4. Discovery of OpenAPI-Defined Tools
 
-#### Option JS-B: Migrate and Deprecate
+4.5. Authentication for External APIs
 
-*   **Description:** Strategically move away from JavaScript for new plugin development and actively migrate existing useful JS plugins to Python.
-    *   Announce a timeline for phasing out JavaScript plugin support.
-    *   Provide resources and tools to assist developers in migrating their JS plugins to Python.
-    *   New plugin development in JS would be discouraged and eventually disallowed.
-    *   The JS sandbox would be maintained only until the end-of-life for JS plugin support.
-*   **Pros:**
-    *   **Simplifies the Platform:** Reduces complexity in `CapabilitiesManager`, `Engineer` service, and overall system architecture by focusing on a single preferred language.
-    *   **Reduces Security Surface:** Eliminates the JS sandbox as a potential attack vector in the long term.
-    *   **Consolidates Development Efforts:** Allows the team to focus on building robust tools and support for Python.
-*   **Cons:**
-    *   Migration effort for existing JS plugins.
-    *   Potential loss of JS-specific advantages if migration is not feasible for certain plugins.
-    *   Developer resistance if there's a strong JS preference.
+Role of the Planning Engine and ACCOMPLISH-like Logic
 
-### 2.4. Recommendation for JavaScript
+Conclusion
 
-**Recommendation: Option JS-B (Migrate and Deprecate)**
+1. Introduction: Capabilities in the Stage7 Architecture
+This document outlines the strategy for supporting various types of capabilities within the Stage7 agent system, aligning with the architecture defined in "Stage7 Agent System: Enhanced Architecture for Agency." The central component for managing these is the Tool Manager & Capability Registry (referred to as "Tool Manager" henceforth).
 
-For long-term platform simplification, security enhancement, and focused development efforts, Option JS-B is recommended. The benefits of a single, preferred plugin language (Python) outweigh the costs of migrating existing JS plugins. This strategy should be implemented with a clear roadmap and adequate support for developers during the transition.
+Capabilities can include:
 
-However, if a significant number of critical plugins rely on JavaScript and cannot be feasibly migrated, or if there's a compelling strategic reason to maintain JS capabilities (e.g., for specific ecosystem integrations), then Option JS-A could be considered, with the explicit understanding of the associated security and maintenance commitments.
+Internal Plugins: Custom code developed for specific functionalities, ideally in Python or containerized if in other languages.
 
-## 3. OpenAPI Integration Strategy
+External Tools: Third-party services integrated via their APIs, with a primary focus on OpenAPI specifications.
 
-To expand the capabilities of the platform and allow seamless integration with external tools and services, a strategy for leveraging OpenAPI specifications is proposed. This allows the system to utilize any API that exposes an OpenAPI (Swagger) definition.
+Agent-Composed Tools: Reusable sub-plans learned or defined by agents and registered with the Tool Manager (as described in the core architecture).
 
-### 3.1. Proposal Overview
+This strategy focuses on the development, registration, and execution support for internal plugins and external tools.
 
-External tools defined by OpenAPI specifications can be treated as a special type of plugin. The `CapabilitiesManager` would be able to discover and execute these "OpenAPI plugins."
+2. Internal Plugin Development Strategy
+Internal plugins are custom-coded components that provide specific functionalities within the Stage7 ecosystem.
 
-### 3.2. OpenAPI Plugin Manifest
+2.1. Python as the Preferred Language
+To ensure consistency, maintainability, and leverage a rich ecosystem, Python is the preferred language for developing new internal plugins that run directly within the agent system's environment (if not containerized).
 
-An OpenAPI specification itself (or a reference to it) can serve as the core of the plugin manifest. Key information would be extracted or defined alongside it:
+Recommendation for Engineer & Operations Interface:
 
-*   **`name`:** A unique name for the plugin (e.g., `WeatherServiceAPI`).
-*   **`description`:** Human-readable description of what the tool does.
-*   **`languageType`:** A new type, e.g., `"openapi"`.
-*   **`entryPoint`:**
-    *   This could be a URL pointing directly to the OpenAPI JSON/YAML specification (e.g., `https://api.example.com/v3/openapi.json`).
-    *   Alternatively, it could be a path to a local copy of the spec within a plugin package.
-*   **`operations` (derived from OpenAPI spec):**
-    *   Each OpenAPI operation (e.g., `/users/{id}:get`) could be mapped to a specific verb or capability.
-    *   **`verb`:** The capability this operation provides (e.g., `getUserById`).
-    *   **`inputs`:** Derived from OpenAPI `parameters` and `requestBody`.
-    *   **`outputs`:** Derived from OpenAPI `responses`.
+Any tools or AI assistance (e.g., an "Engineer" service) provided through this interface for generating new plugin code should prioritize Python.
 
-**Example Manifest Snippet (conceptual):**
+If a capability can be reasonably implemented in Python, it should be the default target for non-containerized internal plugins.
 
-```json
+Recommendation for Documentation and Examples:
+
+All new plugin development documentation, tutorials, and code examples for non-containerized plugins should primarily feature Python.
+
+Benefits:
+
+Simplified development and a common language.
+
+Code reusability across plugins.
+
+Strong AI/ML ecosystem alignment.
+
+Mature tooling.
+
+2.2. Polyglot Support via Containerization
+To support plugins written in languages other than Python (including JavaScript, Java, Node.js, Go, C#, etc.), or to provide stronger isolation for Python plugins, Docker containerization is the recommended approach, as outlined in Section 3.1 of the core architecture.
+
+Tool Manager Responsibility: The Tool Manager will be responsible for managing container images, running plugin containers when needed, and communicating with them via a standardized interface (e.g., HTTP API exposed by the container, gRPC).
+
+Benefits of Containerization:
+
+Language flexibility.
+
+Strong isolation between plugins and the host system.
+
+Dependency management specific to each plugin.
+
+Scalability and portability.
+
+2.3. Manifest for Internal & Containerized Plugins
+All internal plugins, whether Python-based (non-containerized) or containerized (any language), must be accompanied by a manifest file (e.g., plugin_manifest.yaml or .json). This manifest is crucial for the Tool Manager to register and manage the plugin.
+
+The manifest should declare:
+
+name: A unique name for the plugin.
+
+description: Human-readable description.
+
+languageType: e.g., "python", "container".
+
+actionVerb (or actionVerbs): The capability/capabilities this plugin provides.
+
+inputParameterSchemas: Detailed definitions (e.g., using JSON Schema) for all input parameters.
+
+outputParameterSchemas: Detailed definitions for all output parameters.
+
+For Python (non-containerized):
+
+entryPoint: e.g., module and function name (my_plugin.main_function).
+
+For Containerized Plugins:
+
+imageName: The Docker image name and tag.
+
+invocationDetails: How to communicate with the service inside the container (e.g., port, endpoint, protocol).
+
+resourceRequirements (optional).
+
+Engineers will use the Engineer & Operations Interface to develop/register these plugins and their manifests with the Tool Manager.
+
+3. JavaScript Capability Support Strategy
+This section addresses the approach for existing and future JavaScript-based capabilities, aligning with the containerization strategy.
+
+3.1. Legacy JavaScript Execution
+It's assumed that some existing JavaScript plugins might be executed directly via Node.js or within an in-process sandbox (e.g., vm2).
+
+Security Concern: Direct Node.js execution outside a robust sandbox or container poses significant security risks. In-process sandboxes can also be complex to maintain securely.
+
+Recommendation:
+
+Conduct a security audit of any existing JavaScript sandboxing environments.
+
+Flag any JavaScript plugins executing directly via Node.js for immediate action.
+
+3.2. Migration and Containerization Path
+The long-term strategy for JavaScript capabilities is to move away from direct execution and in-process sandboxes.
+
+Option 1 (Preferred): Migrate to Python.
+
+If feasible, migrate the logic of existing useful JavaScript plugins to Python, making them standard internal Python plugins.
+
+Option 2: Containerize JavaScript Plugins.
+
+For JavaScript plugins that are critical and cannot be easily migrated to Python, or for new development where JavaScript offers a distinct advantage (and Python is not suitable), package them as Docker containers.
+
+These containerized JavaScript plugins will be managed by the Tool Manager like any other containerized plugin (see Section 2.2 and 2.3). They will require a manifest detailing how to run and interact with the container.
+
+Deprecation:
+
+Announce a timeline for phasing out support for non-containerized JavaScript plugins and in-process sandboxes.
+
+Provide resources to assist developers in migrating to Python or containerizing their JS plugins.
+
+3.3. Recommendation for JavaScript
+Primary Recommendation: Migrate to Python or Containerize.
+
+For platform simplification, enhanced security, and focused development, JavaScript capabilities should either be migrated to Python or encapsulated within Docker containers. This aligns with the core architecture's push for Python as the primary internal plugin language and containerization for polyglot support. Maintaining a separate, in-process JavaScript sandbox is discouraged long-term due to complexity and security overhead.
+
+4. External Tool Integration via OpenAPI
+Integrating external tools via their OpenAPI specifications is a key strategy for expanding agent capabilities, as supported by the Tool Manager.
+
+4.1. OpenAPI Tools as First-Class Capabilities
+External tools defined by OpenAPI specifications are treated as first-class capabilities, registered and managed by the Tool Manager.
+
+4.2. OpenAPI Tool Definition and Registration
+An OpenAPI specification (v2 Swagger or v3 OpenAPI) serves as the core definition for an external tool. Engineers will use the Engineer & Operations Interface to register these tools with the Tool Manager. Registration involves providing:
+
+A unique name for the tool (e.g., PublicHolidayAPI).
+
+A description.
+
+The OpenAPI specification itself (e.g., by URL or direct upload).
+
+languageType: A specific type, e.g., "openapi".
+
+Authentication configuration details (see Section 4.5).
+
+Optionally, explicit mappings from OpenAPI operationIds to system actionVerbs if not directly inferable or if a more abstract verb is desired. The Tool Manager can also derive available actions, their inputs, and outputs directly from the spec.
+
+Conceptual Registration Information (managed by Tool Manager):
+
 {
   "name": "PublicHolidayAPI",
   "description": "Provides access to public holiday data for various countries.",
-  "languageType": "openapi",
-  "entryPoint": "https_api.publicapis.org/openapi.yaml", // URL to the spec
-  "authentication": { // See 3.5
-    "type": "apiKey",
-    "in": "header",
-    "name": "X-Api-Key",
-    "valueFrom": "secretsManagerKeyName" // How to fetch the actual key
+  "capabilityType": "openapi_tool", // Differentiator
+  "sourceSpecificationUrl": "https_api.publicapis.org/openapi.yaml",
+  "authentication": {
+    "type": "apiKey", // e.g., apiKey, oauth2_client_credentials
+    "in": "header",   // if apiKey
+    "name": "X-Api-Key", // if apiKey
+    "credentialSource": "platformSecretsManagerKey:public_holiday_api_key" // Pointer to secret
   },
-  "operations": [ // Could be auto-derived or explicitly listed for clarity
+  "actionMappings": [ // Optional: Tool Manager can derive these
     {
-      "verb": "getHolidaysForYearAndCountry",
-      "openapiOperationId": "getHolidays", // from spec
-      "summary": "Get holidays for a specific year and country", // from spec
-      // Inputs and outputs are defined by the spec
+      "actionVerb": "getHolidaysForYearAndCountry",
+      "openapiOperationId": "getHolidays",
+      // Input/output schemas are derived from the OpenAPI spec
     }
   ]
 }
-```
 
-### 3.3. Execution by `CapabilitiesManager`
+4.3. Execution by the Tool Manager
+OpenAPI Execution Module: The Tool Manager will include or utilize a specialized module for executing calls to OpenAPI-defined tools.
 
-*   **"OpenAPI Executor" Module:**
-    *   `CapabilitiesManager` would include or delegate to a specialized "OpenAPI Executor" module.
-    *   When a request for an OpenAPI-backed capability comes in, this executor would:
-        1.  Fetch/parse the OpenAPI specification if not already cached.
-        2.  Identify the correct operation based on the requested verb.
-        3.  Validate the provided inputs against the schema defined in the spec.
-        4.  Construct the HTTP request (URL, method, headers, body) according to the spec.
-        5.  Handle authentication (see section 3.5).
-        6.  Make the API call.
-        7.  Validate the response (optional) and transform it into the expected output format.
-*   **Dynamic Client Generation:** The executor could dynamically generate API clients or use generic HTTP clients configured by the OpenAPI spec.
+When the Execution Engine requests an action fulfilled by an OpenAPI tool, the Tool Manager's executor will:
 
-### 3.4. Discovery of OpenAPI Plugins
+Retrieve the tool's definition and parsed OpenAPI specification.
 
-*   **Marketplace/Repository:** A new type of repository or a specific category in an existing plugin marketplace could be introduced for community-contributed OpenAPI plugin manifests.
-*   **Manual Registration:** System administrators or developers could register OpenAPI specs directly with `CapabilitiesManager` via an API or configuration files.
-*   **URL-based Discovery:** Potentially, allow registration by simply providing a URL to an OpenAPI spec, with `CapabilitiesManager` fetching and parsing it.
+Identify the correct API operation based on the requested actionVerb.
 
-### 3.5. Authentication for External APIs
+Validate provided inputs against the operation's schema.
 
-This is a critical aspect:
+Construct the HTTP request (URL, method, headers, body).
 
-*   The OpenAPI plugin manifest should define the authentication mechanism required by the external API (e.g., API key, OAuth2).
-*   The "OpenAPI Executor" must integrate with a secure secrets management system to fetch API keys, tokens, or other credentials.
-*   The manifest might specify *how* to get the credential (e.g., "fetch API key from Vault path X" or "use OAuth2 client credentials flow Y").
-*   **Security Note:** Direct embedding of secrets in manifests is not acceptable.
+Handle authentication securely using configured credentials.
 
-### 3.6. `ACCOMPLISH` Plugin Awareness
+Execute the API call.
 
-*   **Recommendation:** The `ACCOMPLISH` plugin (and similar meta-plugins or orchestrators) should be updated to be aware of OpenAPI-defined tools.
-*   When `ACCOMPLISH` plans a task, it should be able to identify and incorporate steps that involve calling external tools via their OpenAPI plugin manifestations.
-*   This means `ACCOMPLISH`'s planning capabilities might need to understand how to map natural language requests or higher-level goals to specific OpenAPI operations and their required parameters.
+Process the response, validate it against the schema (optional), and return the structured output.
 
-## 4. Conclusion
+4.4. Discovery of OpenAPI-Defined Tools
+Manual Registration: Primary method via the Engineer & Operations Interface.
 
-This strategy promotes Python as the primary language for plugin development to enhance simplicity and robustness. It provides a clear path for managing JavaScript plugins, recommending a move towards deprecation while ensuring security for any continued use. Finally, it introduces a flexible mechanism for integrating a vast range of external tools and services through OpenAPI specifications, significantly expanding the platform's potential capabilities.
+Automated Discovery (Advanced): The Tool Manager's Tool Discovery Engine (Section 2.4 of core architecture) can be configured to scan specified OpenAPI registries or URLs to identify and propose new external tools for registration. Human oversight is recommended for discovered tools.
+
+4.5. Authentication for External APIs
+This is critical for security and functionality:
+
+The registration information for an OpenAPI tool in the Tool Manager must define the authentication mechanism (e.g., API Key, OAuth2, Basic Auth) as specified in its OpenAPI document or supplementary configuration.
+
+The Tool Manager's OpenAPI execution module must integrate with a secure platform secrets management system (e.g., HashiCorp Vault, AWS Secrets Manager) to retrieve credentials at runtime.
+
+No secrets should be stored directly in the tool definitions or manifests. The definition should contain pointers or references to where the secrets are managed.
+
+5. Role of the Planning Engine and ACCOMPLISH-like Logic
+The Planning Engine (Section 2.2 of the core architecture) is responsible for creating plans to achieve agent goals. It queries the Tool Manager to find suitable capabilities (internal plugins, containerized plugins, OpenAPI tools, agent-composed tools) that match the required actionVerbs or sub-goals in its plan.
+
+Logic previously associated with a specific ACCOMPLISH plugin would now be part of the sophisticated planning capabilities of the Planning Engine or implemented as advanced, reusable Plan Templates.
+
+The Planning Engine must be able to understand the different types of capabilities and how their parameters are defined (via their manifests/schemas stored by the Tool Manager).
+
+The Execution Engine then takes the generated Plan Instance and, for each Step Instance, interacts with the Tool Manager to invoke the chosen tool/plugin.
+
+6. Conclusion
+This updated Capability Support Strategy aligns with the Stage7 enhanced architecture by:
+
+Centralizing capability management under the Tool Manager & Capability Registry.
+
+Prioritizing Python for new, non-containerized internal plugins for simplicity and robustness.
+
+Establishing Docker containerization as the standard for polyglot plugin support (including JavaScript) and enhanced isolation.
+
+Providing a clear path for managing and migrating legacy JavaScript capabilities.
+
+Detailing a robust mechanism for integrating External Tools via OpenAPI specifications.
+
+This approach promotes flexibility, security, and extensibility, allowing the Stage7 agent platform to leverage a diverse range of internal and external capabilities effectively.

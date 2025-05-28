@@ -113,7 +113,7 @@ export function signPlugin(plugin: PluginDefinition, privateKey?: string): strin
  * @param publicKey Public key for verification (optional)
  * @returns True if the signature is valid
  */
-export function verifyPluginSignature(plugin: PluginManifest, publicKey?: string): boolean {
+export function verifyPluginSignature(plugin: PluginDefinition, publicKey?: string): boolean {
   try {
     if (!plugin.security?.trust?.signature) {
       console.log('Plugin has no signature to verify');

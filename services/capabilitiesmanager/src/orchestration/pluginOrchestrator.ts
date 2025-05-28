@@ -4,7 +4,8 @@ import { Request, Response } from 'express'; // For Request, Response types in h
 import {
     Step, MapSerializer, BaseEntity, ServiceTokenManager, PluginInput, PluginOutput,
     PluginDefinition, PluginParameterType, environmentType, PluginManifest,
-    verifyPluginSignature, validatePluginPermissions, checkPluginToPluginCompatibility
+    verifyPluginSignature, validatePluginPermissions,
+    checkHostCompatibility, HostCompatibilityResult // Added checkHostCompatibility and HostCompatibilityResult
 } from '@cktmcs/shared';
 
 import { generateStructuredError, ErrorSeverity, GlobalErrorCodes, StructuredError } from '../utils/errorReporter';
@@ -125,7 +126,7 @@ export class PluginOrchestrator extends BaseEntity implements EngineerRequesterC
                     const response = await this.authenticatedApi.get(`http://${this.postOfficeUrl}/getServices`);
                     const services = response.data;
                     // Adjust service name if it changed from 'capabilitiesManagerUrl' to 'pluginOrchestratorUrl'
-                    if (!services || !services[this.serviceName + 'Url']) { // Using this.serviceName which is 'PluginOrchestrator'
+                    if (!services || !services[this.id + 'Url']) { // Using this.id which is 'PluginOrchestrator'
                         console.warn(`[${trace_id}] ${source_component}: Not found in PostOffice services list. Re-registering...`);
                         this.registeredWithPostOffice = false;
                         await this.registerWithPostOffice(5, 1000);
@@ -254,8 +255,8 @@ export class PluginOrchestrator extends BaseEntity implements EngineerRequesterC
                     });
                 }
                 console.log(`[${trace_id}] ${source_component}: Successfully fetched specific plugin ${plugin.id} v${plugin.version}`);
-                const compatibility = checkPluginToPluginCompatibility(plugin, hostCapabilities);
-                if (!compatibility.compatible) {
+                const compatibility: HostCompatibilityResult = checkHostCompatibility(plugin, hostCapabilities);
+                if (!compatibility.isCompatible) {
                     console.warn(`[${trace_id}] ${source_component}: Warning - Explicitly requested plugin ${plugin.id} v${plugin.version} may not be fully compatible. Reason: ${compatibility.reason || 'N/A'}`);
                 } else {
                     console.log(`[${trace_id}] ${source_component}: Explicitly requested plugin ${plugin.id} v${plugin.version} is compatible.`);
@@ -264,9 +265,9 @@ export class PluginOrchestrator extends BaseEntity implements EngineerRequesterC
                 const allVersions = await this.pluginRegistry.fetchAllVersionsByVerb(step.actionVerb);
                 if (allVersions && allVersions.length > 0) {
                     for (const p of allVersions) {
-                const compatibility = checkPluginToPluginCompatibility(p, hostCapabilities);
-                        console.log(`[${trace_id}] ${source_component}: Checking compatibility for plugin ${p.id} v${p.version}. Compatible: ${compatibility.compatible}. Reason: ${compatibility.reason || 'N/A'}`);
-                        if (compatibility.compatible) {
+                const compatibility: HostCompatibilityResult = checkHostCompatibility(p, hostCapabilities);
+                        console.log(`[${trace_id}] ${source_component}: Checking compatibility for plugin ${p.id} v${p.version}. Compatible: ${compatibility.isCompatible}. Reason: ${compatibility.reason || 'N/A'}`);
+                        if (compatibility.isCompatible) {
                             plugin = p;
                             console.log(`[${trace_id}] ${source_component}: Selected plugin ${plugin.id} v${plugin.version} for verb ${step.actionVerb} based on compatibility.`);
                             break;
@@ -278,7 +279,7 @@ export class PluginOrchestrator extends BaseEntity implements EngineerRequesterC
                             severity: ErrorSeverity.ERROR,
                             message: `No compatible version of plugin for action verb '${step.actionVerb}' found for host ${hostCapabilities.hostAppName} v${hostCapabilities.hostVersion}.`,
                             source_component, trace_id_param: trace_id,
-                            contextual_info: { actionVerb: step.actionVerb, hostCapabilities, checkedVersions: allVersions.map(v => ({id: v.id, version: v.version, requirements: v.hostEnvironment?.requirements})) }
+                            contextual_info: { actionVerb: step.actionVerb, hostCapabilities, checkedVersions: allVersions.map(v => ({id: v.id, version: v.version, requirements: v.metadata?.compatibility?.minHostVersion})) }
                         });
                     }
                 } else {
@@ -325,7 +326,19 @@ export class PluginOrchestrator extends BaseEntity implements EngineerRequesterC
                     });
                 }
 
-                const { pluginRootPath, effectiveManifest } = await this.pluginRegistry.preparePluginForExecution(plugin as PluginManifest);
+                // Augment plugin to make it structurally compatible with PluginManifest for the next call
+                // Assuming 'local' is a valid member of PluginRepositoryType enum defined in 'shared/src/types/PluginRepository.ts'
+                // If not, use an appropriate default from that enum.
+                const manifestForExecution: PluginManifest = {
+                    ...plugin,
+                    repository: {
+                        type: 'local' as any, // Cast 'local' to 'any' or import PluginRepositoryType to use an actual enum member
+                                              // e.g. type: PluginRepositoryType.Local
+                    }
+                };
+
+                // Now use the augmented object
+                const { pluginRootPath, effectiveManifest } = await this.pluginRegistry.preparePluginForExecution(manifestForExecution);
                 
                 const configSet = await this.configManager.getPluginConfig(effectiveManifest.id);
                 const currentEnv = { ...process.env }; // Base environment variables
