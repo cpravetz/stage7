@@ -136,9 +136,8 @@ export class PluginRegistry {
     }
 
     async fetchOne(id: string, version?: string, repository?: PluginRepositoryType): Promise<PluginManifest | undefined> { // Added version parameter
-        // Assuming pluginMarketplace.fetchOne can take an optional version
-        // Corrected based on "Expected 1-2 arguments, but got 3" error
-        const plugin = await this.pluginMarketplace.fetchOne(id, version);
+        // Use the correct signature for pluginMarketplace.fetchOne
+        const plugin = await this.pluginMarketplace.fetchOne(id, version, repository);
         if (plugin && !this.cache.has(plugin.id)) { // Cache might need to be version-aware if storing specific versions
             this.updateCache(this.getLocatorFromManifest(plugin));
         }
@@ -154,9 +153,8 @@ export class PluginRegistry {
                 return undefined;
             }
             const repository = this.cache.get(id);
-            // Assuming pluginMarketplace.fetchOne can take an optional version.
-            // If version is specified, it will try to get that version.
-            return this.pluginMarketplace.fetchOne(id, version, repository);
+            // Use the correct signature for pluginMarketplace.fetchOne
+            return this.pluginMarketplace.fetchOne(id, version, repository as PluginRepositoryType);
         }
         // If version is specified here, fetchOneByVerb in marketplace needs to support it.
         // This typically means the marketplace might have a concept of a "default" or "latest pinned" version for a verb.
@@ -208,10 +206,10 @@ export class PluginRegistry {
 
     async findOne(id: string, version?: string): Promise<PluginManifest | undefined> { // Added version
         if (this.cache.has(id)) { // Cache needs to be version aware if we want to hit it here
-            // Corrected based on "Expected 1-2 arguments, but got 3" for the internal fetchOne call
-            return this.pluginMarketplace.fetchOne(id, version);
+            const repository = this.cache.get(id);
+            return this.pluginMarketplace.fetchOne(id, version, repository as PluginRepositoryType);
         }
-        // Corrected based on "Expected 1-2 arguments, but got 3" (assuming this was one of the problematic calls)
+        // Use the correct signature for pluginMarketplace.fetchOne
         const plugin = await this.pluginMarketplace.fetchOne(id, version);
         if (plugin && !this.cache.has(plugin.id)) {
             this.updateCache(this.getLocatorFromManifest(plugin));
