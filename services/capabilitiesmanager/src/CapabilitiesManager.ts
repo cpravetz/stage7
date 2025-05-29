@@ -669,15 +669,19 @@ export class CapabilitiesManager extends BaseEntity {
             // Check if plugin has dependencies and install them if needed
             await this.ensurePythonDependencies(pluginRootPath, trace_id);
 
-            const inputsObject: { [key: string]: PluginInput } = {};
-            inputs.forEach((value, key) => {
-                inputsObject[key] = value;
-            });
+            // Convert Map to array of [key, value] pairs for Python plugin compatibility
+            const inputsArray: [string, PluginInput][] = Array.from(inputs.entries());
 
-            const inputsJsonString = JSON.stringify(inputsObject);
+            const inputsJsonString = JSON.stringify(inputsArray);
+
+            // Debug: Log the inputs being passed to Python plugin
+            console.log(`[${trace_id}] ${source_component}: Inputs array for Python plugin:`, inputsArray);
+            console.log(`[${trace_id}] ${source_component}: JSON string being passed:`, inputsJsonString);
 
             // Use enhanced Python execution with better error handling and security
             const pythonCommand = await this.buildPythonCommand(mainFilePath, pluginRootPath, inputsJsonString, pluginDefinition);
+
+            console.log(`[${trace_id}] ${source_component}: Python command:`, pythonCommand);
 
             const { stdout, stderr } = await execAsync(pythonCommand, {
                 cwd: pluginRootPath,
@@ -898,11 +902,12 @@ export class CapabilitiesManager extends BaseEntity {
     }
 
     private async buildPythonCommand(mainFilePath: string, pluginRootPath: string, inputsJson: string, pluginDefinition: PluginDefinition): Promise<string> {
-        // Escape the JSON input for shell safety
-        const escapedInput = inputsJson.replace(/'/g, "'\"'\"'");
+        // Use a more reliable approach to pass JSON to Python
+        // Instead of shell escaping, we'll use base64 encoding to avoid shell interpretation issues
+        const base64Input = Buffer.from(inputsJson).toString('base64');
 
-        // Build the command with proper escaping and security considerations
-        const command = `echo '${escapedInput}' | python3 "${mainFilePath}" "${pluginRootPath}"`;
+        // Build the command with base64 encoded input
+        const command = `echo "${base64Input}" | base64 -d | python3 "${mainFilePath}" "${pluginRootPath}"`;
 
         return command;
     }

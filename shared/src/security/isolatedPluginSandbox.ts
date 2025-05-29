@@ -27,7 +27,18 @@ async function loadPluginCode(plugin: PluginDefinition): Promise<string> {
 
   // NEW PACKAGING SCHEME: Load from disk first (preferred method)
   // Try to load from the plugin's root directory first
-  const pluginDir = path.join(process.cwd(), 'services', 'capabilitiesmanager', 'src', 'plugins', plugin.verb);
+  // Check if we're already in the services directory (Docker environment)
+  const cwd = process.cwd();
+  let pluginDir: string;
+
+  if (cwd.includes('/services/capabilitiesmanager')) {
+    // We're in the CapabilitiesManager service directory
+    pluginDir = path.join(cwd, 'src', 'plugins', plugin.verb);
+  } else {
+    // We're in the root directory
+    pluginDir = path.join(cwd, 'services', 'capabilitiesmanager', 'src', 'plugins', plugin.verb);
+  }
+
   const mainFilePath = path.join(pluginDir, plugin.entryPoint.main);
 
   try {

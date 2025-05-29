@@ -351,8 +351,12 @@ Return a JSON object with this exact structure:
 
 Context: ${contextString}`;
 
-            const response = await this.queryBrain(containerPrompt);
-            const pluginStructure = JSON.parse(response);
+            const response = await this.authenticatedApi.post(`http://${this.brainUrl}/chat`, {
+                exchanges: [{ role: 'user', content: containerPrompt }],
+                optimization: 'accuracy'
+            });
+            const responseText = response.data.result || response.data.response || '';
+            const pluginStructure = JSON.parse(responseText);
 
             if (!this.validateContainerPluginStructure(pluginStructure)) {
                 console.error('Generated container plugin structure is invalid:', pluginStructure);

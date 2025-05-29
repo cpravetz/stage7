@@ -218,6 +218,7 @@ const MainApp: React.FC = () => {
                 conversationHistory={conversationHistory}
                 workProducts={workProducts}
                 agentStatistics={agentStatistics}
+                activeMissionId={activeMissionId}
               />
             </Paper>
             <TextInput onSend={handleSendMessage} />

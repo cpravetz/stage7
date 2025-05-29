@@ -14,15 +14,8 @@ import { MessageRouter } from './messageRouting';
 import { ServiceDiscoveryManager } from './serviceDiscoveryManager';
 import { WebSocketHandler } from './webSocketHandler';
 import { HealthCheckManager } from './healthCheckManager';
-
-// NOTE: Don't use this directly - use this.authenticatedApi or this.getAuthenticatedAxios() instead
-// This is kept for backward compatibility only
-const api = axios.create({
-    headers: {
-      'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
-    },
-  });
+import { FileUploadManager } from './fileUploadManager';
+import { PluginManager } from './pluginManager';
 
 
 export class PostOffice extends BaseEntity {
@@ -44,6 +37,8 @@ export class PostOffice extends BaseEntity {
     private serviceDiscoveryManager: ServiceDiscoveryManager;
     private webSocketHandler: WebSocketHandler;
     private healthCheckManager: HealthCheckManager;
+    private fileUploadManager: FileUploadManager;
+    private pluginManager: PluginManager;
 
     constructor() {
         // Call the BaseEntity constructor with required parameters
@@ -126,6 +121,16 @@ export class PostOffice extends BaseEntity {
         this.healthCheckManager.setupHealthCheck();
         this.setupHealthCheck();
 
+        // Initialize the FileUploadManager and PluginManager
+        this.fileUploadManager = new FileUploadManager(
+            this.authenticatedApi,
+            (type) => this.serviceDiscoveryManager.getComponentUrl(type)
+        );
+        this.pluginManager = new PluginManager(
+            this.authenticatedApi,
+            (type) => this.serviceDiscoveryManager.getComponentUrl(type)
+        );
+
         // Apply authentication middleware to all routes EXCEPT health check endpoints, registerComponent, and token refresh
         // Import the isHealthCheckEndpoint function from shared middleware
         const { isHealthCheckEndpoint } = require('@cktmcs/shared/dist/middleware/authMiddleware.js');
@@ -177,41 +182,11 @@ export class PostOffice extends BaseEntity {
             this.submitModelEvaluation(req, res);
         });
 
-        this.app.get('/plugins', (req, res) => {
-            try {
-                this.getPlugins(req, res);
-            } catch (error) {
-                console.error('Error handling /plugins request:', error);
-                res.status(500).json({
-                    error: 'Internal server error processing plugins request',
-                    message: error instanceof Error ? error.message : 'Unknown error'
-                });
-            }
-        });
+        // Setup plugin management routes
+        this.pluginManager.setupRoutes(this.app);
 
-        this.app.get('/plugins/:id', (req, res) => {
-            try {
-                this.getPlugin(req, res);
-            } catch (error) {
-                console.error(`Error handling /plugins/${req.params.id} request:`, error);
-                res.status(500).json({
-                    error: `Internal server error processing plugin request for ${req.params.id}`,
-                    message: error instanceof Error ? error.message : 'Unknown error'
-                });
-            }
-        });
-
-        this.app.delete('/plugins/:id', (req, res) => {
-            try {
-                this.deletePlugin(req, res);
-            } catch (error) {
-                console.error(`Error handling DELETE /plugins/${req.params.id} request:`, error);
-                res.status(500).json({
-                    error: `Internal server error processing plugin delete request for ${req.params.id}`,
-                    message: error instanceof Error ? error.message : 'Unknown error'
-                });
-            }
-        });
+        // Setup file upload routes
+        this.fileUploadManager.setupRoutes(this.app);
 
         const serverPort = parseInt(this.port, 10);
         this.server.listen(serverPort, '0.0.0.0', () => {
@@ -968,78 +943,6 @@ export class PostOffice extends BaseEntity {
         } catch (error) {
             console.error('Error submitting model evaluation:', error instanceof Error ? error.message : error);
             return res.status(500).json({ error: 'Failed to submit model evaluation' });
-        }
-    }
-
-    private async getPlugins(req: express.Request, res: express.Response) {
-        try {
-            console.log('Received request for plugins');
-            // Always use the default URL for CapabilitiesManager
-            const capabilitiesManagerUrl = process.env.CAPABILITIESMANAGER_URL || 'capabilitiesmanager:5060';
-            const repositoryType = req.query.repository as string || 'mongo';
-
-            console.log(`Retrieving plugins from CapabilitiesManager at ${capabilitiesManagerUrl}, repository: ${repositoryType}`);
-
-            // Forward the request to the CapabilitiesManager service
-            const response = await this.authenticatedApi.get(`http://${capabilitiesManagerUrl}/plugins`, {
-                params: req.query
-            });
-
-            // Set the correct content type to ensure the response is treated as JSON
-            res.setHeader('Content-Type', 'application/json');
-
-            return res.status(200).json(response.data);
-        } catch (error) {
-            analyzeError(error as Error);
-            console.error('Error getting plugins:', error instanceof Error ? error.message : error);
-            return res.status(500).json({ error: 'Failed to get plugins' });
-        }
-    }
-
-    private async getPlugin(req: express.Request, res: express.Response) {
-        try {
-            console.log(`Received request for plugin with ID: ${req.params.id}`);
-            // Always use the default URL for CapabilitiesManager
-            const capabilitiesManagerUrl = process.env.CAPABILITIESMANAGER_URL || 'capabilitiesmanager:5060';
-
-            console.log(`Retrieving plugin ${req.params.id} from CapabilitiesManager at ${capabilitiesManagerUrl}`);
-
-            // Forward the request to the CapabilitiesManager service
-            const response = await this.authenticatedApi.get(`http://${capabilitiesManagerUrl}/plugins/${req.params.id}`, {
-                params: req.query
-            });
-
-            // Set the correct content type to ensure the response is treated as JSON
-            res.setHeader('Content-Type', 'application/json');
-
-            return res.status(200).json(response.data);
-        } catch (error) {
-            analyzeError(error as Error);
-            console.error('Error getting plugin:', error instanceof Error ? error.message : error);
-            return res.status(500).json({ error: 'Failed to get plugin' });
-        }
-    }
-
-    private async deletePlugin(req: express.Request, res: express.Response) {
-        try {
-            console.log(`Received request to delete plugin with ID: ${req.params.id}`);
-            // Always use the default URL for CapabilitiesManager
-            const capabilitiesManagerUrl = process.env.CAPABILITIESMANAGER_URL || 'capabilitiesmanager:5060';
-            // Repository type is passed in the query params
-
-            console.log(`Deleting plugin ${req.params.id} from CapabilitiesManager at ${capabilitiesManagerUrl}`);
-
-            const response = await this.authenticatedApi.delete(`http://${capabilitiesManagerUrl}/plugins/${req.params.id}`, {
-                params: req.query
-            });
-
-            res.setHeader('Content-Type', 'application/json');
-
-            return res.status(200).json(response.data);
-        } catch (error) {
-            analyzeError(error as Error);
-            console.error('Error deleting plugin:', error instanceof Error ? error.message : error);
-            return res.status(500).json({ error: 'Failed to delete plugin' });
         }
     }
 }

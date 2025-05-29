@@ -26,7 +26,7 @@ class PluginParameterType:
 
 class AccomplishPlugin:
     def __init__(self):
-        self.brain_url = os.getenv('BRAIN_URL', 'brain:5030')
+        self.brain_url = os.getenv('BRAIN_URL', 'brain:5070')
         self.security_manager_url = os.getenv('SECURITY_MANAGER_URL', 'securitymanager:5010')
         self.client_secret = os.getenv('CLIENT_SECRET', 'stage7AuthSecret')
         self.token = None
@@ -49,19 +49,24 @@ class AccomplishPlugin:
             logger.error(f"Failed to get auth token: {e}")
             return None
 
-    def query_brain(self, prompt: str) -> Optional[str]:
+    def query_brain(self, prompt: str, brain_token: Optional[str] = None) -> Optional[str]:
         """Query the Brain service with authentication"""
         try:
-            if not self.token:
+            # Use provided brain token or fall back to getting our own
+            token_to_use = brain_token or self.token
+            if not token_to_use:
                 self.token = self.get_auth_token()
-                if not self.token:
+                token_to_use = self.token
+                if not token_to_use:
                     raise Exception("Failed to obtain authentication token")
 
             headers = {
-                'Authorization': f'Bearer {self.token}',
+                'Authorization': f'Bearer {token_to_use}',
                 'Content-Type': 'application/json'
             }
-            
+
+            logger.info(f"Querying Brain at {self.brain_url}/chat with token: {token_to_use[:20]}...")
+
             response = requests.post(
                 f"http://{self.brain_url}/chat",
                 json={
@@ -204,17 +209,34 @@ Goal to analyze: {goal}"""
     def execute(self, inputs_map: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Execute the ACCOMPLISH plugin"""
         try:
-            # Extract goal from inputs
+            logger.info(f"Execute method called with inputs_map: {inputs_map}")
+
+            # Extract goal and brain token from inputs
             goal = None
+            brain_token = None
+
             for key, value in inputs_map.items():
+                logger.info(f"Processing input key: {key}, value: {value}, type: {type(value)}")
                 if key == 'goal':
                     if isinstance(value, dict) and 'inputValue' in value:
                         goal = value['inputValue']
+                        logger.info(f"Found goal in inputValue: {goal}")
                     else:
                         goal = value
-                    break
+                        logger.info(f"Found goal as direct value: {goal}")
+                elif key in ['__brain_auth_token', 'token']:
+                    if isinstance(value, dict) and 'inputValue' in value:
+                        brain_token = value['inputValue']
+                        logger.info(f"Found brain token from key {key}: {brain_token[:20]}...")
+                    elif isinstance(value, str):
+                        brain_token = value
+                        logger.info(f"Found brain token as direct value from key {key}: {brain_token[:20]}...")
+
+            logger.info(f"Final goal value: {goal}")
+            logger.info(f"Brain token available: {bool(brain_token)}")
 
             if not goal:
+                logger.error("No goal found in inputs")
                 return [{
                     "success": False,
                     "name": "error",
@@ -226,7 +248,7 @@ Goal to analyze: {goal}"""
 
             # Generate prompt and query Brain
             prompt = self.generate_prompt(goal)
-            response = self.query_brain(prompt)
+            response = self.query_brain(prompt, brain_token)
 
             if not response:
                 return [{
@@ -295,9 +317,25 @@ def main():
         if not inputs_str:
             raise ValueError("No input provided")
 
+        # Debug: Log the raw input string
+        logger.info(f"Raw input string: {inputs_str}")
+
         # Parse inputs - expecting serialized Map format
         inputs_list = json.loads(inputs_str)
+        logger.info(f"Parsed inputs list: {inputs_list}")
+
         inputs_map = {item[0]: item[1] for item in inputs_list}
+        logger.info(f"Inputs map: {inputs_map}")
+
+        # Debug: Check if goal is in the inputs
+        if 'goal' in inputs_map:
+            goal_value = inputs_map['goal']
+            logger.info(f"Goal found in inputs: {goal_value}")
+            if isinstance(goal_value, dict) and 'inputValue' in goal_value:
+                logger.info(f"Goal inputValue: {goal_value['inputValue']}")
+        else:
+            logger.warning("Goal not found in inputs map")
+            logger.info(f"Available keys: {list(inputs_map.keys())}")
 
         # Execute plugin
         plugin = AccomplishPlugin()
@@ -307,6 +345,7 @@ def main():
         print(json.dumps(results))
 
     except Exception as e:
+        logger.error(f"Main function error: {e}")
         error_result = [{
             "success": False,
             "name": "error",

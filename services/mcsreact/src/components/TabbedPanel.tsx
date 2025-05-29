@@ -3,10 +3,12 @@ import { Box, Tabs, Tab, Typography, Table, TableBody, TableCell, TableContainer
 import ChatIcon from '@mui/icons-material/Chat';
 import AssessmentIcon from '@mui/icons-material/Assessment';
 import AccountTreeIcon from '@mui/icons-material/AccountTree';
+import AttachFileIcon from '@mui/icons-material/AttachFile';
 import ConversationHistory from './ConversationHistory';
 import { AgentStatistics } from '../shared-browser';
 import { NetworkGraph } from './NetworkGraph';
 import { SecurityClient } from '../SecurityClient';
+import FileUpload from './FileUpload';
 
 interface WorkProduct {
   type: 'Interim' | 'Final';
@@ -18,12 +20,14 @@ interface TabbedPanelProps {
   conversationHistory: string[];
   workProducts: WorkProduct[];
   agentStatistics: Map<string, Array<AgentStatistics>>;
+  activeMissionId?: string;
 }
 
 export const TabbedPanel: React.FC<TabbedPanelProps> = ({
   conversationHistory,
   workProducts,
-  agentStatistics
+  agentStatistics,
+  activeMissionId
 }) => {
   const [activeTab, setActiveTab] = useState('conversation');
 
@@ -121,6 +125,14 @@ export const TabbedPanel: React.FC<TabbedPanelProps> = ({
             id="tab-network"
             aria-controls="tabpanel-network"
           />
+          <Tab
+            icon={<AttachFileIcon />}
+            iconPosition="start"
+            label="Files"
+            value="files"
+            id="tab-files"
+            aria-controls="tabpanel-files"
+          />
         </Tabs>
       </Box>
 
@@ -178,6 +190,16 @@ export const TabbedPanel: React.FC<TabbedPanelProps> = ({
           <Box sx={{ height: '100%', width: '100%' }}>
             <NetworkGraph agentStatistics={agentStatistics} />
           </Box>
+        </TabPanel>
+
+        <TabPanel value={activeTab} index="files">
+          {activeMissionId ? (
+            <FileUpload missionId={activeMissionId} />
+          ) : (
+            <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 4 }}>
+              No active mission. Create or load a mission to manage files.
+            </Typography>
+          )}
         </TabPanel>
       </Box>
     </Box>

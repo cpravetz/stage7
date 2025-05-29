@@ -1,5 +1,3 @@
-// import { PluginDefinition, signPlugin, verifyPluginSignature } from '@cktmcs/shared'; // Keep PluginDefinition for signPluginWithShared
-// import { PluginManifest, PluginRepository, RepositoryConfig, PluginRepositoryType, PluginLocator } from '@cktmcs/shared'; // Original
 import { PluginDefinition, signPlugin, verifyPluginSignature, PluginManifest, RepositoryConfig, PluginRepositoryType, PluginLocator } from '@cktmcs/shared'; // PluginRepository removed
 
 import axios from 'axios';
@@ -94,7 +92,26 @@ export class PluginMarketplace {
                 throw new Error(`Repository ${repository} not found`);
             }
             const plugins = await repo.list();
-            return includeContainerPlugins ? plugins : plugins.filter(p => p.language !== 'container');
+
+            if (!includeContainerPlugins) {
+                // Filter out container plugins by fetching manifests and checking language
+                const filteredPlugins: PluginLocator[] = [];
+                for (const plugin of plugins) {
+                    try {
+                        const manifest = await repo.fetch(plugin.id, plugin.version);
+                        if (manifest && manifest.language !== 'container') {
+                            filteredPlugins.push(plugin);
+                        }
+                    } catch (error) {
+                        console.warn(`Error fetching manifest for plugin ${plugin.id}: ${error}`);
+                        // Include plugin in list if we can't determine its type
+                        filteredPlugins.push(plugin);
+                    }
+                }
+                return filteredPlugins;
+            }
+
+            return plugins;
         }
 
         // If no repository specified, use default
@@ -103,7 +120,26 @@ export class PluginMarketplace {
             throw new Error(`Default repository ${this.defaultRepository} not found`);
         }
         const plugins = await defaultRepo.list();
-        return includeContainerPlugins ? plugins : plugins.filter(p => p.language !== 'container');
+
+        if (!includeContainerPlugins) {
+            // Filter out container plugins by fetching manifests and checking language
+            const filteredPlugins: PluginLocator[] = [];
+            for (const plugin of plugins) {
+                try {
+                    const manifest = await defaultRepo.fetch(plugin.id, plugin.version);
+                    if (manifest && manifest.language !== 'container') {
+                        filteredPlugins.push(plugin);
+                    }
+                } catch (error) {
+                    console.warn(`Error fetching manifest for plugin ${plugin.id}: ${error}`);
+                    // Include plugin in list if we can't determine its type
+                    filteredPlugins.push(plugin);
+                }
+            }
+            return filteredPlugins;
+        }
+
+        return plugins;
     }
 
     /**
