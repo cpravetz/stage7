@@ -184,10 +184,9 @@ export class SecurityManager {
         // Register endpoint
         app.post('/register', register);
 
-                // Register endpoint
         app.post('/login', login);
-        // Register endpoint
-        app.post('/logout', logout);
+        
+        app.post('/logout', logout);        
 
         // Health check endpoint
         app.get('/health', (_req: Request, res: Response) => {
@@ -206,5 +205,43 @@ export class SecurityManager {
     }
 
 }
+
+// Add middleware to verify tokens for plugin authentication
+app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
+    // Update exempt paths to include refresh-token route
+const exemptPaths = ['/auth/', '/verify', '/public-key', '/health', '/login', '/register', '/refresh-token'];
+
+    // Update middleware to match paths more flexibly
+    if (exemptPaths.some(path => req.path.startsWith(path))) {
+        console.log(`[SecurityManager] Skipping token verification for exempt path: ${req.path}`);
+        return next();
+    }
+
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+        console.error('[SecurityManager] No authorization header provided for ', req.path);
+        res.status(401).json({ error: 'Authorization header is required' });
+        return;
+    }
+
+    const parts = authHeader.split(' ');
+    if (parts.length !== 2 || parts[0] !== 'Bearer') {
+        console.error('[SecurityManager] Invalid authorization header format');
+        res.status(401).json({ error: 'Invalid authorization header format' });
+        return;
+    }
+
+    const token = parts[1];
+    const decoded = verifyToken(token);
+    if (!decoded) {
+        console.error('[SecurityManager] Invalid or expired token');
+        res.status(401).json({ error: 'Invalid or expired token' });
+        return;
+    }
+
+    console.log('[SecurityManager] Token verified successfully');
+    req.user = decoded;
+    next();
+});
 
 new SecurityManager().start();

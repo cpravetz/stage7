@@ -109,7 +109,7 @@ export class SecurityClient {
    * Check if URL is an authentication endpoint
    */
   private isAuthEndpoint(url: string): boolean {
-    const authPaths = ['/auth/', '/login', '/register', '/public-key', '/refresh-token'];
+    const authPaths = ['/auth/', '/login', '/register', '/public-key', '/refresh-token', '/logout'];
     return authPaths.some(path => url.includes(path));
   }
 
@@ -349,15 +349,7 @@ export class SecurityClient {
         }
       }
     }
-    
-    // Try default credentials as last resort
-    try {
-      await this.login('admin@example.com', 'password');
-      return true;
-    } catch (error) {
-      console.warn('[SecurityClient] Default login failed');
-      return false;
-    }
+    return false;
   }
 
   /**

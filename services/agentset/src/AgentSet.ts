@@ -1,6 +1,6 @@
 import express from 'express';
 import { Agent } from './agents/Agent';
-import { MapSerializer, BaseEntity } from '@cktmcs/shared';
+import { MapSerializer, BaseEntity, createAuthenticatedAxios } from '@cktmcs/shared';
 import { v4 as uuidv4 } from 'uuid';
 import axios from 'axios';
 import { AgentSetStatistics, PluginInput } from '@cktmcs/shared';
@@ -51,6 +51,13 @@ export class AgentSet extends BaseEntity {
         const knowledgeDomainsArray = this.specializationFramework.getAllKnowledgeDomains();
         const knowledgeDomainsMap = new Map(knowledgeDomainsArray.map(domain => [domain.id, domain]));
         this.domainKnowledge = new DomainKnowledge(knowledgeDomainsMap, this.librarianUrl, this.brainUrl);
+
+        // Initialize authenticated API client
+        this.authenticatedApi = createAuthenticatedAxios({
+            serviceId: 'AgentSet',
+            securityManagerUrl: this.librarianUrl,
+            clientSecret: process.env.CLIENT_SECRET || 'defaultSecret',
+        });
 
         this.initializeServer();
 
