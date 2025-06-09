@@ -2,7 +2,7 @@ import axios from 'axios';
 import express from 'express';
 import { Request, Response, NextFunction } from 'express';
 import { AgentStatistics, Mission, Status } from '@cktmcs/shared';
-import { generateGuid } from './utils/generateGuid';
+import { v4 as uuidv4, validate as uuidValidate } from 'uuid';
 import { BaseEntity, MessageType, PluginInput, MapSerializer, ServiceTokenManager } from '@cktmcs/shared';
 import { MissionStatistics } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
@@ -262,7 +262,7 @@ class MissionControl extends BaseEntity {
             // Clear action plan cache before creating new mission
             await this.clearActionPlanCache();
 
-            const missionId = generateGuid();
+            const missionId = uuidv4();
             console.log(`Generated mission ID: ${missionId}`);
 
             const mission: Mission = {
@@ -542,7 +542,9 @@ class MissionControl extends BaseEntity {
     private async handleAgentStatisticsUpdate(req: express.Request, res: express.Response) {
         try {
             const { agentId, missionId, statistics, timestamp } = req.body;
-
+            if (!uuidValidate(missionId)) {
+                res.status(400).send({ error: 'Invalid missionId format' });
+            }
             console.log(`Received statistics update for agent ${agentId} in mission ${missionId}`);
 
             // Store the statistics for this agent
