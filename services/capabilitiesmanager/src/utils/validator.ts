@@ -81,6 +81,18 @@ export const validateAndStandardizeInputs = async (plugin: PluginDefinition, inp
             }
 
             console.log(`validateAndStandardizeInputs: Successfully validated and standardized inputs for ${plugin.verb} (serialized):`, MapSerializer.transformForSerialization(validInputs));
+            if (plugin.verb === 'SEARCH' && validInputs.has('searchTerm')) {
+              const searchInput = validInputs.get('searchTerm');
+              // Log the entire PluginInput object for searchTerm
+              console.log(`validateAndStandardizeInputs: For SEARCH, the full 'searchTerm' PluginInput object is: ${JSON.stringify(searchInput)}`);
+              if (searchInput) {
+                // Log the inputValue and its type specifically
+                console.log(`validateAndStandardizeInputs: For SEARCH, direct inputValue of 'searchTerm' is: "${searchInput.inputValue}"`);
+                console.log(`validateAndStandardizeInputs: For SEARCH, typeof searchTerm inputValue is: ${typeof searchInput.inputValue}`);
+              } else {
+                console.log("validateAndStandardizeInputs: For SEARCH, validInputs.get('searchTerm') returned undefined/null even though validInputs.has('searchTerm') was true.");
+              }
+            }
             return { success: true, inputs: validInputs };
         } catch (error) {
             return {

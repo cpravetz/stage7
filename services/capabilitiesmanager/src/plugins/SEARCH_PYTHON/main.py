@@ -11,7 +11,11 @@ import json
 import os
 import requests
 from typing import Dict, List, Any, Optional
+import logging
 
+logger = logging.getLogger(__name__)
+# BasicConfig for logging, in case not configured by environment
+# logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class PluginInput:
     """Represents a plugin input parameter"""
@@ -141,6 +145,14 @@ def execute_plugin(inputs: Dict[str, PluginInput]) -> List[PluginOutput]:
         List of PluginOutput objects
     """
     try:
+        logger.info(f"SEARCH_PYTHON execute_plugin(): Received inputs: { {k: (v.input_value if isinstance(v, PluginInput) else v) for k, v in inputs.items()} }")
+
+        search_term_input_obj = inputs.get('searchTerm')
+        if search_term_input_obj:
+            logger.info(f"SEARCH_PYTHON execute_plugin(): searchTerm PluginInput object: input_value='{search_term_input_obj.input_value}', type={type(search_term_input_obj.input_value)}")
+        else:
+            logger.warning("SEARCH_PYTHON execute_plugin(): 'searchTerm' key not found in inputs.")
+
         # Get search term input
         search_term_input = inputs.get('searchTerm')
         if not search_term_input:
@@ -180,19 +192,34 @@ def main():
         
         # Read input from stdin
         input_data = sys.stdin.read().strip()
+        logger.info(f"SEARCH_PYTHON main(): Raw input_data from stdin: {input_data}")
         if not input_data:
             raise ValueError("No input data provided")
         
-        # Parse JSON input
-        raw_inputs = json.loads(input_data)
+        # Parse JSON input (which is an array of [key, value_dict] pairs)
+        input_list_of_pairs = json.loads(input_data)
         
+        if not isinstance(input_list_of_pairs, list):
+            raise ValueError("Input data should be a JSON array of [key, value] pairs.")
+
         # Convert to PluginInput objects
         inputs = {}
-        for key, value in raw_inputs.items():
-            if isinstance(value, dict) and 'inputValue' in value:
-                inputs[key] = PluginInput(value['inputValue'], value.get('args', {}))
+        for item in input_list_of_pairs:
+            if not (isinstance(item, (list, tuple)) and len(item) == 2):
+                raise ValueError(f"Each item in the input array should be a [key, value] pair. Found: {item}")
+
+            key, value_dict = item
+
+            if isinstance(value_dict, dict) and 'inputValue' in value_dict:
+                inputs[key] = PluginInput(value_dict['inputValue'], value_dict.get('args', {}))
             else:
-                inputs[key] = PluginInput(value)
+                # This case might occur if a non-standard PluginInput structure is sent,
+                # or if the value is simple (though CapabilitiesManager usually sends the full structure).
+                # For robustness, we'll still wrap it, but this path is less expected for typical inputs.
+                inputs[key] = PluginInput(value_dict)
+
+        inputs_for_logging = {k: (v.input_value if isinstance(v, PluginInput) else v) for k, v in inputs.items()}
+        logger.info(f"SEARCH_PYTHON main(): Parsed inputs dict (showing inputValues): {inputs_for_logging}")
         
         # Execute the plugin
         outputs = execute_plugin(inputs)
