@@ -1,6 +1,6 @@
 {
   "id": "plugin-FILE_OPS_PYTHON",
-  "verb": "FILE_OPS",
+  "verb": "FILE_OPERATION",
   "description": "Provides services for file operations: read, write, append",
   "explanation": "This plugin takes a path and optional content and executes the selected operation. Python version with enhanced security and error handling.",
   "inputDefinitions": [
