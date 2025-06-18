@@ -260,16 +260,25 @@ The output MUST be a valid JSON array of task objects. Do not include any explan
                         this.say(`Completed step: ${step.actionVerb}`);
 
                         if (result[0]?.resultType === PluginParameterType.PLAN) {
-                            const plan = result[0].result as ActionVerbTask[]; // Type assertion
-                            if (Array.isArray(plan)) {
-                                this.say(`Generated a plan with ${plan.length} steps`);
-                                this.addStepsFromPlan(plan);
+                            const planningStepResult = result[0].result;
+                            let actualPlanArray: ActionVerbTask[] | undefined = undefined;
+
+                            if (Array.isArray(planningStepResult)) {
+                                actualPlanArray = planningStepResult as ActionVerbTask[];
+                            } else if (typeof planningStepResult === 'object' && planningStepResult !== null && Array.isArray((planningStepResult as any).tasks)) {
+                                console.log(`[Agent.ts] runAgent (${this.id}): Plan received is wrapped in a "tasks" object. Extracting tasks array.`);
+                                actualPlanArray = (planningStepResult as any).tasks as ActionVerbTask[];
+                            }
+
+                            if (actualPlanArray) {
+                                this.say(`Generated a plan with ${actualPlanArray.length} steps`);
+                                this.addStepsFromPlan(actualPlanArray);
                                 // Send status update after adding steps from plan
                                 await this.notifyTrafficManager();
                             } else {
-                                const errorMessage = `Error: Expected a plan (array of tasks) from Brain service for initial planning, but received: ${JSON.stringify(plan)}`;
+                                const errorMessage = `Error: Expected a plan (array or object with 'tasks' array) from Brain service for initial planning, but received: ${JSON.stringify(planningStepResult)}`;
                                 console.error(`[Agent.ts] runAgent (${this.id}): ${errorMessage}`);
-                                this.say(`Failed to generate a valid plan. Details: ${JSON.stringify(plan)}`);
+                                this.say(`Failed to generate a valid plan. Details: ${JSON.stringify(planningStepResult)}`);
                                 this.status = AgentStatus.ERROR;
                                 await this.notifyTrafficManager();
                             }
