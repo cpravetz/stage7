@@ -25,6 +25,16 @@ class PluginParameterType:
     ERROR = "ERROR"
 
 class AccomplishPlugin:
+    VERB_SCHEMAS = {
+        'SEARCH': {'required': ['searchTerm'], 'optional': []},
+        'SCRAPE': {'required': ['url', 'selector', 'attribute', 'limit'], 'optional': []},
+        'GET_USER_INPUT': {'required': ['question', 'answerType'], 'optional': ['choices']},
+        'FILE_OPERATION': {'required': ['path', 'operation'], 'optional': ['content']},
+        'DECIDE': {'required': ['condition', 'trueSteps', 'falseSteps'], 'optional': []},
+        'WHILE': {'required': ['condition', 'steps'], 'optional': []},
+        'UNTIL': {'required': ['condition', 'steps'], 'optional': []}
+    }
+
     def __init__(self):
         self.brain_url = os.getenv('BRAIN_URL', 'brain:5070')
         self.security_manager_url = os.getenv('SECURITY_MANAGER_URL', 'securitymanager:5010')
@@ -116,95 +126,146 @@ Analyze this goal and determine the best approach:
     ]
 }}
 
-Available action verbs for plans:
-SEARCH - searches DuckDuckGo for a given term and returns a list of links
-    (required input: searchTerm)
-SCRAPE - scrapes content from a given URL
-    (required inputs: url, selector, attribute, limit)
-GET_USER_INPUT - requests input from the user
-    (required inputs: question, answerType) (optional input: choices)
-FILE_OPERATION - performs file operations like read, write, create, delete
-    (required inputs: path, operation, content)
-DECIDE - Conditional branching based on a condition
-    (required inputs: condition, trueSteps[], falseSteps[])
-WHILE - Repeat steps while a condition is true
-    (required inputs: condition, steps[])
-UNTIL - Repeat steps until a condition becomes true
-    (required inputs: condition, steps[])
+Available action verbs for plans and THEIR REQUIRED INPUTS:
+SEARCH:
+    description: Searches DuckDuckGo for a given term.
+    inputs: {{"searchTerm": "value_for_search_term_goes_here"}} REQUIRED!
+SCRAPE:
+    description: Scrapes content from a given URL.
+    inputs: {{"url": "url_goes_here", "selector": "css_selector", "attribute": "e.g., text, href", "limit": 0}} REQUIRED!
+GET_USER_INPUT:
+    description: Requests input from the user.
+    inputs: {{"question": "question_for_user", "answerType": "string|number|boolean"}} REQUIRED!
+    optional_inputs: {{"choices": ["option1", "option2"]}}
+FILE_OPERATION:
+    description: Performs file operations.
+    inputs: {{"path": "/path/to/file", "operation": "read|write|create|delete"}} REQUIRED! (content is required for 'write' operation, provide as {{"content": "content_value"}})
+DECIDE:
+    description: Conditional branching.
+    inputs: {{"condition": "expression_evaluating_to_true_or_false", "trueSteps": [], "falseSteps": []}} REQUIRED!
+WHILE:
+    description: Repeat steps while a condition is true.
+    inputs: {{"condition": "expression_evaluating_to_true_or_false", "steps": []}} REQUIRED!
+UNTIL:
+    description: Repeat steps until a condition becomes true.
+    inputs: {{"condition": "expression_evaluating_to_true_or_false", "steps": []}} REQUIRED!
 
-Important guidelines:
-- Use specific, actionable verbs for each step
-- Include all necessary inputs for each step
-- Define clear outputs that subsequent steps can use
-- Keep steps focused and atomic
-- Include dependencies between steps when one step needs output from another
-- Make sure the plan is executable and will achieve the stated goal
+CRITICALLY IMPORTANT: For each step in the plan, you MUST include all REQUIRED inputs for the specified 'verb'.
+The 'inputs' field for each step MUST be a JSON object containing all required parameters for that verb.
+Failure to include all required inputs for a verb will make the plan unusable.
+Ensure all JSON string values are properly escaped.
 
 Goal to analyze: {goal}"""
 
-    def convert_json_to_tasks(self, json_plan: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Convert JSON plan to task format"""
-        try:
-            if not json_plan or not isinstance(json_plan, list):
-                logger.error("Cannot convert JSON to tasks. Invalid JSON plan format")
-                return []
+    def validate_plan_data(self, plan_data: List[Dict[str, Any]]) -> Optional[str]:
+        """
+        Validates the plan data from the LLM.
+        Returns an error message string if validation fails, None otherwise.
+        """
+        if not isinstance(plan_data, list):
+            logger.error("Invalid plan data: not a list.")
+            return "Plan data is not a list."
 
+        for i, step in enumerate(plan_data):
+            if not isinstance(step, dict):
+                logger.error(f"Invalid step at index {i}: not a dictionary. Step: {step}")
+                return f"Step at index {i} is not a dictionary."
+
+            verb = step.get('verb')
+            if not verb or not isinstance(verb, str):
+                logger.error(f"Invalid or missing verb for step at index {i}. Step: {step}")
+                return f"Invalid or missing verb for step at index {i}."
+
+            if verb not in self.VERB_SCHEMAS:
+                logger.warning(f"Verb '{verb}' at step {i+1} is not in VERB_SCHEMAS. Skipping detailed input validation for this verb.")
+                continue
+
+            inputs_dict = step.get('inputs')
+            if not isinstance(inputs_dict, dict):
+                logger.error(f"Invalid 'inputs' field for verb '{verb}' at step {i+1}: not a dictionary. Inputs: {inputs_dict}")
+                return f"Step {i+1} ('{verb}') has invalid 'inputs' field (must be a dictionary)."
+
+            schema = self.VERB_SCHEMAS[verb]
+            for required_input_name in schema.get('required', []):
+                if required_input_name not in inputs_dict:
+                    msg = f"Plan generation failed: LLM output for verb '{verb}' (step {i+1}) missing required input '{required_input_name}'."
+                    logger.error(msg)
+                    return msg
+
+                input_value = inputs_dict.get(required_input_name)
+                # Allow False or 0 as valid inputs
+                if input_value is None or (isinstance(input_value, str) and not input_value.strip()):
+                     msg = f"Plan generation failed: LLM output for verb '{verb}' (step {i+1}) has empty or null required input '{required_input_name}'."
+                     logger.error(msg)
+                     return msg
+        return None # All good
+
+    def convert_json_to_tasks(self, json_plan: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Convert JSON plan to task format. Assumes basic validation has passed."""
+        try:
             # First pass: Create a map of output keys to step numbers
             output_to_step_map = {}
-            for index, step in enumerate(json_plan):
-                if step.get('outputs'):
+            for index, step in enumerate(json_plan): # json_plan is already validated to be a list of dicts
+                if isinstance(step.get('outputs'), dict):
                     for output_key in step['outputs'].keys():
                         output_to_step_map[output_key] = step.get('number', index + 1)
 
             tasks = []
-            for index, step in enumerate(json_plan):
-                inputs = {}
+            for index, step in enumerate(json_plan): # step is a dict
+                inputs_from_llm = step.get('inputs', {}) # Default to empty dict if 'inputs' is missing
+                if not isinstance(inputs_from_llm, dict): # Should have been caught by validation if verb was known
+                    logger.warning(f"Step {index+1} ('{step.get('verb')}') 'inputs' is not a dictionary. Treating as empty inputs. Inputs: {inputs_from_llm}")
+                    inputs_from_llm = {}
+
+                processed_inputs = {}
                 plan_dependencies = []
 
-                # Process inputs
-                if step.get('inputs'):
-                    for input_name, input_value in step['inputs'].items():
-                        if isinstance(input_value, str) and input_value.startswith('${') and input_value.endswith('}'):
-                            # This is a reference to another step's output
-                            ref_key = input_value[2:-1]  # Remove ${ and }
-                            if ref_key in output_to_step_map:
-                                source_step = output_to_step_map[ref_key]
-                                plan_dependencies.append({
-                                    "stepNumber": source_step,
+                for input_name, input_value in inputs_from_llm.items():
+                    if isinstance(input_value, str) and input_value.startswith('${') and input_value.endswith('}'):
+                        ref_key = input_value[2:-1]
+                        if ref_key in output_to_step_map:
+                            source_step_number = output_to_step_map[ref_key]
+                            plan_dependencies.append({
+                                "stepNumber": source_step_number,
+                                "outputName": ref_key
+                            })
+                            processed_inputs[input_name] = {
+                                "inputValue": input_value, # This is the reference string itself
+                                "args": {}, # args might be populated later by CM if needed
+                                "dependencyOutputs": [{ # Explicitly state dependency
+                                    "stepNumber": source_step_number,
                                     "outputName": ref_key
-                                })
-                                inputs[input_name] = {
-                                    "inputValue": input_value,
-                                    "args": {},
-                                    "dependencyOutputs": [{
-                                        "stepNumber": source_step,
-                                        "outputName": ref_key
-                                    }]
-                                }
-                            else:
-                                inputs[input_name] = {
-                                    "inputValue": input_value,
-                                    "args": {}
-                                }
-                        else:
-                            inputs[input_name] = {
-                                "inputValue": input_value,
-                                "args": {}
+                                }]
                             }
+                        else:
+                            # Reference to an unknown output, pass as is
+                            processed_inputs[input_name] = {"inputValue": input_value, "args": {}}
+                    else:
+                        # Literal value
+                        processed_inputs[input_name] = {"inputValue": input_value, "args": {}}
 
                 task = {
-                    "verb": step.get('verb', 'UNKNOWN'),
-                    "inputs": inputs,
+                    "verb": step.get('verb', 'UNKNOWN'), # Already validated to exist
+                    "inputs": processed_inputs,
                     "description": step.get('description', ''),
-                    "expectedOutputs": step.get('outputs', {}),
+                    "expectedOutputs": step.get('outputs', {}), # Allow empty or missing outputs
                     "dependencies": plan_dependencies
                 }
                 tasks.append(task)
-
             return tasks
         except Exception as e:
             logger.error(f"Error converting JSON to tasks: {e}")
-            return []
+            # It's crucial to return an error structure if conversion fails unexpectedly
+            # However, the main validation for plan structure is now done before this.
+            # This catch is for truly unexpected errors during the conversion itself.
+            return [{
+                "success": False,
+                "name": "task_conversion_error",
+                "resultType": PluginParameterType.ERROR,
+                "resultDescription": f"Internal error converting plan to tasks: {str(e)}",
+                "result": None,
+                "error": str(e)
+            }]
 
     def execute(self, inputs_map: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Execute the ACCOMPLISH plugin"""
@@ -242,6 +303,9 @@ Goal to analyze: {goal}"""
                     "name": "error",
                     "resultType": PluginParameterType.ERROR,
                     "resultDescription": "Goal is required for ACCOMPLISH plugin",
+                    "name": "error",
+                    "resultType": PluginParameterType.ERROR,
+                    "resultDescription": "Goal is required for ACCOMPLISH plugin",
                     "result": None,
                     "error": "No goal provided to ACCOMPLISH plugin"
                 }]
@@ -266,7 +330,23 @@ Goal to analyze: {goal}"""
                 response_type = parsed_response.get('type', '').upper()
 
                 if response_type == 'PLAN':
-                    tasks = self.convert_json_to_tasks(parsed_response.get('plan', []))
+                    plan_data = parsed_response.get('plan', [])
+                    validation_error_message = self.validate_plan_data(plan_data)
+                    if validation_error_message:
+                        return [{
+                            "success": False,
+                            "name": "plan_validation_error",
+                            "resultType": PluginParameterType.ERROR,
+                            "resultDescription": validation_error_message,
+                            "result": None,
+                            "error": validation_error_message
+                        }]
+
+                    tasks = self.convert_json_to_tasks(plan_data)
+                    # If convert_json_to_tasks itself returns an error structure (e.g. due to its own try-except)
+                    if tasks and isinstance(tasks, list) and len(tasks) == 1 and tasks[0].get("resultType") == PluginParameterType.ERROR:
+                        return tasks
+
                     return [{
                         "success": True,
                         "name": "plan",
