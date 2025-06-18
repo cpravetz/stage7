@@ -400,6 +400,10 @@ export class CapabilitiesManager extends BaseEntity {
         const source_component = "CapabilitiesManager.executeActionVerb";
         const step = { ...req.body, inputs: MapSerializer.transformFromSerialization(req.body.inputs) } as Step;
 
+        if (step.actionVerb === 'SEARCH') {
+            console.log(`[${trace_id}] ${source_component}: Inputs for SEARCH after deserialization:`, MapSerializer.transformForSerialization(step.inputs));
+        }
+
         if (!step.actionVerb || typeof step.actionVerb !== 'string') {
             const sError = generateStructuredError({
                 error_code: GlobalErrorCodes.CAPABILITIES_MANAGER_INVALID_REQUEST_GENERIC,
@@ -535,6 +539,9 @@ export class CapabilitiesManager extends BaseEntity {
         actualPluginRootPath: string,
         trace_id: string
     ): Promise<PluginOutput[]> {
+        if (pluginToExecute.verb === 'SEARCH') {
+            console.log(`[${trace_id}] CapabilitiesManager.executePlugin: Inputs for SEARCH plugin execution:`, MapSerializer.transformForSerialization(inputsForPlugin));
+        }
         const source_component = "CapabilitiesManager.executePlugin";
         console.log(`[${trace_id}] ${source_component}: Executing plugin ${pluginToExecute.id} v${pluginToExecute.version} (${pluginToExecute.verb}) at ${actualPluginRootPath}`);
 

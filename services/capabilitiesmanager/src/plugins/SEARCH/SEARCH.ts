@@ -11,6 +11,13 @@ const authenticatedApi = createAuthenticatedAxios(
 );
 
 export async function execute(inputs: Map<string, PluginInput>): Promise<PluginOutput[]> {
+    console.log('SEARCH plugin execute(): Received inputs:', inputs);
+    // Also log the stringified version for easier inspection of the Map contents
+    // Note: MapSerializer might not be available here, so using a simpler approach if needed.
+    // For now, let's assume console.log handles Map stringification reasonably.
+    // If MapSerializer is needed, it must be imported: import { MapSerializer } from '@cktmcs/shared';
+    // For this exercise, we'll log the raw inputs and if complex objects are Maps, their default toString might be used.
+    // A more robust solution would involve ensuring MapSerializer is available or doing a custom serialization.
     try {
         const searchTerm = inputs.get('searchTerm')?.inputValue;
         if (!searchTerm) {

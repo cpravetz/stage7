@@ -127,9 +127,10 @@ Analyze this goal and determine the best approach:
 }}
 
 Available action verbs for plans and THEIR REQUIRED INPUTS:
-SEARCH:
-    description: Searches DuckDuckGo for a given term.
-    inputs: {{"searchTerm": "value_for_search_term_goes_here"}} REQUIRED!
+    (Pay close attention to the 'inputs' field for each verb. All listed inputs are MANDATORY unless specified as optional.)
+    SEARCH:
+        description: Searches DuckDuckGo for a given term.
+        inputs: {{"searchTerm": "value_for_search_term_goes_here"}} REQUIRED!
 SCRAPE:
     description: Scrapes content from a given URL.
     inputs: {{"url": "url_goes_here", "selector": "css_selector", "attribute": "e.g., text, href", "limit": 0}} REQUIRED!
@@ -150,10 +151,12 @@ UNTIL:
     description: Repeat steps until a condition becomes true.
     inputs: {{"condition": "expression_evaluating_to_true_or_false", "steps": []}} REQUIRED!
 
-CRITICALLY IMPORTANT: For each step in the plan, you MUST include all REQUIRED inputs for the specified 'verb'.
-The 'inputs' field for each step MUST be a JSON object containing all required parameters for that verb.
-Failure to include all required inputs for a verb will make the plan unusable.
-Ensure all JSON string values are properly escaped.
+    CRITICALLY IMPORTANT:
+    1. For each step in the plan, you MUST include all REQUIRED inputs for the specified 'verb' by consulting the definitions above.
+    2. The 'inputs' field for each step MUST be a JSON object containing all required parameters for that verb.
+    3. If a required input value cannot be determined from the goal, context, or outputs of previous steps, you MUST insert a `GET_USER_INPUT` step *before* the current step to ask the user for the missing input value. Do NOT proceed with a step if its required inputs are missing and cannot be obtained.
+    4. Failure to include all required inputs for a verb (or to ask the user for them) will make the plan unusable.
+    Ensure all JSON string values are properly escaped.
 
 Goal to analyze: {goal}"""
 
