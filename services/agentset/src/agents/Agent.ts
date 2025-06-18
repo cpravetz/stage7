@@ -262,21 +262,28 @@ The output MUST be a valid JSON array of task objects. Do not include any explan
                         if (result[0]?.resultType === PluginParameterType.PLAN) {
                             const planningStepResult = result[0].result;
                             let actualPlanArray: ActionVerbTask[] | undefined = undefined;
+                            let planSourceDescription = "direct array"; // For logging
 
                             if (Array.isArray(planningStepResult)) {
                                 actualPlanArray = planningStepResult as ActionVerbTask[];
-                            } else if (typeof planningStepResult === 'object' && planningStepResult !== null && Array.isArray((planningStepResult as any).tasks)) {
-                                console.log(`[Agent.ts] runAgent (${this.id}): Plan received is wrapped in a "tasks" object. Extracting tasks array.`);
-                                actualPlanArray = (planningStepResult as any).tasks as ActionVerbTask[];
+                            } else if (typeof planningStepResult === 'object' && planningStepResult !== null) {
+                                if (Array.isArray((planningStepResult as any).tasks)) {
+                                    console.log(`[Agent.ts] runAgent (${this.id}): Plan received is wrapped in a "tasks" object. Extracting tasks array.`);
+                                    actualPlanArray = (planningStepResult as any).tasks as ActionVerbTask[];
+                                    planSourceDescription = "object with 'tasks' array";
+                                } else if (Array.isArray((planningStepResult as any).steps)) { // New check
+                                    console.log(`[Agent.ts] runAgent (${this.id}): Plan received is wrapped in a "steps" object. Extracting steps array.`);
+                                    actualPlanArray = (planningStepResult as any).steps as ActionVerbTask[];
+                                    planSourceDescription = "object with 'steps' array";
+                                }
                             }
 
                             if (actualPlanArray) {
-                                this.say(`Generated a plan with ${actualPlanArray.length} steps`);
+                                this.say(`Generated a plan (${planSourceDescription}) with ${actualPlanArray.length} steps`);
                                 this.addStepsFromPlan(actualPlanArray);
-                                // Send status update after adding steps from plan
                                 await this.notifyTrafficManager();
                             } else {
-                                const errorMessage = `Error: Expected a plan (array or object with 'tasks' array) from Brain service for initial planning, but received: ${JSON.stringify(planningStepResult)}`;
+                                const errorMessage = `Error: Expected a plan (array, or object with 'tasks'/'steps' array) from Brain service, but received: ${JSON.stringify(planningStepResult)}`;
                                 console.error(`[Agent.ts] runAgent (${this.id}): ${errorMessage}`);
                                 this.say(`Failed to generate a valid plan. Details: ${JSON.stringify(planningStepResult)}`);
                                 this.status = AgentStatus.ERROR;
