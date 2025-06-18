@@ -260,15 +260,25 @@ The output MUST be a valid JSON array of task objects. Do not include any explan
                         this.say(`Completed step: ${step.actionVerb}`);
 
                         if (result[0]?.resultType === PluginParameterType.PLAN) {
-                            const plan = result[0].result as ActionVerbTask[];
-                            this.say(`Generated a plan with ${plan.length} steps`);
-                            this.addStepsFromPlan(plan);
-
-                            // Send status update after adding steps from plan
-                            await this.notifyTrafficManager();
+                            const plan = result[0].result as ActionVerbTask[]; // Type assertion
+                            if (Array.isArray(plan)) {
+                                this.say(`Generated a plan with ${plan.length} steps`);
+                                this.addStepsFromPlan(plan);
+                                // Send status update after adding steps from plan
+                                await this.notifyTrafficManager();
+                            } else {
+                                const errorMessage = `Error: Expected a plan (array of tasks) from Brain service for initial planning, but received: ${JSON.stringify(plan)}`;
+                                console.error(`[Agent.ts] runAgent (${this.id}): ${errorMessage}`);
+                                this.say(`Failed to generate a valid plan. Details: ${JSON.stringify(plan)}`);
+                                this.status = AgentStatus.ERROR;
+                                await this.notifyTrafficManager();
+                            }
                         }
 
-                        await this.saveWorkProduct(step.id, result, step.isEndpoint(this.steps));
+                        // Only save work product if agent is not in error state from plan validation
+                        if (this.status !== AgentStatus.ERROR) {
+                            await this.saveWorkProduct(step.id, result, step.isEndpoint(this.steps));
+                        }
 
                         // Send status update after each step completion
                         await this.notifyTrafficManager();
