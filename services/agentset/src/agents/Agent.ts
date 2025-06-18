@@ -226,12 +226,36 @@ Please consider this context and the available plugins when planning and executi
                         this.say(`Executing step: ${step.actionVerb} - ${step.description || 'No description'}`);
 
                         await this.populateInputsFromLibrarian(step);
-                        const result = await step.execute(
-                            this.executeActionWithCapabilitiesManager.bind(this),
-                            this.useBrainForReasoning.bind(this),
-                            this.createSubAgent.bind(this),
-                            this.handleAskStep.bind(this)
-                        );
+
+                        let result: PluginOutput[];
+
+                        if (step.stepNo === 1 && step.actionVerb === 'ACCOMPLISH' && this.inputs?.has('goal')) {
+                            const goal = this.inputs.get('goal')?.inputValue;
+                            const planningPrompt = `You are a planning assistant. Given the goal: '${goal}', generate a JSON array of tasks to achieve this goal. Each task object should have 'actionVerb', 'inputs' (as a map of name to {inputValue, inputName, args}), 'description', 'dependencies' (as an array of sourceStepId strings, use step IDs like 'step_N'), and optionally 'recommendedRole'. Ensure the plan is detailed and includes multiple steps with dependencies if logical. The first step will be 'step_1', the next 'step_2', and so on. Dependencies should refer to these generated step IDs.
+It is critical that the plan is comprehensive and broken down into a sufficient number of granular steps to ensure successful execution. Each step's description should be clear and actionable.
+When defining 'dependencies', ensure they accurately reflect the data flow required between steps. Only list direct predecessor step IDs that provide necessary input for the current step.
+If the goal is complex, consider creating a sub-plan using a nested 'ACCOMPLISH' verb for a major sub-component, or use 'CREATE_SUB_AGENT' if a specialized agent should handle a part of the mission.
+For 'recommendedRole', suggest roles like 'researcher', 'writer', 'coder', 'validator', 'executor' only if a specialized skill is clearly beneficial for that specific step. Otherwise, omit it or use 'executor'.
+The output MUST be a valid JSON array of task objects. Do not include any explanatory text before or after the JSON array.`;
+
+                            console.log(`[Agent ${this.id}] Constructed planning prompt for initial ACCOMPLISH task:`, planningPrompt);
+
+                            const planningInputs = new Map<string, PluginInput>();
+                            planningInputs.set('prompt', { inputName: 'prompt', inputValue: planningPrompt, args: {} });
+                            planningInputs.set('ConversationType', { inputName: 'ConversationType', inputValue: 'text/code', args: {} }); // Expecting JSON
+
+                            result = await this.useBrainForReasoning(planningInputs);
+                            console.log(`[Agent ${this.id}] Raw response from Brain for planning:`, JSON.stringify(result));
+
+                        } else {
+                            result = await step.execute(
+                                this.executeActionWithCapabilitiesManager.bind(this),
+                                this.useBrainForReasoning.bind(this),
+                                this.createSubAgent.bind(this),
+                                this.handleAskStep.bind(this)
+                            );
+                        }
+
                         console.log(`Step ${step.actionVerb} result:`, result);
                         this.say(`Completed step: ${step.actionVerb}`);
 
@@ -293,6 +317,7 @@ Please consider this context and the available plugins when planning and executi
     }
 
     private addStepsFromPlan(plan: ActionVerbTask[]) {
+        console.log(`[Agent ${this.id}] Parsed plan for addStepsFromPlan:`, JSON.stringify(plan));
         const newSteps = createFromPlan(plan, this.steps.length + 1, this.agentPersistenceManager);
         this.steps.push(...newSteps);
     }
@@ -594,26 +619,39 @@ Please consider this context and the available plugins when planning and executi
             const mimeType = response.data.mimeType || 'text/plain';
 
             let resultType: PluginParameterType;
-            switch (ConversationType) {
-                case 'text/image':
-                    resultType = PluginParameterType.OBJECT; // Assuming image data is returned as an object
-                    break;
-                case 'text/audio':
-                case 'text/video':
-                    resultType = PluginParameterType.OBJECT; // Assuming audio/video data is returned as an object
-                    break;
-                case 'text/code':
-                    resultType = PluginParameterType.STRING;
-                    break;
-                default:
-                    resultType = PluginParameterType.STRING;
+            let parsedResult = brainResponse;
+
+            if (ConversationType === 'text/code' && mimeType === 'application/json') {
+                try {
+                    parsedResult = JSON.parse(brainResponse);
+                    resultType = PluginParameterType.PLAN; // Assuming it's a plan
+                    console.log(`[Agent ${this.id}] Parsed brainResponse as JSON for plan.`);
+                } catch (e) {
+                    console.warn(`[Agent ${this.id}] Failed to parse brainResponse as JSON, treating as string. Error:`, e);
+                    resultType = PluginParameterType.STRING; // Fallback to string if JSON parsing fails
+                }
+            } else {
+                switch (ConversationType) {
+                    case 'text/image':
+                        resultType = PluginParameterType.OBJECT; // Assuming image data is returned as an object
+                        break;
+                    case 'text/audio':
+                    case 'text/video':
+                        resultType = PluginParameterType.OBJECT; // Assuming audio/video data is returned as an object
+                        break;
+                    case 'text/code': // If not application/json, treat as string code
+                        resultType = PluginParameterType.STRING;
+                        break;
+                    default:
+                        resultType = PluginParameterType.STRING;
+                }
             }
 
             const result: PluginOutput = {
                 success: true,
                 name: 'answer',
                 resultType: resultType,
-                result: brainResponse,
+                result: parsedResult,
                 resultDescription: `Brain reasoning output (${ConversationType})`,
                 mimeType: mimeType
             };
@@ -814,7 +852,7 @@ Please consider this context and the available plugins when planning and executi
             steps: stepStats,
             color: this.getAgentColor()
         };
-        //console.log(`Agent ${this.id} statistics:`, statistics);
+        console.log(`[Agent ${this.id}] getStatistics: steps.length = ${this.steps.length}, stepStats = ${JSON.stringify(stepStats)}`);
         return statistics;
     }
 

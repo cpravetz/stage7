@@ -68,20 +68,26 @@ export const TabbedPanel: React.FC<TabbedPanelProps> = ({
 
   const securityClient = SecurityClient.getInstance(window.location.origin);
 
-  const handleWorkProductClick = async (event: React.MouseEvent<HTMLAnchorElement>, url: string) => {
+  const handleWorkProductClick = async (event: React.MouseEvent<HTMLElement>, url: string) => {
     event.preventDefault();
+    console.log('[TabbedPanel] handleWorkProductClick: Attempting to fetch URL:', url);
     try {
       const headers = securityClient.getAuthHeader();
+      console.log('[TabbedPanel] handleWorkProductClick: Authorization Header:', headers ? headers['Authorization'] : 'No Authorization Header found');
+
       const response = await fetch(url, { headers });
+      console.log('[TabbedPanel] handleWorkProductClick: Fetch response status:', response.status);
       if (!response.ok) {
-        throw new Error(`Failed to fetch work product: ${response.statusText}`);
+        const errorText = await response.text();
+        console.error('[TabbedPanel] handleWorkProductClick: Fetch response not OK. Status:', response.status, 'Text:', errorText);
+        throw new Error(`Failed to fetch work product: ${response.status} ${response.statusText}. Body: ${errorText}`);
       }
       const blob = await response.blob();
       const blobUrl = window.URL.createObjectURL(blob);
       window.open(blobUrl, '_blank', 'noopener,noreferrer');
     } catch (error) {
-      console.error('Error fetching work product:', error);
-      alert('Failed to open work product. Please try again.');
+      console.error('[TabbedPanel] handleWorkProductClick: Error fetching work product:', error);
+      alert('Failed to open work product. Please try again. Check console for details.');
     }
   };
 
@@ -168,15 +174,19 @@ export const TabbedPanel: React.FC<TabbedPanelProps> = ({
                         </Typography>
                       </TableCell>
                       <TableCell>
-                        <a
-                          href={product.url}
+                        <Link
+                          component="button"
+                          variant="body2"
                           onClick={(e) => handleWorkProductClick(e, product.url)}
-                          style={{ color: theme.palette.secondary.main, textDecoration: 'underline', cursor: 'pointer' }}
-                          target="_blank"
-                          rel="noopener noreferrer"
+                          sx={{
+                            color: theme.palette.secondary.main,
+                            textDecoration: 'underline',
+                            cursor: 'pointer',
+                            textAlign: 'left', // Ensure link text aligns like normal text
+                          }}
                         >
                           {product.name}
-                        </a>
+                        </Link>
                       </TableCell>
                     </TableRow>
                   ))

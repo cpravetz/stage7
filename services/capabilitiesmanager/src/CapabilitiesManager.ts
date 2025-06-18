@@ -682,13 +682,14 @@ export class CapabilitiesManager extends BaseEntity {
             const inputsJsonString = JSON.stringify(inputsArray);
 
             // Debug: Log the inputs being passed to Python plugin
-            console.log(`[${trace_id}] ${source_component}: Inputs array for Python plugin:`, inputsArray);
-            console.log(`[${trace_id}] ${source_component}: JSON string being passed:`, inputsJsonString);
+            // console.log(`[${trace_id}] ${source_component}: Inputs array for Python plugin:`, inputsArray); // Already logged if verb is SEARCH
+            // console.log(`[${trace_id}] ${source_component}: JSON string being passed:`, inputsJsonString); // Logged below before exec
 
             // Use enhanced Python execution with better error handling and security
             const pythonCommand = await this.buildPythonCommand(mainFilePath, pluginRootPath, inputsJsonString, pluginDefinition);
 
-            console.log(`[${trace_id}] ${source_component}: Python command:`, pythonCommand);
+            console.log(`[${trace_id}] ${source_component}: Executing Python command: ${pythonCommand}`);
+            console.log(`[${trace_id}] ${source_component}: Piping inputsJsonString to Python plugin: ${inputsJsonString}`);
 
             const { stdout, stderr } = await execAsync(pythonCommand, {
                 cwd: pluginRootPath,
@@ -701,8 +702,9 @@ export class CapabilitiesManager extends BaseEntity {
                 timeout: pluginDefinition.security?.sandboxOptions?.timeout || 30000
             });
 
+            console.log(`[${trace_id}] ${source_component}: Raw stdout from Python plugin ${pluginDefinition.verb} v${pluginDefinition.version}:\n${stdout}`);
             if (stderr) {
-                console.warn(`[${trace_id}] ${source_component}: Python plugin ${pluginDefinition.verb} v${pluginDefinition.version} stderr:\n${stderr}`);
+                console.warn(`[${trace_id}] ${source_component}: Raw stderr from Python plugin ${pluginDefinition.verb} v${pluginDefinition.version}:\n${stderr}`);
             }
 
             // Validate and parse output
@@ -710,6 +712,13 @@ export class CapabilitiesManager extends BaseEntity {
             return result;
 
         } catch (error: any) {
+            console.error(`[${trace_id}] ${source_component}: Error during execAsync for ${pluginDefinition.verb} v${pluginDefinition.version}. Error: ${error.message}`);
+            if ((error as any).stdout) {
+                console.error(`[${trace_id}] ${source_component}: Error stdout: ${(error as any).stdout}`);
+            }
+            if ((error as any).stderr) {
+                console.error(`[${trace_id}] ${source_component}: Error stderr: ${(error as any).stderr}`);
+            }
             throw generateStructuredError({
                 error_code: GlobalErrorCodes.CAPABILITIES_MANAGER_PLUGIN_EXECUTION_FAILED,
                 severity: ErrorSeverity.ERROR,
@@ -720,8 +729,9 @@ export class CapabilitiesManager extends BaseEntity {
                 contextual_info: {
                     plugin_id: pluginDefinition.id,
                     version: pluginDefinition.version,
-                    command_executed: "python3",
-                    stderr: (error as any).stderr,
+                    command_executed: "python3", // This might be slightly inaccurate due to buildPythonCommand changes
+                    stdout_on_error: (error as any).stdout,
+                    stderr_on_error: (error as any).stderr,
                     main_file: mainFilePath
                 }
             });
@@ -953,6 +963,7 @@ export class CapabilitiesManager extends BaseEntity {
 
     private validatePythonOutput(stdout: string, pluginDefinition: PluginDefinition, trace_id: string): PluginOutput[] {
         const source_component = "CapabilitiesManager.validatePythonOutput";
+        console.log(`[${trace_id}] ${source_component}: Validating Python output for ${pluginDefinition.verb} v${pluginDefinition.version}. Received stdout:\n${stdout}`);
 
         try {
             // Parse JSON output
@@ -992,12 +1003,12 @@ export class CapabilitiesManager extends BaseEntity {
                 }
             }
 
-            console.log(`[${trace_id}] ${source_component}: Python plugin output validated successfully`);
+            console.log(`[${trace_id}] ${source_component}: Python plugin output parsed and validated successfully for ${pluginDefinition.verb} v${pluginDefinition.version}`);
             return result;
 
         } catch (error: any) {
-            console.error(`[${trace_id}] ${source_component}: Invalid Python plugin output: ${error.message}`);
-            console.error(`[${trace_id}] ${source_component}: Raw output: ${stdout}`);
+            console.error(`[${trace_id}] ${source_component}: Invalid Python plugin output for ${pluginDefinition.verb} v${pluginDefinition.version}: JSON parsing failed. Error: ${error.message}`);
+            console.error(`[${trace_id}] ${source_component}: Raw stdout that failed to parse: ${stdout}`);
 
             // Return error output
             return [{
@@ -1005,7 +1016,7 @@ export class CapabilitiesManager extends BaseEntity {
                 name: 'validation_error',
                 resultType: PluginParameterType.ERROR,
                 result: null,
-                resultDescription: `Invalid plugin output format: ${error.message}`,
+                resultDescription: `Invalid plugin output format: ${error.message}. Raw output: ${stdout.substring(0, 200)}...`,
                 error: error.message
             }];
         }
