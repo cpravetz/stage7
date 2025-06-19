@@ -147,7 +147,7 @@ export class AgentSet extends BaseEntity {
         this.app.post('/pauseAgents', async (req: express.Request, res: express.Response, next: express.NextFunction) => {
             const { missionId } = req.body;
             if (!missionId) {
-                return res.status(400).send({ error: 'missionId is required' });
+                res.status(400).send({ error: 'missionId is required' });
             }
             try {
                 console.log(`Agentset Pausing agents for mission ${missionId}`);
