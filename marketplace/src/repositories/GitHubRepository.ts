@@ -47,7 +47,10 @@ export class GitHubRepository implements PluginRepository {
         this.token = config.credentials?.token || process.env.GITHUB_TOKEN || '';
         this.username = config.credentials?.username || process.env.GITHUB_USERNAME || ''; // Used as default owner
 
-        if (!this.token) { // Username might not be strictly needed if repoOwner is from URL
+        if (!this.token) {
+            console.warn("**********************************************************************************");
+            console.warn("GitHubRepository: GITHUB_TOKEN is missing or empty. Please ensure it is set.");
+            console.warn("**********************************************************************************");
             throw analyzeError(new Error('GitHub repository requires GITHUB_TOKEN.'));
         }
 

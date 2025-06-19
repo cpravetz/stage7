@@ -8,19 +8,45 @@ interface Props {
 
 const ConversationHistory: React.FC<Props> = ({ history }) => {
   const historyListRef = useRef<HTMLDivElement>(null);
+  const prevScrollHeightRef = useRef<number | null>(null);
+  const prevScrollTopRef = useRef<number | null>(null);
 
   useEffect(() => {
     const element = historyListRef.current;
     if (element) {
-      // Check if the user is scrolled near the bottom before new content is added.
-      // This needs to be done carefully. The scrollHeight here is *after* new history is rendered.
       const scrollThreshold = 100; // pixels. Adjust as needed.
-      // Consider user scrolled up if they are more than `scrollThreshold` pixels from the bottom.
-      const userHasScrolledUp = element.scrollTop + element.clientHeight + scrollThreshold < element.scrollHeight;
 
-      if (!userHasScrolledUp) {
-        element.scrollTop = element.scrollHeight;
+      const currentScrollHeight = element.scrollHeight;
+      const currentScrollTop = element.scrollTop;
+      const clientHeight = element.clientHeight;
+
+      const prevScrollHeight = prevScrollHeightRef.current ?? 0;
+      const prevScrollTop = prevScrollTopRef.current ?? 0;
+
+      // Check if the user was scrolled to the bottom (or very close to it)
+      // before new content was added.
+      const wasScrolledToBottom = prevScrollHeight === 0 || (prevScrollTop + clientHeight >= prevScrollHeight - scrollThreshold);
+
+      if (wasScrolledToBottom) {
+        // If user was at the bottom, scroll to the new bottom
+        element.scrollTop = currentScrollHeight;
+      } else {
+        // If user was scrolled up, maintain their scroll position relative to the previous content.
+        // This means adjusting scrollTop by the difference in scrollHeight.
+        // However, we only do this if the scroll height has actually changed.
+        if (currentScrollHeight !== prevScrollHeight) {
+            element.scrollTop = prevScrollTop + (currentScrollHeight - prevScrollHeight);
+        } else {
+            // If scrollHeight hasn't changed (e.g. initial load or no new messages),
+            // maintain the current scrollTop. This case might be redundant if
+            // prevScrollTop is already currentScrollTop but included for clarity.
+            element.scrollTop = prevScrollTop;
+        }
       }
+
+      // Store current scrollHeight and scrollTop for the next render cycle.
+      prevScrollHeightRef.current = currentScrollHeight;
+      prevScrollTopRef.current = element.scrollTop; // Use element.scrollTop after potential adjustment
     }
   }, [history]);
 

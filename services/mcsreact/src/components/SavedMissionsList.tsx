@@ -18,10 +18,10 @@ interface SavedMission {
 
 interface SavedMissionsListProps {
   onMissionSelect: (missionId: string) => void;
-  onClose: () => void;  // Add this line
+  onClose: () => void;
 }
 
-const SavedMissionsList: React.FC<SavedMissionsListProps> = ({ onMissionSelect, onClose }) => {
+const SavedMissionsList: React.FC<SavedMissionsListProps> = React.memo(({ onMissionSelect, onClose }) => {
   const [missions, setMissions] = useState<SavedMission[]>([]);
 
   useEffect(() => {
@@ -45,7 +45,7 @@ const SavedMissionsList: React.FC<SavedMissionsListProps> = ({ onMissionSelect, 
     };
 
     fetchSavedMissions();
-    }, []);
+  }, []); // Empty dependency array is correct for a one-time fetch
 
 
   return (
@@ -57,6 +57,11 @@ const SavedMissionsList: React.FC<SavedMissionsListProps> = ({ onMissionSelect, 
       <ul>
         {missions.map((mission) => (
           <li key={mission.id}>
+            {/* This inline arrow function is generally okay for keyed lists.
+                If SavedMissionsList re-renders frequently due to parent changes
+                AND this list is very long, then useCallback could be used here,
+                but it's unlikely to be the cause of list *jumping*.
+            */}
             <button onClick={() => onMissionSelect(mission.id)}>
               {mission.name}
             </button>
@@ -65,6 +70,6 @@ const SavedMissionsList: React.FC<SavedMissionsListProps> = ({ onMissionSelect, 
       </ul>
     </div>
   );
-};
+});
 
 export default SavedMissionsList;

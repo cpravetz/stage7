@@ -25,8 +25,9 @@ import {
   AttachFile as AttachFileIcon,
   Description as FileIcon
 } from '@mui/icons-material';
-import axios from 'axios';
+import axios from 'axios'; // Keep axios for isAxiosError checks if needed, or remove if SecurityClient handles all error types.
 import { API_BASE_URL } from '../config';
+import { SecurityClient } from '../SecurityClient';
 
 interface MissionFile {
   id: string;
@@ -55,23 +56,19 @@ const FileUpload: React.FC<FileUploadProps> = ({ missionId, onFilesChanged }) =>
   const [description, setDescription] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const api = axios.create({
-    baseURL: API_BASE_URL,
-    headers: {
-      'Authorization': `Bearer ${localStorage.getItem('authToken')}`
-    }
-  });
+  const securityClient = SecurityClient.getInstance(API_BASE_URL);
+  const apiClient = securityClient.getApi();
 
   // Load existing files
   const loadFiles = useCallback(async () => {
     try {
-      const response = await api.get(`/missions/${missionId}/files`);
+      const response = await apiClient.get(`/missions/${missionId}/files`);
       setFiles(response.data.files || []);
     } catch (error) {
       console.error('Error loading files:', error);
       setError('Failed to load files');
     }
-  }, [missionId, api]);
+  }, [missionId, apiClient]);
 
   React.useEffect(() => {
     if (missionId) {
@@ -121,7 +118,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ missionId, onFilesChanged }) =>
         formData.append('description', description.trim());
       }
 
-      const response = await api.post(`/missions/${missionId}/files`, formData, {
+      const response = await apiClient.post(`/missions/${missionId}/files`, formData, {
         headers: {
           'Content-Type': 'multipart/form-data'
         },
@@ -156,7 +153,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ missionId, onFilesChanged }) =>
 
   const handleDownload = async (file: MissionFile) => {
     try {
-      const response = await api.get(`/missions/${missionId}/files/${file.id}/download`, {
+      const response = await apiClient.get(`/missions/${missionId}/files/${file.id}/download`, {
         responseType: 'blob'
       });
 
@@ -182,7 +179,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ missionId, onFilesChanged }) =>
     }
 
     try {
-      await api.delete(`/missions/${missionId}/files/${file.id}`);
+      await apiClient.delete(`/missions/${missionId}/files/${file.id}`);
       setSuccess(`File "${file.originalName}" deleted successfully`);
       await loadFiles();
       onFilesChanged?.();

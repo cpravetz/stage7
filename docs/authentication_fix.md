@@ -97,7 +97,7 @@ app.post('/verify', (req: any, res: any) => {
         const decoded = verifyToken(token);
 
         if (decoded) {
-            console.log('Token verified successfully:', decoded);
+            //console.log('Token verified successfully:', decoded);
             return res.status(200).json({
                 valid: true,
                 user: decoded
@@ -134,7 +134,7 @@ export function verifyToken(token: string): any {
       try {
         // First try to verify with RS256
         const decoded = jwt.verify(token, PUBLIC_KEY, { algorithms: ['RS256'] });
-        console.log('Token verified successfully with RS256:', decoded);
+        //console.log('Token verified successfully with RS256:', decoded);
         return decoded;
       } catch (rsaError) {
         console.error('RS256 verification failed:', rsaError);
@@ -144,7 +144,7 @@ export function verifyToken(token: string): any {
         const legacySecret = process.env.JWT_SECRET || 'your-secret-key';
         try {
           const decoded = jwt.verify(token, legacySecret);
-          console.log('Token verified successfully with HS256:', decoded);
+          //console.log('Token verified successfully with HS256:', decoded);
           return decoded;
         } catch (hs256Error) {
           console.error('HS256 verification failed:', hs256Error);
@@ -160,7 +160,7 @@ export function verifyToken(token: string): any {
       }
     } else {
       const decoded = jwt.verify(token, PUBLIC_KEY);
-      console.log('Token verified successfully with symmetric key:', decoded);
+      //console.log('Token verified successfully with symmetric key:', decoded);
       return decoded;
     }
   } catch (error) {
