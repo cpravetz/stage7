@@ -665,7 +665,7 @@ class MissionControl extends BaseEntity {
                     const missionStats: MissionStatistics = {
                         llmCalls: llmCallsResponse.data.llmCalls,
                         agentCountByStatus: trafficManagerStatistics.agentStatisticsByType.agentCountByStatus,
-                        agentStatistics: MapSerializer.transformForSerialization(trafficManagerStatistics.agentStatisticsByStatus),
+                        agentStatistics: trafficManagerStatistics.agentStatisticsByStatus,
                         engineerStatistics: engineerStatisticsResponse.data
                     };
 

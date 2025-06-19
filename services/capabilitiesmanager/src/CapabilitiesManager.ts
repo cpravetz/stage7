@@ -1140,8 +1140,8 @@ export class CapabilitiesManager extends BaseEntity {
         const trace_id = uuidv4();
         const source_component = "CapabilitiesManager.checkCachedPlan";
         try {
-            const response = await this.authenticatedApi.get(`http://${this.librarianUrl}/loadData`, {
-                params: { collection: 'actionPlans', id: actionVerb }
+            const response = await this.authenticatedApi.get(`http://${this.librarianUrl}/loadData/${actionVerb}`, {
+                params: { collection: 'actionPlans', storageType: 'mongo' }
             });
 
             if (response.data?.data) {
