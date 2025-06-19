@@ -260,25 +260,28 @@ The output MUST be a valid JSON array of task objects. Do not include any explan
                         this.say(`Completed step: ${step.actionVerb}`);
 
                         if (result[0]?.resultType === PluginParameterType.PLAN) {
-                            const planningStepResult = result[0].result;
+                            const planningStepResult = result[0]?.result; // Added optional chaining here for safety
                             let actualPlanArray: ActionVerbTask[] | undefined = undefined;
                             let planSourceDescription = "direct array"; // For logging
 
                             if (Array.isArray(planningStepResult)) {
                                 actualPlanArray = planningStepResult as ActionVerbTask[];
                             } else if (typeof planningStepResult === 'object' && planningStepResult !== null) {
-                                if (Array.isArray((planningStepResult as any).tasks)) {
+                                const tasksArray = (planningStepResult as any).tasks;
+                                const stepsArray = (planningStepResult as any).steps;
+
+                                if (Array.isArray(tasksArray)) {
                                     console.log(`[Agent.ts] runAgent (${this.id}): Plan received is wrapped in a "tasks" object. Extracting tasks array.`);
-                                    actualPlanArray = (planningStepResult as any).tasks as ActionVerbTask[];
+                                    actualPlanArray = tasksArray as ActionVerbTask[];
                                     planSourceDescription = "object with 'tasks' array";
-                                } else if (Array.isArray((planningStepResult as any).steps)) { // New check
+                                } else if (Array.isArray(stepsArray)) {
                                     console.log(`[Agent.ts] runAgent (${this.id}): Plan received is wrapped in a "steps" object. Extracting steps array.`);
-                                    actualPlanArray = (planningStepResult as any).steps as ActionVerbTask[];
+                                    actualPlanArray = stepsArray as ActionVerbTask[];
                                     planSourceDescription = "object with 'steps' array";
                                 }
                             }
 
-                            if (actualPlanArray) {
+                            if (actualPlanArray && Array.isArray(actualPlanArray)) { // Added extra Array.isArray check for robustness
                                 this.say(`Generated a plan (${planSourceDescription}) with ${actualPlanArray.length} steps`);
                                 this.addStepsFromPlan(actualPlanArray);
                                 await this.notifyTrafficManager();
