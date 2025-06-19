@@ -867,7 +867,11 @@ The output MUST be a valid JSON array of task objects. Do not include any explan
             status: step.status,
             dependencies: step.dependencies.map(dep => dep.sourceStepId) || [],
             stepNo: step.stepNo
-        }));
+        };
+        // Add console log for each step being processed
+        console.log(`[Agent.getStatistics] Processing step for stats - ID: ${step.id}, ActionVerb: ${step.actionVerb}, Status: ${step.status}`);
+        return statEntry;
+    }));
 
         const statistics: AgentStatistics = {
             id: this.id,

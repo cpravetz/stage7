@@ -70,24 +70,54 @@ export const TabbedPanel: React.FC<TabbedPanelProps> = ({
 
   const handleWorkProductClick = async (event: React.MouseEvent<HTMLElement>, url: string) => {
     event.preventDefault();
-    console.log('[TabbedPanel] handleWorkProductClick: Attempting to fetch URL:', url);
+    console.log('[TabbedPanel] handleWorkProductClick: Attempting to fetch URL with securityClient.getApi():', url);
     try {
-      const headers = securityClient.getAuthHeader();
-      console.log('[TabbedPanel] handleWorkProductClick: Authorization Header:', headers ? headers['Authorization'] : 'No Authorization Header found');
+      const apiClient = securityClient.getApi();
+      // The Authorization header is now automatically added by the apiClient's interceptor
+      console.log('[TabbedPanel] handleWorkProductClick: Using apiClient.get(). Auth header will be injected by interceptor.');
 
-      const response = await fetch(url, { headers });
-      console.log('[TabbedPanel] handleWorkProductClick: Fetch response status:', response.status);
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('[TabbedPanel] handleWorkProductClick: Fetch response not OK. Status:', response.status, 'Text:', errorText);
-        throw new Error(`Failed to fetch work product: ${response.status} ${response.statusText}. Body: ${errorText}`);
-      }
-      const blob = await response.blob();
+      const response = await apiClient.get(url, {
+          responseType: 'blob' // Important for handling file downloads
+      });
+
+      console.log('[TabbedPanel] handleWorkProductClick: Axios response status:', response.status);
+      // Axios typically throws an error for non-2xx responses, so explicit !response.ok might not be needed
+      // However, if SecurityClient's interceptor is configured to not throw on 401 for some reason,
+      // or if other non-2xx statuses that don't throw by default are possible, an explicit check is safer.
+      // For now, assuming Axios default behavior (throws on 4xx/5xx).
+
+      const blob = response.data; // response.data is already a Blob due to responseType: 'blob'
       const blobUrl = window.URL.createObjectURL(blob);
       window.open(blobUrl, '_blank', 'noopener,noreferrer');
-    } catch (error) {
-      console.error('[TabbedPanel] handleWorkProductClick: Error fetching work product:', error);
-      alert('Failed to open work product. Please try again. Check console for details.');
+    } catch (error: any) { // Catching as any to access error.response
+      console.error('[TabbedPanel] handleWorkProductClick: Error fetching work product via apiClient:', error);
+      if (error.response) {
+        // The request was made and the server responded with a status code
+        // that falls out of the range of 2xx
+        console.error('[TabbedPanel] Error Data:', error.response.data);
+        console.error('[TabbedPanel] Error Status:', error.response.status);
+        console.error('[TabbedPanel] Error Headers:', error.response.headers);
+        // Attempt to read error response if it's a blob containing JSON or text
+        if (error.response.data instanceof Blob) {
+          try {
+            const errorBlobText = await error.response.data.text();
+            console.error('[TabbedPanel] Error Blob Text:', errorBlobText);
+            alert(`Failed to open work product: Server responded with status ${error.response.status}. Details: ${errorBlobText.substring(0,100)}... Check console.`);
+            return;
+          } catch (blobError) {
+            console.error('[TabbedPanel] Error reading error blob:', blobError);
+          }
+        }
+        alert(`Failed to open work product: Server responded with status ${error.response.status}. Check console for details.`);
+      } else if (error.request) {
+        // The request was made but no response was received
+        console.error('[TabbedPanel] Error Request:', error.request);
+        alert('Failed to open work product: No response from server. Check console for details.');
+      } else {
+        // Something happened in setting up the request that triggered an Error
+        console.error('[TabbedPanel] Error Message:', error.message);
+        alert('Failed to open work product. Check console for details.');
+      }
     }
   };
 

@@ -10,8 +10,17 @@ const ConversationHistory: React.FC<Props> = ({ history }) => {
   const historyListRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (historyListRef.current) {
-      historyListRef.current.scrollTop = historyListRef.current.scrollHeight;
+    const element = historyListRef.current;
+    if (element) {
+      // Check if the user is scrolled near the bottom before new content is added.
+      // This needs to be done carefully. The scrollHeight here is *after* new history is rendered.
+      const scrollThreshold = 100; // pixels. Adjust as needed.
+      // Consider user scrolled up if they are more than `scrollThreshold` pixels from the bottom.
+      const userHasScrolledUp = element.scrollTop + element.clientHeight + scrollThreshold < element.scrollHeight;
+
+      if (!userHasScrolledUp) {
+        element.scrollTop = element.scrollHeight;
+      }
     }
   }, [history]);
 
