@@ -106,7 +106,7 @@ export class SecurityManager {
                     return;
                 }
 
-                console.log('Token verified successfully');
+                //console.log('Token verified successfully');
                 res.status(200).json({ valid: true, user: decoded });
             } catch (error) {
                 analyzeError(error as Error);
@@ -239,7 +239,7 @@ const exemptPaths = ['/auth/', '/verify', '/public-key', '/health', '/login', '/
         return;
     }
 
-    console.log('[SecurityManager] Token verified successfully');
+    //console.log('[SecurityManager] Token verified successfully');
     req.user = decoded;
     next();
 });

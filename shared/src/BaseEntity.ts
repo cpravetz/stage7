@@ -1006,7 +1006,7 @@ protected async cleanup() {
         return res.status(401).json({ error: 'Invalid or expired token' });
       }
 
-      console.log(`[BaseEntity] Token verified successfully for ${this.componentType}`);
+      //console.log(`[BaseEntity] Token verified successfully for ${this.componentType}`);
 
       // Cache the verification result
       const expiry = typeof decoded.exp === 'number'
