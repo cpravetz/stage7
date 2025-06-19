@@ -11,7 +11,11 @@ import json
 import os
 import requests
 from typing import Dict, List, Any, Optional
+import logging
 
+logger = logging.getLogger(__name__)
+# BasicConfig for logging, in case not configured by environment
+# logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class PluginInput:
     """Represents a plugin input parameter"""
@@ -80,19 +84,31 @@ def search_duckduckgo(search_term: str) -> List[Dict[str, str]]:
     Returns:
         List of search results with title and URL
     """
+    print(f"DEBUG_SEARCH_PYTHON: search_duckduckgo: Received search_term: '{search_term}'", file=sys.stderr)
     try:
         # Use DuckDuckGo Instant Answer API
-        response = requests.get('https://api.duckduckgo.com/', 
-                              params={
-                                  'q': search_term,
-                                  'format': 'json',
-                                  'no_html': '1',
-                                  'skip_disambig': '1'
-                              },
-                              timeout=10)
+        url = 'https://api.duckduckgo.com/'
+        params = {
+            'q': search_term,
+            'format': 'json',
+            'no_html': '1',
+            'skip_disambig': '1'
+        }
+        print(f"DEBUG_SEARCH_PYTHON: search_duckduckgo: Requesting URL: {url} with params: {json.dumps(params)}", file=sys.stderr)
+
+        response = requests.get(url, params=params, timeout=10)
+
+        print(f"DEBUG_SEARCH_PYTHON: search_duckduckgo: Response status code: {response.status_code}", file=sys.stderr)
+        print(f"DEBUG_SEARCH_PYTHON: search_duckduckgo: Raw response content (first 500 chars): {response.text[:500]}", file=sys.stderr)
         
         response.raise_for_status()
-        data = response.json()
+
+        try:
+            data = response.json()
+            print(f"DEBUG_SEARCH_PYTHON: search_duckduckgo: Parsed JSON data: {json.dumps(data, indent=2)}", file=sys.stderr)
+        except json.JSONDecodeError as e_json:
+            print(f"DEBUG_SEARCH_PYTHON: search_duckduckgo: JSON parsing failed: {str(e_json)}", file=sys.stderr)
+            raise Exception(f"Failed to parse search results: {str(e_json)}") # Re-raise to be caught by the outer try-except
         
         results = []
         
@@ -122,12 +138,16 @@ def search_duckduckgo(search_term: str) -> List[Dict[str, str]]:
                     'url': data['DefinitionURL']
                 })
         
+        print(f"DEBUG_SEARCH_PYTHON: search_duckduckgo: Extracted results: {json.dumps(results, indent=2)}", file=sys.stderr)
         return results
         
-    except requests.exceptions.RequestException as e:
-        raise Exception(f"Failed to search DuckDuckGo: {str(e)}")
-    except json.JSONDecodeError as e:
-        raise Exception(f"Failed to parse search results: {str(e)}")
+    except requests.exceptions.RequestException as e_req:
+        print(f"DEBUG_SEARCH_PYTHON: search_duckduckgo: RequestException: {str(e_req)}", file=sys.stderr)
+        raise Exception(f"Failed to search DuckDuckGo: {str(e_req)}")
+    # JSONDecodeError is handled above, this is a fallback if it's not caught there for some reason or occurs elsewhere.
+    except json.JSONDecodeError as e_json_outer:
+        print(f"DEBUG_SEARCH_PYTHON: search_duckduckgo: Outer JSONDecodeError: {str(e_json_outer)}", file=sys.stderr)
+        raise Exception(f"Failed to parse search results (outer): {str(e_json_outer)}")
 
 
 def execute_plugin(inputs: Dict[str, PluginInput]) -> List[PluginOutput]:
@@ -140,7 +160,23 @@ def execute_plugin(inputs: Dict[str, PluginInput]) -> List[PluginOutput]:
     Returns:
         List of PluginOutput objects
     """
+    outputs_final: List[PluginOutput]
     try:
+        # DEBUG_SEARCH_PYTHON: Log received inputs
+        try:
+            inputs_log_str = json.dumps({k: v.input_value if isinstance(v, PluginInput) else v for k, v in inputs.items()})
+            print(f"DEBUG_SEARCH_PYTHON: execute_plugin: Received inputs: {inputs_log_str}", file=sys.stderr)
+        except Exception as log_e:
+            print(f"DEBUG_SEARCH_PYTHON: execute_plugin: Error logging inputs: {str(log_e)}", file=sys.stderr)
+
+        logger.info(f"SEARCH_PYTHON execute_plugin(): Received inputs: { {k: (v.input_value if isinstance(v, PluginInput) else v) for k, v in inputs.items()} }")
+
+        search_term_input_obj = inputs.get('searchTerm')
+        if search_term_input_obj:
+            logger.info(f"SEARCH_PYTHON execute_plugin(): searchTerm PluginInput object: input_value='{search_term_input_obj.input_value}', type={type(search_term_input_obj.input_value)}")
+        else:
+            logger.warning("SEARCH_PYTHON execute_plugin(): 'searchTerm' key not found in inputs.")
+
         # Get search term input
         search_term_input = inputs.get('searchTerm')
         if not search_term_input:
@@ -162,37 +198,72 @@ def execute_plugin(inputs: Dict[str, PluginInput]) -> List[PluginOutput]:
                                         f"No search results found for '{search_term}'")]
         
         # Return successful results
-        return [create_success_output("results", results, "array", 
+        outputs_final = [create_success_output("results", results, "array",
                                     f"Found {len(results)} search results for '{search_term}'")]
         
     except Exception as e:
-        return [create_error_output("error", f"Search failed: {str(e)}")]
+        print(f"DEBUG_SEARCH_PYTHON: execute_plugin: Caught exception: {str(e)}", file=sys.stderr)
+        outputs_final = [create_error_output("error", f"Search failed: {str(e)}")]
+
+    # DEBUG_SEARCH_PYTHON: Log returned outputs
+    try:
+        outputs_log_str = json.dumps([o.to_dict() for o in outputs_final])
+        print(f"DEBUG_SEARCH_PYTHON: execute_plugin: Returning outputs: {outputs_log_str}", file=sys.stderr)
+    except Exception as log_e:
+        print(f"DEBUG_SEARCH_PYTHON: execute_plugin: Error logging outputs: {str(log_e)}", file=sys.stderr)
+
+    return outputs_final
 
 
 def main():
     """Main entry point for the plugin"""
+    print("DEBUG_SEARCH_PYTHON: main: Plugin script started.", file=sys.stderr)
     try:
         # Read plugin root path from command line argument
         plugin_root = sys.argv[1] if len(sys.argv) > 1 else os.getcwd()
+        print(f"DEBUG_SEARCH_PYTHON: main: Plugin root path: {plugin_root}", file=sys.stderr)
         
         # Add plugin root to Python path for local imports
         sys.path.insert(0, plugin_root)
         
         # Read input from stdin
         input_data = sys.stdin.read().strip()
+        print(f"DEBUG_SEARCH_PYTHON: main: Raw input_data from stdin: '{input_data}'", file=sys.stderr)
+        logger.info(f"SEARCH_PYTHON main(): Raw input_data from stdin: {input_data}") # Keep existing logger call
         if not input_data:
+            print("DEBUG_SEARCH_PYTHON: main: No input data provided, raising ValueError.", file=sys.stderr)
             raise ValueError("No input data provided")
         
-        # Parse JSON input
-        raw_inputs = json.loads(input_data)
+        # Parse JSON input (which is an array of [key, value_dict] pairs)
+        input_list_of_pairs = json.loads(input_data)
+        print(f"DEBUG_SEARCH_PYTHON: main: Parsed input_list_of_pairs: {json.dumps(input_list_of_pairs)}", file=sys.stderr)
         
+        if not isinstance(input_list_of_pairs, list):
+            print(f"DEBUG_SEARCH_PYTHON: main: Input data is not a list as expected. Type: {type(input_list_of_pairs)}", file=sys.stderr)
+            raise ValueError("Input data should be a JSON array of [key, value] pairs.")
+
         # Convert to PluginInput objects
-        inputs = {}
-        for key, value in raw_inputs.items():
-            if isinstance(value, dict) and 'inputValue' in value:
-                inputs[key] = PluginInput(value['inputValue'], value.get('args', {}))
+        inputs: Dict[str, PluginInput] = {}
+        for item in input_list_of_pairs:
+            if not (isinstance(item, (list, tuple)) and len(item) == 2):
+                print(f"DEBUG_SEARCH_PYTHON: main: Invalid item format in input_list_of_pairs: {item}", file=sys.stderr)
+                raise ValueError(f"Each item in the input array should be a [key, value] pair. Found: {item}")
+
+            key, value_dict = item
+
+            if isinstance(value_dict, dict) and 'inputValue' in value_dict:
+                inputs[key] = PluginInput(value_dict['inputValue'], value_dict.get('args', {}))
             else:
-                inputs[key] = PluginInput(value)
+                # This case might occur if a non-standard PluginInput structure is sent,
+                # or if the value is simple (though CapabilitiesManager usually sends the full structure).
+                # For robustness, we'll still wrap it, but this path is less expected for typical inputs.
+                print(f"DEBUG_SEARCH_PYTHON: main: Value for key '{key}' is not a standard PluginInput dict, wrapping directly: {value_dict}", file=sys.stderr)
+                inputs[key] = PluginInput(value_dict)
+
+        inputs_for_logging = {k: (v.input_value if isinstance(v, PluginInput) else v) for k, v in inputs.items()}
+        # This log is already covered by the DEBUG_SEARCH_PYTHON one below, but kept for compatibility with existing logs if any
+        logger.info(f"SEARCH_PYTHON main(): Parsed inputs dict (showing inputValues): {inputs_for_logging}")
+        print(f"DEBUG_SEARCH_PYTHON: main: Converted inputs dictionary (showing inputValues): {json.dumps(inputs_for_logging)}", file=sys.stderr)
         
         # Execute the plugin
         outputs = execute_plugin(inputs)
@@ -200,13 +271,17 @@ def main():
         # Convert outputs to dictionaries and print as JSON
         output_dicts = [output.to_dict() for output in outputs]
         print(json.dumps(output_dicts, indent=2))
+        print("DEBUG_SEARCH_PYTHON: main: Successfully printed JSON output to stdout.", file=sys.stderr)
         
     except Exception as e:
         # Handle any errors in the main execution
+        print(f"DEBUG_SEARCH_PYTHON: main: Caught exception in main try-except block: {str(e)}", file=sys.stderr)
         error_output = create_error_output("error", str(e), "Plugin execution failed")
+        # Ensure this also goes to stdout as per plugin communication protocol
         print(json.dumps([error_output.to_dict()], indent=2))
         sys.exit(1)
 
 
 if __name__ == "__main__":
+    print("DEBUG_SEARCH_PYTHON: __main__: Script execution started.", file=sys.stderr)
     main()

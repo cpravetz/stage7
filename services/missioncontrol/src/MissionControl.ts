@@ -582,6 +582,10 @@ class MissionControl extends BaseEntity {
                                 engineerStatistics: engineerStatisticsResponse.data
                             };
 
+                            // Log before sending
+                            console.log('MissionControl: Sending agentStatistics to PostOffice for client', clientId);
+                            console.log('MissionControl: Sending agentStatistics to PostOffice for client', clientId, 'Data:', JSON.stringify(missionStats.agentStatistics, null, 2));
+
                             // Send statistics to client
                             await this.authenticatedApi.post(`http://${this.postOfficeUrl}/message`, {
                                 type: MessageType.STATISTICS,
@@ -667,6 +671,10 @@ class MissionControl extends BaseEntity {
 
                     console.log(`Sending statistics update to PostOffice for client ${clientId}`);
                     console.log(`Statistics summary: LLM calls: ${missionStats.llmCalls}, Agent count: ${Object.values(missionStats.agentCountByStatus || {}).reduce((sum, count) => sum + count, 0)}`);
+
+                    // Log before sending
+                    console.log('MissionControl (periodic): Sending agentStatistics to PostOffice for client', clientId, 'mission:', missionId);
+                    console.log('MissionControl (periodic): Sending agentStatistics to PostOffice for client', clientId, 'mission:', missionId, 'Data:', JSON.stringify(missionStats.agentStatistics, null, 2));
 
                     await this.authenticatedApi.post(`http://${this.postOfficeUrl}/message`, {
                         type: MessageType.STATISTICS,

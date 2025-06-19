@@ -501,8 +501,10 @@ class AgentSetManager {
 
     isValidMissionId(missionId: string): boolean {
         // Allow only alphanumeric mission IDs (no special characters)
-        const missionIdPattern = /^[a-zA-Z0-9]+$/;
-        return missionIdPattern.test(missionId);
+        const missionIdPattern = /^[a-zA-Z0-9-]+$/;
+        const result = missionIdPattern.test(missionId);
+        console.log(`[agentSetManager] isValidMissionId: Testing '${missionId}'. Pattern: '${missionIdPattern.toString()}'. Result: ${result}`);
+        return result;
     }
 
 

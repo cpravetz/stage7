@@ -400,6 +400,10 @@ export class CapabilitiesManager extends BaseEntity {
         const source_component = "CapabilitiesManager.executeActionVerb";
         const step = { ...req.body, inputs: MapSerializer.transformFromSerialization(req.body.inputs) } as Step;
 
+        if (step.actionVerb === 'SEARCH') {
+            console.log(`[${trace_id}] ${source_component}: Inputs for SEARCH after deserialization:`, MapSerializer.transformForSerialization(step.inputs));
+        }
+
         if (!step.actionVerb || typeof step.actionVerb !== 'string') {
             const sError = generateStructuredError({
                 error_code: GlobalErrorCodes.CAPABILITIES_MANAGER_INVALID_REQUEST_GENERIC,
@@ -535,6 +539,9 @@ export class CapabilitiesManager extends BaseEntity {
         actualPluginRootPath: string,
         trace_id: string
     ): Promise<PluginOutput[]> {
+        if (pluginToExecute.verb === 'SEARCH') {
+            console.log(`[${trace_id}] CapabilitiesManager.executePlugin: Inputs for SEARCH plugin execution:`, MapSerializer.transformForSerialization(inputsForPlugin));
+        }
         const source_component = "CapabilitiesManager.executePlugin";
         console.log(`[${trace_id}] ${source_component}: Executing plugin ${pluginToExecute.id} v${pluginToExecute.version} (${pluginToExecute.verb}) at ${actualPluginRootPath}`);
 
@@ -675,13 +682,14 @@ export class CapabilitiesManager extends BaseEntity {
             const inputsJsonString = JSON.stringify(inputsArray);
 
             // Debug: Log the inputs being passed to Python plugin
-            console.log(`[${trace_id}] ${source_component}: Inputs array for Python plugin:`, inputsArray);
-            console.log(`[${trace_id}] ${source_component}: JSON string being passed:`, inputsJsonString);
+            // console.log(`[${trace_id}] ${source_component}: Inputs array for Python plugin:`, inputsArray); // Already logged if verb is SEARCH
+            // console.log(`[${trace_id}] ${source_component}: JSON string being passed:`, inputsJsonString); // Logged below before exec
 
             // Use enhanced Python execution with better error handling and security
             const pythonCommand = await this.buildPythonCommand(mainFilePath, pluginRootPath, inputsJsonString, pluginDefinition);
 
-            console.log(`[${trace_id}] ${source_component}: Python command:`, pythonCommand);
+            console.log(`[${trace_id}] ${source_component}: Executing Python command: ${pythonCommand}`);
+            console.log(`[${trace_id}] ${source_component}: Piping inputsJsonString to Python plugin: ${inputsJsonString}`);
 
             const { stdout, stderr } = await execAsync(pythonCommand, {
                 cwd: pluginRootPath,
@@ -694,8 +702,9 @@ export class CapabilitiesManager extends BaseEntity {
                 timeout: pluginDefinition.security?.sandboxOptions?.timeout || 30000
             });
 
+            console.log(`[${trace_id}] ${source_component}: Raw stdout from Python plugin ${pluginDefinition.verb} v${pluginDefinition.version}:\n${stdout}`);
             if (stderr) {
-                console.warn(`[${trace_id}] ${source_component}: Python plugin ${pluginDefinition.verb} v${pluginDefinition.version} stderr:\n${stderr}`);
+                console.warn(`[${trace_id}] ${source_component}: Raw stderr from Python plugin ${pluginDefinition.verb} v${pluginDefinition.version}:\n${stderr}`);
             }
 
             // Validate and parse output
@@ -703,6 +712,13 @@ export class CapabilitiesManager extends BaseEntity {
             return result;
 
         } catch (error: any) {
+            console.error(`[${trace_id}] ${source_component}: Error during execAsync for ${pluginDefinition.verb} v${pluginDefinition.version}. Error: ${error.message}`);
+            if ((error as any).stdout) {
+                console.error(`[${trace_id}] ${source_component}: Error stdout: ${(error as any).stdout}`);
+            }
+            if ((error as any).stderr) {
+                console.error(`[${trace_id}] ${source_component}: Error stderr: ${(error as any).stderr}`);
+            }
             throw generateStructuredError({
                 error_code: GlobalErrorCodes.CAPABILITIES_MANAGER_PLUGIN_EXECUTION_FAILED,
                 severity: ErrorSeverity.ERROR,
@@ -713,8 +729,9 @@ export class CapabilitiesManager extends BaseEntity {
                 contextual_info: {
                     plugin_id: pluginDefinition.id,
                     version: pluginDefinition.version,
-                    command_executed: "python3",
-                    stderr: (error as any).stderr,
+                    command_executed: "python3", // This might be slightly inaccurate due to buildPythonCommand changes
+                    stdout_on_error: (error as any).stdout,
+                    stderr_on_error: (error as any).stderr,
                     main_file: mainFilePath
                 }
             });
@@ -878,42 +895,75 @@ export class CapabilitiesManager extends BaseEntity {
                 }
             }
 
-            console.log(`[${trace_id}] ${source_component}: Installing Python dependencies from requirements.txt`);
+            const venvPath = path.join(pluginRootPath, 'venv');
+            const venvPipPath = path.join(venvPath, 'bin', 'pip'); // Assuming Linux/macOS structure
 
-            // Install dependencies using pip
-            const installCommand = `python3 -m pip install --user -r "${requirementsPath}"`;
+            console.log(`[${trace_id}] ${source_component}: Preparing for Python dependency installation using venv at ${venvPath}`);
+
+            let installCommand: string;
+            if (fs.existsSync(venvPath)) {
+                console.log(`[${trace_id}] ${source_component}: Virtual environment already exists at ${venvPath}. Installing dependencies using its pip.`);
+                installCommand = `"${venvPipPath}" install -r "${requirementsPath}"`;
+            } else {
+                console.log(`[${trace_id}] ${source_component}: Creating virtual environment at ${venvPath} and installing dependencies.`);
+                installCommand = `python3 -m venv "${venvPath}" && "${venvPipPath}" install -r "${requirementsPath}"`;
+            }
+
+            console.log(`[${trace_id}] ${source_component}: Install command: ${installCommand}`);
+
             const { stdout, stderr } = await execAsync(installCommand, {
-                cwd: pluginRootPath,
+                cwd: pluginRootPath, // Execute in the plugin's root directory
                 timeout: 120000  // 2 minutes timeout for dependency installation
             });
 
-            if (stderr && !stderr.includes('Successfully installed')) {
-                console.warn(`[${trace_id}] ${source_component}: Dependency installation warnings: ${stderr}`);
+            if (stderr && !stderr.includes('Successfully installed') && !stderr.includes('Requirement already satisfied')) {
+                 // Some warnings might not include "Successfully installed" but are not critical errors.
+                 // e.g. deprecation warnings. We log them but don't necessarily fail.
+                console.warn(`[${trace_id}] ${source_component}: Python dependency installation stderr: ${stderr}`);
             }
+            if (stdout) { // stdout might also contain useful info or confirmation
+                console.log(`[${trace_id}] ${source_component}: Python dependency installation stdout: ${stdout}`);
+            }
+
 
             // Create marker file with requirements hash
             fs.writeFileSync(markerPath, requirementsHash);
-            console.log(`[${trace_id}] ${source_component}: Dependencies installed successfully`);
+            console.log(`[${trace_id}] ${source_component}: Python dependencies processed successfully for ${pluginRootPath}. Marker file updated.`);
 
         } catch (error: any) {
-            console.error(`[${trace_id}] ${source_component}: Failed to install dependencies: ${error.message}`);
-            // Don't throw error - allow plugin to run without dependencies if needed
+            console.error(`[${trace_id}] ${source_component}: Failed to install Python dependencies for ${pluginRootPath}: ${error.message}`);
+            // Log specific error details if available
+            if (error.stderr) {
+                console.error(`[${trace_id}] ${source_component}: Stderr from failed command: ${error.stderr}`);
+            }
+            if (error.stdout) {
+                console.error(`[${trace_id}] ${source_component}: Stdout from failed command: ${error.stdout}`);
+            }
+            // Don't throw error - allow plugin to run without dependencies if it can,
+            // or let the plugin execution fail if dependencies were critical.
+            // The current behavior is to not throw, so we maintain that.
         }
     }
 
     private async buildPythonCommand(mainFilePath: string, pluginRootPath: string, inputsJson: string, pluginDefinition: PluginDefinition): Promise<string> {
+        const venvPythonPath = path.join(pluginRootPath, 'venv', 'bin', 'python');
+        const pythonExecutable = fs.existsSync(venvPythonPath) ? `"${venvPythonPath}"` : 'python3';
+
         // Use a more reliable approach to pass JSON to Python
         // Instead of shell escaping, we'll use base64 encoding to avoid shell interpretation issues
         const base64Input = Buffer.from(inputsJson).toString('base64');
 
         // Build the command with base64 encoded input
-        const command = `echo "${base64Input}" | base64 -d | python3 "${mainFilePath}" "${pluginRootPath}"`;
+        // The plugin's main script is executed with the python from its venv (if available) or system python3.
+        // The pluginRootPath is passed as an argument to the script, useful if the script needs to know its own location.
+        const command = `echo "${base64Input}" | base64 -d | ${pythonExecutable} "${mainFilePath}" "${pluginRootPath}"`;
 
         return command;
     }
 
     private validatePythonOutput(stdout: string, pluginDefinition: PluginDefinition, trace_id: string): PluginOutput[] {
         const source_component = "CapabilitiesManager.validatePythonOutput";
+        console.log(`[${trace_id}] ${source_component}: Validating Python output for ${pluginDefinition.verb} v${pluginDefinition.version}. Received stdout:\n${stdout}`);
 
         try {
             // Parse JSON output
@@ -953,12 +1003,12 @@ export class CapabilitiesManager extends BaseEntity {
                 }
             }
 
-            console.log(`[${trace_id}] ${source_component}: Python plugin output validated successfully`);
+            console.log(`[${trace_id}] ${source_component}: Python plugin output parsed and validated successfully for ${pluginDefinition.verb} v${pluginDefinition.version}`);
             return result;
 
         } catch (error: any) {
-            console.error(`[${trace_id}] ${source_component}: Invalid Python plugin output: ${error.message}`);
-            console.error(`[${trace_id}] ${source_component}: Raw output: ${stdout}`);
+            console.error(`[${trace_id}] ${source_component}: Invalid Python plugin output for ${pluginDefinition.verb} v${pluginDefinition.version}: JSON parsing failed. Error: ${error.message}`);
+            console.error(`[${trace_id}] ${source_component}: Raw stdout that failed to parse: ${stdout}`);
 
             // Return error output
             return [{
@@ -966,7 +1016,7 @@ export class CapabilitiesManager extends BaseEntity {
                 name: 'validation_error',
                 resultType: PluginParameterType.ERROR,
                 result: null,
-                resultDescription: `Invalid plugin output format: ${error.message}`,
+                resultDescription: `Invalid plugin output format: ${error.message}. Raw output: ${stdout.substring(0, 200)}...`,
                 error: error.message
             }];
         }

@@ -476,7 +476,7 @@ export class Step {
 
         steps.forEach((task, index) => {
             const newStep = new Step({
-                actionVerb: task.verb,
+                actionVerb: task.actionVerb,
                 stepNo: this.stepNo + 1 + index,
                 inputs: task.inputs || new Map(),
                 description: task.description || `Sequential step ${index + 1}`,
@@ -669,7 +669,7 @@ export class Step {
 
             const step = new Step({
                 id: task.id!, // task.id is ensured to be defined above
-                actionVerb: task.verb,
+                actionVerb: task.actionVerb, // Use task.actionVerb
                 stepNo: startingStepNo + index,
                 inputs: inputs,
                 description: task.description,
@@ -677,7 +677,7 @@ export class Step {
                 recommendedRole: task.recommendedRole,
                 persistenceManager: persistenceManager
             });
-
+            console.log(`[Step.createFromPlan] Source task.actionVerb: '${task.actionVerb}', Created step.actionVerb: '${step.actionVerb}'`);
             return step;
         });
     }

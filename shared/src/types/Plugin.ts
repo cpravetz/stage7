@@ -131,7 +131,7 @@ export interface PlanDependency {
 
 export interface ActionVerbTask {
     id?: string;
-    verb: string;
+    actionVerb: string; // Changed from verb
     inputs: Map<string, PluginInput>; // Assuming PluginInput is defined/imported
     expectedOutputs?: Map<string, string>;
     description?: string;

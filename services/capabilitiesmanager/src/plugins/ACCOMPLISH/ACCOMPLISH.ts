@@ -127,8 +127,9 @@ GENERATE - uses LLM services to generate content from a prompt or other content.
     (required input: ConversationType) (optional inputs: modelName, optimization, prompt, file, audio, video, image...)
 FILE_OPS - provides services for file operations read, write, append
     (required inputs: path, operation, content)
-SEARCH - searches DuckDuckGo for a given term and returns a list of links
-    (required input: searchTerm)
+SEARCH - searches DuckDuckGo for a given term and returns a list of links.
+    VERY IMPORTANT: This plugin REQUIRES a 'searchTerm' string in its 'inputs'.
+    If the search term cannot be determined from the goal or previous steps, you MUST use the GET_USER_INPUT plugin *before* this SEARCH step to ask the user for the search term. Do NOT generate a SEARCH step without a 'searchTerm'.
 SCRAPE - scrapes content from a given URL
     (required inputs: url, selector, attribute, limit)
 GET_USER_INPUT - requests input from the user

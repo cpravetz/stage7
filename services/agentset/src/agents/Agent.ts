@@ -226,25 +226,78 @@ Please consider this context and the available plugins when planning and executi
                         this.say(`Executing step: ${step.actionVerb} - ${step.description || 'No description'}`);
 
                         await this.populateInputsFromLibrarian(step);
-                        const result = await step.execute(
-                            this.executeActionWithCapabilitiesManager.bind(this),
-                            this.useBrainForReasoning.bind(this),
-                            this.createSubAgent.bind(this),
-                            this.handleAskStep.bind(this)
-                        );
+
+                        let result: PluginOutput[];
+
+                        if (step.stepNo === 1 && step.actionVerb === 'ACCOMPLISH' && this.inputs?.has('goal')) {
+                            const goal = this.inputs.get('goal')?.inputValue;
+                            const planningPrompt = `You are a planning assistant. Given the goal: '${goal}', generate a JSON array of tasks to achieve this goal. Each task object should have 'actionVerb', 'inputs' (as a map of name to {inputValue, inputName, args}), 'description', 'dependencies' (as an array of sourceStepId strings, use step IDs like 'step_N'), and optionally 'recommendedRole'. Ensure the plan is detailed and includes multiple steps with dependencies if logical. The first step will be 'step_1', the next 'step_2', and so on. Dependencies should refer to these generated step IDs.
+It is critical that the plan is comprehensive and broken down into a sufficient number of granular steps to ensure successful execution. Each step's description should be clear and actionable.
+When defining 'dependencies', ensure they accurately reflect the data flow required between steps. Only list direct predecessor step IDs that provide necessary input for the current step.
+If the goal is complex, consider creating a sub-plan using a nested 'ACCOMPLISH' verb for a major sub-component, or use 'CREATE_SUB_AGENT' if a specialized agent should handle a part of the mission.
+For 'recommendedRole', suggest roles like 'researcher', 'writer', 'coder', 'validator', 'executor' only if a specialized skill is clearly beneficial for that specific step. Otherwise, omit it or use 'executor'.
+The output MUST be a valid JSON array of task objects. Do not include any explanatory text before or after the JSON array.`;
+
+                            console.log(`[Agent ${this.id}] Constructed planning prompt for initial ACCOMPLISH task:`, planningPrompt);
+
+                            const planningInputs = new Map<string, PluginInput>();
+                            planningInputs.set('prompt', { inputName: 'prompt', inputValue: planningPrompt, args: {} });
+                            planningInputs.set('ConversationType', { inputName: 'ConversationType', inputValue: 'text/code', args: {} }); // Expecting JSON
+
+                            result = await this.useBrainForReasoning(planningInputs);
+                            console.log(`[Agent ${this.id}] Raw response from Brain for planning:`, JSON.stringify(result));
+
+                        } else {
+                            result = await step.execute(
+                                this.executeActionWithCapabilitiesManager.bind(this),
+                                this.useBrainForReasoning.bind(this),
+                                this.createSubAgent.bind(this),
+                                this.handleAskStep.bind(this)
+                            );
+                        }
+
                         console.log(`Step ${step.actionVerb} result:`, result);
                         this.say(`Completed step: ${step.actionVerb}`);
 
                         if (result[0]?.resultType === PluginParameterType.PLAN) {
-                            const plan = result[0].result as ActionVerbTask[];
-                            this.say(`Generated a plan with ${plan.length} steps`);
-                            this.addStepsFromPlan(plan);
+                            const planningStepResult = result[0]?.result; // Added optional chaining here for safety
+                            let actualPlanArray: ActionVerbTask[] | undefined = undefined;
+                            let planSourceDescription = "direct array"; // For logging
 
-                            // Send status update after adding steps from plan
-                            await this.notifyTrafficManager();
+                            if (Array.isArray(planningStepResult)) {
+                                actualPlanArray = planningStepResult as ActionVerbTask[];
+                            } else if (typeof planningStepResult === 'object' && planningStepResult !== null) {
+                                const tasksArray = (planningStepResult as any).tasks;
+                                const stepsArray = (planningStepResult as any).steps;
+
+                                if (Array.isArray(tasksArray)) {
+                                    console.log(`[Agent.ts] runAgent (${this.id}): Plan received is wrapped in a "tasks" object. Extracting tasks array.`);
+                                    actualPlanArray = tasksArray as ActionVerbTask[];
+                                    planSourceDescription = "object with 'tasks' array";
+                                } else if (Array.isArray(stepsArray)) {
+                                    console.log(`[Agent.ts] runAgent (${this.id}): Plan received is wrapped in a "steps" object. Extracting steps array.`);
+                                    actualPlanArray = stepsArray as ActionVerbTask[];
+                                    planSourceDescription = "object with 'steps' array";
+                                }
+                            }
+
+                            if (actualPlanArray && Array.isArray(actualPlanArray)) { // Added extra Array.isArray check for robustness
+                                this.say(`Generated a plan (${planSourceDescription}) with ${actualPlanArray.length} steps`);
+                                this.addStepsFromPlan(actualPlanArray);
+                                await this.notifyTrafficManager();
+                            } else {
+                                const errorMessage = `Error: Expected a plan (array, or object with 'tasks'/'steps' array) from Brain service, but received: ${JSON.stringify(planningStepResult)}`;
+                                console.error(`[Agent.ts] runAgent (${this.id}): ${errorMessage}`);
+                                this.say(`Failed to generate a valid plan. Details: ${JSON.stringify(planningStepResult)}`);
+                                this.status = AgentStatus.ERROR;
+                                await this.notifyTrafficManager();
+                            }
                         }
 
-                        await this.saveWorkProduct(step.id, result, step.isEndpoint(this.steps));
+                        // Only save work product if agent is not in error state from plan validation
+                        if (this.status !== AgentStatus.ERROR) {
+                            await this.saveWorkProduct(step.id, result, step.isEndpoint(this.steps));
+                        }
 
                         // Send status update after each step completion
                         await this.notifyTrafficManager();
@@ -293,6 +346,7 @@ Please consider this context and the available plugins when planning and executi
     }
 
     private addStepsFromPlan(plan: ActionVerbTask[]) {
+        console.log(`[Agent ${this.id}] Parsed plan for addStepsFromPlan:`, JSON.stringify(plan));
         const newSteps = createFromPlan(plan, this.steps.length + 1, this.agentPersistenceManager);
         this.steps.push(...newSteps);
     }
@@ -594,26 +648,39 @@ Please consider this context and the available plugins when planning and executi
             const mimeType = response.data.mimeType || 'text/plain';
 
             let resultType: PluginParameterType;
-            switch (ConversationType) {
-                case 'text/image':
-                    resultType = PluginParameterType.OBJECT; // Assuming image data is returned as an object
-                    break;
-                case 'text/audio':
-                case 'text/video':
-                    resultType = PluginParameterType.OBJECT; // Assuming audio/video data is returned as an object
-                    break;
-                case 'text/code':
-                    resultType = PluginParameterType.STRING;
-                    break;
-                default:
-                    resultType = PluginParameterType.STRING;
+            let parsedResult = brainResponse;
+
+            if (ConversationType === 'text/code' && mimeType === 'application/json') {
+                try {
+                    parsedResult = JSON.parse(brainResponse);
+                    resultType = PluginParameterType.PLAN; // Assuming it's a plan
+                    console.log(`[Agent ${this.id}] Parsed brainResponse as JSON for plan.`);
+                } catch (e) {
+                    console.warn(`[Agent ${this.id}] Failed to parse brainResponse as JSON, treating as string. Error:`, e);
+                    resultType = PluginParameterType.STRING; // Fallback to string if JSON parsing fails
+                }
+            } else {
+                switch (ConversationType) {
+                    case 'text/image':
+                        resultType = PluginParameterType.OBJECT; // Assuming image data is returned as an object
+                        break;
+                    case 'text/audio':
+                    case 'text/video':
+                        resultType = PluginParameterType.OBJECT; // Assuming audio/video data is returned as an object
+                        break;
+                    case 'text/code': // If not application/json, treat as string code
+                        resultType = PluginParameterType.STRING;
+                        break;
+                    default:
+                        resultType = PluginParameterType.STRING;
+                }
             }
 
             const result: PluginOutput = {
                 success: true,
                 name: 'answer',
                 resultType: resultType,
-                result: brainResponse,
+                result: parsedResult,
                 resultDescription: `Brain reasoning output (${ConversationType})`,
                 mimeType: mimeType
             };
@@ -795,34 +862,57 @@ Please consider this context and the available plugins when planning and executi
     }
 
     async getStatistics(): Promise<AgentStatistics> {
-        // Calculate statistics without unused variables
+        console.log(`[Agent ${this.id}] Preparing statistics. Current steps count: ${this.steps.length}`);
 
-        const stepStats = this.steps.map(step => ({
-            id: step.id,
-            verb: step.actionVerb,
-            status: step.status,
-            dependencies: step.dependencies.map(dep => dep.sourceStepId) || [],
-            stepNo: step.stepNo
-        }));
+        const stepStats = this.steps.map(step => {
+            // Ensure step and its properties are defined before accessing
+            const stepId = step?.id || 'unknown-id';
+            const stepActionVerb = step?.actionVerb || 'undefined-actionVerb';
+            const stepStatus = step?.status || StepStatus.PENDING; // Default to PENDING if status is undefined
+
+            let dependencies: string[] = [];
+            if (step?.dependencies && Array.isArray(step.dependencies)) {
+                dependencies = step.dependencies.map(dep => dep?.sourceStepId || 'unknown-sourceStepId');
+            }
+
+            const stepNo = step?.stepNo || 0;
+
+            console.log(`[Agent.getStatistics] Processing step for stats - ID: ${stepId}, ActionVerb: '${stepActionVerb}', Status: '${stepStatus}'`);
+
+            return {
+                id: stepId,
+                verb: stepActionVerb, // Mapped to 'verb' for AgentStatistics interface
+                status: stepStatus,
+                dependencies: dependencies,
+                stepNo: stepNo
+            };
+        }); // End of this.steps.map
+
+        const lastStepActionVerb = this.steps.length > 0
+            ? this.steps[this.steps.length - 1]?.actionVerb || 'Unknown'
+            : 'Unknown';
 
         const statistics: AgentStatistics = {
             id: this.id,
             status: this.status,
             taskCount: this.steps.length,
-            currentTaskNo: this.steps.length,
-            currentTaskVerb: this.steps[this.steps.length - 1]?.actionVerb || 'Unknown',
+            currentTaskNo: this.steps.length, // This could be more sophisticated
+            currentTaskVerb: lastStepActionVerb,
             steps: stepStats,
-            color: this.getAgentColor()
+            color: this.getAgentColor() // Assuming getAgentColor() is correctly defined elsewhere
         };
-        //console.log(`Agent ${this.id} statistics:`, statistics);
+
+        console.log(`[Agent ${this.id}] getStatistics result: total steps = ${this.steps.length}, stepStats = ${JSON.stringify(stepStats)}`);
         return statistics;
     }
 
     private getAgentColor(): string {
         // Generate a consistent color based on agent ID
         let hash = 0;
-        for (let i = 0; i < this.id.length; i++) {
-            hash = this.id.charCodeAt(i) + ((hash << 5) - hash);
+        if (typeof this.id === 'string') { // Ensure this.id is a string
+            for (let i = 0; i < this.id.length; i++) {
+                hash = this.id.charCodeAt(i) + ((hash << 5) - hash);
+            }
         }
         const hue = hash % 360;
         return `hsl(${hue}, 70%, 50%)`;
@@ -830,127 +920,191 @@ Please consider this context and the available plugins when planning and executi
 
     private async notifyTrafficManager(): Promise<void> {
         try {
-            console.log(`Agent ${this.id} notifying TrafficManager of status: ${this.status}`);
+            // Ensure this.id and this.status are defined before using them
+            const agentId = this.id || 'unknown-agent-id';
+            const agentStatus = this.status || AgentStatus.UNKNOWN; // Assuming AgentStatus.UNKNOWN exists or use a suitable default
+
+            console.log(`Agent ${agentId} notifying TrafficManager of status: ${agentStatus}`);
 
             // Get current statistics
+            // The getStatistics method is async and should be awaited.
             const stats = await this.getStatistics();
 
-            // Send detailed update to TrafficManager
+            // Ensure missionId is defined
+            const missionId = this.missionId || 'unknown-mission-id';
+
+            // Send detailed update to TrafficManager via internal message queue
+            // Ensure sendMessage is correctly defined and handles async operations if necessary
             await this.sendMessage(MessageType.AGENT_UPDATE, 'trafficmanager', {
-                agentId: this.id,
-                status: this.status,
-                statistics: stats,
-                missionId: this.missionId,
+                agentId: agentId,
+                status: agentStatus,
+                statistics: stats, // stats should be of type AgentStatistics
+                missionId: missionId,
                 timestamp: new Date().toISOString()
             });
 
-            // Also notify AgentSet
-            try {
+            // Also notify AgentSet via HTTP
+            // Ensure this.agentSetUrl is defined and this.authenticatedApi is available and configured
+            if (this.agentSetUrl && this.authenticatedApi) {
                 await this.authenticatedApi.post(`http://${this.agentSetUrl}/updateFromAgent`, {
-                    agentId: this.id,
-                    status: this.status,
-                    statistics: stats
+                    agentId: agentId,
+                    status: agentStatus,
+                    statistics: stats // Ensure stats is serializable if needed by this endpoint
                 });
                 console.log(`Successfully notified AgentSet at ${this.agentSetUrl}`);
-            } catch (agentSetError) {
-                console.error(`Failed to notify AgentSet at ${this.agentSetUrl}:`,
-                    agentSetError instanceof Error ? agentSetError.message : agentSetError);
+            } else {
+                console.warn(`[Agent ${agentId}] Could not notify AgentSet: agentSetUrl or authenticatedApi is undefined.`);
             }
         } catch (error) {
-            analyzeError(error as Error);
-            console.error(`Failed to notify TrafficManager about agent ${this.id}:`,
-                error instanceof Error ? error.message : error);
+            // Use analyzeError or a similar structured logging for errors
+            const agentIdForError = this.id || 'unknown-agent-id';
+            if (error instanceof Error) {
+                console.error(`[Agent ${agentIdForError}] Failed to notify TrafficManager: ${error.message}`, error.stack);
+                analyzeError(error); // If analyzeError is available and appropriate
+            } else {
+                console.error(`[Agent ${agentIdForError}] Failed to notify TrafficManager with unknown error:`, error);
+            }
         }
     }
 
     private async hasDependentAgents(): Promise<boolean> {
         try {
-          const response = await this.authenticatedApi.get(`http://${this.trafficManagerUrl}/dependentAgents/${this.id}`);
-          const dependentAgents = response.data;
-          return dependentAgents.length > 0;
-        } catch (error) { analyzeError(error as Error);
-          console.error('Error checking for dependent agents:', error instanceof Error ? error.message : error);
-          return false;
+            if (!this.trafficManagerUrl || !this.authenticatedApi) {
+                console.warn(`[Agent ${this.id || 'unknown-id'}] Cannot check dependent agents: trafficManagerUrl or authenticatedApi is undefined.`);
+                return false; // Cannot determine, assume false
+            }
+            if (!this.id) {
+                console.warn(`[Agent 'unknown-id'] Cannot check dependent agents: agent ID is undefined.`);
+                return false;
+            }
+            const response = await this.authenticatedApi.get(`http://${this.trafficManagerUrl}/dependentAgents/${this.id}`);
+            // Ensure response.data is an array before checking its length
+            return Array.isArray(response?.data) && response.data.length > 0;
+        } catch (error) {
+            const agentIdForError = this.id || 'unknown-agent-id';
+            if (error instanceof Error) {
+                console.error(`[Agent ${agentIdForError}] Error checking for dependent agents: ${error.message}`, error.stack);
+                analyzeError(error);
+            } else {
+                console.error(`[Agent ${agentIdForError}] Error checking for dependent agents with unknown error:`, error);
+            }
+            return false; // On error, assume no dependent agents to be safe or handle as per specific requirements
         }
     }
 
-    /**
-     * Set up automatic checkpointing for the agent
-     * @param intervalMinutes Checkpoint interval in minutes
-     */
     setupCheckpointing(intervalMinutes: number = 15): void {
         // Clear existing interval if any
         if (this.checkpointInterval) {
             clearInterval(this.checkpointInterval);
+            this.checkpointInterval = null; // Clear the ref
+        }
+
+        if (typeof intervalMinutes !== 'number' || intervalMinutes <= 0) {
+            console.warn(`[Agent ${this.id || 'unknown-id'}] Invalid checkpoint interval: ${intervalMinutes}. Checkpointing disabled.`);
+            return;
         }
 
         // Set up new interval
         this.checkpointInterval = setInterval(() => {
             this.saveAgentState()
-                .catch(error => console.error(`Failed to create checkpoint for agent ${this.id}:`, error));
+                .catch(error => {
+                    const agentIdForError = this.id || 'unknown-agent-id';
+                    if (error instanceof Error) {
+                        console.error(`[Agent ${agentIdForError}] Failed to create checkpoint: ${error.message}`, error.stack);
+                    } else {
+                        console.error(`[Agent ${agentIdForError}] Failed to create checkpoint with unknown error:`, error);
+                    }
+                });
         }, intervalMinutes * 60 * 1000);
 
-        console.log(`Set up checkpointing for agent ${this.id} every ${intervalMinutes} minutes`);
+        console.log(`[Agent ${this.id || 'unknown-id'}] Set up checkpointing every ${intervalMinutes} minutes.`);
     }
 
-    /**
-     * Save the agent's state
-     */
     async saveAgentState(): Promise<void> {
+        const agentIdForLog = this.id || 'unknown-agent-id';
         try {
-            await this.stateManager.saveState({
+            if (!this.stateManager) {
+                console.error(`[Agent ${agentIdForLog}] StateManager not initialized. Cannot save agent state.`);
+                return;
+            }
+            // Ensure all properties being saved are defined or have defaults
+            const stateToSave = {
                 id: this.id,
-                status: this.status,
-                steps: this.steps,
+                status: this.status || AgentStatus.UNKNOWN,
+                steps: Array.isArray(this.steps) ? this.steps : [],
                 missionId: this.missionId,
-                dependencies: this.dependencies,
-                conversation: this.conversation,
-                role: this.role,
-                systemPrompt: this.systemPrompt,
-                capabilities: this.capabilities,
-                context: Array.from(this.context.entries())
-            });
-            console.log(`Saved state for agent ${this.id}`);
+                dependencies: Array.isArray(this.dependencies) ? this.dependencies : [],
+                conversation: Array.isArray(this.conversation) ? this.conversation : [],
+                role: this.role || 'executor',
+                systemPrompt: this.systemPrompt || '',
+                capabilities: Array.isArray(this.capabilities) ? this.capabilities : [],
+                context: this.context instanceof Map ? Array.from(this.context.entries()) : []
+            };
+            await this.stateManager.saveState(stateToSave);
+            console.log(`[Agent ${agentIdForLog}] Saved state.`);
         } catch (error) {
-            console.error(`Error saving state for agent ${this.id}:`, error);
-            throw error;
+            if (error instanceof Error) {
+                console.error(`[Agent ${agentIdForLog}] Error saving state: ${error.message}`, error.stack);
+            } else {
+                console.error(`[Agent ${agentIdForLog}] Error saving state with unknown error:`, error);
+            }
+            // Optionally re-throw or handle as critical error
+            // For now, just logging, as re-throwing might stop the agent.
         }
     }
 
-    /**
-     * Get the agent's state
-     */
     async getAgentState(): Promise<any> {
+        const agentIdForLog = this.id || 'unknown-agent-id';
         try {
-            // Create default state object
-            const defaultState = {
-                id: this.id,
-                status: this.status,
-                missionId: this.missionId,
-                role: this.role,
-                roleCustomizations: this.roleCustomizations,
-                stepCount: this.steps.length,
-                completedSteps: this.steps.filter(step => step.status === StepStatus.COMPLETED).length,
-                pendingSteps: this.steps.filter(step => step.status === StepStatus.PENDING).length,
-                runningSteps: this.steps.filter(step => step.status === StepStatus.RUNNING).length,
-                errorSteps: this.steps.filter(step => step.status === StepStatus.ERROR).length
-            };
-
-            // Try to load state, but use default if it fails
-            try {
-                const loadedState = await this.stateManager.loadState(this.id);
-                if (loadedState) {
-                    return loadedState;
-                }
-            } catch (loadError) {
-                console.warn(`Could not load state for agent ${this.id}, using default state`);
+            if (!this.stateManager) {
+                console.error(`[Agent ${agentIdForLog}] StateManager not initialized. Cannot get agent state.`);
+                // Return a default structure if stateManager is missing
+                return {
+                    id: this.id,
+                    status: this.status || AgentStatus.UNKNOWN,
+                    missionId: this.missionId,
+                    role: this.role || 'executor',
+                    stepCount: Array.isArray(this.steps) ? this.steps.length : 0,
+                    // Provide default empty arrays for step counts if this.steps is not an array
+                    completedSteps: Array.isArray(this.steps) ? this.steps.filter(step => step?.status === StepStatus.COMPLETED).length : 0,
+                    pendingSteps: Array.isArray(this.steps) ? this.steps.filter(step => step?.status === StepStatus.PENDING).length : 0,
+                    runningSteps: Array.isArray(this.steps) ? this.steps.filter(step => step?.status === StepStatus.RUNNING).length : 0,
+                    errorSteps: Array.isArray(this.steps) ? this.steps.filter(step => step?.status === StepStatus.ERROR).length : 0,
+                    roleCustomizations: this.roleCustomizations
+                };
             }
 
-            // Return default state if loading failed or returned null/undefined
-            return defaultState;
+            const loadedState = await this.stateManager.loadState(this.id);
+            if (loadedState) {
+                return loadedState;
+            }
+
+            // Fallback to default state if loadedState is null/undefined
+            console.warn(`[Agent ${agentIdForLog}] Could not load state from StateManager, returning default state representation.`);
+            return {
+                id: this.id,
+                status: this.status || AgentStatus.UNKNOWN,
+                missionId: this.missionId,
+                role: this.role || 'executor',
+                stepCount: Array.isArray(this.steps) ? this.steps.length : 0,
+                completedSteps: Array.isArray(this.steps) ? this.steps.filter(step => step?.status === StepStatus.COMPLETED).length : 0,
+                pendingSteps: Array.isArray(this.steps) ? this.steps.filter(step => step?.status === StepStatus.PENDING).length : 0,
+                runningSteps: Array.isArray(this.steps) ? this.steps.filter(step => step?.status === StepStatus.RUNNING).length : 0,
+                errorSteps: Array.isArray(this.steps) ? this.steps.filter(step => step?.status === StepStatus.ERROR).length : 0,
+                roleCustomizations: this.roleCustomizations
+            };
         } catch (error) {
-            console.error(`Error in getAgentState for agent ${this.id}:`, error);
-            throw error;
+            if (error instanceof Error) {
+                console.error(`[Agent ${agentIdForLog}] Error in getAgentState: ${error.message}`, error.stack);
+            } else {
+                console.error(`[Agent ${agentIdForLog}] Error in getAgentState with unknown error:`, error);
+            }
+            // Return a default structure on error
+            return {
+                id: this.id,
+                status: this.status || AgentStatus.UNKNOWN,
+                error: 'Failed to retrieve agent state',
+            };
         }
     }
 
