@@ -476,7 +476,7 @@ export class Step {
 
         steps.forEach((task, index) => {
             const newStep = new Step({
-                actionVerb: task.verb,
+                actionVerb: task.actionVerb,
                 stepNo: this.stepNo + 1 + index,
                 inputs: task.inputs || new Map(),
                 description: task.description || `Sequential step ${index + 1}`,
