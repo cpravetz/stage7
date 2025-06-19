@@ -112,47 +112,59 @@ export class AgentSet extends BaseEntity {
         // The BaseEntity.verifyToken method already handles skipping authentication for health check endpoints
         this.app.use((req: express.Request, res: express.Response, next: express.NextFunction) => this.verifyToken(req, res, next));
 
-        this.app.post('/message', (req: express.Request, res: express.Response) => this.handleMessage(req, res));
+        this.app.post('/message', this.handleMessage.bind(this));
 
         // Add a new agent to the set
-        this.app.post('/addAgent', (req: express.Request, res: express.Response) => this.addAgent(req, res));
+        this.app.post('/addAgent', this.addAgent.bind(this));
 
         // Endpoint for agents to notify of their terminal state for removal
-        this.app.post('/removeAgent', (req: express.Request, res: express.Response) => {
+        this.app.post('/removeAgent', async (req: express.Request, res: express.Response, next: express.NextFunction) => {
             const { agentId, status } = req.body;
             if (!agentId || !status) {
                 return res.status(400).send({ error: 'agentId and status are required for removal' });
             }
-            this.removeAgentFromSet(agentId, status)
-                .then(() => {
-                    res.status(200).send({ message: `Agent ${agentId} processed for removal with status ${status}.` });
-                })
-                .catch(error => {
-                    analyzeError(error as Error);
+            try {
+                await this.removeAgentFromSet(agentId, status);
+                res.status(200).send({ message: `Agent ${agentId} processed for removal with status ${status}.` });
+            } catch (error) {
+                analyzeError(error as Error);
+                // Pass error to Express error handling middleware if 'next' is available
+                if (next) {
+                    next(error);
+                } else {
                     res.status(500).send({ error: `Error processing agent ${agentId} for removal: ${error instanceof Error ? error.message : String(error)}` });
-                });
+                }
+            }
         });
 
-        this.app.post('/agent/:agentId/message', (req: express.Request, res: express.Response) => this.handleAgentMessage(req, res));
+        this.app.post('/agent/:agentId/message', this.handleAgentMessage.bind(this));
 
-        this.app.get('/agent/:agentId', (req: express.Request, res: express.Response) => this.getAgent(req, res));
+        this.app.get('/agent/:agentId', this.getAgent.bind(this));
 
-        this.app.get('/agent/:agentId/output', (req: express.Request, res: express.Response) => this.getAgentOutput(req, res));
+        this.app.get('/agent/:agentId/output', this.getAgentOutput.bind(this));
 
         // Pause mission agents
-        this.app.post('/pauseAgents', async (req: express.Request, res: express.Response) => {
+        this.app.post('/pauseAgents', async (req: express.Request, res: express.Response, next: express.NextFunction) => {
             const { missionId } = req.body;
-            console.log(`Agentset Pausing agents for mission ${missionId}`);
-            const agents = Array.from(this.agents.values()).filter(agent => agent.getMissionId() === missionId);
-            console.log(`Agentset Pausing ${agents.length}agents for mission ${missionId}`);
-            for (const agent of agents) {
-                await agent.pause();
+            if (!missionId) {
+                return res.status(400).send({ error: 'missionId is required' });
             }
-            res.status(200).send({ message: 'All agents paused' });
+            try {
+                console.log(`Agentset Pausing agents for mission ${missionId}`);
+                const agents = Array.from(this.agents.values()).filter(agent => agent.getMissionId() === missionId);
+                console.log(`Agentset Pausing ${agents.length} agents for mission ${missionId}`);
+                for (const agent of agents) {
+                    await agent.pause();
+                }
+                res.status(200).send({ message: `All ${agents.length} agents for mission ${missionId} paused` });
+            } catch (error) {
+                analyzeError(error as Error);
+                if (next) next(error); else res.status(500).send({error: "Error pausing agents"});
+            }
         });
 
         // Abort mission agents (mission-wide)
-        this.app.post('/abortAgents', (req: express.Request, res: express.Response) => this.abortMissionAgents(req, res));
+        this.app.post('/abortAgents', this.abortMissionAgents.bind(this));
 
         // ===== Agent Lifecycle Management Endpoints =====
 
@@ -584,9 +596,12 @@ export class AgentSet extends BaseEntity {
             }
         });
 
-       this.app.get('/statistics/:missionId', (req: express.Request, res: express.Response) => { this.getAgentStatistics(req, res) });
-       this.app.post('/updateFromAgent', (req: express.Request, res: express.Response) => { this.updateFromAgent(req, res) });
-       this.app.get('/agent/:agentId/output', async (req: express.Request, res: express.Response) => {
+       this.app.get('/statistics/:missionId', this.getAgentStatistics.bind(this));
+       this.app.post('/updateFromAgent', this.updateFromAgent.bind(this));
+       // Note: The '/agent/:agentId/output' route is already defined above with .bind(this), this is a duplicate.
+       // Removing this duplicate:
+       // this.app.get('/agent/:agentId/output', async (req: express.Request, res: express.Response) => {
+       this.app.post('/saveAgent', async (req: express.Request, res: express.Response, next: express.NextFunction) => {
             const { agentId } = req.params;
             const agent = this.agents.get(agentId);
 
