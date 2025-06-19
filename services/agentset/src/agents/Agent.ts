@@ -99,9 +99,17 @@ export class Agent extends BaseEntity {
         });
 
         this.initializeAgent().then(() => {
+            console.log(`Agent ${this.id} initialized successfully. Status: ${this.status}. Commencing main execution loop.`);
+            this.say(`Agent ${this.id} initialized and commencing operations.`);
             this.runUntilDone();
-        }).catch(() => {
+        }).catch((error) => { // Added error parameter
             this.status = AgentStatus.ERROR;
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            console.error(`Agent ${this.id} failed during initialization or before starting execution loop. Error: ${errorMessage}`);
+            this.say(`Agent ${this.id} failed to initialize or start. Error: ${errorMessage}`);
+            this.notifyTrafficManager().catch(notifyError => {
+                 console.error(`Agent ${this.id} failed to notify TrafficManager about initialization error:`, notifyError);
+            });
         });
     }
 
@@ -172,6 +180,10 @@ Please consider this context and the available plugins when planning and executi
     }
 
     private async getAvailablePlugins() {
+        if (this.status !== AgentStatus.RUNNING && this.status !== AgentStatus.INITIALIZING) {
+            console.log(`Agent ${this.id} is not RUNNING or INITIALIZING, skipping getAvailablePlugins.`);
+            return [];
+        }
         try {
             const response = await this.authenticatedApi.get(`http://${this.capabilitiesManagerUrl}/availablePlugins`);
             return response.data;
@@ -186,8 +198,7 @@ Please consider this context and the available plugins when planning and executi
             if (this.status === AgentStatus.ABORTED || this.status === AgentStatus.COMPLETED) {
                 return;
             }
-            console.log(`Agent ${this.id} is starting...`);
-            this.say(`Agent is starting...`);
+            // Removed "Agent is starting..." logs from here. It's now in the constructor's then block.
 
             // Send initial status update to TrafficManager
             await this.notifyTrafficManager();
@@ -208,13 +219,15 @@ Please consider this context and the available plugins when planning and executi
                             if (delegationResult.success) {
                                 // Mark this step as completed since it's been delegated
                                 step.status = StepStatus.COMPLETED;
+                                const isAgentEndpointForDelegation = step.isEndpoint(this.steps);
+                                const hasDependentsForDelegation = await this.hasDependentAgents();
                                 await this.saveWorkProduct(step.id, [{
                                     success: true,
                                     name: 'delegation',
                                     resultType: PluginParameterType.OBJECT,
                                     resultDescription: 'Step delegated to specialized agent',
                                     result: delegationResult.result
-                                }], step.isEndpoint(this.steps));
+                                }], isAgentEndpointForDelegation, hasDependentsForDelegation);
 
                                 // Continue to the next step
                                 continue;
@@ -296,7 +309,9 @@ The output MUST be a valid JSON array of task objects. Do not include any explan
 
                         // Only save work product if agent is not in error state from plan validation
                         if (this.status !== AgentStatus.ERROR) {
-                            await this.saveWorkProduct(step.id, result, step.isEndpoint(this.steps));
+                            const isAgentEndpoint = step.isEndpoint(this.steps);
+                            const hasDependents = await this.hasDependentAgents();
+                            await this.saveWorkProduct(step.id, result, isAgentEndpoint, hasDependents);
                         }
 
                         // Send status update after each step completion
@@ -318,6 +333,16 @@ The output MUST be a valid JSON array of task objects. Do not include any explan
 
             // Final status update
             await this.notifyTrafficManager();
+
+            if (this.status === AgentStatus.COMPLETED) {
+                try {
+                    console.log(`Agent ${this.id} notifying AgentSet of completed status for removal.`);
+                    await this.authenticatedApi.post(`http://${this.agentSetUrl}/removeAgent`, { agentId: this.id, status: 'completed' });
+                } catch (error) {
+                    console.error(`Agent ${this.id} failed to notify AgentSet for removal after completion:`, error instanceof Error ? error.message : error);
+                    // Non-critical, proceed
+                }
+            }
         } catch (error) {
             console.error('Error running agent:', error instanceof Error ? error.message : error);
             this.status = AgentStatus.ERROR;
@@ -327,6 +352,10 @@ The output MUST be a valid JSON array of task objects. Do not include any explan
     }
 
     private async populateInputsFromLibrarian(step: Step) {
+        if (this.status !== AgentStatus.RUNNING) {
+            console.log(`Agent ${this.id} is not RUNNING, skipping populateInputsFromLibrarian for step ${step.id}.`);
+            return;
+        }
         for (const dep of step.dependencies) {
             const workProduct = await this.agentPersistenceManager.loadWorkProduct(this.id, dep.sourceStepId);
             if (workProduct && workProduct.data) {
@@ -393,6 +422,10 @@ The output MUST be a valid JSON array of task objects. Do not include any explan
     }
 
     private async checkAndResumeBlockedAgents() {
+        if (this.status !== AgentStatus.RUNNING) {
+            console.log(`Agent ${this.id} is not RUNNING, skipping checkAndResumeBlockedAgents.`);
+            return;
+        }
         try {
             await this.authenticatedApi.post(`http://${this.trafficManagerUrl}/checkBlockedAgents`, { completedAgentId: this.id });
         } catch (error) { analyzeError(error as Error);
@@ -419,6 +452,17 @@ The output MUST be a valid JSON array of task objects. Do not include any explan
     }
 
     private async handleAskStep(inputs: Map<string, PluginInput>): Promise<PluginOutput[]> {
+        if (this.status !== AgentStatus.RUNNING) {
+            console.log(`Agent ${this.id} is not RUNNING, aborting handleAskStep.`);
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: 'Agent not running',
+                result: null,
+                error: 'Agent is not in RUNNING state.'
+            }];
+        }
         const input = inputs.get('question');
         if (!input) {
             this.logAndSay('Question is required for ASK plugin');
@@ -487,20 +531,35 @@ The output MUST be a valid JSON array of task objects. Do not include any explan
         }
     }
 
-    private async saveWorkProduct(stepId: string, data: PluginOutput[], isFinal: boolean): Promise<void> {
+    private async saveWorkProduct(stepId: string, data: PluginOutput[], isAgentEndpoint: boolean, hasDependentAgentsValue: boolean): Promise<void> {
+        if (this.status === AgentStatus.PAUSED || this.status === AgentStatus.ABORTED) {
+            console.log(`Agent ${this.id} is in status ${this.status}, skipping saveWorkProduct for step ${stepId}.`);
+            return;
+        }
         const serializedData = MapSerializer.transformForSerialization(data);
         const workProduct = new WorkProduct(this.id, stepId, serializedData);
         try {
             await this.agentPersistenceManager.saveWorkProduct(workProduct);
 
-            // Determine if this is a mission output
-            const isMissionOutput = this.steps.length === 1 || (isFinal && !(await this.hasDependentAgents()));
+            const isTrulyFinalMissionStep = isAgentEndpoint && !hasDependentAgentsValue;
+
+            const type = isTrulyFinalMissionStep ? 'Final' : 'Interim';
+
+            let scope: string;
+            // If there's only one step in this agent, or if this step is truly the final one for the mission
+            if (this.steps.length === 1 || isTrulyFinalMissionStep) {
+                scope = 'MissionOutput';
+            } else if (isAgentEndpoint) { // It's the last step for this agent, but the mission continues via other agents
+                scope = 'AgentOutput';
+            } else { // It's an interim step within this agent's plan
+                scope = 'AgentStep';
+            }
 
             // Send message to client
             this.sendMessage(MessageType.WORK_PRODUCT_UPDATE, 'user', {
                 id: stepId,
-                type: isFinal ? 'Final' : 'Interim',
-                scope: isMissionOutput ? 'MissionOutput' : (isFinal ? 'AgentOutput' : 'AgentStep'),
+                type: type,
+                scope: scope,
                 name: data[0]? data[0].resultDescription :  'Step Output',
                 agentId: this.id,
                 stepId: stepId,
@@ -514,6 +573,17 @@ The output MUST be a valid JSON array of task objects. Do not include any explan
     }
 
     private async createSubAgent(inputs: Map<string, PluginInput>): Promise<PluginOutput[]> {
+        if (this.status !== AgentStatus.RUNNING) {
+            console.log(`Agent ${this.id} is not RUNNING, aborting createSubAgent.`);
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: 'Agent not running',
+                result: null,
+                error: 'Agent is not in RUNNING state.'
+            }];
+        }
         try {
             const subAgentGoal = inputs.get('subAgentGoal');
             const newInputs = new Map(inputs);
@@ -596,6 +666,17 @@ The output MUST be a valid JSON array of task objects. Do not include any explan
     }
 
     private async useBrainForReasoning(inputs: Map<string, PluginInput>): Promise<PluginOutput[]> {
+        if (this.status !== AgentStatus.RUNNING) {
+            console.log(`Agent ${this.id} is not RUNNING, aborting useBrainForReasoning.`);
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: 'Agent not running',
+                result: null,
+                error: 'Agent is not in RUNNING state.'
+            }];
+        }
         const prompt = inputs.get('prompt')?.inputValue as string;
         if (!prompt) {
             return [{
@@ -836,6 +917,16 @@ The output MUST be a valid JSON array of task objects. Do not include any explan
 
     async pause() {
         console.log(`Pausing agent ${this.id}`);
+        if (this.checkpointInterval) {
+            clearInterval(this.checkpointInterval);
+            this.checkpointInterval = null;
+            console.log(`Agent ${this.id} checkpoint interval cleared due to pause.`);
+        }
+        if (this.currentQuestionResolve) {
+            this.currentQuestionResolve(''); // Resolve with empty or specific "paused" answer
+            this.currentQuestionResolve = null;
+            console.log(`Agent ${this.id} current question resolved due to pause.`);
+        }
         this.status = AgentStatus.PAUSED;
         await this.notifyTrafficManager();
         await this.saveAgentState();
@@ -845,11 +936,30 @@ The output MUST be a valid JSON array of task objects. Do not include any explan
         this.status = AgentStatus.ABORTED;
         await this.notifyTrafficManager();
         await this.saveAgentState();
+        try {
+            console.log(`Agent ${this.id} notifying AgentSet of abort status for removal.`);
+            await this.authenticatedApi.post(`http://${this.agentSetUrl}/removeAgent`, { agentId: this.id, status: 'aborted' });
+        } catch (error) {
+            console.error(`Agent ${this.id} failed to notify AgentSet for removal after abort:`, error instanceof Error ? error.message : error);
+            // Non-critical, proceed with agent functions
+        }
+        if (this.checkpointInterval) {
+            clearInterval(this.checkpointInterval);
+            this.checkpointInterval = null;
+            console.log(`Agent ${this.id} checkpoint interval cleared due to abort.`);
+        }
+        if (this.currentQuestionResolve) {
+            this.currentQuestionResolve(''); // Resolve with empty or specific "aborted" answer
+            this.currentQuestionResolve = null;
+            console.log(`Agent ${this.id} current question resolved due to abort.`);
+        }
     }
 
     async resume() {
         if (this.status === AgentStatus.PAUSED || this.status === AgentStatus.INITIALIZING) {
             this.status = AgentStatus.RUNNING;
+            this.setupCheckpointing(15); // Re-setup checkpointing interval, assuming 15 minutes
+            console.log(`Agent ${this.id} re-setup checkpoint interval due to resume.`);
             await this.notifyTrafficManager();
             this.runAgent();
         }
@@ -1418,7 +1528,10 @@ The output MUST be a valid JSON array of task objects. Do not include any explan
         );
 
         // Save the work product
-        await this.saveWorkProduct(planStep.id, result, true);
+        // For a planStep executed this way, it's considered an endpoint for this agent's current flow.
+        const isAgentEndpointForPlan = planStep.isEndpoint(this.steps);
+        const hasDependentsForPlan = await this.hasDependentAgents();
+        await this.saveWorkProduct(planStep.id, result, isAgentEndpointForPlan, hasDependentsForPlan);
 
         console.log(`Agent ${this.id} completed plan template execution: ${templateId}`);
         return result;

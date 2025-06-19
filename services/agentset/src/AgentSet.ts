@@ -117,6 +117,22 @@ export class AgentSet extends BaseEntity {
         // Add a new agent to the set
         this.app.post('/addAgent', (req: express.Request, res: express.Response) => this.addAgent(req, res));
 
+        // Endpoint for agents to notify of their terminal state for removal
+        this.app.post('/removeAgent', (req: express.Request, res: express.Response) => {
+            const { agentId, status } = req.body;
+            if (!agentId || !status) {
+                return res.status(400).send({ error: 'agentId and status are required for removal' });
+            }
+            this.removeAgentFromSet(agentId, status)
+                .then(() => {
+                    res.status(200).send({ message: `Agent ${agentId} processed for removal with status ${status}.` });
+                })
+                .catch(error => {
+                    analyzeError(error as Error);
+                    res.status(500).send({ error: `Error processing agent ${agentId} for removal: ${error instanceof Error ? error.message : String(error)}` });
+                });
+        });
+
         this.app.post('/agent/:agentId/message', (req: express.Request, res: express.Response) => this.handleAgentMessage(req, res));
 
         this.app.get('/agent/:agentId', (req: express.Request, res: express.Response) => this.getAgent(req, res));
@@ -134,6 +150,9 @@ export class AgentSet extends BaseEntity {
             }
             res.status(200).send({ message: 'All agents paused' });
         });
+
+        // Abort mission agents (mission-wide)
+        this.app.post('/abortAgents', (req: express.Request, res: express.Response) => this.abortMissionAgents(req, res));
 
         // ===== Agent Lifecycle Management Endpoints =====
 
@@ -606,6 +625,55 @@ export class AgentSet extends BaseEntity {
             console.log(`AgentSet application running on ${this.url}`);
         });
 
+    }
+
+    private async removeAgentFromSet(agentId: string, status: string) {
+        console.log(`Attempting to remove agent ${agentId} with status ${status} from AgentSet.`);
+        const agent = this.agents.get(agentId);
+
+        if (agent) {
+            this.agents.delete(agentId);
+            this.lifecycleManager.unregisterAgent(agentId); // Unregister from lifecycle manager
+            console.log(`Agent ${agentId} removed from AgentSet and unregistered from LifecycleManager due to status: ${status}. Current agent count: ${this.agents.size}`);
+
+            // Potentially notify TrafficManager to update its counts, if AgentSet is authoritative for agent existence.
+            // For now, TrafficManager counts will be stale until it tries to interact with a removed agent or a separate cleanup for TM is implemented.
+
+        } else {
+            console.warn(`Agent ${agentId} not found in AgentSet during removal attempt. Status was: ${status}.`);
+        }
+    }
+
+    private async abortMissionAgents(req: express.Request, res: express.Response) {
+        const { missionId } = req.body;
+
+        if (!missionId) {
+            return res.status(400).send({ error: 'missionId is required to abort agents.' });
+        }
+
+        console.log(`AgentSet: Received request to abort all agents for mission ${missionId}.`);
+        let abortedCount = 0;
+        const promises: Promise<void>[] = [];
+
+        try {
+            for (const agent of this.agents.values()) {
+                if (agent.getMissionId() === missionId) {
+                    console.log(`AgentSet: Aborting agent ${agent.id} for mission ${missionId}.`);
+                    promises.push(agent.abort()); // agent.abort() is async and will notify for removal
+                    abortedCount++;
+                }
+            }
+
+            await Promise.allSettled(promises); // Wait for all abort operations to settle
+
+            console.log(`AgentSet: ${abortedCount} agents targeted for abort for mission ${missionId}. Agent-initiated removal will follow.`);
+            res.status(200).send({ message: `${abortedCount} agents for mission ${missionId} have been signaled to abort.` });
+
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error(`AgentSet: Error during mission-wide abort for ${missionId}:`, error instanceof Error ? error.message : String(error));
+            res.status(500).send({ error: `Failed to abort agents for mission ${missionId}.` });
+        }
     }
 
     private async addAgent(req: express.Request, res: express.Response) {

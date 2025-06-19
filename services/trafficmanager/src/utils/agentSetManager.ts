@@ -369,6 +369,34 @@ class AgentSetManager {
         }
     }
 
+    /**
+     * Removes an agent from an AgentSet and updates internal tracking.
+     * This is called when an agent has terminated (completed or aborted).
+     * @param agentId The ID of the agent to remove.
+     */
+    async removeAgentFromSet(agentId: string): Promise<void> {
+        console.log(`AgentSetManager: Attempting to remove agent ${agentId} from tracking.`);
+        const agentSetId = this.agentToSetMap.get(agentId);
+
+        if (agentSetId) {
+            const agentSet = this.agentSets.get(agentSetId);
+            if (agentSet) {
+                if (agentSet.agentCount > 0) {
+                    agentSet.agentCount--;
+                } else {
+                    console.warn(`AgentSetManager: AgentSet ${agentSetId} already has 0 agentCount before decrementing for agent ${agentId}.`);
+                }
+                console.log(`AgentSetManager: Decremented agent count for AgentSet ${agentSetId} to ${agentSet.agentCount} due to removal of agent ${agentId}.`);
+            } else {
+                console.warn(`AgentSetManager: AgentSet ${agentSetId} not found in agentSets map for agent ${agentId}. Cannot decrement count.`);
+            }
+            this.agentToSetMap.delete(agentId);
+            console.log(`AgentSetManager: Agent ${agentId} removed from agentToSetMap.`);
+        } else {
+            console.warn(`AgentSetManager: Agent ${agentId} not found in agentToSetMap. Cannot remove or decrement count.`);
+        }
+    }
+
     async sendMessageToAgent(agentId: string, message: any): Promise<any> {
         const agentSetUrl = await this.getAgentUrl(agentId);
         if (!agentSetUrl) {
