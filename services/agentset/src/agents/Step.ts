@@ -34,6 +34,7 @@ export class Step {
     result?: PluginOutput[];
     timeout?: number;
     recommendedRole?: string;
+    awaitsSignal: string;
     private tempData: Map<string, any> = new Map();
     private persistenceManager: AgentPersistenceManager;
 
@@ -57,6 +58,7 @@ export class Step {
         this.status = params.status || StepStatus.PENDING;
         this.recommendedRole = params.recommendedRole;
         this.persistenceManager = params.persistenceManager;
+        this.awaitsSignal = '';
         //console.log(`Constructing new step ${this.id} created. Dependencies ${this.dependencies.map(dep => dep.sourceStepId).join(', ')}`);
 
         // Log step creation event

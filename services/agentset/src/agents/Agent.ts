@@ -1395,6 +1395,22 @@ async handleCollaborationMessage(message: CollaborationMessage): Promise<void> {
 }
 
     /**
+     * Process a resource request
+     * @param request Resource request
+     * @returns Resource response
+     */
+    async processResourceRequest(request: any): Promise<any> {
+        console.log(`Agent ${this.id} processing resource request:`, request);
+        // Simple implementation - in a real system, would check available resources
+        return {
+            requestId: request.id,
+            granted: true,
+            resource: request.resource,
+            message: `Resource ${request.resource} granted by agent ${this.id}`
+        };
+    }
+    
+    /**
      * Process a conflict resolution
      * @param resolution Conflict resolution
      */
