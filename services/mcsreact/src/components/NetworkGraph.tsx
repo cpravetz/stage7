@@ -64,17 +64,25 @@ function getContrastYIQ(hexcolor: string): string {
 export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const networkRef = useRef<Network | null>(null);
+    // Store zoom and pan state
+    const viewStateRef = useRef<{scale: number, position: {x: number, y: number}} | null>(null);
 
     // --- Zoom controls ---
     const handleZoom = (factor: number) => {
         if (networkRef.current) {
             const scale = networkRef.current.getScale();
             networkRef.current.moveTo({ scale: Math.max(0.1, Math.min(5, scale * factor)) });
+            // Save view state
+            const position = networkRef.current.getViewPosition();
+            viewStateRef.current = { scale: Math.max(0.1, Math.min(5, scale * factor)), position };
         }
     };
     const handleResetZoom = () => {
         if (networkRef.current) {
             networkRef.current.moveTo({ scale: 1 });
+            // Save view state
+            const position = networkRef.current.getViewPosition();
+            viewStateRef.current = { scale: 1, position };
         }
     };
 
@@ -205,7 +213,16 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics }) =
             return;
         }
 
-        console.log(`[NetworkGraph] useEffect: Initializing/updating network with ${nodes.length} nodes and ${edges.length} edges.`);
+        // Save current view state before update
+        let prevView: {scale: number, position: {x: number, y: number}} | null = null;
+        if (networkRef.current) {
+            prevView = {
+                scale: networkRef.current.getScale(),
+                position: networkRef.current.getViewPosition()
+            };
+        } else if (viewStateRef.current) {
+            prevView = viewStateRef.current;
+        }
 
         const options: Options = {
             layout: {
@@ -268,6 +285,11 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics }) =
         } else {
             networkRef.current = new Network(containerRef.current, { nodes, edges }, options);
             console.log('[NetworkGraph] New network initialized.');
+        }
+
+        // Restore previous view state (zoom/pan)
+        if (prevView && networkRef.current) {
+            networkRef.current.moveTo({ scale: prevView.scale, position: prevView.position });
         }
 
         // Only destroy on unmount

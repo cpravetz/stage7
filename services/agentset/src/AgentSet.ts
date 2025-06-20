@@ -12,6 +12,9 @@ import { CollaborationManager } from './collaboration/CollaborationManager';
 import { SpecializationFramework } from './specialization/SpecializationFramework';
 import { DomainKnowledge } from './specialization/DomainKnowledge';
 
+// Expose AgentSet instance globally for agent dependency analysis
+let agentSetInstance: AgentSet | undefined;
+
 export class AgentSet extends BaseEntity {
     agents: Map<string, Agent> = new Map(); // Store agents by their ID
     maxAgents: number = 10; // Example limit for agents in this set
@@ -1214,4 +1217,9 @@ export class AgentSet extends BaseEntity {
     }
 }
 
-new AgentSet(); // Start the AgentSet application
+agentSetInstance = new AgentSet(); // Start the AgentSet application
+// @ts-ignore
+if (typeof global !== 'undefined') {
+    // @ts-ignore
+    global.agentSetInstance = agentSetInstance;
+}

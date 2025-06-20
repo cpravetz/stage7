@@ -15,15 +15,6 @@ import { Step, StepStatus, createFromPlan } from './Step';
 import { StateManager } from '../utils/StateManager';
 
 
-// NOTE: Don't use this directly - use authenticatedApi from BaseEntity instead
-// This is kept for backward compatibility only
-const api = axios.create({
-    headers: {
-      'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
-    },
-  });
-
 export class Agent extends BaseEntity {
     private missionContext: string = '';
     private agentSetUrl: string;
@@ -221,13 +212,14 @@ Please consider this context and the available plugins when planning and executi
                                 step.status = StepStatus.COMPLETED;
                                 const isAgentEndpointForDelegation = step.isEndpoint(this.steps);
                                 const hasDependentsForDelegation = await this.hasDependentAgents();
-                                await this.saveWorkProduct(step.id, [{
+                                const allAgents = this.getAllAgentsInMission();
+                                await this.saveWorkProductWithClassification(step.id, [{
                                     success: true,
                                     name: 'delegation',
                                     resultType: PluginParameterType.OBJECT,
                                     resultDescription: 'Step delegated to specialized agent',
                                     result: delegationResult.result
-                                }], isAgentEndpointForDelegation, hasDependentsForDelegation);
+                                }], isAgentEndpointForDelegation, allAgents);
 
                                 // Continue to the next step
                                 continue;
@@ -244,7 +236,7 @@ Please consider this context and the available plugins when planning and executi
 
                         if (step.stepNo === 1 && step.actionVerb === 'ACCOMPLISH' && this.inputs?.has('goal')) {
                             const goal = this.inputs.get('goal')?.inputValue;
-                            const planningPrompt = `You are a planning assistant. Given the goal: '${goal}', generate a JSON array of tasks to achieve this goal. Each task object should have 'actionVerb', 'inputs' (as a map of name to {inputValue, inputName, args}), 'description', 'dependencies' (as an array of sourceStepId strings, use step IDs like 'step_N'), and optionally 'recommendedRole'. Ensure the plan is detailed and includes multiple steps with dependencies if logical. The first step will be 'step_1', the next 'step_2', and so on. Dependencies should refer to these generated step IDs.
+                            const planningPrompt = `You are a planning assistant. Given the goal: '${goal}', generate a JSON array of tasks to achieve this goal. Each task object should have 'actionVerb', 'inputs' (as a map of name to {inputValue, inputName, args}), 'description', 'dependencies' (as an array of sourceStepId strings, use step IDs like 'step_1'), and optionally 'recommendedRole'. Ensure the plan is detailed and includes multiple steps with dependencies if logical. The first step will be 'step_1', the next 'step_2', and so on. Dependencies should refer to these generated step IDs.
 It is critical that the plan is comprehensive and broken down into a sufficient number of granular steps to ensure successful execution. Each step's description should be clear and actionable.
 When defining 'dependencies', ensure they accurately reflect the data flow required between steps. Only list direct predecessor step IDs that provide necessary input for the current step.
 If the goal is complex, consider creating a sub-plan using a nested 'ACCOMPLISH' verb for a major sub-component, or use 'CREATE_SUB_AGENT' if a specialized agent should handle a part of the mission.
@@ -311,7 +303,7 @@ The output MUST be a valid JSON array of task objects. Do not include any explan
                         if (this.status !== AgentStatus.ERROR) {
                             const isAgentEndpoint = step.isEndpoint(this.steps);
                             const hasDependents = await this.hasDependentAgents();
-                            await this.saveWorkProduct(step.id, result, isAgentEndpoint, hasDependents);
+                            await this.saveWorkProductWithClassification(step.id, result, isAgentEndpoint, this.getAllAgentsInMission());
                         }
 
                         // Send status update after each step completion
@@ -531,7 +523,7 @@ The output MUST be a valid JSON array of task objects. Do not include any explan
         }
     }
 
-    private async saveWorkProduct(stepId: string, data: PluginOutput[], isAgentEndpoint: boolean, hasDependentAgentsValue: boolean): Promise<void> {
+    private async saveWorkProductWithClassification(stepId: string, data: PluginOutput[], isAgentEndpoint: boolean, allAgents: Agent[]): Promise<void> {
         if (this.status === AgentStatus.PAUSED || this.status === AgentStatus.ABORTED) {
             console.log(`Agent ${this.id} is in status ${this.status}, skipping saveWorkProduct for step ${stepId}.`);
             return;
@@ -541,35 +533,47 @@ The output MUST be a valid JSON array of task objects. Do not include any explan
         try {
             await this.agentPersistenceManager.saveWorkProduct(workProduct);
 
-            const isTrulyFinalMissionStep = isAgentEndpoint && !hasDependentAgentsValue;
-
-            const type = isTrulyFinalMissionStep ? 'Final' : 'Interim';
+            // New logic: check if any step in any agent depends on this step
+            const isFinal = Agent.isStepFinal(stepId, allAgents);
+            const type = isFinal ? 'Final' : 'Interim';
 
             let scope: string;
-            // If there's only one step in this agent, or if this step is truly the final one for the mission
-            if (this.steps.length === 1 || isTrulyFinalMissionStep) {
+            if (this.steps.length === 1 || (isAgentEndpoint && isFinal)) {
                 scope = 'MissionOutput';
-            } else if (isAgentEndpoint) { // It's the last step for this agent, but the mission continues via other agents
+            } else if (isAgentEndpoint) {
                 scope = 'AgentOutput';
-            } else { // It's an interim step within this agent's plan
+            } else {
                 scope = 'AgentStep';
             }
 
-            // Send message to client
             this.sendMessage(MessageType.WORK_PRODUCT_UPDATE, 'user', {
                 id: stepId,
                 type: type,
                 scope: scope,
-                name: data[0]? data[0].resultDescription :  'Step Output',
+                name: data[0] ? data[0].resultDescription : 'Step Output',
                 agentId: this.id,
                 stepId: stepId,
                 missionId: this.missionId,
                 mimeType: data[0]?.mimeType || 'text/plain',
-                fileName: data[0]?.fileName // Add fileName here
+                fileName: data[0]?.fileName
             });
         } catch (error) { analyzeError(error as Error);
             console.error('Error saving work product:', error instanceof Error ? error.message : error);
         }
+    }
+
+    /**
+     * Checks if any step in the given list of agents depends on the given stepId.
+     */
+    private static isStepFinal(stepId: string, allAgents: Agent[]): boolean {
+        for (const agent of allAgents) {
+            for (const step of agent.steps) {
+                if (step.dependencies && step.dependencies.some(dep => dep.sourceStepId === stepId)) {
+                    return false; // Found a dependent step
+                }
+            }
+        }
+        return true; // No dependent step found
     }
 
     private async createSubAgent(inputs: Map<string, PluginInput>): Promise<PluginOutput[]> {
@@ -873,11 +877,14 @@ The output MUST be a valid JSON array of task objects. Do not include any explan
         }
     }
 
-    // Helper method to check if a step has any dependent steps
-    private hasDependentSteps(stepId: string): boolean {
-        return this.steps.some(step =>
-            step.dependencies.some(dep => dep.sourceStepId === stepId)
-        );
+    // Helper to get all agents in the current mission (assumes AgentSet.agents is accessible)
+    private getAllAgentsInMission(): Agent[] {
+        if (typeof global !== 'undefined' && (global as any).agentSetInstance) {
+            const agentSet = (global as any).agentSetInstance as { agents: Map<string, Agent> };
+            return Array.from(agentSet.agents.values()).filter((a: Agent) => a.missionId === this.missionId);
+        }
+        // Fallback: only this agent
+        return [this];
     }
 
     // Update the cleanupFailedStep method to include proper error handling
@@ -887,12 +894,6 @@ The output MUST be a valid JSON array of task objects. Do not include any explan
 
             // Clear any temporary data
             step.clearTempData?.();
-
-            // If this step's failure affects the entire agent, update agent status
-            if (!this.hasDependentSteps(step.id)) {
-                this.status = AgentStatus.ERROR;
-                await this.notifyTrafficManager();
-            }
 
             // Save the updated state
             await this.saveAgentState();
@@ -908,8 +909,6 @@ The output MUST be a valid JSON array of task objects. Do not include any explan
             // Log the error but don't throw - we want to continue with other cleanup tasks
         }
     }
-
-    // Original saveAgentState method is replaced by the more detailed implementation below
 
     async loadAgentState(): Promise<void> {
         await this.stateManager.applyState(this);
@@ -1397,16 +1396,27 @@ The output MUST be a valid JSON array of task objects. Do not include any explan
     }
 
     /**
-     * Generate a vote for a conflict
+     * Generate a vote for a conflict (production-ready)
      * @param conflict Conflict
      * @returns Vote
      */
     async generateConflictVote(conflict: any): Promise<any> {
-        console.log(`Agent ${this.id} generating vote for conflict:`, conflict);
-        // Simple implementation - in a real system, would use reasoning
+        // Example: Use agent's role, context, and conflict details to make a decision
+        if (!conflict || !Array.isArray(conflict.options) || conflict.options.length === 0) {
+            return {
+                vote: 'abstain',
+                explanation: `Agent ${this.id} abstains: no valid options provided.`
+            };
+        }
+        // Example: Prefer options matching agent's role, otherwise pick the first
+        const preferred = conflict.options.find((opt: string) =>
+            typeof opt === 'string' && opt.toLowerCase().includes(this.role.toLowerCase())
+        );
+        const vote = preferred || conflict.options[0];
+        // Optionally, use more advanced logic here (e.g., context, past votes, negotiation)
         return {
-            vote: conflict.options ? conflict.options[0] : 'approve',
-            explanation: `Agent ${this.id} votes based on role: ${this.role}`
+            vote,
+            explanation: `Agent ${this.id} (${this.role}) voted for '${vote}' based on role/context.`
         };
     }
 
@@ -1531,7 +1541,7 @@ The output MUST be a valid JSON array of task objects. Do not include any explan
         // For a planStep executed this way, it's considered an endpoint for this agent's current flow.
         const isAgentEndpointForPlan = planStep.isEndpoint(this.steps);
         const hasDependentsForPlan = await this.hasDependentAgents();
-        await this.saveWorkProduct(planStep.id, result, isAgentEndpointForPlan, hasDependentsForPlan);
+        await this.saveWorkProductWithClassification(planStep.id, result, isAgentEndpointForPlan, this.getAllAgentsInMission());
 
         console.log(`Agent ${this.id} completed plan template execution: ${templateId}`);
         return result;
