@@ -1,20 +1,20 @@
 import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import express from 'express';
-import { MessageQueueClient } from './messaging/queueClient.js';
-import { ServiceDiscovery } from './discovery/serviceDiscovery.js';
-import { IBaseEntity } from './interfaces/IBaseEntity.js';
-import { ServiceTokenManager } from './security/ServiceTokenManager.js';
+import { MessageQueueClient } from './messaging/queueClient';
+import { ServiceDiscovery } from './discovery/serviceDiscovery';
+import { IBaseEntity } from './interfaces/IBaseEntity';
+import { ServiceTokenManager } from './security/ServiceTokenManager';
 import { Channel, ConsumeMessage } from 'amqplib';
 
 // Export middleware for easy access
-export { createAuthMiddleware, requireRoles, requirePermissions } from './middleware/authMiddleware.js';
+export { createAuthMiddleware, requireRoles, requirePermissions } from './middleware/authMiddleware';
 
 // Export authenticated axios creator for easy access
-export { createAuthenticatedAxios, createClientAuthenticatedAxios } from './http/createAuthenticatedAxios.js';
+export { createAuthenticatedAxios, createClientAuthenticatedAxios } from './http/createAuthenticatedAxios';
 
 // Import MessageType enum directly to avoid ESM import issues
-import * as MessageModule from './types/Message.js';
+import * as MessageModule from './types/Message';
 
 // Forward declaration to avoid circular dependency
 type AuthenticatedApiClientType = any; // Will be properly typed when used
@@ -41,7 +41,7 @@ export class BaseEntity implements IBaseEntity {
     this.port = port;
     this.url = `${urlBase}:${port}` //url;
     // Dynamically import to avoid circular dependency
-    const { AuthenticatedApiClient } = require('./AuthenticatedApiClient.js');
+    const { AuthenticatedApiClient } = require('./AuthenticatedApiClient');
     this.authenticatedApi = new AuthenticatedApiClient(this);
 
     // Initialize services
@@ -900,7 +900,7 @@ protected async cleanup() {
    */
   protected isHealthCheckEndpoint(path: string): boolean {
     // Import the shared health check paths
-    const { HEALTH_CHECK_PATHS } = require('./middleware/authMiddleware.js');
+    const { HEALTH_CHECK_PATHS } = require('./middleware/authMiddleware');
     return HEALTH_CHECK_PATHS.some((healthPath: string) => path === healthPath || path.startsWith(`${healthPath}/`));
   }
 

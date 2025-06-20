@@ -4,7 +4,7 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
-import { BaseEntity } from '../BaseEntity.js';
+import { BaseEntity } from '../BaseEntity';
 
 /**
  * Standard paths that should bypass authentication

@@ -1,6 +1,6 @@
 import { AxiosInstance, AxiosRequestConfig } from 'axios';
-import { IBaseEntity } from './interfaces/IBaseEntity.js';
-import { createAuthenticatedAxios } from './http/createAuthenticatedAxios.js';
+import { IBaseEntity } from './interfaces/IBaseEntity';
+import { createAuthenticatedAxios } from './http/createAuthenticatedAxios';
 
 /**
  * Client for making authenticated API requests

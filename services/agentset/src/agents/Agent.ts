@@ -11,7 +11,7 @@ import { ActionVerbTask } from '@cktmcs/shared';
 import { AgentConfig, AgentStatistics } from '@cktmcs/shared';
 import { MessageType } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
-import { Step, StepStatus, createFromPlan, StepModification } from './Step'; // Added StepModification
+import { Step, StepStatus, createFromPlan, StepModification } from './Step';
 import { StateManager } from '../utils/StateManager';
 
 export enum CollaborationMessageType {
@@ -1753,33 +1753,29 @@ async handleCollaborationMessage(message: CollaborationMessage): Promise<void> {
                             } else if (this.sharedKnowledge.has(key)) {
                                 stateToSend[key] = this.sharedKnowledge.get(key);
                             } else {
-                                stateToSend[key] = null; // Or some indicator that key is not found
+                                stateToSend[key] = null;
                             }
                         }
-                        console.log(`Agent ${this.id}: Sending requested state for keys: ${coordination.payload.requestedStateKeys.join(', ')} to ${coordination.senderId}.`);
-                        await this.sendMessage(
-                            MessageType.COORDINATION_MESSAGE,
+                        console.log(`Agent ${this.id}: Responding to SYNC_STATE request for keys: ${coordination.payload.requestedStateKeys.join(', ')} from ${coordination.senderId}.`);
+                        await this._sendCoordinationResponse(
                             coordination.senderId,
-                            {
-                                type: 'SYNC_STATE_RESPONSE',
-                                originalSignalId: coordination.signalId,
-                                payload: stateToSend,
-                                timestamp: new Date().toISOString()
-                            }
+                            'SYNC_STATE_RESPONSE',
+                            stateToSend,
+                            coordination.signalId
                         );
-                        this.logEvent({ eventType: 'coordination_sync_state_sent', agentId: this.id, recipientId: coordination.senderId, requestedKeys: coordination.payload.requestedStateKeys, stateSent: stateToSend });
+                        this.logEvent({ eventType: 'coordination_sync_state_sent', agentId: this.id, recipientId: coordination.senderId, requestedKeys: coordination.payload.requestedStateKeys, dataSent: stateToSend });
+
                     } else if (coordination.payload?.sharedState && typeof coordination.payload.sharedState === 'object') {
-                        console.log(`Agent ${this.id}: Received shared state from ${coordination.senderId}:`, coordination.payload.sharedState);
+                        console.log(`Agent ${this.id}: Processing SYNC_STATE with sharedState from ${coordination.senderId}.`);
                         for (const [key, value] of Object.entries(coordination.payload.sharedState)) {
                             this.sharedKnowledge.set(key, value);
                         }
                         this.logEvent({ eventType: 'coordination_shared_state_received', agentId: this.id, senderId: coordination.senderId, sharedState: coordination.payload.sharedState });
-                        // Potentially save state if sharedKnowledge is critical to persist immediately
-                        // await this.saveAgentState(); // Decided to save at the end of handleCoordination
                     } else {
-                        console.log(`Agent ${this.id}: General SYNC_STATE received without specific sharedState or requestedStateKeys. Current status: ${this.status}`);
+                        console.log(`Agent ${this.id}: General SYNC_STATE received from ${coordination.senderId} without specific sharedState or requestedStateKeys.`);
                     }
-                    this.logEvent({ eventType: 'coordination_sync_state_processed', agentId: this.id, senderId: coordination.senderId, payload: coordination.payload });
+                    // General processed event for SYNC_STATE, distinct from specific send/receive events.
+                    this.logEvent({ eventType: 'coordination_sync_state_processed_generic', agentId: this.id, senderId: coordination.senderId, payload: coordination.payload });
                     break;
 
                 case CoordinationType.AWAIT_SIGNAL:
@@ -1798,18 +1794,16 @@ async handleCollaborationMessage(message: CollaborationMessage): Promise<void> {
                             }
                         });
                         if (unpausedSteps > 0) {
-                            await this.notifyTrafficManager(); // Notify if steps were unpaused
+                            await this.notifyTrafficManager();
                         }
                     } else {
-                        // Logic for agent or step to enter a PAUSED state upon receiving an AWAIT_SIGNAL (without signalReceived)
-                        // This is more complex: requires identifying which step should pause, or if the agent itself should.
-                        // For now, we log that an await signal was registered if a step is already configured for it.
+                        // This part logs if an agent is told to await a signal, but doesn't actively pause a step.
+                        // Pausing is assumed to be handled by the step's own logic or an external TASK_UPDATE.
                         const waitingStep = this.steps.find(step => step.awaitsSignal === signalId && (step.status === StepStatus.PENDING || step.status === StepStatus.PAUSED));
                         if (waitingStep) {
-                            console.log(`Agent ${this.id}: Step ${waitingStep.id} is noted to be awaiting signal '${signalId}'. If not already PAUSED, its execution logic should handle pausing.`);
-                             // A step's own execution logic would typically set itself to PAUSED if it determines it needs to wait for this signal.
+                            console.log(`Agent ${this.id}: Step ${waitingStep.id} is noted to be awaiting signal '${signalId}'. Its execution logic should handle pausing if not already PAUSED.`);
                         } else {
-                            console.log(`Agent ${this.id}: Received AWAIT_SIGNAL for '${signalId}', but no specific step is currently configured to await it or in a PAUSED state for it. This signal might be for future steps or agent-level coordination.`);
+                            console.log(`Agent ${this.id}: Received AWAIT_SIGNAL instruction for '${signalId}', but no specific step is currently configured for it or actively PAUSED for it.`);
                         }
                     }
                     this.logEvent({ eventType: 'coordination_await_signal_processed', agentId: this.id, senderId: coordination.senderId, signalId, payload: coordination.payload });
@@ -1818,38 +1812,29 @@ async handleCollaborationMessage(message: CollaborationMessage): Promise<void> {
                 case CoordinationType.PROVIDE_INFO:
                     console.log(`Agent ${this.id}: Processing PROVIDE_INFO request from ${coordination.senderId}. Requested info keys:`, coordination.infoKeys);
                     if (coordination.infoKeys && coordination.infoKeys.length > 0) {
-                        const infoPayload: any = {};
+                        const infoPayload: Record<string, any> = {};
                         for (const key of coordination.infoKeys) {
-                            // Retrieve info from agent's state, conversation, or work products
                             if (key === 'status') infoPayload.status = this.status;
-                            else if (key === 'currentStep') infoPayload.currentStep = this.steps.find(s => s.status === StepStatus.RUNNING)?.id;
-                            else if (key === 'lastCompletedStep') infoPayload.lastCompletedStep = this.steps.filter(s => s.status === StepStatus.COMPLETED).pop()?.id;
-                            // Add more complex info retrieval logic as needed, e.g., from work products
-                            // else if (key.startsWith('workProduct_')) { // Example for future extension
-                            //     const stepId = key.substring('workProduct_'.length);
-                            //     const wp = await this.agentPersistenceManager.loadWorkProduct(this.id, stepId);
-                            //     if (wp) infoPayload[key] = wp.data;
-                            // }
-                            else if (this.sharedKnowledge.has(key)) { // Check sharedKnowledge
+                            else if (key === 'role') infoPayload.role = this.role;
+                            else if (key === 'missionId') infoPayload.missionId = this.missionId;
+                            else if (key === 'id') infoPayload.id = this.id;
+                            else if (key === 'currentStep') infoPayload.currentStep = this.steps.find(s => s.status === StepStatus.RUNNING)?.id || null;
+                            else if (key === 'lastCompletedStep') infoPayload.lastCompletedStep = this.steps.filter(s => s.status === StepStatus.COMPLETED).pop()?.id || null;
+                            else if (this.sharedKnowledge.has(key)) {
                                 infoPayload[key] = this.sharedKnowledge.get(key);
                             }
                             else {
                                 infoPayload[key] = `Information for key '${key}' not readily available or not implemented.`;
                             }
                         }
-                        console.log(`Agent ${this.id}: Attempting to send requested info to ${coordination.senderId}:`, infoPayload);
-                        await this.sendMessage(
-                            MessageType.COORDINATION_MESSAGE,
+                        console.log(`Agent ${this.id}: Responding to PROVIDE_INFO request from ${coordination.senderId}.`);
+                        await this._sendCoordinationResponse(
                             coordination.senderId,
-                            {
-                                type: 'PROVIDE_INFO_RESPONSE',
-                                originalSignalId: coordination.signalId,
-                                payload: infoPayload,
-                                timestamp: new Date().toISOString()
-                            }
+                            'PROVIDE_INFO_RESPONSE',
+                            infoPayload,
+                            coordination.signalId
                         );
-                        this.logEvent({ eventType: 'coordination_provide_info_sent', agentId: this.id, recipientId: coordination.senderId, requestedKeys: coordination.infoKeys, providedInfo: infoPayload });
-
+                        this.logEvent({ eventType: 'coordination_provide_info_sent', agentId: this.id, recipientId: coordination.senderId, requestedKeys: coordination.infoKeys, dataSent: infoPayload });
                     } else {
                         console.warn(`Agent ${this.id}: PROVIDE_INFO request from ${coordination.senderId} had no infoKeys specified.`);
                         this.logEvent({ eventType: 'coordination_error', agentId: this.id, error: 'Missing infoKeys for PROVIDE_INFO', senderId: coordination.senderId });
@@ -1863,67 +1848,36 @@ async handleCollaborationMessage(message: CollaborationMessage): Promise<void> {
             }
             await this.saveAgentState();
         } catch (error) {
-            console.error(`Agent ${this.id}: Error processing coordination data from ${coordination.senderId}:`, error, coordination);
+            console.error(`Agent ${this.id}: Error processing coordination data from ${coordination.senderId}:`, error, coordination); // Keep full error object for server logs
             this.logEvent({
                 eventType: 'coordination_processing_error',
                 agentId: this.id,
-                error: error instanceof Error ? error.message : String(error),
-                coordinationData: coordination,
+                error: error instanceof Error ? error.message : String(error), // Log only message for event
+                coordinationData: coordination, // Keep full data for event context if needed
                 timestamp: new Date().toISOString()
             });
         }
     }
 
     /**
-     * Process a resource request
-     * @param request Resource request
-     * @returns Resource response
+     * Helper method to send standardized coordination responses.
      */
-    async processResourceRequest(request: { id: string, resource: string, amount?: number }): Promise<{ requestId: string, granted: boolean, resource: string, message?: string, reason?: string }> {
-        console.log(`Agent ${this.id} received resource request:`, request);
-        this.logEvent({
-            eventType: 'resource_request_received',
-            agentId: this.id,
-            request,
+    private async _sendCoordinationResponse(
+        recipientId: string,
+        coordinationResponseType: string, // e.g., 'SYNC_STATE_RESPONSE', 'PROVIDE_INFO_RESPONSE'
+        data: any,
+        originalSignalId?: string
+    ): Promise<void> {
+        const content = {
+            coordinationType: coordinationResponseType,
+            data,
+            senderAgentId: this.id,
+            originalSignalId,
             timestamp: new Date().toISOString()
-        });
-
-        const { id: requestId, resource, amount = 1 } = request; // Default amount to 1 if not specified
-
-        if (!resource || typeof resource !== 'string') {
-            const msg = `Malformed resource request: 'resource' field is missing or invalid.`;
-            console.error(`Agent ${this.id}: ${msg}`, request);
-            this.logEvent({ eventType: 'resource_request_error', agentId: this.id, error: msg, request });
-            return { requestId: requestId || 'unknown', granted: false, resource: resource || 'unknown', reason: msg };
-        }
-
-        if (typeof amount !== 'number' || amount <= 0) {
-            const msg = `Malformed resource request: 'amount' field must be a positive number. Received: ${amount}`;
-            console.error(`Agent ${this.id}: ${msg}`, request);
-            this.logEvent({ eventType: 'resource_request_error', agentId: this.id, error: msg, request });
-            return { requestId: requestId || 'unknown', granted: false, resource, reason: msg };
-        }
-
-        if (!this.manageableResources.includes(resource)) {
-            const reason = `Resource type '${resource}' is not managed by this agent.`;
-            console.log(`Agent ${this.id}: ${reason}`);
-            this.logEvent({ eventType: 'resource_request_denied', agentId: this.id, requestId, resource, reason });
-            return { requestId, granted: false, resource, reason };
-        }
-
-        const currentAmount = this.availableResources.get(resource) || 0;
-        if (currentAmount >= amount) {
-            this.availableResources.set(resource, currentAmount - amount);
-            const message = `Resource '${resource}' (amount: ${amount}) granted. Remaining: ${this.availableResources.get(resource)}.`;
-            console.log(`Agent ${this.id}: ${message}`);
-            this.logEvent({ eventType: 'resource_request_granted', agentId: this.id, requestId, resource, amountGranted: amount, remaining: this.availableResources.get(resource) });
-            return { requestId, granted: true, resource, message };
-        } else {
-            const reason = `Resource type '${resource}' is currently unavailable or insufficient amount. Requested: ${amount}, Available: ${currentAmount}.`;
-            console.log(`Agent ${this.id}: ${reason}`);
-            this.logEvent({ eventType: 'resource_request_denied', agentId: this.id, requestId, resource, reason, requestedAmount: amount, availableAmount: currentAmount });
-            return { requestId, granted: false, resource, reason };
-        }
+        };
+        // The specific event logging (e.g., 'coordination_sync_state_sent') is done at the call site
+        // as it might have more specific details about what was sent (e.g., requestedKeys).
+        await this.sendMessage(MessageType.COORDINATION_MESSAGE, recipientId, content);
     }
 
     /**

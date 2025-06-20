@@ -6,18 +6,47 @@ import { AgentPersistenceManager } from '../src/utils/AgentPersistenceManager';
 import { StateManager } from '../src/utils/StateManager';
 import { getServiceUrls } from '../src/utils/postOfficeInterface';
 import { v4 as uuidv4 } from 'uuid';
-import axios from 'axios';
+import axios from 'axios'; // Keep the import for type annotations if needed elsewhere
 
 // Mock external dependencies
-jest.mock('axios');
+// jest.mock('axios'); // This will be replaced by the factory mock below
+
+const mockAxiosInstance = {
+  get: jest.fn(),
+  post: jest.fn(),
+  put: jest.fn(),
+  delete: jest.fn(),
+  patch: jest.fn(),
+  head: jest.fn(),
+  options: jest.fn(),
+  request: jest.fn(),
+  defaults: { headers: { common: {}, delete: {}, get: {}, head: {}, post: {}, put: {}, patch: {} } } as any, // More complete defaults
+  interceptors: {
+    request: { use: jest.fn(), eject: jest.fn() },
+    response: { use: jest.fn(), eject: jest.fn() },
+  },
+  getUri: jest.fn(),
+};
+
+jest.mock('axios', () => ({
+  ...jest.requireActual('axios'), // Use actual for other things like isAxiosError if not explicitly mocked
+  create: jest.fn(() => mockAxiosInstance),
+  isAxiosError: jest.fn((payload) => payload && payload.isAxiosError === true), // Mock isAxiosError
+  // Mock other static axios methods if used (e.g., get, post) directly on axios, not instance
+  get: jest.fn(),
+  post: jest.fn(),
+}));
+
 jest.mock('../src/utils/postOfficeInterface');
 jest.mock('../src/utils/AgentPersistenceManager');
 jest.mock('../src/utils/StateManager');
 jest.mock('../src/agents/Step'); // Mock the Step class
 
-const mockAxios = axios as jest.Mocked<typeof axios>;
+
 const mockGetSvcUrls = getServiceUrls as jest.MockedFunction<typeof getServiceUrls>;
 const MockStep = Step as jest.MockedClass<typeof Step>;
+// mockAxios will now be the mocked version from jest.mock
+const mockAxios = axios as jest.Mocked<typeof axios>;
 const mockUuidv4 = uuidv4 as jest.MockedFunction<typeof uuidv4>;
 
 
@@ -39,8 +68,20 @@ describe('Agent', () => {
 
     beforeEach(() => {
         // Reset mocks before each test
-        mockAxios.post.mockReset();
-        mockAxios.get.mockReset();
+        mockAxiosInstance.get.mockClear();
+        mockAxiosInstance.post.mockClear();
+        mockAxiosInstance.put.mockClear();
+        mockAxiosInstance.delete.mockClear();
+        // ... clear other mockAxiosInstance methods ...
+        mockAxiosInstance.interceptors.request.use.mockClear();
+        mockAxiosInstance.interceptors.response.use.mockClear();
+
+        (axios.create as jest.Mock).mockClear().mockReturnValue(mockAxiosInstance);
+        (axios.get as jest.Mock).mockClear();
+        (axios.post as jest.Mock).mockClear();
+        (axios.isAxiosError as jest.Mock).mockClear().mockImplementation((payload) => payload && payload.isAxiosError === true);
+
+
         mockGetSvcUrls.mockResolvedValue({
             capabilitiesManagerUrl: 'http://localhost:9002',
             brainUrl: 'http://localhost:9003',
@@ -87,9 +128,12 @@ describe('Agent', () => {
         mockConfig = createMockAgentConfig();
         // @ts-ignore // BaseEntity constructor expects different params, simplify for test
         agent = new Agent(mockConfig);
-        // Mock internal authenticatedApi for Agent based on axios
-        // @ts-ignore
-        agent.authenticatedApi = mockAxios;
+        // agent.authenticatedApi is initialized within BaseEntity's constructor,
+        // which calls new AuthenticatedApiClient(), which calls createAuthenticatedAxios(),
+        // which calls axios.create(). So agent.authenticatedApi should be the mockAxiosInstance.
+        // We can verify this or just ensure the mock setup is correct.
+        // Forcing it here as well for safety, though ideally the constructor chain handles it.
+        agent.authenticatedApi = mockAxiosInstance as any;
 
         // Spy on agent.logEvent AFTER agent instantiation
         mockLogEvent = jest.spyOn(agent, 'logEvent').mockImplementation(async () => {});
@@ -470,9 +514,10 @@ describe('Agent', () => {
                     MessageType.COORDINATION_MESSAGE,
                     'requestingAgent',
                     expect.objectContaining({
-                        type: 'SYNC_STATE_RESPONSE',
+                        coordinationType: 'SYNC_STATE_RESPONSE',
                         originalSignalId: 'syncReq1',
-                        payload: {
+                        senderAgentId: agent.id,
+                        data: {
                             status: AgentStatus.RUNNING,
                             role: 'testRole',
                             externalKey: 'externalValue',
@@ -578,9 +623,10 @@ describe('Agent', () => {
                     MessageType.COORDINATION_MESSAGE,
                     'infoRequester',
                     expect.objectContaining({
-                        type: 'PROVIDE_INFO_RESPONSE',
+                        coordinationType: 'PROVIDE_INFO_RESPONSE',
                         originalSignalId: 'infoReq1',
-                        payload: {
+                        senderAgentId: agent.id,
+                        data: {
                             status: AgentStatus.COMPLETED,
                             customData: { value: 123 },
                             nonExistent: `Information for key 'nonExistent' not readily available or not implemented.`
