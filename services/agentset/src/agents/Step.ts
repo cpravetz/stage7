@@ -157,18 +157,6 @@ export class Step {
                 case 'EXECUTE_PLAN_TEMPLATE':
                     result = await this.handleExecutePlanTemplate(executeAction);
                     break;
-            /*                    case 'TRANSFORM':
-                                result = await this.handleTransform();
-                                break;
-                            case 'MERGE':
-                                result = await this.handleMerge();
-                                break;
-                            case 'FILTER':
-                                result = await this.handleFilter();
-                                break;
-                            case 'MAP':
-                                result = await this.handleMap();
-                                break;*/
                 default:
                     result = await executeAction(this);
             }

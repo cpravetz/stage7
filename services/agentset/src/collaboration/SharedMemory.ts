@@ -1,6 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
 import { analyzeError } from '@cktmcs/errorhandler';
-import axios from 'axios';
 
 /**
  * Memory entry

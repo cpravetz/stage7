@@ -1,9 +1,8 @@
 import { v4 as uuidv4 } from 'uuid';
 import { analyzeError } from '@cktmcs/errorhandler';
-import axios from 'axios';
 import { Agent } from '../agents/Agent';
 import { AgentRole, PredefinedRoles } from './AgentRole';
-import { AuthenticatedApiClient, BaseEntity } from '@cktmcs/shared';
+import { AuthenticatedApiClient } from '@cktmcs/shared';
 
 /**
  * Agent specialization
@@ -494,94 +493,6 @@ export class SpecializationFramework {
    */
   getAllKnowledgeDomains(): KnowledgeDomain[] {
     return Array.from(this.knowledgeDomains.values());
-  }
-
-  /**
-   * Recommend a role for an agent based on its performance
-   * @param agentId Agent ID
-   * @returns Recommended role ID or undefined if no recommendation
-   */
-  async recommendRole(agentId: string): Promise<string | undefined> {
-    const agent = this.agents.get(agentId);
-
-    if (!agent) {
-      throw new Error(`Agent ${agentId} not found`);
-    }
-
-    try {
-      // Get agent's task history
-      const taskHistory = await agent.getTaskHistory();
-
-      if (taskHistory.length === 0) {
-        return undefined; // Not enough data
-      }
-
-      // Analyze task history
-      const taskTypes = taskHistory.map(task => task.type);
-      const taskSuccessRates = new Map<string, number>();
-      const taskCounts = new Map<string, number>();
-
-      for (const task of taskHistory) {
-        const type = task.type;
-        const success = task.success ? 1 : 0;
-
-        taskCounts.set(type, (taskCounts.get(type) || 0) + 1);
-
-        const currentSuccessRate = taskSuccessRates.get(type) || 0;
-        const currentCount = taskCounts.get(type) || 0;
-
-        // Update success rate
-        if (currentCount === 1) {
-          taskSuccessRates.set(type, success);
-        } else {
-          const newRate = (currentSuccessRate * (currentCount - 1) + success) / currentCount;
-          taskSuccessRates.set(type, newRate);
-        }
-      }
-
-      // Find task types with highest success rates
-      const sortedTaskTypes = Array.from(taskSuccessRates.entries())
-        .sort((a, b) => b[1] - a[1])
-        .filter(([_, rate]) => rate > 0.7) // Only consider tasks with >70% success rate
-        .map(([type]) => type);
-
-      if (sortedTaskTypes.length === 0) {
-        return undefined; // No suitable tasks
-      }
-
-      // Map task types to roles
-      const roleScores = new Map<string, number>();
-
-      for (const role of this.roles.values()) {
-        let score = 0;
-
-        for (const capability of role.capabilities) {
-          const matchingTasks = sortedTaskTypes.filter(type =>
-            type.toLowerCase().includes(capability.toLowerCase())
-          ).length;
-
-          score += matchingTasks;
-        }
-
-        if (score > 0) {
-          roleScores.set(role.id, score);
-        }
-      }
-
-      // Find role with highest score
-      const sortedRoles = Array.from(roleScores.entries())
-        .sort((a, b) => b[1] - a[1]);
-
-      if (sortedRoles.length === 0) {
-        return undefined; // No suitable roles
-      }
-
-      return sortedRoles[0][0];
-    } catch (error) {
-      analyzeError(error as Error);
-      console.error(`Error recommending role for agent ${agentId}:`, error);
-      return undefined;
-    }
   }
 
   /**

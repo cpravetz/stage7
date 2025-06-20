@@ -1,5 +1,4 @@
 import { v4 as uuidv4 } from 'uuid';
-import axios from 'axios';
 import express from 'express';
 import { AgentStatus } from '../utils/agentStatus';
 import { getServiceUrls } from '../utils/postOfficeInterface';
@@ -36,14 +35,6 @@ export class Agent extends BaseEntity {
 
     // Properties for lifecycle management
     private checkpointInterval: NodeJS.Timeout | null = null;
-
-    // Properties for specialization
-    private systemPrompt: string = '';
-    private capabilities: string[] = [];
-    private context: Map<string, any> = new Map();
-
-    // Properties for collaboration
-    private taskHistory: any[] = [];
 
     private currentQuestionResolve: ((value: string) => void) | null = null;
 
@@ -1144,10 +1135,7 @@ The output MUST be a valid JSON array of task objects. Do not include any explan
                 missionId: this.missionId,
                 dependencies: Array.isArray(this.dependencies) ? this.dependencies : [],
                 conversation: Array.isArray(this.conversation) ? this.conversation : [],
-                role: this.role || 'executor',
-                systemPrompt: this.systemPrompt || '',
-                capabilities: Array.isArray(this.capabilities) ? this.capabilities : [],
-                context: this.context instanceof Map ? Array.from(this.context.entries()) : []
+                role: this.role || 'executor'
             };
             await this.stateManager.saveState(stateToSave);
             console.log(`[Agent ${agentIdForLog}] Saved state.`);
@@ -1226,92 +1214,13 @@ The output MUST be a valid JSON array of task objects. Do not include any explan
     }
 
     /**
-     * Set the agent's system prompt
-     * @param prompt System prompt
-     */
-    setSystemPrompt(prompt: string): void {
-        this.systemPrompt = prompt;
-    }
-
-    /**
-     * Set the agent's capabilities
-     * @param capabilities Capabilities
-     */
-    setCapabilities(capabilities: string[]): void {
-        this.capabilities = capabilities;
-    }
-
-    /**
-     * Store data in the agent's context
-     * @param key Context key
-     * @param value Context value
-     */
-    async storeInContext(key: string, value: any): Promise<void> {
-        this.context.set(key, value);
-    }
-
-    /**
-     * Get the agent's task history
-     * @returns Task history
-     */
-    async getTaskHistory(): Promise<any[]> {
-        return this.taskHistory;
-    }
-
-    /**
      * Handle a collaboration message
      * @param message Collaboration message
      */
     async handleCollaborationMessage(message: any): Promise<void> {
         console.log(`Agent ${this.id} received collaboration message:`, message);
-        // Store message in context for future reference
-        const collaborationMessages = this.context.get('collaborationMessages') || [];
-        collaborationMessages.push(message);
-        this.context.set('collaborationMessages', collaborationMessages);
-    }
-
-    /**
-     * Create a step for a delegated task
-     * @param task Task
-     */
-    async createStepForTask(task: any): Promise<void> {
-        // Create a new step for the task
-        const step = new Step({
-            actionVerb: task.verb || 'EXECUTE',
-            stepNo: this.steps.length + 1,
-            inputs: new Map(Object.entries(task.inputs || {})),
-            description: task.description || 'Delegated task',
-            status: StepStatus.PENDING,
-            persistenceManager: this.agentPersistenceManager
-        });
-
-        this.steps.push(step);
-        console.log(`Created step for delegated task: ${task.id}`);
-
-        // Add task to history
-        this.taskHistory.push({
-            id: task.id,
-            type: task.verb || 'EXECUTE',
-            description: task.description || 'Delegated task',
-            delegatedBy: task.delegatedBy,
-            startTime: new Date().toISOString(),
-            status: 'pending'
-        });
-    }
-
-    /**
-     * Process a task result
-     * @param result Task result
-     */
-    async processTaskResult(result: any): Promise<void> {
-        console.log(`Agent ${this.id} processing task result:`, result);
-        // Update task history
-        const taskIndex = this.taskHistory.findIndex(task => task.id === result.taskId);
-        if (taskIndex >= 0) {
-            this.taskHistory[taskIndex].status = result.success ? 'completed' : 'failed';
-            this.taskHistory[taskIndex].endTime = new Date().toISOString();
-            this.taskHistory[taskIndex].result = result.result;
-        }
+        // Placeholder for actual handling logic
+        // Example: Store message in a relevant property or trigger specific actions
     }
 
     /**
@@ -1320,10 +1229,7 @@ The output MUST be a valid JSON array of task objects. Do not include any explan
      */
     async processConflictResolution(resolution: any): Promise<void> {
         console.log(`Agent ${this.id} processing conflict resolution:`, resolution);
-        // Store resolution in context
-        const resolutions = this.context.get('conflictResolutions') || [];
-        resolutions.push(resolution);
-        this.context.set('conflictResolutions', resolutions);
+        // Placeholder for actual handling logic
     }
 
     /**
@@ -1455,10 +1361,7 @@ The output MUST be a valid JSON array of task objects. Do not include any explan
      */
     async processResourceResponse(response: any, requestId?: string): Promise<void> {
         console.log(`Agent ${this.id} processing resource response:`, response);
-        // Store response in context
-        const responses = this.context.get('resourceResponses') || [];
-        responses.push({ ...response, requestId });
-        this.context.set('resourceResponses', responses);
+        // Placeholder for actual handling logic
     }
 
     /**

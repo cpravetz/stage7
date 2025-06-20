@@ -1,8 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { analyzeError } from '@cktmcs/errorhandler';
-import axios from 'axios';
 import { KnowledgeDomain } from './SpecializationFramework';
-import { AuthenticatedApiClient, BaseEntity } from '@cktmcs/shared';
+import { AuthenticatedApiClient } from '@cktmcs/shared';
 
 /**
  * Knowledge item

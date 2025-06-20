@@ -124,22 +124,24 @@ export interface CollaborationProtocol {
    * @param request Task delegation request
    * @returns Task delegation response
    */
-  delegateTask(recipientId: string, request: TaskDelegationRequest): Promise<TaskDelegationResponse>;
+  delegateTask(senderId: string, recipientId: string, request: TaskDelegationRequest): Promise<TaskDelegationResponse>;
   
   /**
    * Share knowledge with other agents
+   * @param senderId Sender agent ID
    * @param recipientId Recipient agent ID or 'broadcast'
    * @param knowledge Knowledge to share
    */
-  shareKnowledge(recipientId: string | 'broadcast', knowledge: KnowledgeSharing): Promise<void>;
+  shareKnowledge(senderId: string, recipientId: string | 'broadcast', knowledge: KnowledgeSharing): Promise<void>;
   
   /**
    * Request conflict resolution
+   * @param senderId Sender agent ID
    * @param recipientId Recipient agent ID
    * @param request Conflict resolution request
    * @returns Conflict resolution response
    */
-  resolveConflict(recipientId: string, request: ConflictResolutionRequest): Promise<ConflictResolutionResponse>;
+  resolveConflict(senderId: string, recipientId: string, request: ConflictResolutionRequest): Promise<ConflictResolutionResponse>;
 }
 
 /**

@@ -731,17 +731,15 @@ protected async cleanup() {
     trafficManagerUrl: string,
     librarianUrl: string,
     missionControlUrl: string,
-    engineerUrl: string,
-    configServiceUrl: string
+    engineerUrl: string
   }> {
-    const [capabilitiesManagerUrl, brainUrl, trafficManagerUrl, librarianUrl, missionControlUrl, engineerUrl, configServiceUrl] = await Promise.all([
+    const [capabilitiesManagerUrl, brainUrl, trafficManagerUrl, librarianUrl, missionControlUrl, engineerUrl] = await Promise.all([
       this.getServiceUrl('CapabilitiesManager').then(url => url || 'capabilitiesmanager:5060'),
       this.getServiceUrl('Brain').then(url => url || 'brain:5070'),
       this.getServiceUrl('TrafficManager').then(url => url || 'trafficmanager:5080'),
       this.getServiceUrl('Librarian').then(url => url || 'librarian:5040'),
       this.getServiceUrl('MissionControl').then(url => url || 'missioncontrol:5030'),
-      this.getServiceUrl('Engineer').then(url => url || 'engineer:5050'),
-      this.getServiceUrl('ConfigService').then(url => url || 'configservice:5090')
+      this.getServiceUrl('Engineer').then(url => url || 'engineer:5050')
     ]);
 
     return {
@@ -750,8 +748,7 @@ protected async cleanup() {
       trafficManagerUrl,
       librarianUrl,
       missionControlUrl,
-      engineerUrl,
-      configServiceUrl
+      engineerUrl
     };
   }
 
@@ -771,7 +768,6 @@ protected async cleanup() {
       'capabilitiesmanager': '5060',
       'brain': '5070',
       'trafficmanager': '5080',
-      'configservice': '5090',
       'agentset': '5100'
     };
 
