@@ -44,8 +44,8 @@ export class GitHubRepository implements PluginRepository {
             return;
         }
 
-        this.token = config.credentials?.token || process.env.GITHUB_TOKEN || '';
-        this.username = config.credentials?.username || process.env.GITHUB_USERNAME || ''; // Used as default owner
+        this.token = process.env.GITHUB_TOKEN || config.credentials?.token || '';
+        this.username = process.env.GITHUB_USERNAME || config.credentials?.username || ''; // Used as default owner
 
         if (!this.token) {
             console.warn("**********************************************************************************");

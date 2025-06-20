@@ -313,6 +313,28 @@ Goal to analyze: {goal}"""
                 "error": str(e)
             }]
 
+    def normalize_plan_dependencies(self, plan_data: List[Dict[str, Any]]):
+        """
+        Normalize dependencies in the plan so that any 'step_X' string references are converted to step numbers.
+        Modifies plan_data in-place.
+        """
+        # Build a mapping from 'step_1', 'step_2', ... to step number
+        label_to_number = {}
+        for idx, step in enumerate(plan_data):
+            step_number = step.get('number', idx + 1)
+            label_to_number[f'step_{step_number}'] = step_number
+        # Normalize dependencies in each step
+        for step in plan_data:
+            deps = step.get('dependencies', [])
+            new_deps = []
+            for dep in deps:
+                if isinstance(dep, str) and dep.startswith('step_') and dep in label_to_number:
+                    # Replace 'step_X' with the corresponding step number
+                    new_deps.append(label_to_number[dep])
+                else:
+                    new_deps.append(dep)
+            step['dependencies'] = new_deps
+
     def execute(self, inputs_map: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Execute the ACCOMPLISH plugin"""
         try:
@@ -377,6 +399,8 @@ Goal to analyze: {goal}"""
 
                 if response_type == 'PLAN':
                     plan_data = parsed_response.get('plan', [])
+                    # --- Normalize dependencies before validation and conversion ---
+                    self.normalize_plan_dependencies(plan_data)
                     validation_error_message = self.validate_plan_data(plan_data)
                     if validation_error_message:
                         return [{
@@ -387,7 +411,6 @@ Goal to analyze: {goal}"""
                             "result": None,
                             "error": validation_error_message
                         }]
-                    # --- Strict dependency validation and assignment ---
                     initial_inputs = list(inputs_map.keys())
                     dep_error = self.validate_and_assign_dependencies(plan_data, initial_inputs)
                     if dep_error:

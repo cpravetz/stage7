@@ -633,10 +633,14 @@ export class Step {
         const planTasks = plan as PlanTask[];
         const stepNumberToUUID: Record<number, string> = {};
         const outputNameToUUID: Record<string, string> = {};
+        // Also map 'step_1', 'step_2', ... to UUIDs for compatibility
+        const stepLabelToUUID: Record<string, string> = {};
         planTasks.forEach((task, idx) => {
             const uuid = uuidv4();
             task.id = uuid;
-            stepNumberToUUID[(task.number || idx + 1)] = uuid;
+            const stepNum = task.number || idx + 1;
+            stepNumberToUUID[stepNum] = uuid;
+            stepLabelToUUID[`step_${stepNum}`] = uuid;
         });
         // First pass: register outputs and GET_USER_INPUT steps
         planTasks.forEach((task, idx) => {
@@ -678,6 +682,10 @@ export class Step {
                         sourceStepId = outputNameToUUID[dep.outputName];
                     } else if (dep.inputName && outputNameToUUID[dep.inputName]) {
                         sourceStepId = outputNameToUUID[dep.inputName];
+                    } else if (typeof dep === 'string' && /^step_\d+$/.test(dep) && stepLabelToUUID[dep]) {
+                        // Support for 'step_1' style references
+                        sourceStepId = stepLabelToUUID[dep];
+                        console.warn(`[createFromPlan] Resolved legacy dependency label '${dep}' to UUID '${sourceStepId}'`);
                     }
                     if (!sourceStepId) {
                         throw new Error(`[createFromPlan] Cannot resolve dependency for step ${task.actionVerb} (stepNo ${startingStepNo + idx}): dep=${JSON.stringify(dep)}`);
