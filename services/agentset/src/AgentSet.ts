@@ -1077,6 +1077,12 @@ export class AgentSet extends BaseEntity {
             return;
         }
 
+        // Debug: Log all agent IDs and their mission IDs
+        console.log(`[AgentSet] getAgentStatistics called for missionId: ${missionId}`);
+        for (const agent of this.agents.values()) {
+            console.log(`[AgentSet] Agent ID: ${agent.id}, missionId: ${agent.getMissionId()}`);
+        }
+
         let stats  : AgentSetStatistics = {
             agentsByStatus: new Map(),
             agentsCount: 0

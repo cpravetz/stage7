@@ -23,9 +23,60 @@ const getStepStatusBorderColor = (status: string): string => {
     }
 };
 
+// Utility to determine best text color (black/white) for background
+function getContrastYIQ(hexcolor: string): string {
+    let r, g, b;
+    if (hexcolor.startsWith('hsl')) {
+        // Convert HSL to RGB
+        const hsl = hexcolor.match(/hsl\(([-\d.]+),\s*([\d.]+)%,\s*([\d.]+)%\)/);
+        if (hsl) {
+            let h = parseFloat(hsl[1]);
+            let s = parseFloat(hsl[2]) / 100;
+            let l = parseFloat(hsl[3]) / 100;
+            let c = (1 - Math.abs(2 * l - 1)) * s;
+            let x = c * (1 - Math.abs((h / 60) % 2 - 1));
+            let m = l - c / 2;
+            let r1 = 0, g1 = 0, b1 = 0;
+            if (h < 60) { r1 = c; g1 = x; b1 = 0; }
+            else if (h < 120) { r1 = x; g1 = c; b1 = 0; }
+            else if (h < 180) { r1 = 0; g1 = c; b1 = x; }
+            else if (h < 240) { r1 = 0; g1 = x; b1 = c; }
+            else if (h < 300) { r1 = x; g1 = 0; b1 = c; }
+            else { r1 = c; g1 = 0; b1 = x; }
+            r = Math.round((r1 + m) * 255);
+            g = Math.round((g1 + m) * 255);
+            b = Math.round((b1 + m) * 255);
+        } else { r = g = b = 128; }
+    } else {
+        // Assume hex
+        let hex = hexcolor.replace('#', '');
+        if (hex.length === 3) {
+            hex = hex.split('').map(x => x + x).join('');
+        }
+        r = parseInt(hex.substr(0, 2), 16);
+        g = parseInt(hex.substr(2, 2), 16);
+        b = parseInt(hex.substr(4, 2), 16);
+    }
+    const yiq = (r * 299 + g * 587 + b * 114) / 1000;
+    return yiq >= 128 ? '#222' : '#fff';
+}
+
 export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const networkRef = useRef<Network | null>(null);
+
+    // --- Zoom controls ---
+    const handleZoom = (factor: number) => {
+        if (networkRef.current) {
+            const scale = networkRef.current.getScale();
+            networkRef.current.moveTo({ scale: Math.max(0.1, Math.min(5, scale * factor)) });
+        }
+    };
+    const handleResetZoom = () => {
+        if (networkRef.current) {
+            networkRef.current.moveTo({ scale: 1 });
+        }
+    };
 
     const { nodes, edges } = useMemo(() => {
         console.log('[NetworkGraph] raw agentStatistics prop:', JSON.stringify(agentStatistics, null, 2));
@@ -66,7 +117,13 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics }) =
                 continue;
             }
             agents.forEach((agent: AgentStatistics, agentIndex: number) => {
-                console.log(`[NetworkGraph] Agent ${agentIndex} ID: ${agent.id}, Color: ${agent.color}, Steps count: ${agent.steps ? agent.steps.length : 'N/A'}`);
+                console.log(`[NetworkGraph][DEBUG] Agent ${agentIndex} (status: ${statusCategory}) ID: ${agent.id}, Color: ${agent.color}, Steps count: ${agent.steps ? agent.steps.length : 'N/A'}`);
+                if (agent.steps && Array.isArray(agent.steps)) {
+                    agent.steps.forEach((step, stepIdx) => {
+                        console.log(`[NetworkGraph][DEBUG]   Step ${stepIdx}: id=${step.id}, verb=${step.verb}, status=${step.status}, dependencies=${JSON.stringify(step.dependencies)}`);
+                    });
+                }
+
                 const agentColor = agent.color || '#999999'; // Default agent color if undefined
 
                 if (!agent.steps || !Array.isArray(agent.steps)) {
@@ -76,45 +133,47 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics }) =
                 agent.steps.forEach(step => {
                     nodeCount++;
                     const stepStatusBorderColor = getStepStatusBorderColor(step.status);
+                    const fontColor = getContrastYIQ(agentColor);
                     console.log(`[NetworkGraph] Adding node for step: ${step.id}, Verb: ${step.verb}, Status: ${step.status}, AgentColor: ${agentColor}, BorderColor: ${stepStatusBorderColor}`);
 
                     newNodes.add({
                         id: step.id,
-                        label: `${step.verb}\n(${step.status.toUpperCase()})`, // Status in uppercase for emphasis
+                        label: `${step.verb}\n(${step.status.toUpperCase()})`,
                         color: {
-                            background: agentColor, // Agent color for node fill
-                            border: stepStatusBorderColor, // Status color for border
+                            background: agentColor,
+                            border: stepStatusBorderColor,
                             highlight: {
                                 background: agentColor,
                                 border: stepStatusBorderColor,
                             },
                             hover: {
                                 background: agentColor,
-                                border: '#FFC107' // A distinct hover border color
+                                border: '#FFC107'
                             }
                         },
-                        borderWidth: 3, // Make border more prominent
-                        group: agent.id, // Group by agent ID for potential future use or styling
-                        font: { color: '#FFFFFF' } // Assuming agent colors are generally dark, white font. Adjust if needed.
+                        borderWidth: 3,
+                        group: agent.id,
+                        font: { color: fontColor }
                     });
 
                     if (step.dependencies && Array.isArray(step.dependencies)) {
                         step.dependencies.forEach(depId => {
+                            if (!depId || depId === 'unknown-sourceStepId') return; // Skip invalid edges
                             console.log(`[NetworkGraph] Adding edge from ${depId} to ${step.id}`);
                             newEdges.add({
                                 from: depId,
                                 to: step.id,
                                 arrows: 'to',
                                 color: {
-                                    color: agentColor, // Edge color related to the agent of the 'to' node
+                                    color: agentColor,
                                     highlight: '#FFC107',
                                     hover: '#FFC107'
                                 },
                                 width: 2,
-                                smooth: { // Ensure smooth edges are configured for hierarchical layout
+                                smooth: {
                                     enabled: true,
                                     type: "cubicBezier",
-                                    forceDirection: "horizontal", // For LR layout
+                                    forceDirection: "horizontal",
                                     roundness: 0.5
                                 }
                             });
@@ -132,13 +191,12 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics }) =
     }, [agentStatistics]);
 
     useEffect(() => {
-        if (!containerRef.current ) { // If no container, do nothing.
+        if (!containerRef.current) {
             return;
         }
 
-        // If no nodes, clear network or don't initialize
         if (nodes.length === 0) {
-             if (networkRef.current) {
+            if (networkRef.current) {
                 networkRef.current.setData({ nodes: new DataSet<Node>(), edges: new DataSet<Edge>() });
                 console.log('[NetworkGraph] No nodes to display, clearing existing network.');
             } else {
@@ -212,18 +270,24 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics }) =
             console.log('[NetworkGraph] New network initialized.');
         }
 
+        // Only destroy on unmount
         return () => {
-            // Only destroy if component is truly unmounting.
-            // If nodes/edges change, we update, we don't want to destroy and recreate.
-            // However, the current structure of useEffect with [nodes, edges] dependency
-            // implies that if they change, the old effect cleanup runs (destroying).
-            // For this subtask, we'll keep it as is, but a more robust solution
-            // might separate initialization from update.
-            console.log('[NetworkGraph] useEffect: Cleanup. Current network will be destroyed if it exists.');
-            networkRef.current?.destroy();
-            networkRef.current = null;
+            if (networkRef.current) {
+                console.log('[NetworkGraph] useEffect: Cleanup on unmount. Network will be destroyed.');
+                networkRef.current.destroy();
+                networkRef.current = null;
+            }
         };
     }, [nodes, edges]); // Re-run effect if nodes or edges datasets change
 
-    return <div ref={containerRef} className="network-graph" />;
+    return (
+        <div style={{ position: 'relative', width: '100%' }}>
+            <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 2, display: 'flex', gap: 8 }}>
+                <button onClick={() => handleZoom(1.2)} title="Zoom In">＋</button>
+                <button onClick={() => handleZoom(1/1.2)} title="Zoom Out">－</button>
+                <button onClick={handleResetZoom} title="Reset Zoom">⟳</button>
+            </div>
+            <div ref={containerRef} className="network-graph" />
+        </div>
+    );
 };

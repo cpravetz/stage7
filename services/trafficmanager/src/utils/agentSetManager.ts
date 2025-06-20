@@ -522,7 +522,9 @@ class AgentSetManager {
                         console.error(`Invalid URL: ${agentSet.url}`);
                         return stats;
                     }
+                    console.log(`[AgentSetManager] Requesting statistics from AgentSet at ${agentSet.url} for missionId: ${missionId}`);
                     const response = await this.apiCall('get', `http://${agentSet.url}/statistics/${encodeURIComponent(missionId)}`);
+                    console.log(`[AgentSetManager] Response from AgentSet at ${agentSet.url}:`, JSON.stringify(response.data));
                     const serializedStats = response.data;
                     serializedStats.agentsByStatus = MapSerializer.transformFromSerialization(serializedStats.agentsByStatus);
                     console.log(`AgentSetManager:AgentSet `,agentSet.url,` stats: `, serializedStats);
@@ -548,7 +550,7 @@ class AgentSetManager {
                         });
                     }
                 } catch (error) {
-                    console.error(`Error fetching agent statistics from ${agentSet.url}:`, error instanceof Error ? error.message : error);
+                    console.error(`[AgentSetManager] Error fetching statistics from AgentSet at ${agentSet.url} for missionId: ${missionId}:`, error);
                 }
             }
             return stats;
