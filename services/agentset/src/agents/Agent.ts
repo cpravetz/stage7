@@ -1220,6 +1220,7 @@ The output MUST be a valid JSON array of task objects. Do not include any explan
      */
     async handleCollaborationMessage(message: any): Promise<void> {
         console.log(`Agent ${this.id} received collaboration message:`, message);
+        // TODO: Implement full collaboration message handling logic
         // Placeholder for actual handling logic
         // Example: Store message in a relevant property or trigger specific actions
     }
@@ -1230,6 +1231,7 @@ The output MUST be a valid JSON array of task objects. Do not include any explan
      */
     async processConflictResolution(resolution: any): Promise<void> {
         console.log(`Agent ${this.id} processing conflict resolution:`, resolution);
+        // TODO: Implement full conflict resolution processing logic
         // Placeholder for actual handling logic
     }
 
@@ -1333,10 +1335,7 @@ The output MUST be a valid JSON array of task objects. Do not include any explan
      */
     async handleCoordination(coordination: any): Promise<void> {
         console.log(`Agent ${this.id} handling coordination:`, coordination);
-        // Store coordination in context
-        const coordinations = this.context.get('coordinations') || [];
-        coordinations.push(coordination);
-        this.context.set('coordinations', coordinations);
+        // TODO: Implement full coordination handling logic
     }
 
     /**
