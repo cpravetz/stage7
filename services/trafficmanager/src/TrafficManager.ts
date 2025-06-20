@@ -173,6 +173,12 @@ export class TrafficManager extends BaseEntity {
             // Check if this status update affects any dependent agents
             await this.checkDependentAgents(agentId);
 
+            // If agent is completed or aborted, remove it from AgentSetManager's tracking
+            if (status === AgentStatus.COMPLETED || status === AgentStatus.ABORTED) {
+                console.log(`TrafficManager: Agent ${agentId} reached terminal state ${status}. Requesting removal from AgentSetManager.`);
+                await agentSetManager.removeAgentFromSet(agentId);
+            }
+
             return { message: `Agent ${agentId} status updated to ${status}` }
         } catch (error) { analyzeError(error as Error);
             console.error(`Error updating status for agent %s:`, agentId, error instanceof Error ? error.message : error);
@@ -295,7 +301,7 @@ export class TrafficManager extends BaseEntity {
                 agentStatisticsByStatus: MapSerializer.transformForSerialization(agentSetManagerStatistics.agentsByStatus)
             };
 
-            res.status(200).json(MapSerializer.transformForSerialization(trafficManagerStatistics));
+            res.status(200).json(trafficManagerStatistics);
         } catch (error) { //analyzeError(error as Error);
             console.error('Error fetching agent statistics:', error instanceof Error ? error.message : error);
             res.status(500).json({ error: 'Failed to fetch agent statistics' });

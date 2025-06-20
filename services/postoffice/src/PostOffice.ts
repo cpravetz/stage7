@@ -83,7 +83,7 @@ export class PostOffice extends BaseEntity {
 
         const limiter = rateLimit({
             windowMs: 15 * 60 * 1000,
-            max: 1000,
+            max: 10000, // Increased for debugging
         });
         this.app.use(limiter);
 

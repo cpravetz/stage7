@@ -94,7 +94,12 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           console.log('WebSocketContext: Received raw data.content.agentStatistics:', JSON.stringify(data.content.agentStatistics, null, 2));
         }
 
-        setStatistics(data.content); // This updates the broader statistics object
+        // --- FIX: Always deserialize agentStatistics before setting statistics ---
+        let statsToSet = { ...data.content };
+        if (statsToSet.agentStatistics && statsToSet.agentStatistics._type === 'Map') {
+          statsToSet.agentStatistics = MapSerializer.transformFromSerialization(statsToSet.agentStatistics);
+        }
+        setStatistics(statsToSet); // This updates the broader statistics object
 
         if (data.content && data.content.agentStatistics) {
           let processedAgentStats = data.content.agentStatistics;

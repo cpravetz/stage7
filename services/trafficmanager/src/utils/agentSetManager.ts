@@ -369,6 +369,34 @@ class AgentSetManager {
         }
     }
 
+    /**
+     * Removes an agent from an AgentSet and updates internal tracking.
+     * This is called when an agent has terminated (completed or aborted).
+     * @param agentId The ID of the agent to remove.
+     */
+    async removeAgentFromSet(agentId: string): Promise<void> {
+        console.log(`AgentSetManager: Attempting to remove agent ${agentId} from tracking.`);
+        const agentSetId = this.agentToSetMap.get(agentId);
+
+        if (agentSetId) {
+            const agentSet = this.agentSets.get(agentSetId);
+            if (agentSet) {
+                if (agentSet.agentCount > 0) {
+                    agentSet.agentCount--;
+                } else {
+                    console.warn(`AgentSetManager: AgentSet ${agentSetId} already has 0 agentCount before decrementing for agent ${agentId}.`);
+                }
+                console.log(`AgentSetManager: Decremented agent count for AgentSet ${agentSetId} to ${agentSet.agentCount} due to removal of agent ${agentId}.`);
+            } else {
+                console.warn(`AgentSetManager: AgentSet ${agentSetId} not found in agentSets map for agent ${agentId}. Cannot decrement count.`);
+            }
+            this.agentToSetMap.delete(agentId);
+            console.log(`AgentSetManager: Agent ${agentId} removed from agentToSetMap.`);
+        } else {
+            console.warn(`AgentSetManager: Agent ${agentId} not found in agentToSetMap. Cannot remove or decrement count.`);
+        }
+    }
+
     async sendMessageToAgent(agentId: string, message: any): Promise<any> {
         const agentSetUrl = await this.getAgentUrl(agentId);
         if (!agentSetUrl) {
@@ -494,7 +522,9 @@ class AgentSetManager {
                         console.error(`Invalid URL: ${agentSet.url}`);
                         return stats;
                     }
+                    console.log(`[AgentSetManager] Requesting statistics from AgentSet at ${agentSet.url} for missionId: ${missionId}`);
                     const response = await this.apiCall('get', `http://${agentSet.url}/statistics/${encodeURIComponent(missionId)}`);
+                    console.log(`[AgentSetManager] Response from AgentSet at ${agentSet.url}:`, JSON.stringify(response.data));
                     const serializedStats = response.data;
                     serializedStats.agentsByStatus = MapSerializer.transformFromSerialization(serializedStats.agentsByStatus);
                     console.log(`AgentSetManager:AgentSet `,agentSet.url,` stats: `, serializedStats);
@@ -520,7 +550,7 @@ class AgentSetManager {
                         });
                     }
                 } catch (error) {
-                    console.error(`Error fetching agent statistics from ${agentSet.url}:`, error instanceof Error ? error.message : error);
+                    console.error(`[AgentSetManager] Error fetching statistics from AgentSet at ${agentSet.url} for missionId: ${missionId}:`, error);
                 }
             }
             return stats;

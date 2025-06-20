@@ -203,6 +203,49 @@ Goal to analyze: {goal}"""
                      return msg
         return None # All good
 
+    def validate_and_assign_dependencies(self, plan_data: List[Dict[str, Any]], initial_inputs: List[str]) -> Optional[str]:
+        """
+        Ensures all steps have well-defined dependencies. The first step's inputs must match initial_inputs.
+        All other steps' inputs must be satisfied by initial_inputs, previous step outputs, or GET_USER_INPUT steps.
+        Returns error string if validation fails, None otherwise. Modifies plan_data in-place to assign dependencies.
+        """
+        output_keys = {}  # output_name -> step_number
+        step_numbers = {}
+        for idx, step in enumerate(plan_data):
+            step_number = step.get('number', idx + 1)
+            step_numbers[step_number] = step
+            step.setdefault('dependencies', [])
+            # Register outputs for future steps
+            for output_name in step.get('outputs', {}):
+                output_keys[output_name] = step_number
+
+        for idx, step in enumerate(plan_data):
+            step_number = step.get('number', idx + 1)
+            dependencies = set()
+            inputs_dict = step.get('inputs', {})
+            if not isinstance(inputs_dict, dict):
+                return f"Step {idx+1} has invalid 'inputs' field (must be a dictionary)."
+            for input_name, input_value in inputs_dict.items():
+                if isinstance(input_value, str) and input_value.startswith('${') and input_value.endswith('}'):
+                    ref_key = input_value[2:-1]
+                    if ref_key in output_keys:
+                        dependencies.add(output_keys[ref_key])
+                    elif ref_key in initial_inputs:
+                        continue  # Satisfied by initial inputs
+                    else:
+                        return f"Step {idx+1} input '{input_name}' references unknown source '{ref_key}'. Plan is invalid."
+                elif idx == 0:
+                    # First step: input must be in initial_inputs
+                    if input_name not in initial_inputs:
+                        return f"First step input '{input_name}' not in initial inputs. Plan is invalid."
+                else:
+                    # For other steps, input must be in initial_inputs or produced by previous steps
+                    if input_name not in initial_inputs and input_name not in output_keys:
+                        return f"Step {idx+1} input '{input_name}' not satisfied by initial inputs or previous outputs. Plan is invalid."
+            # Assign dependencies
+            step['dependencies'] = list(dependencies)
+        return None
+
     def convert_json_to_tasks(self, json_plan: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Convert JSON plan to task format. Assumes basic validation has passed."""
         try:
@@ -344,7 +387,18 @@ Goal to analyze: {goal}"""
                             "result": None,
                             "error": validation_error_message
                         }]
-
+                    # --- Strict dependency validation and assignment ---
+                    initial_inputs = list(inputs_map.keys())
+                    dep_error = self.validate_and_assign_dependencies(plan_data, initial_inputs)
+                    if dep_error:
+                        return [{
+                            "success": False,
+                            "name": "plan_dependency_error",
+                            "resultType": PluginParameterType.ERROR,
+                            "resultDescription": dep_error,
+                            "result": None,
+                            "error": dep_error
+                        }]
                     tasks = self.convert_json_to_tasks(plan_data)
                     # If convert_json_to_tasks itself returns an error structure (e.g. due to its own try-except)
                     if tasks and isinstance(tasks, list) and len(tasks) == 1 and tasks[0].get("resultType") == PluginParameterType.ERROR:

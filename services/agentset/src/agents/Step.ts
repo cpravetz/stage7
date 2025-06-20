@@ -628,56 +628,78 @@ export class Step {
      * @returns Array of Step instances
      */
     export function createFromPlan(plan: ActionVerbTask[], startingStepNo: number, persistenceManager: AgentPersistenceManager): Step[] {
-        // Ensure each task has an id before processing dependencies
-        plan.forEach(task => {
-            if (!task.id) {
-                task.id = uuidv4();
+        // Extend ActionVerbTask locally to include number and outputs for conversion
+        type PlanTask = ActionVerbTask & { number?: number; outputs?: Record<string, any> };
+        const planTasks = plan as PlanTask[];
+        const stepNumberToUUID: Record<number, string> = {};
+        const outputNameToUUID: Record<string, string> = {};
+        planTasks.forEach((task, idx) => {
+            const uuid = uuidv4();
+            task.id = uuid;
+            stepNumberToUUID[(task.number || idx + 1)] = uuid;
+        });
+        // First pass: register outputs and GET_USER_INPUT steps
+        planTasks.forEach((task, idx) => {
+            const stepUUID = task.id!;
+            if (task.outputs) {
+                Object.keys(task.outputs).forEach(outputName => {
+                    outputNameToUUID[outputName] = stepUUID;
+                });
+            }
+            if (task.actionVerb === 'GET_USER_INPUT' && task.outputs) {
+                Object.keys(task.outputs).forEach(outputName => {
+                    outputNameToUUID[outputName] = stepUUID;
+                });
             }
         });
-
-        return plan.map((task, index) => {
+        // Second pass: create steps and resolve dependencies
+        return planTasks.map((task, idx) => {
             const inputs = new Map<string, PluginInput>();
             if (task.inputs) {
                 if (task.inputs instanceof Map) {
-                    task.inputs.forEach((value: PluginInput, key: string) => inputs.set(key, value)); // Explicit types
+                    task.inputs.forEach((value: PluginInput, key: string) => inputs.set(key, value));
                 } else {
-                    Object.entries(task.inputs).forEach(([key, value]: [string, any]) => { // Explicit types
+                    Object.entries(task.inputs).forEach(([key, value]: [string, any]) => {
                         inputs.set(key, {
                             inputName: key,
-                            inputValue: value.inputValue !== undefined ? value.inputValue : value, // Handle if value is already shaped like PluginInput or is direct value
+                            inputValue: value.inputValue !== undefined ? value.inputValue : value,
                             args: value.args || {}
                         } as PluginInput);
                     });
                 }
             }
-
-            const dependencies = (task.dependencies || []).map((dep: PlanDependency) => { // Explicit type
-                // Defensive check: dep.sourceStepNo should be > 0 and within plan length
-                const sourceTaskInPlan = (dep.sourceStepNo && dep.sourceStepNo > 0 && dep.sourceStepNo <= plan.length)
-                    ? plan[dep.sourceStepNo - 1]
-                    : undefined;
-                
-                // Ensure sourceTaskInPlan and its id are defined before trying to access id
-                const sourceStepId = sourceTaskInPlan?.id;
-
-                return {
-                    inputName: dep.inputName,
-                    sourceStepId: sourceStepId, // Will be undefined if sourceTaskInPlan or its id is undefined
-                    outputName: dep.outputName // Added outputName as it's part of StepDependency
-                };
-            });
-
+            const dependencies: StepDependency[] = [];
+            if (task.dependencies && Array.isArray(task.dependencies)) {
+                task.dependencies.forEach((dep: any) => {
+                    let sourceStepId: string | undefined = undefined;
+                    if (dep.sourceStepNo && stepNumberToUUID[dep.sourceStepNo]) {
+                        sourceStepId = stepNumberToUUID[dep.sourceStepNo];
+                    } else if (dep.outputName && outputNameToUUID[dep.outputName]) {
+                        sourceStepId = outputNameToUUID[dep.outputName];
+                    } else if (dep.inputName && outputNameToUUID[dep.inputName]) {
+                        sourceStepId = outputNameToUUID[dep.inputName];
+                    }
+                    if (!sourceStepId) {
+                        throw new Error(`[createFromPlan] Cannot resolve dependency for step ${task.actionVerb} (stepNo ${startingStepNo + idx}): dep=${JSON.stringify(dep)}`);
+                    }
+                    dependencies.push({
+                        inputName: dep.inputName,
+                        sourceStepId,
+                        outputName: dep.outputName
+                    });
+                });
+            }
             const step = new Step({
-                id: task.id!, // task.id is ensured to be defined above
-                actionVerb: task.actionVerb, // Use task.actionVerb
-                stepNo: startingStepNo + index,
+                id: task.id!,
+                actionVerb: task.actionVerb,
+                stepNo: startingStepNo + idx,
                 inputs: inputs,
                 description: task.description,
-                dependencies: dependencies as StepDependency[], // Cast here after ensuring outputName is present
+                dependencies: dependencies,
                 recommendedRole: task.recommendedRole,
                 persistenceManager: persistenceManager
             });
-            console.log(`[Step.createFromPlan] Source task.actionVerb: '${task.actionVerb}', Created step.actionVerb: '${step.actionVerb}'`);
+            console.log(`[Step.createFromPlan] Created step.actionVerb: '${step.actionVerb}', Step ID: ${step.id}, Dependencies: ${JSON.stringify(dependencies)}`);
             return step;
         });
     }
