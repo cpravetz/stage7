@@ -77,9 +77,7 @@ Configuration management allows services to retrieve and update configuration va
 
 The configuration management implementation consists of the following components:
 
-1. **ConfigService**: A service for storing and retrieving configuration values
-2. **ConfigClient**: A client library for interacting with the ConfigService
-3. **Configuration Files**: JSON files for storing configuration values
+1. **Configuration Files**: JSON files for storing configuration values
 
 ### Configuration Storage
 
@@ -90,31 +88,26 @@ Configuration values are stored in JSON files, one for each environment:
 - staging.json
 - production.json
 
-The ConfigService loads these files at startup and provides an API for retrieving and updating values.
+Services load these files at startup.
 
 ### Configuration Retrieval
 
-Services can retrieve configuration values using the ConfigClient:
+Services can retrieve configuration values by reading environment variables or configuration files.
 
 ```typescript
-const value = await configClient.get('app.name', 'Default Name');
+// Example: Get database host from environment variable or use a default value
+const dbHost = process.env.DATABASE_HOST || 'localhost';
 ```
 
 This returns the value of the specified configuration key, or the default value if the key is not found.
 
 ### Configuration Updates
 
-Services can update configuration values using the ConfigClient:
-
-```typescript
-await configClient.set('app.name', 'New Name', 'Application name');
-```
-
-This updates the value of the specified configuration key and saves it to the appropriate configuration file.
+Configuration values can be updated by modifying the environment variables or configuration files and restarting the service.
 
 ### Caching
 
-The ConfigClient caches configuration values to reduce the number of requests to the ConfigService. The cache is invalidated after a configurable TTL (default: 1 minute).
+Caching mechanisms can be implemented at the application level if needed.
 
 ## Integration
 
@@ -122,6 +115,5 @@ The service discovery and configuration management systems are integrated with t
 
 1. **BaseEntity**: Enhanced to register with Consul and discover other services
 2. **PostOffice**: Updated to use service discovery for routing messages
-3. **All Services**: Updated to use the ConfigClient for configuration
 
 This integration provides a more robust and flexible system that can adapt to changing environments and requirements.

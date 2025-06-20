@@ -1,5 +1,5 @@
 import axios, { AxiosInstance, InternalAxiosRequestConfig } from 'axios';
-import { ServiceTokenManager } from '../security/ServiceTokenManager.js';
+import { ServiceTokenManager } from '../security/ServiceTokenManager';
 
 // Environment configuration
 const ENV = process.env.NODE_ENV || 'development';

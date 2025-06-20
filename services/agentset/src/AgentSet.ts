@@ -2,7 +2,6 @@ import express from 'express';
 import { Agent } from './agents/Agent';
 import { MapSerializer, BaseEntity, createAuthenticatedAxios } from '@cktmcs/shared';
 import { v4 as uuidv4 } from 'uuid';
-import axios from 'axios';
 import { AgentSetStatistics, PluginInput } from '@cktmcs/shared';
 import { AgentPersistenceManager } from './utils/AgentPersistenceManager';
 import { analyzeError } from '@cktmcs/errorhandler';
@@ -11,9 +10,6 @@ import { AgentLifecycleManager } from './lifecycle/AgentLifecycleManager';
 import { CollaborationManager } from './collaboration/CollaborationManager';
 import { SpecializationFramework } from './specialization/SpecializationFramework';
 import { DomainKnowledge } from './specialization/DomainKnowledge';
-
-// Expose AgentSet instance globally for agent dependency analysis
-let agentSetInstance: AgentSet | undefined;
 
 export class AgentSet extends BaseEntity {
     agents: Map<string, Agent> = new Map(); // Store agents by their ID
@@ -696,27 +692,7 @@ export class AgentSet extends BaseEntity {
 
        this.app.get('/statistics/:missionId', this.getAgentStatistics.bind(this));
        this.app.post('/updateFromAgent', this.updateFromAgent.bind(this));
-       // Note: The '/agent/:agentId/output' route is already defined above with .bind(this), this is a duplicate.
-       // Removing this duplicate:
-       // this.app.get('/agent/:agentId/output', async (req: express.Request, res: express.Response) => {
-       this.app.post('/saveAgent', async (req: express.Request, res: express.Response, next: express.NextFunction) => {
-            const { agentId } = req.params;
-            const agent = this.agents.get(agentId);
-
-            if (!agent) {
-                res.status(404).send({ error: `Agent with id ${agentId} not found` });
-            }
-            else {
-                try {
-                    const output = await agent.getOutput();
-                    res.status(200).send({ output });
-                } catch (error) { analyzeError(error as Error);
-                    console.error('Error fetching output for agent %s:', agentId, error instanceof Error ? error.message : error);
-                    res.status(500).send({ error: `Failed to fetch output for agent ${agentId}` });
-                }
-            }
-        });
-
+       // Note: The '/agent/:agentId/output' route is already defined above with .bind(this)
 
        this.app.post('/saveAgent', async (req: express.Request, res: express.Response) => {
             const { agentId } = req.body;
@@ -1217,9 +1193,4 @@ export class AgentSet extends BaseEntity {
     }
 }
 
-agentSetInstance = new AgentSet(); // Start the AgentSet application
-// @ts-ignore
-if (typeof global !== 'undefined') {
-    // @ts-ignore
-    global.agentSetInstance = agentSetInstance;
-}
+new AgentSet(); // Start the AgentSet application

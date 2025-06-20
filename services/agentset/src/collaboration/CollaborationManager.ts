@@ -5,7 +5,6 @@ import { ConflictResolution } from './ConflictResolution';
 import { CollaborationMessage, CollaborationMessageType, CollaborationProtocol, TaskDelegationRequest, TaskDelegationResponse, ConflictResolutionRequest, ConflictResolutionResponse, KnowledgeSharing, createCollaborationMessage } from './CollaborationProtocol';
 import { v4 as uuidv4 } from 'uuid';
 import { analyzeError } from '@cktmcs/errorhandler';
-import axios from 'axios';
 
 /**
  * Collaboration manager
@@ -356,18 +355,12 @@ export class CollaborationManager implements CollaborationProtocol {
    * @returns Task delegation response
    */
   async delegateTask(
+    senderId: string,
     recipientId: string,
     request: TaskDelegationRequest
   ): Promise<TaskDelegationResponse> {
     try {
-      // Get sender agent ID from the current context
-      const senderAgent = this.getCurrentAgent();
-
-      if (!senderAgent) {
-        throw new Error('No current agent context');
-      }
-
-      return await this.taskDelegation.delegateTask(senderAgent.id, recipientId, request);
+      return await this.taskDelegation.delegateTask(senderId, recipientId, request);
     } catch (error) {
       analyzeError(error as Error);
       console.error('Error delegating task:', error);
@@ -386,21 +379,15 @@ export class CollaborationManager implements CollaborationProtocol {
    * @param knowledge Knowledge to share
    */
   async shareKnowledge(
+    senderId: string,
     recipientId: string | 'broadcast',
     knowledge: KnowledgeSharing
   ): Promise<void> {
     try {
-      // Get sender agent ID from the current context
-      const senderAgent = this.getCurrentAgent();
-
-      if (!senderAgent) {
-        throw new Error('No current agent context');
-      }
-
       // Create and send knowledge share message
       const message = createCollaborationMessage(
         CollaborationMessageType.KNOWLEDGE_SHARE,
-        senderAgent.id,
+        senderId,
         recipientId,
         knowledge
       );
@@ -415,25 +402,20 @@ export class CollaborationManager implements CollaborationProtocol {
 
   /**
    * Request conflict resolution
+   * @param senderId Sender agent ID
    * @param recipientId Recipient agent ID
    * @param request Conflict resolution request
    * @returns Conflict resolution response
    */
   async resolveConflict(
+    senderId: string,
     recipientId: string,
     request: ConflictResolutionRequest
   ): Promise<ConflictResolutionResponse> {
     try {
-      // Get sender agent ID from the current context
-      const senderAgent = this.getCurrentAgent();
-
-      if (!senderAgent) {
-        throw new Error('No current agent context');
-      }
-
       // Create conflict
       const conflict = await this.conflictResolution.createConflict(
-        senderAgent.id,
+        senderId,
         request,
         [recipientId]
       );
@@ -473,25 +455,6 @@ export class CollaborationManager implements CollaborationProtocol {
         explanation: error instanceof Error ? error.message : String(error)
       };
     }
-  }
-
-  /**
-   * Get the current agent from context
-   * @returns Current agent or undefined
-   */
-  private getCurrentAgent(): Agent | undefined {
-    // In a real implementation, this would use a context system
-    // For now, we'll just return the first agent as a placeholder
-    return this.agents.values().next().value;
-  }
-
-  /**
-   * Set the current agent context
-   * @param agentId Agent ID
-   */
-  setCurrentAgentContext(agentId: string): void {
-    // In a real implementation, this would store the agent ID in a context system
-    console.log(`Setting current agent context to ${agentId}`);
   }
 
   /**

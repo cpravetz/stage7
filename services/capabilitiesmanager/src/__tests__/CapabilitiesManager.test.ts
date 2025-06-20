@@ -3,14 +3,14 @@ import * as fs from 'fs';
 import * as child_process from 'child_process';
 import * as path from 'path';
 import { promisify } from 'util'; // This will be mocked via spyOn
-import { ConfigManager } from '../utils/configManager.js';
+import { ConfigManager } from '../utils/configManager';
 
 // Mock ConfigManager and other dependencies to simplify CM instantiation
-jest.mock('../utils/configManager.js');
-jest.mock('../utils/pluginRegistry.js');
-jest.mock('../utils/pluginPackager.js');
-jest.mock('../utils/containerManager.js');
-jest.mock('../utils/pluginRepositoryManager.js');
+jest.mock('../utils/configManager');
+jest.mock('../utils/pluginRegistry');
+jest.mock('../utils/pluginPackager');
+jest.mock('../utils/containerManager');
+jest.mock('../utils/pluginRepositoryManager');
 jest.mock('@cktmcs/shared', () => ({
     ...jest.requireActual('@cktmcs/shared'), // keep other shared utilities if needed
     BaseEntity: class { // Mock BaseEntity to avoid its constructor logic (like PostOffice registration)

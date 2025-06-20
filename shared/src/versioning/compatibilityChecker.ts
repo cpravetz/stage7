@@ -1,5 +1,5 @@
 import { PluginDefinition, PluginParameter } from '../types/Plugin';
-import { compareVersions, areVersionsCompatible } from './semver.js';
+import { compareVersions, areVersionsCompatible } from './semver';
 
 /**
  * Interface for compatibility check results

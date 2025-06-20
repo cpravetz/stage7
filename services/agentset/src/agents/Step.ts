@@ -9,9 +9,19 @@ export enum StepStatus {
     PENDING = 'pending',
     RUNNING = 'running',
     COMPLETED = 'completed',
-    ERROR = 'error'
+    ERROR = 'error',
+    PAUSED = 'paused' // Assuming PAUSED is a valid status based on other discussions
 }
 
+export interface StepModification {
+    description?: string;
+    inputs?: Map<string, PluginInput>; // For complete replacement of inputs
+    updateInputs?: Map<string, PluginInput>; // For merging/updating specific inputs
+    status?: StepStatus;
+    actionVerb?: string;
+    recommendedRole?: string;
+    // Add other modifiable fields as necessary
+}
 
 export class Step {
     readonly id: string;
@@ -24,6 +34,7 @@ export class Step {
     result?: PluginOutput[];
     timeout?: number;
     recommendedRole?: string;
+    awaitsSignal: string;
     private tempData: Map<string, any> = new Map();
     private persistenceManager: AgentPersistenceManager;
 
@@ -47,6 +58,7 @@ export class Step {
         this.status = params.status || StepStatus.PENDING;
         this.recommendedRole = params.recommendedRole;
         this.persistenceManager = params.persistenceManager;
+        this.awaitsSignal = '';
         //console.log(`Constructing new step ${this.id} created. Dependencies ${this.dependencies.map(dep => dep.sourceStepId).join(', ')}`);
 
         // Log step creation event
@@ -157,18 +169,6 @@ export class Step {
                 case 'EXECUTE_PLAN_TEMPLATE':
                     result = await this.handleExecutePlanTemplate(executeAction);
                     break;
-            /*                    case 'TRANSFORM':
-                                result = await this.handleTransform();
-                                break;
-                            case 'MERGE':
-                                result = await this.handleMerge();
-                                break;
-                            case 'FILTER':
-                                result = await this.handleFilter();
-                                break;
-                            case 'MAP':
-                                result = await this.handleMap();
-                                break;*/
                 default:
                     result = await executeAction(this);
             }
@@ -561,25 +561,25 @@ export class Step {
      */
     private async handleExecutePlanTemplate(executeAction: (step: Step) => Promise<PluginOutput[]>): Promise<PluginOutput[]> {
         const templateIdInput = this.inputs.get('templateId');
-        const templateInputsInput = this.inputs.get('inputs');
-        const userIdInput = this.inputs.get('userId');
-        const executionModeInput = this.inputs.get('executionMode');
+        const templateInputsInput = this.inputs.get('inputs'); // Ensure this is correctly typed if it's complex
+        const userIdInput = this.inputs.get('userId'); // Ensure this is correctly typed
+        const executionModeInput = this.inputs.get('executionMode'); // Ensure this is correctly typed
 
-        if (!templateIdInput) {
+        if (!templateIdInput || !templateIdInput.inputValue || typeof templateIdInput.inputValue !== 'string') {
             return [{
                 success: false,
                 name: 'error',
                 resultType: PluginParameterType.ERROR,
                 resultDescription: '[Step]Error in EXECUTE_PLAN_TEMPLATE step',
                 result: null,
-                error: 'Missing required input: templateId'
+                error: 'Missing or invalid required input: templateId must be a string'
             }];
         }
 
         const templateId = templateIdInput.inputValue as string;
-        const templateInputs = templateInputsInput?.inputValue || {};
-        const userId = userIdInput?.inputValue as string || 'agent-user';
-        const executionMode = executionModeInput?.inputValue as string || 'automatic';
+        const templateInputs = templateInputsInput?.inputValue || {}; // Default to empty object if undefined
+        const userId = (userIdInput?.inputValue as string) || 'agent-user'; // Default userId
+        const executionMode = (executionModeInput?.inputValue as string) || 'automatic'; // Default executionMode
 
         // Create a special step that will be sent to CapabilitiesManager for plan template execution
         const planExecutionStep = new Step({
@@ -617,6 +617,43 @@ export class Step {
 
         // If no execution ID, return the raw result
         return result;
+    }
+
+    /**
+     * Applies modifications to the step instance.
+     * @param modifications - An object containing properties to update.
+     */
+    public applyModifications(modifications: StepModification): void {
+        if (modifications.description !== undefined) {
+            this.description = modifications.description;
+            this.logEvent({ eventType: 'step_description_updated', stepId: this.id, newDescription: this.description });
+        }
+        if (modifications.inputs) { // Complete replacement
+            this.inputs = new Map(modifications.inputs); // Assuming Map or convert from Record
+            this.logEvent({ eventType: 'step_inputs_replaced', stepId: this.id });
+        }
+        if (modifications.updateInputs) { // Merge/update
+            if (!this.inputs) this.inputs = new Map<string, PluginInput>();
+            modifications.updateInputs.forEach((value, key) => {
+                this.inputs.set(key, value);
+            });
+            this.logEvent({ eventType: 'step_inputs_updated', stepId: this.id });
+        }
+        if (modifications.status) {
+            this.updateStatus(modifications.status); // Use existing updateStatus to ensure logging
+        }
+        if (modifications.actionVerb) {
+            // Note: Changing actionVerb is a significant change and might require re-evaluation of dependencies or capabilities.
+            // For now, just updating the property.
+            console.warn(`Agent ${this.id.split('_')[0]}: Step ${this.id} actionVerb changed from ${this.actionVerb} to ${modifications.actionVerb}. This might have execution implications.`);
+            (this as any).actionVerb = modifications.actionVerb; // Bypass readonly if necessary, or reconsider readonly
+            this.logEvent({ eventType: 'step_actionVerb_updated', stepId: this.id, oldActionVerb: this.actionVerb, newActionVerb: modifications.actionVerb });
+        }
+        if (modifications.recommendedRole) {
+            this.recommendedRole = modifications.recommendedRole;
+            this.logEvent({ eventType: 'step_recommendedRole_updated', stepId: this.id, newRecommendedRole: this.recommendedRole });
+        }
+        // Add handling for other modifiable fields here
     }
 }
 

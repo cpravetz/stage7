@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { createAuthenticatedAxios } from '../http/createAuthenticatedAxios.js';
+import { createAuthenticatedAxios } from '../http/createAuthenticatedAxios';
 
 /**
  * Service Discovery client for Consul

@@ -17,11 +17,6 @@ interface ServiceCredential {
 
 // Define service types and their credentials
 const serviceRegistry: Record<string, ServiceCredential> = {
-  'ConfigService': {
-    id: 'ConfigService',
-    secret: process.env.CONFIG_SERVICE_SECRET || 'stage7AuthSecret',
-    roles: ['config:read', 'config:write']
-  },
   'PostOffice': {
     id: 'PostOffice',
     secret: process.env.POSTOFFICE_SECRET || 'stage7AuthSecret',

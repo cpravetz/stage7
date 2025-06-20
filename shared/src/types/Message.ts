@@ -29,7 +29,8 @@ export enum MessageType {
     PLUGIN_RESULT = "pluginResult",
     PLUGIN_ERROR = "pluginError",
     PLUGIN_PROGRESS = "pluginProgress",
-    PLUGIN_CANCEL = "pluginCancel"
+    PLUGIN_CANCEL = "pluginCancel",
+    COORDINATION_MESSAGE = "coordinationMessage" // Added for agent-to-agent coordination
 }
 
 /**
