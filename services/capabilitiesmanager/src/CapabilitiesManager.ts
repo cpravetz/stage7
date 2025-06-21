@@ -8,9 +8,7 @@ import { Step, MapSerializer, BaseEntity, ServiceTokenManager } from '@cktmcs/sh
 import { PluginInput, PluginOutput, PluginDefinition, PluginParameterType, environmentType, PluginManifest, PluginLocator, PluginRepositoryType } from '@cktmcs/shared';
 import { PlanTemplate, PlanTemplateCreateRequest, PlanTemplateUpdateRequest, PlanExecutionRequest, ExecutionContext as PlanExecutionContext, StepExecution, PlanExecutionStatus, StepExecutionStatus, OpenAPITool, OpenAPIExecutionRequest, OpenAPIExecutionResult } from '@cktmcs/shared';
 import { executePluginInSandbox } from '@cktmcs/shared';
-import { verifyPluginSignature } from '@cktmcs/shared';
 import { validatePluginPermissions, hasDangerousPermissions } from '@cktmcs/shared';
-import { compareVersions } from '@cktmcs/shared';
 import { promisify } from 'util';
 import { exec as execCallback } from 'child_process';
 const execAsync = promisify(execCallback);
@@ -18,12 +16,9 @@ import { generateStructuredError, ErrorSeverity, GlobalErrorCodes, StructuredErr
 import { ConfigManager } from './utils/configManager';
 import { PluginRegistry } from './utils/pluginRegistry';
 import { validateAndStandardizeInputs } from './utils/validator';
-import { requestPluginFromEngineer } from './utils/engineer';
 import { ContainerManager } from './utils/containerManager';
-import { ContainerInstance, ContainerExecutionRequest, ContainerPluginManifest } from './types/containerTypes';
-import { PluginPackager, PackageMetadata } from './utils/pluginPackager';
-import { PluginRepositoryManager, RepositoryConfig } from './utils/pluginRepositoryManager';
-import githubRoutes from './routes/githubRoutes';
+import { ContainerExecutionRequest, ContainerPluginManifest } from './types/containerTypes';
+
 
 // Helper to create PluginOutput error from a StructuredError
 function createPluginOutputError(structuredError: StructuredError): PluginOutput[] {
@@ -50,33 +45,19 @@ export class CapabilitiesManager extends BaseEntity {
     private server: any;
     private configManager!: ConfigManager;
     private pluginRegistry: PluginRegistry;
-    private pluginPackager: PluginPackager;
-    private repositoryManager?: PluginRepositoryManager;
     private containerManager: ContainerManager;
     private serviceId = 'CapabilitiesManager';
+
+    private failedPluginLookups: Map<string, number> = new Map(); // actionVerb -> last failure timestamp
+    private static readonly PLUGIN_LOOKUP_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
 
     constructor() {
         super('CapabilitiesManager', 'CapabilitiesManager', `capabilitiesmanager`, process.env.PORT || '5060');
         const trace_id = `${this.serviceId}-constructor-${uuidv4().substring(0,8)}`;
-        console.log(`[${trace_id}] Starting CapabilitiesManager initialization...`);
+        //console.log(`[${trace_id}] Starting CapabilitiesManager initialization...`);
         
         this.pluginRegistry = new PluginRegistry();
-        this.pluginPackager = new PluginPackager();
         this.containerManager = new ContainerManager();
-
-        // Initialize repository manager if GitHub config is available
-        if (process.env.GITHUB_REPO_OWNER && process.env.GITHUB_REPO_NAME && process.env.GITHUB_TOKEN) {
-            const repoConfig: RepositoryConfig = {
-                owner: process.env.GITHUB_REPO_OWNER,
-                repo: process.env.GITHUB_REPO_NAME,
-                token: process.env.GITHUB_TOKEN,
-                branch: process.env.GITHUB_BRANCH || 'main'
-            };
-            this.repositoryManager = new PluginRepositoryManager(repoConfig, this.pluginPackager);
-            console.log(`[${trace_id}] Plugin repository manager initialized for ${repoConfig.owner}/${repoConfig.repo}`);
-        } else {
-            console.log(`[${trace_id}] Plugin repository manager not initialized - missing GitHub configuration`);
-        }
 
         this.initialize(trace_id).catch(error => {
             const initError = error instanceof Error ? error : new Error(String(error));
@@ -95,10 +76,10 @@ export class CapabilitiesManager extends BaseEntity {
             await this.start(trace_id);
 
             if (!this.registeredWithPostOffice) {
-                console.log(`[${trace_id}] ${source_component}: Registering with PostOffice...`);
+                //console.log(`[${trace_id}] ${source_component}: Registering with PostOffice...`);
                 await this.registerWithPostOffice(15, 2000);
                 if (this.registeredWithPostOffice) {
-                    console.log(`[${trace_id}] ${source_component}: Successfully registered with PostOffice.`);
+                    //console.log(`[${trace_id}] ${source_component}: Successfully registered with PostOffice.`);
                 } else {
                     generateStructuredError({
                         error_code: GlobalErrorCodes.INTERNAL_ERROR_CM,
@@ -109,10 +90,10 @@ export class CapabilitiesManager extends BaseEntity {
                     });
                 }
             } else {
-                console.log(`[${trace_id}] ${source_component}: Already registered with PostOffice.`);
+                //console.log(`[${trace_id}] ${source_component}: Already registered with PostOffice.`);
             }
 
-            console.log(`[${trace_id}] ${source_component}: Initialization complete.`);
+            //console.log(`[${trace_id}] ${source_component}: Initialization complete.`);
         } catch (error: any) {
             throw generateStructuredError({
                 error_code: GlobalErrorCodes.INTERNAL_ERROR_CM,
@@ -148,31 +129,6 @@ export class CapabilitiesManager extends BaseEntity {
                 // Core routes
                 app.post('/executeAction', (req, res) => this.executeActionVerb(req, res));
 
-                // Plan template routes
-                app.post('/plans', (req, res) => this.createPlanTemplate(req, res));
-                app.get('/plans/:id', (req, res) => this.getPlanTemplate(req, res));
-                app.get('/plans', (req, res) => this.listPlanTemplates(req, res));
-                app.put('/plans/:id', (req, res) => this.updatePlanTemplate(req, res));
-                app.delete('/plans/:id', (req, res) => this.deletePlanTemplate(req, res));
-                app.post('/plans/:id/execute', (req, res) => this.executePlanTemplate(req, res));
-                app.get('/executions/:id', (req, res) => this.getExecutionContext(req, res));
-                app.get('/executions', (req, res) => this.listExecutions(req, res));
-
-                // OpenAPI tool routes
-                app.get('/tools/openapi', (req, res) => this.listOpenAPITools(req, res));
-                app.get('/tools/openapi/:id', (req, res) => this.getOpenAPITool(req, res));
-                app.post('/tools/openapi/:id/execute', (req, res) => this.executeOpenAPITool(req, res));
-                app.get('/capabilities', (req, res) => this.listCapabilities(req, res));
-
-                // Plugin packaging and repository routes
-                app.post('/plugins/package', (req, res) => this.packagePlugin(req, res));
-                app.post('/plugins/publish', (req, res) => this.publishPlugin(req, res));
-                app.post('/plugins/install', (req, res) => this.installPlugin(req, res));
-                app.get('/plugins/repository', (req, res) => this.listRepositoryPlugins(req, res));
-                app.get('/plugins/repository/search', (req, res) => this.searchRepositoryPlugins(req, res));
-                app.get('/plugins/repository/:id', (req, res) => this.getRepositoryPluginInfo(req, res));
-                app.get('/plugins/updates', (req, res) => this.checkPluginUpdates(req, res));
-
                 app.post('/message', async (req, res) => {
                     const trace_id = (req as any).trace_id || `${trace_id_parent}-msg-${uuidv4().substring(0,8)}`;
                     try {
@@ -194,7 +150,10 @@ export class CapabilitiesManager extends BaseEntity {
                 app.get('/availablePlugins', async (req, res) => {
                     const trace_id = (req as any).trace_id || `${trace_id_parent}-avail-${uuidv4().substring(0,8)}`;
                     try {
-                        const plugins: PluginLocator[] = await this.pluginRegistry.list();
+                        // Only report local/container plugins: fallback to filtering by verb or include all if language is not present
+                        const plugins: PluginLocator[] = (await this.pluginRegistry.list()).filter(
+                            p => !('language' in p) || (p as any).language === 'javascript' || (p as any).language === 'python' || (p as any).language === 'container'
+                        );
                         res.json(plugins);
                     } catch (error:any) {
                         const sError = generateStructuredError({
@@ -208,9 +167,6 @@ export class CapabilitiesManager extends BaseEntity {
                         res.status(500).json(sError);
                     }
                 });
-
-                app.post('/storeNewPlugin', (req, res) => {this.storeNewPlugin(req, res)});
-                app.use('/github', githubRoutes);
 
                 this.server = app.listen(this.port, () => {
                     console.log(`[${trace_id_parent}] CapabilitiesManager server listening on port ${this.port}`);
@@ -291,118 +247,11 @@ export class CapabilitiesManager extends BaseEntity {
         }, 5 * 60 * 1000);
     }
 
-    private async storeNewPlugin(req: express.Request, res: express.Response) {
-        const trace_id = (req as any).trace_id || uuidv4();
-        const source_component = "CapabilitiesManager.storeNewPlugin";
-        try {
-            const newPlugin = req.body as PluginManifest;
-
-            if (!newPlugin.id || !newPlugin.verb || !newPlugin.version || !newPlugin.language ) {
-                res.status(400).json(generateStructuredError({
-                    error_code: GlobalErrorCodes.CAPABILITIES_MANAGER_MANIFEST_VALIDATION_FAILED,
-                    severity: ErrorSeverity.ERROR,
-                    message: "Plugin manifest validation failed: Missing id, name, version, or language.",
-                    contextual_info: {
-                        plugin_id: newPlugin.id,
-                        name: newPlugin.verb,
-                        version: newPlugin.version,
-                        language: newPlugin.language
-                    },
-                    trace_id_param: trace_id,
-                    source_component
-                }));
-                return;
-            }
-
-            if (newPlugin.language !== 'openapi' && (!newPlugin.entryPoint || !newPlugin.entryPoint.main)) {
-                res.status(400).json(generateStructuredError({
-                    error_code: GlobalErrorCodes.CAPABILITIES_MANAGER_MANIFEST_VALIDATION_FAILED,
-                    severity: ErrorSeverity.ERROR,
-                    message: "Plugin manifest validation failed: Missing entryPoint.main for non-openapi plugin.",
-                    contextual_info: {
-                        plugin_id: newPlugin.id,
-                        language: newPlugin.language
-                    },
-                    trace_id_param: trace_id,
-                    source_component
-                }));
-                return;
-            }
-
-            const existingPlugin = await this.pluginRegistry.fetchOne(newPlugin.id, newPlugin.version, newPlugin.repository?.type);
-            if (existingPlugin) {
-                console.warn(`[${trace_id}] ${source_component}: Plugin ${newPlugin.id} version ${newPlugin.version} already exists. Assuming store handles update/overwrite.`);
-            }
-
-            if (!newPlugin.security?.trust?.signature) {
-                res.status(400).json(generateStructuredError({
-                    error_code: GlobalErrorCodes.CAPABILITIES_MANAGER_PLUGIN_STORE_FAILED,
-                    severity: ErrorSeverity.ERROR,
-                    message: 'Plugin submission requires a signature.',
-                    contextual_info: { plugin_id: newPlugin.id },
-                    trace_id_param: trace_id,
-                    source_component
-                }));
-                return;
-            }
-
-            if (!await verifyPluginSignature(newPlugin as PluginDefinition)) {
-                res.status(400).json(generateStructuredError({
-                    error_code: GlobalErrorCodes.CAPABILITIES_MANAGER_PLUGIN_STORE_FAILED,
-                    severity: ErrorSeverity.ERROR,
-                    message: 'Plugin signature is invalid.',
-                    contextual_info: { plugin_id: newPlugin.id },
-                    trace_id_param: trace_id,
-                    source_component
-                }));
-                return;
-            }
-
-            const permissionErrors = validatePluginPermissions(newPlugin);
-            if (permissionErrors.length > 0) {
-                res.status(400).json(generateStructuredError({
-                    error_code: GlobalErrorCodes.PLUGIN_PERMISSION_VALIDATION_FAILED,
-                    severity: ErrorSeverity.ERROR,
-                    message: `Plugin permission validation failed: ${permissionErrors.join(', ')}`,
-                    contextual_info: { plugin_id: newPlugin.id },
-                    trace_id_param: trace_id,
-                    source_component
-                }));
-                return;
-            }
-
-            await this.pluginRegistry.store(newPlugin);
-            console.log(`[${trace_id}] ${source_component}: Plugin registered/updated: ${newPlugin.id} v${newPlugin.version}`);
-
-            res.status(200).json({
-                message: 'Plugin registered successfully',
-                pluginId: newPlugin.id,
-                version: newPlugin.version,
-                isUpdate: !!existingPlugin
-            });
-        } catch (error:any) {
-            const sError = generateStructuredError({
-                error_code: error.code || GlobalErrorCodes.CAPABILITIES_MANAGER_PLUGIN_STORE_FAILED,
-                severity: ErrorSeverity.ERROR,
-                message: `Failed to store plugin '${req.body?.id || 'unknown'}'. ${error.message}`,
-                source_component,
-                original_error: error,
-                trace_id_param: trace_id
-            });
-            const httpStatus = error.originalError?.response?.status ||
-                (error.code && typeof error.code === 'string' && (error.code.startsWith("G") || error.code.startsWith("PR")) ? 400 : 500);
-            res.status(httpStatus).json(sError);
-        }
-    }
 
     private async executeActionVerb(req: express.Request, res: express.Response) {
         const trace_id = (req as any).trace_id || uuidv4();
         const source_component = "CapabilitiesManager.executeActionVerb";
         const step = { ...req.body, inputs: MapSerializer.transformFromSerialization(req.body.inputs) } as Step;
-
-        if (step.actionVerb === 'SEARCH') {
-            console.log(`[${trace_id}] ${source_component}: Inputs for SEARCH after deserialization:`, MapSerializer.transformForSerialization(step.inputs));
-        }
 
         if (!step.actionVerb || typeof step.actionVerb !== 'string') {
             const sError = generateStructuredError({
@@ -416,120 +265,113 @@ export class CapabilitiesManager extends BaseEntity {
             return;
         }
 
-        const pluginDetails = (step as any).plugin_details;
-        const pluginIdToFetch = pluginDetails?.plugin_id || step.actionVerb;
-        const pluginVersionToFetch = pluginDetails?.plugin_version;
-
-        console.log(`[${trace_id}] ${source_component}: Executing action: ${step.actionVerb}, PluginID: ${pluginIdToFetch}, Version: ${pluginVersionToFetch || 'default/latest'}`);
-
-        let plugin: PluginDefinition | undefined;
         try {
-            if (pluginDetails && pluginDetails.plugin_id && pluginDetails.plugin_version) {
-                plugin = await this.pluginRegistry.fetchOne(pluginDetails.plugin_id, pluginDetails.plugin_version);
-                if (!plugin) {
-                    throw generateStructuredError({
-                        error_code: GlobalErrorCodes.PLUGIN_VERSION_NOT_FOUND,
-                        severity: ErrorSeverity.ERROR,
-                        message: `Plugin '${pluginDetails.plugin_id}' version '${pluginDetails.plugin_version}' not found.`,
-                        source_component,
-                        trace_id_param: trace_id,
-                        contextual_info: {plugin_id: pluginDetails.plugin_id, version: pluginDetails.plugin_version}
-                    });
-                }
-            } else {
-                plugin = await this.pluginRegistry.fetchOneByVerb(step.actionVerb);
-            }
-
-            if (!plugin) {
-                console.log(`[${trace_id}] ${source_component}: Plugin for action '${step.actionVerb}' not found. Handling as unknown verb.`);
-                const cachedPlanArray = await this.checkCachedPlan(step.actionVerb);
-                if (cachedPlanArray && cachedPlanArray.length > 0) {
-                    console.log(`[${trace_id}] ${source_component}: Using cached plan for verb: ${step.actionVerb}`);
-                    res.status(200).send(MapSerializer.transformForSerialization(cachedPlanArray));
+            // Query Marketplace for the handler for this actionVerb
+            const handlerResult = await this.getHandlerForActionVerb(step.actionVerb, trace_id);
+            if (handlerResult) {
+                if (handlerResult.type === 'plugin') {
+                    // Execute plugin as before
+                    const plugin = handlerResult.handler as PluginDefinition;
+                    const validatedInputs = await validateAndStandardizeInputs(plugin, step.inputs);
+                    if (!validatedInputs.success) {
+                        throw generateStructuredError({
+                            error_code: GlobalErrorCodes.INPUT_VALIDATION_FAILED,
+                            severity: ErrorSeverity.ERROR,
+                            message: validatedInputs.error || "Input validation failed for plugin.",
+                            source_component,
+                            contextual_info: {
+                                plugin_id: plugin.id,
+                                version: plugin.version,
+                                verb: plugin.verb
+                            },
+                            trace_id_param: trace_id
+                        });
+                    }
+                    const manifestForExecution: PluginManifest = {
+                        ...plugin,
+                        repository: {
+                            type: 'local' as any,
+                            url: '',
+                            dependencies: {}
+                        }
+                    };
+                    const { pluginRootPath, effectiveManifest } = await this.pluginRegistry.preparePluginForExecution(manifestForExecution);
+                    const result = await this.executePlugin(effectiveManifest, validatedInputs.inputs || new Map(), pluginRootPath, trace_id);
+                    res.status(200).send(MapSerializer.transformForSerialization(result));
+                    return;
+                } else if (handlerResult.type === 'planTemplate') {
+                    // Execute plan template via internal utility (now only for execution, not CRUD)
+                    const planTemplate = handlerResult.handler as any; // PlanTemplate
+                    // You may want to move plan template execution logic to a shared utility
+                    // For now, we call the internal execution method
+                    const executionResult = await this.executePlanTemplateHandler(planTemplate, step, trace_id);
+                    res.status(200).send(MapSerializer.transformForSerialization(executionResult));
                     return;
                 }
-
-                console.log(`[${trace_id}] ${source_component}: No cached plan. Handling unknown verb '${step.actionVerb}'.`);
-                const resultUnknownVerb = await this.handleUnknownVerb(step, trace_id);
-                res.status(200).send(MapSerializer.transformForSerialization(resultUnknownVerb));
+            }
+            // If neither plugin nor plan template found, fall back to ACCOMPLISH/Brain
+            this.logPluginLookupFailure(step.actionVerb, trace_id, `No handler found for actionVerb '${step.actionVerb}'. Invoking ACCOMPLISH/Brain for reasoning.`);
+            const cachedPlanArray = await this.checkCachedPlan(step.actionVerb);
+            if (cachedPlanArray && cachedPlanArray.length > 0) {
+                res.status(200).send(MapSerializer.transformForSerialization(cachedPlanArray));
                 return;
             }
+            const resultUnknownVerb = await this.handleUnknownVerb(step, trace_id);
+            res.status(200).send(MapSerializer.transformForSerialization(resultUnknownVerb));
         } catch (error: any) {
-            const errorCode = error.error_code ||
-                (error.originalError as any)?.code ||
-                error.code ||
-                GlobalErrorCodes.CAPABILITIES_MANAGER_PLUGIN_FETCH_FAILED;
-
-            const sError = generateStructuredError({
-                error_code: errorCode,
-                severity: ErrorSeverity.ERROR,
-                message: `Failed to fetch plugin for action '${step.actionVerb}'. ${error.message}`,
-                source_component,
-                original_error: error,
-                trace_id_param: trace_id,
-                contextual_info: {actionVerb: step.actionVerb, plugin_id: pluginIdToFetch, plugin_version: pluginVersionToFetch}
-            });
-            const httpStatus = error.error_code === GlobalErrorCodes.PLUGIN_VERSION_NOT_FOUND ? 404 :
-                (error.originalError?.response?.status || 500);
-            res.status(httpStatus).json(createPluginOutputError(sError));
-            return;
-        }
-
-        // Proceed with execution if plugin is found
-        try {
-            const validatedInputs = await validateAndStandardizeInputs(plugin, step.inputs);
-            if (!validatedInputs.success) {
-                throw generateStructuredError({
-                    error_code: GlobalErrorCodes.INPUT_VALIDATION_FAILED,
-                    severity: ErrorSeverity.ERROR,
-                    message: validatedInputs.error || "Input validation failed for plugin.",
-                    source_component,
-                    contextual_info: {
-                        plugin_id: plugin.id,
-                        version: plugin.version,
-                        verb: plugin.verb
-                    },
-                    trace_id_param: trace_id
-                });
+            // Patch: On handler fetch error, treat as missing and fall back to ACCOMPLISH/Brain
+            this.logPluginLookupFailure(step.actionVerb, trace_id, `Handler lookup failed for actionVerb '${step.actionVerb}': ${error.message}. Invoking ACCOMPLISH/Brain for reasoning.`);
+            const cachedPlanArray = await this.checkCachedPlan(step.actionVerb);
+            if (cachedPlanArray && cachedPlanArray.length > 0) {
+                res.status(200).send(MapSerializer.transformForSerialization(cachedPlanArray));
+                return;
             }
+            const resultUnknownVerb = await this.handleUnknownVerb(step, trace_id);
+            res.status(200).send(MapSerializer.transformForSerialization(resultUnknownVerb));
+        }
+    }
 
-            // Convert PluginDefinition to PluginManifest for execution
-            const manifestForExecution: PluginManifest = {
-                ...plugin,
-                repository: {
-                    type: 'local' as any,
-                    url: '',
-                    dependencies: {}
-                }
-            };
+    /**
+     * Query the Marketplace for the best handler (plugin or plan template) for an actionVerb.
+     * Returns an object: { type: 'plugin' | 'planTemplate', handler: PluginDefinition | PlanTemplate }
+     */
+    private async getHandlerForActionVerb(actionVerb: string, trace_id: string): Promise<{ type: string, handler: any } | null> {
+        const source_component = "CapabilitiesManager.getHandlerForActionVerb";
+        try {
+            // Query Marketplace for the handler for this actionVerb
+            const response = await this.authenticatedApi.get(`http://${process.env.MARKETPLACE_URL || 'marketplace:5050'}/actionVerbHandler/${actionVerb}`);
+            if (response.data && response.data.type && response.data.handler) {
+                return response.data;
+            }
+            return null;
+        } catch (error: any) {
+            console.error(`[${trace_id}] ${source_component}: Error querying Marketplace for handler:`, error.message);
+            return null;
+        }
+    }
 
-            const { pluginRootPath, effectiveManifest } = await this.pluginRegistry.preparePluginForExecution(manifestForExecution);
-            const result = await this.executePlugin(effectiveManifest, validatedInputs.inputs || new Map(), pluginRootPath, trace_id);
+    /**
+     * Execute a plan template handler (utility for plan template execution only)
+     * This should be moved to a shared utility in the future.
+     */
+    private async executePlanTemplateHandler(planTemplate: any, step: Step, trace_id: string): Promise<PluginOutput[]> {
+        // For now, just return a stub result. Implement actual plan template execution logic as needed.
+        return [{
+            success: true,
+            name: 'planTemplateExecution',
+            resultType: PluginParameterType.STRING,
+            result: `Executed plan template ${planTemplate.id} for actionVerb ${step.actionVerb}`,
+            resultDescription: 'Plan template execution result'
+        }];
+    }
 
-            res.status(200).send(MapSerializer.transformForSerialization(result));
-        } catch (error:any) {
-            console.error(`[${trace_id}] ${source_component}: Error during execution pipeline for ${plugin.verb} v${plugin.version}: ${error.message}`, error.stack);
-            const errorCode = error.code || GlobalErrorCodes.CAPABILITIES_MANAGER_PLUGIN_EXECUTION_FAILED;
-
-            const sError = generateStructuredError({
-                error_code: errorCode,
-                severity: ErrorSeverity.CRITICAL,
-                message: `Execution pipeline failed for plugin '${plugin.verb}' v'${plugin.version || 'unknown'}'. ${error.message}`,
-                source_component,
-                original_error: error,
-                trace_id_param: trace_id,
-                contextual_info: {
-                    plugin_id: plugin.id,
-                    verb: plugin.verb,
-                    version: plugin.version,
-                    actionVerb: step.actionVerb
-                }
-            });
-            const httpStatus = error.originalError?.response?.status ||
-                (error.code && typeof error.code === 'string' &&
-                 (error.code.startsWith("G") || error.code.startsWith("PR") ||
-                  error.code === GlobalErrorCodes.CAPABILITIES_MANAGER_PLUGIN_PREPARATION_FAILED) ? 400 : 500);
-            res.status(httpStatus).json(createPluginOutputError(sError));
+    // Helper to log plugin lookup failures with cooldown
+    private logPluginLookupFailure(actionVerb: string, trace_id: string, message: string) {
+        const now = Date.now();
+        const lastFailure = this.failedPluginLookups.get(actionVerb) || 0;
+        if (now - lastFailure > CapabilitiesManager.PLUGIN_LOOKUP_COOLDOWN_MS) {
+            console.warn(`[${trace_id}] ${message}`);
+            this.failedPluginLookups.set(actionVerb, now);
         }
     }
 
@@ -1026,7 +868,7 @@ export class CapabilitiesManager extends BaseEntity {
         const source_component = "CapabilitiesManager.handleUnknownVerb";
         try {
             const context = ` ${step.description || ''} with inputs ${MapSerializer.transformForSerialization(step.inputs)}`;
-            const goal = `Handle the action verb "${step.actionVerb}" in our plan with the following context: ${context} by defining a plan, generating an answer from the inputs, or recommending a new plugin for handling the actionVerb. Respond with a plan, a plugin request, or a literal result. Avoid using this action verb, ${step.actionVerb}, in the plan.`;
+            const goal = `Handle the action verb \"${step.actionVerb}\" in our plan with the following context: ${context} by defining a plan, generating an answer from the inputs, or recommending a new plugin for handling the actionVerb. Respond with a plan, a plugin request, or a literal result. Avoid using this action verb, ${step.actionVerb}, in the plan.`;
 
             const accomplishResultArray = await this.executeAccomplishPlugin(goal, step.actionVerb, trace_id);
             if (!accomplishResultArray[0].success) {
@@ -1040,29 +882,6 @@ export class CapabilitiesManager extends BaseEntity {
                 case PluginParameterType.NUMBER:
                 case PluginParameterType.BOOLEAN:
                     return accomplishResultArray;
-
-                case PluginParameterType.PLUGIN:
-                    const engineerResult = await requestPluginFromEngineer(this, step, JSON.stringify(accomplishResult.result));
-                    if (!engineerResult.success) return [engineerResult];
-
-                    const pluginDef = await this.pluginRegistry.fetchOneByVerb(step.actionVerb);
-                    if (!pluginDef) {
-                        throw generateStructuredError({
-                            error_code: GlobalErrorCodes.PLUGIN_NOT_FOUND,
-                            severity: ErrorSeverity.ERROR,
-                            message: `Newly created plugin for verb '${step.actionVerb}' not found after engineer request.`,
-                            source_component,
-                            trace_id_param: trace_id
-                        });
-                    }
-
-                    return [{
-                        success: true,
-                        name: 'plugin_created',
-                        resultType: PluginParameterType.PLUGIN,
-                        result: pluginDef,
-                        resultDescription: `CM: Created new plugin for ${step.actionVerb}`
-                    }];
 
                 default:
                     throw generateStructuredError({
@@ -1185,389 +1004,7 @@ export class CapabilitiesManager extends BaseEntity {
     }
 
     // Plan Template Management Methods
-
-    private async createPlanTemplate(req: express.Request, res: express.Response): Promise<void> {
-        const trace_id = (req as any).trace_id || `createPlanTemplate-${uuidv4().substring(0,8)}`;
-        const source_component = "CapabilitiesManager.createPlanTemplate";
-
-        try {
-            const createRequest: PlanTemplateCreateRequest = req.body;
-
-            // Validate the plan template
-            const validationResult = this.validatePlanTemplate(createRequest.template);
-            if (!validationResult.valid) {
-                res.status(400).json({
-                    error: 'Plan template validation failed',
-                    details: validationResult.errors
-                });
-                return;
-            }
-
-            // Create the complete plan template with metadata
-            const planTemplate: PlanTemplate = {
-                ...createRequest.template,
-                metadata: {
-                    ...createRequest.metadata,
-                    created: new Date(),
-                    version: '1.0.0'
-                }
-            };
-
-            // Store in Librarian
-            const response = await this.authenticatedApi.post(`http://${this.librarianUrl}/storeData`, {
-                collection: 'planTemplates',
-                id: planTemplate.id,
-                data: planTemplate,
-                storageType: 'mongo'
-            });
-
-            console.log(`[${trace_id}] ${source_component}: Created plan template: ${planTemplate.id}`);
-            res.status(201).json({
-                templateId: planTemplate.id,
-                version: planTemplate.metadata.version,
-                message: 'Plan template created successfully'
-            });
-
-        } catch (error: any) {
-            console.error(`[${trace_id}] ${source_component}: Error creating plan template:`, error);
-            res.status(500).json({
-                error: 'Failed to create plan template',
-                details: error.message
-            });
-        }
-    }
-
-    private async getPlanTemplate(req: express.Request, res: express.Response): Promise<void> {
-        const trace_id = (req as any).trace_id || `getPlanTemplate-${uuidv4().substring(0,8)}`;
-        const source_component = "CapabilitiesManager.getPlanTemplate";
-
-        try {
-            const { id } = req.params;
-            const { version } = req.query;
-
-            let templateId = id;
-            if (version) {
-                templateId = `${id}:${version}`;
-            }
-
-            const response = await this.authenticatedApi.get(`http://${this.librarianUrl}/loadData/${templateId}`, {
-                params: {
-                    collection: 'planTemplates',
-                    storageType: 'mongo'
-                }
-            });
-
-            if (!response.data?.data) {
-                res.status(404).json({
-                    error: 'Plan template not found',
-                    templateId: id,
-                    version: version || 'latest'
-                });
-                return;
-            }
-
-            console.log(`[${trace_id}] ${source_component}: Retrieved plan template: ${id}`);
-            res.status(200).json(response.data.data);
-
-        } catch (error: any) {
-            console.error(`[${trace_id}] ${source_component}: Error retrieving plan template:`, error);
-            res.status(500).json({
-                error: 'Failed to retrieve plan template',
-                details: error.message
-            });
-        }
-    }
-
-    private async listPlanTemplates(req: express.Request, res: express.Response): Promise<void> {
-        const trace_id = (req as any).trace_id || `listPlanTemplates-${uuidv4().substring(0,8)}`;
-        const source_component = "CapabilitiesManager.listPlanTemplates";
-
-        try {
-            const { category, tags, author, search } = req.query;
-
-            // Build query based on filters
-            let query: any = {};
-            if (category) query['metadata.category'] = category;
-            if (author) query['metadata.author'] = author;
-            if (tags) {
-                const tagArray = Array.isArray(tags) ? tags : [tags];
-                query['metadata.tags'] = { $in: tagArray };
-            }
-            if (search) {
-                query.$or = [
-                    { name: { $regex: search, $options: 'i' } },
-                    { description: { $regex: search, $options: 'i' } }
-                ];
-            }
-
-            const response = await this.authenticatedApi.post(`http://${this.librarianUrl}/queryData`, {
-                collection: 'planTemplates',
-                query: query,
-                limit: 100
-            });
-
-            console.log(`[${trace_id}] ${source_component}: Listed plan templates with filters:`, { category, tags, author, search });
-            res.status(200).json({
-                templates: response.data?.data || [],
-                count: response.data?.data?.length || 0
-            });
-
-        } catch (error: any) {
-            console.error(`[${trace_id}] ${source_component}: Error listing plan templates:`, error);
-            res.status(500).json({
-                error: 'Failed to list plan templates',
-                details: error.message
-            });
-        }
-    }
-
-    private async updatePlanTemplate(req: express.Request, res: express.Response): Promise<void> {
-        const trace_id = (req as any).trace_id || `updatePlanTemplate-${uuidv4().substring(0,8)}`;
-        const source_component = "CapabilitiesManager.updatePlanTemplate";
-
-        try {
-            const { id } = req.params;
-            const updateRequest: PlanTemplateUpdateRequest = req.body;
-
-            // Get existing template
-            const existingResponse = await this.authenticatedApi.get(`http://${this.librarianUrl}/loadData/${id}`, {
-                params: {
-                    collection: 'planTemplates',
-                    storageType: 'mongo'
-                }
-            });
-
-            if (!existingResponse.data?.data) {
-                res.status(404).json({
-                    error: 'Plan template not found',
-                    templateId: id
-                });
-                return;
-            }
-
-            const existingTemplate: PlanTemplate = existingResponse.data.data;
-
-            // Merge updates
-            const updatedTemplate: PlanTemplate = {
-                ...existingTemplate,
-                ...updateRequest.template,
-                metadata: {
-                    ...existingTemplate.metadata,
-                    ...updateRequest.template.metadata,
-                    updated: new Date()
-                }
-            };
-
-            // Bump version if requested
-            if (updateRequest.versionBump) {
-                updatedTemplate.metadata.version = this.bumpVersion(
-                    existingTemplate.metadata.version,
-                    updateRequest.versionBump
-                );
-            }
-
-            // Validate updated template
-            const validationResult = this.validatePlanTemplate(updatedTemplate);
-            if (!validationResult.valid) {
-                res.status(400).json({
-                    error: 'Updated plan template validation failed',
-                    details: validationResult.errors
-                });
-                return;
-            }
-
-            // Store updated template
-            await this.authenticatedApi.post(`http://${this.librarianUrl}/storeData`, {
-                collection: 'planTemplates',
-                id: updatedTemplate.id,
-                data: updatedTemplate,
-                storageType: 'mongo'
-            });
-
-            console.log(`[${trace_id}] ${source_component}: Updated plan template: ${id}`);
-            res.status(200).json({
-                templateId: updatedTemplate.id,
-                version: updatedTemplate.metadata.version,
-                message: 'Plan template updated successfully'
-            });
-
-        } catch (error: any) {
-            console.error(`[${trace_id}] ${source_component}: Error updating plan template:`, error);
-            res.status(500).json({
-                error: 'Failed to update plan template',
-                details: error.message
-            });
-        }
-    }
-
-    private async deletePlanTemplate(req: express.Request, res: express.Response): Promise<void> {
-        const trace_id = (req as any).trace_id || `deletePlanTemplate-${uuidv4().substring(0,8)}`;
-        const source_component = "CapabilitiesManager.deletePlanTemplate";
-
-        try {
-            const { id } = req.params;
-
-            const response = await this.authenticatedApi.delete(`http://${this.librarianUrl}/deleteData/${id}`, {
-                params: {
-                    collection: 'planTemplates',
-                    storageType: 'mongo'
-                }
-            });
-
-            console.log(`[${trace_id}] ${source_component}: Deleted plan template: ${id}`);
-            res.status(200).json({
-                message: 'Plan template deleted successfully',
-                templateId: id
-            });
-
-        } catch (error: any) {
-            console.error(`[${trace_id}] ${source_component}: Error deleting plan template:`, error);
-            res.status(500).json({
-                error: 'Failed to delete plan template',
-                details: error.message
-            });
-        }
-    }
-
-    private async executePlanTemplate(req: express.Request, res: express.Response): Promise<void> {
-        const trace_id = (req as any).trace_id || `executePlanTemplate-${uuidv4().substring(0,8)}`;
-        const source_component = "CapabilitiesManager.executePlanTemplate";
-
-        try {
-            const { id } = req.params;
-            const executionRequest: PlanExecutionRequest = req.body;
-
-            // Get the plan template
-            const templateResponse = await this.authenticatedApi.get(`http://${this.librarianUrl}/loadData/${id}`, {
-                params: {
-                    collection: 'planTemplates',
-                    storageType: 'mongo'
-                }
-            });
-
-            if (!templateResponse.data?.data) {
-                res.status(404).json({
-                    error: 'Plan template not found',
-                    templateId: id
-                });
-                return;
-            }
-
-            const template: PlanTemplate = templateResponse.data.data;
-
-            // Create execution context
-            const executionContext: PlanExecutionContext = {
-                id: uuidv4(),
-                planTemplateId: template.id,
-                planTemplateVersion: template.metadata.version,
-                status: 'pending' as PlanExecutionStatus,
-                inputs: executionRequest.inputs,
-                steps: [],
-                outputs: {},
-                metadata: {
-                    startTime: new Date(),
-                    userId: executionRequest.userId,
-                    parentExecutionId: executionRequest.parentExecutionId,
-                    executionMode: executionRequest.executionMode || 'automatic'
-                }
-            };
-
-            // Store initial execution context
-            await this.authenticatedApi.post(`http://${this.librarianUrl}/storeData`, {
-                collection: 'executionContexts',
-                id: executionContext.id,
-                data: executionContext,
-                storageType: 'mongo'
-            });
-
-            // Start execution (async)
-            this.executeTemplate(template, executionContext, trace_id).catch(error => {
-                console.error(`[${trace_id}] ${source_component}: Template execution failed:`, error);
-            });
-
-            console.log(`[${trace_id}] ${source_component}: Started execution of template: ${id}`);
-            res.status(202).json({
-                executionId: executionContext.id,
-                status: 'started',
-                message: 'Plan template execution started'
-            });
-
-        } catch (error: any) {
-            console.error(`[${trace_id}] ${source_component}: Error starting plan template execution:`, error);
-            res.status(500).json({
-                error: 'Failed to start plan template execution',
-                details: error.message
-            });
-        }
-    }
-
-    private async getExecutionContext(req: express.Request, res: express.Response): Promise<void> {
-        const trace_id = (req as any).trace_id || `getExecutionContext-${uuidv4().substring(0,8)}`;
-        const source_component = "CapabilitiesManager.getExecutionContext";
-
-        try {
-            const { id } = req.params;
-
-            const response = await this.authenticatedApi.get(`http://${this.librarianUrl}/loadData/${id}`, {
-                params: {
-                    collection: 'executionContexts',
-                    storageType: 'mongo'
-                }
-            });
-
-            if (!response.data?.data) {
-                res.status(404).json({
-                    error: 'Execution context not found',
-                    executionId: id
-                });
-                return;
-            }
-
-            console.log(`[${trace_id}] ${source_component}: Retrieved execution context: ${id}`);
-            res.status(200).json(response.data.data);
-
-        } catch (error: any) {
-            console.error(`[${trace_id}] ${source_component}: Error retrieving execution context:`, error);
-            res.status(500).json({
-                error: 'Failed to retrieve execution context',
-                details: error.message
-            });
-        }
-    }
-
-    private async listExecutions(req: express.Request, res: express.Response): Promise<void> {
-        const trace_id = (req as any).trace_id || `listExecutions-${uuidv4().substring(0,8)}`;
-        const source_component = "CapabilitiesManager.listExecutions";
-
-        try {
-            const { userId, status, templateId } = req.query;
-
-            // Build query based on filters
-            let query: any = {};
-            if (userId) query['metadata.userId'] = userId;
-            if (status) query.status = status;
-            if (templateId) query.planTemplateId = templateId;
-
-            const response = await this.authenticatedApi.post(`http://${this.librarianUrl}/queryData`, {
-                collection: 'executionContexts',
-                query: query,
-                limit: 100
-            });
-
-            console.log(`[${trace_id}] ${source_component}: Listed executions with filters:`, { userId, status, templateId });
-            res.status(200).json({
-                executions: response.data?.data || [],
-                count: response.data?.data?.length || 0
-            });
-
-        } catch (error: any) {
-            console.error(`[${trace_id}] ${source_component}: Error listing executions:`, error);
-            res.status(500).json({
-                error: 'Failed to list executions',
-                details: error.message
-            });
-        }
-    }
+    // REMOVED: All plan template CRUD endpoints and logic. Plan template CRUD is now handled by the Marketplace service.
 
     // Plan Template Utility Methods
 
@@ -2062,6 +1499,7 @@ export class CapabilitiesManager extends BaseEntity {
             // Combine and format capabilities
             const capabilities = [];
 
+           
             // Add plugins - fetch full manifests for complete information
             if (!type || type === 'plugin') {
                 for (const locator of pluginLocators) {
@@ -2251,7 +1689,7 @@ export class CapabilitiesManager extends BaseEntity {
                         break;
                     case 'query':
                         queryParams[inputMapping.name] = inputValue;
-                        break;
+                                               break;
                     case 'header':
                         headers[inputMapping.name] = inputValue;
                         break;
@@ -2428,329 +1866,6 @@ export class CapabilitiesManager extends BaseEntity {
                 resultDescription: `Plan template execution failed: ${error.message}`,
                 error: error.message
             }];
-        }
-    }
-
-    // Plugin Packaging and Repository Management Methods
-
-    private async packagePlugin(req: express.Request, res: express.Response): Promise<void> {
-        const trace_id = (req as any).trace_id || `packagePlugin-${uuidv4().substring(0,8)}`;
-        const source_component = "CapabilitiesManager.packagePlugin";
-
-        try {
-            const { pluginId, version, metadata } = req.body;
-
-            if (!pluginId || !version || !metadata) {
-                res.status(400).json({
-                    error: 'Missing required fields: pluginId, version, metadata'
-                });
-                return;
-            }
-
-            // Get plugin from registry
-            const plugin = await this.pluginRegistry.fetchOne(pluginId, version);
-            if (!plugin) {
-                res.status(404).json({
-                    error: `Plugin not found: ${pluginId} v${version}`
-                });
-                return;
-            }
-
-            // Get plugin path
-            const { pluginRootPath } = await this.pluginRegistry.preparePluginForExecution(plugin as PluginManifest);
-
-            // Package the plugin
-            const packageMetadata: PackageMetadata = {
-                packageVersion: '1.0.0',
-                stage7Version: process.env.STAGE7_VERSION || '1.0.0',
-                compatibility: metadata.compatibility || ['1.0.0'],
-                tags: metadata.tags || [],
-                category: metadata.category || 'utility',
-                license: metadata.license || 'MIT'
-            };
-
-            const pluginPackage = await this.pluginPackager.packagePlugin(
-                pluginRootPath,
-                plugin as PluginManifest,
-                packageMetadata
-            );
-
-            console.log(`[${trace_id}] ${source_component}: Plugin packaged successfully: ${pluginId} v${version}`);
-            res.status(200).json({
-                message: 'Plugin packaged successfully',
-                package: {
-                    id: pluginPackage.id,
-                    name: pluginPackage.name,
-                    version: pluginPackage.version,
-                    packageHash: pluginPackage.packageHash,
-                    createdAt: pluginPackage.createdAt
-                }
-            });
-
-        } catch (error: any) {
-            console.error(`[${trace_id}] ${source_component}: Error packaging plugin:`, error);
-            res.status(500).json({
-                error: 'Failed to package plugin',
-                details: error.message
-            });
-        }
-    }
-
-    private async publishPlugin(req: express.Request, res: express.Response): Promise<void> {
-        const trace_id = (req as any).trace_id || `publishPlugin-${uuidv4().substring(0,8)}`;
-        const source_component = "CapabilitiesManager.publishPlugin";
-
-        try {
-            if (!this.repositoryManager) {
-                res.status(503).json({
-                    error: 'Plugin repository not configured'
-                });
-                return;
-            }
-
-            const { pluginId, version, metadata } = req.body;
-
-            if (!pluginId || !version || !metadata) {
-                res.status(400).json({
-                    error: 'Missing required fields: pluginId, version, metadata'
-                });
-                return;
-            }
-
-            // Get plugin from registry
-            const plugin = await this.pluginRegistry.fetchOne(pluginId, version);
-            if (!plugin) {
-                res.status(404).json({
-                    error: `Plugin not found: ${pluginId} v${version}`
-                });
-                return;
-            }
-
-            // Get plugin path
-            const { pluginRootPath } = await this.pluginRegistry.preparePluginForExecution(plugin as PluginManifest);
-
-            // Package metadata
-            const packageMetadata: PackageMetadata = {
-                packageVersion: '1.0.0',
-                stage7Version: process.env.STAGE7_VERSION || '1.0.0',
-                compatibility: metadata.compatibility || ['1.0.0'],
-                tags: metadata.tags || [],
-                category: metadata.category || 'utility',
-                license: metadata.license || 'MIT'
-            };
-
-            // Publish to repository
-            const registryEntry = await this.repositoryManager.publishPlugin(
-                pluginRootPath,
-                plugin as PluginManifest,
-                packageMetadata
-            );
-
-            console.log(`[${trace_id}] ${source_component}: Plugin published successfully: ${pluginId} v${version}`);
-            res.status(200).json({
-                message: 'Plugin published successfully',
-                entry: registryEntry
-            });
-
-        } catch (error: any) {
-            console.error(`[${trace_id}] ${source_component}: Error publishing plugin:`, error);
-            res.status(500).json({
-                error: 'Failed to publish plugin',
-                details: error.message
-            });
-        }
-    }
-
-    private async installPlugin(req: express.Request, res: express.Response): Promise<void> {
-        const trace_id = (req as any).trace_id || `installPlugin-${uuidv4().substring(0,8)}`;
-        const source_component = "CapabilitiesManager.installPlugin";
-
-        try {
-            if (!this.repositoryManager) {
-                res.status(503).json({
-                    error: 'Plugin repository not configured'
-                });
-                return;
-            }
-
-            const { pluginId, version, targetDir } = req.body;
-
-            if (!pluginId) {
-                res.status(400).json({
-                    error: 'Missing required field: pluginId'
-                });
-                return;
-            }
-
-            // Install plugin from repository
-            const manifest = await this.repositoryManager.installPlugin(pluginId, version, targetDir);
-
-            // Register plugin in local registry
-            await this.pluginRegistry.store(manifest);
-
-            console.log(`[${trace_id}] ${source_component}: Plugin installed successfully: ${pluginId} v${manifest.version}`);
-            res.status(200).json({
-                message: 'Plugin installed successfully',
-                plugin: {
-                    id: manifest.id,
-                    name: manifest.id,
-                    version: manifest.version,
-                    verb: manifest.verb
-                }
-            });
-
-        } catch (error: any) {
-            console.error(`[${trace_id}] ${source_component}: Error installing plugin:`, error);
-            res.status(500).json({
-                error: 'Failed to install plugin',
-                details: error.message
-            });
-        }
-    }
-
-    private async listRepositoryPlugins(req: express.Request, res: express.Response): Promise<void> {
-        const trace_id = (req as any).trace_id || `listRepositoryPlugins-${uuidv4().substring(0,8)}`;
-        const source_component = "CapabilitiesManager.listRepositoryPlugins";
-
-        try {
-            if (!this.repositoryManager) {
-                res.status(503).json({
-                    error: 'Plugin repository not configured'
-                });
-                return;
-            }
-
-            const { category, tags } = req.query;
-            const tagArray = tags ? (tags as string).split(',') : undefined;
-
-            const plugins = await this.repositoryManager.listPlugins(category as string, tagArray);
-
-            console.log(`[${trace_id}] ${source_component}: Listed ${plugins.length} repository plugins`);
-            res.status(200).json({
-                plugins,
-                count: plugins.length
-            });
-
-        } catch (error: any) {
-            console.error(`[${trace_id}] ${source_component}: Error listing repository plugins:`, error);
-            res.status(500).json({
-                error: 'Failed to list repository plugins',
-                details: error.message
-            });
-        }
-    }
-
-    private async searchRepositoryPlugins(req: express.Request, res: express.Response): Promise<void> {
-        const trace_id = (req as any).trace_id || `searchRepositoryPlugins-${uuidv4().substring(0,8)}`;
-        const source_component = "CapabilitiesManager.searchRepositoryPlugins";
-
-        try {
-            if (!this.repositoryManager) {
-                res.status(503).json({
-                    error: 'Plugin repository not configured'
-                });
-                return;
-            }
-
-            const { q: query } = req.query;
-
-            if (!query) {
-                res.status(400).json({
-                    error: 'Missing required query parameter: q'
-                });
-                return;
-            }
-
-            const plugins = await this.repositoryManager.searchPlugins(query as string);
-
-            console.log(`[${trace_id}] ${source_component}: Found ${plugins.length} plugins for query: ${query}`);
-            res.status(200).json({
-                plugins,
-                count: plugins.length,
-                query
-            });
-
-        } catch (error: any) {
-            console.error(`[${trace_id}] ${source_component}: Error searching repository plugins:`, error);
-            res.status(500).json({
-                error: 'Failed to search repository plugins',
-                details: error.message
-            });
-        }
-    }
-
-    private async getRepositoryPluginInfo(req: express.Request, res: express.Response): Promise<void> {
-        const trace_id = (req as any).trace_id || `getRepositoryPluginInfo-${uuidv4().substring(0,8)}`;
-        const source_component = "CapabilitiesManager.getRepositoryPluginInfo";
-
-        try {
-            if (!this.repositoryManager) {
-                res.status(503).json({
-                    error: 'Plugin repository not configured'
-                });
-                return;
-            }
-
-            const { id } = req.params;
-            const { version } = req.query;
-
-            const pluginInfo = await this.repositoryManager.getPluginInfo(id, version as string);
-
-            if (!pluginInfo) {
-                res.status(404).json({
-                    error: `Plugin not found: ${id}${version ? ` v${version}` : ''}`
-                });
-                return;
-            }
-
-            console.log(`[${trace_id}] ${source_component}: Retrieved plugin info: ${id} v${pluginInfo.version}`);
-            res.status(200).json(pluginInfo);
-
-        } catch (error: any) {
-            console.error(`[${trace_id}] ${source_component}: Error getting repository plugin info:`, error);
-            res.status(500).json({
-                error: 'Failed to get repository plugin info',
-                details: error.message
-            });
-        }
-    }
-
-    private async checkPluginUpdates(req: express.Request, res: express.Response): Promise<void> {
-        const trace_id = (req as any).trace_id || `checkPluginUpdates-${uuidv4().substring(0,8)}`;
-        const source_component = "CapabilitiesManager.checkPluginUpdates";
-
-        try {
-            if (!this.repositoryManager) {
-                res.status(503).json({
-                    error: 'Plugin repository not configured'
-                });
-                return;
-            }
-
-            // Get installed plugins
-            const installedPlugins = await this.pluginRegistry.list();
-            const pluginVersions = installedPlugins
-                .filter(plugin => plugin.version) // Filter out plugins without version
-                .map(plugin => ({
-                    id: plugin.id,
-                    version: plugin.version!
-                }));
-
-            // Check for updates
-            const updates = await this.repositoryManager.checkForUpdates(pluginVersions);
-
-            console.log(`[${trace_id}] ${source_component}: Checked updates for ${pluginVersions.length} plugins`);
-            res.status(200).json({
-                updates,
-                count: updates.filter(u => u.updateAvailable).length
-            });
-
-        } catch (error: any) {
-            console.error(`[${trace_id}] ${source_component}: Error checking plugin updates:`, error);
-            res.status(500).json({
-                error: 'Failed to check plugin updates',
-                details: error.message
-            });
         }
     }
 

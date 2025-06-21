@@ -344,7 +344,7 @@ export class CollaborationManager implements CollaborationProtocol {
     const recipientAgent = this.agents.get(message.recipientId);
 
     if (recipientAgent) {
-      await recipientAgent.processResourceResponse(message.content, message.inReplyTo);
+      await recipientAgent.processResourceResponse(message.content);
     }
   }
 

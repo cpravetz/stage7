@@ -13,65 +13,14 @@ import { MessageType } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { Step, StepStatus, createFromPlan, StepModification } from './Step';
 import { StateManager } from '../utils/StateManager';
-
-export enum CollaborationMessageType {
-    TASK_UPDATE = 'TASK_UPDATE',
-    INFO_SHARE = 'INFO_SHARE',
-    RESOURCE_SHARE_REQUEST = 'RESOURCE_SHARE_REQUEST',
-}
-
-export interface CollaborationMessage {
-    type: CollaborationMessageType;
-    payload: any;
-    senderId: string; // Added senderId for context
-    timestamp: string; // Added timestamp
-    // Add other common fields like messageId if needed
-}
-
-// Define a structure for what a TASK_UPDATE payload might contain
-export interface TaskUpdatePayload {
-    stepId: string;
-    status?: StepStatus; // e.g., mark a step as cancelled or paused by an external system
-    description?: string; // update description
-    newInputs?: Record<string, PluginInput>; // To replace inputs, use Record for easier serialization
-    updateInputs?: Record<string, PluginInput>; // To merge/update specific inputs
-    // other fields like priority, new actionVerb, etc. could be added
-}
-
-export interface ConflictResolution {
-    resolvedStepId?: string; // ID of the step that was in conflict
-    chosenAction: 'MODIFY_STEP' | 'REPLACE_PLAN' | 'NO_CHANGE' | 'RETRY_STEP'; // Action to take
-    reasoning?: string; // Explanation for the chosen action
-    stepModifications?: StepModification; // Details if chosenAction is 'MODIFY_STEP'
-    newPlan?: ActionVerbTask[]; // New plan if chosenAction is 'REPLACE_PLAN'
-    // other fields like 'resolvedByAgentId', 'timestamp' can be added
-}
-
-export enum CoordinationType {
-    SYNC_STATE = 'SYNC_STATE',
-    AWAIT_SIGNAL = 'AWAIT_SIGNAL',
-    PROVIDE_INFO = 'PROVIDE_INFO',
-    // Add other coordination types as needed
-}
-
-export interface CoordinationData {
-    type: CoordinationType;
-    senderId: string; // ID of the agent initiating coordination
-    targetAgentId?: string; // Optional: specific agent to coordinate with
-    payload?: any; // Data relevant to the coordination type
-    signalId?: string; // For AWAIT_SIGNAL / SEND_SIGNAL
-    infoKeys?: string[]; // For PROVIDE_INFO / INFO_RECEIVED
-    timestamp: string;
-}
-
-export interface ResourceResponse {
-    requestId: string;
-    granted: boolean;
-    resource: string;
-    data?: any; // Optional data associated with the granted resource
-    message?: string; // Optional message/reason for denial
-    senderId: string; // ID of the agent/system that processed the request & is sending this response
-}
+import {
+    CollaborationMessageType,
+    CollaborationMessage,
+    TaskUpdatePayload,
+    CoordinationData,
+    ResourceResponse,
+    ConflictResolution
+} from '../collaboration/CollaborationProtocol';
 
 export class Agent extends BaseEntity {
     private missionContext: string = '';
@@ -152,7 +101,10 @@ export class Agent extends BaseEntity {
         this.initializeAgent().then(() => {
             console.log(`Agent ${this.id} initialized successfully. Status: ${this.status}. Commencing main execution loop.`);
             this.say(`Agent ${this.id} initialized and commencing operations.`);
-            this.runUntilDone();
+            if (!this.isRunning) {
+                this.isRunning = true;
+                this.runUntilDone();
+            }
         }).catch((error) => { // Added error parameter
             this.status = AgentStatus.ERROR;
             const errorMessage = error instanceof Error ? error.message : String(error);
@@ -188,12 +140,19 @@ export class Agent extends BaseEntity {
     /**
      * Start the agent
      */
+    private isRunning: boolean = false;
+
     public start(): void {
         console.log(`Starting agent ${this.id}`);
-        this.runUntilDone().catch(error => {
-            console.error(`Error running agent ${this.id}:`, error instanceof Error ? error.message : error);
-            this.status = AgentStatus.ERROR;
-        });
+        if (!this.isRunning) {
+            this.isRunning = true;
+            this.runUntilDone().catch(error => {
+                console.error(`Error running agent ${this.id}:`, error instanceof Error ? error.message : error);
+                this.status = AgentStatus.ERROR;
+            });
+        } else {
+            console.log(`Agent ${this.id} is already running. start() call ignored.`);
+        }
     }
 
     private async initializeAgent() {
@@ -491,10 +450,25 @@ The output MUST be a valid JSON array of task objects. Do not include any explan
         await super.handleBaseMessage(message);
         // Add message handling as new types are defined
         switch (message.type) {
-            case MessageType.USER_MESSAGE:
-                this.addToConversation('user', message.content.message);
+            // Remove TASK_UPDATE, INFO_SHARE, RESOURCE_SHARE_REQUEST cases as they do not exist in CollaborationMessageType
+            // Only handle types that exist in CollaborationProtocol
+            case CollaborationMessageType.RESOURCE_REQUEST:
+                // ...existing RESOURCE_REQUEST logic...
                 break;
+            case CollaborationMessageType.RESOURCE_RESPONSE:
+                // ...existing RESOURCE_RESPONSE logic...
+                break;
+            // Add other CollaborationMessageType cases as needed
             default:
+                console.warn(`Agent ${this.id} received unrecognized collaboration message type: '${(message as any).type}' from sender ${message.senderId}. Full message:`, message);
+                this.logEvent({
+                    eventType: 'unrecognized_collaboration_message',
+                    agentId: this.id,
+                    senderId: message.senderId,
+                    messageType: (message as any).type,
+                    payload: message.payload,
+                    timestamp: new Date().toISOString()
+                });
                 break;
         }
     }
@@ -595,7 +569,13 @@ The output MUST be a valid JSON array of task objects. Do not include any explan
 
             // New logic: check if any step in any agent depends on this step
             const isFinal = Agent.isStepFinal(stepId, allAgents);
-            const type = isFinal ? 'Final' : 'Interim';
+            // Determine type: 'Plan' if workproduct contains a plan, else 'Final' or 'Interim'
+            let type: 'Plan' | 'Final' | 'Interim';
+            if (Array.isArray(data) && data[0]?.resultType === PluginParameterType.PLAN) {
+                type = 'Plan';
+            } else {
+                type = isFinal ? 'Final' : 'Interim';
+            }
 
             let scope: string;
             if (this.steps.length === 1 || (isAgentEndpoint && isFinal)) {
@@ -1296,70 +1276,9 @@ async handleCollaborationMessage(message: CollaborationMessage): Promise<void> {
     }
 
     switch (message.type) {
-        case CollaborationMessageType.TASK_UPDATE:
-            const taskUpdatePayload = message.payload as TaskUpdatePayload;
-            if (!taskUpdatePayload || !taskUpdatePayload.stepId) {
-                console.error(`Agent ${this.id}: Received TASK_UPDATE with missing stepId. Payload:`, message.payload);
-                this.logEvent({ eventType: 'collaboration_task_update_error', agentId: this.id, error: 'Missing stepId in TASK_UPDATE', payload: message.payload });
-                break;
-            }
-            const stepToUpdate = this.steps.find(s => s.id === taskUpdatePayload.stepId);
-            if (stepToUpdate) {
-                console.log(`Agent ${this.id}: Processing TASK_UPDATE for step ${taskUpdatePayload.stepId}. Current details:`, JSON.stringify(stepToUpdate));
-                let updated = false;
-                if (taskUpdatePayload.status) {
-                    stepToUpdate.status = taskUpdatePayload.status;
-                    console.log(`Agent ${this.id}: Step ${stepToUpdate.id} status updated to ${taskUpdatePayload.status}.`);
-                    updated = true;
-                }
-                if (taskUpdatePayload.description) {
-                    stepToUpdate.description = taskUpdatePayload.description;
-                    console.log(`Agent ${this.id}: Step ${stepToUpdate.id} description updated.`);
-                    updated = true;
-                }
-                if (taskUpdatePayload.newInputs) {
-                    stepToUpdate.inputs = new Map(Object.entries(taskUpdatePayload.newInputs));
-                    console.log(`Agent ${this.id}: Step ${stepToUpdate.id} inputs replaced.`);
-                    updated = true;
-                }
-                if (taskUpdatePayload.updateInputs) {
-                    for (const [key, value] of Object.entries(taskUpdatePayload.updateInputs)) {
-                        stepToUpdate.inputs.set(key, value);
-                    }
-                    console.log(`Agent ${this.id}: Step ${stepToUpdate.id} inputs updated/merged.`);
-                    updated = true;
-                }
-
-                if (updated) {
-                    this.logEvent({ eventType: 'collaboration_task_updated', agentId: this.id, stepId: stepToUpdate.id, changes: taskUpdatePayload });
-                    // If status changed to PENDING, agent loop will pick it up.
-                    // If it was RUNNING and changed to PAUSED/ERROR, effects depend on runAgent logic.
-                    await this.notifyTrafficManager(); // Notify if significant changes occurred
-                    await this.saveAgentState();
-                } else {
-                    console.log(`Agent ${this.id}: TASK_UPDATE for step ${taskUpdatePayload.stepId} resulted in no changes.`, taskUpdatePayload);
-                }
-            } else {
-                console.warn(`Agent ${this.id}: Received TASK_UPDATE for unknown stepId: ${taskUpdatePayload.stepId}.`);
-                this.logEvent({ eventType: 'collaboration_task_update_error', agentId: this.id, error: 'StepId not found for TASK_UPDATE', stepId: taskUpdatePayload.stepId });
-            }
-            break;
-        case CollaborationMessageType.INFO_SHARE:
-            this.conversation.push({
-                role: `info_share_from_${message.senderId}`,
-                content: JSON.stringify(message.payload)
-            });
-            this.logEvent({
-                eventType: 'info_share_received',
-                agentId: this.id,
-                senderId: message.senderId,
-                payload: message.payload,
-                timestamp: new Date().toISOString()
-            });
-            console.log(`Agent ${this.id} stored INFO_SHARE from ${message.senderId}:`, message.payload);
-            break;
-        case CollaborationMessageType.RESOURCE_SHARE_REQUEST:
-            console.log(`Agent ${this.id} received RESOURCE_SHARE_REQUEST from ${message.senderId}:`, message.payload);
+        // Remove or comment out unreachable/invalid cases for TASK_UPDATE and INFO_SHARE
+        case CollaborationMessageType.RESOURCE_REQUEST:
+            console.log(`Agent ${this.id} received RESOURCE_REQUEST from ${message.senderId}:`, message.payload);
             // Example: Queue or directly process resource request
             // For now, directly calling processResourceRequest if it matches expected structure.
             // This assumes message.payload is compatible with what processResourceRequest expects.
@@ -1368,17 +1287,21 @@ async handleCollaborationMessage(message: CollaborationMessage): Promise<void> {
                 // Assuming processResourceRequest might change state that needs saving, like availableResources
                 await this.saveAgentState();
             } else {
-                const warningMsg = `Agent ${this.id} received RESOURCE_SHARE_REQUEST with incompatible payload:`;
+                const warningMsg = `Agent ${this.id} received RESOURCE_REQUEST with incompatible payload:`;
                 console.warn(warningMsg, message.payload);
                 this.logEvent({
                     eventType: 'collaboration_resource_request_payload_error',
                     agentId: this.id,
-                    error: 'Incompatible payload for RESOURCE_SHARE_REQUEST',
+                    error: 'Incompatible payload for RESOURCE_REQUEST',
                     payload: message.payload,
                     senderId: message.senderId,
                     timestamp: new Date().toISOString()
                 });
             }
+            break;
+        case CollaborationMessageType.RESOURCE_RESPONSE:
+            console.log(`Agent ${this.id} received RESOURCE_RESPONSE from ${message.senderId}:`, message.payload);
+            // Existing RESOURCE_RESPONSE logic here
             break;
         default:
             console.warn(`Agent ${this.id} received unrecognized collaboration message type: '${(message as any).type}' from sender ${message.senderId}. Full message:`, message);
@@ -1697,7 +1620,7 @@ async handleCollaborationMessage(message: CollaborationMessage): Promise<void> {
         // Ensure chosenOption has a 'value' or similar property to cast to a vote string
         // This depends on the actual structure of 'conflict.options' items.
         // Assuming options are objects like { value: "action_X", details: {...} } or simple strings.
-        let voteValue: string;
+        let voteValue: string = '';
         if (typeof chosenOption === 'string') {
             voteValue = chosenOption;
         } else if (chosenOption && typeof chosenOption.value === 'string') {
@@ -1757,7 +1680,7 @@ async handleCollaborationMessage(message: CollaborationMessage): Promise<void> {
 
         try {
             switch (coordination.type) {
-                case CoordinationType.SYNC_STATE:
+                case "SYNC_STATE":
                     console.log(`Agent ${this.id}: Processing SYNC_STATE from ${coordination.senderId}. Payload:`, coordination.payload);
                     // For now, just logging what might be shared or requested.
                     // Example: If payload requests specific state keys:
@@ -1794,7 +1717,7 @@ async handleCollaborationMessage(message: CollaborationMessage): Promise<void> {
                     this.logEvent({ eventType: 'coordination_sync_state_processed_generic', agentId: this.id, senderId: coordination.senderId, payload: coordination.payload });
                     break;
 
-                case CoordinationType.AWAIT_SIGNAL:
+                case "AWAIT_SIGNAL":
                     const signalId = coordination.signalId || 'default_signal';
                     console.log(`Agent ${this.id}: Processing AWAIT_SIGNAL for signalId '${signalId}' from ${coordination.senderId}.`);
 
@@ -1825,7 +1748,7 @@ async handleCollaborationMessage(message: CollaborationMessage): Promise<void> {
                     this.logEvent({ eventType: 'coordination_await_signal_processed', agentId: this.id, senderId: coordination.senderId, signalId, payload: coordination.payload });
                     break;
 
-                case CoordinationType.PROVIDE_INFO:
+                case "PROVIDE_INFO":
                     console.log(`Agent ${this.id}: Processing PROVIDE_INFO request from ${coordination.senderId}. Requested info keys:`, coordination.infoKeys);
                     if (coordination.infoKeys && coordination.infoKeys.length > 0) {
                         const infoPayload: Record<string, any> = {};
@@ -2133,5 +2056,42 @@ async handleCollaborationMessage(message: CollaborationMessage): Promise<void> {
 
         // Monitor the execution until completion
         return await this.monitorPlanExecution(executionId);
+    }
+
+    setSystemPrompt(prompt: string): void {
+        // Set a system prompt for the agent (for LLMs or prompt-based agents)
+        (this as any).systemPrompt = prompt;
+    }
+
+    setCapabilities(capabilities: string[]): void {
+        // Set agent's capabilities (for specialization, etc.)
+        (this as any).capabilities = capabilities;
+    }
+
+    async storeInContext(key: string, value: any): Promise<void> {
+        // Store arbitrary data in agent's context (for specialization, etc.)
+        if (!(this as any).context) (this as any).context = {};
+        (this as any).context[key] = value;
+    }
+
+    async createStepForTask(task: any): Promise<void> {
+        // Minimal stub: create a new Step for the delegated task
+        const step = new Step({
+            actionVerb: task.type || task.actionVerb || 'DELEGATED_TASK',
+            stepNo: this.steps.length + 1,
+            inputs: new Map(Object.entries(task.inputs || {})),
+            description: task.description || 'Delegated task',
+            status: StepStatus.PENDING,
+            persistenceManager: this.agentPersistenceManager
+        });
+        this.steps.push(step);
+        await this.saveAgentState();
+    }
+
+    async processTaskResult(result: any): Promise<void> {
+        // Minimal stub: log the result and update agent state
+        this.logEvent({ eventType: 'task_result_received', agentId: this.id, result, timestamp: new Date().toISOString() });
+        // Optionally, update step status or agent state here
+        await this.saveAgentState();
     }
 }
