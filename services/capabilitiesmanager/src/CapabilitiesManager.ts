@@ -55,6 +55,9 @@ export class CapabilitiesManager extends BaseEntity {
     private containerManager: ContainerManager;
     private serviceId = 'CapabilitiesManager';
 
+    private failedPluginLookups: Map<string, number> = new Map(); // actionVerb -> last failure timestamp
+    private static readonly PLUGIN_LOOKUP_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
+
     constructor() {
         super('CapabilitiesManager', 'CapabilitiesManager', `capabilitiesmanager`, process.env.PORT || '5060');
         const trace_id = `${this.serviceId}-constructor-${uuidv4().substring(0,8)}`;
@@ -194,6 +197,16 @@ export class CapabilitiesManager extends BaseEntity {
                 app.get('/availablePlugins', async (req, res) => {
                     const trace_id = (req as any).trace_id || `${trace_id_parent}-avail-${uuidv4().substring(0,8)}`;
                     try {
+                        // Only report local/container plugins if GitHub is not accessible
+                        if (!this.repositoryManager) {
+                            const plugins: PluginLocator[] = (await this.pluginRegistry.list()).filter(
+                                p => p.language === 'javascript' || p.language === 'python' || p.language === 'container'
+                            );
+                            console.log(`[${trace_id}] /availablePlugins: GitHub/repositoryManager not configured. Returning only local/container plugins.`);
+                            res.json(plugins);
+                            return;
+                        }
+                        // If repositoryManager is available, return all plugins (including remote if implemented)
                         const plugins: PluginLocator[] = await this.pluginRegistry.list();
                         res.json(plugins);
                     } catch (error:any) {
@@ -439,39 +452,28 @@ export class CapabilitiesManager extends BaseEntity {
             } else {
                 plugin = await this.pluginRegistry.fetchOneByVerb(step.actionVerb);
             }
-
             if (!plugin) {
-                console.log(`[${trace_id}] ${source_component}: Plugin for action '${step.actionVerb}' not found. Handling as unknown verb.`);
+                // Fallback: No plugin found, proceed to ACCOMPLISH/Brain
+                this.logPluginLookupFailure(step.actionVerb, trace_id, `No plugin found for actionVerb '${step.actionVerb}'. Invoking ACCOMPLISH/Brain for reasoning.`);
                 const cachedPlanArray = await this.checkCachedPlan(step.actionVerb);
                 if (cachedPlanArray && cachedPlanArray.length > 0) {
-                    console.log(`[${trace_id}] ${source_component}: Using cached plan for verb: ${step.actionVerb}`);
                     res.status(200).send(MapSerializer.transformForSerialization(cachedPlanArray));
                     return;
                 }
-
-                console.log(`[${trace_id}] ${source_component}: No cached plan. Handling unknown verb '${step.actionVerb}'.`);
                 const resultUnknownVerb = await this.handleUnknownVerb(step, trace_id);
                 res.status(200).send(MapSerializer.transformForSerialization(resultUnknownVerb));
                 return;
             }
         } catch (error: any) {
-            const errorCode = error.error_code ||
-                (error.originalError as any)?.code ||
-                error.code ||
-                GlobalErrorCodes.CAPABILITIES_MANAGER_PLUGIN_FETCH_FAILED;
-
-            const sError = generateStructuredError({
-                error_code: errorCode,
-                severity: ErrorSeverity.ERROR,
-                message: `Failed to fetch plugin for action '${step.actionVerb}'. ${error.message}`,
-                source_component,
-                original_error: error,
-                trace_id_param: trace_id,
-                contextual_info: {actionVerb: step.actionVerb, plugin_id: pluginIdToFetch, plugin_version: pluginVersionToFetch}
-            });
-            const httpStatus = error.error_code === GlobalErrorCodes.PLUGIN_VERSION_NOT_FOUND ? 404 :
-                (error.originalError?.response?.status || 500);
-            res.status(httpStatus).json(createPluginOutputError(sError));
+            // Patch: On plugin fetch error, treat as missing plugin and fall back to ACCOMPLISH/Brain
+            this.logPluginLookupFailure(step.actionVerb, trace_id, `Plugin lookup failed for actionVerb '${step.actionVerb}': ${error.message}. Invoking ACCOMPLISH/Brain for reasoning.`);
+            const cachedPlanArray = await this.checkCachedPlan(step.actionVerb);
+            if (cachedPlanArray && cachedPlanArray.length > 0) {
+                res.status(200).send(MapSerializer.transformForSerialization(cachedPlanArray));
+                return;
+            }
+            const resultUnknownVerb = await this.handleUnknownVerb(step, trace_id);
+            res.status(200).send(MapSerializer.transformForSerialization(resultUnknownVerb));
             return;
         }
 
@@ -530,6 +532,16 @@ export class CapabilitiesManager extends BaseEntity {
                  (error.code.startsWith("G") || error.code.startsWith("PR") ||
                   error.code === GlobalErrorCodes.CAPABILITIES_MANAGER_PLUGIN_PREPARATION_FAILED) ? 400 : 500);
             res.status(httpStatus).json(createPluginOutputError(sError));
+        }
+    }
+
+    // Helper to log plugin lookup failures with cooldown
+    private logPluginLookupFailure(actionVerb: string, trace_id: string, message: string) {
+        const now = Date.now();
+        const lastFailure = this.failedPluginLookups.get(actionVerb) || 0;
+        if (now - lastFailure > CapabilitiesManager.PLUGIN_LOOKUP_COOLDOWN_MS) {
+            console.warn(`[${trace_id}] ${message}`);
+            this.failedPluginLookups.set(actionVerb, now);
         }
     }
 

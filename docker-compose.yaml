@@ -23,7 +23,6 @@ services:
       MISSIONCONTROL_URL: &missioncontrolUrl missioncontrol:5030
       RABBITMQ_URL: &rabbitmqUrl amqp://stage7:stage7password@rabbitmq:5672
       CONSUL_URL: &consulUrl consul:8500
-      CONFIG_SERVICE_URL: &configserviceUrl configservice:5090
       POSTOFFICE_CLIENT_SECRET: &sharedSecret stage7AuthSecret
       CLIENT_SECRET: *sharedSecret
       # Temporarily allow bootstrapping without RabbitMQ to unblock other services
@@ -62,7 +61,6 @@ services:
       POSTOFFICE_URL: *postofficeUrl
       RABBITMQ_URL: *rabbitmqUrl
       CONSUL_URL: *consulUrl
-      CONFIG_SERVICE_URL: *configserviceUrl
       TRAFFICMANAGER_URL: &trafficmanagerUrl trafficmanager:5080
       LIBRARIAN_URL: &librarianUrl librarian:5040
       BRAIN_URL: &brainUrl brain:5070
@@ -92,7 +90,6 @@ services:
       POSTOFFICE_URL: *postofficeUrl
       RABBITMQ_URL: *rabbitmqUrl
       CONSUL_URL: *consulUrl
-      CONFIG_SERVICE_URL: *configserviceUrl
       LIBRARIAN_URL: *librarianUrl
       TRAFFICMANAGER_CLIENT_SECRET: *sharedSecret
       CLIENT_SECRET: *sharedSecret
@@ -122,7 +119,6 @@ services:
       POSTOFFICE_URL: *postofficeUrl
       RABBITMQ_URL: *rabbitmqUrl
       CONSUL_URL: *consulUrl
-      CONFIG_SERVICE_URL: *configserviceUrl
       BRAIN_CLIENT_SECRET: *sharedSecret
       CLIENT_SECRET: *sharedSecret
     volumes:
@@ -180,7 +176,6 @@ services:
       POSTOFFICE_URL: *postofficeUrl
       RABBITMQ_URL: *rabbitmqUrl
       CONSUL_URL: *consulUrl
-      CONFIG_SERVICE_URL: *configserviceUrl
       BRAIN_URL: *brainUrl
       LIBRARIAN_URL: *librarianUrl
       CAPABILITIESMANAGER_URL: *capabilitiesmanagerUrl
@@ -224,7 +219,6 @@ services:
       POSTOFFICE_URL: *postofficeUrl
       RABBITMQ_URL: *rabbitmqUrl
       CONSUL_URL: *consulUrl
-      CONFIG_SERVICE_URL: *configserviceUrl
       LIBRARIAN_URL: *librarianUrl
       BRAIN_URL: *brainUrl
       ENGINEER_URL: &engineerUrl
@@ -271,7 +265,6 @@ services:
       POSTOFFICE_URL: *postofficeUrl
       RABBITMQ_URL: *rabbitmqUrl
       CONSUL_URL: *consulUrl
-      CONFIG_SERVICE_URL: *configserviceUrl
       LIBRARIAN_CLIENT_SECRET: *sharedSecret
       CLIENT_SECRET: *sharedSecret
     volumes:
@@ -294,7 +287,6 @@ services:
       POSTOFFICE_URL: *postofficeUrl
       RABBITMQ_URL: *rabbitmqUrl
       CONSUL_URL: *consulUrl
-      CONFIG_SERVICE_URL: &configserviceUrl configservice:5090
       # Using RS256 asymmetric keys for JWT signing and verification
       KEYS_DIR: /usr/src/app/services/security/keys
       ADMIN_SECRET: adminSecret
@@ -302,7 +294,6 @@ services:
       # Using a single shared client secret for all services
       SECURITYMANAGER_CLIENT_SECRET: *sharedSecret
       POSTOFFICE_CLIENT_SECRET: *sharedSecret
-      CONFIGSERVICE_CLIENT_SECRET: *sharedSecret
       MISSIONCONTROL_CLIENT_SECRET: *sharedSecret
       TRAFFICMANAGER_CLIENT_SECRET: *sharedSecret
       BRAIN_CLIENT_SECRET: *sharedSecret
@@ -326,27 +317,6 @@ services:
       - ./shared/keys:/usr/src/app/shared/keys
     ports:
       - "5010:5010"
-
-  configservice:
-    build:
-      context: .
-      dockerfile: services/configservice/dockerfile
-    depends_on:
-      - securitymanager
-    environment:
-      NODE_ENV: production
-      PORT: &configservicePort 5090
-      CONFIG_SERVICE_URL: *configserviceUrl
-      SECURITYMANAGER_URL: *securitymanagerUrl
-      POSTOFFICE_URL: *postofficeUrl
-      RABBITMQ_URL: *rabbitmqUrl
-      CONSUL_URL: *consulUrl
-      CONFIG_DIR: /usr/src/app/config
-      CONFIGSERVICE_CLIENT_SECRET: *sharedSecret
-      CLIENT_SECRET: *sharedSecret
-    volumes:
-      - config_data:/usr/src/app/config
-      - ./shared/keys:/usr/src/app/shared/keys
 
   frontend:
     build:
