@@ -101,7 +101,10 @@ export class Agent extends BaseEntity {
         this.initializeAgent().then(() => {
             console.log(`Agent ${this.id} initialized successfully. Status: ${this.status}. Commencing main execution loop.`);
             this.say(`Agent ${this.id} initialized and commencing operations.`);
-            this.runUntilDone();
+            if (!this.isRunning) {
+                this.isRunning = true;
+                this.runUntilDone();
+            }
         }).catch((error) => { // Added error parameter
             this.status = AgentStatus.ERROR;
             const errorMessage = error instanceof Error ? error.message : String(error);
@@ -137,12 +140,19 @@ export class Agent extends BaseEntity {
     /**
      * Start the agent
      */
+    private isRunning: boolean = false;
+
     public start(): void {
         console.log(`Starting agent ${this.id}`);
-        this.runUntilDone().catch(error => {
-            console.error(`Error running agent ${this.id}:`, error instanceof Error ? error.message : error);
-            this.status = AgentStatus.ERROR;
-        });
+        if (!this.isRunning) {
+            this.isRunning = true;
+            this.runUntilDone().catch(error => {
+                console.error(`Error running agent ${this.id}:`, error instanceof Error ? error.message : error);
+                this.status = AgentStatus.ERROR;
+            });
+        } else {
+            console.log(`Agent ${this.id} is already running. start() call ignored.`);
+        }
     }
 
     private async initializeAgent() {
