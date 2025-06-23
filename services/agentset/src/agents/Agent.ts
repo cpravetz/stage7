@@ -22,6 +22,8 @@ import {
     ConflictResolution
 } from '../collaboration/CollaborationProtocol';
 
+// DETAILED_PLANNING_PROMPT_TEMPLATE is removed as this logic is now in the ACCOMPLISH plugin.
+
 export class Agent extends BaseEntity {
     private missionContext: string = '';
     private agentSetUrl: string;
@@ -164,9 +166,13 @@ export class Agent extends BaseEntity {
             this.librarianUrl = librarianUrl;
             this.status = AgentStatus.RUNNING;
 
-            if (this.missionContext && this.steps[0]?.actionVerb === 'ACCOMPLISH') {
-                await this.prepareOpeningInstruction();
-            }
+            // The prepareOpeningInstruction logic is now integrated into the DETAILED_PLANNING_PROMPT_TEMPLATE
+            // and will be used when constructing the prompt for the initial ACCOMPLISH task.
+            // No need to call it separately here or add its content to the conversation directly
+            // if the main goal is to feed it into the planning prompt.
+            // If it serves other purposes for conversation history, it might need to be re-evaluated.
+            // For now, assuming its primary purpose was to provide context for the initial plan generation.
+
             return true;
         } catch (error) { analyzeError(error as Error);
             console.error('Error initializing agent:', error instanceof Error ? error.message : error);
@@ -213,11 +219,56 @@ Please consider this context and the available plugins when planning and executi
             // Send initial status update to TrafficManager
             await this.notifyTrafficManager();
 
-            while (this.status === AgentStatus.RUNNING &&
-                   this.steps.some(step => step.status === StepStatus.PENDING || step.status === StepStatus.RUNNING)) {
+            while ((this.status === AgentStatus.RUNNING || this.status === AgentStatus.PLANNING) &&
+                   (this.steps.some(step => step.status === StepStatus.PENDING || step.status === StepStatus.RUNNING) || this.status === AgentStatus.PLANNING)) {
+
+                if (this.status === AgentStatus.PLANNING) {
+                    console.log(`[Agent ${this.id}] Agent is in PLANNING state. Attempting to re-plan.`);
+                    // Attempt to re-plan. The goal for re-planning should ideally be the original agent's goal.
+                    // This assumes the original goal is stored in the first step's inputs or the agent's initial inputs.
+                    let originalGoalInput = this.inputs?.get('goal') || this.steps[0]?.inputs?.get('goal');
+
+                    if (originalGoalInput?.inputValue) {
+                        const goalForReplan = originalGoalInput.inputValue as string;
+                        console.log(`[Agent ${this.id}] Initiating re-planning for original goal: "${goalForReplan}"`);
+
+                        // Clear out PENDING/RUNNING steps. Completed/Errored steps are kept for history.
+                        this.steps = this.steps.filter(s => s.status === StepStatus.COMPLETED || s.status === StepStatus.ERROR);
+
+                        // Create a new ACCOMPLISH step for the re-plan
+                        const newAccomplishStepInputs = new Map<string, PluginInput>();
+                        newAccomplishStepInputs.set('goal', { inputName: 'goal', inputValue: goalForReplan, args: {} });
+                        // missionContext, available_plugins, and conversation_history will be added by the standard
+                        // ACCOMPLISH handling logic when this new step is processed.
+
+                        const replanStep = new Step({
+                            actionVerb: 'ACCOMPLISH',
+                            stepNo: this.steps.length + 1, // Ensure it's the next number
+                            inputs: newAccomplishStepInputs,
+                            description: `Re-plan to achieve original goal: ${goalForReplan}`,
+                            status: StepStatus.PENDING,
+                            persistenceManager: this.agentPersistenceManager
+                        });
+
+                        this.steps.push(replanStep);
+                        this.status = AgentStatus.RUNNING; // Set status to RUNNING to process the new ACCOMPLISH step
+                        this.say(`Re-planning initiated for goal: ${goalForReplan}. New ACCOMPLISH step ${replanStep.id} created.`);
+                        await this.notifyTrafficManager();
+                        continue; // Restart the main while loop to pick up the new ACCOMPLISH step
+
+                    } else {
+                        console.error(`[Agent ${this.id}] Cannot re-plan: Original goal not found.`);
+                        this.status = AgentStatus.ERROR; // Critical failure if goal is lost
+                    }
+
+                    if (this.status === AgentStatus.ERROR) { // If re-planning setup failed
+                        await this.notifyTrafficManager(); // Notify about status change
+                        break; // Exit loop if re-planning failed critically
+                    }
+                }
 
                 for (const step of this.steps.filter(s => s.status === StepStatus.PENDING)) {
-                    if (this.status === AgentStatus.RUNNING && step.areDependenciesSatisfied(this.steps)) {
+                    if ((this.status === AgentStatus.RUNNING) && step.areDependenciesSatisfied(this.steps)) {
                         console.log(`Executing step ${step.actionVerb} (${step.id})...`);
 
                         // Check if this step has a recommended role that doesn't match this agent's role
@@ -253,25 +304,57 @@ Please consider this context and the available plugins when planning and executi
 
                         let result: PluginOutput[];
 
-                        if (step.stepNo === 1 && step.actionVerb === 'ACCOMPLISH' && this.inputs?.has('goal')) {
-                            const goal = this.inputs.get('goal')?.inputValue;
-                            const planningPrompt = `You are a planning assistant. Given the goal: '${goal}', generate a JSON array of tasks to achieve this goal. Each task object should have 'actionVerb', 'inputs' (as a map of name to {inputValue, inputName, args}), 'description', 'dependencies' (as an array of sourceStepId strings, use step IDs like 'step_1'), and optionally 'recommendedRole'. Ensure the plan is detailed and includes multiple steps with dependencies if logical. The first step will be 'step_1', the next 'step_2', and so on. Dependencies should refer to these generated step IDs.
-It is critical that the plan is comprehensive and broken down into a sufficient number of granular steps to ensure successful execution. Each step's description should be clear and actionable.
-When defining 'dependencies', ensure they accurately reflect the data flow required between steps. Only list direct predecessor step IDs that provide necessary input for the current step.
-If the goal is complex, consider creating a sub-plan using a nested 'ACCOMPLISH' verb for a major sub-component, or use 'CREATE_SUB_AGENT' if a specialized agent should handle a part of the mission.
-For 'recommendedRole', suggest roles like 'researcher', 'writer', 'coder', 'validator', 'executor' only if a specialized skill is clearly beneficial for that specific step. Otherwise, omit it or use 'executor'.
-The output MUST be a valid JSON array of task objects. Do not include any explanatory text before or after the JSON array.`;
+                        if (step.actionVerb === 'ACCOMPLISH') {
+                            console.log(`[Agent ${this.id}] Preparing to execute ACCOMPLISH step (Step ${step.stepNo}) via CapabilitiesManager.`);
 
-                            console.log(`[Agent ${this.id}] Constructed planning prompt for initial ACCOMPLISH task:`, planningPrompt);
+                            // Ensure 'goal' is present. For the first step, it might be in agent.inputs.
+                            // For subsequent steps, it must be in step.inputs.
+                            let goalValue: any;
+                            if (step.stepNo === 1 && this.inputs?.has('goal')) {
+                                goalValue = this.inputs.get('goal')?.inputValue;
+                                // Ensure this goal is also part of the step's inputs for the plugin
+                                if (goalValue !== undefined && !step.inputs.has('goal')) {
+                                    step.inputs.set('goal', { inputName: 'goal', inputValue: goalValue, args: {} });
+                                }
+                            } else if (step.inputs?.has('goal')) {
+                                goalValue = step.inputs.get('goal')?.inputValue;
+                            }
 
-                            const planningInputs = new Map<string, PluginInput>();
-                            planningInputs.set('prompt', { inputName: 'prompt', inputValue: planningPrompt, args: {} });
-                            planningInputs.set('ConversationType', { inputName: 'ConversationType', inputValue: 'text/code', args: {} }); // Expecting JSON
+                            if (goalValue === undefined || goalValue === null || String(goalValue).trim() === '') {
+                                console.error(`[Agent ${this.id}] ACCOMPLISH step (Step ${step.stepNo}) is missing a valid 'goal' input.`);
+                                result = [{
+                                    success: false,
+                                    name: "error",
+                                    resultType: PluginParameterType.ERROR,
+                                    resultDescription: "ACCOMPLISH step requires a 'goal' input.",
+                                    result: null,
+                                    error: "Missing 'goal' input for ACCOMPLISH step."
+                                }];
+                            } else {
+                                // Add mission_context and available_plugins to the step's inputs
+                                // The ACCOMPLISH plugin will expect these.
+                                const availablePluginsArray = await this.getAvailablePlugins();
+                                // The Python plugin expects a simple list of strings for 'available_plugins' if sent as a list,
+                                // or a pre-formatted string. Let's send the array.
+                                step.inputs.set('available_plugins', { inputName: 'available_plugins', inputValue: availablePluginsArray, args: {} });
+                                step.inputs.set('mission_context', { inputName: 'mission_context', inputValue: this.missionContext || "", args: {} });
 
-                            result = await this.useBrainForReasoning(planningInputs);
-                            console.log(`[Agent ${this.id}] Raw response from Brain for planning:`, JSON.stringify(result));
+                                // Add the current conversation history as well, as this can be vital context for planning.
+                                // The ACCOMPLISH plugin might need to be updated to receive and use this.
+                                // For now, let's pass it as 'conversation_history'.
+                                step.inputs.set('conversation_history', { inputName: 'conversation_history', inputValue: this.conversation, args: {} });
 
+
+                                console.log(`[Agent ${this.id}] Executing ACCOMPLISH step with inputs:`, MapSerializer.transformForSerialization(step.inputs));
+                                result = await step.execute(
+                                    this.executeActionWithCapabilitiesManager.bind(this),
+                                    this.useBrainForReasoning.bind(this), // Should not be called by ACCOMPLISH directly anymore
+                                    this.createSubAgent.bind(this),
+                                    this.handleAskStep.bind(this)
+                                );
+                            }
                         } else {
+                            // Standard execution for other verbs
                             result = await step.execute(
                                 this.executeActionWithCapabilitiesManager.bind(this),
                                 this.useBrainForReasoning.bind(this),
@@ -280,7 +363,7 @@ The output MUST be a valid JSON array of task objects. Do not include any explan
                             );
                         }
 
-                        console.log(`Step ${step.actionVerb} result:`, result);
+                        console.log(`Step ${step.actionVerb} (ID: ${step.id}) result:`, JSON.stringify(result));
                         this.say(`Completed step: ${step.actionVerb}`);
 
                         if (result[0]?.resultType === PluginParameterType.PLAN) {

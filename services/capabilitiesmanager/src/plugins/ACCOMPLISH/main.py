@@ -81,7 +81,8 @@ class AccomplishPlugin:
                 f"http://{self.brain_url}/chat",
                 json={
                     "exchanges": [{"role": "user", "content": prompt}],
-                    "optimization": "accuracy"
+                    "optimization": "accuracy",
+                    "ConversationType": "text/code" # Explicitly request JSON/code output
                 },
                 headers=headers,
                 timeout=60
@@ -93,72 +94,35 @@ class AccomplishPlugin:
             logger.error(f"Failed to query Brain: {e}")
             return None
 
-    def generate_prompt(self, goal: str) -> str:
+    def generate_prompt(self, goal: str, available_plugins_str: str, mission_context_str: str) -> str:
         """Generate the prompt for the Brain service"""
-        return f"""You are an AI assistant that helps accomplish goals by either providing direct answers or creating detailed plans.
+        # This is the new standardized prompt template
+        # Note: The old prompt's guidance about DIRECT_ANSWER vs PLAN is now implicitly
+        # handled by the fact that this plugin is *for* planning. If the Brain thinks
+        # a direct answer is sufficient, it might return a very simple plan, or this
+        # plugin could be enhanced later to detect that. For now, we focus on plan generation.
+        # The specific verb schemas from the old prompt are also removed, as the new template
+        # assumes the LLM has more general knowledge or this can be part of the {availablePlugins}
+        # if needed in that format.
 
-Given the goal: "{goal}"
+        prompt = f"""
+You are a planning assistant. Given the goal: '{goal}', generate a JSON array of tasks to achieve this goal.
+Each task object should have 'actionVerb', 'inputs' (as a map of name to {{'inputValue': 'value', 'inputName': 'name', 'args': {{}}}}), 'description', 'dependencies' (as an array of sourceStepId strings, use step IDs like 'step_1'), and optionally 'recommendedRole'.
+Ensure the plan is detailed and includes multiple steps with dependencies if logical. The first step will be 'step_1', the next 'step_2', and so on. Dependencies should refer to these generated step IDs.
+It is critical that the plan is comprehensive and broken down into a sufficient number of granular steps to ensure successful execution. Each step's description should be clear and actionable.
+When defining 'dependencies', ensure they accurately reflect the data flow required between steps. Only list direct predecessor step IDs that provide necessary input for the current step.
+If the goal is complex, consider creating a sub-plan using a nested 'ACCOMPLISH' verb for a major sub-component, or use 'CREATE_SUB_AGENT' if a specialized agent should handle a part of the mission.
+For 'recommendedRole', suggest roles like 'researcher', 'writer', 'coder', 'validator', 'executor' only if a specialized skill is clearly beneficial for that specific step. Otherwise, omit it or use 'executor'.
+The output MUST be a valid JSON array of task objects. Do not include any explanatory text before or after the JSON array.
 
-Analyze this goal and determine the best approach:
+Available Plugins:
+{available_plugins_str}
 
-1. If the goal can be accomplished with a direct answer or simple response, respond with a JSON object in this format:
-{{
-    "type": "DIRECT_ANSWER",
-    "answer": "Your direct answer or solution here"
-}}
-
-2. If the goal requires multiple steps or actions to accomplish, create a detailed plan and respond with a JSON object in this format:
-{{
-    "type": "PLAN",
-    "plan": [
-        {{
-            "number": 1,
-            "verb": "ACTION_VERB",
-            "description": "Description of what this step does",
-            "inputs": {{
-                "inputName": "inputValue"
-            }},
-            "outputs": {{
-                "outputName": "Expected output description"
-            }},
-            "dependencies": []
-        }}
-    ]
-}}
-
-Available action verbs for plans and THEIR REQUIRED INPUTS:
-    (Pay close attention to the 'inputs' field for each verb. All listed inputs are MANDATORY unless specified as optional.)
-    SEARCH:
-        description: Searches DuckDuckGo for a given term.
-        inputs: {{"searchTerm": "value_for_search_term_goes_here"}} REQUIRED!
-SCRAPE:
-    description: Scrapes content from a given URL.
-    inputs: {{"url": "url_goes_here", "selector": "css_selector", "attribute": "e.g., text, href", "limit": 0}} REQUIRED!
-GET_USER_INPUT:
-    description: Requests input from the user.
-    inputs: {{"question": "question_for_user", "answerType": "string|number|boolean"}} REQUIRED!
-    optional_inputs: {{"choices": ["option1", "option2"]}}
-FILE_OPERATION:
-    description: Performs file operations.
-    inputs: {{"path": "/path/to/file", "operation": "read|write|create|delete"}} REQUIRED! (content is required for 'write' operation, provide as {{"content": "content_value"}})
-DECIDE:
-    description: Conditional branching.
-    inputs: {{"condition": "expression_evaluating_to_true_or_false", "trueSteps": [], "falseSteps": []}} REQUIRED!
-WHILE:
-    description: Repeat steps while a condition is true.
-    inputs: {{"condition": "expression_evaluating_to_true_or_false", "steps": []}} REQUIRED!
-UNTIL:
-    description: Repeat steps until a condition becomes true.
-    inputs: {{"condition": "expression_evaluating_to_true_or_false", "steps": []}} REQUIRED!
-
-    CRITICALLY IMPORTANT:
-    1. For each step in the plan, you MUST include all REQUIRED inputs for the specified 'verb' by consulting the definitions above.
-    2. The 'inputs' field for each step MUST be a JSON object containing all required parameters for that verb.
-    3. If a required input value cannot be determined from the goal, context, or outputs of previous steps, you MUST insert a `GET_USER_INPUT` step *before* the current step to ask the user for the missing input value. Do NOT proceed with a step if its required inputs are missing and cannot be obtained.
-    4. Failure to include all required inputs for a verb (or to ask the user for them) will make the plan unusable.
-    Ensure all JSON string values are properly escaped.
-
-Goal to analyze: {goal}"""
+Please consider this context and the available plugins when planning and executing the mission.
+Mission Context: {mission_context_str}
+Goal to achieve: {goal}
+"""
+        return prompt.strip()
 
     def validate_plan_data(self, plan_data: List[Dict[str, Any]]) -> Optional[str]:
         """
@@ -340,32 +304,46 @@ Goal to analyze: {goal}"""
         try:
             logger.info(f"Execute method called with inputs_map: {inputs_map}")
 
-            # Extract goal and brain token from inputs
+            # Extract goal, brain token, available_plugins, and mission_context from inputs
             goal = None
             brain_token = None
+            available_plugins_str = "No specific plugins listed as available." # Default
+            mission_context_str = "No overall mission context provided." # Default
+            conversation_history = [] # Default
 
-            for key, value in inputs_map.items():
-                logger.info(f"Processing input key: {key}, value: {value}, type: {type(value)}")
+            for key, value_obj in inputs_map.items():
+                logger.info(f"Processing input key: {key}, value_obj: {value_obj}")
+                input_value = value_obj.get('inputValue') if isinstance(value_obj, dict) else value_obj
+
                 if key == 'goal':
-                    if isinstance(value, dict) and 'inputValue' in value:
-                        goal = value['inputValue']
-                        logger.info(f"Found goal in inputValue: {goal}")
-                    else:
-                        goal = value
-                        logger.info(f"Found goal as direct value: {goal}")
-                elif key in ['__brain_auth_token', 'token']:
-                    if isinstance(value, dict) and 'inputValue' in value:
-                        brain_token = value['inputValue']
-                        logger.info(f"Found brain token from key {key}: {brain_token[:20]}...")
-                    elif isinstance(value, str):
-                        brain_token = value
-                        logger.info(f"Found brain token as direct value from key {key}: {brain_token[:20]}...")
+                    goal = str(input_value) if input_value is not None else None
+                    logger.info(f"Found goal: {goal}")
+                elif key == 'available_plugins': # Expecting a string, potentially pre-formatted
+                    if isinstance(input_value, list): # If agent sends a list of plugin names
+                        available_plugins_str = "\n".join([f"- {p}" for p in input_value]) if input_value else "No plugins listed."
+                    elif isinstance(input_value, str) and input_value.strip():
+                        available_plugins_str = input_value
+                    logger.info(f"Found available_plugins: {available_plugins_str}")
+                elif key == 'mission_context':
+                    if isinstance(input_value, str) and input_value.strip():
+                        mission_context_str = input_value
+                    logger.info(f"Found mission_context: {mission_context_str}")
+                elif key == 'conversation_history':
+                    if isinstance(input_value, list):
+                        conversation_history = input_value
+                    logger.info(f"Found conversation_history (length): {len(conversation_history)}")
+                elif key in ['__brain_auth_token', 'token']: # Keep existing token logic
+                    brain_token = str(input_value) if input_value is not None else None
+                    logger.info(f"Found brain token from key {key}: {brain_token[:20] if brain_token else 'None'}...")
 
-            logger.info(f"Final goal value: {goal}")
+            logger.info(f"Final goal: {goal}")
+            logger.info(f"Final available_plugins_str: {available_plugins_str}")
+            logger.info(f"Final mission_context_str: {mission_context_str}")
+            logger.info(f"Final conversation_history length: {len(conversation_history)}")
             logger.info(f"Brain token available: {bool(brain_token)}")
 
             if not goal:
-                logger.error("No goal found in inputs")
+                logger.error("No goal provided to ACCOMPLISH plugin")
                 return [{
                     "success": False,
                     "name": "error",
@@ -379,7 +357,8 @@ Goal to analyze: {goal}"""
                 }]
 
             # Generate prompt and query Brain
-            prompt = self.generate_prompt(goal)
+            prompt = self.generate_prompt(goal, available_plugins_str, mission_context_str)
+            logger.info(f"Generated prompt for Brain: {prompt[:500]}...") # Log start of prompt
             response = self.query_brain(prompt, brain_token)
 
             if not response:
@@ -394,61 +373,66 @@ Goal to analyze: {goal}"""
 
             # Parse Brain response
             try:
-                parsed_response = json.loads(response)
-                response_type = parsed_response.get('type', '').upper()
+                # The new prompt instructs the Brain to return a JSON array directly.
+                plan_data = json.loads(response)
 
-                if response_type == 'PLAN':
-                    plan_data = parsed_response.get('plan', [])
-                    # --- Normalize dependencies before validation and conversion ---
-                    self.normalize_plan_dependencies(plan_data)
-                    validation_error_message = self.validate_plan_data(plan_data)
-                    if validation_error_message:
-                        return [{
-                            "success": False,
-                            "name": "plan_validation_error",
-                            "resultType": PluginParameterType.ERROR,
-                            "resultDescription": validation_error_message,
-                            "result": None,
-                            "error": validation_error_message
-                        }]
-                    initial_inputs = list(inputs_map.keys())
-                    dep_error = self.validate_and_assign_dependencies(plan_data, initial_inputs)
-                    if dep_error:
-                        return [{
-                            "success": False,
-                            "name": "plan_dependency_error",
-                            "resultType": PluginParameterType.ERROR,
-                            "resultDescription": dep_error,
-                            "result": None,
-                            "error": dep_error
-                        }]
-                    tasks = self.convert_json_to_tasks(plan_data)
-                    # If convert_json_to_tasks itself returns an error structure (e.g. due to its own try-except)
-                    if tasks and isinstance(tasks, list) and len(tasks) == 1 and tasks[0].get("resultType") == PluginParameterType.ERROR:
-                        return tasks
+                if not isinstance(plan_data, list):
+                    logger.error(f"Brain response is not a JSON array as expected. Response: {response[:500]}")
+                    return [{
+                        "success": False,
+                        "name": "brain_response_format_error",
+                        "resultType": PluginParameterType.ERROR,
+                        "resultDescription": "Brain did not return a JSON array for the plan.",
+                        "result": None,
+                        "error": "Brain response was not a list."
+                    }]
 
+                # --- Normalize dependencies (handles step_X) before validation and conversion ---
+                self.normalize_plan_dependencies(plan_data)
+
+                validation_error_message = self.validate_plan_data(plan_data)
+                if validation_error_message:
                     return [{
-                        "success": True,
-                        "name": "plan",
-                        "resultType": PluginParameterType.PLAN,
-                        "resultDescription": f"A plan to: {goal}",
-                        "result": tasks,
-                        "mimeType": "application/json"
+                        "success": False,
+                        "name": "plan_validation_error",
+                        "resultType": PluginParameterType.ERROR,
+                        "resultDescription": validation_error_message,
+                        "result": None,
+                        "error": validation_error_message
                     }]
-                elif response_type == 'DIRECT_ANSWER':
+
+                # TODO: Review if validate_and_assign_dependencies is still fully needed or if parts
+                # can be simplified given the new prompt's strictness on step_X dependencies.
+                # For now, keeping it. Agent.ts's createFromPlan will also resolve dependencies.
+                initial_inputs_names = list(inputs_map.keys()) # Pass only names for validation context
+                dep_error = self.validate_and_assign_dependencies(plan_data, initial_inputs_names)
+                if dep_error:
                     return [{
-                        "success": True,
-                        "name": "answer",
-                        "resultType": PluginParameterType.STRING,
-                        "resultDescription": "Direct answer from Brain",
-                        "result": parsed_response.get('answer', ''),
-                        "mimeType": "text/plain"
+                        "success": False,
+                        "name": "plan_dependency_error",
+                        "resultType": PluginParameterType.ERROR,
+                        "resultDescription": dep_error,
+                        "result": None,
+                        "error": dep_error
                     }]
-                else:
-                    raise ValueError(f"Invalid response type from Brain: {response_type}")
+
+                tasks = self.convert_json_to_tasks(plan_data)
+                # If convert_json_to_tasks itself returns an error structure
+                if tasks and isinstance(tasks, list) and len(tasks) == 1 and tasks[0].get("resultType") == PluginParameterType.ERROR:
+                    return tasks
+
+                logger.info(f"Successfully processed plan for goal: {goal}")
+                return [{
+                    "success": True,
+                    "name": "plan",
+                    "resultType": PluginParameterType.PLAN,
+                    "resultDescription": f"A plan to: {goal}",
+                    "result": tasks, # This is List[ActionVerbTask]
+                    "mimeType": "application/json"
+                }]
 
             except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse Brain response as JSON: {e}")
+                logger.error(f"Failed to parse Brain response as JSON: {e}. Response: {response[:500]}")
                 return [{
                     "success": False,
                     "name": "error",
