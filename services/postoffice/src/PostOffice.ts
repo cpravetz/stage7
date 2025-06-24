@@ -119,7 +119,6 @@ export class PostOffice extends BaseEntity {
             this.componentType
         );
         this.healthCheckManager.setupHealthCheck();
-        this.setupHealthCheck();
 
         // Initialize the FileUploadManager and PluginManager
         this.fileUploadManager = new FileUploadManager(
@@ -226,50 +225,6 @@ export class PostOffice extends BaseEntity {
             res.status(500).send({ error: `Failed to retrieve work product id:${req.params.id}`});
         }
     }
-
-    protected setupHealthCheck() {
-        this.healthCheckManager.setupHealthCheck();
-
-        // Add proxy endpoint for AgentSet health check
-        this.app.get('/agentset/health', async (_req, res) => {
-            try {
-                const agentSetUrl = process.env.AGENTSET_URL || 'agentset:5100';
-                // Health check endpoints don't need authentication
-                const response = await axios.get(`http://${agentSetUrl}/health`);
-                res.status(200).json(response.data);
-            } catch (error) {
-                console.error('Error checking AgentSet health:', error instanceof Error ? error.message : error);
-                res.status(500).json({ error: 'Failed to check AgentSet health' });
-            }
-        });
-
-        // Add proxy endpoint for AgentSet healthy check
-        this.app.get('/agentset/healthy', async (_req, res) => {
-            try {
-                const agentSetUrl = process.env.AGENTSET_URL || 'agentset:5100';
-                // Health check endpoints don't need authentication
-                const response = await axios.get(`http://${agentSetUrl}/healthy`);
-                res.status(200).json(response.data);
-            } catch (error) {
-                console.error('Error checking AgentSet healthy status:', error instanceof Error ? error.message : error);
-                res.status(500).json({ error: 'Failed to check AgentSet healthy status' });
-            }
-        });
-
-        // Add proxy endpoint for AgentSet ready check
-        this.app.get('/agentset/ready', async (_req, res) => {
-            try {
-                const agentSetUrl = process.env.AGENTSET_URL || 'agentset:5100';
-                // Health check endpoints don't need authentication
-                const response = await axios.get(`http://${agentSetUrl}/ready`);
-                res.status(200).json(response.data);
-            } catch (error) {
-                console.error('Error checking AgentSet ready status:', error instanceof Error ? error.message : error);
-                res.status(500).json({ error: 'Failed to check AgentSet ready status' });
-            }
-        });
-    }
-
 
     protected async handleQueueMessage(message: Message) {
         await this.messageRouter.handleQueueMessage(message);

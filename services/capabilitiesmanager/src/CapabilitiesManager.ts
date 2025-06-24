@@ -738,17 +738,31 @@ export class CapabilitiesManager extends BaseEntity {
             }
 
             const venvPath = path.join(pluginRootPath, 'venv');
-            const venvPipPath = path.join(venvPath, 'bin', 'pip'); // Assuming Linux/macOS structure
+            // Platform-aware venv paths
+            const isWindows = process.platform === 'win32';
+            const venvBinDir = isWindows ? path.join(venvPath, 'Scripts') : path.join(venvPath, 'bin');
+            const venvPythonPath = path.join(venvBinDir, isWindows ? 'python.exe' : 'python');
+            const venvPipPath = path.join(venvBinDir, isWindows ? 'pip.exe' : 'pip');
 
-            console.log(`[${trace_id}] ${source_component}: Preparing for Python dependency installation using venv at ${venvPath}`);
+            // Helper to check if venv is healthy
+            function venvHealthy() {
+                return fs.existsSync(venvPythonPath) && fs.existsSync(venvPipPath);
+            }
+
+            // If venv exists but is not healthy, remove it
+            if (fs.existsSync(venvPath) && !venvHealthy()) {
+                console.warn(`[${trace_id}] ${source_component}: Existing venv at ${venvPath} is broken (missing python or pip). Deleting and recreating.`);
+                // Remove venv recursively
+                fs.rmSync(venvPath, { recursive: true, force: true });
+            }
 
             let installCommand: string;
-            if (fs.existsSync(venvPath)) {
-                console.log(`[${trace_id}] ${source_component}: Virtual environment already exists at ${venvPath}. Installing dependencies using its pip.`);
-                installCommand = `"${venvPipPath}" install -r "${requirementsPath}"`;
+            if (!fs.existsSync(venvPath)) {
+                console.log(`[${trace_id}] ${source_component}: Creating virtual environment at ${venvPath}.`);
+                installCommand = `${isWindows ? 'python' : 'python3'} -m venv "${venvPath}" && "${venvPipPath}" install --upgrade pip && "${venvPipPath}" install -r "${requirementsPath}"`;
             } else {
-                console.log(`[${trace_id}] ${source_component}: Creating virtual environment at ${venvPath} and installing dependencies.`);
-                installCommand = `python3 -m venv "${venvPath}" && "${venvPipPath}" install -r "${requirementsPath}"`;
+                console.log(`[${trace_id}] ${source_component}: Virtual environment exists and is healthy at ${venvPath}. Installing dependencies using its pip.`);
+                installCommand = `"${venvPipPath}" install --upgrade pip && "${venvPipPath}" install -r "${requirementsPath}"`;
             }
 
             console.log(`[${trace_id}] ${source_component}: Install command: ${installCommand}`);
@@ -759,14 +773,13 @@ export class CapabilitiesManager extends BaseEntity {
             });
 
             if (stderr && !stderr.includes('Successfully installed') && !stderr.includes('Requirement already satisfied')) {
-                 // Some warnings might not include "Successfully installed" but are not critical errors.
-                 // e.g. deprecation warnings. We log them but don't necessarily fail.
+                // Some warnings might not include "Successfully installed" but are not critical errors.
+                // e.g. deprecation warnings. We log them but don't necessarily fail.
                 console.warn(`[${trace_id}] ${source_component}: Python dependency installation stderr: ${stderr}`);
             }
-            if (stdout) { // stdout might also contain useful info or confirmation
+            if (stdout) {
                 console.log(`[${trace_id}] ${source_component}: Python dependency installation stdout: ${stdout}`);
             }
-
 
             // Create marker file with requirements hash
             fs.writeFileSync(markerPath, requirementsHash);
@@ -1166,7 +1179,18 @@ export class CapabilitiesManager extends BaseEntity {
             const result = await this.executeActionVerbInternal(step, trace_id);
 
             stepExecution.outputs = this.extractStepOutputs(result);
-            stepExecution.status = 'completed';
+            // Determine step status based on plugin output
+            if (Array.isArray(result) && result.some(r => r.success === true)) {
+                stepExecution.status = 'completed';
+            } else {
+                stepExecution.status = 'failed';
+                // Try to set error message from first output
+                if (Array.isArray(result) && result.length > 0) {
+                    stepExecution.error = result[0].error || result[0].resultDescription || 'Step failed';
+                } else {
+                    stepExecution.error = 'Step failed (no output)';
+                }
+            }
             stepExecution.endTime = new Date();
 
         } catch (error: any) {

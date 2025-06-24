@@ -19,15 +19,16 @@ The `CollaborationManager` class implements the `CollaborationProtocol` interfac
 
 ### Key Responsibilities
 
-- Maintains a map of agents and shared memories for missions.
-- Sends and forwards collaboration messages to agents or other agent sets.
-- Handles incoming collaboration messages by routing them to appropriate handlers based on message type.
+- Delegates message routing to the `postOffice` service, ensuring messages reach the correct agent or agent set.
+- Uses the `AgentSet` for agent lookup and management, rather than maintaining its own agent map.
+- Leverages the `librarian` service for shared memory and knowledge storage, instead of managing shared memory internally.
+- Delegates agent location and network routing to the `trafficManager` service.
 - Manages task delegation and conflict resolution by delegating to the respective systems.
 - Periodically checks for expired tasks and conflicts.
 
 ### Message Handling
 
-The manager processes various collaboration message types, including:
+The manager processes various collaboration message types by routing them to the appropriate agent or service provider, avoiding duplication of logic already present in the system.
 
 - Knowledge sharing
 - Task delegation, result, and status updates

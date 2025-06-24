@@ -962,7 +962,7 @@ The output MUST be a valid JSON array of task objects. Do not include any explan
         return this.status;
     }
 
-    async getStatistics(): Promise<AgentStatistics> {
+    async getStatistics(globalStepMap?: Map<string, { agentId: string, step: any }>): Promise<AgentStatistics> {
         console.log(`[Agent ${this.id}] Preparing statistics. Current steps count: ${this.steps.length}`);
 
         const stepStats = this.steps.map(step => {
@@ -975,10 +975,13 @@ The output MUST be a valid JSON array of task objects. Do not include any explan
             if (step?.dependencies && Array.isArray(step.dependencies)) {
                 dependencies = step.dependencies.map(dep => dep?.sourceStepId || 'unknown-sourceStepId');
             }
+            // If a globalStepMap is provided, include any additional dependencies found there
+            if (globalStepMap) {
+                // Optionally, you could enhance this to include cross-agent dependencies if not already present
+                // For now, we assume step.dependencies is complete, but you could cross-check here if needed
+            }
 
             const stepNo = step?.stepNo || 0;
-
-            console.log(`[Agent.getStatistics] Processing step for stats - ID: ${stepId}, ActionVerb: '${stepActionVerb}', Status: '${stepStatus}'`);
 
             return {
                 id: stepId,

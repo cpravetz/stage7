@@ -4,6 +4,8 @@ import { DataSet } from 'vis-data';
 import { Edge, Node, Options } from 'vis-network';
 import { MapSerializer, AgentStatistics } from '../shared-browser'; // Assuming AgentStatistics is correctly defined
 import './NetworkGraph.css';
+import { API_BASE_URL } from '../config';
+import { SecurityClient } from '../SecurityClient';
 
 interface NetworkGraphProps {
     agentStatistics: Map<string, Array<AgentStatistics>> | any;
@@ -66,6 +68,11 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics }) =
     const networkRef = useRef<Network | null>(null);
     // Store zoom and pan state
     const viewStateRef = useRef<{scale: number, position: {x: number, y: number}} | null>(null);
+    // Step overview dialog state
+    const [stepOverview, setStepOverview] = React.useState<any | null>(null);
+    const [stepOverviewOpen, setStepOverviewOpen] = React.useState(false);
+    const [stepOverviewLoading, setStepOverviewLoading] = React.useState(false);
+    const [stepOverviewError, setStepOverviewError] = React.useState<string | null>(null);
 
     // --- Zoom controls ---
     const handleZoom = (factor: number) => {
@@ -83,6 +90,23 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics }) =
             // Save view state
             const position = networkRef.current.getViewPosition();
             viewStateRef.current = { scale: 1, position };
+        }
+    };
+
+    // --- Helper to preserve and restore view state on updates ---
+    const saveViewState = () => {
+        if (networkRef.current) {
+            const scale = networkRef.current.getScale();
+            const position = networkRef.current.getViewPosition();
+            viewStateRef.current = { scale, position };
+        }
+    };
+    const restoreViewState = () => {
+        if (networkRef.current && viewStateRef.current) {
+            networkRef.current.moveTo({
+                scale: viewStateRef.current.scale,
+                position: viewStateRef.current.position
+            });
         }
     };
 
@@ -117,73 +141,126 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics }) =
         const newEdges = new DataSet<Edge>();
         let nodeCount = 0;
 
-        console.log(`[NetworkGraph] Iterating over statsMap (size: ${statsMap.size})...`);
-        for (const [statusCategory, agents] of statsMap.entries()) { // statusCategory is the key of the map, e.g., "active", "inactive"
-            console.log(`[NetworkGraph] Processing status category: ${statusCategory}, Number of agents: ${agents.length}`);
-            if (!Array.isArray(agents)) {
-                console.warn(`[NetworkGraph] Agents for status category ${statusCategory} is not an array:`, agents);
-                continue;
-            }
-            agents.forEach((agent: AgentStatistics, agentIndex: number) => {
-                console.log(`[NetworkGraph][DEBUG] Agent ${agentIndex} (status: ${statusCategory}) ID: ${agent.id}, Color: ${agent.color}, Steps count: ${agent.steps ? agent.steps.length : 'N/A'}`);
-                if (agent.steps && Array.isArray(agent.steps)) {
-                    agent.steps.forEach((step, stepIdx) => {
-                        console.log(`[NetworkGraph][DEBUG]   Step ${stepIdx}: id=${step.id}, verb=${step.verb}, status=${step.status}, dependencies=${JSON.stringify(step.dependencies)}`);
-                    });
-                }
+        // --- Track step->agent and dependency relationships ---
+        const stepIdToAgentId: Record<string, string> = {};
+        const stepIdToStep: Record<string, any> = {};
+        const agentIdToSteps: Record<string, any[]> = {};
+        const stepIdToDependents: Record<string, Set<string>> = {};
 
-                const agentColor = agent.color || '#999999'; // Default agent color if undefined
-
-                if (!agent.steps || !Array.isArray(agent.steps)) {
-                     console.warn(`[NetworkGraph] Agent ${agent.id} has no steps or steps is not an array:`, agent.steps);
-                     return;
-                }
+        // First pass: create nodes and build lookup tables
+        for (const [statusCategory, agents] of statsMap.entries()) {
+            if (!Array.isArray(agents)) continue;
+            agents.forEach((agent: AgentStatistics) => {
+                const agentColor = agent.color || '#999999';
+                if (!agent.steps || !Array.isArray(agent.steps)) return;
+                agentIdToSteps[agent.agentId] = agent.steps;
                 agent.steps.forEach(step => {
-                    nodeCount++;
+                    stepIdToAgentId[step.id] = agent.agentId;
+                    stepIdToStep[step.id] = step;
+                    // Build dependents map
+                    if (step.dependencies && Array.isArray(step.dependencies)) {
+                        step.dependencies.forEach(depId => {
+                            if (!depId) return;
+                            if (!stepIdToDependents[depId]) stepIdToDependents[depId] = new Set();
+                            stepIdToDependents[depId].add(step.id);
+                        });
+                    }
                     const stepStatusBorderColor = getStepStatusBorderColor(step.status);
                     const fontColor = getContrastYIQ(agentColor);
-                    console.log(`[NetworkGraph] Adding node for step: ${step.id}, Verb: ${step.verb}, Status: ${step.status}, AgentColor: ${agentColor}, BorderColor: ${stepStatusBorderColor}`);
-
                     newNodes.add({
                         id: step.id,
                         label: `${step.verb}\n(${step.status.toUpperCase()})`,
                         color: {
                             background: agentColor,
                             border: stepStatusBorderColor,
-                            highlight: {
-                                background: agentColor,
-                                border: stepStatusBorderColor,
-                            },
-                            hover: {
-                                background: agentColor,
-                                border: '#FFC107'
-                            }
+                            highlight: { background: agentColor, border: stepStatusBorderColor },
+                            hover: { background: agentColor, border: '#FFC107' }
                         },
                         borderWidth: 3,
-                        group: agent.id,
+                        group: agent.agentId,
                         font: { color: fontColor }
                     });
+                });
+            });
+        }
 
-                    if (step.dependencies && Array.isArray(step.dependencies)) {
-                        step.dependencies.forEach(depId => {
-                            if (!depId || depId === 'unknown-sourceStepId') return; // Skip invalid edges
-                            console.log(`[NetworkGraph] Adding edge from ${depId} to ${step.id}`);
+        // Second pass: create edges (dependencies, agent input/output links)
+        for (const [statusCategory, agents] of statsMap.entries()) {
+            if (!Array.isArray(agents)) continue;
+            agents.forEach((agent: AgentStatistics) => {
+                if (!agent.steps || !Array.isArray(agent.steps)) return;
+                // Use inputIds/outputIds if present, else fallback to []
+                const agentInputIds: string[] = Array.isArray((agent as any).inputIds) ? (agent as any).inputIds : [];
+                const agentOutputIds: string[] = Array.isArray((agent as any).outputIds) ? (agent as any).outputIds : [];
+                // Add input nodes (if not already present)
+                agentInputIds.forEach((inputId: string) => {
+                    if (!newNodes.get(inputId)) {
+                        newNodes.add({
+                            id: inputId,
+                            label: `AGENT INPUT\n${inputId}`,
+                            color: { background: '#f5f5f5', border: '#607d8b' },
+                            borderWidth: 2,
+                            font: { color: '#222' },
+                            group: agent.agentId,
+                            shape: 'ellipse',
+                        });
+                    }
+                });
+                // Add output nodes (if not already present)
+                agentOutputIds.forEach((outputId: string) => {
+                    if (!newNodes.get(outputId)) {
+                        newNodes.add({
+                            id: outputId,
+                            label: `AGENT OUTPUT\n${outputId}`,
+                            color: { background: '#e8f5e9', border: '#388e3c' },
+                            borderWidth: 2,
+                            font: { color: '#222' },
+                            group: agent.agentId,
+                            shape: 'ellipse',
+                        });
+                    }
+                });
+                // Step-to-step and agent input/output edges
+                agent.steps.forEach(step => {
+                    // Standard dependencies
+                    if (step.dependencies && Array.isArray(step.dependencies) && step.dependencies.length > 0) {
+                        step.dependencies.forEach((depId: string) => {
+                            if (!depId || depId === 'unknown-sourceStepId') return;
                             newEdges.add({
                                 from: depId,
                                 to: step.id,
                                 arrows: 'to',
-                                color: {
-                                    color: agentColor,
-                                    highlight: '#FFC107',
-                                    hover: '#FFC107'
-                                },
+                                color: { color: agent.color || '#999999', highlight: '#FFC107', hover: '#FFC107' },
                                 width: 2,
-                                smooth: {
-                                    enabled: true,
-                                    type: "cubicBezier",
-                                    forceDirection: "horizontal",
-                                    roundness: 0.5
-                                }
+                                smooth: { enabled: true, type: 'cubicBezier', forceDirection: 'horizontal', roundness: 0.5 }
+                            });
+                        });
+                    } else {
+                        // No dependencies: connect agent input(s) to this step
+                        agentInputIds.forEach((inputId: string) => {
+                            newEdges.add({
+                                from: inputId,
+                                to: step.id,
+                                arrows: 'to',
+                                color: { color: '#607d8b', highlight: '#FFC107', hover: '#FFC107' },
+                                width: 2,
+                                dashes: true,
+                                smooth: { enabled: true, type: 'cubicBezier', forceDirection: 'horizontal', roundness: 0.5 }
+                            });
+                        });
+                    }
+                    // No dependents: connect this step to agent output(s)
+                    const dependents = stepIdToDependents[step.id];
+                    if (!dependents || dependents.size === 0) {
+                        agentOutputIds.forEach((outputId: string) => {
+                            newEdges.add({
+                                from: step.id,
+                                to: outputId,
+                                arrows: 'to',
+                                color: { color: '#388e3c', highlight: '#FFC107', hover: '#FFC107' },
+                                width: 2,
+                                dashes: true,
+                                smooth: { enabled: true, type: 'cubicBezier', forceDirection: 'horizontal', roundness: 0.5 }
                             });
                         });
                     }
@@ -203,6 +280,9 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics }) =
             return;
         }
 
+        // --- Save view state before update ---
+        saveViewState();
+
         if (nodes.length === 0) {
             if (networkRef.current) {
                 networkRef.current.setData({ nodes: new DataSet<Node>(), edges: new DataSet<Edge>() });
@@ -213,83 +293,98 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics }) =
             return;
         }
 
-        // Save current view state before update
-        let prevView: {scale: number, position: {x: number, y: number}} | null = null;
-        if (networkRef.current) {
-            prevView = {
-                scale: networkRef.current.getScale(),
-                position: networkRef.current.getViewPosition()
-            };
-        } else if (viewStateRef.current) {
-            prevView = viewStateRef.current;
-        }
-
         const options: Options = {
             layout: {
                 hierarchical: {
                     enabled: true,
-                    direction: 'LR', // Left to Right
-                    sortMethod: 'directed', // Follows edge direction
-                    levelSeparation: 200, // Increased separation
-                    nodeSpacing: 150,     // Spacing between nodes at the same level
-                    treeSpacing: 250,     // Spacing between different trees (if any)
+                    direction: 'LR',
+                    sortMethod: 'directed',
+                    levelSeparation: 200,
+                    nodeSpacing: 150,
+                    treeSpacing: 250,
                     parentCentralization: true,
                     blockShifting: true,
                     edgeMinimization: true,
-                    shakeTowards: 'roots' // or 'leaves'
+                    shakeTowards: 'roots'
                 }
             },
             physics: {
-                enabled: false // Hierarchical layout works best with physics disabled
+                enabled: false
             },
             interaction: {
-                dragNodes: true, // Allow moving nodes
+                dragNodes: true,
                 dragView: true,
                 zoomView: true,
-                hover: true // Enable hover effects
+                hover: true
             },
             nodes: {
                 shape: 'box',
                 margin: { top: 10, bottom: 10, left: 15, right: 15 },
                 widthConstraint: {
-                    minimum: 120, // Slightly wider nodes
+                    minimum: 120,
                     maximum: 250
                 },
                 font: {
                     size: 12,
-                    // color is now set per-node for better contrast with agent color
                 },
             },
             edges: {
-                smooth: { // Smoothness for hierarchical layout
+                smooth: {
                     enabled: true,
                     type: "cubicBezier",
-                    forceDirection: "horizontal", // For LR layout
+                    forceDirection: "horizontal",
                     roundness: 0.5
                 },
                 arrows: {
                     to: { enabled: true, scaleFactor: 1 }
                 },
-                // color is now set per-edge
                 width: 2
             },
             groups: {
-                // Can define group styles here if needed, but individual styling is more flexible
             }
         };
 
         if (networkRef.current) {
             networkRef.current.setOptions(options);
-            networkRef.current.setData({ nodes, edges }); // Update data and options
+            networkRef.current.setData({ nodes, edges });
+            // --- Restore view state after update ---
+            restoreViewState();
             console.log('[NetworkGraph] Network updated with new data/options.');
         } else {
             networkRef.current = new Network(containerRef.current, { nodes, edges }, options);
-            console.log('[NetworkGraph] New network initialized.');
-        }
+            const securityClient = SecurityClient.getInstance(API_BASE_URL);
+            // Add node click handler for step overview
+            networkRef.current.on('click', async (params) => {
+                if (params.nodes && params.nodes.length > 0) {
+                    const stepId = params.nodes[0];
+                    setStepOverviewLoading(true);
+                    setStepOverviewOpen(true);
+                    setStepOverviewError(null);
+                    setStepOverview(null);
+                    try {
+                        const token = securityClient.getAccessToken();
 
-        // Restore previous view state (zoom/pan)
-        if (prevView && networkRef.current) {
-            networkRef.current.moveTo({ scale: prevView.scale, position: prevView.position });
+                        // Fetch step overview from librarian API (replace URL as needed)
+                        const resp = await fetch(`${API_BASE_URL}/librarian/steps/${stepId}`,{
+                            method: 'GET',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${token}`
+                            },
+                            credentials: 'include',
+                            mode: 'cors'
+                        });
+                        if (!resp.ok) throw new Error('Failed to fetch step overview');
+                        const data = await resp.json();
+                        setStepOverview(data);
+                    } catch (e: any) {
+                        setStepOverviewError(e.message || 'Error fetching step overview');
+                    } finally {
+                        setStepOverviewLoading(false);
+                    }
+                }
+            });
+            console.log('[NetworkGraph] New network initialized.');
         }
 
         // Only destroy on unmount
@@ -300,7 +395,35 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics }) =
                 networkRef.current = null;
             }
         };
-    }, [nodes, edges]); // Re-run effect if nodes or edges datasets change
+    }, [nodes, edges]);
+
+    // Step Overview Dialog
+    const StepOverviewDialog = () => (
+        <div>
+            {stepOverviewOpen && (
+                <div className="step-overview-modal">
+                    <div className="step-overview-content">
+                        <button className="close-btn" onClick={() => setStepOverviewOpen(false)}>×</button>
+                        {stepOverviewLoading ? (
+                            <div>Loading...</div>
+                        ) : stepOverviewError ? (
+                            <div style={{ color: 'red' }}>{stepOverviewError}</div>
+                        ) : stepOverview ? (
+                            <div>
+                                <h3>Step Overview</h3>
+                                <div><b>Action:</b> {stepOverview.verb}</div>
+                                <div><b>Description:</b> {stepOverview.description}</div>
+                                <div><b>Status:</b> {stepOverview.status}</div>
+                                <div><b>Inputs:</b> <pre>{JSON.stringify(stepOverview.inputs, null, 2)}</pre></div>
+                                <div><b>Outputs:</b> <pre>{JSON.stringify(stepOverview.outputs, null, 2)}</pre></div>
+                                <div><b>Results:</b> <pre>{JSON.stringify(stepOverview.results, null, 2)}</pre></div>
+                            </div>
+                        ) : null}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
 
     return (
         <div style={{ position: 'relative', width: '100%' }}>
@@ -310,6 +433,7 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics }) =
                 <button onClick={handleResetZoom} title="Reset Zoom">⟳</button>
             </div>
             <div ref={containerRef} className="network-graph" />
+            <StepOverviewDialog />
         </div>
     );
 };

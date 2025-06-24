@@ -55,7 +55,7 @@ export class ServiceDiscovery {
         Port: actualPort,
         Check: {
           HTTP: `http://${serviceUrl}/health`,
-          Interval: '15s',
+          Interval: '60s',
           Timeout: '5s'
         }
       });
