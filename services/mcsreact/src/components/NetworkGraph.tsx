@@ -364,8 +364,8 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics }) =
                     try {
                         const token = securityClient.getAccessToken();
 
-                        // Fetch step overview from librarian API (replace URL as needed)
-                        const resp = await fetch(`${API_BASE_URL}/librarian/steps/${stepId}`,{
+                        // Fetch step overview from AgentSet API
+                        const resp = await fetch(`${API_BASE_URL}/agentset/agent/step/${stepId}`,{
                             method: 'GET',
                             headers: {
                                 'Content-Type': 'application/json',
@@ -374,8 +374,12 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics }) =
                             credentials: 'include',
                             mode: 'cors'
                         });
-                        if (!resp.ok) throw new Error('Failed to fetch step overview');
+                        if (!resp.ok) {
+                            const errorData = await resp.json().catch(() => ({ message: 'Failed to fetch step overview and could not parse error response.' }));
+                            throw new Error(errorData.message || `Failed to fetch step overview. Status: ${resp.status}`);
+                        }
                         const data = await resp.json();
+                        // The new endpoint directly returns the step details, no need to access a nested 'data' field.
                         setStepOverview(data);
                     } catch (e: any) {
                         setStepOverviewError(e.message || 'Error fetching step overview');

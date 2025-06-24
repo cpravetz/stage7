@@ -688,6 +688,9 @@ export class AgentSet extends BaseEntity {
        this.app.post('/updateFromAgent', this.updateFromAgent.bind(this));
        // Note: The '/agent/:agentId/output' route is already defined above with .bind(this)
 
+       // Endpoint to get details for a specific step
+       this.app.get('/agent/step/:stepId', this.getStepDetailsHandler.bind(this));
+
        this.app.post('/saveAgent', async (req: express.Request, res: express.Response) => {
             const { agentId } = req.body;
             try {
@@ -1130,6 +1133,49 @@ export class AgentSet extends BaseEntity {
                 }
             }
         }
+
+    private async getStepDetailsHandler(req: express.Request, res: express.Response): Promise<void> {
+        const { stepId } = req.params;
+        if (!stepId) {
+            res.status(400).send({ error: 'stepId is required' });
+            return;
+        }
+
+        try {
+            const stepDetails = await this.getStepDetails(stepId);
+            if (!stepDetails) {
+                res.status(404).send({ error: `Step with id ${stepId} not found` });
+                return;
+            }
+            res.status(200).send(stepDetails);
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error(`Error fetching step details for step ${stepId}:`, error instanceof Error ? error.message : String(error));
+            if (!res.headersSent) {
+                res.status(500).send({ error: `Failed to fetch step details for step ${stepId}` });
+            }
+        }
+    }
+
+    private async getStepDetails(stepId: string): Promise<any | null> {
+        for (const agent of this.agents.values()) {
+            const step = agent.steps.find(s => s.id === stepId);
+            if (step) {
+                // Assuming the 'step' object already contains all necessary details
+                // If not, you might need to fetch additional info from the agent or step object
+                return {
+                    verb: step.verb,
+                    description: step.description,
+                    status: step.status,
+                    inputs: step.inputs,
+                    outputs: step.outputs,
+                    results: step.results, // Assuming results are stored directly on the step
+                    agentId: agent.id, // Optionally include agentId for context
+                };
+            }
+        }
+        return null; // Step not found
+    }
 
     /**
      * Forward a collaboration message to remote agent sets or external systems.
