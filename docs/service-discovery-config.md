@@ -44,23 +44,36 @@ This registration includes:
 
 ### Service Discovery
 
-Services can discover other services using the ServiceDiscovery client:
+Services primarily discover other services through Consul. The `BaseEntity` class, which most services extend, provides a `getServiceUrl(serviceType: string)` method. This method implements the following discovery order:
 
-```typescript
-const serviceUrl = await this.serviceDiscovery.discoverService('Brain');
-```
+1.  **Consul Lookup**: It first attempts to discover the service using the shared `ServiceDiscovery` client, which queries Consul for a healthy instance of the specified `serviceType`.
+    ```typescript
+    // Inside BaseEntity.getServiceUrl, simplified:
+    // const discoveredUrl = await this.serviceDiscovery.discoverService(serviceType);
+    // if (discoveredUrl) return discoveredUrl;
+    ```
+2.  **Environment Variable Fallback**: If the service is not found in Consul, it falls back to checking for an environment variable named `SERVICETYPE_URL` (e.g., `BRAIN_URL`).
+    ```typescript
+    // Inside BaseEntity.getServiceUrl, simplified:
+    // const envUrl = process.env[`${serviceType.toUpperCase()}_URL`];
+    // if (envUrl) return envUrl;
+    ```
 
-This returns the URL of a healthy instance of the specified service type.
+This two-step process (Consul first, then environment variable) is the standard way services locate each other.
 
-### Fallback Mechanism
+**Special Case: PostOffice Discovery**
+The `ServiceDiscovery` client itself (in `shared/src/discovery/serviceDiscovery.ts`) has a special handling for discovering the `PostOffice` service. To avoid circular dependencies during startup, it directly uses the `POSTOFFICE_URL` environment variable or a default value (`postoffice:5020`) instead of querying Consul for PostOffice.
 
-If service discovery fails, the system falls back to environment variables:
+### Fallback Mechanism Summary
 
-1. First, try to discover the service using Consul
-2. If that fails, check the local registry
-3. If that fails, use the environment variable
+The primary fallback mechanism is now simplified:
 
-This ensures that the system can continue to function even if Consul is unavailable.
+1.  **Primary**: Discover the service using Consul.
+2.  **Secondary**: If Consul lookup fails or `ServiceDiscovery` is unavailable, use the specific environment variable for the target service (e.g., `BRAIN_URL`).
+
+The previous reliance on PostOffice's local registry as a tertiary fallback for `BaseEntity` services has been removed, as services now register directly with Consul and PostOffice's role as a service registration broker has been deprecated.
+
+This streamlined approach ensures that the system can still function if Consul is temporarily unavailable, provided the necessary environment variables are configured in the deployment (e.g., in `docker-compose.yaml`).
 
 ## Configuration Management
 
@@ -113,7 +126,13 @@ Caching mechanisms can be implemented at the application level if needed.
 
 The service discovery and configuration management systems are integrated with the existing Stage7 architecture:
 
-1. **BaseEntity**: Enhanced to register with Consul and discover other services
-2. **PostOffice**: Updated to use service discovery for routing messages
+1.  **`BaseEntity`**: This shared class is central to service discovery. Services extending `BaseEntity` automatically:
+    *   Register themselves with Consul on startup.
+    *   Utilize the `getServiceUrl()` method for discovering other services (Consul-first, then environment variable fallback).
+2.  **`ServiceDiscovery` Client**: A shared client in `shared/src/discovery/serviceDiscovery.ts` provides the core logic for interacting with Consul (registration, discovery) and is used by `BaseEntity`.
+3.  **`PostOffice`**:
+    *   Like other services, PostOffice extends `BaseEntity` and thus registers with Consul and uses the standard `getServiceUrl()` method for its own outbound service discovery needs.
+    *   Its previous role as a service registration endpoint (`/registerComponent`) and as a direct fallback lookup source for other services has been deprecated in favor of direct Consul interaction by each service (via `BaseEntity`).
+    *   PostOffice continues to use service discovery for routing messages and for its internal components to locate other necessary services.
 
-This integration provides a more robust and flexible system that can adapt to changing environments and requirements.
+This integration provides a more robust and flexible system, with Consul as the authoritative source for service locations and `BaseEntity` providing a consistent implementation for all services.

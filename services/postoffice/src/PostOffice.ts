@@ -71,7 +71,7 @@ export class PostOffice extends BaseEntity {
             this.clientMissions,
             this.missionClients,
             this.authenticatedApi,
-            (type) => this.serviceDiscoveryManager.getComponentUrl(type),
+            this.getServiceUrl.bind(this), // Use BaseEntity's getServiceUrl
             this.handleWebSocketMessage.bind(this)
         );
 
@@ -123,20 +123,20 @@ export class PostOffice extends BaseEntity {
         // Initialize the FileUploadManager and PluginManager
         this.fileUploadManager = new FileUploadManager(
             this.authenticatedApi,
-            (type) => this.serviceDiscoveryManager.getComponentUrl(type)
+            this.getServiceUrl.bind(this) // Use BaseEntity's getServiceUrl
         );
         this.pluginManager = new PluginManager(
             this.authenticatedApi,
-            (type) => this.serviceDiscoveryManager.getComponentUrl(type)
+            this.getServiceUrl.bind(this) // Use BaseEntity's getServiceUrl
         );
 
         // Apply authentication middleware to all routes EXCEPT health check endpoints, registerComponent, and token refresh
         // Import the isHealthCheckEndpoint function from shared middleware
         const { isHealthCheckEndpoint } = require('@cktmcs/shared/dist/middleware/authMiddleware.js');
         this.app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
-            // Skip authentication for health check endpoints, registerComponent, and token refresh
+            // Skip authentication for health check endpoints, and token refresh
+            // Removed /registerComponent from exempt paths
             if (isHealthCheckEndpoint(req.path) ||
-                req.path === '/registerComponent' ||
                 req.path === '/securityManager/refresh-token' ||
                 req.path === '/securityManager/auth/refresh-token') {
                 console.log(`[PostOffice] Skipping authentication for exempt path: ${req.path}`);
@@ -154,10 +154,11 @@ export class PostOffice extends BaseEntity {
             res.send('PostOffice service is running');
         });
 
-        this.app.post('/registerComponent', (req, res) => {
-            console.log('Received registration request:', req.body);
-            this.registerComponent(req, res);
-        });
+        // Removed /registerComponent route
+        // this.app.post('/registerComponent', (req, res) => {
+        //     console.log('Received registration request:', req.body);
+        //     this.registerComponent(req, res);
+        // });
 
         this.app.post('/message', (req, res) => this.handleMessage(req, res));
         this.app.post('/sendMessage', (req, res) => this.handleIncomingMessage(req, res));
@@ -492,23 +493,8 @@ export class PostOffice extends BaseEntity {
         }
     }
 
-    private async registerComponent(req: express.Request, res: express.Response) {
-        try {
-            const { id, type, url } = req.body;
-
-            if (!id || !type || !url) {
-                res.status(400).send({ error: 'Missing required fields: id, type, url' });
-                return;
-            }
-
-            await this.serviceDiscoveryManager.registerComponent(id, type, url);
-            res.status(200).send({ status: 'Component registered successfully' });
-        } catch (error) {
-            analyzeError(error as Error);
-            console.error('Error registering component:', error instanceof Error ? error.message : error);
-            res.status(500).send({ error: 'Failed to register component' });
-        }
-    }
+    // Removed registerComponent method as it's no longer used after removing the corresponding route
+    // and the functionality from ServiceDiscoveryManager.
 
     private requestComponent(req: express.Request, res: express.Response) {
         const { id, type } = req.query;
@@ -602,8 +588,8 @@ export class PostOffice extends BaseEntity {
             console.error(`Failed to send message to ${url}:`, error instanceof Error ? error.message : error);
         }
     }
-    private getServices(_req: express.Request, res: express.Response) {
-        const services = this.serviceDiscoveryManager.getServices();
+    private async getServices(_req: express.Request, res: express.Response) {
+        const services = await this.serviceDiscoveryManager.getServices();
         res.status(200).send(services);
     }
 

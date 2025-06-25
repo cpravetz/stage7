@@ -58,102 +58,76 @@ export class ServiceDiscoveryManager {
       return envUrl;
     }
     
-    // Fall back to the local registry as a last resort
-    const services = Array.from(this.components.entries())
-      .filter(([_, service]) => service.type === type)
-      .map(([gid, service]) => ({ gid, ...service }));
-    
-    if (services.length > 0) {
-      console.log(`Service ${type} found in local registry: ${services[0].url}`);
-      return services[0].url;
-    }
-    
-    console.error(`Service ${type} not found in any registry`);
+    // The local registry (this.components) is no longer reliably populated by external services.
+    // Thus, looking it up here for general service discovery is not effective.
+    // It might only contain PostOffice itself or other internally managed components.
+    console.warn(`Service ${type} not found via Consul or environment variable. Local registry in PostOffice is not used for this lookup anymore.`);
     return undefined;
   }
 
-  /**
-   * Register a component with the PostOffice and Consul
-   * @param id Component ID
-   * @param type Component type
-   * @param url Component URL
-   * @returns Promise that resolves when registration is complete
-   */
-  async registerComponent(id: string, type: string, url: string): Promise<void> {
-    try {
-      // Register the component in the local registry
-      const component: Component = { id, type, url };
-      this.components.set(id, component);
-      
-      if (!this.componentsByType.has(type)) {
-        this.componentsByType.set(type, new Set());
-      }
-      this.componentsByType.get(type)!.add(id);
-      
-      console.log(`Component registered in local registry: ${id} of type ${type} at ${url}`);
-      
-      // Also register the component with Consul if available
-      if (this.serviceDiscovery) {
-        try {
-          // Extract host and port from URL
-          const urlObj = new URL(url.startsWith('http') ? url : `http://${url}`);
-          const host = urlObj.hostname;
-          const port = parseInt(urlObj.port || '80', 10);
-          
-          // Register with Consul
-          await this.serviceDiscovery.registerService(
-            id,
-            type,
-            url,
-            [type.toLowerCase()],
-            port
-          );
-          
-          console.log(`Component also registered with Consul: ${id} of type ${type}`);
-        } catch (error) {
-          console.error(`Failed to register component ${id} with Consul:`, 
-            error instanceof Error ? error.message : 'Unknown error');
-          // Continue even if Consul registration fails - we still have the local registry
-        }
-      }
-    } catch (error) {
-      analyzeError(error as Error);
-      console.error(`Failed to register component ${id}:`, 
-        error instanceof Error ? error.message : 'Unknown error');
-      throw error;
-    }
-  }
+  // Removed registerComponent method as services extending BaseEntity now handle their own Consul registration.
+  // The local registry in PostOffice (this.components, this.componentsByType) will no longer be populated by this method.
 
   /**
-   * Get a component URL by type
+   * Get a component URL by type from the local PostOffice registry.
+   * Note: This registry is no longer populated by external services calling /registerComponent.
+   * Its use is limited to components that might be registered internally within PostOffice.
+   * For discovering external services, use discoverService.
    * @param type Component type
-   * @returns Component URL or undefined if not found
+   * @returns Component URL or undefined if not found in the local registry
    */
   getComponentUrl(type: string): string | undefined {
     const componentGuids = this.componentsByType.get(type);
     if (componentGuids && componentGuids.size > 0) {
-      const randomGuid = Array.from(componentGuids)[0]; // Get the first registered component of this type
+      const randomGuid = Array.from(componentGuids)[0];
       const component = this.components.get(randomGuid);
-      return component?.url;
+      if (component) {
+        console.log(`Service ${type} found in PostOffice local registry: ${component.url}`);
+        return component.url;
+      }
     }
+    console.log(`Service ${type} not found in PostOffice local registry.`);
     return undefined;
   }
 
   /**
-   * Get all services
+   * Get all services. This method primarily uses getComponentUrl (local PostOffice registry)
+   * and falls back to environment variables.
+   * Given that the local registry is no longer the primary source for external services,
+   * this method's list might be incomplete or rely heavily on environment variables.
    * @returns Object containing service URLs
    */
   getServices(): Record<string, string> {
-    const services = {
-      capabilitiesManagerUrl: this.getComponentUrl('CapabilitiesManager') || process.env.CAPABILITIESMANAGER_URL || 'capabilitiesmanager:5060',
-      brainUrl: this.getComponentUrl('Brain') || process.env.BRAIN_URL || 'brain:5070',
-      trafficManagerUrl: this.getComponentUrl('TrafficManager') || process.env.TRAFFICMANAGER_URL || 'trafficmanager:5080',
-      librarianUrl: this.getComponentUrl('Librarian') || process.env.LIBRARIAN_URL || 'librarian:5040',
-      missionControlUrl: this.getComponentUrl('MissionControl') || process.env.MISSIONCONTROL_URL || 'missioncontrol:5030',
-      engineerUrl: this.getComponentUrl('Engineer') || process.env.ENGINEER_URL || 'engineer:5050'
+    // This method's utility is reduced as getComponentUrl now mainly checks local PO registry.
+    // For a more robust list of services, direct Consul queries would be needed,
+    // or this should be refactored to use `discoverService` for each type.
+    const services: Record<string, string | undefined> = {
+      capabilitiesManagerUrl: await this.discoverService('CapabilitiesManager'),
+      brainUrl: await this.discoverService('Brain'),
+      trafficManagerUrl: await this.discoverService('TrafficManager'),
+      librarianUrl: await this.discoverService('Librarian'),
+      missionControlUrl: await this.discoverService('MissionControl'),
+      engineerUrl: await this.discoverService('Engineer')
     };
+
+    const resolvedServices: Record<string, string> = {};
+    for (const key in services) {
+        if (services[key]) {
+            resolvedServices[key] = services[key] as string;
+        } else {
+            // Fallback to environment variable if discoverService didn't find it
+            const envVarKey = `${key.replace('Url', '').toUpperCase()}_URL`;
+            const envVarValue = process.env[envVarKey];
+            if (envVarValue) {
+                resolvedServices[key] = envVarValue;
+                console.log(`Service for ${key} taken from env var ${envVarKey} as fallback in getServices.`);
+            } else {
+                console.warn(`Service URL for ${key} could not be determined in getServices.`);
+            }
+        }
+    }
     
-    console.log('Service URLs:', services);
-    return services;
+    console.log('Service URLs from PostOffice.getServices():', resolvedServices);
+    return resolvedServices;
   }
 }

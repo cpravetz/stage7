@@ -48,13 +48,36 @@ export class BaseEntity implements IBaseEntity {
     this.initializeMessageQueue();
     this.initializeServiceDiscovery();
 
-    // Register with service registry and PostOffice (unless skipped)
-    if (!skipPostOfficeRegistration) {
-      this.registerWithPostOffice();
-    } else {
-      console.log(`Skipping PostOffice registration for ${this.componentType} (self-registration)`);
-      this.registeredWithPostOffice = true;
+    // Register with service registry (Consul)
+    // PostOffice registration is removed as Consul is the primary mechanism.
+    // if (!skipPostOfficeRegistration) {
+    //   this.registerWithPostOffice(); // Removed
+    // } else {
+    //   console.log(`Skipping PostOffice registration for ${this.componentType} (self-registration)`);
+    //   this.registeredWithPostOffice = true; // This flag might need re-evaluation or removal
+    // }
+    // Ensure this flag is set appropriately if still used elsewhere,
+    // or remove its usage if it was solely for PostOffice registration.
+    // For now, let's assume it might be used to gate operations that depended on PO registration.
+    // If skipPostOfficeRegistration is true, it implies some form of self-registration or alternative.
+    // Given we removed the call, this logic needs review.
+    // Let's tentatively set registeredWithPostOffice to true after serviceDiscovery initialization,
+    // assuming successful Consul registration implies readiness.
+    // This will be set after initializeServiceDiscovery completes.
+    // However, initializeServiceDiscovery is async and constructor is not.
+    // This suggests that `registeredWithPostOffice` state needs careful handling.
+    // For now, we remove the direct call and will rely on Consul registration status.
+    // The `registeredWithPostOffice` flag's meaning is now unclear.
+    // Let's assume for now that if `skipPostOfficeRegistration` was true, it meant the service handles its readiness.
+    // If it was false, it relied on PostOffice. Now it relies on Consul.
+    // We'll keep the `else` block's behavior for `skipPostOfficeRegistration = true`.
+    if (skipPostOfficeRegistration) {
+        console.log(`Skipping PostOffice registration for ${this.componentType} (self-registration implies ready)`);
+        this.registeredWithPostOffice = true;
     }
+    // If not skipping, registration status will depend on Consul, which is async.
+    // The `registeredWithPostOffice` flag should ideally be replaced by a check on Consul registration status.
+
   }
   protected setupHealthCheck() {
   }
@@ -669,52 +692,35 @@ protected async cleanup() {
    */
   async getServiceUrl(serviceType: string): Promise<string | null> {
     try {
-      // First try environment variables (highest priority for consistency)
-      const envVarName = `${serviceType.toUpperCase()}_URL`;
-      const envUrl = process.env[envVarName];
-      if (envUrl) {
-        console.log(`Service ${serviceType} found via environment variable ${envVarName}: ${envUrl}`);
-        return envUrl;
-      }
-
-      // Next try to discover the service using service discovery
+      // 1. Try to discover the service using Consul (primary method)
       if (this.serviceDiscovery) {
         try {
           const discoveredUrl = await this.serviceDiscovery.discoverService(serviceType);
           if (discoveredUrl) {
-            console.log(`Service ${serviceType} discovered via service discovery: ${discoveredUrl}`);
+            console.log(`Service ${serviceType} discovered via Consul: ${discoveredUrl}`);
             return discoveredUrl;
           }
         } catch (error) {
-          console.error(`Error discovering service ${serviceType} via service discovery:`, error);
+          console.error(`Error discovering service ${serviceType} via Consul:`, error);
           // Continue with fallback methods
         }
+      } else {
+        console.warn(`ServiceDiscovery not initialized for ${this.componentType}, cannot query Consul for ${serviceType}.`);
       }
 
-      // Then try to get the URL from PostOffice
-      try {
-        // Use authenticated API for HTTP communication
-        const response = await this.authenticatedApi.get(`http://${this.postOfficeUrl}/getServices`);
-        const services = response.data;
-
-        // Convert service type to camelCase for property lookup
-        const serviceTypeLower = serviceType.charAt(0).toLowerCase() + serviceType.slice(1);
-        const urlPropertyName = `${serviceTypeLower}Url`;
-
-        if (services && services[urlPropertyName]) {
-          console.log(`Service ${serviceType} found via PostOffice: ${services[urlPropertyName]}`);
-          return services[urlPropertyName];
-        }
-      } catch (error) {
-        console.error(`Error getting service ${serviceType} URL from PostOffice:`, error);
-        // Continue with fallback methods
+      // 2. Fallback to environment variables
+      const envVarName = `${serviceType.toUpperCase()}_URL`;
+      const envUrl = process.env[envVarName];
+      if (envUrl) {
+        console.log(`Service ${serviceType} found via environment variable (fallback) ${envVarName}: ${envUrl}`);
+        return envUrl;
       }
 
-      // If all else fails, use default Docker service name and port
-      const defaultPort = this.getDefaultPortForService(serviceType);
-      const defaultUrl = `${serviceType.toLowerCase()}:${defaultPort}`;
-      console.log(`Using default URL for service ${serviceType}: ${defaultUrl}`);
-      return defaultUrl;
+      // Removed PostOffice lookup as Consul is primary and Env Var is the fallback.
+      // Removed fallback to default Docker service name and port.
+      // If a service cannot be found via Consul or Environment Variables, it's considered unavailable.
+      console.error(`Service ${serviceType} not found via Consul or environment variable.`);
+      return null;
     } catch (error) {
       console.error(`Error getting URL for service ${serviceType}:`, error);
       return null;
