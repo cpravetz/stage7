@@ -365,7 +365,7 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics }) =
                         const token = securityClient.getAccessToken();
 
                         // Fetch step overview from AgentSet API
-                        const resp = await fetch(`${API_BASE_URL}/agentset/agent/step/${stepId}`,{
+                        const resp = await fetch(`${API_BASE_URL}/step/${stepId}`,{
                             method: 'GET',
                             headers: {
                                 'Content-Type': 'application/json',
@@ -419,7 +419,6 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics }) =
                                 <div><b>Description:</b> {stepOverview.description}</div>
                                 <div><b>Status:</b> {stepOverview.status}</div>
                                 <div><b>Inputs:</b> <pre>{JSON.stringify(stepOverview.inputs, null, 2)}</pre></div>
-                                <div><b>Outputs:</b> <pre>{JSON.stringify(stepOverview.outputs, null, 2)}</pre></div>
                                 <div><b>Results:</b> <pre>{JSON.stringify(stepOverview.results, null, 2)}</pre></div>
                             </div>
                         ) : null}

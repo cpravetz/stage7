@@ -1164,12 +1164,11 @@ export class AgentSet extends BaseEntity {
                 // Assuming the 'step' object already contains all necessary details
                 // If not, you might need to fetch additional info from the agent or step object
                 return {
-                    verb: step.verb,
+                    verb: step.actionVerb,
                     description: step.description,
                     status: step.status,
                     inputs: step.inputs,
-                    outputs: step.outputs,
-                    results: step.results, // Assuming results are stored directly on the step
+                    results: step.result, // Assuming results are stored directly on the step
                     agentId: agent.id, // Optionally include agentId for context
                 };
             }
