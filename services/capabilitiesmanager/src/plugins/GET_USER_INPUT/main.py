@@ -21,6 +21,8 @@ class PluginParameterType:
     BOOLEAN = "boolean"
     ARRAY = "array"
     OBJECT = "object"
+    DIRECT_ANSWER = "DIRECT_ANSWER"
+    PLUGIN = "plugin"
     ERROR = "ERROR"
 
 class GetUserInputPlugin:

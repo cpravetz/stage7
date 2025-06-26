@@ -209,10 +209,32 @@ export class HuggingfaceInterface extends BaseInterface {
                     }
                 }
 
+                // --- Ensure JSON if required ---
+                let requireJson = false;
+                if (options.modelName && options.modelName.toLowerCase().includes('code')) requireJson = true;
+                if (trimmedMessages && trimmedMessages.length > 0 && trimmedMessages[0].content &&
+                    (trimmedMessages[0].content.includes('JSON') || trimmedMessages[0].content.includes('json'))) {
+                    requireJson = true;
+                }
+                if (requireJson) {
+                    return this.ensureJsonResponse(out, true);
+                }
                 return out || 'No response generated';
             } catch (streamError) {
                 const streamErrorMessage = streamError instanceof Error ? streamError.message : String(streamError);
                 console.error('Error in Huggingface stream:', streamErrorMessage);
+
+                // Check if this is a 404 error to blacklist the model temporarily
+                if (streamErrorMessage.includes('404')) {
+                    console.log(`Received 404 error from Huggingface model ${options.modelName}, blacklisting temporarily.`);
+                    // Blacklist the model for 1 hour
+                    const modelManager = require('../utils/modelManager').modelManagerInstance;
+                    if (modelManager) {
+                        modelManager.performanceTracker.blacklistModel(options.modelName || '', new Date(Date.now() + 3600 * 1000));
+                        modelManager.clearModelSelectionCache();
+                    }
+                    throw new Error(`Huggingface model ${options.modelName} returned 404 and has been blacklisted temporarily.`);
+                }
 
                 // Check if this is a monthly credits exceeded error
                 if (this.isMonthlyCreditsExceededError(streamErrorMessage)) {
@@ -234,8 +256,6 @@ export class HuggingfaceInterface extends BaseInterface {
                     });
                     return response.generated_text || 'No response generated';
                 } catch (fallbackError) {
-                    analyzeError(fallbackError as Error);
-
                     // Check if the fallback error is also a monthly credits exceeded error
                     const fallbackErrorMessage = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
                     if (this.isMonthlyCreditsExceededError(fallbackErrorMessage)) {

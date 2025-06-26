@@ -6,3 +6,8 @@
     border-radius: 4px;
     overflow: auto; /* Enable scrollbars if content overflows */
 }
+
+.stepbox {
+    width: 100%;
+    overflow: auto;
+}

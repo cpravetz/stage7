@@ -130,10 +130,11 @@ export class GitHubRepository implements PluginRepository {
             const err = new Error(errorMsg) as AxiosError;
             (err as any).response = { status: 403, data: { message: errorMsg }};
             (err as any).isAxiosError = true;
-            throw err;
+            return Promise.reject(err);
         }
         if (!this.token) {
-             throw analyzeError(new Error('GitHub token not configured or missing.'));
+             console.error(new Error('GitHub token not configured or missing.'));
+             return Promise.reject(new Error('GitHub token not configured or missing.'));
         }
 
         try {
@@ -164,14 +165,16 @@ export class GitHubRepository implements PluginRepository {
                 const messageDetails = responseData ? ( (typeof responseData === 'string' ? responseData : JSON.stringify(responseData)) || "No additional details from API.") : (error.message || "Unknown Axios error");
 
                 // Instead of throwing custom errors, use analyzeError to wrap the error
-                throw analyzeError(new Error(`GitHub API Error for ${method} ${url}. Status: ${status}. Details: ${messageDetails}`));
+                console.error(new Error(`GitHub API Error for ${method} ${url}. Status: ${status}. Details: ${messageDetails}`));
+                return Promise.reject(error);
             }
             // Non-Axios error or Axios error without response
             if (error instanceof Error) {
-                throw analyzeError(new Error(`Unexpected error during GitHub request to ${url}: ${error.message}`));
+                console.error(new Error(`Unexpected error during GitHub request to ${url}: ${error.message}`));
             } else {
-                throw analyzeError(new Error(`Unexpected error during GitHub request to ${url}: Unknown error`));
+                console.error(new Error(`Unexpected error during GitHub request to ${url}: Unknown error`));
             }
+            return Promise.reject(error);
         }
     }
 

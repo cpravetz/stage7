@@ -88,10 +88,10 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         break;
       case MessageType.STATISTICS:
       case "agentStatistics": // Handle both enum value and string literal
-        console.log('WebSocketContext: Received raw statistics content:', JSON.stringify(data.content, null, 2));
+        //console.log('WebSocketContext: Received raw statistics content:', JSON.stringify(data.content, null, 2));
         // Log the raw agentStatistics part specifically
         if (data.content && data.content.agentStatistics) {
-          console.log('WebSocketContext: Received raw data.content.agentStatistics:', JSON.stringify(data.content.agentStatistics, null, 2));
+//          console.log('WebSocketContext: Received raw data.content.agentStatistics:', JSON.stringify(data.content.agentStatistics, null, 2));
         }
 
         // --- FIX: Always deserialize agentStatistics before setting statistics ---
@@ -249,17 +249,6 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       // across route changes. The connection will be closed when the app is closed.
     };
   }, [connectWebSocket]);
-
-  // Log agentStatistics when it updates
-  useEffect(() => {
-    // Check if agentStatistics is not empty or in its initial state before logging,
-    // to avoid logging on initial mount if it's empty.
-    if (agentStatistics && agentStatistics.size > 0) {
-      console.log('WebSocketContext: agentStatistics state updated:', JSON.stringify(MapSerializer.transformForSerialization(agentStatistics), null, 2));
-    } else if (agentStatistics) { // Log even if it's an empty map after an update
-      console.log('WebSocketContext: agentStatistics state updated to an empty Map.');
-    }
-  }, [agentStatistics]);
 
   // Create API instance
   const createAPI = () => {

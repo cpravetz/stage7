@@ -48,7 +48,6 @@ export class Brain extends BaseEntity {
         app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
             // Skip authentication for health endpoint and chat endpoint
             if (req.path === '/health' || req.path === '/chat') {
-                console.log(`[Brain] Skipping authentication for exempt path: ${req.path}`);
                 return next();
             }
 
@@ -210,13 +209,6 @@ export class Brain extends BaseEntity {
                     }
                 }
 
-                // Ensure response_format is set for JSON responses if the prompt requests JSON
-                if (messages && messages.length > 0 && messages[0].content &&
-                    (messages[0].content.includes('JSON') || messages[0].content.includes('json'))) {
-                    console.log('JSON format detected in prompt, setting response_format to JSON');
-                    if (!thread.optionals) thread.optionals = {};
-                    thread.optionals.response_format = { type: 'json_object' };
-                }
                 // Track the request
                 const requestId = this.modelManager.trackModelRequest(
                     selectedModel.modelName,
@@ -225,11 +217,22 @@ export class Brain extends BaseEntity {
                 );
 
                 try {
-
                     // Pass optionals to the model, including response_format if specified
                     console.log(`Brain: Passing optionals to model: ${JSON.stringify(thread.optionals)}`);
-                    const modelResponse = await selectedModel.chat(messages, thread.optionals || {});
-                    console.log(`Model response received:`,modelResponse);
+                    let modelResponse = await selectedModel.chat(messages, thread.optionals || {});
+                    console.log(`Model response received:`, modelResponse);
+
+                    // --- JSON extraction and validation ---
+                    // If the conversation type is text/code or the prompt requests JSON, ensure JSON response
+                    let requireJson = false;
+                    if (thread.conversationType === LLMConversationType.TextToCode) requireJson = true;
+                    if (messages && messages.length > 0 && messages[0].content &&
+                        (messages[0].content.includes('JSON') || messages[0].content.includes('json'))) {
+                        requireJson = true;
+                    }
+                    if (requireJson && selectedModel.llminterface && typeof selectedModel.llminterface.ensureJsonResponse === 'function') {
+                        modelResponse = selectedModel.llminterface.ensureJsonResponse(modelResponse, true);
+                    }
 
                     // Track successful response
                     // Estimate token count: ~4 chars per token is a rough approximation
@@ -476,20 +479,12 @@ export class Brain extends BaseEntity {
 
             // Store in Librarian using authenticatedApi to ensure proper authorization
             try {
-                console.log(`[Brain] Sending performance data to Librarian at ${this.librarianUrl}`);
-
                 const response = await this.authenticatedApi.post(`http://${this.librarianUrl}/storeData`, {
                     id: 'model-performance-data',
                     data: modelPerformanceData,
                     storageType: 'mongo',
                     collection: 'mcsdata'
                 });
-
-                if (response.status === 200) {
-                    console.log(`[Brain] Successfully synced model performance data to Librarian: ${JSON.stringify(response.data)}`);
-                } else {
-                    console.error(`[Brain] Failed to sync model performance data to Librarian: ${JSON.stringify(response.data)}`);
-                }
             } catch (apiError) {
                 console.error('[Brain] API error syncing performance data to Librarian:',
                     apiError instanceof Error ? apiError.message : String(apiError));
@@ -500,9 +495,6 @@ export class Brain extends BaseEntity {
                     console.error(`[Brain] API error status: ${errorResponse.status}`);
                     console.error(`[Brain] API error data: ${JSON.stringify(errorResponse.data)}`);
                 }
-
-                // Log the error but continue operation
-                console.log('[Brain] Will retry syncing performance data on next scheduled interval');
             }
         } catch (error) {
             console.error('[Brain] Error syncing performance data to Librarian:', error instanceof Error ? error.message : String(error));

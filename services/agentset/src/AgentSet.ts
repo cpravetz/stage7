@@ -10,6 +10,8 @@ import { AgentLifecycleManager } from './lifecycle/AgentLifecycleManager';
 import { CollaborationManager } from './collaboration/CollaborationManager';
 import { SpecializationFramework } from './specialization/SpecializationFramework';
 import { DomainKnowledge } from './specialization/DomainKnowledge';
+import { TaskDelegation } from './collaboration/TaskDelegation';
+import { ConflictResolution } from './collaboration/ConflictResolution';
 
 export class AgentSet extends BaseEntity {
     agents: Map<string, Agent> = new Map(); // Store agents by their ID
@@ -26,6 +28,8 @@ export class AgentSet extends BaseEntity {
     private collaborationManager: CollaborationManager;
     private specializationFramework: SpecializationFramework;
     private domainKnowledge: DomainKnowledge;
+    private taskDelegation: TaskDelegation;
+    private conflictResolution: ConflictResolution;
 
     constructor() {
         // Use a fixed ID for the AgentSet to avoid multiple registrations
@@ -39,12 +43,12 @@ export class AgentSet extends BaseEntity {
 
         // Initialize agent systems
         this.lifecycleManager = new AgentLifecycleManager(this.persistenceManager, this.trafficManagerUrl);
+        this.taskDelegation = new TaskDelegation(this.agents, this.trafficManagerUrl);
+        this.conflictResolution = new ConflictResolution(this.agents, this.trafficManagerUrl, this.brainUrl);
         this.collaborationManager = new CollaborationManager(
-            this.agents,
-            this.librarianUrl,
-            this.trafficManagerUrl,
-            this.brainUrl,
-            this.authenticatedApi
+            this,
+            this.taskDelegation,
+            this.conflictResolution
         );
         this.specializationFramework = new SpecializationFramework(this.agents, this.librarianUrl, this.brainUrl);
         const knowledgeDomainsArray = this.specializationFramework.getAllKnowledgeDomains();
@@ -74,18 +78,7 @@ export class AgentSet extends BaseEntity {
 
     // Initialize Express server to manage agent lifecycle
     private initializeServer(): void {
-        // Add health check endpoints directly to the app
-        this.app.get('/healthy', (req: express.Request, res: express.Response): void => {
-            console.log('Received request to /healthy endpoint');
-            res.status(200).json({
-                status: 'ok',
-                timestamp: new Date().toISOString(),
-                message: 'AgentSet service is running'
-            });
-        });
-
         this.app.get('/health', (req: express.Request, res: express.Response): void => {
-            console.log('Received request to /health endpoint');
             res.status(200).json({
                 status: 'healthy',
                 timestamp: new Date().toISOString(),
@@ -95,7 +88,6 @@ export class AgentSet extends BaseEntity {
         });
 
         this.app.get('/ready', (req: express.Request, res: express.Response): void => {
-            console.log('Received request to /ready endpoint');
             res.status(200).json({
                 ready: true,
                 timestamp: new Date().toISOString(),
@@ -692,7 +684,9 @@ export class AgentSet extends BaseEntity {
 
        this.app.get('/statistics/:missionId', this.getAgentStatistics.bind(this));
        this.app.post('/updateFromAgent', this.updateFromAgent.bind(this));
-       // Note: The '/agent/:agentId/output' route is already defined above with .bind(this)
+
+       // Endpoint to get details for a specific step
+       this.app.get('/agent/step/:stepId', this.getStepDetailsHandler.bind(this));
 
        this.app.post('/saveAgent', async (req: express.Request, res: express.Response) => {
             const { agentId } = req.body;
@@ -1068,10 +1062,20 @@ export class AgentSet extends BaseEntity {
         };
 
         try {
+            // Build a global step map for all agents in this mission
+            const globalStepMap: Map<string, { agentId: string, step: any }> = new Map();
+            for (const agent of this.agents.values()) {
+                if (agent.getMissionId() === missionId) {
+                    for (const step of agent.steps) {
+                        globalStepMap.set(step.id, { agentId: agent.id, step });
+                    }
+                }
+            }
             for (const agent of this.agents.values()) {
                 if (agent.getMissionId() === missionId) {
                     const status = agent.getStatus();
-                    const agentStats = await agent.getStatistics();
+                    // Pass the globalStepMap to getStatistics
+                    const agentStats = await agent.getStatistics(globalStepMap);
                     if (!stats.agentsByStatus.has(status)) {
                         stats.agentsByStatus.set(status, [agentStats]);
                     } else {
@@ -1126,6 +1130,58 @@ export class AgentSet extends BaseEntity {
                 }
             }
         }
+
+    private async getStepDetailsHandler(req: express.Request, res: express.Response): Promise<void> {
+        const { stepId } = req.params;
+        if (!stepId) {
+            res.status(400).send({ error: 'stepId is required' });
+            return;
+        }
+
+        try {
+            const stepDetails = await this.getStepDetails(stepId);
+            if (!stepDetails) {
+                res.status(404).send({ error: `Step with id ${stepId} not found` });
+                return;
+            }
+            res.status(200).send(stepDetails);
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error(`Error fetching step details for step ${stepId}:`, error instanceof Error ? error.message : String(error));
+            if (!res.headersSent) {
+                res.status(500).send({ error: `Failed to fetch step details for step ${stepId}` });
+            }
+        }
+    }
+
+    private async getStepDetails(stepId: string): Promise<any | null> {
+        for (const agent of this.agents.values()) {
+            const step = agent.steps.find(s => s.id === stepId);
+            if (step) {
+                // Assuming the 'step' object already contains all necessary details
+                // If not, you might need to fetch additional info from the agent or step object
+                return {
+                    verb: step.actionVerb,
+                    description: step.description,
+                    status: step.status,
+                    dependencies: step.dependencies,
+                    inputs: MapSerializer.transformForSerialization(step.inputs),
+                    results: step.result, 
+                    agentId: agent.id, // Optionally include agentId for context
+                };
+            }
+        }
+        return null; // Step not found
+    }
+
+    /**
+     * Forward a collaboration message to remote agent sets or external systems.
+     * This is called by CollaborationManager when a message is not for a local agent.
+     */
+    async forwardCollaborationMessage(message: any): Promise<void> {
+        // TODO: Implement actual remote forwarding logic (e.g., via HTTP, MQ, etc.)
+        console.log('Forwarding collaboration message remotely:', message);
+    }
 
     /**
      * Determine default role based on action verb

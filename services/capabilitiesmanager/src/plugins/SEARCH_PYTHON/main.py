@@ -150,6 +150,39 @@ def search_duckduckgo(search_term: str) -> List[Dict[str, str]]:
         raise Exception(f"Failed to parse search results (outer): {str(e_json_outer)}")
 
 
+def search_searxng(search_term: str) -> List[Dict[str, str]]:
+    """
+    Search SearxNG for the given term as a backup if DuckDuckGo fails.
+    Returns a list of results with title and url.
+    """
+    print(f"DEBUG_SEARCH_PYTHON: search_searxng: Received search_term: '{search_term}'", file=sys.stderr)
+    try:
+        # You may want to use your own SearxNG instance for reliability
+        searxng_url = 'https://searxng.site/search'
+        params = {
+            'q': search_term,
+            'format': 'json',
+            'categories': 'general',
+            'language': 'en',
+        }
+        print(f"DEBUG_SEARCH_PYTHON: search_searxng: Requesting URL: {searxng_url} with params: {json.dumps(params)}", file=sys.stderr)
+        response = requests.get(searxng_url, params=params, timeout=10)
+        print(f"DEBUG_SEARCH_PYTHON: search_searxng: Response status code: {response.status_code}", file=sys.stderr)
+        print(f"DEBUG_SEARCH_PYTHON: search_searxng: Raw response content (first 500 chars): {response.text[:500]}", file=sys.stderr)
+        response.raise_for_status()
+        data = response.json()
+        print(f"DEBUG_SEARCH_PYTHON: search_searxng: Parsed JSON data: {json.dumps(data, indent=2)[:500]}", file=sys.stderr)
+        results = []
+        for r in data.get('results', []):
+            if r.get('title') and r.get('url'):
+                results.append({'title': r['title'], 'url': r['url']})
+        print(f"DEBUG_SEARCH_PYTHON: search_searxng: Extracted results: {json.dumps(results, indent=2)}", file=sys.stderr)
+        return results
+    except Exception as e:
+        print(f"DEBUG_SEARCH_PYTHON: search_searxng: Exception: {str(e)}", file=sys.stderr)
+        raise Exception(f"Failed to search SearxNG: {str(e)}")
+
+
 def execute_plugin(inputs: Dict[str, PluginInput]) -> List[PluginOutput]:
     """
     Main plugin execution function for SEARCH plugin
@@ -191,12 +224,29 @@ def execute_plugin(inputs: Dict[str, PluginInput]) -> List[PluginOutput]:
             return [create_error_output("error", "Search term cannot be empty")]
         
         # Perform the search
-        results = search_duckduckgo(search_term)
-        
+        try:
+            results = search_duckduckgo(search_term)
+        except Exception as ddg_exc:
+            print(f"DEBUG_SEARCH_PYTHON: execute_plugin: DuckDuckGo search failed: {str(ddg_exc)}", file=sys.stderr)
+            results = []
+            ddg_error = str(ddg_exc)
+        else:
+            ddg_error = None
+
+        # If DuckDuckGo failed or returned no results, try SearxNG
         if not results:
-            return [create_success_output("results", [], "array", 
-                                        f"No search results found for '{search_term}'")]
-        
+            print(f"DEBUG_SEARCH_PYTHON: execute_plugin: No results from DuckDuckGo, trying SearxNG...", file=sys.stderr)
+            try:
+                results = search_searxng(search_term)
+            except Exception as searx_exc:
+                print(f"DEBUG_SEARCH_PYTHON: execute_plugin: SearxNG search failed: {str(searx_exc)}", file=sys.stderr)
+                # If both fail, return error output
+                error_msg = f"DuckDuckGo failed: {ddg_error}. SearxNG failed: {str(searx_exc)}"
+                return [create_error_output("error", error_msg)]
+            if not results:
+                return [create_success_output("results", [], "array", 
+                    f"No search results found for '{search_term}' (tried DuckDuckGo and SearxNG)")]
+
         # Return successful results
         outputs_final = [create_success_output("results", results, "array",
                                     f"Found {len(results)} search results for '{search_term}'")]
