@@ -48,7 +48,6 @@ export class Brain extends BaseEntity {
         app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
             // Skip authentication for health endpoint and chat endpoint
             if (req.path === '/health' || req.path === '/chat') {
-                console.log(`[Brain] Skipping authentication for exempt path: ${req.path}`);
                 return next();
             }
 
@@ -480,20 +479,12 @@ export class Brain extends BaseEntity {
 
             // Store in Librarian using authenticatedApi to ensure proper authorization
             try {
-                console.log(`[Brain] Sending performance data to Librarian at ${this.librarianUrl}`);
-
                 const response = await this.authenticatedApi.post(`http://${this.librarianUrl}/storeData`, {
                     id: 'model-performance-data',
                     data: modelPerformanceData,
                     storageType: 'mongo',
                     collection: 'mcsdata'
                 });
-
-                if (response.status === 200) {
-                    console.log(`[Brain] Successfully synced model performance data to Librarian: ${JSON.stringify(response.data)}`);
-                } else {
-                    console.error(`[Brain] Failed to sync model performance data to Librarian: ${JSON.stringify(response.data)}`);
-                }
             } catch (apiError) {
                 console.error('[Brain] API error syncing performance data to Librarian:',
                     apiError instanceof Error ? apiError.message : String(apiError));
@@ -504,9 +495,6 @@ export class Brain extends BaseEntity {
                     console.error(`[Brain] API error status: ${errorResponse.status}`);
                     console.error(`[Brain] API error data: ${JSON.stringify(errorResponse.data)}`);
                 }
-
-                // Log the error but continue operation
-                console.log('[Brain] Will retry syncing performance data on next scheduled interval');
             }
         } catch (error) {
             console.error('[Brain] Error syncing performance data to Librarian:', error instanceof Error ? error.message : String(error));

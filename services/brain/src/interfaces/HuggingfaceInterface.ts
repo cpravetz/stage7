@@ -224,6 +224,18 @@ export class HuggingfaceInterface extends BaseInterface {
                 const streamErrorMessage = streamError instanceof Error ? streamError.message : String(streamError);
                 console.error('Error in Huggingface stream:', streamErrorMessage);
 
+                // Check if this is a 404 error to blacklist the model temporarily
+                if (streamErrorMessage.includes('404')) {
+                    console.log(`Received 404 error from Huggingface model ${options.modelName}, blacklisting temporarily.`);
+                    // Blacklist the model for 1 hour
+                    const modelManager = require('../utils/modelManager').modelManagerInstance;
+                    if (modelManager) {
+                        modelManager.performanceTracker.blacklistModel(options.modelName || '', new Date(Date.now() + 3600 * 1000));
+                        modelManager.clearModelSelectionCache();
+                    }
+                    throw new Error(`Huggingface model ${options.modelName} returned 404 and has been blacklisted temporarily.`);
+                }
+
                 // Check if this is a monthly credits exceeded error
                 if (this.isMonthlyCreditsExceededError(streamErrorMessage)) {
                     // Blacklist all Huggingface models until the first of next month

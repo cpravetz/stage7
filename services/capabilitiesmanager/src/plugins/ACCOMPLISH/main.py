@@ -112,12 +112,13 @@ class AccomplishPlugin:
                 json={
                     "exchanges": [{"role": "user", "content": prompt}],
                     "optimization": "accuracy",
-                    "ConversationType": "text/text" # Explicitly request JSON/code output
+                    "ConversationType": "text/code" # Explicitly request JSON/code output
                 },
                 headers=headers,
                 timeout=60
             )
             response.raise_for_status()
+            logger.log(f"Raw brain response: {response}")
             data = response.json()
             return data.get('result') or data.get('response', '')
         except Exception as e:
@@ -127,10 +128,9 @@ class AccomplishPlugin:
     def generate_prompt(self, goal: str, available_plugins_str: str, mission_context_str: str) -> str:
         """Generate the prompt for the Brain service"""
         prompt = f"""
-You are a planning assistant. Your ONLY task is to generate one of the following JSON outputs to achieve the following goal: '{goal}'.
+You are a planning assistant. Your ONLY task is to generate one of the following outputs in JSON format to achieve the following goal: '{goal}'.
 
-You MUST respond with ONLY a JSON object in ONLY ONE of these three formats. DO NOT include any explanations, markdown formatting, or additional text outside the JSON object.
-
+DO NOT include any explanations, markdown formatting, or additional text outside the JSON object.
 
 1. If the goal can be sub-divided into smaller steps, respond with a plan as a JSON object in this format:
 
@@ -617,7 +617,7 @@ def main():
             "name": "error",
             "resultType": PluginParameterType.ERROR,
             "resultDescription": "Plugin execution error",
-            "result": None,
+            "result": {"logs": logger.logs},
             "error": str(e)
         }]
         print(json.dumps(error_result))

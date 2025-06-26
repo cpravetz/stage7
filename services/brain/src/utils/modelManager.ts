@@ -26,6 +26,23 @@ export class ModelManager {
         this.loadModels();
     }
 
+    /**
+     * Blacklist a model for a specific duration
+     * @param modelName The name of the model to blacklist
+     * @param until Date until which the model is blacklisted
+     */
+    blacklistModel(modelName: string, until: Date): void {
+        console.log(`Blacklisting model ${modelName} until ${until.toISOString()}`);
+        for (const conversationType of Object.values(LLMConversationType)) {
+            const metrics = this.performanceTracker.getPerformanceMetrics(modelName, conversationType);
+            if (metrics) {
+                metrics.blacklistedUntil = until.toISOString();
+                metrics.consecutiveFailures = Math.max(metrics.consecutiveFailures, 5); // Ensure it stays blacklisted
+            }
+        }
+        this.clearModelSelectionCache();
+    }
+
     private async loadModels() {
         const modelsDirectory = path.join(__dirname, '..', 'models');
 
