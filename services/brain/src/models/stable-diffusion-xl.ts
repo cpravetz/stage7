@@ -23,7 +23,7 @@ export class StableDiffusionXLModel extends BaseModel {
             modelName: "stabilityai/stable-diffusion-xl-base-1.0",
             interfaceName: "huggingface",
             serviceName: "HFService",
-            tokenLimit: 1000, // Adjust as needed
+            tokenLimit: 4096, // Adjust as needed
             scoresByConversationType: scoresByConversationType,
             contentConversation: [LLMConversationType.TextToImage, LLMConversationType.ImageToImage]
         });

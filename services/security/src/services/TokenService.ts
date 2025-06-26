@@ -35,6 +35,9 @@ export class TokenService {
         this.tokenBlacklistRepository = tokenBlacklistRepository;
         this.userRepository = userRepository;
 
+        // Ensure RS256 algorithm is used for signing tokens
+        this.config.algorithm = 'RS256';
+
         // Load RSA keys
         try {
             const keysDir = path.join(__dirname, '../../keys');

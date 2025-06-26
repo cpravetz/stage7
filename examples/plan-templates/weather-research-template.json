@@ -1,0 +1,95 @@
+{
+  "template": {
+    "id": "weather-research-analysis",
+    "name": "Weather Research and Analysis",
+    "description": "Get current weather data and create an analysis with recommendations",
+    "version": "1.0.0",
+    "inputs": [
+      {
+        "name": "location",
+        "type": "STRING",
+        "description": "City and country (e.g., 'London,UK')",
+        "required": true
+      },
+      {
+        "name": "analysis_focus",
+        "type": "STRING",
+        "description": "What aspect to focus the analysis on (e.g., 'travel planning', 'outdoor activities')",
+        "required": false,
+        "default": "general weather conditions"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "weather_data",
+        "type": "OBJECT",
+        "description": "Raw weather data from API"
+      },
+      {
+        "name": "analysis",
+        "type": "STRING",
+        "description": "AI-generated weather analysis and recommendations"
+      },
+      {
+        "name": "recommendations",
+        "type": "ARRAY",
+        "description": "List of specific recommendations based on weather"
+      }
+    ],
+    "tasks": [
+      {
+        "id": "get_weather",
+        "actionVerb": "GET_CURRENT_WEATHER",
+        "description": "Fetch current weather data for the specified location",
+        "inputs": {
+          "q": "{{inputs.location}}",
+          "units": "metric"
+        },
+        "outputs": [
+          {
+            "name": "weather_data",
+            "type": "OBJECT",
+            "description": "Current weather information"
+          }
+        ]
+      },
+      {
+        "id": "analyze_weather",
+        "actionVerb": "THINK",
+        "description": "Analyze the weather data and provide recommendations",
+        "inputs": {
+          "prompt": "Please analyze the following weather data for {{inputs.location}} and provide recommendations for {{inputs.analysis_focus}}. Weather data: {{tasks.get_weather.outputs.weather_data}}. Provide specific, actionable recommendations based on the current conditions."
+        },
+        "outputs": [
+          {
+            "name": "analysis",
+            "type": "STRING",
+            "description": "Weather analysis and recommendations"
+          }
+        ],
+        "dependsOn": ["get_weather"]
+      },
+      {
+        "id": "extract_recommendations",
+        "actionVerb": "THINK",
+        "description": "Extract specific recommendations from the analysis",
+        "inputs": {
+          "prompt": "From the following weather analysis, extract 3-5 specific, actionable recommendations as a JSON array of strings: {{tasks.analyze_weather.outputs.analysis}}"
+        },
+        "outputs": [
+          {
+            "name": "recommendations",
+            "type": "ARRAY",
+            "description": "List of specific recommendations"
+          }
+        ],
+        "dependsOn": ["analyze_weather"]
+      }
+    ]
+  },
+  "metadata": {
+    "author": "Stage7 System",
+    "tags": ["weather", "analysis", "openapi", "ai"],
+    "category": "data-analysis"
+  }
+}

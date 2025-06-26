@@ -7,6 +7,7 @@ export enum PluginParameterType {
     PLAN = 'plan',
     PLUGIN = 'plugin',
     ERROR = 'error',
+    DIRECT_ANSWER = "DIRECT_ANSWER",
     ANY = 'any' // Retained from a previous version, useful for flexibility
 }
 
@@ -17,6 +18,7 @@ export interface PluginParameter {
     description: string;
     mimeType?: string;
     defaultValue?: any;
+    args?: Record<string, any>; // Added field
 }
 
 export interface EntryPointType {
@@ -79,7 +81,7 @@ export interface PluginDefinition {
     explanation?: string;
     inputDefinitions: PluginParameter[];
     outputDefinitions: PluginParameter[];
-    language: 'javascript' | 'python' | 'openapi' | string;
+    language: 'javascript' | 'python' | 'openapi' | 'container' | string;
     entryPoint?: EntryPointType;
     packageSource?: PluginPackage;
     security: PluginSecurity;
@@ -88,6 +90,30 @@ export interface PluginDefinition {
     metadata?: PluginMetadata; // Uses PluginMetadata
     createdAt?: string;
     updatedAt?: string;
+    // Container-specific configuration for containerized plugins
+    container?: {
+        dockerfile: string;
+        buildContext: string;
+        image: string;
+        ports: Array<{ container: number; host: number }>;
+        environment: { [key: string]: string };
+        resources: {
+            memory: string;
+            cpu: string;
+        };
+        healthCheck: {
+            path: string;
+            interval: string;
+            timeout: string;
+            retries: number;
+        };
+    };
+    // API configuration for container communication
+    api?: {
+        endpoint: string;
+        method: 'GET' | 'POST' | 'PUT' | 'DELETE';
+        timeout: number;
+    };
 }
 
 // Types confirmed by user as needed and previously defined here
@@ -106,7 +132,7 @@ export interface PlanDependency {
 
 export interface ActionVerbTask {
     id?: string;
-    verb: string;
+    actionVerb: string; // Changed from verb
     inputs: Map<string, PluginInput>; // Assuming PluginInput is defined/imported
     expectedOutputs?: Map<string, string>;
     description?: string;
@@ -133,6 +159,7 @@ export interface PluginOutput {
     resultDescription: string,
     error?: string,
     mimeType?: string,
+    fileName?: string, // Optional suggested filename for the result
     console?: any[]
 }
 

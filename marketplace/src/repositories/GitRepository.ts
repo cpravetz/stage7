@@ -73,7 +73,11 @@ export class GitRepository implements PluginRepository {
         }
     }
     
-    async fetch(id: string): Promise<PluginManifest | undefined> {
+    async fetch(id: string, version?: string): Promise<PluginManifest | undefined> {
+        if (version) {
+            console.warn(`GitRepository.fetch: Version parameter '${version}' provided, but version-specific fetching is not yet fully implemented. Fetching from default branch.`);
+            // Future implementation: git checkout version before searching for manifest
+        }
         if (!id) {
             console.log('ID must be provided');
             return undefined;
@@ -122,7 +126,11 @@ export class GitRepository implements PluginRepository {
         }
     }
 
-    async fetchByVerb(verb: string): Promise<PluginManifest | undefined> {
+    async fetchByVerb(verb: string, version?: string): Promise<PluginManifest | undefined> {
+        if (version) {
+            console.warn(`GitRepository.fetchByVerb: Version parameter '${version}' provided, but version-specific fetching is not yet fully implemented. Fetching from default branch.`);
+            // Future implementation: git checkout version before searching for manifest
+        }
         if (!verb) {
             console.log('Verb must be provided');
             return undefined;

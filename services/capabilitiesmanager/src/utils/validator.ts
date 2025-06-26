@@ -1,4 +1,4 @@
-import { PluginInput, PluginDefinition } from '@cktmcs/shared';
+import { PluginInput, PluginDefinition, MapSerializer } from '@cktmcs/shared';
 
 
 export const validateInputType = async (value: any, expectedType: string): Promise<boolean> => {
@@ -21,6 +21,8 @@ export const validateInputType = async (value: any, expectedType: string): Promi
 
 export const validateAndStandardizeInputs = async (plugin: PluginDefinition, inputs: Map<string, PluginInput>): 
     Promise<{ success: boolean; inputs?: Map<string, PluginInput>; error?: string }> => {
+        console.log('validateAndStandardizeInputs: Called for plugin:', plugin.verb, 'version:', plugin.version);
+        console.log('validateAndStandardizeInputs: Raw inputs received (serialized):', MapSerializer.transformForSerialization(inputs));
         const validInputs = new Map<string, PluginInput>();
         try {
             for (const inputDef of plugin.inputDefinitions) {
@@ -38,11 +40,28 @@ export const validateAndStandardizeInputs = async (plugin: PluginDefinition, inp
                 }
 
                 // Handle required inputs
-                if (!input && inputDef.required) {
-                    return {
-                        success: false,
-                        error: `Missing required input "${inputName}" for ${plugin.verb}`
-                    };
+                if (inputDef.required) {
+                    let missingOrInvalid = false;
+                    let reason = "";
+
+                    if (!input) {
+                        missingOrInvalid = true;
+                        reason = `Missing required input "${inputName}" for plugin "${plugin.verb}".`;
+                    } else if (input.inputValue === null || input.inputValue === undefined) {
+                        missingOrInvalid = true;
+                        reason = `Required input "${inputName}" for plugin "${plugin.verb}" must not be null or undefined.`;
+                    } else if (inputDef.type === 'string' && String(input.inputValue).trim() === '') {
+                        missingOrInvalid = true;
+                        reason = `Required string input "${inputName}" for plugin "${plugin.verb}" must not be empty or whitespace-only.`;
+                    }
+
+                    if (missingOrInvalid) {
+                        console.error(`validateAndStandardizeInputs: Validation Error for plugin "${plugin.verb}", input "${inputName}": ${reason}`);
+                        return {
+                            success: false,
+                            error: reason
+                        };
+                    }
                 }
 
                 // Validate input type if present
@@ -61,6 +80,19 @@ export const validateAndStandardizeInputs = async (plugin: PluginDefinition, inp
                 }
             }
 
+            console.log(`validateAndStandardizeInputs: Successfully validated and standardized inputs for ${plugin.verb} (serialized):`, MapSerializer.transformForSerialization(validInputs));
+            if (plugin.verb === 'SEARCH' && validInputs.has('searchTerm')) {
+              const searchInput = validInputs.get('searchTerm');
+              // Log the entire PluginInput object for searchTerm
+              console.log(`validateAndStandardizeInputs: For SEARCH, the full 'searchTerm' PluginInput object is: ${JSON.stringify(searchInput)}`);
+              if (searchInput) {
+                // Log the inputValue and its type specifically
+                console.log(`validateAndStandardizeInputs: For SEARCH, direct inputValue of 'searchTerm' is: "${searchInput.inputValue}"`);
+                console.log(`validateAndStandardizeInputs: For SEARCH, typeof searchTerm inputValue is: ${typeof searchInput.inputValue}`);
+              } else {
+                console.log("validateAndStandardizeInputs: For SEARCH, validInputs.get('searchTerm') returned undefined/null even though validInputs.has('searchTerm') was true.");
+              }
+            }
             return { success: true, inputs: validInputs };
         } catch (error) {
             return {

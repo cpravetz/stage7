@@ -96,7 +96,7 @@ export class GroqInterface extends BaseInterface {
                 model: modelName,
                 messages: formattedMessages,
                 temperature: options.temperature || 0.7,
-                max_tokens: options.max_length || 2048,
+                max_tokens: options.max_length || 4096,
                 stream: false
             };
 
@@ -104,12 +104,12 @@ export class GroqInterface extends BaseInterface {
             if (options.response_format) {
                 console.log(`GroqInterface: Setting response_format to ${JSON.stringify(options.response_format)}`);
                 requestOptions.response_format = options.response_format;
-            } else if (messages && messages.length > 0 && messages[0].content &&
+            } /*else if (messages && messages.length > 0 && messages[0].content &&
                       (messages[0].content.includes('JSON') || messages[0].content.includes('json'))) {
                 // If the message content mentions JSON, set response_format to JSON
                 console.log('GroqInterface: JSON format detected in message, setting response_format to JSON');
                 requestOptions.response_format = { type: 'json_object' };
-            }
+            }*/
 
             // Log the full request for debugging
             console.log(`GroqInterface: Full request options: ${JSON.stringify(requestOptions, (key, value) => {

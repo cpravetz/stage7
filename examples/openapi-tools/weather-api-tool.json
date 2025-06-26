@@ -1,0 +1,54 @@
+{
+  "name": "OpenWeatherMap API",
+  "description": "Access current weather data for any location worldwide",
+  "specUrl": "https://api.openweathermap.org/data/2.5/openapi.json",
+  "baseUrl": "https://api.openweathermap.org/data/2.5",
+  "authentication": {
+    "type": "apiKey",
+    "apiKey": {
+      "in": "query",
+      "name": "appid",
+      "credentialSource": "env:OPENWEATHER_API_KEY"
+    }
+  },
+  "metadata": {
+    "author": "OpenWeatherMap",
+    "tags": ["weather", "api", "external"],
+    "category": "data-services"
+  },
+  "actionMappings": [
+    {
+      "actionVerb": "GET_CURRENT_WEATHER",
+      "operationId": "getCurrentWeather",
+      "method": "GET",
+      "path": "/weather",
+      "description": "Get current weather data for a specific location",
+      "inputs": [
+        {
+          "name": "q",
+          "in": "query",
+          "type": "STRING",
+          "required": true,
+          "description": "City name, state code and country code divided by comma"
+        },
+        {
+          "name": "units",
+          "in": "query", 
+          "type": "STRING",
+          "required": false,
+          "description": "Units of measurement (standard, metric, imperial)",
+          "default": "metric"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "weather_data",
+          "type": "OBJECT",
+          "description": "Current weather information",
+          "statusCode": 200
+        }
+      ],
+      "timeout": 10000
+    }
+  ]
+}

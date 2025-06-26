@@ -11,10 +11,10 @@
     "dependencies": {
         "@cktmcs/shared": "file:../../shared",
         "@cktmcs/errorhandler": "file:../../errorhandler",
-        "axios": "^1.7.7",
+        "axios": "^1.8.4",
         "body-parser": "^1.19.0",
-        "dotenv": "^16.4.5",
-        "express": "^4.18.2",
+        "dotenv": "^16.5.0",
+        "express": "^4.21.1",
         "mongodb": "^6.10.0",
         "redis": "^4.7.0"
     },

@@ -1,5 +1,5 @@
 import { PluginDefinition, PluginParameter } from '../types/Plugin';
-import { compareVersions, areVersionsCompatible } from './semver.js';
+import { compareVersions, areVersionsCompatible } from './semver';
 
 /**
  * Interface for compatibility check results
@@ -24,7 +24,7 @@ export interface CompatibilityIssue {
  * @param newPlugin New version of the plugin
  * @returns Compatibility check result
  */
-export function checkPluginCompatibility(
+export function checkPluginToPluginCompatibility(
   oldPlugin: PluginDefinition,
   newPlugin: PluginDefinition
 ): CompatibilityCheckResult {
@@ -129,6 +129,77 @@ function checkInputCompatibility(
       }
     }
   }
+}
+
+/**
+ * Interface for host compatibility check results
+ */
+export interface HostCompatibilityResult {
+    isCompatible: boolean;
+    reason?: string;
+}
+
+/**
+ * Check if a plugin is compatible with the host environment
+ * @param plugin The plugin definition
+ * @param hostCapabilities Object containing host version and app name
+ * @returns Host compatibility check result
+ */
+export function checkHostCompatibility(
+    plugin: PluginDefinition,
+    hostCapabilities: { hostVersion?: string; hostAppName?: string }
+): HostCompatibilityResult {
+    if (!plugin.metadata?.compatibility?.minHostVersion) {
+        // If plugin doesn't specify a minHostVersion, assume it's compatible (or define a default policy)
+        return { isCompatible: true, reason: "Plugin does not specify a minimum host version." };
+    }
+
+    if (!hostCapabilities.hostVersion) {
+        // If host doesn't provide a version, cannot determine compatibility strictly
+        return { isCompatible: false, reason: "Host version not provided for compatibility check." };
+    }
+
+    const compatible = areVersionsCompatible(plugin.metadata.compatibility.minHostVersion, hostCapabilities.hostVersion);
+    if (compatible) {
+        return { isCompatible: true };
+    } else {
+        // Check if the host is older than the plugin's requirement
+        if (compareVersions(hostCapabilities.hostVersion, plugin.metadata.compatibility.minHostVersion) < 0) {
+             return {
+                isCompatible: false,
+                reason: `Host version '${hostCapabilities.hostVersion}' is older than plugin's required minimum host version '${plugin.metadata.compatibility.minHostVersion}'.`
+            };
+        } else {
+            // This case implies the host is newer but still not "compatible" according to areVersionsCompatible (e.g. major version mismatch)
+            // For minHostVersion, typically any host version >= minHostVersion (within the same major, or if major doesn't matter) is fine.
+            // areVersionsCompatible might be too strict if it implies exact match or only minor/patch differences.
+            // Let's refine this: compatibility means hostVersion >= minHostVersion.
+            // We need to ensure areVersionsCompatible handles this logic or use compareVersions directly.
+
+            // Assuming areVersionsCompatible(required, actual) means actual is compatible with required:
+            // If areVersionsCompatible implies "actual" can be newer, then the original 'compatible' variable is correct.
+            // If it's strict, we need to adjust. Let's assume for now 'areVersionsCompatible' is suitable for "hostVersion is at least minHostVersion and not incompatible due to major version changes".
+            // The existing compareVersions(a,b) returns: 1 if a > b, -1 if a < b, 0 if a === b.
+            // So, hostVersion >= minHostVersion means compareVersions(hostCapabilities.hostVersion, plugin.metadata.compatibility.minHostVersion) >= 0
+
+            const hostIsSufficient = compareVersions(hostCapabilities.hostVersion, plugin.metadata.compatibility.minHostVersion) >= 0;
+
+            if (hostIsSufficient) {
+                // If host version is sufficient, then the 'areVersionsCompatible' might have failed due to major version mismatch.
+                // For minHostVersion, we typically care that the host is AT LEAST that version.
+                // The 'areVersionsCompatible' function might be more about plugin-to-plugin where major bumps are breaking.
+                // Let's simplify: if host version is >= minHostVersion, it's compatible in terms of minimum requirement.
+                // However, a plugin might also specify a *maximum* host version or specific compatible host versions.
+                // The current PluginDefinition only has minHostVersion.
+                 return { isCompatible: true, reason: "Host version meets or exceeds plugin's minimum requirement. Note: areVersionsCompatible might have stricter rules on major versions." };
+            } else {
+                 return {
+                    isCompatible: false,
+                    reason: `Host version '${hostCapabilities.hostVersion}' is older than plugin's required minimum host version '${plugin.metadata.compatibility.minHostVersion}'.`
+                };
+            }
+        }
+    }
 }
 
 /**

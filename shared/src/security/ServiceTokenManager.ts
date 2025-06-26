@@ -57,7 +57,7 @@ export class ServiceTokenManager {
    */
   private async fetchPublicKey(): Promise<void> {
     try {
-      console.log(`[ServiceTokenManager] Fetching public key for ${this.serviceId}`);
+      //console.log(`[ServiceTokenManager] Fetching public key for ${this.serviceId}`);
 
       // First try to load from file system
       try {
@@ -73,24 +73,24 @@ export class ServiceTokenManager {
           path.join(process.cwd(), 'shared/keys/public.pem')
         ];
 
-        console.log(`[ServiceTokenManager] Checking for public key in these locations:`, possiblePaths);
+        //console.log(`[ServiceTokenManager] Checking for public key in these locations:`, possiblePaths);
 
         for (const publicKeyPath of possiblePaths) {
           if (fs.existsSync(publicKeyPath)) {
             this.publicKey = fs.readFileSync(publicKeyPath, 'utf8');
-            console.log(`[ServiceTokenManager] Public key loaded from file: ${publicKeyPath} for ${this.serviceId}`);
-            console.log(`[ServiceTokenManager] Public key content (first 40 chars): ${this.publicKey.substring(0, 40)}...`);
+            //console.log(`[ServiceTokenManager] Public key loaded from file: ${publicKeyPath} for ${this.serviceId}`);
+            //console.log(`[ServiceTokenManager] Public key content (first 40 chars): ${this.publicKey.substring(0, 40)}...`);
             return;
           }
         }
 
-        console.warn(`[ServiceTokenManager] Could not find public key in any of the expected locations`);
+        //console.warn(`[ServiceTokenManager] Could not find public key in any of the expected locations`);
       } catch (fsError: any) {
-        console.warn(`[ServiceTokenManager] Could not load public key from file: ${fsError.message}`);
+        //console.warn(`[ServiceTokenManager] Could not load public key from file: ${fsError.message}`);
       }
 
       // If file system fails, fetch from security manager with retry logic
-      console.log(`[ServiceTokenManager] Fetching public key from ${this.authUrl}/public-key`);
+      //console.log(`[ServiceTokenManager] Fetching public key from ${this.authUrl}/public-key`);
 
       const maxRetries = 3;
       let retryCount = 0;
@@ -105,7 +105,7 @@ export class ServiceTokenManager {
           }
 
           this.publicKey = response.data;
-          console.log(`[ServiceTokenManager] Public key received from server (first 40 chars): ${this.publicKey.substring(0, 40)}...`);
+          //console.log(`[ServiceTokenManager] Public key received from server (first 40 chars): ${this.publicKey.substring(0, 40)}...`);
 
           // Save the public key to file for future use
           try {
@@ -122,22 +122,22 @@ export class ServiceTokenManager {
                   fs.mkdirSync(keysDir, { recursive: true });
                 }
                 fs.writeFileSync(path.join(keysDir, 'public.key'), this.publicKey);
-                console.log(`[ServiceTokenManager] Public key saved to file: ${path.join(keysDir, 'public.key')}`);
+                //console.log(`[ServiceTokenManager] Public key saved to file: ${path.join(keysDir, 'public.key')}`);
                 break;
               } catch (dirError: any) {
-                console.warn(`[ServiceTokenManager] Could not save public key to ${keysDir}: ${dirError.message}`);
+                //console.warn(`[ServiceTokenManager] Could not save public key to ${keysDir}: ${dirError.message}`);
               }
             }
           } catch (fsError: any) {
-            console.warn(`[ServiceTokenManager] Could not save public key to file: ${fsError.message}`);
+            //console.warn(`[ServiceTokenManager] Could not save public key to file: ${fsError.message}`);
           }
 
-          console.log(`[ServiceTokenManager] Public key fetched successfully for ${this.serviceId}`);
+          //console.log(`[ServiceTokenManager] Public key fetched successfully for ${this.serviceId}`);
           return;
         } catch (error: any) {
           lastError = error;
           retryCount++;
-          console.warn(`[ServiceTokenManager] Failed to fetch public key (attempt ${retryCount}/${maxRetries}): ${error.message}`);
+          //console.warn(`[ServiceTokenManager] Failed to fetch public key (attempt ${retryCount}/${maxRetries}): ${error.message}`);
 
           if (axios.isAxiosError(error)) {
             if (error.response) {
@@ -151,7 +151,7 @@ export class ServiceTokenManager {
           if (retryCount < maxRetries) {
             // Wait before retrying (exponential backoff)
             const delay = Math.pow(2, retryCount) * 1000;
-            console.log(`[ServiceTokenManager] Retrying in ${delay}ms...`);
+            //console.log(`[ServiceTokenManager] Retrying in ${delay}ms...`);
             await new Promise(resolve => setTimeout(resolve, delay));
           }
         }
@@ -184,7 +184,7 @@ export class ServiceTokenManager {
 
     // Prevent multiple simultaneous authentication attempts
     if (this.authInProgress) {
-      console.log(`Authentication already in progress for ${this.serviceId}, waiting...`);
+      //console.log(`Authentication already in progress for ${this.serviceId}, waiting...`);
       // Wait a bit and check if token is available
       await new Promise(resolve => setTimeout(resolve, 1000));
       if (this.token !== '' && this.tokenExpiry > now + 5000) {
@@ -199,7 +199,7 @@ export class ServiceTokenManager {
 
     // Prevent too frequent authentication attempts
     if (now - this.lastAuthAttempt < this.authRetryTimeout) {
-      console.log(`Too many authentication attempts for ${this.serviceId}, using existing token or waiting`);
+      //console.log(`Too many authentication attempts for ${this.serviceId}, using existing token or waiting`);
       if (this.token !== '') {
         // Use existing token even if it might be expired
         return this.token;
@@ -219,7 +219,7 @@ export class ServiceTokenManager {
         await this.fetchPublicKey();
       }
 
-      console.log(`Authenticating ${this.serviceId} with security manager at ${this.authUrl}`);
+      //console.log(`Authenticating ${this.serviceId} with security manager at ${this.authUrl}`);
 
       // Use a dedicated axios instance with proper timeout but no auth
       // This is the auth endpoint itself, so we can't authenticate this request
@@ -237,7 +237,7 @@ export class ServiceTokenManager {
         this.token = response.data.token;
         // Add buffer before expiry (token valid for 1h, we'll refresh after 50 min)
         this.tokenExpiry = now + (50 * 60 * 1000);
-        console.log(`Successfully authenticated ${this.serviceId}, token received`);
+        //console.log(`Successfully authenticated ${this.serviceId}, token received`);
         this.authInProgress = false;
         return this.token;
       } else {
@@ -303,7 +303,7 @@ export class ServiceTokenManager {
         const tokenParts = token.split('.');
         if (tokenParts.length === 3) {
           const header = JSON.parse(Buffer.from(tokenParts[0], 'base64').toString());
-          console.log(`[ServiceTokenManager] Token header for SecurityManager verification:`, header);
+          //console.log(`[ServiceTokenManager] Token header for SecurityManager verification:`, header);
         }
       } catch (parseError) {
         console.error(`[ServiceTokenManager] Error parsing token for SecurityManager verification:`, parseError);
@@ -323,11 +323,11 @@ export class ServiceTokenManager {
       });
 
       if (response.data && response.data.valid) {
-        console.log(`[ServiceTokenManager] Token verified by SecurityManager for ${this.serviceId}`);
+        //console.log(`[ServiceTokenManager] Token verified by SecurityManager for ${this.serviceId}`);
         return response.data.user;
       } else {
-        console.log(`[ServiceTokenManager] Token rejected by SecurityManager for ${this.serviceId}:`, response.data?.error || 'Unknown error');
-        console.log(`[ServiceTokenManager] Response data:`, response.data);
+        //console.log(`[ServiceTokenManager] Token rejected by SecurityManager for ${this.serviceId}:`, response.data?.error || 'Unknown error');
+        //console.log(`[ServiceTokenManager] Response data:`, response.data);
         return null;
       }
     } catch (error: any) {
@@ -354,7 +354,7 @@ export class ServiceTokenManager {
     try {
       // Make sure we have the public key
       if (!this.publicKey) {
-        console.log(`[ServiceTokenManager] No public key available for ${this.serviceId}, fetching...`);
+        //console.log(`[ServiceTokenManager] No public key available for ${this.serviceId}, fetching...`);
         await this.fetchPublicKey();
       }
 
@@ -375,7 +375,7 @@ export class ServiceTokenManager {
         // Try to parse the header to check the algorithm
         const headerStr = Buffer.from(tokenParts[0], 'base64').toString();
         const header = JSON.parse(headerStr);
-        console.log(`[ServiceTokenManager] Token header:`, header);
+        //console.log(`[ServiceTokenManager] Token header:`, header);
 
         if (header.alg !== 'RS256') {
           console.error(`[ServiceTokenManager] Token uses unsupported algorithm: ${header.alg}. Only RS256 is supported.`);
@@ -384,7 +384,7 @@ export class ServiceTokenManager {
 
         // Verify with RS256 only - no fallback to HS256
         const decoded = jwt.verify(token, this.publicKey, { algorithms: ['RS256'] });
-        console.log(`[ServiceTokenManager] Token verified successfully for ${this.serviceId}`);
+        //console.log(`[ServiceTokenManager] Token verified successfully for ${this.serviceId}`);
         return decoded;
       } catch (rs256Error) {
         console.error(`[ServiceTokenManager] RS256 verification failed for ${this.serviceId}:`, rs256Error);
@@ -395,9 +395,9 @@ export class ServiceTokenManager {
           if (tokenParts.length === 3) {
             const header = JSON.parse(Buffer.from(tokenParts[0], 'base64').toString());
             const payload = JSON.parse(Buffer.from(tokenParts[1], 'base64').toString());
-            console.log(`[ServiceTokenManager] Token header:`, header);
-            console.log(`[ServiceTokenManager] Token payload exp:`, payload.exp);
-            console.log(`[ServiceTokenManager] Token payload iat:`, payload.iat);
+            //console.log(`[ServiceTokenManager] Token header:`, header);
+            //console.log(`[ServiceTokenManager] Token payload exp:`, payload.exp);
+            //console.log(`[ServiceTokenManager] Token payload iat:`, payload.iat);
 
             // Check if token is expired
             const now = Math.floor(Date.now() / 1000);
@@ -550,7 +550,7 @@ export class ServiceTokenManager {
         this.verifiedTokens.delete(token);
       }
 
-      console.log(`Pruned token cache from ${entries.length} to ${this.verifiedTokens.size} entries`);
+      //console.log(`Pruned token cache from ${entries.length} to ${this.verifiedTokens.size} entries`);
     }
   }
 }

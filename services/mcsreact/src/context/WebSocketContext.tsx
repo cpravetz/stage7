@@ -88,14 +88,39 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         break;
       case MessageType.STATISTICS:
       case "agentStatistics": // Handle both enum value and string literal
-        console.log('Received statistics update:', data);
-        setStatistics(data.content);
+        //console.log('WebSocketContext: Received raw statistics content:', JSON.stringify(data.content, null, 2));
+        // Log the raw agentStatistics part specifically
         if (data.content && data.content.agentStatistics) {
-          console.log('Processing agent statistics:', data.content.agentStatistics);
-          if (data.content.agentStatistics._type === 'Map') {
-            data.content.agentStatistics = MapSerializer.transformFromSerialization(data.content.agentStatistics);
+//          console.log('WebSocketContext: Received raw data.content.agentStatistics:', JSON.stringify(data.content.agentStatistics, null, 2));
+        }
+
+        // --- FIX: Always deserialize agentStatistics before setting statistics ---
+        let statsToSet = { ...data.content };
+        if (statsToSet.agentStatistics && statsToSet.agentStatistics._type === 'Map') {
+          statsToSet.agentStatistics = MapSerializer.transformFromSerialization(statsToSet.agentStatistics);
+        }
+        setStatistics(statsToSet); // This updates the broader statistics object
+
+        if (data.content && data.content.agentStatistics) {
+          let processedAgentStats = data.content.agentStatistics;
+          if (processedAgentStats._type === 'Map') {
+            processedAgentStats = MapSerializer.transformFromSerialization(processedAgentStats);
           }
-          setAgentStatistics(data.content.agentStatistics);
+          // Ensure processedAgentStats is a Map before setting
+          if (!(processedAgentStats instanceof Map)) {
+            console.warn('WebSocketContext: Processed agentStatistics is not a Map, attempting to convert from object:', processedAgentStats);
+            try {
+              // Attempt to convert if it's an object that was previously a Map
+              processedAgentStats = new Map(Object.entries(processedAgentStats || {}));
+            } catch (e) {
+              console.error('WebSocketContext: Failed to convert agentStatistics to Map, defaulting to empty Map.', e);
+              processedAgentStats = new Map();
+            }
+          }
+          setAgentStatistics(processedAgentStats);
+        } else {
+          // If agentStatistics is not present in the message, maybe clear it or set to default
+          setAgentStatistics(new Map());
         }
         break;
       case MessageType.STATUS_UPDATE:

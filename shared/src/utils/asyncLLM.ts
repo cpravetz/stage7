@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
-import { MessageQueueClient } from '../messaging/queueClient.js';
-import { MessageType } from '../types/Message.js';
+import { MessageQueueClient } from '../messaging/queueClient';
+import { MessageType } from '../types/Message';
 import { Channel, ConsumeMessage } from 'amqplib';
 
 /**

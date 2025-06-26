@@ -1,0 +1,111 @@
+{
+  "id": "weather-container",
+  "verb": "WEATHER_CONTAINER",
+  "name": "Weather Container Plugin",
+  "description": "Get weather information for any location using containerized execution",
+  "version": "1.0.0",
+  "language": "container",
+  "inputDefinitions": [
+    {
+      "name": "location",
+      "type": "string",
+      "required": true,
+      "description": "Location name (city, country) to get weather information for"
+    }
+  ],
+  "outputDefinitions": [
+    {
+      "name": "location",
+      "type": "string",
+      "description": "Resolved location name"
+    },
+    {
+      "name": "country",
+      "type": "string",
+      "description": "Country code"
+    },
+    {
+      "name": "temperature",
+      "type": "number",
+      "description": "Temperature in Celsius"
+    },
+    {
+      "name": "feels_like",
+      "type": "number",
+      "description": "Feels like temperature in Celsius"
+    },
+    {
+      "name": "humidity",
+      "type": "number",
+      "description": "Humidity percentage"
+    },
+    {
+      "name": "pressure",
+      "type": "number",
+      "description": "Atmospheric pressure in hPa"
+    },
+    {
+      "name": "description",
+      "type": "string",
+      "description": "Weather description"
+    },
+    {
+      "name": "wind_speed",
+      "type": "number",
+      "description": "Wind speed in m/s"
+    },
+    {
+      "name": "wind_direction",
+      "type": "number",
+      "description": "Wind direction in degrees"
+    },
+    {
+      "name": "visibility",
+      "type": "number",
+      "description": "Visibility in meters"
+    }
+  ],
+  "container": {
+    "dockerfile": "Dockerfile",
+    "buildContext": "./",
+    "image": "stage7/weather-container:1.0.0",
+    "ports": [
+      {
+        "container": 8080,
+        "host": 0
+      }
+    ],
+    "environment": {
+      "PLUGIN_ENV": "production",
+      "LOG_LEVEL": "INFO"
+    },
+    "resources": {
+      "memory": "256m",
+      "cpu": "0.5"
+    },
+    "healthCheck": {
+      "path": "/health",
+      "interval": "30s",
+      "timeout": "10s",
+      "retries": 3
+    }
+  },
+  "api": {
+    "endpoint": "/execute",
+    "method": "POST",
+    "timeout": 30000
+  },
+  "security": {
+    "permissions": ["network_access"],
+    "sandboxOptions": {
+      "timeout": 30000,
+      "memoryLimit": "256m"
+    }
+  },
+  "metadata": {
+    "author": "Stage7 Team",
+    "category": "utility",
+    "tags": ["weather", "container", "api"],
+    "documentation": "https://github.com/cpravetz/stage7/docs/weather-container-plugin.md"
+  }
+}

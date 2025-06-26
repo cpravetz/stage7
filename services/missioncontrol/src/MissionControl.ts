@@ -2,7 +2,7 @@ import axios from 'axios';
 import express from 'express';
 import { Request, Response, NextFunction } from 'express';
 import { AgentStatistics, Mission, Status } from '@cktmcs/shared';
-import { generateGuid } from './utils/generateGuid';
+import { v4 as uuidv4, validate as uuidValidate } from 'uuid';
 import { BaseEntity, MessageType, PluginInput, MapSerializer, ServiceTokenManager } from '@cktmcs/shared';
 import { MissionStatistics } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
@@ -16,15 +16,6 @@ interface CustomRequest extends Request {
       // Add any other properties that might be in the user object
     };
   }
-
-// NOTE: Don't use this directly - use this.authenticatedApi or this.getAuthenticatedAxios() instead
-// This is kept for backward compatibility only
-const api = axios.create({
-    headers: {
-      'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
-    },
-});
 
 class MissionControl extends BaseEntity {
     private missions: Map<string, Mission> = new Map();
@@ -262,13 +253,13 @@ class MissionControl extends BaseEntity {
             // Clear action plan cache before creating new mission
             await this.clearActionPlanCache();
 
-            const missionId = generateGuid();
+            const missionId = uuidv4();
             console.log(`Generated mission ID: ${missionId}`);
 
             const mission: Mission = {
                 id: missionId,
                 userId: userId,
-                name: content.name || `Mission ${new Date().toISOString().slice(0, 10)}`,
+                name: content.name || `Mission ${new Date().toISOString().replace(/:/g, '-')}`,
                 goal: content.goal,
                 missionContext: content.missionContext || '',
                 status: Status.INITIALIZING,
@@ -542,7 +533,14 @@ class MissionControl extends BaseEntity {
     private async handleAgentStatisticsUpdate(req: express.Request, res: express.Response) {
         try {
             const { agentId, missionId, statistics, timestamp } = req.body;
-
+            if (!uuidValidate(missionId)) {
+                res.status(400).send({ error: 'Invalid missionId format' });
+            }
+            // Stop sending stats for missions that are not changing
+            const mission = this.missions.get(missionId);
+            if (!mission || mission.status !== Status.RUNNING) {
+                res.status(204).send({ message: 'Mission not found or not running' });
+            }
             console.log(`Received statistics update for agent ${agentId} in mission ${missionId}`);
 
             // Store the statistics for this agent
@@ -579,6 +577,10 @@ class MissionControl extends BaseEntity {
                                 agentStatistics: MapSerializer.transformForSerialization(trafficManagerStatistics.agentStatisticsByStatus),
                                 engineerStatistics: engineerStatisticsResponse.data
                             };
+
+                            // Log before sending
+                            console.log('MissionControl: Sending agentStatistics to PostOffice for client', clientId);
+                            console.log('MissionControl: Sending agentStatistics to PostOffice for client', clientId, 'Data:', JSON.stringify(missionStats.agentStatistics, null, 2));
 
                             // Send statistics to client
                             await this.authenticatedApi.post(`http://${this.postOfficeUrl}/message`, {
@@ -635,15 +637,55 @@ class MissionControl extends BaseEntity {
                 for (const missionId of missionIds) {
                     console.log(`Fetching statistics for mission ${missionId}`);
                     const mission = this.missions.get(missionId);
-                    if (!mission) {
-                        console.log(`Mission ${missionId} not found, skipping`);
+                    if (!mission || mission.status !== Status.RUNNING) {
+                        console.log(`Mission ${missionId} not found or not running, skipping`);
                         continue;
                     }
 
                     console.log(`Fetching agent statistics from TrafficManager for mission ${missionId}`);
                     const trafficManagerResponse = await this.authenticatedApi.get(`http://${this.trafficManagerUrl}/getAgentStatistics/${missionId}`);
                     const trafficManagerStatistics = trafficManagerResponse.data;
+
+                    // Log raw statistics received from TrafficManager (for debugging purposes)
+                    // console.log('MissionControl: Raw TM Stats agentStatisticsByStatus:', JSON.stringify(trafficManagerStatistics.agentStatisticsByStatus, null, 2));
+
                     trafficManagerStatistics.agentStatisticsByStatus = MapSerializer.transformFromSerialization(trafficManagerStatistics.agentStatisticsByStatus);
+
+                    // Log deserialized statistics (for debugging purposes)
+                    // console.log('MissionControl: Deserialized TM Stats agentStatisticsByStatus:', JSON.stringify(Array.from(trafficManagerStatistics.agentStatisticsByStatus.entries()), null, 2));
+
+                    // Attempt to fix/ensure agentStat.steps is a proper array
+                    if (trafficManagerStatistics.agentStatisticsByStatus instanceof Map) {
+                        trafficManagerStatistics.agentStatisticsByStatus.forEach((agentList: AgentStatistics[], status: string) => {
+                            agentList.forEach((agentStat: any) => { // Use 'any' temporarily for potential object-form steps
+                                if (agentStat.steps && typeof agentStat.steps === 'object' && !Array.isArray(agentStat.steps)) {
+                                    console.warn(`MissionControl: Reconstructing steps for agent ${agentStat.id} which were an object.`);
+                                    try {
+                                        agentStat.steps = Object.values(agentStat.steps);
+                                    } catch (e) {
+                                        console.error(`MissionControl: Failed to reconstruct steps for agent ${agentStat.id}:`, e);
+                                        agentStat.steps = []; // Default to empty array on reconstruction failure
+                                    }
+                                } else if (!agentStat.steps || !Array.isArray(agentStat.steps)) {
+                                    // If steps is missing, null, or not an array (and not an object handled above), ensure it's an empty array.
+                                    if (!agentStat.steps) console.warn(`MissionControl: Agent ${agentStat.id} was missing steps array, initializing to [].`);
+                                    else console.warn(`MissionControl: Agent ${agentStat.id} steps was not an array, re-initializing to []. Original:`, agentStat.steps);
+                                    agentStat.steps = [];
+                                }
+                                // Further ensure each step object has the required fields (optional, for deeper integrity)
+                                if (agentStat.steps.forEach) { // Check if it's an array now
+                                    agentStat.steps.forEach((step: any, index: number) => {
+                                        if (!step || typeof step.id === 'undefined' || typeof step.verb === 'undefined' || typeof step.status === 'undefined') {
+                                            console.warn(`MissionControl: Agent ${agentStat.id}, step ${index} is malformed, ensuring default structure. Original:`, step);
+                                            // This might be too aggressive if partial data is better than none.
+                                            // For now, just logging, could replace with a default StepStat structure.
+                                        }
+                                    });
+                                }
+                            });
+                        });
+                    }
+
 
                     let totalDependencies = 0;
                     if (trafficManagerStatistics.agentStatisticsByStatus?.values) {
@@ -665,6 +707,9 @@ class MissionControl extends BaseEntity {
 
                     console.log(`Sending statistics update to PostOffice for client ${clientId}`);
                     console.log(`Statistics summary: LLM calls: ${missionStats.llmCalls}, Agent count: ${Object.values(missionStats.agentCountByStatus || {}).reduce((sum, count) => sum + count, 0)}`);
+
+                    // Log before sending
+                    console.log('MissionControl (periodic): Sending agentStatistics to PostOffice for client', clientId, 'mission:', missionId, 'Data:', JSON.stringify(missionStats.agentStatistics, null, 2));
 
                     await this.authenticatedApi.post(`http://${this.postOfficeUrl}/message`, {
                         type: MessageType.STATISTICS,

@@ -7,8 +7,8 @@ export type PluginRepositoryType = 'git' | 'npm' | 'local' | 'mongo' | 'github';
 export interface PluginRepository {
     type: PluginRepositoryType;
     store(manifest: PluginManifest): Promise<void>;
-    fetch(id: string): Promise<PluginManifest | undefined>;
-    fetchByVerb(verb: string): Promise<PluginManifest | undefined>;
+    fetch(id: string, version?: string): Promise<PluginManifest | undefined>;
+    fetchByVerb(verb: string, version?: string): Promise<PluginManifest | undefined>;
     delete(id: string): Promise<void>;
     list(): Promise<PluginLocator[]>;
 }

@@ -26,6 +26,23 @@ export class ModelManager {
         this.loadModels();
     }
 
+    /**
+     * Blacklist a model for a specific duration
+     * @param modelName The name of the model to blacklist
+     * @param until Date until which the model is blacklisted
+     */
+    blacklistModel(modelName: string, until: Date): void {
+        console.log(`Blacklisting model ${modelName} until ${until.toISOString()}`);
+        for (const conversationType of Object.values(LLMConversationType)) {
+            const metrics = this.performanceTracker.getPerformanceMetrics(modelName, conversationType);
+            if (metrics) {
+                metrics.blacklistedUntil = until.toISOString();
+                metrics.consecutiveFailures = Math.max(metrics.consecutiveFailures, 5); // Ensure it stays blacklisted
+            }
+        }
+        this.clearModelSelectionCache();
+    }
+
     private async loadModels() {
         const modelsDirectory = path.join(__dirname, '..', 'models');
 
@@ -84,30 +101,6 @@ export class ModelManager {
         const availableModels = Array.from(this.models.values())
             .filter(model => {
                 console.log(`Evaluating model: ${model.name}, interface: ${model.interfaceName}, service: ${model.serviceName}`);
-
-                // Skip problematic models
-                if (model.name.toLowerCase() === 'hf/meta-llama/llama-3.2-3b-instruct') {
-                    console.log(`Skipping model ${model.name} because it's known to have issues`);
-                    return false;
-                }
-
-                // Skip OpenRouter models due to connection issues
-                if (model.interfaceName.toLowerCase() === 'openrouter') {
-                    console.log(`Skipping model ${model.name} because OpenRouter interface is having connection issues`);
-                    return false;
-                }
-
-                // Skip Anthropic models due to potential fees
-                if (model.name.toLowerCase().includes('anthropic') || model.name.toLowerCase().includes('claude')) {
-                    console.log(`Skipping model ${model.name} because it may incur fees`);
-                    return false;
-                }
-
-                // Skip OpenAI models due to potential fees
-                if (model.name.toLowerCase().includes('openai') || model.name.toLowerCase().includes('gpt')) {
-                    console.log(`Skipping model ${model.name} because it may incur fees`);
-                    return false;
-                }
 
                 // Check if model supports the conversation type
                 if (!model.contentConversation.includes(conversationType)) {

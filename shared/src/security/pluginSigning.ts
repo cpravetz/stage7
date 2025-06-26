@@ -1,4 +1,5 @@
 import { PluginDefinition } from '../types/Plugin';
+import { PluginManifest } from '../types/PluginManifest';
 import { createHash, createSign, createVerify } from 'crypto';
 import fs from 'fs';
 import path from 'path';
@@ -38,7 +39,7 @@ function createCanonicalRepresentation(plugin: PluginDefinition): string {
     id: plugin.id,
     verb: plugin.verb,
     version: plugin.version,
-    entryPoint: plugin.entryPoint,
+    entryPoint: plugin.entryPoint || {},
     security: {
       permissions: plugin.security.permissions,
       sandboxOptions: plugin.security.sandboxOptions
@@ -121,13 +122,17 @@ export function verifyPluginSignature(plugin: PluginDefinition, publicKey?: stri
 
     // Get the signature and the data to verify
     const signature = plugin.security.trust.signature;
-    const dataToVerify = JSON.stringify({
+    const objectToVerify = {
       id: plugin.id,
       verb: plugin.verb,
       version: plugin.version,
-      description: plugin.description || '',
-      entryPoint: plugin.entryPoint || {}
-    });
+      entryPoint: plugin.entryPoint || {}, // Match canonical representation's handling of optional entryPoint
+      security: {
+        permissions: plugin.security.permissions,
+        sandboxOptions: plugin.security.sandboxOptions
+      }
+    };
+    const dataToVerify = JSON.stringify(objectToVerify, Object.keys(objectToVerify).sort());
 
     // Use the provided public key or load from environment/file
     const keyToUse = publicKey || process.env.PLUGIN_PUBLIC_KEY || '';
@@ -201,7 +206,7 @@ export function createTrustCertificate(
  * @returns True if the plugin is trusted
  */
 export function verifyTrustCertificate(
-  plugin: PluginDefinition,
+  plugin: PluginManifest,
   trustedPublishers: string[],
   publicKeys?: Map<string, string>
 ): boolean {

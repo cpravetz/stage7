@@ -39,52 +39,103 @@ export class LocalRepository implements PluginRepository {
         }
     }
 
-    async fetch(id: string): Promise<PluginManifest | undefined> {
+    async fetch(id: string, version?: string): Promise<PluginManifest | undefined> {
+        if (!id) {
+            console.log('LocalRepository.fetch: ID must be provided.');
+            return undefined;
+        }
         try {
-            let manifestPath: string | undefined;
-            if (id) {
-                // Search through all plugin directories for matching ID
-                const dirs = await fs.readdir(this.baseDir);
-                for (const dir of dirs) {
-                    const currentPath = path.join(this.baseDir, dir, 'manifest.json');
-                    try {
-                        const manifest = JSON.parse(await fs.readFile(currentPath, 'utf-8'));
-                        if (manifest.id === id) {
-                            manifestPath = currentPath;
-                            break;
-                        }
-                    } catch {
-                        continue;
-                    }
-                }
-                if (!manifestPath) {
-                    return undefined;
-                }
+            let manifestPath: string;
+            if (version) {
+                // Path assuming ID is the directory name, and version is a subdirectory
+                manifestPath = path.join(this.baseDir, id, version, 'manifest.json');
             } else {
-                console.log('Id must be provided');
-                return undefined;
+                // Path assuming ID is the directory name, manifest directly under it (for latest/default)
+                // This part might need more sophisticated logic if multiple non-versioned plugins share an ID-based dir
+                // or if the verb-based storage is still primary for non-versioned.
+                // For now, let's assume plugins are stored in {baseDir}/{id}/{manifest.json} or {baseDir}/{id}/{version}/manifest.json
+                manifestPath = path.join(this.baseDir, id, 'manifest.json');
+                // Fallback: Try to find by iterating if direct path fails (legacy or verb-based storage)
+                try {
+                    await fs.access(manifestPath);
+                } catch (e) {
+                    console.warn(`LocalRepository.fetch: Manifest not found at direct path ${manifestPath}. Falling back to iterating directories for ID '${id}'.`);
+                    const dirs = await fs.readdir(this.baseDir);
+                    let foundPath: string | undefined;
+                    for (const dir of dirs) {
+                        const currentPath = path.join(this.baseDir, dir, 'manifest.json');
+                        try {
+                            const manifestData = JSON.parse(await fs.readFile(currentPath, 'utf-8'));
+                            if (manifestData.id === id) {
+                                // This logic might fetch a manifest that doesn't match a 'version' if one was specified
+                                // and the versioned path didn't exist. This is a simplification.
+                                foundPath = currentPath;
+                                break;
+                            }
+                        } catch { continue; }
+                    }
+                    if (!foundPath) return undefined;
+                    manifestPath = foundPath;
+                }
             }
-
             const manifestContent = await fs.readFile(manifestPath, 'utf-8');
-            return JSON.parse(manifestContent);
+            return JSON.parse(manifestContent) as PluginManifest;
         } catch (error) {
             if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
                 return undefined;
             }
+            console.error(`LocalRepository.fetch: Error fetching plugin ID '${id}'${version ? ` version '${version}'` : ''}:`, error);
             throw error;
         }
     }
 
-    async fetchByVerb(verb: string): Promise<PluginManifest | undefined> {
+    async fetchByVerb(verb: string, version?: string): Promise<PluginManifest | undefined> {
+        if (!verb) {
+            console.log('LocalRepository.fetchByVerb: Verb must be provided.');
+            return undefined;
+        }
         try {
+            // Assuming plugins are primarily identified by a directory matching their verb,
+            // and versions are subdirectories within that verb directory.
+            // e.g., {baseDir}/{verb}/{version}/manifest.json or {baseDir}/{verb}/manifest.json
+            let manifestPath: string;
             const pluginDir = path.join(this.baseDir, verb);
-            const manifestPath = path.join(pluginDir, 'manifest.json');
+
+            if (version) {
+                manifestPath = path.join(pluginDir, version, 'manifest.json');
+            } else {
+                manifestPath = path.join(pluginDir, 'manifest.json');
+            }
+            
             const manifestContent = await fs.readFile(manifestPath, 'utf-8');
-            return JSON.parse(manifestContent);
+            const manifest = JSON.parse(manifestContent) as PluginManifest;
+
+            // Additional check if the manifest's verb actually matches, as directory name might not be canonical.
+            if (manifest.verb !== verb) {
+                console.warn(`LocalRepository.fetchByVerb: Manifest verb '${manifest.verb}' does not match directory verb '${verb}'.`);
+                // Depending on strictness, could return undefined here. For now, returning the found manifest.
+            }
+            return manifest;
         } catch (error) {
             if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+                // Fallback for broader search if direct verb/version path fails
+                // This is simplistic and assumes any manifest with the verb is fine if no version specified.
+                if (!version) {
+                    console.warn(`LocalRepository.fetchByVerb: Manifest not found at direct path for verb '${verb}'. Falling back to iterating directories.`);
+                    const dirs = await fs.readdir(this.baseDir);
+                    for (const dir of dirs) {
+                        const currentPath = path.join(this.baseDir, dir, 'manifest.json');
+                        try {
+                            const manifestData = JSON.parse(await fs.readFile(currentPath, 'utf-8')) as PluginManifest;
+                            if (manifestData.verb === verb) {
+                                return manifestData; // Returns the first one found
+                            }
+                        } catch { continue; }
+                    }
+                }
                 return undefined;
             }
+            console.error(`LocalRepository.fetchByVerb: Error fetching plugin verb '${verb}'${version ? ` version '${version}'` : ''}:`, error);
             throw error;
         }
     }

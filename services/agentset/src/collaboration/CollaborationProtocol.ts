@@ -23,7 +23,14 @@ export interface CollaborationMessage {
   type: CollaborationMessageType;
   senderId: string;
   recipientId: string | 'broadcast';
-  content: any;
+  /**
+   * @deprecated Use payload instead. 'content' is kept for backward compatibility.
+   */
+  content?: any;
+  /**
+   * The main message payload. Use this for all new code.
+   */
+  payload: any;
   timestamp: string;
   conversationId?: string;
   inReplyTo?: string;
@@ -103,6 +110,53 @@ export interface ConflictResolutionResponse {
 }
 
 /**
+ * Task update payload for collaboration messages
+ */
+export interface TaskUpdatePayload {
+  stepId: string;
+  status?: string; // Use StepStatus if available
+  description?: string;
+  newInputs?: Record<string, any>; // Use PluginInput if available
+  updateInputs?: Record<string, any>;
+}
+
+/**
+ * Coordination message data
+ */
+export interface CoordinationData {
+  type: string;
+  senderId: string;
+  targetAgentId?: string;
+  payload?: any;
+  signalId?: string;
+  infoKeys?: string[];
+  timestamp: string;
+}
+
+/**
+ * Resource response for resource sharing
+ */
+export interface ResourceResponse {
+  requestId: string;
+  granted: boolean;
+  resource: string;
+  data?: any;
+  message?: string;
+  senderId: string;
+}
+
+/**
+ * Conflict resolution result (for processConflictResolution)
+ */
+export interface ConflictResolution {
+  resolvedStepId?: string;
+  chosenAction: string;
+  reasoning?: string;
+  stepModifications?: any;
+  newPlan?: any[];
+}
+
+/**
  * Collaboration protocol interface
  */
 export interface CollaborationProtocol {
@@ -124,22 +178,24 @@ export interface CollaborationProtocol {
    * @param request Task delegation request
    * @returns Task delegation response
    */
-  delegateTask(recipientId: string, request: TaskDelegationRequest): Promise<TaskDelegationResponse>;
+  delegateTask(senderId: string, recipientId: string, request: TaskDelegationRequest): Promise<TaskDelegationResponse>;
   
   /**
    * Share knowledge with other agents
+   * @param senderId Sender agent ID
    * @param recipientId Recipient agent ID or 'broadcast'
    * @param knowledge Knowledge to share
    */
-  shareKnowledge(recipientId: string | 'broadcast', knowledge: KnowledgeSharing): Promise<void>;
+  shareKnowledge(senderId: string, recipientId: string | 'broadcast', knowledge: KnowledgeSharing): Promise<void>;
   
   /**
    * Request conflict resolution
+   * @param senderId Sender agent ID
    * @param recipientId Recipient agent ID
    * @param request Conflict resolution request
    * @returns Conflict resolution response
    */
-  resolveConflict(recipientId: string, request: ConflictResolutionRequest): Promise<ConflictResolutionResponse>;
+  resolveConflict(senderId: string, recipientId: string, request: ConflictResolutionRequest): Promise<ConflictResolutionResponse>;
 }
 
 /**
@@ -163,6 +219,9 @@ export function createCollaborationMessage(
     type,
     senderId,
     recipientId,
+    // Always set payload (prefer options.payload, else use content)
+    payload: options.payload !== undefined ? options.payload : content,
+    // Set content for backward compatibility
     content,
     timestamp: new Date().toISOString(),
     ...options

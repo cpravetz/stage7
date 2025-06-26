@@ -269,6 +269,16 @@ export class GeminiInterface extends BaseInterface {
                 const prompt = messages[0].content || '';
                 const result = await model.generateContent(prompt);
                 const response = result.response;
+                // --- Ensure JSON if required ---
+                let requireJson = false;
+                if (modelName.toLowerCase().includes('code')) requireJson = true;
+                if (messages && messages.length > 0 && messages[0].content &&
+                    (messages[0].content.includes('JSON') || messages[0].content.includes('json'))) {
+                    requireJson = true;
+                }
+                if (requireJson) {
+                    return this.ensureJsonResponse(response.text(), true);
+                }
                 return response.text();
             }
             // For chat conversations, use startChat and sendMessage
@@ -285,6 +295,16 @@ export class GeminiInterface extends BaseInterface {
                 // Send the last message
                 const lastMessage = messages[messages.length - 1].content || '';
                 const result = await chat.sendMessage(lastMessage);
+                // --- Ensure JSON if required ---
+                let requireJson = false;
+                if (modelName.toLowerCase().includes('code')) requireJson = true;
+                if (messages && messages.length > 0 && messages[0].content &&
+                    (messages[0].content.includes('JSON') || messages[0].content.includes('json'))) {
+                    requireJson = true;
+                }
+                if (requireJson) {
+                    return this.ensureJsonResponse(result.response.text(), true);
+                }
                 return result.response.text();
             }
         } catch (error) {
