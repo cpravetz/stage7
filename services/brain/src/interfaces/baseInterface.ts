@@ -64,7 +64,7 @@ export abstract class BaseInterface {
      * @param requireJson Whether JSON is required
      * @returns The response, possibly converted to JSON
      */
-    protected ensureJsonResponse(response: string, requireJson: boolean = false): string {
+    public ensureJsonResponse(response: string, requireJson: boolean = false): string {
         if (!requireJson) {
             return response;
         }

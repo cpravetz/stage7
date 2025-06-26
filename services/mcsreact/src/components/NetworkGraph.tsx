@@ -4,6 +4,7 @@ import { DataSet } from 'vis-data';
 import { Edge, Node, Options } from 'vis-network';
 import { MapSerializer, AgentStatistics } from '../shared-browser'; // Assuming AgentStatistics is correctly defined
 import './NetworkGraph.css';
+import './step-overview-fullscreen.css';
 import { API_BASE_URL } from '../config';
 import { SecurityClient } from '../SecurityClient';
 
@@ -374,6 +375,7 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics }) =
                             credentials: 'include',
                             mode: 'cors'
                         });
+                        console.log('[Step Details] Result:', resp);
                         if (!resp.ok) {
                             const errorData = await resp.json().catch(() => ({ message: 'Failed to fetch step overview and could not parse error response.' }));
                             throw new Error(errorData.message || `Failed to fetch step overview. Status: ${resp.status}`);
@@ -401,42 +403,55 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics }) =
         };
     }, [nodes, edges]);
 
-    // Step Overview Dialog
-    const StepOverviewDialog = () => (
-        <div>
-            {stepOverviewOpen && (
-                <div className="step-overview-modal">
-                    <div className="step-overview-content">
-                        <button className="close-btn" onClick={() => setStepOverviewOpen(false)}>×</button>
-                        {stepOverviewLoading ? (
-                            <div>Loading...</div>
-                        ) : stepOverviewError ? (
-                            <div style={{ color: 'red' }}>{stepOverviewError}</div>
-                        ) : stepOverview ? (
-                            <div>
-                                <h3>Step Overview</h3>
-                                <div><b>Action:</b> {stepOverview.verb}</div>
-                                <div><b>Description:</b> {stepOverview.description}</div>
-                                <div><b>Status:</b> {stepOverview.status}</div>
-                                <div><b>Inputs:</b> <pre>{JSON.stringify(stepOverview.inputs, null, 2)}</pre></div>
-                                <div><b>Results:</b> <pre>{JSON.stringify(stepOverview.results, null, 2)}</pre></div>
-                            </div>
-                        ) : null}
-                    </div>
+    // Step Overview Dialog (now replaces the network graph visually)
+    const StepOverviewDialog = () => {
+        // Close on any keypress
+        React.useEffect(() => {
+            if (!stepOverviewOpen) return;
+            const handleKey = (e: KeyboardEvent) => {
+                setStepOverviewOpen(false);
+            };
+            window.addEventListener('keydown', handleKey);
+            return () => window.removeEventListener('keydown', handleKey);
+        }, [stepOverviewOpen]);
+        return (
+            <div className="step-overview-modal step-overview-fullscreen">
+                <div className="step-overview-content">
+                    <button className="close-btn" onClick={() => setStepOverviewOpen(false)}>×</button>
+                    {stepOverviewLoading && <div>Loading...</div>}
+                    {!stepOverviewLoading && stepOverviewError && (
+                        <div style={{ color: 'red' }}>{stepOverviewError}</div>
+                    )}
+                    {!stepOverviewLoading && !stepOverviewError && stepOverview && (
+                        <div className="stepbox" >
+                            <h3>Step Overview</h3>
+                            <div><b>Action:</b> {stepOverview.verb}</div>
+                            <div><b>Description:</b> {stepOverview.description}</div>
+                            <div><b>Status:</b> {stepOverview.status}</div>
+                            <div><b>Inputs:</b> <pre>{JSON.stringify(stepOverview.inputs, null, 2)}</pre></div>
+                            <div><b>Results:</b> <pre>{JSON.stringify(stepOverview.results, null, 2)}</pre></div>
+                            <div><b>Dependencies:</b> <pre>{JSON.stringify(stepOverview.dependencies, null, 2)}</pre></div>
+                        </div>
+                    )}
                 </div>
-            )}
-        </div>
-    );
+            </div>
+        );
+    };
 
     return (
         <div style={{ position: 'relative', width: '100%' }}>
-            <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 2, display: 'flex', gap: 8 }}>
-                <button onClick={() => handleZoom(1.2)} title="Zoom In">＋</button>
-                <button onClick={() => handleZoom(1/1.2)} title="Zoom Out">－</button>
-                <button onClick={handleResetZoom} title="Reset Zoom">⟳</button>
-            </div>
-            <div ref={containerRef} className="network-graph" />
-            <StepOverviewDialog />
+            {stepOverviewOpen ? (
+                <StepOverviewDialog />
+            ) : (
+                <>
+                    <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 2, display: 'flex', gap: 8 }}>
+                        <button onClick={() => handleZoom(1.2)} title="Zoom In">＋</button>
+                        <button onClick={() => handleZoom(1/1.2)} title="Zoom Out">－</button>
+                        <button onClick={handleResetZoom} title="Reset Zoom">⟳</button>
+                    </div>
+                    <div ref={containerRef} className="network-graph" />
+                </>
+            )}
         </div>
     );
 };

@@ -17,15 +17,6 @@ interface CustomRequest extends Request {
     };
   }
 
-// NOTE: Don't use this directly - use this.authenticatedApi or this.getAuthenticatedAxios() instead
-// This is kept for backward compatibility only
-const api = axios.create({
-    headers: {
-      'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
-    },
-});
-
 class MissionControl extends BaseEntity {
     private missions: Map<string, Mission> = new Map();
     private clientMissions: Map<string, Set<string>> = new Map();
@@ -545,6 +536,11 @@ class MissionControl extends BaseEntity {
             if (!uuidValidate(missionId)) {
                 res.status(400).send({ error: 'Invalid missionId format' });
             }
+            // Stop sending stats for missions that are not changing
+            const mission = this.missions.get(missionId);
+            if (!mission || mission.status !== Status.RUNNING) {
+                res.status(204).send({ message: 'Mission not found or not running' });
+            }
             console.log(`Received statistics update for agent ${agentId} in mission ${missionId}`);
 
             // Store the statistics for this agent
@@ -641,8 +637,8 @@ class MissionControl extends BaseEntity {
                 for (const missionId of missionIds) {
                     console.log(`Fetching statistics for mission ${missionId}`);
                     const mission = this.missions.get(missionId);
-                    if (!mission) {
-                        console.log(`Mission ${missionId} not found, skipping`);
+                    if (!mission || mission.status !== Status.RUNNING) {
+                        console.log(`Mission ${missionId} not found or not running, skipping`);
                         continue;
                     }
 
@@ -713,7 +709,6 @@ class MissionControl extends BaseEntity {
                     console.log(`Statistics summary: LLM calls: ${missionStats.llmCalls}, Agent count: ${Object.values(missionStats.agentCountByStatus || {}).reduce((sum, count) => sum + count, 0)}`);
 
                     // Log before sending
-                    console.log('MissionControl (periodic): Sending agentStatistics to PostOffice for client', clientId, 'mission:', missionId);
                     console.log('MissionControl (periodic): Sending agentStatistics to PostOffice for client', clientId, 'mission:', missionId, 'Data:', JSON.stringify(missionStats.agentStatistics, null, 2));
 
                     await this.authenticatedApi.post(`http://${this.postOfficeUrl}/message`, {

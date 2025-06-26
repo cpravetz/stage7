@@ -104,6 +104,15 @@ export class OpenWebUIInterface extends BaseInterface {
                 if (data && data.choices && data.choices.length > 0 && data.choices[0].message && data.choices[0].message.content) {
                     const content = data.choices[0].message.content;
                     console.log(`OpenWebUI response content length: ${content.length} characters`);
+                    // --- Ensure JSON if required ---
+                    let requireJson = false;
+                    if (formattedMessages && formattedMessages.length > 0 && formattedMessages[0].content &&
+                        (formattedMessages[0].content.includes('JSON') || formattedMessages[0].content.includes('json'))) {
+                        requireJson = true;
+                    }
+                    if (requireJson) {
+                        return this.ensureJsonResponse(content, true);
+                    }
                     return content;
                 } else {
                     console.error('Unexpected response format from OpenWebUI:', JSON.stringify(data));

@@ -169,17 +169,10 @@ export class PostOffice extends BaseEntity {
         this.app.post('/loadMission', (req, res) => this.loadMission(req, res));
         this.app.get('/librarian/retrieve/:id', (req, res) => this.retrieveWorkProduct(req, res));
         this.app.get('/getSavedMissions', (req, res) => this.getSavedMissions(req, res));
-
-        this.app.get('/brain/performance', (req, res) => {
-            this.getModelPerformance(req, res);
-        });
-        this.app.get('/brain/performance/rankings', (req, res) => {
-            this.getModelRankings(req, res);
-        });
-
-        this.app.post('/brain/evaluations', (req, res) => {
-            this.submitModelEvaluation(req, res);
-        });
+        this.app.get('/step/:stepId', (req, res) => { this.getStepDetails(req, res)});
+        this.app.get('/brain/performance', (req, res) => { this.getModelPerformance(req, res)});
+        this.app.get('/brain/performance/rankings', (req, res) => { this.getModelRankings(req, res);});
+        this.app.post('/brain/evaluations', (req, res) => { this.submitModelEvaluation(req, res);});
 
         // Setup plugin management routes
         this.pluginManager.setupRoutes(this.app);
@@ -898,6 +891,28 @@ export class PostOffice extends BaseEntity {
         } catch (error) {
             console.error('Error submitting model evaluation:', error instanceof Error ? error.message : error);
             return res.status(500).json({ error: 'Failed to submit model evaluation' });
+        }
+    }
+
+    async getStepDetails(req: express.Request, res: express.Response) {
+        // Accept stepId from either query or params for flexibility
+        const stepId = req.query.stepId || req.params.stepId;
+        if (!stepId) {
+            return res.status(400).json({ error: 'stepId is required' });
+        }
+        try {
+            // Discover AgentSet service URL
+            const agentSetUrl = this.getComponentUrl('AgentSet') || process.env.AGENTSET_URL;
+            if (!agentSetUrl) {
+                return res.status(503).json({ error: 'AgentSet service not available' });
+            }
+            // Forward the request to AgentSet
+            const response = await this.authenticatedApi.get(`http://${agentSetUrl}/agent/step/${stepId}`);
+            return res.status(200).json(response.data);
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error('Error retrieving step details from AgentSet:', error instanceof Error ? error.message : error);
+            return res.status(500).json({ error: 'Failed to retrieve step details' });
         }
     }
 }

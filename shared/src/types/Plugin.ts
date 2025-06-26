@@ -7,6 +7,7 @@ export enum PluginParameterType {
     PLAN = 'plan',
     PLUGIN = 'plugin',
     ERROR = 'error',
+    DIRECT_ANSWER = "DIRECT_ANSWER",
     ANY = 'any' // Retained from a previous version, useful for flexibility
 }
 

@@ -686,7 +686,6 @@ export class AgentSet extends BaseEntity {
 
        this.app.get('/statistics/:missionId', this.getAgentStatistics.bind(this));
        this.app.post('/updateFromAgent', this.updateFromAgent.bind(this));
-       // Note: The '/agent/:agentId/output' route is already defined above with .bind(this)
 
        // Endpoint to get details for a specific step
        this.app.get('/agent/step/:stepId', this.getStepDetailsHandler.bind(this));
@@ -1167,8 +1166,9 @@ export class AgentSet extends BaseEntity {
                     verb: step.actionVerb,
                     description: step.description,
                     status: step.status,
-                    inputs: step.inputs,
-                    results: step.result, // Assuming results are stored directly on the step
+                    dependencies: step.dependencies,
+                    inputs: MapSerializer.transformForSerialization(step.inputs),
+                    results: step.result, 
                     agentId: agent.id, // Optionally include agentId for context
                 };
             }

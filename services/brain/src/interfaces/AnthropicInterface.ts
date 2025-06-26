@@ -61,6 +61,17 @@ export class AnthropicInterface extends BaseInterface {
             if (!fullResponse) {
                 console.log('No content in Anthropic response');
             }
+
+            // --- Ensure JSON if required ---
+            let requireJson = false;
+            if (options.modelName && options.modelName.toLowerCase().includes('code')) requireJson = true;
+            if (messages && messages.length > 0 && messages[0].content &&
+                (messages[0].content.includes('JSON') || messages[0].content.includes('json'))) {
+                requireJson = true;
+            }
+            if (requireJson) {
+                return this.ensureJsonResponse(fullResponse, true);
+            }
     
             return fullResponse || '';
         } catch (error) {

@@ -209,6 +209,16 @@ export class HuggingfaceInterface extends BaseInterface {
                     }
                 }
 
+                // --- Ensure JSON if required ---
+                let requireJson = false;
+                if (options.modelName && options.modelName.toLowerCase().includes('code')) requireJson = true;
+                if (trimmedMessages && trimmedMessages.length > 0 && trimmedMessages[0].content &&
+                    (trimmedMessages[0].content.includes('JSON') || trimmedMessages[0].content.includes('json'))) {
+                    requireJson = true;
+                }
+                if (requireJson) {
+                    return this.ensureJsonResponse(out, true);
+                }
                 return out || 'No response generated';
             } catch (streamError) {
                 const streamErrorMessage = streamError instanceof Error ? streamError.message : String(streamError);

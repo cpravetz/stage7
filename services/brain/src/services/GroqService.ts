@@ -2,6 +2,7 @@ import { BaseService } from './baseService';
 
 export class GroqService extends BaseService {
     private ready: boolean = true;
+    private rateLimitResetTime: number | null = null; // Timestamp when service becomes available again
 
     constructor() {
         // Use the API key from the environment variable
@@ -23,7 +24,40 @@ export class GroqService extends BaseService {
         }
     }
 
+    /**
+     * Call this method when a 429 rate limit error is caught from Groq.
+     * It will parse the error message and set the cooldown accordingly.
+     */
+    handleRateLimitError(error: any) {
+        if (!error || !error.message) return;
+        const match = error.message.match(/Please try again in ([0-9]+)m([0-9.]+)s/);
+        if (match) {
+            const minutes = parseInt(match[1], 10);
+            const seconds = parseFloat(match[2]);
+            const now = Date.now();
+            const cooldownMs = (minutes * 60 + seconds) * 1000;
+            this.rateLimitResetTime = now + cooldownMs;
+            this.ready = false;
+            console.warn(`GroqService rate limited. Will be available again in ${minutes}m${seconds}s (at ${new Date(this.rateLimitResetTime).toISOString()})`);
+        } else {
+            // If we can't parse, fallback to a default cooldown (e.g., 1 minute)
+            this.rateLimitResetTime = Date.now() + 60 * 1000;
+            this.ready = false;
+            console.warn('GroqService rate limited. Could not parse retry time, defaulting to 1 minute cooldown.');
+        }
+    }
+
     isAvailable(): boolean {
+        // If rate limited, check if cooldown has expired
+        if (this.rateLimitResetTime) {
+            if (Date.now() >= this.rateLimitResetTime) {
+                this.rateLimitResetTime = null;
+                this.ready = true;
+            } else {
+                console.warn(`GroqService is rate limited until ${new Date(this.rateLimitResetTime).toISOString()}`);
+                return false;
+            }
+        }
         // Check if API key is valid (not empty and not just quotes)
         const hasValidKey = !!(this.apiKey && this.apiKey !== "''" && this.apiKey !== '""');
         const available = this.ready && hasValidKey;

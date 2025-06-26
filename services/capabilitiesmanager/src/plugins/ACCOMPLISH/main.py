@@ -10,10 +10,35 @@ import os
 import requests
 from typing import Dict, List, Any, Optional, Union
 import logging
+import io
+
+# Custom log handler to capture logs in memory
+class InMemoryLogHandler(logging.Handler):
+    def __init__(self):
+        super().__init__()
+        self.log_buffer = io.StringIO()
+
+    def emit(self, record):
+        msg = self.format(record)
+        self.log_buffer.write(msg + '\n')
+
+    def get_logs(self):
+        return self.log_buffer.getvalue()
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# Add in-memory log handler to capture logs
+memory_handler = InMemoryLogHandler()
+memory_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+logger.addHandler(memory_handler)
+
+# Add a property to logger to get logs
+def get_logger_logs():
+    return memory_handler.get_logs()
+
+logger.logs = property(get_logger_logs)
 
 class PluginParameterType:
     STRING = "string"
@@ -22,6 +47,8 @@ class PluginParameterType:
     ARRAY = "array"
     OBJECT = "object"
     PLAN = "plan"
+    DIRECT_ANSWER = "DIRECT_ANSWER"
+    PLUGIN = "plugin"
     ERROR = "ERROR"
 
 class AccomplishPlugin:
@@ -96,29 +123,105 @@ class AccomplishPlugin:
 
     def generate_prompt(self, goal: str, available_plugins_str: str, mission_context_str: str) -> str:
         """Generate the prompt for the Brain service"""
-        # This is the new standardized prompt template
-        # Note: The old prompt's guidance about DIRECT_ANSWER vs PLAN is now implicitly
-        # handled by the fact that this plugin is *for* planning. If the Brain thinks
-        # a direct answer is sufficient, it might return a very simple plan, or this
-        # plugin could be enhanced later to detect that. For now, we focus on plan generation.
-        # The specific verb schemas from the old prompt are also removed, as the new template
-        # assumes the LLM has more general knowledge or this can be part of the {availablePlugins}
-        # if needed in that format.
-
         prompt = f"""
-You are a planning assistant. Given the goal: '{goal}', generate a JSON array of tasks to achieve this goal.
-Each task object should have 'actionVerb', 'inputs' (as a map of name to {{'inputValue': 'value', 'inputName': 'name', 'args': {{}}}}), 'description', 'dependencies' (as an array of sourceStepId strings, use step IDs like 'step_1'), and optionally 'recommendedRole'.
-Ensure the plan is detailed and includes multiple steps with dependencies if logical. The first step will be 'step_1', the next 'step_2', and so on. Dependencies should refer to these generated step IDs.
-It is critical that the plan is comprehensive and broken down into a sufficient number of granular steps to ensure successful execution. Each step's description should be clear and actionable.
-When defining 'dependencies', ensure they accurately reflect the data flow required between steps. Only list direct predecessor step IDs that provide necessary input for the current step.
-If the goal is complex, consider creating a sub-plan using a nested 'ACCOMPLISH' verb for a major sub-component, or use 'CREATE_SUB_AGENT' if a specialized agent should handle a part of the mission.
-For 'recommendedRole', suggest roles like 'researcher', 'writer', 'coder', 'validator', 'executor' only if a specialized skill is clearly beneficial for that specific step. Otherwise, omit it or use 'executor'.
-The output MUST be a valid JSON array of task objects. Do not include any explanatory text before or after the JSON array.
+You are a planning assistant. Your ONLY task is to generate one of the following JSON outputs to achieve the following goal: '{goal}'.
 
-Available Plugins:
+You MUST respond with ONLY a JSON object in ONLY ONE of these three formats. DO NOT include any explanations, markdown formatting, or additional text outside the JSON object.
+
+1. If you have a full and complete answer to the goal, respond with a JSON object in this format:
+
+{{
+    "type": "DIRECT_ANSWER",
+    "answer": "Your direct answer here"
+}}
+
+2. When the goal is discrete and can be accomplished most efficiently with a new plugin, define one. Creating a plugin should be avoided when the goal can be accomplished with a plan. If you determine a plugin is needed, respond with a JSON object in this format:
+
+{{
+    "type": "PLUGIN",
+    "plugin": {{
+        "id": "plugin-{{verb}}",
+        "verb": "{{verb}}",
+        "description": "A short description of the plugin",
+        "explanation": "A more complete description including inputs, process overview, and outputs than a software engineer can use to build the plugin",
+        "inputDefinitions": [
+            {{
+                "name": "{{input name}}",
+                "required": true/false,
+                "type": "string",
+                "description": "Brief explanation of the input"
+            }},
+            // ... more inputs ...
+        ]
+    }}
+}}
+
+
+3. If the goal can be sub-divided into smaller steps, respond with a plan as a JSON object in this format:
+
+{{
+    "type": "PLAN",
+    "context": "Any overarching points or introduction to the plan you want to share",
+    "plan": [
+        {{
+            "number": 1,
+            "verb": "DESCRIPTIVE_ACTION_VERB",
+            "description": "Brief description of the step",
+            "inputs": {{
+                "inputName1": {{"value": "predeterminedValue"}},
+                "inputName2": {{"outputKey": "outputKeyFromPreviousStep"}}
+            }},
+            "dependencies": {{}},
+            "outputs": {{
+                "outputKey1": "Description of output1",
+                "outputKey2": "Description of output2"
+            }},
+            "recommendedRole": "coordinator"
+        }},
+        {{
+            "number": 2,
+            "verb": "ANOTHER_ACTION",
+            "description": "Description of another step",
+            "inputs": {{
+                "inputName3": {{"outputKey": "outputKey2"}}
+            }},
+            "dependencies": {{"outputKey2": 1}},
+            "outputs": {{
+                "outputKey3": "Description of output3"
+            }},
+            "recommendedRole": "researcher"
+        }}
+    ]
+}}
+
+Guidelines for creating a plan:
+1. Number each step sequentially.
+2. Use specific, actionable verbs or phrases for each step (e.g. ANALYZE_CSV, ANALYZE_AUDIOFILE, PREDICT, WRITE_TEXT, WRITE_CODE, BOOK_A_CAR).
+3. The schema of the step must be as defined above - every field is mandatory but inputs field may be empty.
+4. Each step input should be an object with either a 'value' property for predetermined values or an 'outputKey' property referencing an output from a previous step.
+5. List dependencies for each step as an object with the property names being the outputs needed and the values being the step number that provides the required input like: {"outputname": 1}
+There MUST be a dependency entry for every input that comes from a previous step output.
+6. Specify the outputs of each step. At least one output is mandatory.
+7. Aim for 5-10 steps in the plan, breaking down complex tasks if necessary.
+8. Be thorough in your description fields. This is the only instruction the performer will have.
+9. Ensure the final step produces the desired outcome or mission of the goal.
+10. The actionVerb DELEGATE is available to use to create sub-agents with goals of their own.
+11. Input values may be determined by preceding steps. In those instances set the value to 'undefined'.
+12. For each step, include a "recommendedRole" field with one of the available agent roles that would be best suited for the task.
+
+Available Agent Roles:
+- coordinator: Coordinates activities of other agents, manages task allocation, and ensures mission success. Good for planning, delegation, and monitoring.
+- researcher: Gathers, analyzes, and synthesizes information from various sources. Good for information gathering and data analysis.
+- creative: Generates creative ideas, content, and solutions to problems. Good for idea generation and content creation.
+- critic: Evaluates ideas, plans, and content, providing constructive feedback. Good for quality assessment and risk identification.
+- executor: Implements plans and executes tasks with precision and reliability. Good for task execution and process following.
+- domain_expert: Provides specialized knowledge and expertise in a specific domain. Good for technical analysis and expert advice.
+
+IMPORTANT: Your response MUST be a valid JSON object with no additional text or formatting. The JSON must start with {{ and end with }} and must include one of the three types: "DIRECT_ANSWER", "PLAN", or "PLUGIN".
+
+Plugins are available to execute steps of the plan. Some have required inputs - required properties for the inputs object. These plugins include:
 {available_plugins_str}
 
-Please consider this context and the available plugins when planning and executing the mission.
 Mission Context: {mission_context_str}
 Goal to achieve: {goal}
 """
@@ -273,7 +376,7 @@ Goal to achieve: {goal}
                 "name": "task_conversion_error",
                 "resultType": PluginParameterType.ERROR,
                 "resultDescription": f"Internal error converting plan to tasks: {str(e)}",
-                "result": None,
+                "result": {"logs": logger.logs},
                 "error": str(e)
             }]
 
@@ -352,7 +455,7 @@ Goal to achieve: {goal}
                     "name": "error",
                     "resultType": PluginParameterType.ERROR,
                     "resultDescription": "Goal is required for ACCOMPLISH plugin",
-                    "result": None,
+                    "result": {"logs": logger.logs},
                     "error": "No goal provided to ACCOMPLISH plugin"
                 }]
 
@@ -367,70 +470,96 @@ Goal to achieve: {goal}
                     "name": "error",
                     "resultType": PluginParameterType.ERROR,
                     "resultDescription": "Failed to get response from Brain service",
-                    "result": None,
+                    "result": {"logs": logger.logs},
                     "error": "Brain service unavailable or returned empty response"
                 }]
 
             # Parse Brain response
             try:
-                # The new prompt instructs the Brain to return a JSON array directly.
-                plan_data = json.loads(response)
-
-                if not isinstance(plan_data, list):
-                    logger.error(f"Brain response is not a JSON array as expected. Response: {response[:500]}")
+                parsed = json.loads(response)
+                # Handle PLAN (array), DIRECT_ANSWER, or PLUGIN
+                if isinstance(parsed, list):
+                    plan_data = parsed
+                    # --- Normalize dependencies (handles step_X) before validation and conversion ---
+                    self.normalize_plan_dependencies(plan_data)
+                    validation_error_message = self.validate_plan_data(plan_data)
+                    if validation_error_message:
+                        return [{
+                            "success": False,
+                            "name": "plan_validation_error",
+                            "resultType": PluginParameterType.ERROR,
+                            "resultDescription": validation_error_message,
+                            "result": {"logs": logger.logs},
+                            "error": validation_error_message
+                        }]
+                    initial_inputs_names = list(inputs_map.keys())
+                    dep_error = self.validate_and_assign_dependencies(plan_data, initial_inputs_names)
+                    if dep_error:
+                        return [{
+                            "success": False,
+                            "name": "plan_dependency_error",
+                            "resultType": PluginParameterType.ERROR,
+                            "resultDescription": dep_error,
+                            "result": {"logs": logger.logs},
+                            "error": dep_error
+                        }]
+                    tasks = self.convert_json_to_tasks(plan_data)
+                    if tasks and isinstance(tasks, list) and len(tasks) == 1 and tasks[0].get("resultType") == PluginParameterType.ERROR:
+                        return tasks
+                    logger.info(f"Successfully processed plan for goal: {goal}")
+                    return [{
+                        "success": True,
+                        "name": "plan",
+                        "resultType": PluginParameterType.PLAN,
+                        "resultDescription": f"A plan to: {goal}",
+                        "result": tasks,
+                        "mimeType": "application/json",
+                        "logs": logger.logs
+                    
+                    }]
+                elif isinstance(parsed, dict):
+                    if parsed.get("type") == "DIRECT_ANSWER":
+                        logger.info(f"Received DIRECT_ANSWER: {parsed}")
+                        return [{
+                            "success": True,
+                            "name": "direct_answer",
+                            "resultType": "DIRECT_ANSWER",
+                            "resultDescription": f"Direct answer for: {goal}",
+                            "result": parsed.get("answer"),
+                            "explanation": parsed.get("explanation", "")
+                        }]
+                    elif parsed.get("type") == "PLUGIN":
+                        logger.info(f"Received PLUGIN: {parsed}")
+                        return [{
+                            "success": True,
+                            "name": "plugin",
+                            "resultType": "PLUGIN",
+                            "resultDescription": f"Plugin recommendation for: {goal}",
+                            "result": {
+                                "recommendedPlugin": parsed.get("recommendedPlugin"),
+                                "reason": parsed.get("reason", "")
+                            }
+                        }]
+                    else:
+                        logger.error(f"Unknown object type in Brain response: {parsed}")
+                        return [{
+                            "success": False,
+                            "name": "brain_response_format_error",
+                            "resultType": PluginParameterType.ERROR,
+                            "resultDescription": "Brain returned an unknown object type.",
+                            "result": {"logs": logger.logs},
+                            "error": f"Unknown object type: {parsed}"
+                        }]
+                else:
+                    logger.error(f"Brain response is not a JSON array or recognized object. Response: {response[:500]}")
                     return [{
                         "success": False,
                         "name": "brain_response_format_error",
                         "resultType": PluginParameterType.ERROR,
-                        "resultDescription": "Brain did not return a JSON array for the plan.",
-                        "result": None,
-                        "error": "Brain response was not a list."
+                        "resultDescription": "Brain did not return a JSON array or recognized object.",
+                        "result": {"logs": logger.logs},
+                        "error": "Brain response was not a list or recognized object."
                     }]
-
-                # --- Normalize dependencies (handles step_X) before validation and conversion ---
-                self.normalize_plan_dependencies(plan_data)
-
-                validation_error_message = self.validate_plan_data(plan_data)
-                if validation_error_message:
-                    return [{
-                        "success": False,
-                        "name": "plan_validation_error",
-                        "resultType": PluginParameterType.ERROR,
-                        "resultDescription": validation_error_message,
-                        "result": None,
-                        "error": validation_error_message
-                    }]
-
-                # TODO: Review if validate_and_assign_dependencies is still fully needed or if parts
-                # can be simplified given the new prompt's strictness on step_X dependencies.
-                # For now, keeping it. Agent.ts's createFromPlan will also resolve dependencies.
-                initial_inputs_names = list(inputs_map.keys()) # Pass only names for validation context
-                dep_error = self.validate_and_assign_dependencies(plan_data, initial_inputs_names)
-                if dep_error:
-                    return [{
-                        "success": False,
-                        "name": "plan_dependency_error",
-                        "resultType": PluginParameterType.ERROR,
-                        "resultDescription": dep_error,
-                        "result": None,
-                        "error": dep_error
-                    }]
-
-                tasks = self.convert_json_to_tasks(plan_data)
-                # If convert_json_to_tasks itself returns an error structure
-                if tasks and isinstance(tasks, list) and len(tasks) == 1 and tasks[0].get("resultType") == PluginParameterType.ERROR:
-                    return tasks
-
-                logger.info(f"Successfully processed plan for goal: {goal}")
-                return [{
-                    "success": True,
-                    "name": "plan",
-                    "resultType": PluginParameterType.PLAN,
-                    "resultDescription": f"A plan to: {goal}",
-                    "result": tasks, # This is List[ActionVerbTask]
-                    "mimeType": "application/json"
-                }]
-
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse Brain response as JSON: {e}. Response: {response[:500]}")
                 return [{
@@ -438,10 +567,9 @@ Goal to achieve: {goal}
                     "name": "error",
                     "resultType": PluginParameterType.ERROR,
                     "resultDescription": "Invalid JSON response from Brain service",
-                    "result": None,
+                    "result": {"logs": logger.logs},
                     "error": f"JSON parsing error: {str(e)}"
                 }]
-
         except Exception as e:
             logger.error(f"ACCOMPLISH plugin execution failed: {e}")
             return [{
@@ -449,7 +577,7 @@ Goal to achieve: {goal}
                 "name": "error",
                 "resultType": PluginParameterType.ERROR,
                 "resultDescription": f"Error in ACCOMPLISH plugin execution",
-                "result": None,
+                "result": {"logs": logger.logs},
                 "error": str(e)
             }]
 

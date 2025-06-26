@@ -210,13 +210,6 @@ export class Brain extends BaseEntity {
                     }
                 }
 
-                // Ensure response_format is set for JSON responses if the prompt requests JSON
-                if (messages && messages.length > 0 && messages[0].content &&
-                    (messages[0].content.includes('JSON') || messages[0].content.includes('json'))) {
-                    console.log('JSON format detected in prompt, setting response_format to JSON');
-                    if (!thread.optionals) thread.optionals = {};
-                    thread.optionals.response_format = { type: 'json_object' };
-                }
                 // Track the request
                 const requestId = this.modelManager.trackModelRequest(
                     selectedModel.modelName,
@@ -225,11 +218,22 @@ export class Brain extends BaseEntity {
                 );
 
                 try {
-
                     // Pass optionals to the model, including response_format if specified
                     console.log(`Brain: Passing optionals to model: ${JSON.stringify(thread.optionals)}`);
-                    const modelResponse = await selectedModel.chat(messages, thread.optionals || {});
-                    console.log(`Model response received:`,modelResponse);
+                    let modelResponse = await selectedModel.chat(messages, thread.optionals || {});
+                    console.log(`Model response received:`, modelResponse);
+
+                    // --- JSON extraction and validation ---
+                    // If the conversation type is text/code or the prompt requests JSON, ensure JSON response
+                    let requireJson = false;
+                    if (thread.conversationType === LLMConversationType.TextToCode) requireJson = true;
+                    if (messages && messages.length > 0 && messages[0].content &&
+                        (messages[0].content.includes('JSON') || messages[0].content.includes('json'))) {
+                        requireJson = true;
+                    }
+                    if (requireJson && selectedModel.llminterface && typeof selectedModel.llminterface.ensureJsonResponse === 'function') {
+                        modelResponse = selectedModel.llminterface.ensureJsonResponse(modelResponse, true);
+                    }
 
                     // Track successful response
                     // Estimate token count: ~4 chars per token is a rough approximation

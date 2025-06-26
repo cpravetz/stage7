@@ -49,7 +49,18 @@ export class MistralInterface extends BaseInterface {
             );
 
             if (response.data && response.data.choices && response.data.choices.length > 0) {
-                return response.data.choices[0].message.content;
+                let content = response.data.choices[0].message.content;
+                // --- Ensure JSON if required ---
+                let requireJson = false;
+                if (options.modelName && options.modelName.toLowerCase().includes('code')) requireJson = true;
+                if (messages && messages.length > 0 && messages[0].content &&
+                    (messages[0].content.includes('JSON') || messages[0].content.includes('json'))) {
+                    requireJson = true;
+                }
+                if (requireJson) {
+                    return this.ensureJsonResponse(content, true);
+                }
+                return content;
             } else {
                 console.error('Unexpected response format from Mistral:', JSON.stringify(response.data));
                 throw new Error('Unexpected response format from Mistral');

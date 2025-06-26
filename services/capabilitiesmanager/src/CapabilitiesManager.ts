@@ -19,7 +19,6 @@ import { validateAndStandardizeInputs } from './utils/validator';
 import { ContainerManager } from './utils/containerManager';
 import { ContainerExecutionRequest, ContainerPluginManifest } from './types/containerTypes';
 
-
 // Helper to create PluginOutput error from a StructuredError
 function createPluginOutputError(structuredError: StructuredError): PluginOutput[] {
     return [{
@@ -50,6 +49,7 @@ export class CapabilitiesManager extends BaseEntity {
 
     private failedPluginLookups: Map<string, number> = new Map(); // actionVerb -> last failure timestamp
     private static readonly PLUGIN_LOOKUP_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
+
 
     constructor() {
         super('CapabilitiesManager', 'CapabilitiesManager', `capabilitiesmanager`, process.env.PORT || '5060');
@@ -894,6 +894,8 @@ export class CapabilitiesManager extends BaseEntity {
                 case PluginParameterType.STRING:
                 case PluginParameterType.NUMBER:
                 case PluginParameterType.BOOLEAN:
+                case PluginParameterType.DIRECT_ANSWER:
+                case PluginParameterType.PLUGIN:
                     return accomplishResultArray;
 
                 default:
@@ -924,9 +926,12 @@ export class CapabilitiesManager extends BaseEntity {
     private async executeAccomplishPlugin(goal: string, verbToAvoid: string, trace_id: string): Promise<PluginOutput[]> {
         const source_component = "CapabilitiesManager.executeAccomplishPlugin";
         try {
+            // Get available plugins string from pluginRegistry (which proxies to marketplace)
+            const availablePluginsStr = await this.pluginRegistry.getAvailablePluginsStr();
             const accomplishInputs = new Map([
                 ['goal', { inputName: 'goal', inputValue: goal, args: {} }],
-                ['verbToAvoid', { inputName: 'verbToAvoid', inputValue: verbToAvoid, args: {} }]
+                ['verbToAvoid', { inputName: 'verbToAvoid', inputValue: verbToAvoid, args: {} }],
+                ['available_plugins', { inputName: 'available_plugins', inputValue: availablePluginsStr, args: {} }]
             ]);
 
             const accomplishPluginManifest = await this.pluginRegistry.fetchOneByVerb('ACCOMPLISH');
@@ -949,7 +954,6 @@ export class CapabilitiesManager extends BaseEntity {
                     dependencies: {}
                 }
             };
-
             const { pluginRootPath, effectiveManifest } = await this.pluginRegistry.preparePluginForExecution(manifestForExecution);
             return await this.executePlugin(effectiveManifest, accomplishInputs, pluginRootPath, trace_id);
         } catch (error:any) {
