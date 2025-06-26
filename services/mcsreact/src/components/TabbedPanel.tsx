@@ -50,11 +50,11 @@ export const TabbedPanel: React.FC<TabbedPanelProps> = ({
         hidden={value !== index}
         id={`tabpanel-${index}`}
         aria-labelledby={`tab-${index}`}
-        style={{ height: '100%', overflow: 'auto' }}
+        style={{ height: '100%', overflow: 'auto', display: value === index ? 'flex' : 'none', flexDirection: 'column' }}
         {...other}
       >
         {value === index && (
-          <Box sx={{ height: '100%', p: 1 }}>
+          <Box sx={{ height: '100%', p: 1, flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
             {children}
           </Box>
         )}
@@ -227,7 +227,7 @@ export const TabbedPanel: React.FC<TabbedPanelProps> = ({
         </TabPanel>
 
         <TabPanel value={activeTab} index="network">
-          <Box sx={{ height: '100%', width: '100%' }}>
+          <Box sx={{ height: '100%', width: '100%', flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
             <NetworkGraph agentStatistics={agentStatistics} />
           </Box>
         </TabPanel>

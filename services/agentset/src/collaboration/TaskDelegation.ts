@@ -198,7 +198,7 @@ export class TaskDelegation {
       return response.data;
     } catch (error) {
       analyzeError(error as Error);
-      console.error('Error forwarding task delegation:', error);
+      console.error('Error forwarding task delegation:', error instanceof Error ? error.message : String(error));
 
       return {
         taskId: request.taskId,

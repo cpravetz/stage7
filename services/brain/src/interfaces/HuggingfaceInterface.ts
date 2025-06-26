@@ -244,8 +244,6 @@ export class HuggingfaceInterface extends BaseInterface {
                     });
                     return response.generated_text || 'No response generated';
                 } catch (fallbackError) {
-                    analyzeError(fallbackError as Error);
-
                     // Check if the fallback error is also a monthly credits exceeded error
                     const fallbackErrorMessage = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
                     if (this.isMonthlyCreditsExceededError(fallbackErrorMessage)) {

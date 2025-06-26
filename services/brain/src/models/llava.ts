@@ -17,7 +17,7 @@ export class LLaVAModel extends BaseModel {
             modelName: "liuhaotian/llava-v1.5-13b",
             interfaceName: "huggingface",
             serviceName: "HFService",
-            tokenLimit: 2048,
+            tokenLimit: 4096,
             scoresByConversationType: scoresByConversationType,
             contentConversation: [LLMConversationType.ImageToText]
         });

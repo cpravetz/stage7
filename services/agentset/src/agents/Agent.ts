@@ -226,32 +226,12 @@ Please consider this context and the available plugins when planning and executi
 
                         let result: PluginOutput[];
 
-                        if (step.stepNo === 1 && step.actionVerb === 'ACCOMPLISH' && this.inputs?.has('goal')) {
-                            const goal = this.inputs.get('goal')?.inputValue;
-                            const planningPrompt = `You are a planning assistant. Given the goal: '${goal}', generate a JSON array of tasks to achieve this goal. Each task object should have 'actionVerb', 'inputs' (as a map of name to {inputValue, inputName, args}), 'description', 'dependencies' (as an array of sourceStepId strings, use step IDs like 'step_1'), and optionally 'recommendedRole'. Ensure the plan is detailed and includes multiple steps with dependencies if logical. The first step will be 'step_1', the next 'step_2', and so on. Dependencies should refer to these generated step IDs.
-It is critical that the plan is comprehensive and broken down into a sufficient number of granular steps to ensure successful execution. Each step's description should be clear and actionable.
-When defining 'dependencies', ensure they accurately reflect the data flow required between steps. Only list direct predecessor step IDs that provide necessary input for the current step.
-If the goal is complex, consider creating a sub-plan using a nested 'ACCOMPLISH' verb for a major sub-component, or use 'CREATE_SUB_AGENT' if a specialized agent should handle a part of the mission.
-For 'recommendedRole', suggest roles like 'researcher', 'writer', 'coder', 'validator', 'executor' only if a specialized skill is clearly beneficial for that specific step. Otherwise, omit it or use 'executor'.
-The output MUST be a valid JSON array of task objects. Do not include any explanatory text before or after the JSON array.`;
-
-                            console.log(`[Agent ${this.id}] Constructed planning prompt for initial ACCOMPLISH task:`, planningPrompt);
-
-                            const planningInputs = new Map<string, PluginInput>();
-                            planningInputs.set('prompt', { inputName: 'prompt', inputValue: planningPrompt, args: {} });
-                            planningInputs.set('ConversationType', { inputName: 'ConversationType', inputValue: 'text/code', args: {} }); // Expecting JSON
-
-                            result = await this.useBrainForReasoning(planningInputs);
-                            console.log(`[Agent ${this.id}] Raw response from Brain for planning:`, JSON.stringify(result));
-
-                        } else {
-                            result = await step.execute(
-                                this.executeActionWithCapabilitiesManager.bind(this),
-                                this.useBrainForReasoning.bind(this),
-                                this.createSubAgent.bind(this),
-                                this.handleAskStep.bind(this)
-                            );
-                        }
+                        result = await step.execute(
+                            this.executeActionWithCapabilitiesManager.bind(this),
+                            this.useBrainForReasoning.bind(this),
+                            this.createSubAgent.bind(this),
+                            this.handleAskStep.bind(this)
+                        );
 
                         console.log(`Step ${step.actionVerb} result:`, result);
                         this.say(`Completed step: ${step.actionVerb}`);
@@ -264,20 +244,25 @@ The output MUST be a valid JSON array of task objects. Do not include any explan
                             if (Array.isArray(planningStepResult)) {
                                 actualPlanArray = planningStepResult as ActionVerbTask[];
                             } else if (typeof planningStepResult === 'object' && planningStepResult !== null) {
-                                const tasksArray = (planningStepResult as any).tasks;
-                                const stepsArray = (planningStepResult as any).steps;
+                                if (planningStepResult.plan && Array.isArray(planningStepResult.plan)) {
+                                    console.log(`[Agent.ts] runAgent (${this.id}): Plan received is a direct array. Using it directly.`);
+                                    actualPlanArray = planningStepResult.plan as ActionVerbTask[];
+                                    planSourceDescription = "direct array";
+                                } else {
+                                    const tasksArray = (planningStepResult as any).tasks;
+                                    const stepsArray = (planningStepResult as any).steps;
 
-                                if (Array.isArray(tasksArray)) {
-                                    console.log(`[Agent.ts] runAgent (${this.id}): Plan received is wrapped in a "tasks" object. Extracting tasks array.`);
-                                    actualPlanArray = tasksArray as ActionVerbTask[];
-                                    planSourceDescription = "object with 'tasks' array";
-                                } else if (Array.isArray(stepsArray)) {
-                                    console.log(`[Agent.ts] runAgent (${this.id}): Plan received is wrapped in a "steps" object. Extracting steps array.`);
-                                    actualPlanArray = stepsArray as ActionVerbTask[];
-                                    planSourceDescription = "object with 'steps' array";
+                                    if (Array.isArray(tasksArray)) {
+                                        console.log(`[Agent.ts] runAgent (${this.id}): Plan received is wrapped in a "tasks" object. Extracting tasks array.`);
+                                        actualPlanArray = tasksArray as ActionVerbTask[];
+                                        planSourceDescription = "object with 'tasks' array";
+                                    } else if (Array.isArray(stepsArray)) {
+                                        console.log(`[Agent.ts] runAgent (${this.id}): Plan received is wrapped in a "steps" object. Extracting steps array.`);
+                                        actualPlanArray = stepsArray as ActionVerbTask[];
+                                        planSourceDescription = "object with 'steps' array";
+                                    }
                                 }
                             }
-
                             if (actualPlanArray && Array.isArray(actualPlanArray)) { // Added extra Array.isArray check for robustness
                                 this.say(`Generated a plan (${planSourceDescription}) with ${actualPlanArray.length} steps`);
                                 this.addStepsFromPlan(actualPlanArray);

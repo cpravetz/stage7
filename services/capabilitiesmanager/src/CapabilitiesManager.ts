@@ -884,6 +884,7 @@ export class CapabilitiesManager extends BaseEntity {
             const goal = `Handle the action verb \"${step.actionVerb}\" in our plan with the following context: ${context} by defining a plan, generating an answer from the inputs, or recommending a new plugin for handling the actionVerb. Respond with a plan, a plugin request, or a literal result. Avoid using this action verb, ${step.actionVerb}, in the plan.`;
 
             const accomplishResultArray = await this.executeAccomplishPlugin(goal, step.actionVerb, trace_id);
+            console.log(`[handleUnknownVerb] plugin result:`, accomplishResultArray);
             if (!accomplishResultArray[0].success) {
                 return accomplishResultArray;
             }

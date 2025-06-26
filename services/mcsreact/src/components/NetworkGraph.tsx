@@ -79,10 +79,12 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics }) =
     const handleZoom = (factor: number) => {
         if (networkRef.current) {
             const scale = networkRef.current.getScale();
-            networkRef.current.moveTo({ scale: Math.max(0.1, Math.min(5, scale * factor)) });
+            // Remove upper limit on zoom scale, keep minimum at 0.1
+            const newScale = Math.max(0.1, scale * factor);
+            networkRef.current.moveTo({ scale: newScale });
             // Save view state
             const position = networkRef.current.getViewPosition();
-            viewStateRef.current = { scale: Math.max(0.1, Math.min(5, scale * factor)), position };
+            viewStateRef.current = { scale: newScale, position };
         }
     };
     const handleResetZoom = () => {
@@ -405,7 +407,8 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics }) =
 
     // Step Overview Dialog (now replaces the network graph visually)
     const StepOverviewDialog = () => {
-        // Close on any keypress
+        // Removed close on any keypress to prevent immediate closing
+        /*
         React.useEffect(() => {
             if (!stepOverviewOpen) return;
             const handleKey = (e: KeyboardEvent) => {
@@ -414,6 +417,7 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics }) =
             window.addEventListener('keydown', handleKey);
             return () => window.removeEventListener('keydown', handleKey);
         }, [stepOverviewOpen]);
+        */
         return (
             <div className="step-overview-modal step-overview-fullscreen">
                 <div className="step-overview-content">

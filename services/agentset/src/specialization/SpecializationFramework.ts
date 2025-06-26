@@ -106,7 +106,7 @@ export class SpecializationFramework {
       }
     } catch (error) {
       analyzeError(error as Error);
-      console.error('Error loading agent specializations:', error);
+      console.error('Error loading agent specializations:', error instanceof Error ? error.message : String(error));
     }
   }
 

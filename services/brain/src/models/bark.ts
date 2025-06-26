@@ -17,7 +17,7 @@ export class BarkModel extends BaseModel {
             modelName: "suno/bark",
             interfaceName: "huggingface",
             serviceName: "HFService",
-            tokenLimit: 1000, // You may need to adjust this based on the actual model's limit
+            tokenLimit: 4096,
             scoresByConversationType: scoresByConversationType,
             contentConversation: [LLMConversationType.TextToAudio]
         });

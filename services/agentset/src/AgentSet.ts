@@ -79,7 +79,6 @@ export class AgentSet extends BaseEntity {
     // Initialize Express server to manage agent lifecycle
     private initializeServer(): void {
         this.app.get('/health', (req: express.Request, res: express.Response): void => {
-            console.log('Received request to /health endpoint');
             res.status(200).json({
                 status: 'healthy',
                 timestamp: new Date().toISOString(),
@@ -89,7 +88,6 @@ export class AgentSet extends BaseEntity {
         });
 
         this.app.get('/ready', (req: express.Request, res: express.Response): void => {
-            console.log('Received request to /ready endpoint');
             res.status(200).json({
                 ready: true,
                 timestamp: new Date().toISOString(),
