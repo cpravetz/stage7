@@ -1,0 +1,577 @@
+2025-06-26 16:33:12.740 | RSA private key for plugin signing not found (this is normal for most services)
+2025-06-26 16:33:12.779 | Loaded RSA public key for plugin verification
+2025-06-26 16:33:13.001 | Attempting to connect to RabbitMQ (attempt 1/20)...
+2025-06-26 16:33:13.001 | Using RabbitMQ URL: amqp://stage7:stage7password@rabbitmq:5672
+2025-06-26 16:33:13.001 | Attempting to connect to RabbitMQ host: rabbitmq
+2025-06-26 16:33:13.011 | Connecting to RabbitMQ at amqp://stage7:stage7password@rabbitmq:5672
+2025-06-26 16:33:13.016 | Attempting to register with Consul (attempt 1/10)...
+2025-06-26 16:33:13.017 | Using Consul URL: consul:8500
+2025-06-26 16:33:13.167 | Initialized 6 predefined roles: coordinator, researcher, creative, critic, executor, domain_expert
+2025-06-26 16:33:13.270 | AgentSet initialized with fixed ID: primary-agentset
+2025-06-26 16:33:13.283 | AgentSet application running on agentset:5100
+2025-06-26 16:33:13.292 | [shouldBypassAuth] Bypassing auth for auth path: /v1/agent/service/register (matched /register)
+2025-06-26 16:33:13.636 | [shouldBypassAuth] Bypassing auth for auth path: /registerComponent (matched /register)
+2025-06-26 16:33:13.698 | Service primary-agentset registered with Consul
+2025-06-26 16:33:13.706 | Successfully registered AgentSet with Consul
+2025-06-26 16:33:13.710 | AgentSet registered successfully with PostOffice
+2025-06-26 16:33:13.733 | [AuthenticatedAxios] Request vfbz173xpr: Failed after 424ms: {
+2025-06-26 16:33:13.733 |   status: undefined,
+2025-06-26 16:33:13.733 |   statusText: undefined,
+2025-06-26 16:33:13.733 |   data: undefined,
+2025-06-26 16:33:13.733 |   url: 'http://librarian:5040/loadData'
+2025-06-26 16:33:13.733 | }
+2025-06-26 16:33:14.381 | [AuthenticatedAxios] Request hjzip86pnkk: Failed after 1054ms: {
+2025-06-26 16:33:14.381 |   status: undefined,
+2025-06-26 16:33:14.381 |   statusText: undefined,
+2025-06-26 16:33:14.381 |   data: undefined,
+2025-06-26 16:33:14.381 |   url: 'http://librarian:5040/loadData'
+2025-06-26 16:33:14.381 | }
+2025-06-26 16:33:14.387 | [AuthenticatedAxios] Request fimlx8oe4qk: Failed after 1051ms: {
+2025-06-26 16:33:14.388 |   status: undefined,
+2025-06-26 16:33:14.388 |   statusText: undefined,
+2025-06-26 16:33:14.388 |   data: undefined,
+2025-06-26 16:33:14.388 |   url: 'http://librarian:5040/loadData'
+2025-06-26 16:33:14.388 | }
+2025-06-26 16:33:14.781 | Error is  connect ECONNREFUSED 172.19.0.9:5040
+2025-06-26 16:33:14.781 | Error loading agent specializations: connect ECONNREFUSED 172.19.0.9:5040
+2025-06-26 16:33:15.422 | Error is  connect ECONNREFUSED 172.19.0.9:5040
+2025-06-26 16:33:15.436 | Error loading knowledge domains: AxiosError: connect ECONNREFUSED 172.19.0.9:5040
+2025-06-26 16:33:15.436 |     at AxiosError.from (/usr/src/app/node_modules/axios/dist/node/axios.cjs:863:14)
+2025-06-26 16:33:15.436 |     at RedirectableRequest.handleRequestError (/usr/src/app/node_modules/axios/dist/node/axios.cjs:3187:25)
+2025-06-26 16:33:15.436 |     at RedirectableRequest.emit (node:events:536:35)
+2025-06-26 16:33:15.436 |     at eventHandlers.<computed> (/usr/src/app/node_modules/follow-redirects/index.js:49:24)
+2025-06-26 16:33:15.436 |     at ClientRequest.emit (node:events:524:28)
+2025-06-26 16:33:15.436 |     at emitErrorEvent (node:_http_client:101:11)
+2025-06-26 16:33:15.436 |     at Socket.socketErrorListener (node:_http_client:504:5)
+2025-06-26 16:33:15.436 |     at Socket.emit (node:events:524:28)
+2025-06-26 16:33:15.436 |     at emitErrorNT (node:internal/streams/destroy:169:8)
+2025-06-26 16:33:15.436 |     at emitErrorCloseNT (node:internal/streams/destroy:128:3)
+2025-06-26 16:33:15.436 |     at Axios.request (/usr/src/app/node_modules/axios/dist/node/axios.cjs:4276:41)
+2025-06-26 16:33:15.436 |     at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+2025-06-26 16:33:15.436 |     at async Axios.request (/usr/src/app/node_modules/axios/dist/node/axios.cjs:4271:14)
+2025-06-26 16:33:15.436 |     at async SpecializationFramework.loadKnowledgeDomains (/usr/src/app/services/agentset/dist/specialization/SpecializationFramework.js:84:30) {
+2025-06-26 16:33:15.436 |   port: 5040,
+2025-06-26 16:33:15.436 |   address: '172.19.0.9',
+2025-06-26 16:33:15.436 |   syscall: 'connect',
+2025-06-26 16:33:15.436 |   code: 'ECONNREFUSED',
+2025-06-26 16:33:15.436 |   errno: -111,
+2025-06-26 16:33:15.436 |   config: {
+2025-06-26 16:33:15.436 |     transitional: {
+2025-06-26 16:33:15.436 |       silentJSONParsing: true,
+2025-06-26 16:33:15.436 |       forcedJSONParsing: true,
+2025-06-26 16:33:15.436 |       clarifyTimeoutError: false
+2025-06-26 16:33:15.436 |     },
+2025-06-26 16:33:15.436 |     adapter: [ 'xhr', 'http', 'fetch' ],
+2025-06-26 16:33:15.436 |     transformRequest: [ [Function: transformRequest] ],
+2025-06-26 16:33:15.436 |     transformResponse: [ [Function: transformResponse] ],
+2025-06-26 16:33:15.436 |     timeout: 30000,
+2025-06-26 16:33:15.436 |     xsrfCookieName: 'XSRF-TOKEN',
+2025-06-26 16:33:15.436 |     xsrfHeaderName: 'X-XSRF-TOKEN',
+2025-06-26 16:33:15.436 |     maxContentLength: -1,
+2025-06-26 16:33:15.436 |     maxBodyLength: -1,
+2025-06-26 16:33:15.436 |     env: { FormData: [Function [FormData]], Blob: [class Blob] },
+2025-06-26 16:33:15.436 |     validateStatus: [Function: validateStatus],
+2025-06-26 16:33:15.436 |     headers: Object [AxiosHeaders] {
+2025-06-26 16:33:15.436 |       Accept: 'application/json, text/plain, */*',
+2025-06-26 16:33:15.436 |       'Content-Type': 'application/json',
+2025-06-26 16:33:15.436 |       'Access-Control-Allow-Origin': '*',
+2025-06-26 16:33:15.436 |       'X-Request-ID': 'hjzip86pnkk',
+2025-06-26 16:33:15.436 |       Authorization: 'Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJTZWN1cml0eU1hbmFnZXIiLCJzdWIiOiJFcnJvckhhbmRsZXIiLCJhdWQiOiJzdGFnZTctc2VydmljZXMiLCJleHAiOjE3NTA5NzM1OTMsImlhdCI6MTc1MDk2OTk5MywianRpIjoiMHI1MXI0Y2ZiNXFpc3I3cHhyaDI2bzkiLCJjb21wb25lbnRUeXBlIjoiRXJyb3JIYW5kbGVyIiwicm9sZXMiOlsiZXJyb3I6YXNzZXNzIl0sInBlcm1pc3Npb25zIjpbImVycm9yOmFzc2VzcyJdLCJjbGllbnRJZCI6IkVycm9ySGFuZGxlciJ9.rcLIzaeDIIUqOe0Plo9Fzbu_JMAS0ZXvRa1_GmzvB2bW5RyjJnq5o2SpPVPSl9NBimZd9Na8cV4J3_CoPrQs_9lHvJtElsBzUlLzcFe-VCUl22qWatizv-l9wQycnzumKair--rdOsllDMj7SBwfQvMG2GtEjwHGKiVJGSCdJeqcmnqcF3dP0AlVHn6sGpHx9wcG1m7Pkv9BghNFUqwBvuHpwIUWIrD4SWXeY6pJs49BRtBPikj-Vd46HmlgAGxlN99Gl-QJVS6as3b0F3EmYQQRvUnOqt08cs-vza7h5pi00Z_IAA2-_zXK1JBPqPIuf_6W12hGvYLjphwARfTOiQ',
+2025-06-26 16:33:15.436 |       'User-Agent': 'axios/1.9.0',
+2025-06-26 16:33:15.436 |       'Accept-Encoding': 'gzip, compress, deflate, br'
+2025-06-26 16:33:15.436 |     },
+2025-06-26 16:33:15.437 |     params: { storageType: 'mongo', collection: 'knowledge_domains' },
+2025-06-26 16:33:15.437 |     method: 'get',
+2025-06-26 16:33:15.437 |     url: 'http://librarian:5040/loadData',
+2025-06-26 16:33:15.437 |     allowAbsoluteUrls: true,
+2025-06-26 16:33:15.437 |     _requestStartTime: 1750969993325,
+2025-06-26 16:33:15.437 |     _retryCount: 1,
+2025-06-26 16:33:15.437 |     data: undefined
+2025-06-26 16:33:15.437 |   },
+2025-06-26 16:33:15.437 |   request: <ref *1> Writable {
+2025-06-26 16:33:15.437 |     _events: {
+2025-06-26 16:33:15.437 |       close: undefined,
+2025-06-26 16:33:15.437 |       error: [Function: handleRequestError],
+2025-06-26 16:33:15.437 |       prefinish: undefined,
+2025-06-26 16:33:15.437 |       finish: undefined,
+2025-06-26 16:33:15.437 |       drain: undefined,
+2025-06-26 16:33:15.437 |       response: [Function: handleResponse],
+2025-06-26 16:33:15.437 |       socket: [Array],
+2025-06-26 16:33:15.437 |       timeout: undefined,
+2025-06-26 16:33:15.437 |       abort: undefined
+2025-06-26 16:33:15.437 |     },
+2025-06-26 16:33:15.437 |     _writableState: WritableState {
+2025-06-26 16:33:15.437 |       highWaterMark: 16384,
+2025-06-26 16:33:15.437 |       length: 0,
+2025-06-26 16:33:15.437 |       corked: 0,
+2025-06-26 16:33:15.437 |       onwrite: [Function: bound onwrite],
+2025-06-26 16:33:15.437 |       writelen: 0,
+2025-06-26 16:33:15.437 |       bufferedIndex: 0,
+2025-06-26 16:33:15.437 |       pendingcb: 0,
+2025-06-26 16:33:15.437 |       [Symbol(kState)]: 17580812,
+2025-06-26 16:33:15.437 |       [Symbol(kBufferedValue)]: null
+2025-06-26 16:33:15.437 |     },
+2025-06-26 16:33:15.437 |     _maxListeners: undefined,
+2025-06-26 16:33:15.437 |     _options: {
+2025-06-26 16:33:15.437 |       maxRedirects: 21,
+2025-06-26 16:33:15.437 |       maxBodyLength: Infinity,
+2025-06-26 16:33:15.437 |       protocol: 'http:',
+2025-06-26 16:33:15.437 |       path: '/loadData?storageType=mongo&collection=knowledge_domains',
+2025-06-26 16:33:15.437 |       method: 'GET',
+2025-06-26 16:33:15.437 |       headers: [Object: null prototype],
+2025-06-26 16:33:15.437 |       agents: [Object],
+2025-06-26 16:33:15.437 |       auth: undefined,
+2025-06-26 16:33:15.437 |       family: undefined,
+2025-06-26 16:33:15.437 |       beforeRedirect: [Function: dispatchBeforeRedirect],
+2025-06-26 16:33:15.437 |       beforeRedirects: [Object],
+2025-06-26 16:33:15.437 |       hostname: 'librarian',
+2025-06-26 16:33:15.437 |       port: '5040',
+2025-06-26 16:33:15.437 |       agent: undefined,
+2025-06-26 16:33:15.437 |       nativeProtocols: [Object],
+2025-06-26 16:33:15.437 |       pathname: '/loadData',
+2025-06-26 16:33:15.437 |       search: '?storageType=mongo&collection=knowledge_domains'
+2025-06-26 16:33:15.437 |     },
+2025-06-26 16:33:15.437 |     _ended: true,
+2025-06-26 16:33:15.437 |     _ending: true,
+2025-06-26 16:33:15.437 |     _redirectCount: 0,
+2025-06-26 16:33:15.437 |     _redirects: [],
+2025-06-26 16:33:15.437 |     _requestBodyLength: 0,
+2025-06-26 16:33:15.437 |     _requestBodyBuffers: [],
+2025-06-26 16:33:15.437 |     _eventsCount: 3,
+2025-06-26 16:33:15.437 |     _onNativeResponse: [Function (anonymous)],
+2025-06-26 16:33:15.437 |     _currentRequest: ClientRequest {
+2025-06-26 16:33:15.437 |       _events: [Object: null prototype],
+2025-06-26 16:33:15.437 |       _eventsCount: 7,
+2025-06-26 16:33:15.437 |       _maxListeners: undefined,
+2025-06-26 16:33:15.437 |       outputData: [],
+2025-06-26 16:33:15.437 |       outputSize: 0,
+2025-06-26 16:33:15.437 |       writable: true,
+2025-06-26 16:33:15.437 |       destroyed: false,
+2025-06-26 16:33:15.437 |       _last: true,
+2025-06-26 16:33:15.437 |       chunkedEncoding: false,
+2025-06-26 16:33:15.437 |       shouldKeepAlive: true,
+2025-06-26 16:33:15.437 |       maxRequestsOnConnectionReached: false,
+2025-06-26 16:33:15.437 |       _defaultKeepAlive: true,
+2025-06-26 16:33:15.437 |       useChunkedEncodingByDefault: false,
+2025-06-26 16:33:15.437 |       sendDate: false,
+2025-06-26 16:33:15.437 |       _removedConnection: false,
+2025-06-26 16:33:15.437 |       _removedContLen: false,
+2025-06-26 16:33:15.437 |       _removedTE: false,
+2025-06-26 16:33:15.437 |       strictContentLength: false,
+2025-06-26 16:33:15.437 |       _contentLength: 0,
+2025-06-26 16:33:15.437 |       _hasBody: true,
+2025-06-26 16:33:15.437 |       _trailer: '',
+2025-06-26 16:33:15.437 |       finished: true,
+2025-06-26 16:33:15.437 |       _headerSent: true,
+2025-06-26 16:33:15.437 |       _closed: false,
+2025-06-26 16:33:15.437 |       socket: [Socket],
+2025-06-26 16:33:15.437 |       _header: 'GET /loadData?storageType=mongo&collection=knowledge_domains HTTP/1.1\r\n' +
+2025-06-26 16:33:15.437 |         'Accept: application/json, text/plain, */*\r\n' +
+2025-06-26 16:33:15.437 |         'Content-Type: application/json\r\n' +
+2025-06-26 16:33:15.437 |         'Access-Control-Allow-Origin: *\r\n' +
+2025-06-26 16:33:15.437 |         'X-Request-ID: hjzip86pnkk\r\n' +
+2025-06-26 16:33:15.437 |         'Authorization: Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJTZWN1cml0eU1hbmFnZXIiLCJzdWIiOiJFcnJvckhhbmRsZXIiLCJhdWQiOiJzdGFnZTctc2VydmljZXMiLCJleHAiOjE3NTA5NzM1OTMsImlhdCI6MTc1MDk2OTk5MywianRpIjoiMHI1MXI0Y2ZiNXFpc3I3cHhyaDI2bzkiLCJjb21wb25lbnRUeXBlIjoiRXJyb3JIYW5kbGVyIiwicm9sZXMiOlsiZXJyb3I6YXNzZXNzIl0sInBlcm1pc3Npb25zIjpbImVycm9yOmFzc2VzcyJdLCJjbGllbnRJZCI6IkVycm9ySGFuZGxlciJ9.rcLIzaeDIIUqOe0Plo9Fzbu_JMAS0ZXvRa1_GmzvB2bW5RyjJnq5o2SpPVPSl9NBimZd9Na8cV4J3_CoPrQs_9lHvJtElsBzUlLzcFe-VCUl22qWatizv-l9wQycnzumKair--rdOsllDMj7SBwfQvMG2GtEjwHGKiVJGSCdJeqcmnqcF3dP0AlVHn6sGpHx9wcG1m7Pkv9BghNFUqwBvuHpwIUWIrD4SWXeY6pJs49BRtBPikj-Vd46HmlgAGxlN99Gl-QJVS6as3b0F3EmYQQRvUnOqt08cs-vza7h5pi00Z_IAA2-_zXK1JBPqPIuf_6W12hGvYLjphwARfTOiQ\r\n' +
+2025-06-26 16:33:15.437 |         'User-Agent: axios/1.9.0\r\n' +
+2025-06-26 16:33:15.438 |         'Accept-Encoding: gzip, compress, deflate, br\r\n' +
+2025-06-26 16:33:15.438 |         'Host: librarian:5040\r\n' +
+2025-06-26 16:33:15.438 |         'Connection: keep-alive\r\n' +
+2025-06-26 16:33:15.438 |         '\r\n',
+2025-06-26 16:33:15.438 |       _keepAliveTimeout: 0,
+2025-06-26 16:33:15.438 |       _onPendingData: [Function: nop],
+2025-06-26 16:33:15.438 |       agent: [Agent],
+2025-06-26 16:33:15.438 |       socketPath: undefined,
+2025-06-26 16:33:15.438 |       method: 'GET',
+2025-06-26 16:33:15.438 |       maxHeaderSize: undefined,
+2025-06-26 16:33:15.438 |       insecureHTTPParser: undefined,
+2025-06-26 16:33:15.438 |       joinDuplicateHeaders: undefined,
+2025-06-26 16:33:15.438 |       path: '/loadData?storageType=mongo&collection=knowledge_domains',
+2025-06-26 16:33:15.438 |       _ended: false,
+2025-06-26 16:33:15.438 |       res: null,
+2025-06-26 16:33:15.438 |       aborted: false,
+2025-06-26 16:33:15.438 |       timeoutCb: [Function: emitRequestTimeout],
+2025-06-26 16:33:15.438 |       upgradeOrConnect: false,
+2025-06-26 16:33:15.438 |       parser: null,
+2025-06-26 16:33:15.438 |       maxHeadersCount: null,
+2025-06-26 16:33:15.438 |       reusedSocket: false,
+2025-06-26 16:33:15.438 |       host: 'librarian',
+2025-06-26 16:33:15.438 |       protocol: 'http:',
+2025-06-26 16:33:15.438 |       _redirectable: [Circular *1],
+2025-06-26 16:33:15.438 |       [Symbol(shapeMode)]: false,
+2025-06-26 16:33:15.438 |       [Symbol(kCapture)]: false,
+2025-06-26 16:33:15.438 |       [Symbol(kBytesWritten)]: 0,
+2025-06-26 16:33:15.438 |       [Symbol(kNeedDrain)]: false,
+2025-06-26 16:33:15.438 |       [Symbol(corked)]: 0,
+2025-06-26 16:33:15.438 |       [Symbol(kOutHeaders)]: [Object: null prototype],
+2025-06-26 16:33:15.438 |       [Symbol(errored)]: null,
+2025-06-26 16:33:15.438 |       [Symbol(kHighWaterMark)]: 16384,
+2025-06-26 16:33:15.438 |       [Symbol(kRejectNonStandardBodyWrites)]: false,
+2025-06-26 16:33:15.438 |       [Symbol(kUniqueHeaders)]: null
+2025-06-26 16:33:15.438 |     },
+2025-06-26 16:33:15.438 |     _currentUrl: 'http://librarian:5040/loadData?storageType=mongo&collection=knowledge_domains',
+2025-06-26 16:33:15.438 |     _timeout: null,
+2025-06-26 16:33:15.438 |     [Symbol(shapeMode)]: true,
+2025-06-26 16:33:15.438 |     [Symbol(kCapture)]: false
+2025-06-26 16:33:15.438 |   },
+2025-06-26 16:33:15.438 |   cause: Error: connect ECONNREFUSED 172.19.0.9:5040
+2025-06-26 16:33:15.438 |       at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1611:16) {
+2025-06-26 16:33:15.438 |     errno: -111,
+2025-06-26 16:33:15.438 |     code: 'ECONNREFUSED',
+2025-06-26 16:33:15.438 |     syscall: 'connect',
+2025-06-26 16:33:15.438 |     address: '172.19.0.9',
+2025-06-26 16:33:15.438 |     port: 5040
+2025-06-26 16:33:15.438 |   }
+2025-06-26 16:33:15.438 | }
+2025-06-26 16:33:15.438 | Error is  connect ECONNREFUSED 172.19.0.9:5040
+2025-06-26 16:33:15.448 | Error loading knowledge items: AxiosError: connect ECONNREFUSED 172.19.0.9:5040
+2025-06-26 16:33:15.448 |     at AxiosError.from (/usr/src/app/node_modules/axios/dist/node/axios.cjs:863:14)
+2025-06-26 16:33:15.448 |     at RedirectableRequest.handleRequestError (/usr/src/app/node_modules/axios/dist/node/axios.cjs:3187:25)
+2025-06-26 16:33:15.448 |     at RedirectableRequest.emit (node:events:536:35)
+2025-06-26 16:33:15.448 |     at eventHandlers.<computed> (/usr/src/app/node_modules/follow-redirects/index.js:49:24)
+2025-06-26 16:33:15.448 |     at ClientRequest.emit (node:events:524:28)
+2025-06-26 16:33:15.448 |     at emitErrorEvent (node:_http_client:101:11)
+2025-06-26 16:33:15.448 |     at Socket.socketErrorListener (node:_http_client:504:5)
+2025-06-26 16:33:15.448 |     at Socket.emit (node:events:524:28)
+2025-06-26 16:33:15.448 |     at emitErrorNT (node:internal/streams/destroy:169:8)
+2025-06-26 16:33:15.448 |     at emitErrorCloseNT (node:internal/streams/destroy:128:3)
+2025-06-26 16:33:15.448 |     at Axios.request (/usr/src/app/node_modules/axios/dist/node/axios.cjs:4276:41)
+2025-06-26 16:33:15.448 |     at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+2025-06-26 16:33:15.448 |     at async Axios.request (/usr/src/app/node_modules/axios/dist/node/axios.cjs:4271:14)
+2025-06-26 16:33:15.448 |     at async DomainKnowledge.loadKnowledgeItems (/usr/src/app/services/agentset/dist/specialization/DomainKnowledge.js:33:30) {
+2025-06-26 16:33:15.448 |   port: 5040,
+2025-06-26 16:33:15.448 |   address: '172.19.0.9',
+2025-06-26 16:33:15.448 |   syscall: 'connect',
+2025-06-26 16:33:15.448 |   code: 'ECONNREFUSED',
+2025-06-26 16:33:15.448 |   errno: -111,
+2025-06-26 16:33:15.448 |   config: {
+2025-06-26 16:33:15.448 |     transitional: {
+2025-06-26 16:33:15.448 |       silentJSONParsing: true,
+2025-06-26 16:33:15.448 |       forcedJSONParsing: true,
+2025-06-26 16:33:15.448 |       clarifyTimeoutError: false
+2025-06-26 16:33:15.448 |     },
+2025-06-26 16:33:15.448 |     adapter: [ 'xhr', 'http', 'fetch' ],
+2025-06-26 16:33:15.448 |     transformRequest: [ [Function: transformRequest] ],
+2025-06-26 16:33:15.448 |     transformResponse: [ [Function: transformResponse] ],
+2025-06-26 16:33:15.448 |     timeout: 30000,
+2025-06-26 16:33:15.448 |     xsrfCookieName: 'XSRF-TOKEN',
+2025-06-26 16:33:15.448 |     xsrfHeaderName: 'X-XSRF-TOKEN',
+2025-06-26 16:33:15.448 |     maxContentLength: -1,
+2025-06-26 16:33:15.448 |     maxBodyLength: -1,
+2025-06-26 16:33:15.448 |     env: { FormData: [Function [FormData]], Blob: [class Blob] },
+2025-06-26 16:33:15.448 |     validateStatus: [Function: validateStatus],
+2025-06-26 16:33:15.448 |     headers: Object [AxiosHeaders] {
+2025-06-26 16:33:15.448 |       Accept: 'application/json, text/plain, */*',
+2025-06-26 16:33:15.448 |       'Content-Type': 'application/json',
+2025-06-26 16:33:15.448 |       'Access-Control-Allow-Origin': '*',
+2025-06-26 16:33:15.448 |       'X-Request-ID': 'fimlx8oe4qk',
+2025-06-26 16:33:15.448 |       Authorization: 'Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJTZWN1cml0eU1hbmFnZXIiLCJzdWIiOiJFcnJvckhhbmRsZXIiLCJhdWQiOiJzdGFnZTctc2VydmljZXMiLCJleHAiOjE3NTA5NzM1OTMsImlhdCI6MTc1MDk2OTk5MywianRpIjoiMHI1MXI0Y2ZiNXFpc3I3cHhyaDI2bzkiLCJjb21wb25lbnRUeXBlIjoiRXJyb3JIYW5kbGVyIiwicm9sZXMiOlsiZXJyb3I6YXNzZXNzIl0sInBlcm1pc3Npb25zIjpbImVycm9yOmFzc2VzcyJdLCJjbGllbnRJZCI6IkVycm9ySGFuZGxlciJ9.rcLIzaeDIIUqOe0Plo9Fzbu_JMAS0ZXvRa1_GmzvB2bW5RyjJnq5o2SpPVPSl9NBimZd9Na8cV4J3_CoPrQs_9lHvJtElsBzUlLzcFe-VCUl22qWatizv-l9wQycnzumKair--rdOsllDMj7SBwfQvMG2GtEjwHGKiVJGSCdJeqcmnqcF3dP0AlVHn6sGpHx9wcG1m7Pkv9BghNFUqwBvuHpwIUWIrD4SWXeY6pJs49BRtBPikj-Vd46HmlgAGxlN99Gl-QJVS6as3b0F3EmYQQRvUnOqt08cs-vza7h5pi00Z_IAA2-_zXK1JBPqPIuf_6W12hGvYLjphwARfTOiQ',
+2025-06-26 16:33:15.448 |       'User-Agent': 'axios/1.9.0',
+2025-06-26 16:33:15.448 |       'Accept-Encoding': 'gzip, compress, deflate, br'
+2025-06-26 16:33:15.448 |     },
+2025-06-26 16:33:15.448 |     params: { storageType: 'mongo', collection: 'domain_knowledge' },
+2025-06-26 16:33:15.448 |     method: 'get',
+2025-06-26 16:33:15.448 |     url: 'http://librarian:5040/loadData',
+2025-06-26 16:33:15.448 |     allowAbsoluteUrls: true,
+2025-06-26 16:33:15.448 |     _requestStartTime: 1750969993332,
+2025-06-26 16:33:15.448 |     _retryCount: 1,
+2025-06-26 16:33:15.448 |     data: undefined
+2025-06-26 16:33:15.448 |   },
+2025-06-26 16:33:15.448 |   request: <ref *1> Writable {
+2025-06-26 16:33:15.448 |     _events: {
+2025-06-26 16:33:15.448 |       close: undefined,
+2025-06-26 16:33:15.448 |       error: [Function: handleRequestError],
+2025-06-26 16:33:15.448 |       prefinish: undefined,
+2025-06-26 16:33:15.448 |       finish: undefined,
+2025-06-26 16:33:15.448 |       drain: undefined,
+2025-06-26 16:33:15.448 |       response: [Function: handleResponse],
+2025-06-26 16:33:15.449 |       socket: [Array],
+2025-06-26 16:33:15.449 |       timeout: undefined,
+2025-06-26 16:33:15.449 |       abort: undefined
+2025-06-26 16:33:15.449 |     },
+2025-06-26 16:33:15.449 |     _writableState: WritableState {
+2025-06-26 16:33:15.449 |       highWaterMark: 16384,
+2025-06-26 16:33:15.449 |       length: 0,
+2025-06-26 16:33:15.449 |       corked: 0,
+2025-06-26 16:33:15.449 |       onwrite: [Function: bound onwrite],
+2025-06-26 16:33:15.449 |       writelen: 0,
+2025-06-26 16:33:15.449 |       bufferedIndex: 0,
+2025-06-26 16:33:15.449 |       pendingcb: 0,
+2025-06-26 16:33:15.449 |       [Symbol(kState)]: 17580812,
+2025-06-26 16:33:15.449 |       [Symbol(kBufferedValue)]: null
+2025-06-26 16:33:15.449 |     },
+2025-06-26 16:33:15.449 |     _maxListeners: undefined,
+2025-06-26 16:33:15.449 |     _options: {
+2025-06-26 16:33:15.449 |       maxRedirects: 21,
+2025-06-26 16:33:15.449 |       maxBodyLength: Infinity,
+2025-06-26 16:33:15.449 |       protocol: 'http:',
+2025-06-26 16:33:15.449 |       path: '/loadData?storageType=mongo&collection=domain_knowledge',
+2025-06-26 16:33:15.449 |       method: 'GET',
+2025-06-26 16:33:15.449 |       headers: [Object: null prototype],
+2025-06-26 16:33:15.449 |       agents: [Object],
+2025-06-26 16:33:15.449 |       auth: undefined,
+2025-06-26 16:33:15.449 |       family: undefined,
+2025-06-26 16:33:15.449 |       beforeRedirect: [Function: dispatchBeforeRedirect],
+2025-06-26 16:33:15.449 |       beforeRedirects: [Object],
+2025-06-26 16:33:15.449 |       hostname: 'librarian',
+2025-06-26 16:33:15.449 |       port: '5040',
+2025-06-26 16:33:15.449 |       agent: undefined,
+2025-06-26 16:33:15.449 |       nativeProtocols: [Object],
+2025-06-26 16:33:15.449 |       pathname: '/loadData',
+2025-06-26 16:33:15.449 |       search: '?storageType=mongo&collection=domain_knowledge'
+2025-06-26 16:33:15.449 |     },
+2025-06-26 16:33:15.449 |     _ended: true,
+2025-06-26 16:33:15.449 |     _ending: true,
+2025-06-26 16:33:15.449 |     _redirectCount: 0,
+2025-06-26 16:33:15.449 |     _redirects: [],
+2025-06-26 16:33:15.449 |     _requestBodyLength: 0,
+2025-06-26 16:33:15.449 |     _requestBodyBuffers: [],
+2025-06-26 16:33:15.449 |     _eventsCount: 3,
+2025-06-26 16:33:15.449 |     _onNativeResponse: [Function (anonymous)],
+2025-06-26 16:33:15.449 |     _currentRequest: ClientRequest {
+2025-06-26 16:33:15.449 |       _events: [Object: null prototype],
+2025-06-26 16:33:15.449 |       _eventsCount: 7,
+2025-06-26 16:33:15.449 |       _maxListeners: undefined,
+2025-06-26 16:33:15.449 |       outputData: [],
+2025-06-26 16:33:15.449 |       outputSize: 0,
+2025-06-26 16:33:15.449 |       writable: true,
+2025-06-26 16:33:15.449 |       destroyed: false,
+2025-06-26 16:33:15.449 |       _last: true,
+2025-06-26 16:33:15.449 |       chunkedEncoding: false,
+2025-06-26 16:33:15.449 |       shouldKeepAlive: true,
+2025-06-26 16:33:15.449 |       maxRequestsOnConnectionReached: false,
+2025-06-26 16:33:15.449 |       _defaultKeepAlive: true,
+2025-06-26 16:33:15.449 |       useChunkedEncodingByDefault: false,
+2025-06-26 16:33:15.449 |       sendDate: false,
+2025-06-26 16:33:15.449 |       _removedConnection: false,
+2025-06-26 16:33:15.449 |       _removedContLen: false,
+2025-06-26 16:33:15.449 |       _removedTE: false,
+2025-06-26 16:33:15.449 |       strictContentLength: false,
+2025-06-26 16:33:15.449 |       _contentLength: 0,
+2025-06-26 16:33:15.449 |       _hasBody: true,
+2025-06-26 16:33:15.449 |       _trailer: '',
+2025-06-26 16:33:15.449 |       finished: true,
+2025-06-26 16:33:15.449 |       _headerSent: true,
+2025-06-26 16:33:15.449 |       _closed: false,
+2025-06-26 16:33:15.449 |       socket: [Socket],
+2025-06-26 16:33:15.449 |       _header: 'GET /loadData?storageType=mongo&collection=domain_knowledge HTTP/1.1\r\n' +
+2025-06-26 16:33:15.449 |         'Accept: application/json, text/plain, */*\r\n' +
+2025-06-26 16:33:15.449 |         'Content-Type: application/json\r\n' +
+2025-06-26 16:33:15.449 |         'Access-Control-Allow-Origin: *\r\n' +
+2025-06-26 16:33:15.449 |         'X-Request-ID: fimlx8oe4qk\r\n' +
+2025-06-26 16:33:15.449 |         'Authorization: Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJTZWN1cml0eU1hbmFnZXIiLCJzdWIiOiJFcnJvckhhbmRsZXIiLCJhdWQiOiJzdGFnZTctc2VydmljZXMiLCJleHAiOjE3NTA5NzM1OTMsImlhdCI6MTc1MDk2OTk5MywianRpIjoiMHI1MXI0Y2ZiNXFpc3I3cHhyaDI2bzkiLCJjb21wb25lbnRUeXBlIjoiRXJyb3JIYW5kbGVyIiwicm9sZXMiOlsiZXJyb3I6YXNzZXNzIl0sInBlcm1pc3Npb25zIjpbImVycm9yOmFzc2VzcyJdLCJjbGllbnRJZCI6IkVycm9ySGFuZGxlciJ9.rcLIzaeDIIUqOe0Plo9Fzbu_JMAS0ZXvRa1_GmzvB2bW5RyjJnq5o2SpPVPSl9NBimZd9Na8cV4J3_CoPrQs_9lHvJtElsBzUlLzcFe-VCUl22qWatizv-l9wQycnzumKair--rdOsllDMj7SBwfQvMG2GtEjwHGKiVJGSCdJeqcmnqcF3dP0AlVHn6sGpHx9wcG1m7Pkv9BghNFUqwBvuHpwIUWIrD4SWXeY6pJs49BRtBPikj-Vd46HmlgAGxlN99Gl-QJVS6as3b0F3EmYQQRvUnOqt08cs-vza7h5pi00Z_IAA2-_zXK1JBPqPIuf_6W12hGvYLjphwARfTOiQ\r\n' +
+2025-06-26 16:33:15.449 |         'User-Agent: axios/1.9.0\r\n' +
+2025-06-26 16:33:15.449 |         'Accept-Encoding: gzip, compress, deflate, br\r\n' +
+2025-06-26 16:33:15.449 |         'Host: librarian:5040\r\n' +
+2025-06-26 16:33:15.449 |         'Connection: keep-alive\r\n' +
+2025-06-26 16:33:15.449 |         '\r\n',
+2025-06-26 16:33:15.449 |       _keepAliveTimeout: 0,
+2025-06-26 16:33:15.449 |       _onPendingData: [Function: nop],
+2025-06-26 16:33:15.449 |       agent: [Agent],
+2025-06-26 16:33:15.449 |       socketPath: undefined,
+2025-06-26 16:33:15.449 |       method: 'GET',
+2025-06-26 16:33:15.449 |       maxHeaderSize: undefined,
+2025-06-26 16:33:15.449 |       insecureHTTPParser: undefined,
+2025-06-26 16:33:15.449 |       joinDuplicateHeaders: undefined,
+2025-06-26 16:33:15.449 |       path: '/loadData?storageType=mongo&collection=domain_knowledge',
+2025-06-26 16:33:15.449 |       _ended: false,
+2025-06-26 16:33:15.449 |       res: null,
+2025-06-26 16:33:15.449 |       aborted: false,
+2025-06-26 16:33:15.450 |       timeoutCb: [Function: emitRequestTimeout],
+2025-06-26 16:33:15.450 |       upgradeOrConnect: false,
+2025-06-26 16:33:15.450 |       parser: null,
+2025-06-26 16:33:15.450 |       maxHeadersCount: null,
+2025-06-26 16:33:15.450 |       reusedSocket: false,
+2025-06-26 16:33:15.450 |       host: 'librarian',
+2025-06-26 16:33:15.450 |       protocol: 'http:',
+2025-06-26 16:33:15.450 |       _redirectable: [Circular *1],
+2025-06-26 16:33:15.450 |       [Symbol(shapeMode)]: false,
+2025-06-26 16:33:15.450 |       [Symbol(kCapture)]: false,
+2025-06-26 16:33:15.450 |       [Symbol(kBytesWritten)]: 0,
+2025-06-26 16:33:15.450 |       [Symbol(kNeedDrain)]: false,
+2025-06-26 16:33:15.450 |       [Symbol(corked)]: 0,
+2025-06-26 16:33:15.450 |       [Symbol(kOutHeaders)]: [Object: null prototype],
+2025-06-26 16:33:15.450 |       [Symbol(errored)]: null,
+2025-06-26 16:33:15.450 |       [Symbol(kHighWaterMark)]: 16384,
+2025-06-26 16:33:15.450 |       [Symbol(kRejectNonStandardBodyWrites)]: false,
+2025-06-26 16:33:15.450 |       [Symbol(kUniqueHeaders)]: null
+2025-06-26 16:33:15.450 |     },
+2025-06-26 16:33:15.450 |     _currentUrl: 'http://librarian:5040/loadData?storageType=mongo&collection=domain_knowledge',
+2025-06-26 16:33:15.450 |     _timeout: null,
+2025-06-26 16:33:15.450 |     [Symbol(shapeMode)]: true,
+2025-06-26 16:33:15.450 |     [Symbol(kCapture)]: false
+2025-06-26 16:33:15.450 |   },
+2025-06-26 16:33:15.450 |   cause: Error: connect ECONNREFUSED 172.19.0.9:5040
+2025-06-26 16:33:15.450 |       at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1611:16) {
+2025-06-26 16:33:15.450 |     errno: -111,
+2025-06-26 16:33:15.450 |     code: 'ECONNREFUSED',
+2025-06-26 16:33:15.450 |     syscall: 'connect',
+2025-06-26 16:33:15.450 |     address: '172.19.0.9',
+2025-06-26 16:33:15.450 |     port: 5040
+2025-06-26 16:33:15.450 |   }
+2025-06-26 16:33:15.450 | }
+2025-06-26 16:33:31.162 | Created ServiceTokenManager for AgentSet
+2025-06-26 16:33:31.175 | Adding agent with req.body {
+2025-06-26 16:33:31.175 |   agentId: '165af372-8554-447c-99e8-ead97ea07ae0',
+2025-06-26 16:33:31.175 |   actionVerb: 'ACCOMPLISH',
+2025-06-26 16:33:31.175 |   inputs: { _type: 'Map', entries: [ [Array] ] },
+2025-06-26 16:33:31.175 |   missionId: 'd13ceeda-e3e0-4691-951b-b3d1b15d5e75',
+2025-06-26 16:33:31.175 |   missionContext: ''
+2025-06-26 16:33:31.175 | }
+2025-06-26 16:33:31.175 | Adding agent with inputs { _type: 'Map', entries: [ [ 'goal', [Object] ] ] }
+2025-06-26 16:33:31.175 | addAgent provided inputs: { _type: 'Map', entries: [ [ 'goal', [Object] ] ] }
+2025-06-26 16:33:31.176 | addAgent inputsMap: Map(1) {
+2025-06-26 16:33:31.176 |   'goal' => {
+2025-06-26 16:33:31.176 |     inputName: 'goal',
+2025-06-26 16:33:31.176 |     inputValue: 'You are an expert marketing strategist and tactician.  Create a go to market plan for the TownScape system from Seakaytee.  You can find more about the product on seakaytee.com website.  Identify the potential buyers, their motivators, our positioning for the system, messaging, pricing, timing, communication channels and anything else needed to successfully launch this system.  Then begin implementing the plan.',
+2025-06-26 16:33:31.176 |     args: {}
+2025-06-26 16:33:31.176 |   }
+2025-06-26 16:33:31.176 | }
+2025-06-26 16:33:31.177 | Attempting to connect to RabbitMQ (attempt 1/20)...
+2025-06-26 16:33:31.177 | Using RabbitMQ URL: amqp://stage7:stage7password@rabbitmq:5672
+2025-06-26 16:33:31.177 | Attempting to connect to RabbitMQ host: rabbitmq
+2025-06-26 16:33:31.177 | Connecting to RabbitMQ at amqp://stage7:stage7password@rabbitmq:5672
+2025-06-26 16:33:31.178 | Attempting to register with Consul (attempt 1/10)...
+2025-06-26 16:33:31.178 | Using Consul URL: consul:8500
+2025-06-26 16:33:31.181 | Agent 165af372-8554-447c-99e8-ead97ea07ae0 created. missionId=d13ceeda-e3e0-4691-951b-b3d1b15d5e75. Inputs: {}
+2025-06-26 16:33:31.186 | Service CapabilitiesManager found via environment variable CAPABILITIESMANAGER_URL: capabilitiesmanager:5060
+2025-06-26 16:33:31.187 | Service TrafficManager found via environment variable TRAFFICMANAGER_URL: trafficmanager:5080
+2025-06-26 16:33:31.190 | [Agent 165af372-8554-447c-99e8-ead97ea07ae0] Set up checkpointing every 15 minutes.
+2025-06-26 16:33:31.192 | [shouldBypassAuth] Bypassing auth for auth path: /v1/agent/service/register (matched /register)
+2025-06-26 16:33:31.229 | [shouldBypassAuth] Bypassing auth for auth path: /registerComponent (matched /register)
+2025-06-26 16:33:31.273 | Service 165af372-8554-447c-99e8-ead97ea07ae0 registered with Consul
+2025-06-26 16:33:31.273 | Successfully registered AgentSet with Consul
+2025-06-26 16:33:31.276 | AgentSet registered successfully with PostOffice
+2025-06-26 16:33:31.335 | Connected to RabbitMQ
+2025-06-26 16:33:31.352 | Channel created successfully
+2025-06-26 16:33:31.353 | RabbitMQ channel ready
+2025-06-26 16:33:31.432 | Connection test successful - RabbitMQ connection is stable
+2025-06-26 16:33:31.432 | Creating queue: agentset-165af372-8554-447c-99e8-ead97ea07ae0
+2025-06-26 16:33:31.452 | Binding queue to exchange: stage7
+2025-06-26 16:33:31.492 | Successfully connected to RabbitMQ and set up queues/bindings
+2025-06-26 16:33:32.891 | Service Brain found via PostOffice: brain:5070
+2025-06-26 16:33:32.893 | Service Librarian found via PostOffice: librarian:5040
+2025-06-26 16:33:32.895 | Service MissionControl found via PostOffice: missioncontrol:5030
+2025-06-26 16:33:32.901 | Service Engineer found via PostOffice: engineer:5050
+2025-06-26 16:33:32.901 | Service URLs: {
+2025-06-26 16:33:32.901 |   capabilitiesManagerUrl: 'capabilitiesmanager:5060',
+2025-06-26 16:33:32.901 |   brainUrl: 'brain:5070',
+2025-06-26 16:33:32.901 |   trafficManagerUrl: 'trafficmanager:5080',
+2025-06-26 16:33:32.901 |   librarianUrl: 'librarian:5040'
+2025-06-26 16:33:32.901 | }
+2025-06-26 16:33:32.901 | Agent 165af372-8554-447c-99e8-ead97ea07ae0 initialized successfully. Status: running. Commencing main execution loop.
+2025-06-26 16:33:32.902 | AgentSet 165af372-8554-447c-99e8-ead97ea07ae0 saying: Agent 165af372-8554-447c-99e8-ead97ea07ae0 initialized and commencing operations.
+2025-06-26 16:33:32.902 | AgentSet 165af372-8554-447c-99e8-ead97ea07ae0 sending message of type say to user
+2025-06-26 16:33:32.902 | Using PostOffice URL: postoffice:5020
+2025-06-26 16:33:32.903 | Agent 165af372-8554-447c-99e8-ead97ea07ae0 notifying TrafficManager of status: running
+2025-06-26 16:33:32.903 | [Agent 165af372-8554-447c-99e8-ead97ea07ae0] Preparing statistics. Current steps count: 1
+2025-06-26 16:33:32.904 | [Agent 165af372-8554-447c-99e8-ead97ea07ae0] getStatistics result: total steps = 1, stepStats = [{"id":"96ff16a1-9aeb-48bb-8487-3dd869ba6e1a","verb":"ACCOMPLISH","status":"pending","dependencies":[],"stepNo":1}]
+2025-06-26 16:33:32.904 | AgentSet 165af372-8554-447c-99e8-ead97ea07ae0 sending message of type agentUpdate to trafficmanager
+2025-06-26 16:33:32.904 | Using PostOffice URL: postoffice:5020
+2025-06-26 16:33:32.910 | Successfully sent message to user via HTTP. Response status: 200
+2025-06-26 16:33:32.910 | Successfully sent message to PostOffice: Agent 165af372-8554-447c-99e8-ead97ea07ae0 initialized and commencing operations.
+2025-06-26 16:33:32.915 | Successfully sent message to trafficmanager via HTTP. Response status: 200
+2025-06-26 16:33:33.022 | Event logged successfully: {"eventType":"agent_created","agentId":"165af372-8554-447c-99e8-ead97ea07ae0","missionId":"d13ceeda-e3e0-4691-951b-b3d1b15d5e75","inputs":{"_type":"Map","entries":[["goal",{"inputName":"goal","inputValue":"You are an expert marketing strategist and tactician.  Create a go to market plan for the TownScape system from Seakaytee.  You can find more about the product on seakaytee.com website.  Identify the potential buyers, their motivators, our positioning for the system, messaging, pricing, timing, communication channels and anything else needed to successfully launch this system.  Then begin implementing the plan.","args":{}}]]},"status":"initializing","timestamp":"2025-06-26T20:33:31.184Z"}
+2025-06-26 16:33:33.028 | Event logged successfully: {"eventType":"step_created","stepId":"96ff16a1-9aeb-48bb-8487-3dd869ba6e1a","stepNo":1,"actionVerb":"ACCOMPLISH","inputs":{"_type":"Map","entries":[["goal",{"inputName":"goal","inputValue":"You are an expert marketing strategist and tactician.  Create a go to market plan for the TownScape system from Seakaytee.  You can find more about the product on seakaytee.com website.  Identify the potential buyers, their motivators, our positioning for the system, messaging, pricing, timing, communication channels and anything else needed to successfully launch this system.  Then begin implementing the plan.","args":{}}]]},"dependencies":[],"status":"pending","description":"Initial mission step","timestamp":"2025-06-26T20:33:31.183Z"}
+2025-06-26 16:33:33.028 | Saved 1 agent specializations
+2025-06-26 16:33:33.029 | Applied role Executor to agent 165af372-8554-447c-99e8-ead97ea07ae0
+2025-06-26 16:33:33.029 | Assigned default role executor to agent 165af372-8554-447c-99e8-ead97ea07ae0
+2025-06-26 16:33:33.167 | AgentSet received update from agent 165af372-8554-447c-99e8-ead97ea07ae0 with status running
+2025-06-26 16:33:33.182 | Agent state saved successfully for agent 165af372-8554-447c-99e8-ead97ea07ae0.
+2025-06-26 16:33:33.182 | Agent state saved successfully.
+2025-06-26 16:33:33.182 | [Agent 165af372-8554-447c-99e8-ead97ea07ae0] Saved state.
+2025-06-26 16:33:33.182 | Forwarding statistics for agent 165af372-8554-447c-99e8-ead97ea07ae0 to TrafficManager
+2025-06-26 16:33:33.293 | Successfully notified AgentSet at agentset:5100
+2025-06-26 16:33:33.293 | Executing step ACCOMPLISH (96ff16a1-9aeb-48bb-8487-3dd869ba6e1a)...
+2025-06-26 16:33:33.293 | AgentSet 165af372-8554-447c-99e8-ead97ea07ae0 saying: Executing step: ACCOMPLISH - Initial mission step
+2025-06-26 16:33:33.294 | AgentSet 165af372-8554-447c-99e8-ead97ea07ae0 sending message of type say to user
+2025-06-26 16:33:33.294 | Using PostOffice URL: postoffice:5020
+2025-06-26 16:33:33.300 | Successfully sent message to user via HTTP. Response status: 200
+2025-06-26 16:33:33.300 | Successfully sent message to PostOffice: Executing step: ACCOMPLISH - Initial mission step
+2025-06-26 16:33:33.752 | Connected to RabbitMQ
+2025-06-26 16:33:33.755 | Channel created successfully
+2025-06-26 16:33:33.755 | RabbitMQ channel ready
+2025-06-26 16:33:33.820 | Connection test successful - RabbitMQ connection is stable
+2025-06-26 16:33:33.820 | Creating queue: agentset-primary-agentset
+2025-06-26 16:33:33.832 | Binding queue to exchange: stage7
+2025-06-26 16:33:33.862 | Successfully connected to RabbitMQ and set up queues/bindings
+2025-06-26 16:33:36.808 | [AgentSet] getAgentStatistics called for missionId: d13ceeda-e3e0-4691-951b-b3d1b15d5e75
+2025-06-26 16:33:36.808 | [AgentSet] Agent ID: 165af372-8554-447c-99e8-ead97ea07ae0, missionId: d13ceeda-e3e0-4691-951b-b3d1b15d5e75
+2025-06-26 16:33:36.808 | [Agent 165af372-8554-447c-99e8-ead97ea07ae0] Preparing statistics. Current steps count: 1
+2025-06-26 16:33:36.808 | [Agent 165af372-8554-447c-99e8-ead97ea07ae0] getStatistics result: total steps = 1, stepStats = [{"id":"96ff16a1-9aeb-48bb-8487-3dd869ba6e1a","verb":"ACCOMPLISH","status":"running","dependencies":[],"stepNo":1}]
+2025-06-26 16:33:45.169 | [AgentSet] getAgentStatistics called for missionId: d13ceeda-e3e0-4691-951b-b3d1b15d5e75
+2025-06-26 16:33:45.169 | [AgentSet] Agent ID: 165af372-8554-447c-99e8-ead97ea07ae0, missionId: d13ceeda-e3e0-4691-951b-b3d1b15d5e75
+2025-06-26 16:33:45.169 | [Agent 165af372-8554-447c-99e8-ead97ea07ae0] Preparing statistics. Current steps count: 1
+2025-06-26 16:33:45.170 | [Agent 165af372-8554-447c-99e8-ead97ea07ae0] getStatistics result: total steps = 1, stepStats = [{"id":"96ff16a1-9aeb-48bb-8487-3dd869ba6e1a","verb":"ACCOMPLISH","status":"running","dependencies":[],"stepNo":1}]
+2025-06-26 16:33:50.160 | [AgentSet] getAgentStatistics called for missionId: d13ceeda-e3e0-4691-951b-b3d1b15d5e75
+2025-06-26 16:33:50.160 | [AgentSet] Agent ID: 165af372-8554-447c-99e8-ead97ea07ae0, missionId: d13ceeda-e3e0-4691-951b-b3d1b15d5e75
+2025-06-26 16:33:50.160 | [Agent 165af372-8554-447c-99e8-ead97ea07ae0] Preparing statistics. Current steps count: 1
+2025-06-26 16:33:50.160 | [Agent 165af372-8554-447c-99e8-ead97ea07ae0] getStatistics result: total steps = 1, stepStats = [{"id":"96ff16a1-9aeb-48bb-8487-3dd869ba6e1a","verb":"ACCOMPLISH","status":"running","dependencies":[],"stepNo":1}]
+2025-06-26 16:33:55.167 | [AgentSet] getAgentStatistics called for missionId: d13ceeda-e3e0-4691-951b-b3d1b15d5e75
+2025-06-26 16:33:55.167 | [AgentSet] Agent ID: 165af372-8554-447c-99e8-ead97ea07ae0, missionId: d13ceeda-e3e0-4691-951b-b3d1b15d5e75
+2025-06-26 16:33:55.167 | [Agent 165af372-8554-447c-99e8-ead97ea07ae0] Preparing statistics. Current steps count: 1
+2025-06-26 16:33:55.167 | [Agent 165af372-8554-447c-99e8-ead97ea07ae0] getStatistics result: total steps = 1, stepStats = [{"id":"96ff16a1-9aeb-48bb-8487-3dd869ba6e1a","verb":"ACCOMPLISH","status":"running","dependencies":[],"stepNo":1}]
+2025-06-26 16:34:00.164 | [AgentSet] getAgentStatistics called for missionId: d13ceeda-e3e0-4691-951b-b3d1b15d5e75
+2025-06-26 16:34:00.165 | [AgentSet] Agent ID: 165af372-8554-447c-99e8-ead97ea07ae0, missionId: d13ceeda-e3e0-4691-951b-b3d1b15d5e75
+2025-06-26 16:34:00.165 | [Agent 165af372-8554-447c-99e8-ead97ea07ae0] Preparing statistics. Current steps count: 1
+2025-06-26 16:34:00.165 | [Agent 165af372-8554-447c-99e8-ead97ea07ae0] getStatistics result: total steps = 1, stepStats = [{"id":"96ff16a1-9aeb-48bb-8487-3dd869ba6e1a","verb":"ACCOMPLISH","status":"running","dependencies":[],"stepNo":1}]
+2025-06-26 16:34:04.544 | Event logged successfully: {"eventType":"step_result","stepId":"96ff16a1-9aeb-48bb-8487-3dd869ba6e1a","stepNo":1,"result":[{"success":false,"name":"error","resultType":"ERROR","resultDescription":"Plugin execution error","result":null,"error":"Object of type property is not JSON serializable","mimeType":"text/plain"}],"timestamp":"2025-06-26T20:34:04.529Z"}
+2025-06-26 16:34:04.545 | Saving work product for agent 96ff16a1-9aeb-48bb-8487-3dd869ba6e1a, step 96ff16a1-9aeb-48bb-8487-3dd869ba6e1a
+2025-06-26 16:34:04.563 | Step ACCOMPLISH result: [
+2025-06-26 16:34:04.563 |   {
+2025-06-26 16:34:04.563 |     success: false,
+2025-06-26 16:34:04.563 |     name: 'error',
+2025-06-26 16:34:04.563 |     resultType: 'ERROR',
+2025-06-26 16:34:04.563 |     resultDescription: 'Plugin execution error',
+2025-06-26 16:34:04.563 |     result: null,
+2025-06-26 16:34:04.563 |     error: 'Object of type property is not JSON serializable',
+2025-06-26 16:34:04.563 |     mimeType: 'text/plain'
+2025-06-26 16:34:04.563 |   }
+2025-06-26 16:34:04.563 | ]
+2025-06-26 16:34:04.563 | AgentSet 165af372-8554-447c-99e8-ead97ea07ae0 saying: Completed step: ACCOMPLISH
+2025-06-26 16:34:04.563 | AgentSet 165af372-8554-447c-99e8-ead97ea07ae0 sending message of type say to user
+2025-06-26 16:34:04.563 | Using PostOffice URL: postoffice:5020
+2025-06-26 16:34:04.576 | Successfully sent message to user via HTTP. Response status: 200
+2025-06-26 16:34:04.576 | Successfully sent message to PostOffice: Completed step: ACCOMPLISH
+2025-06-26 16:34:04.580 | Saving work product for agent 165af372-8554-447c-99e8-ead97ea07ae0, step 96ff16a1-9aeb-48bb-8487-3dd869ba6e1a
+2025-06-26 16:34:04.590 | AgentSet 165af372-8554-447c-99e8-ead97ea07ae0 sending message of type workProductUpdate to user
+2025-06-26 16:34:04.590 | Using PostOffice URL: postoffice:5020
+2025-06-26 16:34:04.591 | Agent 165af372-8554-447c-99e8-ead97ea07ae0 notifying TrafficManager of status: running
+2025-06-26 16:34:04.591 | [Agent 165af372-8554-447c-99e8-ead97ea07ae0] Preparing statistics. Current steps count: 1
+2025-06-26 16:34:04.591 | [Agent 165af372-8554-447c-99e8-ead97ea07ae0] getStatistics result: total steps = 1, stepStats = [{"id":"96ff16a1-9aeb-48bb-8487-3dd869ba6e1a","verb":"ACCOMPLISH","status":"completed","dependencies":[],"stepNo":1}]
+2025-06-26 16:34:04.592 | AgentSet 165af372-8554-447c-99e8-ead97ea07ae0 sending message of type agentUpdate to trafficmanager
+2025-06-26 16:34:04.592 | Using PostOffice URL: postoffice:5020
+2025-06-26 16:34:04.601 | Successfully sent message to user via HTTP. Response status: 200
+2025-06-26 16:34:04.607 | Successfully sent message to trafficmanager via HTTP. Response status: 200
+2025-06-26 16:34:04.611 | AgentSet received update from agent 165af372-8554-447c-99e8-ead97ea07ae0 with status running
+2025-06-26 16:34:04.623 | Agent state saved successfully for agent 165af372-8554-447c-99e8-ead97ea07ae0.
+2025-06-26 16:34:04.623 | Agent state saved successfully.
+2025-06-26 16:34:04.623 | [Agent 165af372-8554-447c-99e8-ead97ea07ae0] Saved state.
+2025-06-26 16:34:04.623 | Forwarding statistics for agent 165af372-8554-447c-99e8-ead97ea07ae0 to TrafficManager
+2025-06-26 16:34:04.732 | Successfully notified AgentSet at agentset:5100
+2025-06-26 16:34:04.740 | Loading work product for agent 165af372-8554-447c-99e8-ead97ea07ae0, step 96ff16a1-9aeb-48bb-8487-3dd869ba6e1a
+2025-06-26 16:34:04.760 | Agent 165af372-8554-447c-99e8-ead97ea07ae0 has completed its work.
+2025-06-26 16:34:04.760 | AgentSet 165af372-8554-447c-99e8-ead97ea07ae0 saying: Agent 165af372-8554-447c-99e8-ead97ea07ae0 has completed its work.
+2025-06-26 16:34:04.760 | AgentSet 165af372-8554-447c-99e8-ead97ea07ae0 sending message of type say to user
+2025-06-26 16:34:04.760 | Using PostOffice URL: postoffice:5020
+2025-06-26 16:34:04.761 | AgentSet 165af372-8554-447c-99e8-ead97ea07ae0 saying: Result: {"agentId":"165af372-8554-447c-99e8-ead97ea07ae0","stepId":"96ff16a1-9aeb-48bb-8487-3dd869ba6e1a","data":{"_id":"96ff16a1-9aeb-48bb-8487-3dd869ba6e1a_96ff16a1-9aeb-48bb-8487-3dd869ba6e1a","agentId":"96ff16a1-9aeb-48bb-8487-3dd869ba6e1a","data":[{"success":false,"name":"error","resultType":"ERROR","resultDescription":"Plugin execution error","result":null,"error":"Object of type property is not JSON serializable","mimeType":"text/plain"}],"id":"96ff16a1-9aeb-48bb-8487-3dd869ba6e1a_96ff16a1-9aeb-48bb-8487-3dd869ba6e1a","stepId":"96ff16a1-9aeb-48bb-8487-3dd869ba6e1a","timestamp":"2025-06-26T20:34:04.549Z"}}
+2025-06-26 16:34:04.761 | AgentSet 165af372-8554-447c-99e8-ead97ea07ae0 sending message of type say to user
+2025-06-26 16:34:04.761 | Using PostOffice URL: postoffice:5020
+2025-06-26 16:34:04.761 | Agent 165af372-8554-447c-99e8-ead97ea07ae0 notifying TrafficManager of status: completed
+2025-06-26 16:34:04.761 | [Agent 165af372-8554-447c-99e8-ead97ea07ae0] Preparing statistics. Current steps count: 1
+2025-06-26 16:34:04.761 | [Agent 165af372-8554-447c-99e8-ead97ea07ae0] getStatistics result: total steps = 1, stepStats = [{"id":"96ff16a1-9aeb-48bb-8487-3dd869ba6e1a","verb":"ACCOMPLISH","status":"completed","dependencies":[],"stepNo":1}]
+2025-06-26 16:34:04.762 | AgentSet 165af372-8554-447c-99e8-ead97ea07ae0 sending message of type agentUpdate to trafficmanager
+2025-06-26 16:34:04.762 | Using PostOffice URL: postoffice:5020
+2025-06-26 16:34:04.773 | Successfully sent message to user via HTTP. Response status: 200
+2025-06-26 16:34:04.773 | Successfully sent message to PostOffice: Agent 165af372-8554-447c-99e8-ead97ea07ae0 has completed its work.
+2025-06-26 16:34:04.774 | Successfully sent message to user via HTTP. Response status: 200
+2025-06-26 16:34:04.774 | Successfully sent message to PostOffice: Result: {"agentId":"165af372-8554-447c-99e8-ead97ea07ae0","stepId":"96ff16a1-9aeb-48bb-8487-3dd869ba6e1a","data":{"_id":"96ff16a1-9aeb-48bb-8487-3dd869ba6e1a_96ff16a1-9aeb-48bb-8487-3dd869ba6e1a","agentId":"96ff16a1-9aeb-48bb-8487-3dd869ba6e1a","data":[{"success":false,"name":"error","resultType":"ERROR","resultDescription":"Plugin execution error","result":null,"error":"Object of type property is not JSON serializable","mimeType":"text/plain"}],"id":"96ff16a1-9aeb-48bb-8487-3dd869ba6e1a_96ff16a1-9aeb-48bb-8487-3dd869ba6e1a","stepId":"96ff16a1-9aeb-48bb-8487-3dd869ba6e1a","timestamp":"2025-06-26T20:34:04.549Z"}}
+2025-06-26 16:34:04.781 | Successfully sent message to trafficmanager via HTTP. Response status: 200
+2025-06-26 16:34:04.784 | AgentSet received update from agent 165af372-8554-447c-99e8-ead97ea07ae0 with status completed
+2025-06-26 16:34:04.794 | Agent state saved successfully for agent 165af372-8554-447c-99e8-ead97ea07ae0.
+2025-06-26 16:34:04.794 | Agent state saved successfully.
+2025-06-26 16:34:04.794 | [Agent 165af372-8554-447c-99e8-ead97ea07ae0] Saved state.
+2025-06-26 16:34:04.794 | Forwarding statistics for agent 165af372-8554-447c-99e8-ead97ea07ae0 to TrafficManager
+2025-06-26 16:34:04.902 | Successfully notified AgentSet at agentset:5100
+2025-06-26 16:34:04.902 | Agent 165af372-8554-447c-99e8-ead97ea07ae0 notifying AgentSet of completed status for removal.
+2025-06-26 16:34:04.905 | Attempting to remove agent 165af372-8554-447c-99e8-ead97ea07ae0 with status completed from AgentSet.
+2025-06-26 16:34:04.906 | Agent 165af372-8554-447c-99e8-ead97ea07ae0 removed from AgentSet and unregistered from LifecycleManager due to status: completed. Current agent count: 0
+2025-06-26 16:34:05.217 | [AgentSet] getAgentStatistics called for missionId: d13ceeda-e3e0-4691-951b-b3d1b15d5e75
