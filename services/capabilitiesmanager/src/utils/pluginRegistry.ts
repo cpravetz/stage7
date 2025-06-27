@@ -338,8 +338,6 @@ export class PluginRegistry {
         for (const locator of locators) {
             lines.push(`- ${locator.verb}`);
         }
-        lines.push('- DELEGATE: Create sub-agents with goals of their own.');
-        lines.push('- GET_USER_INPUT: Prompt the user for input.');
         return lines.join('\n');
     }
 }
