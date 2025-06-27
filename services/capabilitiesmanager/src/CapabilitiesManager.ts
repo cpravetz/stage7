@@ -332,20 +332,19 @@ export class CapabilitiesManager extends BaseEntity {
     }
 
     /**
-     * Query the Marketplace for the best handler (plugin or plan template) for an actionVerb.
+     * Find the best handler (plugin or plan template) for an actionVerb.
      * Returns an object: { type: 'plugin' | 'planTemplate', handler: PluginDefinition | PlanTemplate }
      */
     private async getHandlerForActionVerb(actionVerb: string, trace_id: string): Promise<{ type: string, handler: any } | null> {
         const source_component = "CapabilitiesManager.getHandlerForActionVerb";
         try {
-            // Query Marketplace for the handler for this actionVerb
-            const response = await this.authenticatedApi.get(`http://${process.env.MARKETPLACE_URL || 'marketplace:5050'}/actionVerbHandler/${actionVerb}`);
-            if (response.data && response.data.type && response.data.handler) {
-                return response.data;
+            const plugin = await this.pluginRegistry.fetchOneByVerb(actionVerb);
+            if (plugin) {
+                return { type: 'plugin', handler: plugin };
             }
             return null;
         } catch (error: any) {
-            console.error(`[${trace_id}] ${source_component}: Error querying Marketplace for handler:`, error.message);
+            console.error(`[${trace_id}] ${source_component}: Error resolving handler for actionVerb '${actionVerb}':`, error.message);
             return null;
         }
     }

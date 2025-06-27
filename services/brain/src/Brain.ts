@@ -103,7 +103,7 @@ export class Brain extends BaseEntity {
                 this.modelManager.resetAllBlacklists();
                 res.json({ success: true, message: 'All blacklisted models have been reset' });
             } catch (error) {
-                analyzeError(error as Error);
+                console.error('Error resetting blacklisted models:', error instanceof Error ? error.message : String(error));
                 res.status(500).json({ error: 'Failed to reset blacklisted models' });
             }
         });
@@ -161,123 +161,167 @@ export class Brain extends BaseEntity {
                 conversationType: req.body.ConversationType || LLMConversationType.TextToText
             };
 
-            // Select model based on provided name or optimization criteria
-            const selectedModel = req.body.model ?
-                this.modelManager.getModel(req.body.model) :
-                this.modelManager.selectModel(thread.optimization, thread.conversationType);
-
-            if (!selectedModel) {
-                res.json({ response: 'No suitable model found.', mimeType: 'text/plain' });
-                console.log('No suitable model found.');
-            } else {
-                console.log(`Chatting with model ${selectedModel.modelName} using interface ${selectedModel.interfaceName} and conversation type ${thread.conversationType}`);
-
-                // Extract only the message content from the exchanges
-                const messages = thread.exchanges;
-
-                // Validate message format
-                if (messages && Array.isArray(messages)) {
-                    for (let i = 0; i < messages.length; i++) {
-                        const msg = messages[i];
-                        // Check if the message has the required properties
-                        if (!msg.role || !msg.content) {
-                            console.log(`Warning: Message at index ${i} is missing role or content:`, msg);
-                            // Try to fix the message if possible
-                            if (!msg.role) msg.role = 'user';
-                            if (!msg.content && (msg as any).message) {
-                                msg.content = (msg as any).message;
-                                console.log(`Fixed message at index ${i} by using 'message' property as 'content'`);
-                            }
-                        }
-                    }
-                } else {
-                    console.log('Warning: messages is not an array or is undefined');
+            // If a specific model is requested, use it directly (no retry)
+            if (req.body.model) {
+                const selectedModel = this.modelManager.getModel(req.body.model);
+                if (!selectedModel) {
+                    res.json({ response: 'No suitable model found.', mimeType: 'text/plain' });
+                    console.log('No suitable model found for chat.');
+                    return;
                 }
-                this.llmCalls++;
-                thread.optionals.modelName = selectedModel.modelName;
+                await this._chatWithModel(selectedModel, thread, res);
+                return;
+            }
 
-                console.log('Chat messages provided:', JSON.stringify(messages, null, 2));
-
-                // Check if the message content is too long and might be getting truncated
-                if (messages && messages.length > 0 && messages[0].content) {
-                    const contentLength = messages[0].content.length;
-                    console.log(`First message content length: ${contentLength} characters`);
-
-                    // If content is very long, log a warning
-                    if (contentLength > 10000) {
-                        console.log('WARNING: Message content is very long and might be truncated');
+            // Otherwise, use retry logic with selectModel
+            let lastError = null;
+            let attempts = 0;
+            const maxAttempts = 5;
+            const triedModels = new Set<string>();
+            while (attempts < maxAttempts) {
+                const selectedModel = this.modelManager.selectModel(thread.optimization, thread.conversationType);
+                if (!selectedModel) {
+                    if (attempts === 0) {
+                        res.json({ response: 'No suitable model found.', mimeType: 'text/plain' });
+                        console.log('No suitable model found for chat.');
+                    } else {
+                        res.status(500).json({ error: lastError || 'No suitable model found after retries.' });
                     }
+                    return;
                 }
-
-                // Track the request
-                const requestId = this.modelManager.trackModelRequest(
-                    selectedModel.modelName,
-                    thread.conversationType,
-                    JSON.stringify(messages)
-                );
-
+                if (triedModels.has(selectedModel.modelName)) {
+                    // Defensive: avoid infinite loop if selectModel returns same model
+                    res.status(500).json({ error: lastError || 'Model selection loop detected.' });
+                    return;
+                }
+                triedModels.add(selectedModel.modelName);
                 try {
-                    // Pass optionals to the model, including response_format if specified
-                    console.log(`Brain: Passing optionals to model: ${JSON.stringify(thread.optionals)}`);
-                    let modelResponse = await selectedModel.chat(messages, thread.optionals || {});
-                    console.log(`Model response received:`, modelResponse);
-
-                    // --- JSON extraction and validation ---
-                    // If the conversation type is text/code or the prompt requests JSON, ensure JSON response
-                    let requireJson = false;
-                    if (thread.conversationType === LLMConversationType.TextToCode) requireJson = true;
-                    if (messages && messages.length > 0 && messages[0].content &&
-                        (messages[0].content.includes('JSON') || messages[0].content.includes('json'))) {
-                        requireJson = true;
-                    }
-                    if (requireJson && selectedModel.llminterface && typeof selectedModel.llminterface.ensureJsonResponse === 'function') {
-                        modelResponse = selectedModel.llminterface.ensureJsonResponse(modelResponse, true);
-                    }
-
-                    // Track successful response
-                    // Estimate token count: ~4 chars per token is a rough approximation
-                    const estimatedTokenCount = typeof modelResponse === 'string'
-                        ? Math.ceil(modelResponse.length / 4)
-                        : 0;
-                    console.log(`[Brain] Estimated token count for response: ${estimatedTokenCount}`);
-
-                    this.modelManager.trackModelResponse(
-                        requestId,
-                        modelResponse,
-                        estimatedTokenCount,
-                        true
-                    );
-
-                    if (!modelResponse || modelResponse == 'No response generated') {
-                        // Return a simple error response
-                        res.status(500).json({ error: 'No response generated' });
-                        return;
-                    }
-
-                    const mimeType = this.determineMimeType(modelResponse);
-                    res.json({
-                        response: modelResponse,
-                        mimeType: mimeType
-                    });
+                    await this._chatWithModel(selectedModel, thread, res);
+                    return; // Success, exit
                 } catch (error) {
-                    // Track failed response
-                    this.modelManager.trackModelResponse(
-                        requestId,
-                        '',
-                        0,
-                        false,
-                        error instanceof Error ? error.message : String(error)
-                    );
-
-                    // Return error response
-                    console.log(`Error with model ${selectedModel.modelName}:`, error instanceof Error ? error.message : String(error));
-                    res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+                    lastError = error instanceof Error ? error.message : String(error);
+                    // Blacklist the model for 10 minutes
+                    const blacklistUntil = new Date(Date.now() + 10 * 60 * 1000);
+                    this.modelManager.blacklistModel(selectedModel.modelName, blacklistUntil);
+                    console.log(`[Brain Chat] Blacklisted model ${selectedModel.modelName} due to error: ${lastError}`);
+                    attempts++;
                 }
             }
+            // If we reach here, all attempts failed
+            res.status(500).json({ error: lastError || 'No suitable model found after retries.' });
         } catch (error) {
             console.log('Chat Error in Brain:', error instanceof Error ? error.message : String(error));
             analyzeError(error as Error);
             res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+        }
+    }
+
+    /**
+     * Helper to handle chatting with a specific model, including tracking and response logic.
+     * Throws on error so retry logic can handle it.
+     */
+    private async _chatWithModel(selectedModel: any, thread: any, res: express.Response) {
+        console.log(`Chatting with model ${selectedModel.modelName} using interface ${selectedModel.interfaceName} and conversation type ${thread.conversationType}`);
+
+        // Extract only the message content from the exchanges
+        const messages = thread.exchanges;
+
+        // Validate message format
+        if (messages && Array.isArray(messages)) {
+            for (let i = 0; i < messages.length; i++) {
+                const msg = messages[i];
+                // Check if the message has the required properties
+                if (!msg.role || !msg.content) {
+                    console.log(`Warning: Message at index ${i} is missing role or content:`, msg);
+                    // Try to fix the message if possible
+                    if (!msg.role) msg.role = 'user';
+                    if (!msg.content && (msg as any).message) {
+                        msg.content = (msg as any).message;
+                        console.log(`Fixed message at index ${i} by using 'message' property as 'content'`);
+                    }
+                }
+            }
+        } else {
+            console.log('Warning: messages is not an array or is undefined');
+        }
+        this.llmCalls++;
+        thread.optionals.modelName = selectedModel.modelName;
+
+        console.log('Chat messages provided:', JSON.stringify(messages, null, 2));
+
+        // Check if the message content is too long and might be getting truncated
+        if (messages && messages.length > 0 && messages[0].content) {
+            const contentLength = messages[0].content.length;
+            console.log(`First message content length: ${contentLength} characters`);
+
+            // If content is very long, log a warning
+            if (contentLength > 10000) {
+                console.log('WARNING: Message content is very long and might be truncated');
+            }
+        }
+
+        // Track the request
+        const requestId = this.modelManager.trackModelRequest(
+            selectedModel.modelName,
+            thread.conversationType,
+            JSON.stringify(messages)
+        );
+
+        try {
+            // Pass optionals to the model, including response_format if specified
+            console.log(`Brain: Passing optionals to model: ${JSON.stringify(thread.optionals)}`);
+            let modelResponse = await selectedModel.chat(messages, thread.optionals || {});
+            console.log(`[Brain Chat] Model response received:`, modelResponse);
+
+            // --- JSON extraction and validation ---
+            // If the conversation type is text/code or the prompt requests JSON, ensure JSON response
+            let requireJson = false;
+            if (thread.conversationType === LLMConversationType.TextToCode) requireJson = true;
+            if (messages && messages.length > 0 && messages[0].content &&
+                (messages[0].content.includes('JSON') || messages[0].content.includes('json'))) {
+                requireJson = true;
+            }
+            if (requireJson && selectedModel.llminterface && typeof selectedModel.llminterface.ensureJsonResponse === 'function') {
+                modelResponse = selectedModel.llminterface.ensureJsonResponse(modelResponse, true);
+            }
+
+            // Track successful response
+            // Estimate token count: ~4 chars per token is a rough approximation
+            const estimatedTokenCount = typeof modelResponse === 'string'
+                ? Math.ceil(modelResponse.length / 4)
+                : 0;
+            console.log(`[Brain] Estimated token count for response: ${estimatedTokenCount}`);
+
+            this.modelManager.trackModelResponse(
+                requestId,
+                modelResponse,
+                estimatedTokenCount,
+                true
+            );
+
+            if (!modelResponse || modelResponse == 'No response generated') {
+                // Return a simple error response
+                console.log(`No response generated by model ${selectedModel.modelName}`);
+                res.status(500).json({ error: 'No response generated' });
+                throw new Error('No response generated');
+            }
+
+            const mimeType = this.determineMimeType(modelResponse);
+            res.json({
+                response: modelResponse,
+                mimeType: mimeType
+            });
+        } catch (error) {
+            // Track failed response
+            this.modelManager.trackModelResponse(
+                requestId,
+                '',
+                0,
+                false,
+                error instanceof Error ? error.message : String(error)
+            );
+            // Rethrow so the retry logic can handle blacklisting and retry
+            throw error;
         }
     }
 

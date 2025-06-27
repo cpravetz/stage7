@@ -26,7 +26,7 @@ class MissionControl extends BaseEntity {
     private engineerUrl: string = process.env.ENGINEER_URL || 'engineer:5050';
 
     constructor() {
-        super('MissionControl', 'MissionControl', process.env.HOST || 'missioncontrol', process.env.PORT || '5050');
+        super('MissionControl', 'MissionControl', process.env.HOST || 'missioncontrol', process.env.PORT || '5030');
 
         // Initialize token manager for service-to-service authentication
         const serviceId = 'MissionControl';

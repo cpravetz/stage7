@@ -682,8 +682,15 @@ export class Step {
         // First pass: register outputs and GET_USER_INPUT steps
         planTasks.forEach((task, idx) => {
             const stepUUID = task.id!;
+            // Register outputs
             if (task.outputs) {
                 Object.keys(task.outputs).forEach(outputName => {
+                    outputNameToUUID[outputName] = stepUUID;
+                });
+            }
+            // Register expectedOutputs (for LLM plans that use this key)
+            if ((task as any).expectedOutputs) {
+                Object.keys((task as any).expectedOutputs).forEach(outputName => {
                     outputNameToUUID[outputName] = stepUUID;
                 });
             }

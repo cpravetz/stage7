@@ -64,6 +64,13 @@ export class Librarian extends BaseEntity {
         this.app.get('/loadAllWorkProducts/:agentId', (req: express.Request, res: express.Response) => { this.loadAllWorkProducts(req, res) });
         this.app.get('/getSavedMissions', (req: express.Request, res: express.Response) => { this.getSavedMissions(req, res) });
         this.app.delete('/deleteCollection', (req: express.Request, res: express.Response) => { this.deleteCollection(req, res) });
+        this.app.get('/health', (req: express.Request, res: express.Response): void => {
+            res.status(200).json({
+                status: 'healthy',
+                timestamp: new Date().toISOString(),
+                message: 'Librarian service is healthy',
+            });
+        });
 
       }
 
