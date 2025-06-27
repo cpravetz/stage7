@@ -100,41 +100,33 @@ export class ModelManager {
         // Get all available models that support the conversation type
         const availableModels = Array.from(this.models.values())
             .filter(model => {
-                console.log(`Evaluating model: ${model.name}, interface: ${model.interfaceName}, service: ${model.serviceName}`);
 
                 // Check if model supports the conversation type
                 if (!model.contentConversation.includes(conversationType)) {
-                    console.log(`Skipping model ${model.name} because it doesn't support conversation type ${conversationType}`);
                     return false;
                 }
 
                 // Check if model's interface is available
                 const interfaceInstance = interfaceManager.getInterface(model.interfaceName);
                 if (!interfaceInstance) {
-                    console.log(`Skipping model ${model.name} because interface ${model.interfaceName} is not available`);
                     return false;
                 }
 
                 // Check if model's service is available
                 const service = serviceManager.getService(model.serviceName);
                 if (!service) {
-                    console.log(`Skipping model ${model.name} because service ${model.serviceName} is not found`);
                     return false;
                 }
 
                 if (!service.isAvailable()) {
-                    console.log(`Skipping model ${model.name} because service ${model.serviceName} is not available`);
-                    console.log(`Service details - apiKey: ${service.apiKey ? 'Set' : 'Not set'}, apiUrl: ${service.apiUrl}`);
                     return false;
                 }
 
                 // Check if model is blacklisted
                 if (this.performanceTracker.isModelBlacklisted(model.name, conversationType)) {
-                    console.log(`Skipping model ${model.name} because it is blacklisted for ${conversationType}`);
                     return false;
                 }
 
-                console.log(`Model ${model.name} is available for selection`);
                 return true;
             });
 

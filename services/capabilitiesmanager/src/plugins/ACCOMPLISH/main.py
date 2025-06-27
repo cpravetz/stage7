@@ -34,12 +34,6 @@ memory_handler = InMemoryLogHandler()
 memory_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
 logger.addHandler(memory_handler)
 
-# Add a property to logger to get logs
-def get_logger_logs():
-    return memory_handler.get_logs()
-
-logger.logs = property(get_logger_logs)
-
 class PluginParameterType:
     STRING = "string"
     NUMBER = "number"
@@ -118,7 +112,7 @@ class AccomplishPlugin:
                 timeout=60
             )
             response.raise_for_status()
-            logger.log(f"Raw brain response: {response}")
+            logger.info(f"Raw brain response: {response}")
             data = response.json()
             return data.get('result') or data.get('response', '')
         except Exception as e:
@@ -246,6 +240,10 @@ Mission Context: {mission_context_str}
             if not isinstance(step, dict):
                 logger.error(f"Invalid step at index {i}: not a dictionary. Step: {step}")
                 return f"Step at index {i} is not a dictionary."
+
+            # If 'actionVerb' is missing but 'verb' is present, copy it
+            if 'actionVerb' not in step and 'verb' in step and isinstance(step['verb'], str) and step['verb'].strip():
+                step['actionVerb'] = step['verb']
 
             # Validate mandatory fields and their types
             if 'actionVerb' not in step or not isinstance(step['actionVerb'], str) or not step['actionVerb'].strip():
@@ -423,7 +421,7 @@ Mission Context: {mission_context_str}
                 "name": "task_conversion_error",
                 "resultType": PluginParameterType.ERROR,
                 "resultDescription": f"Internal error converting plan to tasks: {str(e)}",
-                "result": {"logs": logger.logs},
+                "result": {"logs": memory_handler.get_logs()},
                 "error": str(e)
             }]
 
@@ -471,7 +469,7 @@ Mission Context: {mission_context_str}
                     "name": "error",
                     "resultType": PluginParameterType.ERROR,
                     "resultDescription": "Goal is required for ACCOMPLISH plugin",
-                    "result": {"logs": logger.logs},
+                    "result": {"logs": memory_handler.get_logs()},
                     "error": "No goal provided to ACCOMPLISH plugin"
                 }]
 
@@ -486,7 +484,7 @@ Mission Context: {mission_context_str}
                     "name": "error",
                     "resultType": PluginParameterType.ERROR,
                     "resultDescription": "Failed to get response from Brain service",
-                    "result": {"logs": logger.logs},
+                    "result": {"logs": memory_handler.get_logs()},
                     "error": "Brain service unavailable or returned empty response"
                 }]
 
@@ -507,7 +505,7 @@ Mission Context: {mission_context_str}
                             "name": "plan_validation_error",
                             "resultType": PluginParameterType.ERROR,
                             "resultDescription": validation_error_message,
-                            "result": {"logs": logger.logs},
+                            "result": {"logs": memory_handler.get_logs()},
                             "error": validation_error_message
                         }]
                     
@@ -523,7 +521,7 @@ Mission Context: {mission_context_str}
                         "resultDescription": f"A plan to: {goal}",
                         "result": tasks,
                         "mimeType": "application/json",
-                        "logs": logger.logs
+                        "logs": memory_handler.get_logs()
                     }]
                 elif isinstance(parsed, dict) and parsed.get("type") == "DIRECT_ANSWER":
                     logger.info(f"Received DIRECT_ANSWER: {parsed}")
@@ -551,7 +549,7 @@ Mission Context: {mission_context_str}
                         "name": "brain_response_format_error",
                         "resultType": PluginParameterType.ERROR,
                         "resultDescription": "Brain did not return a recognized JSON object type.",
-                        "result": {"logs": logger.logs},
+                        "result": {"logs": memory_handler.get_logs()},
                         "error": f"Unrecognized JSON object type: {parsed.get('type', 'N/A')}"
                     }]
             except json.JSONDecodeError as e:
@@ -561,7 +559,7 @@ Mission Context: {mission_context_str}
                     "name": "error",
                     "resultType": PluginParameterType.ERROR,
                     "resultDescription": "Invalid JSON response from Brain service",
-                    "result": {"logs": logger.logs},
+                    "result": {"logs": memory_handler.get_logs()},
                     "error": f"JSON parsing error: {str(e)}"
                 }]
         except Exception as e:
@@ -571,7 +569,7 @@ Mission Context: {mission_context_str}
                 "name": "error",
                 "resultType": PluginParameterType.ERROR,
                 "resultDescription": f"Error in ACCOMPLISH plugin execution",
-                "result": {"logs": logger.logs},
+                "result": {"logs": memory_handler.get_logs()},
                 "error": str(e)
             }]
 
@@ -617,7 +615,7 @@ def main():
             "name": "error",
             "resultType": PluginParameterType.ERROR,
             "resultDescription": "Plugin execution error",
-            "result": {"logs": logger.logs},
+            "result": {"logs": memory_handler.get_logs()},
             "error": str(e)
         }]
         print(json.dumps(error_result))
