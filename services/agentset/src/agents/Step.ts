@@ -704,40 +704,33 @@ export class Step {
         return planTasks.map((task, idx) => {
             const inputs = new Map<string, PluginInput>();
             if (task.inputs) {
-                if (task.inputs instanceof Map) {
-                    task.inputs.forEach((value: PluginInput, key: string) => inputs.set(key, value));
-                } else {
-                    Object.entries(task.inputs).forEach(([key, value]: [string, any]) => {
-                        inputs.set(key, {
-                            inputName: key,
-                            inputValue: value.inputValue !== undefined ? value.inputValue : value,
-                            args: value.args || {}
-                        } as PluginInput);
-                    });
-                }
+                // New format: each input is an object with inputValue possibly referencing ${outputname}
+                Object.entries(task.inputs).forEach(([key, value]: [string, any]) => {
+                    let inputValue = value.inputValue !== undefined ? value.inputValue : value;
+                    // If inputValue is a string of the form ${outputname}, leave as-is (will resolve via dependencies)
+                    // Otherwise, treat as literal value
+                    inputs.set(key, {
+                        inputName: key,
+                        inputValue,
+                        args: value.args || {}
+                    } as PluginInput);
+                });
             }
             const dependencies: StepDependency[] = [];
+            // New format: dependencies is an array of objects mapping outputName to step number
             if (task.dependencies && Array.isArray(task.dependencies)) {
                 task.dependencies.forEach((dep: any) => {
-                    let sourceStepId: string | undefined = undefined;
-                    if (dep.sourceStepNo && stepNumberToUUID[dep.sourceStepNo]) {
-                        sourceStepId = stepNumberToUUID[dep.sourceStepNo];
-                    } else if (dep.outputName && outputNameToUUID[dep.outputName]) {
-                        sourceStepId = outputNameToUUID[dep.outputName];
-                    } else if (dep.inputName && outputNameToUUID[dep.inputName]) {
-                        sourceStepId = outputNameToUUID[dep.inputName];
-                    } else if (typeof dep === 'string' && /^step_\d+$/.test(dep) && stepLabelToUUID[dep]) {
-                        // Support for 'step_1' style references
-                        sourceStepId = stepLabelToUUID[dep];
-                        console.warn(`[createFromPlan] Resolved legacy dependency label '${dep}' to UUID '${sourceStepId}'`);
-                    }
+                    // dep is { outputName: stepNo }
+                    const outputName = Object.keys(dep)[0];
+                    const sourceStepNo = dep[outputName];
+                    const sourceStepId = stepNumberToUUID[sourceStepNo];
                     if (!sourceStepId) {
                         throw new Error(`[createFromPlan] Cannot resolve dependency for step ${task.actionVerb} (stepNo ${startingStepNo + idx}): dep=${JSON.stringify(dep)}`);
                     }
                     dependencies.push({
-                        inputName: dep.inputName,
+                        inputName: outputName, // The input that will receive this output
                         sourceStepId,
-                        outputName: dep.outputName
+                        outputName
                     });
                 });
             }
