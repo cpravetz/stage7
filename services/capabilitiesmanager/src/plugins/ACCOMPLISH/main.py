@@ -137,13 +137,13 @@ DO NOT include any explanations, markdown formatting, or additional text outside
             "actionVerb": "DESCRIPTIVE_ACTION_VERB",
             "description": "Brief description of the step",
             "inputs": {{
-                "inputName1": {{"value": "predeterminedValue"}},
-                "inputName2": {{"outputKey": "outputKeyFromPreviousStep"}}
+                "a descriptive input name": {{"value": "predeterminedValue"}},
+                "a different descriptive input name": {{"outputKey": "name of output item containing the value needed here"}}
             }},
             "dependencies": {{}},
             "outputs": {{
-                "outputKey1": "Description of output1",
-                "outputKey2": "Description of output2"
+                "descriptive output name1": "Description of output1",
+                "descriptive output name2": "Description of output2"
             }},
             "recommendedRole": "coordinator"
         }},
@@ -152,7 +152,7 @@ DO NOT include any explanations, markdown formatting, or additional text outside
             "actionVerb": "ANOTHER_ACTION",
             "description": "Description of another step",
             "inputs": {{
-                "inputName3": {{"outputKey": "outputKey2"}}
+                "a descriptive input name ": {{"outputKey": "eg: descriptive output name2"}}
             }},
             "dependencies": {{"outputKey2": 1}},
             "outputs": {{

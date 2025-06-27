@@ -181,7 +181,6 @@ services:
       CAPABILITIESMANAGER_URL: *capabilitiesmanagerUrl
       ENGINEER_CLIENT_SECRET: *sharedSecret
       CLIENT_SECRET: *sharedSecret
-      GITHUB_TOKEN: &githubToken 'your_github_token_here'
       GITHUB_USERNAME: &githubUsername 'cpravetz'
       GIT_DEFAULT_BRANCH: &gitDefaultBranch main
       GIT_REPOSITORY_URL: &gitRepositoryUrl 'https://github.com/cpravetz/s7plugins.git'
