@@ -5,8 +5,8 @@ import fs from 'fs';
 import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import { Step, MapSerializer, BaseEntity, ServiceTokenManager } from '@cktmcs/shared';
-import { PluginInput, PluginOutput, PluginDefinition, PluginParameterType, environmentType, PluginManifest, PluginLocator, PluginRepositoryType } from '@cktmcs/shared';
-import { PlanTemplate, PlanTemplateCreateRequest, PlanTemplateUpdateRequest, PlanExecutionRequest, ExecutionContext as PlanExecutionContext, StepExecution, PlanExecutionStatus, StepExecutionStatus, OpenAPITool, OpenAPIExecutionRequest, OpenAPIExecutionResult } from '@cktmcs/shared';
+import { PluginInput, PluginOutput, PluginDefinition, PluginParameterType, environmentType, PluginManifest, PluginLocator, PluginRepositoryType, PluginParameter, DefinitionManifest, DefinitionType, OpenAPITool, MCPTool, MCPActionMapping, MCPAuthentication, MCPServiceTarget, OpenAPIExecutionRequest, OpenAPIExecutionResult } from '@cktmcs/shared'; // Added DefinitionManifest, DefinitionType
+import { PlanTemplate, PlanTemplateCreateRequest, PlanTemplateUpdateRequest, PlanExecutionRequest, ExecutionContext as PlanExecutionContext, StepExecution, PlanExecutionStatus, StepExecutionStatus } from '@cktmcs/shared'; // Removed OpenAPITool, MCPTool etc from here as they are imported above
 import { executePluginInSandbox } from '@cktmcs/shared';
 import { validatePluginPermissions, hasDangerousPermissions } from '@cktmcs/shared';
 import { promisify } from 'util';
@@ -266,50 +266,73 @@ export class CapabilitiesManager extends BaseEntity {
         }
 
         try {
-            // Query Marketplace for the handler for this actionVerb
+            // Query PluginRegistry for the handler for this actionVerb
+            // The handlerResult.handler will be a PluginManifest (or DefinitionManifest)
             const handlerResult = await this.getHandlerForActionVerb(step.actionVerb, trace_id);
-            if (handlerResult) {
-                if (handlerResult.type === 'plugin') {
-                    // Execute plugin as before
-                    const plugin = handlerResult.handler as PluginDefinition;
-                    const validatedInputs = await validateAndStandardizeInputs(plugin, step.inputs);
-                    if (!validatedInputs.success) {
+
+            if (handlerResult && handlerResult.handler) {
+                const manifest = handlerResult.handler as PluginManifest; // Could be DefinitionManifest
+
+                if (manifest.language === DefinitionType.OPENAPI) {
+                    const definitionManifest = manifest as DefinitionManifest;
+                    if (definitionManifest.toolDefinition && (definitionManifest.toolDefinition as OpenAPITool).specUrl) {
+                        const result = await this.executeOpenAPIToolInternal(definitionManifest.toolDefinition as OpenAPITool, step, trace_id);
+                        res.status(200).send(MapSerializer.transformForSerialization(result));
+                        return;
+                    } else {
+                         throw generateStructuredError({
+                            error_code: GlobalErrorCodes.CAPABILITIES_MANAGER_INVALID_HANDLER_DEF,
+                            severity: ErrorSeverity.ERROR,
+                            message: `OpenAPI manifest for verb '${step.actionVerb}' is missing toolDefinition.`,
+                            trace_id_param: trace_id, source_component
+                        });
+                    }
+                } else if (manifest.language === DefinitionType.MCP) {
+                    const definitionManifest = manifest as DefinitionManifest;
+                     if (definitionManifest.toolDefinition && (definitionManifest.toolDefinition as MCPTool).actionMappings) {
+                        const result = await this.executeMCPTool(definitionManifest.toolDefinition as MCPTool, step, trace_id);
+                        res.status(200).send(MapSerializer.transformForSerialization(result));
+                        return;
+                    } else {
+                         throw generateStructuredError({
+                            error_code: GlobalErrorCodes.CAPABILITIES_MANAGER_INVALID_HANDLER_DEF,
+                            severity: ErrorSeverity.ERROR,
+                            message: `MCP manifest for verb '${step.actionVerb}' is missing toolDefinition.`,
+                            trace_id_param: trace_id, source_component
+                        });
+                    }
+                } else if (manifest.language === 'javascript' || manifest.language === 'python' || manifest.language === 'container') {
+                    // Standard code-based plugin execution
+                    const pluginDefinition = manifest as PluginDefinition; // Assuming PluginManifest is compatible enough
+                    const validatedInputs = await validateAndStandardizeInputs(pluginDefinition, step.inputs);
+                    if (!validatedInputs.success || !validatedInputs.inputs) {
                         throw generateStructuredError({
                             error_code: GlobalErrorCodes.INPUT_VALIDATION_FAILED,
                             severity: ErrorSeverity.ERROR,
                             message: validatedInputs.error || "Input validation failed for plugin.",
                             source_component,
-                            contextual_info: {
-                                plugin_id: plugin.id,
-                                version: plugin.version,
-                                verb: plugin.verb
-                            },
+                            contextual_info: { plugin_id: pluginDefinition.id, version: pluginDefinition.version, verb: pluginDefinition.verb },
                             trace_id_param: trace_id
                         });
                     }
-                    const manifestForExecution: PluginManifest = {
-                        ...plugin,
-                        repository: {
-                            type: 'local' as any,
-                            url: '',
-                            dependencies: {}
-                        }
-                    };
-                    const { pluginRootPath, effectiveManifest } = await this.pluginRegistry.preparePluginForExecution(manifestForExecution);
-                    const result = await this.executePlugin(effectiveManifest, validatedInputs.inputs || new Map(), pluginRootPath, trace_id);
+                    // preparePluginForExecution expects PluginManifest, which DefinitionManifest extends
+                    const { pluginRootPath, effectiveManifest } = await this.pluginRegistry.preparePluginForExecution(manifest);
+                    const result = await this.executePlugin(effectiveManifest, validatedInputs.inputs, pluginRootPath, trace_id);
                     res.status(200).send(MapSerializer.transformForSerialization(result));
                     return;
-                } else if (handlerResult.type === 'planTemplate') {
-                    // Execute plan template via internal utility (now only for execution, not CRUD)
-                    const planTemplate = handlerResult.handler as any; // PlanTemplate
-                    // You may want to move plan template execution logic to a shared utility
-                    // For now, we call the internal execution method
-                    const executionResult = await this.executePlanTemplateHandler(planTemplate, step, trace_id);
-                    res.status(200).send(MapSerializer.transformForSerialization(executionResult));
-                    return;
+                }
+                // else if (handlerResult.type === 'planTemplate') { // PlanTemplates might need a different handling or also be a language type
+                //     const planTemplate = handlerResult.handler as any;
+                //     const executionResult = await this.executePlanTemplateHandler(planTemplate, step, trace_id);
+                //     res.status(200).send(MapSerializer.transformForSerialization(executionResult));
+                //     return;
+                // }
+                 else {
+                    console.warn(`[${trace_id}] ${source_component}: Unknown handler language/type '${manifest.language}' for verb '${step.actionVerb}'. Falling back.`);
                 }
             }
-            // If neither plugin nor plan template found, fall back to ACCOMPLISH/Brain
+
+            // If no specific handler found via PluginRegistry, or unknown type, fall back to ACCOMPLISH/Brain
             this.logPluginLookupFailure(step.actionVerb, trace_id, `No handler found for actionVerb '${step.actionVerb}'. Invoking ACCOMPLISH/Brain for reasoning.`);
             const cachedPlanArray = await this.checkCachedPlan(step.actionVerb);
             if (cachedPlanArray && cachedPlanArray.length > 0) {
@@ -342,12 +365,42 @@ export class CapabilitiesManager extends BaseEntity {
             if (plugin) {
                 return { type: 'plugin', handler: plugin };
             }
+
+            // Try to find an OpenAPI tool - This direct call will be removed.
+            // const openApiTool = await this.findOpenAPIToolByActionVerb(actionVerb);
+            // if (openApiTool) {
+            //     console.log(`[${trace_id}] ${source_component}: Found OpenAPI tool for actionVerb '${actionVerb}': ${openApiTool.id}`);
+            //     return { type: 'openapiTool', handler: openApiTool };
+            // }
+
+            // Try to find an MCP tool - This direct call will be removed.
+            // const mcpTool = await this.findMCPToolByActionVerb(actionVerb, trace_id);
+            // if (mcpTool) {
+            //     console.log(`[${trace_id}] ${source_component}: Found MCP tool for actionVerb '${actionVerb}': ${mcpTool.id}`);
+            //     return { type: 'mcpTool', handler: mcpTool };
+            // }
+
+            // If plugin is found by pluginRegistry, it could be a code plugin, openapi tool, or mcp tool.
+            // The type differentiation will happen based on plugin.language in executeActionVerb.
+            if (plugin) {
+                 // The 'type' here is generic 'plugin' now, specific type (openapi, mcp) determined by language later.
+                return { type: 'plugin', handler: plugin };
+            }
+
+            // TODO: Add PlanTemplate lookup here if they are also to be channelled via PluginRegistry.
+            // For now, PlanTemplates are not dynamically looked up as primary handlers in this function if not via pluginRegistry.
+
             return null;
         } catch (error: any) {
             console.error(`[${trace_id}] ${source_component}: Error resolving handler for actionVerb '${actionVerb}':`, error.message);
             return null;
         }
     }
+
+    // private async findMCPToolByActionVerb(actionVerb: string, trace_id: string): Promise<MCPTool | null> {
+    //     // This method is being removed as MCP tools will be fetched via PluginRegistry -> PluginMarketplace.
+    //     // ... (implementation removed)
+    // }
 
     /**
      * Execute a plan template handler (utility for plan template execution only)
@@ -1335,274 +1388,150 @@ export class CapabilitiesManager extends BaseEntity {
             return await this.executePlugin(effectiveManifest, validatedInputs.inputs!, pluginRootPath, trace_id);
         }
 
-        // If no plugin found, try OpenAPI tools
-        const openApiTool = await this.findOpenAPIToolByActionVerb(step.actionVerb);
-        if (openApiTool) {
-            return await this.executeOpenAPIToolInternal(openApiTool, step, trace_id);
+        // If no plugin found, try OpenAPI tools - This direct call will be removed
+        // const openApiTool = await this.findOpenAPIToolByActionVerb(step.actionVerb);
+        // if (openApiTool) {
+        //     return await this.executeOpenAPIToolInternal(openApiTool, step, trace_id);
+        // }
+
+        // If plugin (which could be a DefinitionManifest) is found:
+        if (plugin) {
+            // Check if it's a DefinitionManifest for OpenAPI or MCP
+            if (plugin.language === DefinitionType.OPENAPI && (plugin as DefinitionManifest).toolDefinition) {
+                const definitionManifest = plugin as DefinitionManifest;
+                const openApiToolDef = definitionManifest.toolDefinition as OpenAPITool;
+                if (openApiToolDef.specUrl) { // Basic check for valid OpenAPITool
+                    return await this.executeOpenAPIToolInternal(openApiToolDef, step, trace_id);
+                } else {
+                    throw new Error(`OpenAPI manifest for verb '${step.actionVerb}' is missing a valid toolDefinition in executeActionVerbInternal.`);
+                }
+            } else if (plugin.language === DefinitionType.MCP && (plugin as DefinitionManifest).toolDefinition) {
+                const definitionManifest = plugin as DefinitionManifest;
+                const mcpToolDef = definitionManifest.toolDefinition as MCPTool;
+                if (mcpToolDef.actionMappings) { // Basic check for valid MCPTool
+                    return await this.executeMCPTool(mcpToolDef, step, trace_id);
+                } else {
+                     throw new Error(`MCP manifest for verb '${step.actionVerb}' is missing a valid toolDefinition in executeActionVerbInternal.`);
+                }
+            } else if (plugin.language === 'javascript' || plugin.language === 'python' || plugin.language === 'container') {
+                 // This was the original logic for code-based plugins in this method.
+                 // It should have been hit if the 'plugin' variable was a code plugin.
+                 // The previous part of executeActionVerbInternal already handles this:
+                 //   const validatedInputs = await validateAndStandardizeInputs(plugin as PluginDefinition, step.inputs);
+                 //   ...
+                 //   const { pluginRootPath, effectiveManifest } = await this.pluginRegistry.preparePluginForExecution(plugin);
+                 //   return await this.executePlugin(effectiveManifest, validatedInputs.inputs!, pluginRootPath, trace_id);
+                 // So, if we reach here and plugin is a code plugin, it means the above block (which I am assuming is before this search block)
+                 // already returned. If it didn't, then the structure of executeActionVerbInternal needs more review.
+                 // For now, let's assume if it's a code plugin, it's handled before this point in the method.
+                 // If it's an unknown language type that's not definition-based:
+                 console.warn(`[${trace_id}] executeActionVerbInternal: Handler found with language '${plugin.language}' but not a recognized definition type or standard code type. Falling back.`);
+            } else {
+                 console.warn(`[${trace_id}] executeActionVerbInternal: Handler found with language '${plugin.language}' but not a recognized definition type (OpenAPI, MCP) or standard code type. Falling back.`);
+            }
         }
 
-        // If neither plugin nor OpenAPI tool found, handle as unknown verb
+        // If no handler found via PluginRegistry, or if it was an unknown type, handle as unknown verb
         return await this.handleUnknownVerb(step, trace_id);
     }
 
-    // OpenAPI Tool Management Methods
+    // OpenAPI Tool Management Methods - These will be simplified or removed if all access is via PluginRegistry
 
-    private async listOpenAPITools(req: express.Request, res: express.Response): Promise<void> {
-        const trace_id = (req as any).trace_id || `listOpenAPITools-${uuidv4().substring(0,8)}`;
-        const source_component = "CapabilitiesManager.listOpenAPITools";
+    // private async listOpenAPITools(req: express.Request, res: express.Response): Promise<void> {
+    //     // ... (implementation removed as listing will go via pluginRegistry -> marketplace)
+    // }
 
-        try {
-            const { category, tags, search } = req.query;
+    // private async getOpenAPITool(req: express.Request, res: express.Response): Promise<void> {
+    //    // ... (implementation removed)
+    // }
 
-            // Build query based on filters
-            let query: any = {};
-            if (category) query['metadata.category'] = category;
-            if (tags) {
-                const tagArray = Array.isArray(tags) ? tags : [tags];
-                query['metadata.tags'] = { $in: tagArray };
-            }
-            if (search) {
-                query.$or = [
-                    { name: { $regex: search, $options: 'i' } },
-                    { description: { $regex: search, $options: 'i' } }
-                ];
-            }
-
-            const response = await this.authenticatedApi.post(`http://${this.librarianUrl}/queryData`, {
-                collection: 'openApiTools',
-                query: query,
-                limit: 100
-            });
-
-            console.log(`[${trace_id}] ${source_component}: Listed OpenAPI tools with filters:`, { category, tags, search });
-            res.status(200).json({
-                tools: response.data?.data || [],
-                count: response.data?.data?.length || 0
-            });
-
-        } catch (error: any) {
-            console.error(`[${trace_id}] ${source_component}: Error listing OpenAPI tools:`, error);
-            res.status(500).json({
-                error: 'Failed to list OpenAPI tools',
-                details: error.message
-            });
-        }
-    }
-
-    private async getOpenAPITool(req: express.Request, res: express.Response): Promise<void> {
-        const trace_id = (req as any).trace_id || `getOpenAPITool-${uuidv4().substring(0,8)}`;
-        const source_component = "CapabilitiesManager.getOpenAPITool";
-
-        try {
-            const { id } = req.params;
-
-            const response = await this.authenticatedApi.get(`http://${this.librarianUrl}/loadData/${id}`, {
-                params: {
-                    collection: 'openApiTools',
-                    storageType: 'mongo'
-                }
-            });
-
-            if (!response.data?.data) {
-                res.status(404).json({
-                    error: 'OpenAPI tool not found',
-                    toolId: id
-                });
-                return;
-            }
-
-            console.log(`[${trace_id}] ${source_component}: Retrieved OpenAPI tool: ${id}`);
-            res.status(200).json(response.data.data);
-
-        } catch (error: any) {
-            console.error(`[${trace_id}] ${source_component}: Error retrieving OpenAPI tool:`, error);
-            res.status(500).json({
-                error: 'Failed to retrieve OpenAPI tool',
-                details: error.message
-            });
-        }
-    }
-
-    private async executeOpenAPITool(req: express.Request, res: express.Response): Promise<void> {
-        const trace_id = (req as any).trace_id || `executeOpenAPITool-${uuidv4().substring(0,8)}`;
-        const source_component = "CapabilitiesManager.executeOpenAPITool";
-
-        try {
-            const { id } = req.params;
-            const executionRequest: OpenAPIExecutionRequest = req.body;
-
-            // Get the OpenAPI tool
-            const toolResponse = await this.authenticatedApi.get(`http://${this.librarianUrl}/loadData/${id}`, {
-                params: {
-                    collection: 'openApiTools',
-                    storageType: 'mongo'
-                }
-            });
-
-            if (!toolResponse.data?.data) {
-                res.status(404).json({
-                    error: 'OpenAPI tool not found',
-                    toolId: id
-                });
-                return;
-            }
-
-            const tool: OpenAPITool = toolResponse.data.data;
-
-            // Create a Step object for internal execution
-            const step: Step = {
-                id: uuidv4(),
-                stepNo: 1,
-                actionVerb: executionRequest.actionVerb,
-                inputs: new Map(Object.entries(executionRequest.inputs).map(([k, v]) => [k, { inputName: k, inputValue: v, args: {} }])),
-                dependencies: [],
-                status: 'pending'
-            };
-
-            const result = await this.executeOpenAPIToolInternal(tool, step, trace_id);
-
-            console.log(`[${trace_id}] ${source_component}: Executed OpenAPI tool: ${id}`);
-            res.status(200).json({
-                success: true,
-                outputs: result,
-                toolId: id,
-                actionVerb: executionRequest.actionVerb
-            });
-
-        } catch (error: any) {
-            console.error(`[${trace_id}] ${source_component}: Error executing OpenAPI tool:`, error);
-            res.status(500).json({
-                error: 'Failed to execute OpenAPI tool',
-                details: error.message
-            });
-        }
-    }
+    // private async executeOpenAPITool(req: express.Request, res: express.Response): Promise<void> {
+    //     // ... (This specific endpoint might be removed if all execution is via /executeAction)
+    // }
 
     private async listCapabilities(req: express.Request, res: express.Response): Promise<void> {
         const trace_id = (req as any).trace_id || `listCapabilities-${uuidv4().substring(0,8)}`;
         const source_component = "CapabilitiesManager.listCapabilities";
+        const { category, search, type } = req.query;
+        const capabilities: any[] = [];
 
         try {
-            const { category, search, type } = req.query;
+            const locators = await this.pluginRegistry.list(); // Single source for all locators
 
-            // Get plugin locators first
-            const pluginLocators = await this.pluginRegistry.list();
+            for (const locator of locators) {
+                // Basic filtering based on type query param
+                if (type && locator.language !== type && !(type === 'plugin' && !locator.language) ) { // 'plugin' type can include older locators without language
+                    continue;
+                }
 
-            // Get OpenAPI tools
-            let openApiQuery: any = {};
-            if (category) openApiQuery['metadata.category'] = category;
-            if (search) {
-                openApiQuery.$or = [
-                    { name: { $regex: search, $options: 'i' } },
-                    { description: { $regex: search, $options: 'i' } }
-                ];
-            }
+                // Fetch full manifest for more details and advanced filtering
+                // This could be slow if there are many locators; consider optimizing if performance is an issue.
+                let manifest: PluginManifest | undefined;
+                try {
+                    manifest = await this.pluginRegistry.fetchOne(locator.id, locator.version);
+                } catch (fetchError) {
+                    console.warn(`[${trace_id}] ${source_component}: Failed to fetch manifest for ${locator.id} v${locator.version}. Using locator info. Error: ${fetchError}`);
+                }
 
-            const openApiResponse = await this.authenticatedApi.post(`http://${this.librarianUrl}/queryData`, {
-                collection: 'openApiTools',
-                query: openApiQuery,
-                limit: 100
-            });
+                const name = manifest?.verb || locator.verb;
+                const description = manifest?.description || `Capability: ${locator.verb}`;
+                const capCategory = manifest?.metadata?.category?.[0] || manifest?.metadata?.category || locator.language || 'general';
+                const tags = manifest?.metadata?.tags || [];
 
-            const openApiTools = openApiResponse.data?.data || [];
-
-            // Get plan templates
-            let templateQuery: any = {};
-            if (category) templateQuery['metadata.category'] = category;
-            if (search) {
-                templateQuery.$or = [
-                    { name: { $regex: search, $options: 'i' } },
-                    { description: { $regex: search, $options: 'i' } }
-                ];
-            }
-
-            const templateResponse = await this.authenticatedApi.post(`http://${this.librarianUrl}/queryData`, {
-                collection: 'planTemplates',
-                query: templateQuery,
-                limit: 100
-            });
-
-            const planTemplates = templateResponse.data?.data || [];
-
-            // Combine and format capabilities
-            const capabilities = [];
-
-           
-            // Add plugins - fetch full manifests for complete information
-            if (!type || type === 'plugin') {
-                for (const locator of pluginLocators) {
-                    try {
-                        const plugin = await this.pluginRegistry.fetchOne(locator.id, locator.version);
-                        if (plugin) {
-                            capabilities.push({
-                                id: plugin.id,
-                                name: plugin.verb,
-                                description: plugin.description,
-                                type: 'plugin',
-                                actionVerb: plugin.verb,
-                                category: plugin.metadata?.category || 'plugin',
-                                tags: plugin.metadata?.tags || []
-                            });
-                        }
-                    } catch (error) {
-                        // If we can't fetch the full manifest, use basic info from locator
-                        capabilities.push({
-                            id: locator.id,
-                            name: locator.verb,
-                            description: `Plugin: ${locator.verb}`,
-                            type: 'plugin',
-                            actionVerb: locator.verb,
-                            category: 'plugin',
-                            tags: []
-                        });
+                // Search filter
+                if (search) {
+                    const s = (search as string).toLowerCase();
+                    if (!name.toLowerCase().includes(s) && !description.toLowerCase().includes(s) && !capCategory.toLowerCase().includes(s)) {
+                        continue;
                     }
                 }
-            }
 
-            // Add OpenAPI tools
-            if (!type || type === 'openapi') {
-                for (const tool of openApiTools) {
-                    for (const mapping of tool.actionMappings || []) {
-                        capabilities.push({
-                            id: `${tool.id}-${mapping.actionVerb}`,
-                            name: mapping.actionVerb,
-                            description: mapping.description || tool.description,
-                            type: 'openapi',
-                            actionVerb: mapping.actionVerb,
-                            category: tool.metadata?.category || 'external-api',
-                            tags: tool.metadata?.tags || [],
-                            toolId: tool.id,
-                            method: mapping.method,
-                            path: mapping.path
-                        });
+                // Category filter
+                if (category && capCategory !== category) {
+                    continue;
+                }
+
+                let capabilityEntry: any = {
+                    id: locator.id, // For code plugins, this is fine. For definition-based, might need verb specific ID.
+                    name: name,
+                    description: description,
+                    type: locator.language || 'plugin', // Use language as type
+                    actionVerb: locator.verb, // Primary verb
+                    category: capCategory,
+                    tags: tags,
+                    version: locator.version
+                };
+
+                // Add more specific details if it's an OpenAPI or MCP tool from its definition if needed for UI
+                if (manifest && manifest.language === 'openapi' && (manifest as any).toolDefinition) {
+                    const openApiDef = (manifest as any).toolDefinition as OpenAPITool;
+                    // Find specific action mapping if locator.verb is one of them
+                    const actionMapping = openApiDef.actionMappings.find(m => m.actionVerb === locator.verb);
+                    capabilityEntry.toolId = openApiDef.id;
+                    if (actionMapping) {
+                        capabilityEntry.method = actionMapping.method;
+                        capabilityEntry.path = actionMapping.path;
+                    }
+                } else if (manifest && manifest.language === 'mcp' && (manifest as any).toolDefinition) {
+                    const mcpDef = (manifest as any).toolDefinition as MCPTool;
+                     const actionMapping = mcpDef.actionMappings.find(m => m.actionVerb === locator.verb);
+                    capabilityEntry.toolId = mcpDef.id;
+                    if (actionMapping) {
+                         capabilityEntry.serviceTarget = actionMapping.mcpServiceTarget;
                     }
                 }
+                 // If multiple actionVerbs per manifest, need to decide how to represent them.
+                 // Current locator structure has one verb. If a manifest (OpenAPI/MCP) has multiple verbs,
+                 // LibrarianDefinitionRepository.list() should create multiple locators.
+
+                capabilities.push(capabilityEntry);
             }
 
-            // Add plan templates
-            if (!type || type === 'template') {
-                for (const template of planTemplates) {
-                    capabilities.push({
-                        id: template.id,
-                        name: template.name,
-                        description: template.description,
-                        type: 'template',
-                        actionVerb: `EXECUTE_TEMPLATE_${template.id.toUpperCase()}`,
-                        category: template.metadata?.category || 'template',
-                        tags: template.metadata?.tags || []
-                    });
-                }
-            }
 
-            console.log(`[${trace_id}] ${source_component}: Listed ${capabilities.length} capabilities`);
+            console.log(`[${trace_id}] ${source_component}: Listed ${capabilities.length} capabilities based on registry.`);
             res.status(200).json({
                 capabilities,
                 count: capabilities.length,
-                breakdown: {
-                    plugins: pluginLocators.length,
-                    openApiTools: openApiTools.length,
-                    planTemplates: planTemplates.length
-                }
             });
 
         } catch (error: any) {
@@ -1615,6 +1544,7 @@ export class CapabilitiesManager extends BaseEntity {
     }
 
     private async findOpenAPIToolByActionVerb(actionVerb: string): Promise<OpenAPITool | null> {
+        // This method is being removed as OpenAPI tools will be fetched via PluginRegistry -> PluginMarketplace.
         try {
             const response = await this.authenticatedApi.post(`http://${this.librarianUrl}/queryData`, {
                 collection: 'openApiTools',
@@ -1922,6 +1852,244 @@ export class CapabilitiesManager extends BaseEntity {
             console.error(`[${trace_id}] ${source_component}: Cleanup failed: ${error.message}`);
         }
     }
+
+    private async executeMCPTool(mcpTool: MCPTool, step: Step, trace_id: string): Promise<PluginOutput[]> {
+        const source_component = "CapabilitiesManager.executeMCPTool";
+        console.log(`[${trace_id}] ${source_component}: Executing MCP Tool ${mcpTool.id} for actionVerb ${step.actionVerb}`);
+
+        const actionMapping = mcpTool.actionMappings.find(m => m.actionVerb === step.actionVerb);
+        if (!actionMapping) {
+            const errorMsg = `ActionVerb '${step.actionVerb}' not found in MCP Tool '${mcpTool.id}'. This should have been caught by getHandlerForActionVerb.`;
+            console.error(`[${trace_id}] ${source_component}: ${errorMsg}`);
+            return [this.createErrorOutput(GlobalErrorCodes.CAPABILITIES_MANAGER_MCP_TOOL_EXECUTION_FAILED, errorMsg, trace_id)];
+        }
+
+        try {
+            // 1. Validate Inputs
+            const validatedInputsResult = await validateAndStandardizeInputs(actionMapping as any, step.inputs); // Cast as any because actionMapping is not PluginDefinition
+            if (!validatedInputsResult.success || !validatedInputsResult.inputs) {
+                const errorMsg = validatedInputsResult.error || "Input validation failed for MCP tool.";
+                console.error(`[${trace_id}] ${source_component}: ${errorMsg}`);
+                return [this.createErrorOutput(GlobalErrorCodes.INPUT_VALIDATION_FAILED, errorMsg, trace_id, { toolId: mcpTool.id, actionVerb: step.actionVerb })];
+            }
+            const validatedInputs = validatedInputsResult.inputs;
+            const inputsObject: { [key: string]: any } = {};
+            validatedInputs.forEach((value, key) => {
+                inputsObject[key] = value.inputValue;
+            });
+
+            // 2. Prepare Request for MCP Service
+            // This part is highly dependent on the specifics of MCPServiceTarget and how MCP services are called.
+            // For this example, let's assume mcpServiceTarget.serviceName is a key for a URL in config or env,
+            // and we make a POST request with inputsObject as JSON body.
+
+            const mcpTarget = actionMapping.mcpServiceTarget;
+            let targetUrl = mcpTarget.serviceName; // Could be a direct URL or a service discovery key
+
+            // Basic service discovery placeholder (replace with actual discovery if used)
+            if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
+                 // Try to resolve from environment, assuming format MCP_SERVICE_<NAME>_URL
+                const envUrl = process.env[`MCP_SERVICE_${targetUrl.toUpperCase().replace(/-/g, '_')}_URL`];
+                if (envUrl) {
+                    targetUrl = envUrl;
+                } else {
+                    // Fallback or error if service name cannot be resolved
+                    console.error(`[${trace_id}] ${source_component}: Cannot resolve MCP service name '${mcpTarget.serviceName}' to a URL.`);
+                    return [this.createErrorOutput(GlobalErrorCodes.CAPABILITIES_MANAGER_MCP_TOOL_EXECUTION_FAILED, `Cannot resolve MCP service name '${mcpTarget.serviceName}'.`, trace_id)];
+                }
+            }
+
+            // Append endpoint/command if it's a path
+            if (mcpTarget.endpointOrCommand.startsWith('/')) {
+                targetUrl += mcpTarget.endpointOrCommand;
+            } else {
+                // If not a path, it might be part of the payload or a different protocol.
+                // This example focuses on HTTP.
+                console.warn(`[${trace_id}] ${source_component}: MCP endpointOrCommand '${mcpTarget.endpointOrCommand}' is not a path, specific handling required.`);
+            }
+
+            const requestConfig: any = {
+                method: mcpTarget.method.toLowerCase() || 'post',
+                url: targetUrl,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Trace-ID': trace_id,
+                    // Add other common headers
+                },
+                data: inputsObject // Assuming inputs are sent as JSON body
+            };
+
+            // Add additional static config from mcpServiceTarget
+            if (mcpTarget.additionalConfig) {
+                if (mcpTarget.additionalConfig.headers) {
+                    requestConfig.headers = { ...requestConfig.headers, ...mcpTarget.additionalConfig.headers };
+                }
+                // Handle other additionalConfig fields as needed
+            }
+
+
+            // 3. Handle Authentication
+            const authConfig = actionMapping.authentication || mcpTool.authentication;
+            if (authConfig) {
+                await this.applyMCPAuthentication(requestConfig.headers, authConfig, trace_id);
+            }
+
+
+            // 4. Make the call
+            console.log(`[${trace_id}] ${source_component}: Calling MCP service. URL: ${requestConfig.url}, Method: ${requestConfig.method}`);
+            const mcpResponse = await axios(requestConfig);
+
+            // 5. Transform Response to PluginOutput[]
+            // This is also highly dependent on the expected response structure from MCP services
+            // and what's defined in actionMapping.outputs.
+            // For simplicity, assume the response data is an object with keys matching output names.
+            const outputs: PluginOutput[] = [];
+            if (mcpResponse.data && typeof mcpResponse.data === 'object') {
+                for (const outputDef of actionMapping.outputs) {
+                    if (mcpResponse.data.hasOwnProperty(outputDef.name)) {
+                        outputs.push({
+                            success: true,
+                            name: outputDef.name,
+                            resultType: outputDef.type,
+                            result: mcpResponse.data[outputDef.name],
+                            resultDescription: outputDef.description || `Output from MCP tool ${mcpTool.id}`,
+                        });
+                    } else {
+                         outputs.push({
+                            success: false, // Or true if partial success is allowed and output is optional
+                            name: outputDef.name,
+                            resultType: PluginParameterType.ERROR,
+                            result: null,
+                            resultDescription: `Output '${outputDef.name}' not found in MCP response.`,
+                            error: `Output '${outputDef.name}' not found in MCP response.`
+                        });
+                    }
+                }
+                 // If no specific outputs matched, but we got data, return it as a generic result
+                if (outputs.length === 0) {
+                     outputs.push({
+                        success: true,
+                        name: 'mcp_result',
+                        resultType: PluginParameterType.OBJECT,
+                        result: mcpResponse.data,
+                        resultDescription: `Raw response from MCP tool ${mcpTool.id}`,
+                    });
+                }
+
+            } else {
+                // Handle non-object or empty responses
+                outputs.push({
+                    success: true, // Or false if data is strictly expected
+                    name: 'mcp_response',
+                    resultType: this.inferResultType(mcpResponse.data),
+                    result: mcpResponse.data,
+                    resultDescription: `Response from MCP tool ${mcpTool.id}`,
+                });
+            }
+
+            console.log(`[${trace_id}] ${source_component}: MCP Tool ${mcpTool.id} executed successfully.`);
+            return outputs;
+
+        } catch (error: any) {
+            const sError = generateStructuredError({
+                error_code: GlobalErrorCodes.CAPABILITIES_MANAGER_MCP_TOOL_EXECUTION_FAILED,
+                severity: ErrorSeverity.ERROR,
+                message: `MCP Tool '${mcpTool.id}' action '${step.actionVerb}' execution failed: ${error.message}`,
+                source_component,
+                original_error: error,
+                trace_id_param: trace_id,
+                contextual_info: {
+                    toolId: mcpTool.id,
+                    actionVerb: step.actionVerb,
+                    mcpTarget: actionMapping.mcpServiceTarget,
+                    responseStatus: error.response?.status,
+                    responseData: error.response?.data
+                }
+            });
+            return createPluginOutputError(sError);
+        }
+    }
+
+    private async applyMCPAuthentication(headers: any, authConfig: MCPAuthentication, trace_id: string): Promise<void> {
+        const source_component = "CapabilitiesManager.applyMCPAuthentication";
+        console.log(`[${trace_id}] ${source_component}: Applying MCP authentication type: ${authConfig.type}`);
+
+        try {
+            switch (authConfig.type) {
+                case 'none':
+                    break;
+                case 'apiKey':
+                    if (authConfig.apiKey) {
+                        const keyName = authConfig.apiKey.name;
+                        const keyValue = authConfig.apiKey.value || (authConfig.apiKey.credentialSource ? await this.getCredential(authConfig.apiKey.credentialSource) : undefined);
+                        if (!keyValue) {
+                            throw new Error(`API key value not found for ${keyName}.`);
+                        }
+                        if (authConfig.apiKey.in === 'header') {
+                            headers[keyName] = keyValue;
+                        } else if (authConfig.apiKey.in === 'query') {
+                            // Query params need to be added to URL, this function only modifies headers
+                            // This indicates a need for a more comprehensive request modification function
+                            console.warn(`[${trace_id}] ${source_component}: API key in query for ${keyName} not directly supported by this header modification function.`);
+                        }
+                        // 'body' would also need different handling
+                    } else {
+                         throw new Error("apiKey authentication config is missing.");
+                    }
+                    break;
+                case 'customToken':
+                    if (authConfig.customToken && authConfig.customToken.credentialSource) {
+                        const token = await this.getCredential(authConfig.customToken.credentialSource);
+                        const tokenPrefix = authConfig.customToken.tokenPrefix || '';
+                        headers[authConfig.customToken.headerName] = `${tokenPrefix}${token}`;
+                    } else {
+                        throw new Error("customToken authentication config is incomplete.");
+                    }
+                    break;
+                // Add cases for oauth2 or other MCP-specific auth types
+                default:
+                    console.warn(`[${trace_id}] ${source_component}: Unsupported MCP authentication type: ${authConfig.type}`);
+                    // Potentially throw an error if unsupported auth type is critical
+                    break;
+            }
+        } catch (error: any) {
+             generateStructuredError({
+                error_code: GlobalErrorCodes.AUTHENTICATION_ERROR,
+                severity: ErrorSeverity.ERROR,
+                message: `Failed to apply MCP authentication: ${error.message}`,
+                source_component,
+                original_error: error,
+                trace_id_param: trace_id,
+                contextual_info: { authType: authConfig.type }
+            });
+            throw error; // Re-throw to be caught by the calling function
+        }
+    }
+
+    private createErrorOutput(
+        errorCode: string,
+        message: string,
+        trace_id: string,
+        contextual_info?: any
+    ): PluginOutput {
+        const sError = generateStructuredError({
+            error_code: errorCode as GlobalErrorCodes,
+            severity: ErrorSeverity.ERROR,
+            message: message,
+            source_component: "CapabilitiesManager", // Generic source for this helper
+            trace_id_param: trace_id,
+            contextual_info: contextual_info
+        });
+        return {
+            success: false,
+            name: sError.error_code || 'error',
+            resultType: PluginParameterType.ERROR,
+            result: sError,
+            resultDescription: sError.message_human_readable,
+            error: sError.message_technical,
+        };
+    }
+
 }
 
 export const capabilitiesManager = new CapabilitiesManager();
