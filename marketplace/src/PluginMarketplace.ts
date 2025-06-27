@@ -9,6 +9,7 @@ import { GitRepository } from './repositories/GitRepository';
 import { GitHubRepository } from './repositories/GitHubRepository';
 //import { NpmRepository } from './repositories/NpmRepository';
 import { LocalRepository } from './repositories/LocalRepository';
+import { LibrarianDefinitionRepository } from './repositories/LibrarianDefinitionRepository';
 import { repositoryConfig } from './config/repositoryConfig';
 
 // Temporary inlined interface for diagnosis
@@ -158,6 +159,8 @@ export class PluginMarketplace {
                     return new GitHubRepository(config);
                 case 'local':
                     return new LocalRepository(config);
+                case 'librarian-definition':
+                    return new LibrarianDefinitionRepository(config);
                 default:
                     console.warn(`Unknown repository type: ${config.type}`);
                     return undefined;

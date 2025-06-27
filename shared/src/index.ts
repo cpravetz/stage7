@@ -14,6 +14,8 @@ export * from './types/Agent';
 export * from './types/Statistics';
 export * from './types/PlanTemplate';
 export * from './types/OpenAPITool';
+export * from './types/MCPTool';
+export * from './types/DefinitionManifest';
 export * from './Serializer';
 export * from './messaging/queueClient';
 export * from './utils/asyncLLM';
