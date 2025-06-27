@@ -1,6 +1,7 @@
-import { PluginManifest, PluginParameterType } from './Plugin'; // Assuming PluginParameterType might be useful for common parts
+import { PluginManifest } from './PluginManifest'; // Assuming PluginParameterType might be useful for common parts
 import { OpenAPITool } from './OpenAPITool';
 import { MCPTool } from './MCPTool';
+import { PluginParameter } from './Plugin';
 
 /**
  * Represents the type of definition held by the manifest.
@@ -54,34 +55,28 @@ export function createOpenApiDefinitionManifest(tool: OpenAPITool, primaryVerb: 
     const primaryActionMapping = tool.actionMappings.find(m => m.actionVerb === primaryVerb);
 
     return {
-        id: `${tool.id}-${primaryVerb}`, // Manifest ID could be toolID + primary verb for uniqueness
+        id: `${tool.id}-${primaryVerb}`,
         verb: primaryVerb,
         description: primaryActionMapping?.description || tool.description,
-        explanation: tool.description, // Or a more detailed explanation if available
-        inputDefinitions: primaryActionMapping?.inputs || [], // Inputs for the primary verb
-        outputDefinitions: primaryActionMapping?.outputs.map(o => ({ // Map OpenAPIResponseMapping to PluginParameter
-            name: o.name,
-            type: o.type,
-            description: o.description || '',
-            required: true, // Assuming all defined outputs are required for simplicity here
-        })) || [],
-        language: DefinitionType.OPENAPI, // Set language to 'openapi'
+        explanation: tool.description,
+        inputDefinitions: mapOpenApiInputsToPluginParameters(primaryActionMapping?.inputs || []),
+        outputDefinitions: mapOpenApiOutputsToPluginParameters(primaryActionMapping?.outputs || []),
+        language: DefinitionType.OPENAPI,
         version: tool.version,
         metadata: {
-            ...(tool.metadata as any), // Spread existing metadata
-            sourceToolId: tool.id, // Reference to the original OpenAPITool id
+            ...(tool.metadata as any),
+            sourceToolId: tool.id,
         },
-        security: { // Default security, might need adjustment based on how these are handled
-            permissions: [], // Definition-based tools typically don't ask for fs/net permissions themselves
+        security: {
+            permissions: [],
             sandboxOptions: { allowEval: false, timeout: 5000, memory: 128, allowedModules: [], allowedAPIs: [] },
             trust: {},
         },
         definitionType: DefinitionType.OPENAPI,
         toolDefinition: tool,
         primaryActionVerb: primaryVerb,
-        // entryPoint and packageSource are typically not used for definition-based tools
-        repository: { // Placeholder, will be filled by marketplace/repository logic
-            type: 'librarian-definition' as any, // Example type
+        repository: {
+            type: 'librarian-definition' as any,
             url: '',
         }
     };
@@ -123,4 +118,37 @@ export function createMcpDefinitionManifest(tool: MCPTool, primaryVerb: string):
             url: '',
         }
     };
+}
+
+/**
+ * Utility to map OpenAPIActionMapping outputs to PluginParameter[]
+ * Ensures compatibility between OpenAPI outputs and PluginParameter[] for manifest creation.
+ * @param outputs Array of OpenAPIResponseMapping
+ * @returns PluginParameter[]
+ */
+function mapOpenApiOutputsToPluginParameters(outputs: any[]): PluginParameter[] {
+    return outputs.map(o => ({
+        name: o.name,
+        type: o.type,
+        description: o.description || '',
+        required: true, // OpenAPI outputs are assumed required for manifest
+        // Add more fields if needed for PluginParameter compatibility
+    }));
+}
+
+/**
+ * Utility to map OpenAPIActionMapping inputs to PluginParameter[]
+ * Ensures compatibility between OpenAPI inputs and PluginParameter[] for manifest creation.
+ * @param inputs Array of OpenAPIRequestMapping
+ * @returns PluginParameter[]
+ */
+function mapOpenApiInputsToPluginParameters(inputs: any[]): PluginParameter[] {
+    return (inputs || []).map(i => ({
+        name: i.name,
+        type: i.type,
+        description: i.description || '',
+        required: !!i.required,
+        defaultValue: i.default,
+        // Add more fields if needed for PluginParameter compatibility
+    }));
 }
