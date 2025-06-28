@@ -15,7 +15,7 @@ import EmailVerification from './components/EmailVerification';
 import PasswordReset from './components/PasswordReset';
 import RequestPasswordReset from './components/RequestPasswordReset';
 import ModelPerformanceDashboard from './components/ModelPerformanceDashboard';
-import GitHubPluginManager from './components/GitHubPluginManager';
+import PluginManager from './components/PluginManager';
 import { ThemeToggle } from './components/ThemeToggle';
 import { AppThemeProvider } from './theme/AppThemeProvider';
 
@@ -154,7 +154,7 @@ const MainApp: React.FC = () => {
                 to="/github-plugins"
                 sx={{ mr: 2 }}
               >
-                GitHub Plugins
+                Tools and Plugins
               </Button>
               <ThemeToggle />
               <IconButton color="inherit" onClick={handleLogout} aria-label="logout">
@@ -277,7 +277,7 @@ const App: React.FC = () => {
             <Route path="/reset-password" element={<PasswordReset />} />
             <Route path="/forgot-password" element={<RequestPasswordReset />} />
             <Route path="/model-performance" element={<ModelPerformanceDashboard />} />
-            <Route path="/github-plugins" element={<GitHubPluginManager />} />
+            <Route path="/github-plugins" element={<PluginManager />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>

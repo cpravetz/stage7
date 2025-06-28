@@ -286,6 +286,12 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics }) =
         // --- Save view state before update ---
         saveViewState();
 
+        // Prevent refresh if StepOverviewDialog is open
+        if (stepOverviewOpen) {
+            // Skip update if dialog is open; another update will happen soon enough
+            return;
+        }
+
         if (nodes.length === 0) {
             if (networkRef.current) {
                 networkRef.current.setData({ nodes: new DataSet<Node>(), edges: new DataSet<Edge>() });

@@ -39,6 +39,16 @@ export const validateAndStandardizeInputs = async (plugin: PluginDefinition, inp
                     }
                 }
 
+                // If input is missing and defaultValue is defined, use it
+                if (!input && inputDef.defaultValue !== undefined) {
+                    input = {
+                        inputName,
+                        inputValue: inputDef.defaultValue,
+                        args: {}
+                    };
+                    console.log(`validateAndStandardizeInputs: Added missing input '${inputName}' with defaultValue for plugin '${plugin.verb}'.`);
+                }
+
                 // Handle required inputs
                 if (inputDef.required) {
                     let missingOrInvalid = false;
@@ -46,17 +56,17 @@ export const validateAndStandardizeInputs = async (plugin: PluginDefinition, inp
 
                     if (!input) {
                         missingOrInvalid = true;
-                        reason = `Missing required input "${inputName}" for plugin "${plugin.verb}".`;
+                        reason = `Missing required input \"${inputName}\" for plugin \"${plugin.verb}\" and no defaultValue provided.`;
                     } else if (input.inputValue === null || input.inputValue === undefined) {
                         missingOrInvalid = true;
-                        reason = `Required input "${inputName}" for plugin "${plugin.verb}" must not be null or undefined.`;
+                        reason = `Required input \"${inputName}\" for plugin \"${plugin.verb}\" must not be null or undefined.`;
                     } else if (inputDef.type === 'string' && String(input.inputValue).trim() === '') {
                         missingOrInvalid = true;
-                        reason = `Required string input "${inputName}" for plugin "${plugin.verb}" must not be empty or whitespace-only.`;
+                        reason = `Required string input \"${inputName}\" for plugin \"${plugin.verb}\" must not be empty or whitespace-only.`;
                     }
 
                     if (missingOrInvalid) {
-                        console.error(`validateAndStandardizeInputs: Validation Error for plugin "${plugin.verb}", input "${inputName}": ${reason}`);
+                        console.error(`validateAndStandardizeInputs: Validation Error for plugin \"${plugin.verb}\", input \"${inputName}\": ${reason}`);
                         return {
                             success: false,
                             error: reason
@@ -70,7 +80,7 @@ export const validateAndStandardizeInputs = async (plugin: PluginDefinition, inp
                     if (!isValid) {
                         return {
                             success: false,
-                            error: `Invalid type for input "${inputName}". Expected ${inputDef.type}`
+                            error: `Invalid type for input \"${inputName}\". Expected ${inputDef.type}`
                         };
                     }
                 }

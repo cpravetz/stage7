@@ -37,6 +37,12 @@ export const repositoryConfig = {
             options: {
                 defaultBranch: process.env.GIT_DEFAULT_BRANCH || 'main'
             }
+        },
+        {
+            type: 'librarian-definition',
+            librarianUrl: process.env.LIBRARIAN_URL || 'librarian:5040', // Matches the MongoRepository URL for Librarian
+            openApiToolsCollection: 'openApiTools',
+            mcpToolsCollection: 'mcpTools',
         }
     ]
 };

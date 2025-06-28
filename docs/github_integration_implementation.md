@@ -28,7 +28,7 @@ This document outlines the implementation of GitHub integration for the Stage7 p
 
 ### Frontend
 
-1. **GitHubPluginManager**
+1. **PluginManager**
    - UI component for managing GitHub plugins
    - Allows configuring GitHub credentials and repository
    - Displays plugins from GitHub repository

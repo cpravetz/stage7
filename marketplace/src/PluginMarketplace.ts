@@ -9,6 +9,7 @@ import { GitRepository } from './repositories/GitRepository';
 import { GitHubRepository } from './repositories/GitHubRepository';
 //import { NpmRepository } from './repositories/NpmRepository';
 import { LocalRepository } from './repositories/LocalRepository';
+import { LibrarianDefinitionRepository, LibrarianDefinitionRepositoryConfig } from './repositories/LibrarianDefinitionRepository';
 import { repositoryConfig } from './config/repositoryConfig';
 
 // Temporary inlined interface for diagnosis
@@ -55,8 +56,16 @@ export class PluginMarketplace {
 
                 // For GitHub repository, verify required credentials are present
                 if (repoConfig.type === 'github' && process.env.ENABLE_GITHUB === 'true') {
-                    if (!process.env.GITHUB_TOKEN || !process.env.GITHUB_USERNAME || !process.env.GIT_REPOSITORY_URL) {
-                        console.warn('GitHub repository is enabled but missing required credentials. Set GITHUB_TOKEN, GITHUB_USERNAME, and GIT_REPOSITORY_URL environment variables.');
+                    if (!process.env.GITHUB_TOKEN ) {
+                        console.warn('GitHub TOKEN is missing.');
+                        continue;
+                    }
+                    if (!process.env.GITHUB_USERNAME ) {
+                        console.warn('GitHub USERNAME is missing.');
+                        continue;
+                    }
+                    if (!process.env.GIT_REPOSITORY_URL) {
+                        console.warn('GitHub REPOSITORY_URL is missing.');
                         continue;
                     }
                     console.log('Initializing GitHub repository with provided credentials');
@@ -89,57 +98,61 @@ export class PluginMarketplace {
         if (repository) {
             const repo = this.repositories.get(repository); // repo is InlinedPluginRepository | undefined
             if (!repo) {
-                throw new Error(`Repository ${repository} not found`);
+                // Instead of throwing, return empty list for missing/misconfigured repository
+                console.warn(`Repository ${repository} not found (list). Returning empty list.`);
+                return [];
             }
-            const plugins = await repo.list();
-
+            try {
+                const plugins = await repo.list();
+                if (!includeContainerPlugins) {
+                    const filteredPlugins: PluginLocator[] = [];
+                    for (const plugin of plugins) {
+                        try {
+                            const manifest = await repo.fetch(plugin.id, plugin.version);
+                            if (manifest && manifest.language !== 'container') {
+                                filteredPlugins.push(plugin);
+                            }
+                        } catch (error) {
+                            console.warn(`Error fetching manifest for plugin ${plugin.id}: ${error}`);
+                            filteredPlugins.push(plugin);
+                        }
+                    }
+                    return filteredPlugins;
+                }
+                return plugins;
+            } catch (err) {
+                console.warn(`Error listing plugins from repository ${repository}:`, err);
+                return [];
+            }
+        }
+        // If no repository specified, use default
+        const defaultRepo = this.repositories.get(this.defaultRepository); 
+        if (!defaultRepo) {
+            console.warn(`Default repository ${this.defaultRepository} not found (list). Returning empty list.`);
+            return [];
+        }
+        try {
+            const plugins = await defaultRepo.list();
             if (!includeContainerPlugins) {
-                // Filter out container plugins by fetching manifests and checking language
                 const filteredPlugins: PluginLocator[] = [];
                 for (const plugin of plugins) {
                     try {
-                        const manifest = await repo.fetch(plugin.id, plugin.version);
+                        const manifest = await defaultRepo.fetch(plugin.id, plugin.version);
                         if (manifest && manifest.language !== 'container') {
                             filteredPlugins.push(plugin);
                         }
                     } catch (error) {
                         console.warn(`Error fetching manifest for plugin ${plugin.id}: ${error}`);
-                        // Include plugin in list if we can't determine its type
                         filteredPlugins.push(plugin);
                     }
                 }
                 return filteredPlugins;
             }
-
             return plugins;
+        } catch (err) {
+            console.warn(`Error listing plugins from default repository:`, err);
+            return [];
         }
-
-        // If no repository specified, use default
-        const defaultRepo = this.repositories.get(this.defaultRepository); // defaultRepo is InlinedPluginRepository | undefined
-        if (!defaultRepo) {
-            throw new Error(`Default repository ${this.defaultRepository} not found`);
-        }
-        const plugins = await defaultRepo.list();
-
-        if (!includeContainerPlugins) {
-            // Filter out container plugins by fetching manifests and checking language
-            const filteredPlugins: PluginLocator[] = [];
-            for (const plugin of plugins) {
-                try {
-                    const manifest = await defaultRepo.fetch(plugin.id, plugin.version);
-                    if (manifest && manifest.language !== 'container') {
-                        filteredPlugins.push(plugin);
-                    }
-                } catch (error) {
-                    console.warn(`Error fetching manifest for plugin ${plugin.id}: ${error}`);
-                    // Include plugin in list if we can't determine its type
-                    filteredPlugins.push(plugin);
-                }
-            }
-            return filteredPlugins;
-        }
-
-        return plugins;
     }
 
     /**
@@ -147,7 +160,7 @@ export class PluginMarketplace {
      * @param config Repository configuration
      * @returns Repository instance or undefined if creation failed
      */
-    private createRepository(config: RepositoryConfig): InlinedPluginRepository | undefined { // Changed return type
+    private createRepository(config: RepositoryConfig | LibrarianDefinitionRepositoryConfig): InlinedPluginRepository | undefined { // Changed return type
         try {
             switch (config.type) {
                 case 'mongo':
@@ -158,6 +171,8 @@ export class PluginMarketplace {
                     return new GitHubRepository(config);
                 case 'local':
                     return new LocalRepository(config);
+                case 'librarian-definition':
+                    return new LibrarianDefinitionRepository(config);
                 default:
                     console.warn(`Unknown repository type: ${config.type}`);
                     return undefined;
@@ -178,17 +193,28 @@ export class PluginMarketplace {
         if (repository) {
             const repo = this.repositories.get(repository); // repo is InlinedPluginRepository | undefined
             if (!repo) {
-                throw new Error(`Repository ${repository} not found`);
+                console.warn(`Repository ${repository} not found (fetchOne). Returning undefined.`);
+                return undefined;
             }
-            return await repo.fetch(id, version); // Removed (repo as PluginRepository) cast
+            try {
+                return await repo.fetch(id, version);
+            } catch (err) {
+                console.warn(`Error fetching plugin ${id} from repository ${repository}:`, err);
+                return undefined;
+            }
         }
-        
         // If no repository specified, use default
         const defaultRepo = this.repositories.get(this.defaultRepository); // defaultRepo is InlinedPluginRepository | undefined
         if (!defaultRepo) {
-            throw new Error(`Default repository ${this.defaultRepository} not found`);
+            console.warn(`Default repository ${this.defaultRepository} not found (fetchOne). Returning undefined.`);
+            return undefined;
         }
-        return await defaultRepo.fetch(id, version); // Removed (defaultRepo as PluginRepository) cast
+        try {
+            return await defaultRepo.fetch(id, version);
+        } catch (err) {
+            console.warn(`Error fetching plugin ${id} from default repository:`, err);
+            return undefined;
+        }
     }
 
     public async fetchOneByVerb(verb: string, version?: string): Promise<PluginManifest | undefined> {
@@ -208,17 +234,18 @@ export class PluginMarketplace {
 
     public async fetchAllVersionsOfPlugin(pluginId: string, repositoryType?: PluginRepositoryType): Promise<PluginManifest[] | undefined> {
         const repoToUse = repositoryType ? this.repositories.get(repositoryType) : this.repositories.get(this.defaultRepository); // repoToUse is InlinedPluginRepository | undefined
-
         if (!repoToUse) {
             const repoName = repositoryType || this.defaultRepository;
-            // Consider throwing a specific error or logging
-            console.error(`Repository ${repoName} not found when trying to fetch all versions for plugin ${pluginId}.`);
+            console.warn(`Repository ${repoName} not found (fetchAllVersionsOfPlugin). Returning undefined.`);
             return undefined;
         }
-        // The 'fetchAllVersionsOfPlugin' method is optional in InlinedPluginRepository.
-        // We need to check if it exists before calling.
         if (repoToUse.fetchAllVersionsOfPlugin) {
-            return await repoToUse.fetchAllVersionsOfPlugin(pluginId);
+            try {
+                return await repoToUse.fetchAllVersionsOfPlugin(pluginId);
+            } catch (err) {
+                console.warn(`Error fetching all versions for plugin ${pluginId} from repository ${repoToUse.type}:`, err);
+                return undefined;
+            }
         } else {
             console.warn(`Repository type ${repoToUse.type} does not support fetchAllVersionsOfPlugin.`);
             return undefined; 
@@ -257,10 +284,42 @@ export class PluginMarketplace {
             const repo = this.repositories.get(repositoryType); // repo is InlinedPluginRepository | undefined
             if (repo) {
                 await repo.store(plugin);
+            } else {
+                console.warn(`Repository ${repositoryType} not found (store). Plugin not stored.`);
             }
         } catch (error) {
             analyzeError(error as Error);
             throw new Error(`Failed to store plugin: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+
+    /**
+     * Delete a plugin by ID (and optionally version) from a specific repository
+     */
+    public async delete(pluginId: string, version?: string, repository?: PluginRepositoryType): Promise<void> {
+        if (repository) {
+            const repo = this.repositories.get(repository);
+            if (!repo) {
+                console.warn(`Repository ${repository} not found (delete). Nothing to delete.`);
+                return;
+            }
+            try {
+                await repo.delete(pluginId, version);
+            } catch (err) {
+                console.warn(`Error deleting plugin ${pluginId} from repository ${repository}:`, err);
+            }
+            return;
+        }
+        // If no repository specified, use default
+        const defaultRepo = this.repositories.get(this.defaultRepository);
+        if (!defaultRepo) {
+            console.warn(`Default repository ${this.defaultRepository} not found (delete). Nothing to delete.`);
+            return;
+        }
+        try {
+            await defaultRepo.delete(pluginId, version);
+        } catch (err) {
+            console.warn(`Error deleting plugin ${pluginId} from default repository:`, err);
         }
     }
 
@@ -350,7 +409,7 @@ export class PluginMarketplace {
         lines.push('- DELEGATE: Create sub-agents with goals of their own.');
         lines.push('- ACCOMPLISH - takes a specific goal and either achieves it or returns a plan to achieve it. (required input: goal)');
         lines.push('- THINK - sends prompts to the chat function of the LLMs attached to the system in order to generate content from a conversation.(required input: prompt) (optional inputs: optimization (cost|accuracy|creativity|speed|continuity), ConversationType) accuracy is the default optimization');
-        lines.push('- GENERATE - uses LLM services to generate content from a prompt or other content. Services include image creation, audio transscription, image editing, etc. (required input: ConversationType) (optional inputs: modelName, optimization, prompt, file, audio, video, image...)');
+        lines.push('- GENERATE - uses LLM services to generate content from a prompt or other content. Services include image creation, audio transcription, image editing, etc. (required input: ConversationType) (optional inputs: modelName, optimization, prompt, file, audio, video, image...)');
         lines.push('- FILE_OPS - provides services for file operations read, write, append (required inputs: path, operation, content)');
         lines.push('- SEARCH - searches DuckDuckGo for a given term and returns a list of links (required input: searchTerm)');
         lines.push('- SCRAPE - scrapes content from a given URL (required inputs: url, selector, attribute, limit)');

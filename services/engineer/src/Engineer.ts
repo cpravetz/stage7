@@ -17,7 +17,9 @@ import {
     OpenAPIActionMapping,
     OpenAPIAuthentication,
     OpenAPIParameterMapping,
-    OpenAPIResponseMapping
+    OpenAPIResponseMapping,
+    MCPTool,
+    MCPToolRegistrationRequest
 } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { PluginMarketplace } from '@cktmcs/marketplace';
@@ -116,6 +118,13 @@ export class Engineer extends BaseEntity {
                 res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
             }
         });
+
+        // MCP Tool Endpoints - REMOVED as per revised plan
+        // app.post('/tools/mcp', async (req, res) => { ... });
+        // app.put('/tools/mcp/:id', async (req, res) => { ... });
+        // app.get('/tools/mcp/:id', async (req, res) => { ... });
+        // app.get('/tools/mcp', async (req, res) => { ... });
+        // app.delete('/tools/mcp/:id', async (req, res) => { ... });
 
         app.post('/message', (req, res) => this.handleMessage(req, res));
         app.get('/statistics', (req, res) => { this.getStatistics(req, res) });
@@ -864,6 +873,14 @@ Context: ${contextString}`;
                 return true; // Allow unknown languages for now
         }
     }
+
+    // MCP Tool Management Methods - REMOVED as per revised plan
+    // private validateMCPToolDefinition(...) { ... }
+    // async registerMCPTool(...) { ... }
+    // async updateMCPTool(...) { ... }
+    // async getMCPTool(...) { ... }
+    // async listMCPTools(...) { ... }
+    // async deleteMCPTool(...) { ... }
 }
 
 // Instantiate the Engineer - this line should typically be in an entry point file (e.g., index.ts for the service)

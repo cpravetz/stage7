@@ -126,43 +126,89 @@ You are a planning assistant. Your ONLY task is to generate one of the following
 
 DO NOT include any explanations, markdown formatting, or additional text outside the JSON object.
 
-1. If the goal can be sub-divided into smaller steps, respond with a plan as a JSON object in this format:
+1. If the goal can be sub-divided into smaller steps, respond with a plan as a JSON object.  Plans must conform to this schema!
 
 {{
-    "type": "PLAN",
-    "context": "Any overarching points or introduction to the plan you want to share",
-    "plan": [
-        {{
-            "number": 1,
-            "actionVerb": "DESCRIPTIVE_ACTION_VERB",
-            "description": "Brief description of the step",
-            "inputs": {{
-                "inputName1": {{"value": "predeterminedValue"}},
-                "inputName2": {{"outputKey": "outputKeyFromPreviousStep"}}
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "array",
+  "items": {{
+    "type": "object",
+    "properties": {{
+      "number": {{
+        "type": "integer",
+        "minimum": 1,
+        "description": "Sequential step number"
+      }},
+      "actionVerb": {{
+        "type": "string",
+        "description": "The action to be performed in this step"
+      }},
+      "inputs": {{
+        "type": "object",
+        "patternProperties": {{
+          "^[a-zA-Z][a-zA-Z0-9_]*$": {{
+            "type": "object",
+            "properties": {{
+              "inputValue": {{
+                "type": "string",
+                "description": "Either a constant string value or a template reference like '${{outputName}}'"
+              }},
+              "args": {{
+                "type": "object",
+                "description": "Additional arguments for the input"
+              }}
             }},
-            "dependencies": {{}},
-            "outputs": {{
-                "outputKey1": "Description of output1",
-                "outputKey2": "Description of output2"
-            }},
-            "recommendedRole": "coordinator"
+            "required": ["inputValue"],
+            "additionalProperties": false
+          }}
         }},
-        {{
-            "number": 2,
-            "actionVerb": "ANOTHER_ACTION",
-            "description": "Description of another step",
-            "inputs": {{
-                "inputName3": {{"outputKey": "outputKey2"}}
-            }},
-            "dependencies": {{"outputKey2": 1}},
-            "outputs": {{
-                "outputKey3": "Description of output3"
-            }},
-            "recommendedRole": "researcher"
-        }}
-    ]
+        "additionalProperties": false,
+        "description": "Input parameters for this step"
+      }},
+      "description": {{
+        "type": "string",
+        "description": "Human-readable description of what this step does"
+      }},
+      "expectedOutputs": {{
+        "type": "object",
+        "patternProperties": {{
+          "^[a-zA-Z][a-zA-Z0-9_]*$": {{
+            "type": "string",
+            "description": "Description of the expected output"
+          }}
+        }},
+        "additionalProperties": false,
+        "description": "Expected outputs from this step"
+      }},
+      "dependencies": {{
+        "type": "array",
+        "items": {{
+          "type": "object",
+          "patternProperties": {{
+            "^[a-zA-Z][a-zA-Z0-9_]*$": {{
+              "type": "integer",
+              "minimum": 1,
+              "description": "Step number that produces the output for the input with this name"
+            }}
+          }},
+          "additionalProperties": false,
+          "minProperties": 1,
+          "maxProperties": 1
+        }},
+        "description": "Array of objects mapping input names to their source step numbers"
+      }},
+      "recommendedRole": {{
+        "type": "string",
+        "description": "Suggested role type for executing this step"
+      }}
+    }},
+    "required": ["number", "actionVerb", "inputs", "description", "expectedOutputs", "dependencies"],
+    "additionalProperties": false
+  }},
+  "description": "Schema for a workflow consisting of sequential steps with dependencies"
 }}
 
+DO NOT RETURN THE SCHEMA - JUST THE PLAN!
 Guidelines for creating a plan:
 1. Number each step sequentially using the "number" field.
 2. Use specific, actionable verbs or phrases for each step using the "actionVerb" field (e.g., ANALYZE_CSV, ANALYZE_AUDIOFILE, PREDICT, WRITE_TEXT, WRITE_CODE, BOOK_A_CAR).

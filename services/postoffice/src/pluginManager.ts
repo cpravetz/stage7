@@ -18,7 +18,8 @@ export class PluginManager {
         // Get all plugins
         app.get('/plugins', async (req, res) => {
             try {
-                await this.getPlugins(req, res);
+                const { repository } = req.query;
+                await this.getPlugins(req, res, repository as string);
             } catch (error) {
                 console.error(`Error handling GET /plugins request:`, error);
                 res.status(500).json({
@@ -31,7 +32,8 @@ export class PluginManager {
         // Get specific plugin
         app.get('/plugins/:id', async (req, res) => {
             try {
-                await this.getPlugin(req, res);
+                const { repository } = req.query;
+                await this.getPlugin(req, res, repository as string);
             } catch (error) {
                 console.error(`Error handling GET /plugins/${req.params.id} request:`, error);
                 res.status(500).json({
@@ -44,7 +46,8 @@ export class PluginManager {
         // Create new plugin
         app.post('/plugins', async (req, res) => {
             try {
-                await this.createPlugin(req, res);
+                const { repository } = req.query;
+                await this.createPlugin(req, res, repository as string);
             } catch (error) {
                 console.error(`Error handling POST /plugins request:`, error);
                 res.status(500).json({
@@ -57,7 +60,8 @@ export class PluginManager {
         // Update plugin
         app.put('/plugins/:id', async (req, res) => {
             try {
-                await this.updatePlugin(req, res);
+                const { repository } = req.query;
+                await this.updatePlugin(req, res, repository as string);
             } catch (error) {
                 console.error(`Error handling PUT /plugins/${req.params.id} request:`, error);
                 res.status(500).json({
@@ -70,7 +74,8 @@ export class PluginManager {
         // Delete plugin
         app.delete('/plugins/:id', async (req, res) => {
             try {
-                await this.deletePlugin(req, res);
+                const { repository } = req.query;
+                await this.deletePlugin(req, res, repository as string);
             } catch (error) {
                 console.error(`Error handling DELETE /plugins/${req.params.id} request:`, error);
                 res.status(500).json({
@@ -81,14 +86,15 @@ export class PluginManager {
         });
     }
 
-    private async getPlugins(req: express.Request, res: express.Response) {
+    private async getPlugins(req: express.Request, res: express.Response, repository?: string) {
         try {
             const capabilitiesManagerUrl = this.getComponentUrl('CapabilitiesManager');
             if (!capabilitiesManagerUrl) {
                 return res.status(500).json({ error: 'CapabilitiesManager service not available' });
             }
-
-            const response = await this.authenticatedApi.get(`http://${capabilitiesManagerUrl}/plugins`);
+            const repoParam = repository ? `?repository=${repository}` : '';
+            const response = await this.authenticatedApi.get(`http://${capabilitiesManagerUrl}/plugins${repoParam}`);
+            console.log('Plugins retrieved successfully:', response.data);
             res.status(200).json(response.data);
         } catch (error) {
             analyzeError(error as Error);
@@ -97,21 +103,19 @@ export class PluginManager {
         }
     }
 
-    private async getPlugin(req: express.Request, res: express.Response) {
+    private async getPlugin(req: express.Request, res: express.Response, repository?: string) {
         const { id } = req.params;
-
         try {
             const capabilitiesManagerUrl = this.getComponentUrl('CapabilitiesManager');
             if (!capabilitiesManagerUrl) {
                 return res.status(500).json({ error: 'CapabilitiesManager service not available' });
             }
-
-            const response = await this.authenticatedApi.get(`http://${capabilitiesManagerUrl}/plugins/${id}`);
+            const repoParam = repository ? `?repository=${repository}` : '';
+            const response = await this.authenticatedApi.get(`http://${capabilitiesManagerUrl}/plugins/${id}${repoParam}`);
             res.status(200).json(response.data);
         } catch (error) {
             analyzeError(error as Error);
             console.error(`Error getting plugin ${id}:`, error instanceof Error ? error.message : error);
-            
             if (error instanceof Error && 'response' in error && (error as any).response?.status === 404) {
                 res.status(404).json({ error: 'Plugin not found' });
             } else {
@@ -120,19 +124,18 @@ export class PluginManager {
         }
     }
 
-    private async createPlugin(req: express.Request, res: express.Response) {
+    private async createPlugin(req: express.Request, res: express.Response, repository?: string) {
         try {
             const capabilitiesManagerUrl = this.getComponentUrl('CapabilitiesManager');
             if (!capabilitiesManagerUrl) {
                 return res.status(500).json({ error: 'CapabilitiesManager service not available' });
             }
-
-            const response = await this.authenticatedApi.post(`http://${capabilitiesManagerUrl}/plugins`, req.body);
+            const repoParam = repository ? `?repository=${repository}` : '';
+            const response = await this.authenticatedApi.post(`http://${capabilitiesManagerUrl}/plugins${repoParam}`, req.body);
             res.status(201).json(response.data);
         } catch (error) {
             analyzeError(error as Error);
             console.error('Error creating plugin:', error instanceof Error ? error.message : error);
-            
             if (error instanceof Error && 'response' in error && (error as any).response?.status === 400) {
                 res.status(400).json({ 
                     error: 'Invalid plugin data',
@@ -144,21 +147,19 @@ export class PluginManager {
         }
     }
 
-    private async updatePlugin(req: express.Request, res: express.Response) {
+    private async updatePlugin(req: express.Request, res: express.Response, repository?: string) {
         const { id } = req.params;
-
         try {
             const capabilitiesManagerUrl = this.getComponentUrl('CapabilitiesManager');
             if (!capabilitiesManagerUrl) {
                 return res.status(500).json({ error: 'CapabilitiesManager service not available' });
             }
-
-            const response = await this.authenticatedApi.put(`http://${capabilitiesManagerUrl}/plugins/${id}`, req.body);
+            const repoParam = repository ? `?repository=${repository}` : '';
+            const response = await this.authenticatedApi.put(`http://${capabilitiesManagerUrl}/plugins/${id}${repoParam}`, req.body);
             res.status(200).json(response.data);
         } catch (error) {
             analyzeError(error as Error);
             console.error(`Error updating plugin ${id}:`, error instanceof Error ? error.message : error);
-            
             if (error instanceof Error && 'response' in error) {
                 const status = (error as any).response?.status;
                 if (status === 404) {
@@ -177,21 +178,19 @@ export class PluginManager {
         }
     }
 
-    private async deletePlugin(req: express.Request, res: express.Response) {
+    private async deletePlugin(req: express.Request, res: express.Response, repository?: string) {
         const { id } = req.params;
-
         try {
             const capabilitiesManagerUrl = this.getComponentUrl('CapabilitiesManager');
             if (!capabilitiesManagerUrl) {
                 return res.status(500).json({ error: 'CapabilitiesManager service not available' });
             }
-
-            await this.authenticatedApi.delete(`http://${capabilitiesManagerUrl}/plugins/${id}`);
+            const repoParam = repository ? `?repository=${repository}` : '';
+            await this.authenticatedApi.delete(`http://${capabilitiesManagerUrl}/plugins/${id}${repoParam}`);
             res.status(200).json({ message: 'Plugin deleted successfully' });
         } catch (error) {
             analyzeError(error as Error);
             console.error(`Error deleting plugin ${id}:`, error instanceof Error ? error.message : error);
-            
             if (error instanceof Error && 'response' in error && (error as any).response?.status === 404) {
                 res.status(404).json({ error: 'Plugin not found' });
             } else {

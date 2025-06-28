@@ -47,11 +47,17 @@ export class GitHubRepository implements PluginRepository {
         this.token = process.env.GITHUB_TOKEN || config.credentials?.token || '';
         this.username = process.env.GITHUB_USERNAME || config.credentials?.username || ''; // Used as default owner
 
-        if (!this.token) {
-            console.warn("**********************************************************************************");
-            console.warn("GitHubRepository: GITHUB_TOKEN is missing or empty. Please ensure it is set.");
-            console.warn("**********************************************************************************");
-            throw analyzeError(new Error('GitHub repository requires GITHUB_TOKEN.'));
+        if (!this.token || !this.username) {
+            console.warn(`GitHubRepository: GITHUB_TOKEN ${this.token} or GITHUB_USERNAME ${this.username} is missing. Repository will be disabled but not throw.`);
+            this.isEnabled = false;
+            this.token = '';
+            this.username = '';
+            this.repoOwner = '';
+            this.repoName = '';
+            this.baseApiUrl = '';
+            this.baseContentUrl = '';
+            this.pluginsDir = 'plugins';
+            return;
         }
 
         const repoUrl = config.url || process.env.GIT_REPOSITORY_URL || '';
