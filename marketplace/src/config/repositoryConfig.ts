@@ -40,15 +40,9 @@ export const repositoryConfig = {
         },
         {
             type: 'librarian-definition',
-            url: process.env.LIBRARIAN_URL || 'librarian:5040', // Matches the MongoRepository URL for Librarian
-            options: {
-                // These are the default collections the LibrarianDefinitionRepository will use
-                // if not overridden by more specific configurations or logic within the repo itself.
-                openApiToolsCollection: 'openApiTools',
-                mcpToolsCollection: 'mcpTools',
-                // Optionally, if a single collection is preferred for all definitions:
-                // actionHandlersCollection: 'actionHandlers'
-            }
+            librarianUrl: process.env.LIBRARIAN_URL || 'librarian:5040', // Matches the MongoRepository URL for Librarian
+            openApiToolsCollection: 'openApiTools',
+            mcpToolsCollection: 'mcpTools',
         }
     ]
 };

@@ -224,6 +224,7 @@ services:
       CAPABILITIESMANAGER_CLIENT_SECRET: *sharedSecret
       CLIENT_SECRET: *sharedSecret
       LOCAL_PLUGIN_PATH: /usr/src/app/services//capabilitiesmanager/src/plugins
+      GITHUB_TOKEN: ${GITHUB_TOKEN}
       ENABLE_GITHUB: "true"
       GITHUB_USERNAME: *githubUsername
       GIT_DEFAULT_BRANCH: *gitDefaultBranch

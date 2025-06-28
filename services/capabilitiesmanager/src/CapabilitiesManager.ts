@@ -113,13 +113,6 @@ export class CapabilitiesManager extends BaseEntity {
                 const app = express();
                 app.use(bodyParser.json());
 
-                app.use((req: express.Request, _res, next) => {
-                    const trace_id = `${trace_id_parent}-${uuidv4().substring(0,8)}`;
-                    (req as any).trace_id = trace_id;
-                    console.log(`[${trace_id}] ${new Date().toISOString()} - CM - ${req.method} ${req.path}`);
-                    next();
-                });
-
                 // Authentication middleware - skip for health checks
                 app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
                     if (req.path === '/health' || req.path === '/ready') return next();
@@ -128,6 +121,68 @@ export class CapabilitiesManager extends BaseEntity {
 
                 // Core routes
                 app.post('/executeAction', (req, res) => this.executeActionVerb(req, res));
+
+                // --- Plugin CRUD API ---
+                app.get('/plugins', async (req, res) => {
+                    try {
+                        const repository = req.query.repository as PluginRepositoryType | undefined;
+                        console.log(`[${trace_id_parent}] ${source_component}: Fetching plugins from repository: ${repository || 'default'}`);
+                        const plugins = await this.pluginRegistry.list(repository);
+                        res.json({ plugins });
+                    } catch (error: any) {
+                        res.status(200).json({ plugins: [] });
+                    }
+                });
+                app.get('/plugins/:id', async (req, res) => {
+                    try {
+                        const repository = req.query.repository as PluginRepositoryType | undefined;
+                        const plugin = await this.pluginRegistry.fetchOne(req.params.id, undefined, repository);
+                        if (!plugin) {
+                            res.status(404).json({ error: 'Plugin not found' });
+                        } else {
+                            res.json({ plugin });
+                        }
+                    } catch (error: any) {
+                        res.status(404).json({ error: 'Plugin not found' });
+                    }
+                });
+                app.post('/plugins', async (req, res) => {
+                    try {
+                        await this.pluginRegistry.store(req.body);
+                        res.status(201).json({ success: true });
+                    } catch (error: any) {
+                        res.status(400).json({ error: 'Failed to create plugin', details: error.message });
+                    }
+                });
+                app.put('/plugins/:id', async (req, res) => {
+                    try {
+                        await this.pluginRegistry.store(req.body);
+                        res.json({ success: true });
+                    } catch (error: any) {
+                        res.status(400).json({ error: 'Failed to update plugin', details: error.message });
+                    }
+                });
+                app.delete('/plugins/:id', async (req, res) => {
+                    try {
+                        const repository = req.query.repository as string | undefined;
+                        // Only librarian-definition repos support delete
+                        if (repository === 'librarian-definition' && typeof this.pluginRegistry.delete === 'function') {
+                            await this.pluginRegistry.delete(req.params.id, undefined, repository);
+                        }
+                        res.json({ success: true });
+                    } catch (error: any) {
+                        res.status(400).json({ error: 'Failed to delete plugin', details: error.message });
+                    }
+                });
+                // --- Plugin Repositories API ---
+                app.get('/pluginRepositories', (req, res) => {
+                    try {
+                        const repos = this.pluginRegistry.getActiveRepositories();
+                        res.json({ repositories: repos });
+                    } catch (error: any) {
+                        res.status(200).json({ repositories: [] });
+                    }
+                });
 
                 app.post('/message', async (req, res) => {
                     const trace_id = (req as any).trace_id || `${trace_id_parent}-msg-${uuidv4().substring(0,8)}`;
@@ -150,9 +205,8 @@ export class CapabilitiesManager extends BaseEntity {
                 app.get('/availablePlugins', async (req, res) => {
                     const trace_id = (req as any).trace_id || `${trace_id_parent}-avail-${uuidv4().substring(0,8)}`;
                     try {
-                        // Only report local/container plugins: fallback to filtering by verb or include all if language is not present
                         const plugins: PluginLocator[] = (await this.pluginRegistry.list()).filter(
-                            p => !('language' in p) || (p as any).language === 'javascript' || (p as any).language === 'python' || (p as any).language === 'container'
+                            (p: PluginLocator) => !('language' in p) || (p as any).language === 'javascript' || (p as any).language === 'python' || (p as any).language === 'container'
                         );
                         res.json(plugins);
                     } catch (error:any) {
@@ -1763,7 +1817,9 @@ export class CapabilitiesManager extends BaseEntity {
             console.log(`[${trace_id}] ${source_component}: MCP Tool ${mcpTool.id} executed successfully.`);
             return outputs;
 
-        } catch (error: any) {
+       
+
+        } catch ( error: any) {
             const sError = generateStructuredError({
                 error_code: GlobalErrorCodes.CAPABILITIES_MANAGER_MCP_TOOL_EXECUTION_FAILED,
                 severity: ErrorSeverity.ERROR,

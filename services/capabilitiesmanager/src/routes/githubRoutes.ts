@@ -75,85 +75,110 @@ router.post('/config', async (req: express.Request, res: express.Response) => {
     }
 });
 
-// List plugins from GitHub
+// List plugins from any repository
 router.get('/plugins', async (req: express.Request, res: express.Response) => {
     try {
-        // Check if GitHub access is enabled
-        if (process.env.ENABLE_GITHUB !== 'true') {
-            res.status(403).json({
-                error: 'GitHub access is disabled by configuration. Set ENABLE_GITHUB=true to enable.'
-            });
-        }
-
+        const { repository } = req.query;
+        const repoType = typeof repository === 'string' ? repository : 'github';
         const repositories = pluginMarketplace.getRepositories();
-        const githubRepo = repositories.get('github');
+        const repo = repositories.get(repoType);
 
-        if (!githubRepo) {
-            res.status(404).json({ error: 'GitHub repository not configured' });
+        if (!repo) {
+            res.status(404).json({ error: `${repoType} repository not configured` });
         } else {
-            const plugins = await githubRepo.list();
+            const plugins = await repo.list();
             res.json({ plugins });
         }
     } catch (error) {
         analyzeError(error as Error);
-        res.status(500).json({ error: 'Failed to list plugins from GitHub' });
+        res.status(500).json({ error: 'Failed to list plugins' });
     }
 });
 
-// Get a specific plugin from GitHub
+// Get a specific plugin from any repository
 router.get('/plugins/:id', async (req: express.Request, res: express.Response) => {
     try {
-        // Check if GitHub access is enabled
-        if (process.env.ENABLE_GITHUB !== 'true') {
-            res.status(403).json({
-                error: 'GitHub access is disabled by configuration. Set ENABLE_GITHUB=true to enable.'
-            });
-        }
-
         const { id } = req.params;
+        const { repository } = req.query;
+        const repoType = typeof repository === 'string' ? repository : 'github';
         const repositories = pluginMarketplace.getRepositories();
-        const githubRepo = repositories.get('github');
+        const repo = repositories.get(repoType);
 
-        if (!githubRepo) {
-            res.status(404).json({ error: 'GitHub repository not configured' });
+        if (!repo) {
+            res.status(404).json({ error: `${repoType} repository not configured` });
         } else {
-            const plugin = await githubRepo.fetch(id);
+            const plugin = await repo.fetch(id);
             if (!plugin) {
                 res.status(404).json({ error: 'Plugin not found' });
+            } else {
+                res.json({ plugin });
             }
-            res.json({ plugin });
-
         }
-
     } catch (error) {
         analyzeError(error as Error);
-        res.status(500).json({ error: 'Failed to get plugin from GitHub' });
+        res.status(500).json({ error: 'Failed to get plugin' });
     }
 });
 
-// Delete a plugin from GitHub
+// Add a plugin to any repository
+router.post('/plugins', async (req: express.Request, res: express.Response) => {
+    try {
+        const { repository } = req.query;
+        const repoType = typeof repository === 'string' ? repository : 'github';
+        const repositories = pluginMarketplace.getRepositories();
+        const repo = repositories.get(repoType);
+
+        if (!repo) {
+            res.status(404).json({ error: `${repoType} repository not configured` });
+        } else {
+            await repo.store(req.body);
+            res.status(201).json({ success: true });
+        }
+    } catch (error) {
+        analyzeError(error as Error);
+        res.status(500).json({ error: 'Failed to create plugin' });
+    }
+});
+
+// Update a plugin in any repository
+router.put('/plugins/:id', async (req: express.Request, res: express.Response) => {
+    try {
+        const { id } = req.params;
+        const { repository } = req.query;
+        const repoType = typeof repository === 'string' ? repository : 'github';
+        const repositories = pluginMarketplace.getRepositories();
+        const repo = repositories.get(repoType);
+
+        if (!repo) {
+            res.status(404).json({ error: `${repoType} repository not configured` });
+        } else {
+            await repo.store(req.body); // store() should handle update
+            res.json({ success: true });
+        }
+    } catch (error) {
+        analyzeError(error as Error);
+        res.status(500).json({ error: 'Failed to update plugin' });
+    }
+});
+
+// Delete a plugin from any repository
 router.delete('/plugins/:id', async (req: express.Request, res: express.Response) => {
     try {
-        // Check if GitHub access is enabled
-        if (process.env.ENABLE_GITHUB !== 'true') {
-            res.status(403).json({
-                error: 'GitHub access is disabled by configuration. Set ENABLE_GITHUB=true to enable.'
-            });
-        }
-
         const { id } = req.params;
+        const { repository } = req.query;
+        const repoType = typeof repository === 'string' ? repository : 'github';
         const repositories = pluginMarketplace.getRepositories();
-        const githubRepo = repositories.get('github');
+        const repo = repositories.get(repoType);
 
-        if (!githubRepo) {
-            res.status(404).json({ error: 'GitHub repository not configured' });
+        if (!repo) {
+            res.status(404).json({ error: `${repoType} repository not configured` });
         } else {
-            await githubRepo.delete(id);
+            await repo.delete(id);
             res.json({ success: true, message: 'Plugin deleted successfully' });
         }
     } catch (error) {
         analyzeError(error as Error);
-        res.status(500).json({ error: 'Failed to delete plugin from GitHub' });
+        res.status(500).json({ error: 'Failed to delete plugin' });
     }
 });
 

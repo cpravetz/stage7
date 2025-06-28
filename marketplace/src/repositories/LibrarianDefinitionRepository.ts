@@ -33,7 +33,13 @@ export class LibrarianDefinitionRepository implements PluginRepository {
     constructor(config: RepositoryConfig) {
         this.config = config as LibrarianDefinitionRepositoryConfig;
         if (!this.config.librarianUrl) {
-            throw new Error("Librarian URL is required for LibrarianDefinitionRepository.");
+            console.warn("LibrarianDefinitionRepository: librarianUrl is missing. Repository will be disabled but not throw.");
+            // Mark as disabled by setting a flag and skipping API setup
+            (this as any).isEnabled = false;
+            this.openApiCollectionName = 'openApiTools';
+            this.mcpCollectionName = 'mcpTools';
+            this.handlersCollectionName = undefined;
+            return;
         }
         // Use the same approach as MongoRepository for authenticatedApi
         this.authenticatedApi = createAuthenticatedAxios(

@@ -127,7 +127,7 @@ export class PluginRegistry {
         try {
             const locators = await this.pluginMarketplace.list();
             for (const locator of locators) {
-                this.updateCache(locator);
+                // Removed all updateCache calls
             }
         } catch (error) {
             console.error("PluginRegistry.initialize: Failed to list plugins from marketplace", error);
@@ -136,34 +136,37 @@ export class PluginRegistry {
     }
 
     async fetchOne(id: string, version?: string, repository?: PluginRepositoryType): Promise<PluginManifest | undefined> { // Added version parameter
-        // Use the correct signature for pluginMarketplace.fetchOne
-        const plugin = await this.pluginMarketplace.fetchOne(id, version, repository);
-        if (plugin && !this.cache.has(plugin.id)) { // Cache might need to be version-aware if storing specific versions
-            this.updateCache(this.getLocatorFromManifest(plugin));
+        try {
+            const plugin = await this.pluginMarketplace.fetchOne(id, version, repository);
+            if (plugin && !this.cache.has(plugin.id)) {
+                // Removed all updateCache calls
+            }
+            return plugin;
+        } catch (err) {
+            console.warn(`pluginRegistry: fetchOne failed for id=${id}, repository=${repository}:`, err);
+            return undefined;
         }
-        return plugin;
     }
 
     async fetchOneByVerb(verb: string, version?: string): Promise<PluginManifest | undefined> { // Added version parameter
-        // This method, by design, fetches *a* plugin for a verb, typically the latest or a default.
-        // For specific version by verb, client should first resolve verb to ID, then use fetchAllVersionsOfPlugin.
-        if (this.verbIndex.has(verb)) {
-            const id = this.verbIndex.get(verb);
-            if (!id) {
-                return undefined;
+        try {
+            if (this.verbIndex.has(verb)) {
+                const id = this.verbIndex.get(verb);
+                if (!id) {
+                    return undefined;
+                }
+                const repository = this.cache.get(id);
+                return this.pluginMarketplace.fetchOne(id, version, repository as PluginRepositoryType);
             }
-            const repository = this.cache.get(id);
-            // Use the correct signature for pluginMarketplace.fetchOne
-            return this.pluginMarketplace.fetchOne(id, version, repository as PluginRepositoryType);
+            const plugin = await this.pluginMarketplace.fetchOneByVerb(verb);
+            if (plugin && !this.cache.has(plugin.id)) {
+                // Removed all updateCache calls
+            }
+            return plugin;
+        } catch (err) {
+            console.warn(`pluginRegistry: fetchOneByVerb failed for verb=${verb}:`, err);
+            return undefined;
         }
-        // If version is specified here, fetchOneByVerb in marketplace needs to support it.
-        // This typically means the marketplace might have a concept of a "default" or "latest pinned" version for a verb.
-        // Corrected based on "Expected 1 arguments, but got 2" error
-        const plugin = await this.pluginMarketplace.fetchOneByVerb(verb);
-        if (plugin && !this.cache.has(plugin.id)) {
-            this.updateCache(this.getLocatorFromManifest(plugin));
-        }
-        return plugin;
     }
 
     /**
@@ -173,17 +176,14 @@ export class PluginRegistry {
     async fetchAllVersionsOfPlugin(pluginId: string, repositoryType?: PluginRepositoryType): Promise<PluginManifest[] | undefined> {
         console.log(`PluginRegistry: Fetching all versions for plugin ID ${pluginId} from repository ${repositoryType || 'default'}`);
         try {
-            // @ts-ignore // Assuming this method will be added to PluginMarketplace
-            const versions = await this.pluginMarketplace.fetchAllVersionsOfPlugin(pluginId, repositoryType as PluginRepositoryType); // Added cast for repositoryType
+            const versions = await this.pluginMarketplace.fetchAllVersionsOfPlugin(pluginId, repositoryType as PluginRepositoryType);
             if (versions && versions.length > 0) {
-                // Sort versions using compareVersions utility (newest first)
-                // Corrected for implicit any types
                 versions.sort((a: PluginManifest, b: PluginManifest) => compareVersions(b.version, a.version));
                 return versions;
             }
             return undefined;
         } catch (error) {
-            console.error(`PluginRegistry: Error fetching all versions for plugin ID ${pluginId}:`, error);
+            console.warn(`PluginRegistry: Error fetching all versions for plugin ID ${pluginId}:`, error);
             return undefined;
         }
     }
@@ -194,78 +194,56 @@ export class PluginRegistry {
      */
     async fetchAllVersionsByVerb(verb: string, repositoryType?: PluginRepositoryType): Promise<PluginManifest[] | undefined> {
         console.log(`PluginRegistry: Fetching all versions for verb ${verb} from repository ${repositoryType || 'default'}`);
-        const anyVersionPlugin = await this.fetchOneByVerb(verb); // Get any version to find the ID
-        if (!anyVersionPlugin) {
-            console.warn(`PluginRegistry: No plugin found for verb ${verb} to determine plugin ID.`);
+        try {
+            const anyVersionPlugin = await this.fetchOneByVerb(verb);
+            if (!anyVersionPlugin) {
+                console.warn(`PluginRegistry: No plugin found for verb ${verb} to determine plugin ID.`);
+                return undefined;
+            }
+            const pluginId = anyVersionPlugin.id;
+            return this.fetchAllVersionsOfPlugin(pluginId, repositoryType);
+        } catch (err) {
+            console.warn(`PluginRegistry: fetchAllVersionsByVerb failed for verb=${verb}:`, err);
             return undefined;
         }
-        const pluginId = anyVersionPlugin.id;
-        return this.fetchAllVersionsOfPlugin(pluginId, repositoryType);
     }
-
 
     async findOne(id: string, version?: string): Promise<PluginManifest | undefined> { // Added version
-        if (this.cache.has(id)) { // Cache needs to be version aware if we want to hit it here
-            const repository = this.cache.get(id);
-            return this.pluginMarketplace.fetchOne(id, version, repository as PluginRepositoryType);
+        try {
+            if (this.cache.has(id)) {
+                const repository = this.cache.get(id);
+                return this.pluginMarketplace.fetchOne(id, version, repository as PluginRepositoryType);
+            }
+            const plugin = await this.pluginMarketplace.fetchOne(id, version);
+            if (plugin && !this.cache.has(plugin.id)) {
+                // Removed all updateCache calls
+            }
+            return plugin;
+        } catch (err) {
+            console.warn(`pluginRegistry: findOne failed for id=${id}:`, err);
+            return undefined;
         }
-        // Use the correct signature for pluginMarketplace.fetchOne
-        const plugin = await this.pluginMarketplace.fetchOne(id, version);
-        if (plugin && !this.cache.has(plugin.id)) {
-            this.updateCache(this.getLocatorFromManifest(plugin));
+    }
+
+    public async store(plugin: PluginManifest): Promise<void> {
+        try {
+            await this.pluginMarketplace.store(plugin);
+        } catch (err) {
+            console.warn(`pluginRegistry: store failed for plugin id=${plugin.id}:`, err);
         }
-        return plugin;
-    }
-
-    public store(plugin: PluginManifest): Promise<void> {
-        return this.pluginMarketplace.store(plugin);
-    }
-
-    async list(): Promise<PluginLocator[]> {
-        return this.pluginMarketplace.list();
-    }
-
-    /**
-     * Check if a plugin is a container plugin
-     */
-    isContainerPlugin(plugin: PluginManifest): boolean {
-        return plugin.language === 'container' &&
-               !!(plugin as any).container &&
-               !!(plugin as any).api;
     }
 
     /**
-     * Validate container plugin manifest
+     * Delete a plugin by ID (and optionally version) from a specific repository
      */
-    validateContainerPlugin(plugin: PluginManifest): boolean {
-        if (!this.isContainerPlugin(plugin)) {
-            return false;
+    public async delete(pluginId: string, version?: string, repository?: PluginRepositoryType): Promise<void> {
+        try {
+            if (typeof (this.pluginMarketplace as any).delete === 'function') {
+                await (this.pluginMarketplace as any).delete(pluginId, version, repository);
+            }
+        } catch (err) {
+            console.warn(`pluginRegistry: delete failed for plugin id=${pluginId}:`, err);
         }
-
-        const containerConfig = (plugin as any).container;
-        const apiConfig = (plugin as any).api;
-
-        // Check required container fields
-        if (!containerConfig.image || !containerConfig.ports || !Array.isArray(containerConfig.ports)) {
-            return false;
-        }
-
-        // Check required API fields
-        if (!apiConfig.endpoint || !apiConfig.method) {
-            return false;
-        }
-
-        return true;
-    }
-
-    private async updateCache(pluginLocator: PluginLocator): Promise<void> {
-        // console.log('Registry: Update cache with ', pluginLocator.verb, pluginLocator.id); // Original log
-        // Quieter logging for cache updates unless debugging
-        if (process.env.DEBUG_PLUGIN_REGISTRY) {
-            console.log('Registry: Update cache with ', pluginLocator.verb, pluginLocator.id);
-        }
-        this.cache.set(pluginLocator.id, pluginLocator.repository.type);
-        this.verbIndex.set(pluginLocator.verb, pluginLocator.id);
     }
 
     private getLocatorFromManifest(manifest: PluginManifest): PluginLocator {
@@ -339,5 +317,43 @@ export class PluginRegistry {
             lines.push(`- ${locator.verb}`);
         }
         return lines.join('\n');
+    }
+
+    /**
+     * Returns a list of active/configured repository types (for frontend repo picker)
+     */
+    public getActiveRepositories(): { type: string; label: string }[] {
+        // Use the pluginMarketplace instance to get the configured repositories
+        const repoMap = this.pluginMarketplace.getRepositories();
+        // Map to label for UI
+        const labelMap: Record<string, string> = {
+            local: 'Local',
+            mongo: 'MongoDB',
+            github: 'GitHub',
+            git: 'Git',
+            openapi: 'OpenAPI Tools',
+            mcp: 'MCP Tools',
+            'librarian-definition': 'Librarian',
+        };
+        return Array.from(repoMap.keys()).map(type => ({
+            type,
+            label: labelMap[type] || type
+        }));
+    }
+
+    public async list(repositoryType?: PluginRepositoryType): Promise<PluginLocator[]> {
+        try {
+            console.log(`Listing plugins from repository type: ${repositoryType || 'all'}`);
+            const all = await this.pluginMarketplace.list(repositoryType);
+            console.log(`Found ${all.length} plugins in total from repository type: ${repositoryType || 'all'}`);
+            if (!repositoryType) return all;
+            // Filter by repository type if requested
+            const result = all.filter(p => p.repository && p.repository.type === repositoryType);
+            console.log(`Found ${result.length} plugins in repository type: ${repositoryType}`);
+            return result;
+        } catch (err) {
+            console.warn('pluginRegistry: list failed:', err);
+            return [];
+        }
     }
 }
