@@ -667,7 +667,7 @@ node scripts/test-plugin-ecosystem.js
 ```json
 {
   "actionVerb": "string",
-  "inputs": "Map<string, PluginInput>"
+  "inputs": "Map<string, InputValue>"
 }
 ```
 
@@ -714,7 +714,7 @@ For any unhandled errors in the above endpoints:
 ```json
 {
   "verb": "string",
-  "context": "Map<string, PluginInput>",
+  "context": "Map<string, InputValue>",
   "guidance": "string"
 }
 ```
@@ -1197,7 +1197,7 @@ Note: Other fields may be added as needed
 ```json
 {
   "actionVerb": "string",
-  "inputs": "Map<string, PluginInput>",
+  "inputs": "Map<string, InputValue>",
   "dependencies": "string[]",
   "missionId": "string",
   "missionContext": "string"

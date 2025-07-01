@@ -1,5 +1,5 @@
 import { Status } from './Status';
-import { PluginInput } from './Plugin';
+import { InputValue } from './Plugin';
 
 export interface Agent {
     id: string;
@@ -11,7 +11,7 @@ export interface Agent {
 
 export interface AgentConfig {
     actionVerb: string;
-    inputs? : Map<string, PluginInput>;
+    inputValues? : Map<string, InputValue>;
     missionId: string;
     dependencies?: string[];
     postOfficeUrl: string;

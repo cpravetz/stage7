@@ -54,7 +54,7 @@ container-plugin-template/
    # Test plugin execution
    curl -X POST http://localhost:8080/execute \
      -H "Content-Type: application/json" \
-     -d '{"inputs": {"example_input": {"inputValue": "test"}}}'
+     -d '{"inputs": {"example_input": {"value": "test"}}}'
    ```
 
 ## Plugin Implementation
@@ -81,7 +81,7 @@ def execute_plugin(inputs: Dict[str, Any], context: Dict[str, Any]) -> Dict[str,
 {
   "inputs": {
     "parameter_name": {
-      "inputValue": "actual_value",
+      "value": "actual_value",
       "args": {}
     }
   },

@@ -160,7 +160,7 @@ Validate and test the converted plugin:
 python tools/python-plugin-cli.py validate plugins/PLUGIN_NAME
 
 # Test with sample input
-python tools/python-plugin-cli.py test plugins/PLUGIN_NAME --input '{"param": {"inputValue": "test"}}'
+python tools/python-plugin-cli.py test plugins/PLUGIN_NAME --input '{"param": {"value": "test"}}'
 ```
 
 ## Migration Examples

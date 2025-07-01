@@ -1,8 +1,8 @@
 import express from 'express';
 import { Agent } from './agents/Agent';
-import { MapSerializer, BaseEntity, createAuthenticatedAxios } from '@cktmcs/shared';
+import { MapSerializer, BaseEntity, createAuthenticatedAxios, PluginParameterType } from '@cktmcs/shared';
 import { v4 as uuidv4 } from 'uuid';
-import { AgentSetStatistics, PluginInput } from '@cktmcs/shared';
+import { AgentSetStatistics, InputValue } from '@cktmcs/shared';
 import { AgentPersistenceManager } from './utils/AgentPersistenceManager';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { setInterval } from 'timers';
@@ -766,7 +766,7 @@ export class AgentSet extends BaseEntity {
         const { agentId, actionVerb, inputs, missionId, missionContext, roleId, roleCustomizations } = req.body;
         console.log('Adding agent with req.body', req.body);
         console.log('Adding agent with inputs', inputs);
-        let inputsMap: Map<string, PluginInput>;
+        let inputsMap: Map<string, InputValue>;
 
         if (inputs?._type === 'Map') {
             inputsMap = MapSerializer.transformFromSerialization(inputs);
@@ -776,12 +776,13 @@ export class AgentSet extends BaseEntity {
             } else {
                 inputsMap = new Map();
                 for (const [key, value] of Object.entries(inputs)) {
-                    if (typeof value === 'object' && value !== null && 'inputValue' in value) {
-                        inputsMap.set(key, value as PluginInput);
+                    if (typeof value === 'object' && value !== null && 'value' in value) {
+                        inputsMap.set(key, value as InputValue);
                     } else {
                         inputsMap.set(key, {
                             inputName: key,
-                            inputValue: value,
+                            value: value,
+                            valueType: PluginParameterType.ANY,
                             args: { [key]: value }
                         });
                     }
@@ -792,7 +793,7 @@ export class AgentSet extends BaseEntity {
         console.log(`addAgent inputsMap:`, inputsMap);
         const agentConfig = {
             actionVerb,
-            inputs: inputsMap,
+            inputValues: inputsMap,
             missionId,
             missionContext,
             id: agentId,
@@ -850,7 +851,7 @@ export class AgentSet extends BaseEntity {
                 throw new Error('Agent with this ID already exists');
             }
 
-            let inputsMap: Map<string, PluginInput>;
+            let inputsMap: Map<string, InputValue>;
 
             if (inputs?._type === 'Map') {
                 inputsMap = MapSerializer.transformFromSerialization(inputs);
@@ -860,12 +861,13 @@ export class AgentSet extends BaseEntity {
                 } else {
                     inputsMap = new Map();
                     for (const [key, value] of Object.entries(inputs)) {
-                        if (typeof value === 'object' && value !== null && 'inputValue' in value) {
-                            inputsMap.set(key, value as PluginInput);
+                        if (typeof value === 'object' && value !== null && 'value' in value) {
+                            inputsMap.set(key, value as InputValue);
                         } else {
                             inputsMap.set(key, {
                                 inputName: key,
-                                inputValue: value,
+                                value: value,
+                                valueType: PluginParameterType.ANY,
                                 args: { [key]: value }
                             });
                         }
@@ -876,7 +878,7 @@ export class AgentSet extends BaseEntity {
             // Create a new agent
             const agentConfig = {
                 actionVerb,
-                inputs: inputsMap,
+                inputValues: inputsMap,
                 missionId,
                 missionContext,
                 id: agentId,
@@ -1165,7 +1167,8 @@ export class AgentSet extends BaseEntity {
                     description: step.description,
                     status: step.status,
                     dependencies: step.dependencies,
-                    inputs: MapSerializer.transformForSerialization(step.inputs),
+                    inputReferences: MapSerializer.transformForSerialization(step.inputReferences),
+                    inputValues: MapSerializer.transformForSerialization(step.inputValues),
                     results: step.result, 
                     agentId: agent.id, // Optionally include agentId for context
                 };

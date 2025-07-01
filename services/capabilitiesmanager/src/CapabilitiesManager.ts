@@ -5,19 +5,19 @@ import fs from 'fs';
 import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import { Step, MapSerializer, BaseEntity, ServiceTokenManager } from '@cktmcs/shared';
-import { PluginInput, PluginOutput, PluginDefinition, PluginParameterType, environmentType, PluginManifest, PluginLocator, PluginRepositoryType, PluginParameter, DefinitionManifest, DefinitionType, OpenAPITool, MCPTool, MCPActionMapping, MCPAuthentication, MCPServiceTarget, OpenAPIExecutionRequest, OpenAPIExecutionResult } from '@cktmcs/shared'; // Added DefinitionManifest, DefinitionType
-import { PlanTemplate, PlanTemplateCreateRequest, PlanTemplateUpdateRequest, PlanExecutionRequest, ExecutionContext as PlanExecutionContext, StepExecution, PlanExecutionStatus, StepExecutionStatus } from '@cktmcs/shared'; // Removed OpenAPITool, MCPTool etc from here as they are imported above
+import { InputValue, InputReference, PluginOutput, PluginDefinition, PluginParameterType, environmentType, PluginManifest, PluginLocator, PluginRepositoryType, PluginParameter, DefinitionManifest, DefinitionType, OpenAPITool, MCPTool, MCPActionMapping, MCPAuthentication, MCPServiceTarget, OpenAPIExecutionRequest, OpenAPIExecutionResult } from '@cktmcs/shared'; // Added DefinitionManifest, DefinitionType
+import { PlanTemplate, ExecutionContext as PlanExecutionContext, StepExecution, PlanExecutionStatus, StepExecutionStatus } from '@cktmcs/shared'; // Removed OpenAPITool, MCPTool etc from here as they are imported above
 import { executePluginInSandbox } from '@cktmcs/shared';
 import { validatePluginPermissions, hasDangerousPermissions } from '@cktmcs/shared';
 import { promisify } from 'util';
 import { exec as execCallback } from 'child_process';
-const execAsync = promisify(execCallback);
 import { generateStructuredError, ErrorSeverity, GlobalErrorCodes, StructuredError } from './utils/errorReporter';
 import { ConfigManager } from './utils/configManager';
 import { PluginRegistry } from './utils/pluginRegistry';
 import { validateAndStandardizeInputs } from './utils/validator';
 import { ContainerManager } from './utils/containerManager';
 import { ContainerExecutionRequest, ContainerPluginManifest } from './types/containerTypes';
+const execAsync = promisify(execCallback);
 
 // Helper to create PluginOutput error from a StructuredError
 function createPluginOutputError(structuredError: StructuredError): PluginOutput[] {
@@ -32,7 +32,7 @@ function createPluginOutputError(structuredError: StructuredError): PluginOutput
 }
 
 interface ExecutionContext {
-    inputs: Map<string, PluginInput>;
+    inputValues: Map<string, InputValue>;
     environment: environmentType;
     pluginDefinition: PluginDefinition;
     pluginRootPath: string;
@@ -89,11 +89,8 @@ export class CapabilitiesManager extends BaseEntity {
                         trace_id_param: trace_id
                     });
                 }
-            } else {
-                //console.log(`[${trace_id}] ${source_component}: Already registered with PostOffice.`);
             }
 
-            //console.log(`[${trace_id}] ${source_component}: Initialization complete.`);
         } catch (error: any) {
             throw generateStructuredError({
                 error_code: GlobalErrorCodes.INTERNAL_ERROR_CM,
@@ -305,7 +302,7 @@ export class CapabilitiesManager extends BaseEntity {
     private async executeActionVerb(req: express.Request, res: express.Response) {
         const trace_id = (req as any).trace_id || uuidv4();
         const source_component = "CapabilitiesManager.executeActionVerb";
-        const step = { ...req.body, inputs: MapSerializer.transformFromSerialization(req.body.inputs) } as Step;
+        const step = { ...req.body, inputValues: MapSerializer.transformFromSerialization(req.body.inputValues) } as Step;
 
         if (!step.actionVerb || typeof step.actionVerb !== 'string') {
             const sError = generateStructuredError({
@@ -358,7 +355,7 @@ export class CapabilitiesManager extends BaseEntity {
                 } else if (manifest.language === 'javascript' || manifest.language === 'python' || manifest.language === 'container') {
                     // Standard code-based plugin execution
                     const pluginDefinition = manifest as PluginDefinition; // Assuming PluginManifest is compatible enough
-                    const validatedInputs = await validateAndStandardizeInputs(pluginDefinition, step.inputs);
+                    const validatedInputs = await validateAndStandardizeInputs(pluginDefinition, step.inputValues || new Map<string, InputValue>());
                     if (!validatedInputs.success || !validatedInputs.inputs) {
                         throw generateStructuredError({
                             error_code: GlobalErrorCodes.INPUT_VALIDATION_FAILED,
@@ -461,7 +458,7 @@ export class CapabilitiesManager extends BaseEntity {
 
     protected async executePlugin(
         pluginToExecute: PluginDefinition,
-        inputsForPlugin: Map<string, PluginInput>,
+        inputsForPlugin: Map<string, InputValue>,
         actualPluginRootPath: string,
         trace_id: string
     ): Promise<PluginOutput[]> {
@@ -517,25 +514,28 @@ export class CapabilitiesManager extends BaseEntity {
             const executionInputs = new Map(inputsForPlugin);
             if (token) executionInputs.set('__auth_token', {
                 inputName: '__auth_token',
-                inputValue: token,
+                value: token,
+                valueType: PluginParameterType.STRING,
                 args: { token }
             });
 
             if (brainToken) {
                 executionInputs.set('__brain_auth_token', {
                     inputName: '__brain_auth_token',
-                    inputValue: brainToken,
+                    value: brainToken,
+                    valueType: PluginParameterType.STRING,
                     args: { token: brainToken }
                 });
                 executionInputs.set('token', {
                     inputName: 'token',
-                    inputValue: brainToken,
+                    value: brainToken,
+                    valueType: PluginParameterType.STRING,
                     args: { token: brainToken }
                 });
             }
 
             const executionContext: ExecutionContext = {
-                inputs: executionInputs,
+                inputValues: executionInputs,
                 environment,
                 pluginDefinition: pluginToExecute,
                 pluginRootPath: actualPluginRootPath,
@@ -546,7 +546,7 @@ export class CapabilitiesManager extends BaseEntity {
                 try {
                     return await executePluginInSandbox(
                         executionContext.pluginDefinition,
-                        Array.from(executionContext.inputs.values()),
+                        Array.from(executionContext.inputValues.values()),
                         executionContext.environment
                     );
                 } catch (sandboxError: any) {
@@ -592,7 +592,7 @@ export class CapabilitiesManager extends BaseEntity {
     }
 
     private async executePythonPlugin(executionContext: ExecutionContext): Promise<PluginOutput[]> {
-        const { pluginDefinition, inputs, environment, pluginRootPath, trace_id } = executionContext;
+        const { pluginDefinition, inputValues, environment, pluginRootPath, trace_id } = executionContext;
         const source_component = "CapabilitiesManager.executePythonPlugin";
         const mainFilePath = path.join(pluginRootPath, pluginDefinition.entryPoint!.main);
 
@@ -603,7 +603,7 @@ export class CapabilitiesManager extends BaseEntity {
             await this.ensurePythonDependencies(pluginRootPath, trace_id);
 
             // Convert Map to array of [key, value] pairs for Python plugin compatibility
-            const inputsArray: [string, PluginInput][] = Array.from(inputs.entries());
+            const inputsArray: [string, InputValue][] = Array.from(inputValues.entries());
 
             const inputsJsonString = JSON.stringify(inputsArray);
 
@@ -661,7 +661,7 @@ export class CapabilitiesManager extends BaseEntity {
     }
 
     private async executeContainerPlugin(executionContext: ExecutionContext): Promise<PluginOutput[]> {
-        const { pluginDefinition, inputs, pluginRootPath, trace_id } = executionContext;
+        const { pluginDefinition, inputValues, pluginRootPath, trace_id } = executionContext;
         const source_component = "CapabilitiesManager.executeContainerPlugin";
 
         console.log(`[${trace_id}] ${source_component}: Container execution for plugin ${pluginDefinition.id} v${pluginDefinition.version}`);
@@ -704,8 +704,8 @@ export class CapabilitiesManager extends BaseEntity {
             try {
                 // Prepare execution request
                 const inputsObject: { [key: string]: any } = {};
-                inputs.forEach((value, key) => {
-                    inputsObject[key] = value;
+                inputValues.forEach((value, key) => {
+                    inputsObject[key] = value.value;
                 });
 
                 const executionRequest: ContainerExecutionRequest = {
@@ -957,7 +957,7 @@ export class CapabilitiesManager extends BaseEntity {
     private async handleUnknownVerb(step: Step, trace_id: string): Promise<PluginOutput[]> {
         const source_component = "CapabilitiesManager.handleUnknownVerb";
         try {
-            const context = ` ${step.description || ''} with inputs ${MapSerializer.transformForSerialization(step.inputs)}`;
+            const context = ` ${step.description || ''} with inputs ${MapSerializer.transformForSerialization(step.inputValues)}`;
             const goal = `Handle the action verb \"${step.actionVerb}\" in our plan with the following context: ${context} by defining a plan, generating an answer from the inputs, or recommending a new plugin for handling the actionVerb. Respond with a plan, a plugin request, or a literal result. Avoid using this action verb, ${step.actionVerb}, in the plan.`;
 
             const accomplishResultArray = await this.executeAccomplishPlugin(goal, step.actionVerb, trace_id);
@@ -1006,10 +1006,10 @@ export class CapabilitiesManager extends BaseEntity {
         try {
             // Get available plugins string from pluginRegistry (which proxies to marketplace)
             const availablePluginsStr = await this.pluginRegistry.getAvailablePluginsStr();
-            const accomplishInputs = new Map([
-                ['goal', { inputName: 'goal', inputValue: goal, args: {} }],
-                ['verbToAvoid', { inputName: 'verbToAvoid', inputValue: verbToAvoid, args: {} }],
-                ['available_plugins', { inputName: 'available_plugins', inputValue: availablePluginsStr, args: {} }]
+            const accomplishInputs : Map<string, InputValue> = new Map([
+                ['goal', { inputName: 'goal', value: goal, valueType: PluginParameterType.STRING, args: {} }],
+                ['verbToAvoid', { inputName: 'verbToAvoid', value: verbToAvoid, valueType: PluginParameterType.STRING, args: {} }],
+                ['available_plugins', { inputName: 'available_plugins', value: availablePluginsStr, valueType: PluginParameterType.STRING, args: {} }]
             ]);
 
             const accomplishPluginManifest = await this.pluginRegistry.fetchOneByVerb('ACCOMPLISH');
@@ -1197,7 +1197,8 @@ export class CapabilitiesManager extends BaseEntity {
                 stepNo: context.steps.length,
                 actionVerb: task.actionVerb,
                 description: task.description,
-                inputs: new Map(Object.entries(stepExecution.inputs).map(([k, v]) => [k, { inputName: k, inputValue: v, args: {} }])),
+                inputValues: new Map(Object.entries(stepExecution.inputs).map(([k, v]) => [k, { inputName: k, value: v, valueType: PluginParameterType.STRING, args: {} }])),
+                outputs: new Map(),
                 dependencies: [],
                 status: 'pending'
             };
@@ -1340,7 +1341,7 @@ export class CapabilitiesManager extends BaseEntity {
 
         if (plugin) {
             // Execute plugin
-            const validatedInputs = await validateAndStandardizeInputs(plugin, step.inputs);
+            const validatedInputs = await validateAndStandardizeInputs(plugin, step.inputValues || new Map());
             if (!validatedInputs.success) {
                 throw new Error(validatedInputs.error || "Input validation failed");
             }
@@ -1463,7 +1464,7 @@ export class CapabilitiesManager extends BaseEntity {
 
         // Process inputs according to parameter mappings
         for (const inputMapping of actionMapping.inputs) {
-            const inputValue = step.inputs.get(inputMapping.name)?.inputValue;
+            const inputValue = step.inputValues?.get(inputMapping.name)?.value;
 
             if (inputValue !== undefined) {
                 switch (inputMapping.in) {
@@ -1566,10 +1567,10 @@ export class CapabilitiesManager extends BaseEntity {
         const source_component = "CapabilitiesManager.handleExecutePlanTemplateInternal";
 
         try {
-            const templateId = step.inputs.get('templateId')?.inputValue as string;
-            const inputs = step.inputs.get('inputs')?.inputValue || {};
-            const userId = step.inputs.get('userId')?.inputValue as string || 'agent-user';
-            const executionMode = step.inputs.get('executionMode')?.inputValue as string || 'automatic';
+            const templateId = step.inputValues?.get('templateId')?.value as string;
+            const inputs = step.inputValues?.get('inputs')?.value || {};
+            const userId = step.inputValues?.get('userId')?.value as string || 'agent-user';
+            const executionMode = step.inputValues?.get('executionMode')?.value as string || 'automatic';
 
             if (!templateId) {
                 throw new Error('Template ID is required for plan template execution');
@@ -1692,7 +1693,7 @@ export class CapabilitiesManager extends BaseEntity {
 
         try {
             // 1. Validate Inputs
-            const validatedInputsResult = await validateAndStandardizeInputs(actionMapping as any, step.inputs); // Cast as any because actionMapping is not PluginDefinition
+            const validatedInputsResult = await validateAndStandardizeInputs(actionMapping as any, step.inputValues || new Map()); // Cast as any because actionMapping is not PluginDefinition
             if (!validatedInputsResult.success || !validatedInputsResult.inputs) {
                 const errorMsg = validatedInputsResult.error || "Input validation failed for MCP tool.";
                 console.error(`[${trace_id}] ${source_component}: ${errorMsg}`);
@@ -1701,7 +1702,7 @@ export class CapabilitiesManager extends BaseEntity {
             const validatedInputs = validatedInputsResult.inputs;
             const inputsObject: { [key: string]: any } = {};
             validatedInputs.forEach((value, key) => {
-                inputsObject[key] = value.inputValue;
+                inputsObject[key] = value.value;
             });
 
             // 2. Prepare Request for MCP Service

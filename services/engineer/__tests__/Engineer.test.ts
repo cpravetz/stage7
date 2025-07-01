@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { Engineer } from '../src/Engineer';
-import { MapSerializer, PluginInput, Plugin } from '@cktmcs/shared';
+import { InputValue, PluginParameterType } from '@cktmcs/shared';
 
 jest.mock('axios');
 const mockedAxios = axios as jest.Mocked<typeof axios>;
@@ -21,8 +21,8 @@ describe('Engineer', () => {
   describe('createPlugin', () => {
     it('should create a plugin successfully', async () => {
       const verb = 'TEST_VERB';
-      const context = new Map<string, PluginInput>();
-      context.set('testInput', { inputValue: 'test', args: {}, dependencyOutputs: {} });
+      const context = new Map<string, InputValue>();
+      context.set('testInput', { value: 'test', valueType: PluginParameterType.STRING, args: {}, inputName: 'testInput' });
 
       const mockExplanation = 'Test explanation';
       const mockPluginStructure: Plugin = {
@@ -55,7 +55,7 @@ describe('Engineer', () => {
 
     it('should throw an error if plugin structure generation fails', async () => {
       const verb = 'FAIL_VERB';
-      const context = new Map<string, PluginInput>();
+      const context = new Map<string, InputValue>();
 
       mockedAxios.post.mockResolvedValueOnce({ data: { result: 'Test explanation' } });
       mockedAxios.post.mockRejectedValueOnce(new Error('Failed to generate plugin structure'));

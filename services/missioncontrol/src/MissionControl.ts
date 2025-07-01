@@ -1,9 +1,9 @@
 import axios from 'axios';
 import express from 'express';
 import { Request, Response, NextFunction } from 'express';
-import { AgentStatistics, Mission, Status } from '@cktmcs/shared';
+import { AgentStatistics, Mission, PluginParameterType, Status } from '@cktmcs/shared';
 import { v4 as uuidv4, validate as uuidValidate } from 'uuid';
-import { BaseEntity, MessageType, PluginInput, MapSerializer, ServiceTokenManager } from '@cktmcs/shared';
+import { BaseEntity, MessageType, InputValue, MapSerializer, ServiceTokenManager } from '@cktmcs/shared';
 import { MissionStatistics } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { rateLimit } from 'express-rate-limit';
@@ -274,10 +274,11 @@ class MissionControl extends BaseEntity {
             this.sendStatusUpdate(mission, 'Mission created');
 
             // Create the inputs map for the agent
-            const inputs = new Map<string, PluginInput>();
+            const inputs = new Map<string, InputValue>();
             inputs.set('goal', {
                 inputName: 'goal',
-                inputValue: mission.goal,
+                value: mission.goal,
+                valueType: PluginParameterType.STRING,
                 args: {}
             });
 
@@ -285,7 +286,8 @@ class MissionControl extends BaseEntity {
             if (mission.missionContext) {
                 inputs.set('missionContext', {
                     inputName: 'missionContext',
-                    inputValue: mission.missionContext,
+                    value: mission.missionContext,
+                    valueType: PluginParameterType.STRING,
                     args: {}
                 });
             }

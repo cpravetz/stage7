@@ -1,14 +1,10 @@
 import { v4 as uuidv4 } from 'uuid';
-import { PluginInput, 
-    PluginParameterType, 
+import { PluginParameterType, 
     PluginOutput, 
     InputReference, 
     InputValue, 
-    PlanDependency, 
     StepDependency, 
     ActionVerbTask, 
-    PlanTemplate, 
-    PlanExecutionRequest, 
     ExecutionContext as PlanExecutionContext } from '@cktmcs/shared'; 
 import { MapSerializer } from '@cktmcs/shared';
 import { MessageType } from '@cktmcs/shared'; // Ensured MessageType is here, assuming it's separate or also from shared index
@@ -25,8 +21,8 @@ export enum StepStatus {
 
 export interface StepModification {
     description?: string;
-    inputs?: Map<string, PluginInput>; // For complete replacement of inputs
-    updateInputs?: Map<string, PluginInput>; // For merging/updating specific inputs
+    inputValues?: Map<string, InputValue>; // For complete replacement of inputs
+    updateInputs?: Map<string, InputValue>; // For merging/updating specific inputs
     status?: StepStatus;
     actionVerb?: string;
     recommendedRole?: string;
@@ -37,9 +33,8 @@ export class Step {
     readonly id: string;
     readonly stepNo: number;
     readonly actionVerb: string;
-    inputs: Map<string, PluginInput>;
-    inputReferences?: Map<string, InputReference>;
-    inputValues?: Map<string, InputValue>; 
+    inputReferences: Map<string, InputReference>;
+    inputValues: Map<string, InputValue>; 
     description?: string;
     dependencies: StepDependency[];
     status: StepStatus;
@@ -54,7 +49,6 @@ export class Step {
         id?: string,
         actionVerb: string,
         stepNo: number,
-        inputs?: Map<string, PluginInput>,
         inputReferences?: Map<string, InputReference>,
         inputValues?: Map<string, InputValue>,
         description?: string,
@@ -66,9 +60,8 @@ export class Step {
         this.id = params.id || uuidv4();
         this.stepNo = params.stepNo;
         this.actionVerb = params.actionVerb;
-        this.inputs = params.inputs || new Map();
-        this.inputReferences = params.inputReferences;
-        this.inputValues = params.inputValues;
+        this.inputReferences = params.inputReferences || new Map();
+        this.inputValues = params.inputValues || new Map();
         this.description = params.description;
         this.dependencies = params.dependencies || [];
         this.status = params.status || StepStatus.PENDING;
@@ -81,7 +74,8 @@ export class Step {
             stepId: this.id,
             stepNo: this.stepNo,
             actionVerb: this.actionVerb,
-            inputs: MapSerializer.transformForSerialization(this.inputs),
+            //inputs: MapSerializer.transformForSerialization(this.inputs),
+            inputReferences: MapSerializer.transformForSerialization(this.inputReferences),
             dependencies: MapSerializer.transformForSerialization(this.dependencies),
             status: this.status,
             description: this.description,
@@ -103,14 +97,25 @@ export class Step {
     }
 
     populateInputsFromDependencies(allSteps: Step[]): void {
+        this.inputReferences.forEach((inputReference, name) => {
+            if (inputReference.value) {
+                this.inputValues.set(inputReference.inputName, {
+                    inputName: inputReference.inputName,
+                    value: inputReference.value,
+                    valueType: inputReference.valueType,
+                    args: inputReference.args || {}
+                });
+            }
+        });
         this.dependencies.forEach(dep => {
             const sourceStep = allSteps.find(s => s.id === dep.sourceStepId);
             if (sourceStep?.result) {
                 const outputValue = sourceStep.result.find(r => r.name === dep.outputName)?.result;
                 if (outputValue !== undefined) {
-                    this.inputs.set(dep.outputName, {
+                    this.inputValues.set(dep.outputName, {
                         inputName: dep.outputName,
-                        inputValue: outputValue,
+                        value: outputValue,
+                        valueType: PluginParameterType.STRING, // Assuming STRING, adjust as necessary
                         args: {}
                     });
                 }
@@ -144,23 +149,23 @@ export class Step {
 
     async execute(
         executeAction: (step: Step) => Promise<PluginOutput[]>,
-        thinkAction: (inputs: Map<string, PluginInput>) => Promise<PluginOutput[]>,
-        delegateAction: (inputs: Map<string, PluginInput>) => Promise<PluginOutput[]>,
-        askAction: (inputs: Map<string, PluginInput>) => Promise<PluginOutput[]>
+        thinkAction: (inputValues: Map<string, InputValue>) => Promise<PluginOutput[]>,
+        delegateAction: (inputValues: Map<string, InputValue>) => Promise<PluginOutput[]>,
+        askAction: (inputValues: Map<string, InputValue>) => Promise<PluginOutput[]>
     ): Promise<PluginOutput[]> {
         this.status = StepStatus.RUNNING;
         try {
             let result: PluginOutput[];
             switch (this.actionVerb) {
                 case 'THINK':
-                    result = await thinkAction(this.inputs);
+                    result = await thinkAction(this.inputValues);
                     break;
                 case 'DELEGATE':
-                    result = await delegateAction(this.inputs);
+                    result = await delegateAction(this.inputValues);
                     break;
                 case 'ASK':
                 case MessageType.REQUEST:
-                    result = await askAction(this.inputs);
+                    result = await askAction(this.inputValues);
                     break;
                 case 'DECIDE':
                     result = await this.handleDecide();
@@ -264,9 +269,9 @@ export class Step {
     }
 
     private async handleDecide(): Promise<PluginOutput[]> {
-        const condition = this.inputs.get('condition')?.inputValue;
-        const trueSteps = this.inputs.get('trueSteps')?.inputValue as ActionVerbTask[];
-        const falseSteps = this.inputs.get('falseSteps')?.inputValue as ActionVerbTask[];
+        const condition = this.inputValues.get('condition')?.value;
+        const trueSteps = this.inputValues.get('trueSteps')?.value as ActionVerbTask[];
+        const falseSteps = this.inputValues.get('falseSteps')?.value as ActionVerbTask[];
 
         let result: boolean;
         if (typeof condition === 'function') {
@@ -291,8 +296,8 @@ export class Step {
     }
 
     private async handleRepeat(): Promise<PluginOutput[]> {
-        const count = this.inputs.get('count')?.inputValue as number;
-        const steps = this.inputs.get('steps')?.inputValue as ActionVerbTask[];
+        const count = this.inputValues.get('count')?.value as number;
+        const steps = this.inputValues.get('steps')?.value as ActionVerbTask[];
         const newSteps: Step[] = [];
 
         for (let i = 0; i < count; i++) {
@@ -310,8 +315,8 @@ export class Step {
     }
 
     private async handleTimeout(): Promise<PluginOutput[]> {
-        const timeoutMs = this.inputs.get('timeout')?.inputValue as number;
-        const steps = this.inputs.get('steps')?.inputValue as ActionVerbTask[];
+        const timeoutMs = this.inputValues.get('timeout')?.value as number;
+        const steps = this.inputValues.get('steps')?.value as ActionVerbTask[];
         const newSteps = createFromPlan(steps, this.stepNo + 1, this.persistenceManager);
 
         newSteps.forEach(step => {
@@ -328,8 +333,8 @@ export class Step {
     }
 
     private async handleWhile(): Promise<PluginOutput[]> {
-        const conditionInput = this.inputs.get('condition');
-        const stepsInput = this.inputs.get('steps');
+        const conditionInput = this.inputValues.get('condition');
+        const stepsInput = this.inputValues.get('steps');
         const maxIterations = 100; // Safety limit
 
         if (!conditionInput || !stepsInput) {
@@ -343,8 +348,8 @@ export class Step {
             }];
         }
 
-        const steps = stepsInput.inputValue as ActionVerbTask[];
-        const condition = conditionInput.inputValue;
+        const steps = stepsInput.value as ActionVerbTask[];
+        const condition = conditionInput.value;
 
         let currentIteration = 0;
         const newSteps: Step[] = [];
@@ -353,10 +358,11 @@ export class Step {
         const checkStep = new Step({
             actionVerb: 'THINK',
             stepNo: this.stepNo + 1,
-            inputs: new Map([
+            inputReferences: new Map([
                 ['prompt', {
                     inputName: 'prompt',
-                    inputValue: `Evaluate if this condition is true: ${condition}`,
+                    value: `Evaluate if this condition is true: ${condition}`,
+                    valueType: PluginParameterType.STRING,
                     args: {}
                 }]
             ]),
@@ -384,10 +390,11 @@ export class Step {
         const nextCheckStep = new Step({
             actionVerb: 'THINK',
             stepNo: this.stepNo + 2 + steps.length,
-            inputs: new Map([
+            inputReferences: new Map([
                 ['prompt', {
                     inputName: 'prompt',
-                    inputValue: `Evaluate if this condition is still true: ${condition}. If true, more steps will be created.`,
+                    value: `Evaluate if this condition is still true: ${condition}. If true, more steps will be created.`,
+                    valueType: PluginParameterType.STRING,
                     args: {}
                 }]
             ]),
@@ -409,8 +416,8 @@ export class Step {
     }
 
     private async handleUntil(): Promise<PluginOutput[]> {
-        const conditionInput = this.inputs.get('condition');
-        const stepsInput = this.inputs.get('steps');
+        const conditionInput = this.inputValues.get('condition');
+        const stepsInput = this.inputValues.get('steps');
 
         if (!conditionInput || !stepsInput) {
             return [{
@@ -423,8 +430,8 @@ export class Step {
             }];
         }
 
-        const steps = stepsInput.inputValue as ActionVerbTask[];
-        const condition = conditionInput.inputValue;
+        const steps = stepsInput.value as ActionVerbTask[];
+        const condition = conditionInput.value;
 
         const newSteps: Step[] = [];
 
@@ -436,10 +443,11 @@ export class Step {
         const checkStep = new Step({
             actionVerb: 'THINK',
             stepNo: this.stepNo + 1 + steps.length,
-            inputs: new Map([
+            inputReferences: new Map([
                 ['prompt', {
                     inputName: 'prompt',
-                    inputValue: `Evaluate if this condition is now true: ${condition}. If false, more steps will be created.`,
+                    value: `Evaluate if this condition is now true: ${condition}. If false, more steps will be created.`,
+                    valueType: PluginParameterType.STRING,
                     args: {}
                 }]
             ]),
@@ -469,7 +477,7 @@ export class Step {
     }
 
     private async handleSequence(): Promise<PluginOutput[]> {
-        const stepsInput = this.inputs.get('steps');
+        const stepsInput = this.inputValues.get('steps');
 
         if (!stepsInput) {
             return [{
@@ -482,7 +490,7 @@ export class Step {
             }];
         }
 
-        const steps = stepsInput.inputValue as ActionVerbTask[];
+        const steps = stepsInput.value as ActionVerbTask[];
         const newSteps: Step[] = [];
 
         // Create steps with explicit dependencies to force sequential execution
@@ -492,7 +500,8 @@ export class Step {
             const newStep = new Step({
                 actionVerb: task.actionVerb,
                 stepNo: this.stepNo + 1 + index,
-                inputs: task.inputs || new Map(),
+                inputReferences: task.inputReferences || new Map(),
+                inputValues: new Map(),
                 description: task.description || `Sequential step ${index + 1}`,
                 persistenceManager: this.persistenceManager
             });
@@ -560,7 +569,8 @@ export class Step {
             id: this.id,
             stepNo: this.stepNo,
             actionVerb: this.actionVerb,
-            inputs: MapSerializer.transformForSerialization(this.inputs),
+            inputReferences: MapSerializer.transformForSerialization(this.inputReferences),
+            inputValues: MapSerializer.transformForSerialization(this.inputValues),
             description: this.description,
             dependencies: MapSerializer.transformForSerialization(this.dependencies),
             status: this.status,
@@ -574,12 +584,12 @@ export class Step {
      * This creates a new execution context and delegates to the CapabilitiesManager
      */
     private async handleExecutePlanTemplate(executeAction: (step: Step) => Promise<PluginOutput[]>): Promise<PluginOutput[]> {
-        const templateIdInput = this.inputs.get('templateId');
-        const templateInputsInput = this.inputs.get('inputs'); // Ensure this is correctly typed if it's complex
-        const userIdInput = this.inputs.get('userId'); // Ensure this is correctly typed
-        const executionModeInput = this.inputs.get('executionMode'); // Ensure this is correctly typed
+        const templateIdInput = this.inputValues.get('templateId')?.value;
+        const templateInputsInput = this.inputValues.get('inputs')?.value || {}; 
+        const userIdInput = this.inputValues.get('userId')?.value; // Ensure this is correctly typed
+        const executionModeInput = this.inputValues.get('executionMode')?.value; // Ensure this is correctly typed
 
-        if (!templateIdInput || !templateIdInput.inputValue || typeof templateIdInput.inputValue !== 'string') {
+        if (!templateIdInput || typeof templateIdInput !== 'string') {
             return [{
                 success: false,
                 name: 'error',
@@ -590,20 +600,20 @@ export class Step {
             }];
         }
 
-        const templateId = templateIdInput.inputValue as string;
-        const templateInputs = templateInputsInput?.inputValue || {}; // Default to empty object if undefined
-        const userId = (userIdInput?.inputValue as string) || 'agent-user'; // Default userId
-        const executionMode = (executionModeInput?.inputValue as string) || 'automatic'; // Default executionMode
+        const templateId = templateIdInput;
+        const templateInputs = templateInputsInput || {}; // Default to empty object if undefined
+        const userId = (userIdInput as string) || 'agent-user'; // Default userId
+        const executionMode = (executionModeInput as string) || 'automatic'; // Default executionMode
 
         // Create a special step that will be sent to CapabilitiesManager for plan template execution
         const planExecutionStep = new Step({
             actionVerb: 'EXECUTE_PLAN_TEMPLATE_INTERNAL',
             stepNo: this.stepNo,
-            inputs: new Map([
-                ['templateId', { inputName: 'templateId', inputValue: templateId, args: {} }],
-                ['inputs', { inputName: 'inputs', inputValue: templateInputs, args: {} }],
-                ['userId', { inputName: 'userId', inputValue: userId, args: {} }],
-                ['executionMode', { inputName: 'executionMode', inputValue: executionMode, args: {} }]
+            inputReferences: new Map([
+                ['templateId', { inputName: 'templateId', value: templateId, valueType: PluginParameterType.STRING, args: {} }],
+                ['inputs', { inputName: 'inputs', value: templateInputs, valueType: PluginParameterType.OBJECT, args: {} }],
+                ['userId', { inputName: 'userId', value: userId, valueType: PluginParameterType.STRING, args: {} }],
+                ['executionMode', { inputName: 'executionMode', value: executionMode, valueType: PluginParameterType.STRING, args: {} }]
             ]),
             description: `Execute plan template: ${templateId}`,
             persistenceManager: this.persistenceManager
@@ -642,14 +652,14 @@ export class Step {
             this.description = modifications.description;
             this.logEvent({ eventType: 'step_description_updated', stepId: this.id, newDescription: this.description });
         }
-        if (modifications.inputs) { // Complete replacement
-            this.inputs = new Map(modifications.inputs); // Assuming Map or convert from Record
+        if (modifications.inputValues) { // Complete replacement
+            this.inputValues = new Map(modifications.inputValues); // Assuming Map or convert from Record
             this.logEvent({ eventType: 'step_inputs_replaced', stepId: this.id });
         }
         if (modifications.updateInputs) { // Merge/update
-            if (!this.inputs) this.inputs = new Map<string, PluginInput>();
+            if (!this.inputValues) this.inputValues = new Map<string, InputValue>();
             modifications.updateInputs.forEach((value, key) => {
-                this.inputs.set(key, value);
+                this.inputValues.set(key, value);
             });
             this.logEvent({ eventType: 'step_inputs_updated', stepId: this.id });
         }
@@ -711,10 +721,9 @@ export class Step {
         });
         // Second pass: create steps and resolve dependencies
         return planTasks.map((task, idx) => {
-            const inputs = new Map<string, PluginInput>();
             const inputReferences = new Map<string, InputReference>();
-            if (task.inputs) {
-                for (const [inputName, inputDef] of Object.entries(task.inputs as Record<string, any>)) {
+            if (task.inputReferences) {
+                for (const [inputName, inputDef] of Object.entries(task.inputReferences as Record<string, any>)) {
                     if (typeof inputDef !== 'object' || inputDef === null) {
                         console.warn(`[createFromPlan] Skipping invalid input definition for '${inputName}' in task '${task.actionVerb}'.`);
                         continue;
@@ -753,7 +762,6 @@ export class Step {
                 id: task.id!,
                 actionVerb: task.actionVerb,
                 stepNo: startingStepNo + idx,
-                inputs: inputs,
                 description: task.description,
                 dependencies: dependencies,
                 inputReferences: inputReferences,

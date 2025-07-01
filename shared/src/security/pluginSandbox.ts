@@ -1,4 +1,4 @@
-import { PluginDefinition, environmentType, PluginInput, PluginOutput, PluginParameterType } from '../types/Plugin'; // PluginDefinition is kept for loadPluginCode
+import { PluginDefinition, environmentType, InputValue, PluginOutput, PluginParameterType } from '../types/Plugin'; // PluginDefinition is kept for loadPluginCode
 import { PluginManifest } from '../types/PluginManifest';
 import { VM, VMScript } from 'vm2';
 import * as fs from 'fs/promises';
@@ -35,7 +35,7 @@ export const DEFAULT_SANDBOX_OPTIONS: SandboxOptions = {
  */
 export async function executePluginInSandbox(
   plugin: PluginManifest,
-  inputs: Map<string, PluginInput>,
+  inputs: Map<string, InputValue>,
   environment: environmentType
 ): Promise<PluginOutput[]> {
   // Validate plugin security settings

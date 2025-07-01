@@ -135,7 +135,7 @@ class TestAccomplishPlanValidation(unittest.TestCase):
         mock_query_brain.return_value = invalid_plan_json_from_llm
 
         # Inputs for the execute method
-        inputs_map = {"goal": {"inputValue": "test goal"}, "token": {"inputValue": "fake_token"}}
+        inputs_map = {"goal": {"value": "test goal"}, "token": {"value": "fake_token"}}
 
         result = self.plugin.execute(inputs_map)
 
@@ -158,7 +158,7 @@ class TestAccomplishPlanValidation(unittest.TestCase):
         # Simulate validation failure from the mocked method
         mock_validate_plan_data.return_value = "Mocked Validation Error: Input missing."
 
-        inputs_map = {"goal": {"inputValue": "test goal"}, "token": {"inputValue": "fake_token"}}
+        inputs_map = {"goal": {"value": "test goal"}, "token": {"value": "fake_token"}}
         result = self.plugin.execute(inputs_map)
 
         self.assertEqual(len(result), 1)

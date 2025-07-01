@@ -15,7 +15,7 @@ export class StateManager {
                 id: agent.id,
                 status: agent.status,
                 output: agent.output,
-                inputs: agent.inputs,
+                inputs: agent.inputValues,
                 missionId: agent.missionId,
                 steps: agent.steps,
                 dependencies: agent.dependencies,
@@ -53,7 +53,7 @@ export class StateManager {
             if (state) {
                 agent.status = state.status;
                 agent.output = state.output;
-                agent.inputs = state.inputs;
+                agent.inputValues = state.inputs;
                 agent.missionId = state.missionId;
                 agent.steps = state.steps;
                 agent.dependencies = state.dependencies;
