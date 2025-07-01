@@ -1,5 +1,15 @@
 import { v4 as uuidv4 } from 'uuid';
-import { PluginInput, PluginParameterType, PluginOutput, PlanDependency, StepDependency, ActionVerbTask, PlanTemplate, PlanExecutionRequest, ExecutionContext as PlanExecutionContext } from '@cktmcs/shared'; // Ensured ActionVerbTask is here
+import { PluginInput, 
+    PluginParameterType, 
+    PluginOutput, 
+    InputReference, 
+    InputValue, 
+    PlanDependency, 
+    StepDependency, 
+    ActionVerbTask, 
+    PlanTemplate, 
+    PlanExecutionRequest, 
+    ExecutionContext as PlanExecutionContext } from '@cktmcs/shared'; 
 import { MapSerializer } from '@cktmcs/shared';
 import { MessageType } from '@cktmcs/shared'; // Ensured MessageType is here, assuming it's separate or also from shared index
 import { AgentPersistenceManager } from '../utils/AgentPersistenceManager';
@@ -28,6 +38,8 @@ export class Step {
     readonly stepNo: number;
     readonly actionVerb: string;
     inputs: Map<string, PluginInput>;
+    inputReferences?: Map<string, InputReference>;
+    inputValues?: Map<string, InputValue>; 
     description?: string;
     dependencies: StepDependency[];
     status: StepStatus;
@@ -43,6 +55,8 @@ export class Step {
         actionVerb: string,
         stepNo: number,
         inputs?: Map<string, PluginInput>,
+        inputReferences?: Map<string, InputReference>,
+        inputValues?: Map<string, InputValue>,
         description?: string,
         dependencies?: StepDependency[],
         status?: StepStatus,
@@ -53,14 +67,14 @@ export class Step {
         this.stepNo = params.stepNo;
         this.actionVerb = params.actionVerb;
         this.inputs = params.inputs || new Map();
+        this.inputReferences = params.inputReferences;
+        this.inputValues = params.inputValues;
         this.description = params.description;
         this.dependencies = params.dependencies || [];
         this.status = params.status || StepStatus.PENDING;
         this.recommendedRole = params.recommendedRole;
         this.persistenceManager = params.persistenceManager;
         this.awaitsSignal = '';
-        //console.log(`Constructing new step ${this.id} created. Dependencies ${this.dependencies.map(dep => dep.sourceStepId).join(', ')}`);
-
         // Log step creation event
         this.logEvent({
             eventType: 'step_created',
@@ -688,14 +702,9 @@ export class Step {
                     outputNameToUUID[outputName] = stepUUID;
                 });
             }
-            // Register expectedOutputs (for LLM plans that use this key)
-            if ((task as any).expectedOutputs) {
-                Object.keys((task as any).expectedOutputs).forEach(outputName => {
-                    outputNameToUUID[outputName] = stepUUID;
-                });
-            }
-            if (task.actionVerb === 'GET_USER_INPUT' && task.outputs) {
-                Object.keys(task.outputs).forEach(outputName => {
+            // Register outputs (for LLM plans that use this key)
+            if ((task as any).outputs) {
+                Object.keys((task as any).outputs).forEach(outputName => {
                     outputNameToUUID[outputName] = stepUUID;
                 });
             }
@@ -703,19 +712,25 @@ export class Step {
         // Second pass: create steps and resolve dependencies
         return planTasks.map((task, idx) => {
             const inputs = new Map<string, PluginInput>();
+            const inputReferences = new Map<string, InputReference>();
             if (task.inputs) {
-                // New format: each input is an object with inputValue possibly referencing ${outputname}
-                Object.entries(task.inputs).forEach(([key, value]: [string, any]) => {
-                    let inputValue = value.inputValue !== undefined ? value.inputValue : value;
-                    // If inputValue is a string of the form ${outputname}, leave as-is (will resolve via dependencies)
-                    // Otherwise, treat as literal value
-                    inputs.set(key, {
-                        inputName: key,
-                        inputValue,
-                        args: value.args || {}
-                    } as PluginInput);
-                });
+                for (const [inputName, inputDef] of Object.entries(task.inputs as Record<string, any>)) {
+                    if (typeof inputDef !== 'object' || inputDef === null) {
+                        console.warn(`[createFromPlan] Skipping invalid input definition for '${inputName}' in task '${task.actionVerb}'.`);
+                        continue;
+                    }
+                    
+                    const reference: InputReference = {
+                        inputName: inputName,
+                        value: inputDef.value,
+                        outputName: inputDef.outputName,
+                        valueType: inputDef.valueType,
+                        args: inputDef.args,
+                    };
+                    inputReferences.set(inputName, reference);
+                }
             }
+
             const dependencies: StepDependency[] = [];
             // New format: dependencies is an array of objects mapping outputName to step number
             if (task.dependencies && Array.isArray(task.dependencies)) {
@@ -741,6 +756,8 @@ export class Step {
                 inputs: inputs,
                 description: task.description,
                 dependencies: dependencies,
+                inputReferences: inputReferences,
+                inputValues: new Map<string, InputValue>,
                 recommendedRole: task.recommendedRole,
                 persistenceManager: persistenceManager
             });

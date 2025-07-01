@@ -122,11 +122,11 @@ class AccomplishPlugin:
     def generate_prompt(self, goal: str, available_plugins_str: str, mission_context_str: str) -> str:
         """Generate the prompt for the Brain service"""
         prompt = f"""
-You are a planning assistant. Your ONLY task is to generate one of the following outputs in JSON format to achieve the following goal: '{goal}'.
+You are a planning assistant. Your ONLY task is to generate a response in one of the following JSON formats to achieve the following goal: '{goal}'.
 
 DO NOT include any explanations, markdown formatting, or additional text outside the JSON object.
 
-1. If the goal can be sub-divided into smaller steps, respond with a plan as a JSON object.  Plans must conform to this schema!
+1. If the creating response for the goal should be sub-divided into smaller steps, respond with a plan as a JSON object.  Plans must conform to this schema!
 
 {{
   "$schema": "http://json-schema.org/draft-07/schema#",
@@ -149,16 +149,29 @@ DO NOT include any explanations, markdown formatting, or additional text outside
           "^[a-zA-Z][a-zA-Z0-9_]*$": {{
             "type": "object",
             "properties": {{
-              "inputValue": {{
+              "value": {{
                 "type": "string",
-                "description": "Either a constant string value or a template reference like '${{outputName}}'"
+                "description": "Constant string value for this input"
+              }},
+              "outputName": {{
+                "type": "string",
+                "description": "Reference to an output from a previous step"
+              }},
+              "valueType": {{
+                "type": "string",
+                "enum": ["string", "number", "boolean", "array", "object", "plan", "plugin", "any"],
+                "description": "The expected type of the input value"
               }},
               "args": {{
                 "type": "object",
                 "description": "Additional arguments for the input"
               }}
             }},
-            "required": ["inputValue"],
+            "required": ["valueType"],
+            "oneOf": [
+              {{"required": ["value"]}},
+              {{"required": ["outputName"]}}
+            ],
             "additionalProperties": false
           }}
         }},
@@ -169,7 +182,7 @@ DO NOT include any explanations, markdown formatting, or additional text outside
         "type": "string",
         "description": "Human-readable description of what this step does"
       }},
-      "expectedOutputs": {{
+      "outputs": {{
         "type": "object",
         "patternProperties": {{
           "^[a-zA-Z][a-zA-Z0-9_]*$": {{
@@ -202,27 +215,28 @@ DO NOT include any explanations, markdown formatting, or additional text outside
         "description": "Suggested role type for executing this step"
       }}
     }},
-    "required": ["number", "actionVerb", "inputs", "description", "expectedOutputs", "dependencies"],
+    "required": ["number", "actionVerb", "inputs", "description", "outputs", "dependencies"],
     "additionalProperties": false
   }},
   "description": "Schema for a workflow consisting of sequential steps with dependencies"
 }}
 
+
 DO NOT RETURN THE SCHEMA - JUST THE PLAN!
-Guidelines for creating a plan:
+Rules for creating a plan:
 1. Number each step sequentially using the "number" field.
 2. Use specific, actionable verbs or phrases for each step using the "actionVerb" field (e.g., ANALYZE_CSV, ANALYZE_AUDIOFILE, PREDICT, WRITE_TEXT, WRITE_CODE, BOOK_A_CAR).
 3. The schema of each step MUST be exactly as defined above. Every field is mandatory, but the "inputs" field may be an empty object ({{}}).
-4. Each step input in the "inputs" object MUST be an object with EITHER a 'value' property for predetermined values OR an 'outputKey' property referencing an output from a previous step. DO NOT include "inputName", "inputValue", or "args" within the input definition objects inside the "inputs" field.
+4. Each input in the "inputs" object MUST be an object with either a 'value' that is a string contant OR an 'outputName' property referencing an output from a previous step. Include the expected or known input value type as valueType and include optional args if the consuming step will need them.
 5. List dependencies for each step as an object in the "dependencies" field, where property names are the output keys needed and values are the step numbers that provide the required output (e.g., {{"outputname": 1}}). There MUST be a dependency entry for every input that comes from a previous step output.
 6. Specify the outputs of each step in the "outputs" field. At least one output is mandatory.
-7. Aim for 5-10 steps in the plan, breaking down complex tasks if necessary.
-8. Be thorough in your "description" fields. This is the only instruction the performer will have.
-9. Ensure the final step produces the desired outcome or mission of the goal.
-10. The actionVerb DELEGATE is available to use to create sub-agents with goals of their own.
-11. Input values may be determined by preceding steps. In those instances, use the 'outputKey' reference. For inputs whose values are not yet determined but will be provided at runtime (e.g., from user input), set the 'value' to `null`.
-12. For each step, include a "recommendedRole" field with one of the available agent roles that would be best suited for the task.
-13. Every step must have at least one output.
+7. Prioritize Output Naming for Dependencies: When a step's output is intended to be used as an input for a subsequent step, ensure the name of that output precisely matches the inputName expected by the dependent step. Avoid generic output names if the output is specifically consumed by another step.
+8. Aim for 5-10 steps in the plan, breaking down complex tasks as necessary.
+9. Be very thorough in your "description" fields. This is the only context or instruction the performer will have.
+10. Ensure the final step produces the desired outcome or mission of the goal.
+11. For each step, include a "recommendedRole" field with one of the available agent roles that would be best suited for the task.
+12. Create at least one output for every step.
+13. When using actionVerbs, ensure the required inputs are there and produced by preceeding steps using the correct name.  For example, a DELEGATE step should have a subAgentGoal defined as a goal and either provided as a constant in the step or defined by a preceeding step as an output named subAgenGoal.
 
 Available Agent Roles:
 - coordinator: Coordinates activities of other agents, manages task allocation, and ensures mission success. Good for planning, delegation, and monitoring.
@@ -316,18 +330,24 @@ Mission Context: {mission_context_str}
             actionVerb = step['actionVerb'] # Use the validated verb
             for input_name, input_value_obj in inputs_dict.items():
                 if not isinstance(input_value_obj, dict):
-                    return f"Step {i+1} input '{input_name}' is not an object. Expected {{'value': '...'}} or {{'outputKey': '...'}}."
-                
+                    return f"Step {i+1} input '{input_name}' is not an object. Expected {{'value': '...'}} or {{'outputName': '...'}}."
+
+                # Validate presence of 'valueType'
+                if 'valueType' not in input_value_obj:
+                    return f"Step {i+1} input '{input_name}' missing required 'valueType' field."
+                if input_value_obj['valueType'] not in self.ALLOWED_VALUE_TYPES:
+                    return f"Step {i+1} input '{input_name}' has invalid 'valueType' '{input_value_obj['valueType']}'. Allowed types: {self.ALLOWED_VALUE_TYPES}"
+
                 has_value = 'value' in input_value_obj
-                has_output_key = 'outputKey' in input_value_obj
+                has_output_key = 'outputName' in input_value_obj
                 
-                if not (has_value ^ has_output_key): # Exactly one of 'value' or 'outputKey' must be present
-                    return f"Step {i+1} input '{input_name}' must contain exactly one of 'value' or 'outputKey'."
-                
-                # Ensure no other keys are present
-                allowed_keys = {'value'} if has_value else {'outputKey'}
+                if not (has_value ^ has_output_key): # Exactly one of 'value' or 'outputName' must be present
+                    return f"Step {i+1} input '{input_name}' must contain exactly one of 'value' or 'outputName'."
+
+                # Ensure no other keys are present except 'value', 'outputName', 'valueType', and optional 'args'
+                allowed_keys = {'value', 'outputName', 'valueType', 'args'}
                 if not set(input_value_obj.keys()).issubset(allowed_keys):
-                    return f"Step {i+1} input '{input_name}' contains unexpected keys. Only '{'value' if has_value else 'outputKey'}' is allowed."
+                    return f"Step {i+1} input '{input_name}' contains unexpected keys. Allowed keys: {allowed_keys}"
 
             # Validate required inputs based on VERB_SCHEMAS
             if actionVerb in self.VERB_SCHEMAS:
@@ -337,23 +357,28 @@ Mission Context: {mission_context_str}
                         msg = f"Plan generation failed: LLM output for verb '{actionVerb}' (step {i+1}) missing required input '{required_input_name}'."
                         logger.error(msg)
                         return msg
-                    # Further check if the required input's value/outputKey is truly present/non-empty
+                    # Further check if the required input's value/outputName is truly present/non-empty
                     input_val_obj = inputs_dict[required_input_name]
                     if 'value' in input_val_obj and (input_val_obj['value'] is None or (isinstance(input_val_obj['value'], str) and not input_val_obj['value'].strip())):
                         msg = f"Plan generation failed: LLM output for verb '{actionVerb}' (step {i+1}) has empty or null 'value' for required input '{required_input_name}'."
                         logger.error(msg)
                         return msg
-                    if 'outputKey' in input_val_obj and (input_val_obj['outputKey'] is None or (isinstance(input_val_obj['outputKey'], str) and not input_val_obj['outputKey'].strip())):
-                        msg = f"Plan generation failed: LLM output for verb '{actionVerb}' (step {i+1}) has empty or null 'outputKey' for required input '{required_input_name}'."
+                    if 'outputName' in input_val_obj and (input_val_obj['outputName'] is None or (isinstance(input_val_obj['outputName'], str) and not input_val_obj['outputName'].strip())):
+                        msg = f"Plan generation failed: LLM output for verb '{actionVerb}' (step {i+1}) has empty or null 'outputName' for required input '{required_input_name}'."
                         logger.error(msg)
                         return msg
         
             # Validate 'dependencies'
-            dependencies = step.get('dependencies')
-            if not isinstance(dependencies, dict):
-                return f"Step {i+1} has invalid 'dependencies' field. Must be a dictionary."
-            
-            for dep_output_key, dep_step_number in dependencies.items():
+            dependencies = step.get('dependencies', []) # Default to empty list
+            if not isinstance(dependencies, list):
+                return f"Step {i+1} has invalid 'dependencies' field. Must be a list of objects."
+
+            for dep in dependencies:
+                if not isinstance(dep, dict) or len(dep) != 1:
+                    return f"Step {i+1} has an invalid dependency item: '{dep}'. Each item must be a single key-value pair object."
+                
+                dep_output_key, dep_step_number = list(dep.items())[0]
+
                 if not isinstance(dep_output_key, str) or not dep_output_key.strip():
                     return f"Step {i+1} has invalid dependency key '{dep_output_key}'. Must be a non-empty string."
                 if not isinstance(dep_step_number, int) or dep_step_number <= 0:
@@ -374,89 +399,17 @@ Mission Context: {mission_context_str}
     def convert_json_to_tasks(self, json_plan: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Convert JSON plan to task format. Assumes detailed validation has passed."""
         try:
-            # First pass: Create a map of output keys to step numbers
-            output_to_step_map = {}
-            for index, step in enumerate(json_plan):
-                # Ensure 'number' exists and is an integer due to validation, default to index+1 for robustness
-                step_number = step.get('number', index + 1) 
-                if isinstance(step.get('outputs'), dict):
-                    for output_key in step['outputs'].keys():
-                        output_to_step_map[output_key] = step_number
-
             tasks = []
-            for index, step in enumerate(json_plan):
-                inputs_from_llm = step.get('inputs', {})
-                processed_inputs = {}
-                plan_dependencies = []
-
-                for input_name, input_def_obj in inputs_from_llm.items():
-                    if 'value' in input_def_obj:
-                        # Direct value provided
-                        processed_inputs[input_name] = {"inputValue": input_def_obj['value'], "args": {}}
-                    elif 'outputKey' in input_def_obj:
-                        # Reference to an output from a previous step
-                        ref_key = input_def_obj['outputKey']
-                        source_step_number = output_to_step_map.get(ref_key)
-
-                        if source_step_number is not None:
-                            # Add to plan_dependencies for the current task
-                            plan_dependencies.append({
-                                "stepNumber": source_step_number,
-                                "outputName": ref_key
-                            })
-                            # Format inputValue as ${outputKey} for internal use
-                            processed_inputs[input_name] = {
-                                "inputValue": f"${{{ref_key}}}",
-                                "args": {},
-                                "dependencyOutputs": [{
-                                    "stepNumber": source_step_number,
-                                    "outputName": ref_key
-                                }]
-                            }
-                        else:
-                            logger.warning(f"Step {index+1} input '{input_name}' references unknown outputKey '{ref_key}'. Treating as null value.")
-                            processed_inputs[input_name] = {"inputValue": None, "args": {}}
-                    else:
-                        # Should not happen if validate_plan_data passed, but for safety
-                        logger.warning(f"Step {index+1} input '{input_name}' has an unexpected input definition format. Treating as null value.")
-                        processed_inputs[input_name] = {"inputValue": None, "args": {}}
-
-                # Process dependencies from the LLM (which should be an object: {"outputKey": stepNumber})
-                llm_dependencies = step.get('dependencies', {})
-                for output_key_depended_on, dep_step_number in llm_dependencies.items():
-                    # Ensure this dependency isn't already covered by an input's dependencyOutput
-                    # This avoids redundant entries if an input also implies a dependency
-                    # The `plan_dependencies` list built above is for *inputs* that reference outputs.
-                    # The 'dependencies' field in the LLM response is for general step dependencies.
-                    # We merge these or ensure consistency. For simplicity, we'll just add
-                    # general step dependencies here.
-                    # A more robust solution might reconcile and deduplicate these.
-                    # For now, append any direct step dependencies specified by the LLM that aren't tied to an input.
-                    # The prompt specified dependency as {"outputname": 1}, which ties it to an output.
-                    # So, these should largely overlap with `dependencyOutputs` on inputs.
-                    # If not explicitly tied to an input, add as a general step dependency.
-                    is_covered_by_input_dep = False
-                    for existing_input_dep in processed_inputs.values():
-                        if isinstance(existing_input_dep, dict) and existing_input_dep.get('dependencyOutputs'):
-                            for dep_out in existing_input_dep['dependencyOutputs']:
-                                if dep_out['stepNumber'] == dep_step_number and dep_out['outputName'] == output_key_depended_on:
-                                    is_covered_by_input_dep = True
-                                    break
-                        if is_covered_by_input_dep:
-                            break
-                    
-                    if not is_covered_by_input_dep:
-                         plan_dependencies.append({
-                            "stepNumber": dep_step_number,
-                            "outputName": output_key_depended_on
-                        })
-
+            for step in json_plan:
+                # The new implementation will pass the `inputs` from the language model's plan directly through,
+                # as the downstream `createFromPlan` function is responsible for processing this structure.
                 task = {
-                    "actionVerb": step['actionVerb'], # Already validated to exist
-                    "inputs": processed_inputs,
-                    "description": step['description'], # Already validated
-                    "expectedOutputs": step['outputs'], # Already validated to be non-empty dict
-                    "dependencies": plan_dependencies # Use the list generated from inputs and LLM dependencies
+                    "actionVerb": step['actionVerb'],
+                    "inputs": step.get('inputs', {}),  # Pass inputs directly
+                    "description": step['description'],
+                    "outputs": step['outputs'],
+                    "dependencies": step.get('dependencies', []), # Pass dependencies directly
+                    "recommendedRole": step.get('recommendedRole')
                 }
                 tasks.append(task)
             return tasks
