@@ -420,6 +420,7 @@ export class PluginMarketplace {
         lines.push('- SEQUENCE - Execute steps in strict sequential order / no concurrency (required inputs: steps[])');
         lines.push('- TIMEOUT - Set a timeout for a group of steps (required inputs: timeout, steps[])');
         lines.push('- REPEAT - Repeat steps a specific number of times (required inputs: count, steps[])');
+        lines.push('- FOREACH - Iterate over an array and execute steps for each item (required inputs: array, steps[plan])');
 
         // Add more internal verbs as needed
         const result = lines.join('\n');
