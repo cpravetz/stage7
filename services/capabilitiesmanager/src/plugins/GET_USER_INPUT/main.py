@@ -51,7 +51,7 @@ class GetUserInputPlugin:
             return None
 
     def send_user_input_request(self, request_data: Dict[str, Any]) -> Optional[str]:
-        """Send user input request to PostOffice service"""
+        """Send user input request to PostOffice service and return request ID"""
         try:
             if not self.token:
                 self.token = self.get_auth_token()
@@ -67,17 +67,18 @@ class GetUserInputPlugin:
                 f"http://{self.postoffice_url}/sendUserInputRequest",
                 json=request_data,
                 headers=headers,
-                timeout=60
+                timeout=10
             )
             response.raise_for_status()
             data = response.json()
-            return data.get('result', '')
+            # Expect PostOffice to return a request_id for async tracking
+            return data.get('request_id')
         except Exception as e:
             logger.error(f"Failed to send user input request: {e}")
             return None
 
     def execute(self, inputs_map: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Execute the GET_USER_INPUT plugin"""
+        """Execute the GET_USER_INPUT plugin asynchronously"""
         try:
             # Extract inputs
             question = None
@@ -122,7 +123,6 @@ class GetUserInputPlugin:
                 if isinstance(choices, list):
                     request_data["choices"] = choices
                 elif isinstance(choices, str):
-                    # Try to parse as JSON array
                     try:
                         parsed_choices = json.loads(choices)
                         if isinstance(parsed_choices, list):
@@ -134,26 +134,28 @@ class GetUserInputPlugin:
                 else:
                     request_data["choices"] = [str(choices)]
 
-            # Send request to PostOffice
-            response = self.send_user_input_request(request_data)
+            # Send request to PostOffice and get request_id
+            request_id = self.send_user_input_request(request_data)
 
-            if response is None:
+            if request_id is None:
                 return [{
                     "success": False,
                     "name": "error",
                     "resultType": PluginParameterType.ERROR,
-                    "resultDescription": "Failed to get user input from PostOffice service",
+                    "resultDescription": "Failed to send user input request to PostOffice service",
                     "result": None,
-                    "error": "PostOffice service unavailable or returned empty response"
+                    "error": "PostOffice service unavailable or did not return request_id"
                 }]
 
+            # Return a pending result with the request_id for async handling
             return [{
                 "success": True,
-                "name": "answer",
+                "name": "pending_user_input",
                 "resultType": PluginParameterType.STRING,
-                "resultDescription": "User response",
-                "result": response,
-                "mimeType": "text/plain"
+                "resultDescription": "User input requested, awaiting response.",
+                "result": None,
+                "request_id": request_id,
+                "mimeType": "application/x-user-input-pending"
             }]
 
         except Exception as e:

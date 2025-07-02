@@ -26,6 +26,13 @@ interface WebSocketContextType {
   sendMessage: (message: string) => Promise<void>;
   handleControlAction: (action: string) => Promise<void>;
   handleLoadMission: (missionId: string) => Promise<void>;
+  pendingUserInput?: {
+    request_id: string;
+    question: string;
+    answerType: string;
+    choices?: string[];
+  } | null;
+  setPendingUserInput?: React.Dispatch<React.SetStateAction<any>>;
 }
 
 // Create the context with default values
@@ -52,6 +59,14 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     engineerStatistics: { newPlugins: [] }
   });
   const [agentStatistics, setAgentStatistics] = useState<Map<string, Array<any>>>(new Map());
+
+  // Add state for pending user input
+  const [pendingUserInput, setPendingUserInput] = useState<{
+    request_id: string;
+    question: string;
+    answerType: string;
+    choices?: string[];
+  } | null>(null);
 
   const ws = useRef<WebSocket | null>(null);
   const reconnectAttempts = useRef<number>(0);
@@ -144,6 +159,14 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           } else {
             return [...prev, data.content];
           }
+        });
+        break;
+      case 'USER_INPUT_REQUEST':
+        setPendingUserInput({
+          request_id: data.request_id,
+          question: data.question,
+          answerType: data.answerType,
+          choices: data.choices
         });
         break;
       default:
@@ -442,7 +465,9 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     agentStatistics,
     sendMessage,
     handleControlAction,
-    handleLoadMission
+    handleLoadMission,
+    pendingUserInput,
+    setPendingUserInput
   };
 
   return (

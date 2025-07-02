@@ -1529,4 +1529,16 @@ Please consider this context and the available plugins when planning and executi
         // Optionally, update step status or agent state here
         await this.saveAgentState();
     }
+
+    // Add a method to resume a paused step with user input
+    public async resumeStepWithUserInput(stepId: string, userInput: any) {
+        const step = this.steps.find(s => s.id === stepId);
+        if (step && step.status === StepStatus.PAUSED) {
+            // Set the user input as an input value for the step
+            step.inputValues.set('userInput', { inputName: 'userInput', value: userInput, valueType: PluginParameterType.STRING, args: {} });
+            step.status = StepStatus.PENDING;
+            // Resume agent execution
+            await this.runAgent();
+        }
+    }
 }
