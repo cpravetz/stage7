@@ -96,7 +96,7 @@ export class GroqInterface extends BaseInterface {
                 model: modelName,
                 messages: formattedMessages,
                 temperature: options.temperature || 0.7,
-                max_tokens: options.max_length || 4096,
+                max_tokens: options.max_length || 6000,
                 stream: false
             };
 
