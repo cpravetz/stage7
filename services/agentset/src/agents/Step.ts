@@ -1,11 +1,12 @@
 import { v4 as uuidv4 } from 'uuid';
-import { PluginParameterType, 
-    PluginOutput, 
-    InputReference, 
-    InputValue, 
-    StepDependency, 
-    ActionVerbTask, 
-    ExecutionContext as PlanExecutionContext } from '@cktmcs/shared'; 
+import { PluginParameterType,
+    PluginOutput,
+    InputReference,
+    InputValue,
+    StepDependency,
+    ActionVerbTask,
+    ExecutionContext as PlanExecutionContext,
+    PlanTemplate } from '@cktmcs/shared'; // Added ActionVerbTask
 import { MapSerializer } from '@cktmcs/shared';
 import { MessageType } from '@cktmcs/shared'; // Ensured MessageType is here, assuming it's separate or also from shared index
 import { AgentPersistenceManager } from '../utils/AgentPersistenceManager';
@@ -147,6 +148,90 @@ export class Step {
         return dependents.length === 0;
     }
 
+    private async handleForeach(): Promise<PluginOutput[]> {
+        const arrayInput = this.inputValues.get('array');
+        const stepsInput = this.inputValues.get('steps');
+
+        if (!arrayInput || !Array.isArray(arrayInput.value)) {
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: '[Step]Error in FOREACH step: "array" input is missing or not an array.',
+                result: null,
+                error: 'FOREACH requires an "array" input of type array.'
+            }];
+        }
+
+        if (!stepsInput || !Array.isArray(stepsInput.value)) {
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: '[Step]Error in FOREACH step: "steps" input is missing or not a plan (array of tasks).',
+                result: null,
+                error: 'FOREACH requires a "steps" input of type plan.'
+            }];
+        }
+
+        const inputArray: any[] = arrayInput.value;
+        const subPlanTemplate: ActionVerbTask[] = stepsInput.value;
+        const allGeneratedSteps: ActionVerbTask[] = [];
+
+        if (inputArray.length === 0) {
+            return [{
+                success: true,
+                name: 'loop_skipped',
+                resultType: PluginParameterType.STRING,
+                resultDescription: 'FOREACH loop skipped as input array was empty.',
+                result: 'Empty array, no iterations.'
+            }];
+        }
+
+        for (let i = 0; i < inputArray.length; i++) {
+            const item = inputArray[i];
+            const itemSteps: ActionVerbTask[] = JSON.parse(JSON.stringify(subPlanTemplate));
+
+            itemSteps.forEach(task => {
+                if (!task.inputReferences) {
+                    task.inputReferences = new Map<string, InputReference>();
+                }
+                task.description = `(Item ${i + 1}/${inputArray.length}: ${JSON.stringify(item)}) ${task.description || ''}`;
+                task.inputReferences.set('loopItem', {
+                    inputName: 'loopItem',
+                    value: item,
+                    valueType: PluginParameterType.ANY,
+                    args: { fromForeach: true }
+                });
+                task.inputReferences.set('loopIndex', {
+                    inputName: 'loopIndex',
+                    value: i,
+                    valueType: PluginParameterType.NUMBER,
+                    args: { fromForeach: true }
+                });
+            });
+            allGeneratedSteps.push(...itemSteps);
+        }
+
+        if (allGeneratedSteps.length > 0) {
+            return [{
+                success: true,
+                name: 'steps',
+                resultType: PluginParameterType.PLAN,
+                resultDescription: `[Step] FOREACH generated ${allGeneratedSteps.length} steps.`,
+                result: allGeneratedSteps
+            }];
+        } else {
+            return [{
+                success: true,
+                name: 'no_steps_generated',
+                resultType: PluginParameterType.STRING,
+                resultDescription: 'FOREACH loop completed without generating steps (e.g. empty input array).',
+                result: 'No steps generated.'
+            }];
+        }
+    }
+
     async execute(
         executeAction: (step: Step) => Promise<PluginOutput[]>,
         thinkAction: (inputValues: Map<string, InputValue>) => Promise<PluginOutput[]>,
@@ -187,6 +272,9 @@ export class Step {
                     break;
                 case 'EXECUTE_PLAN_TEMPLATE':
                     result = await this.handleExecutePlanTemplate(executeAction);
+                    break;
+                case 'FOREACH':
+                    result = await this.handleForeach();
                     break;
                 default:
                     result = await executeAction(this);
@@ -367,7 +455,7 @@ export class Step {
                 }]
             ]),
             description: 'While loop condition evaluation',
-            persistenceManager: this.persistenceManager
+            persistenceManager: this.persistenceManager,
         });
 
         newSteps.push(checkStep);
@@ -399,7 +487,7 @@ export class Step {
                 }]
             ]),
             description: 'While loop continuation check',
-            persistenceManager: this.persistenceManager
+            persistenceManager: this.persistenceManager,
 
         });
 
@@ -452,7 +540,7 @@ export class Step {
                 }]
             ]),
             description: 'Until loop condition evaluation',
-            persistenceManager: this.persistenceManager
+            persistenceManager: this.persistenceManager,
 
         });
 
@@ -501,7 +589,7 @@ export class Step {
                 actionVerb: task.actionVerb,
                 stepNo: this.stepNo + 1 + index,
                 inputReferences: task.inputReferences || new Map(),
-                inputValues: new Map(),
+                inputValues: new Map<string, InputValue>(),
                 description: task.description || `Sequential step ${index + 1}`,
                 persistenceManager: this.persistenceManager
             });
@@ -575,7 +663,7 @@ export class Step {
             dependencies: MapSerializer.transformForSerialization(this.dependencies),
             status: this.status,
             result: this.result,
-            recommendedRole: this.recommendedRole
+            recommendedRole: this.recommendedRole,
         };
     }
 
@@ -765,7 +853,7 @@ export class Step {
                 description: task.description,
                 dependencies: dependencies,
                 inputReferences: inputReferences,
-                inputValues: new Map<string, InputValue>,
+                inputValues: new Map<string, InputValue>(),
                 recommendedRole: task.recommendedRole,
                 persistenceManager: persistenceManager
             });

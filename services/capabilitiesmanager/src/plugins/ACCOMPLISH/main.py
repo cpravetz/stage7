@@ -544,8 +544,11 @@ Revise the plan to correct the error. Only return the corrected plan as a JSON a
                 logger.info(f"Model response received: {response[:500]}...") # Log start of response
 
                 # Handle PLAN (top-level object), DIRECT_ANSWER, or PLUGIN
-                if isinstance(parsed, dict) and parsed.get("type") == "PLAN" and isinstance(parsed.get("items"), list):
-                    plan_data = parsed["items"]
+                if isinstance(parsed, dict) and parsed.get("type") == "PLAN" and (isinstance(parsed.get("plan"), list) or isinstance(parsed.get("items"), list)):
+                    if isinstance(parsed.get("plan"), list):
+                        plan_data = parsed["plan"]
+                    else:
+                        plan_data = parsed["items"]
                     logger.info(f"Successfully parsed top-level PLAN object. Plan length: {len(plan_data)}")
                     validation_error_message = self.validate_plan_data(plan_data)
                     repair_attempts = 0
