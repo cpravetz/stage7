@@ -1,5 +1,5 @@
-import { Step, StepStatus, createFromPlan } from '../Step';
-import { AgentPersistenceManager } from '../../utils/AgentPersistenceManager';
+import { Step, StepStatus, createFromPlan } from '../src/agents/Step';
+import { AgentPersistenceManager } from '../src/utils/AgentPersistenceManager';
 import { PluginParameterType, PluginOutput, InputValue, ActionVerbTask, InputReference } from '@cktmcs/shared';
 
 // Mock AgentPersistenceManager
