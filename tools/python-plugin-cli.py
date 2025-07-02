@@ -95,7 +95,7 @@ from pathlib import Path
 plugin_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(plugin_dir))
 
-from main import execute_plugin, PluginInput
+from main import execute_plugin, InputValue
 
 
 class Test{plugin_name.title()}Plugin(unittest.TestCase):
@@ -104,7 +104,7 @@ class Test{plugin_name.title()}Plugin(unittest.TestCase):
     def test_basic_functionality(self):
         """Test basic plugin functionality"""
         inputs = {{
-            'example_input': PluginInput('test_value')
+            'example_input': InputValue('test_value')
         }}
         
         outputs = execute_plugin(inputs)
@@ -261,7 +261,7 @@ def test_plugin(plugin_path: str, input_json: str = None) -> None:
 
     # Use default test input if none provided
     if not input_json:
-        input_json = '{"example_input": {"inputValue": "test_value", "args": {}}}'
+        input_json = '{"example_input": {"value": "test_value", "args": {}}}'
 
     try:
         test_input = json.loads(input_json)

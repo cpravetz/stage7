@@ -116,7 +116,7 @@ export interface TaskUpdatePayload {
   stepId: string;
   status?: string; // Use StepStatus if available
   description?: string;
-  newInputs?: Record<string, any>; // Use PluginInput if available
+  newInputs?: Record<string, any>; 
   updateInputs?: Record<string, any>;
 }
 

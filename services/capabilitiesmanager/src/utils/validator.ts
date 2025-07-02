@@ -1,4 +1,4 @@
-import { PluginInput, PluginDefinition, MapSerializer } from '@cktmcs/shared';
+import { InputValue, PluginDefinition, MapSerializer } from '@cktmcs/shared';
 
 
 export const validateInputType = async (value: any, expectedType: string): Promise<boolean> => {
@@ -19,11 +19,11 @@ export const validateInputType = async (value: any, expectedType: string): Promi
 }
 
 
-export const validateAndStandardizeInputs = async (plugin: PluginDefinition, inputs: Map<string, PluginInput>): 
-    Promise<{ success: boolean; inputs?: Map<string, PluginInput>; error?: string }> => {
+export const validateAndStandardizeInputs = async (plugin: PluginDefinition, inputs: Map<string, InputValue>): 
+    Promise<{ success: boolean; inputs?: Map<string, InputValue>; error?: string }> => {
         console.log('validateAndStandardizeInputs: Called for plugin:', plugin.verb, 'version:', plugin.version);
         console.log('validateAndStandardizeInputs: Raw inputs received (serialized):', MapSerializer.transformForSerialization(inputs));
-        const validInputs = new Map<string, PluginInput>();
+        const validInputs = new Map<string, InputValue>();
         try {
             for (const inputDef of plugin.inputDefinitions) {
                 const inputName = inputDef.name;
@@ -43,7 +43,8 @@ export const validateAndStandardizeInputs = async (plugin: PluginDefinition, inp
                 if (!input && inputDef.defaultValue !== undefined) {
                     input = {
                         inputName,
-                        inputValue: inputDef.defaultValue,
+                        value: inputDef.defaultValue,
+                        valueType: inputDef.type,
                         args: {}
                     };
                     console.log(`validateAndStandardizeInputs: Added missing input '${inputName}' with defaultValue for plugin '${plugin.verb}'.`);
@@ -57,10 +58,10 @@ export const validateAndStandardizeInputs = async (plugin: PluginDefinition, inp
                     if (!input) {
                         missingOrInvalid = true;
                         reason = `Missing required input \"${inputName}\" for plugin \"${plugin.verb}\" and no defaultValue provided.`;
-                    } else if (input.inputValue === null || input.inputValue === undefined) {
+                    } else if (input.value === null || input.value === undefined) {
                         missingOrInvalid = true;
                         reason = `Required input \"${inputName}\" for plugin \"${plugin.verb}\" must not be null or undefined.`;
-                    } else if (inputDef.type === 'string' && String(input.inputValue).trim() === '') {
+                    } else if (inputDef.type === 'string' && String(input.value).trim() === '') {
                         missingOrInvalid = true;
                         reason = `Required string input \"${inputName}\" for plugin \"${plugin.verb}\" must not be empty or whitespace-only.`;
                     }
@@ -76,7 +77,7 @@ export const validateAndStandardizeInputs = async (plugin: PluginDefinition, inp
 
                 // Validate input type if present
                 if (input && inputDef.type) {
-                    const isValid = await validateInputType(input.inputValue, inputDef.type);
+                    const isValid = await validateInputType(input.value, inputDef.type);
                     if (!isValid) {
                         return {
                             success: false,
@@ -93,12 +94,12 @@ export const validateAndStandardizeInputs = async (plugin: PluginDefinition, inp
             console.log(`validateAndStandardizeInputs: Successfully validated and standardized inputs for ${plugin.verb} (serialized):`, MapSerializer.transformForSerialization(validInputs));
             if (plugin.verb === 'SEARCH' && validInputs.has('searchTerm')) {
               const searchInput = validInputs.get('searchTerm');
-              // Log the entire PluginInput object for searchTerm
-              console.log(`validateAndStandardizeInputs: For SEARCH, the full 'searchTerm' PluginInput object is: ${JSON.stringify(searchInput)}`);
+              // Log the entire InputValues object for searchTerm
+              console.log(`validateAndStandardizeInputs: For SEARCH, the full 'searchTerm' InputValues object is: ${JSON.stringify(searchInput)}`);
               if (searchInput) {
                 // Log the inputValue and its type specifically
-                console.log(`validateAndStandardizeInputs: For SEARCH, direct inputValue of 'searchTerm' is: "${searchInput.inputValue}"`);
-                console.log(`validateAndStandardizeInputs: For SEARCH, typeof searchTerm inputValue is: ${typeof searchInput.inputValue}`);
+                console.log(`validateAndStandardizeInputs: For SEARCH, direct inputValue of 'searchTerm' is: "${searchInput.value}"`);
+                console.log(`validateAndStandardizeInputs: For SEARCH, typeof searchTerm inputValue is: ${typeof searchInput.value}`);
               } else {
                 console.log("validateAndStandardizeInputs: For SEARCH, validInputs.get('searchTerm') returned undefined/null even though validInputs.has('searchTerm') was true.");
               }

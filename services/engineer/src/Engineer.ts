@@ -3,7 +3,7 @@ import express from 'express';
 import {
     MapSerializer,
     BaseEntity,
-    PluginInput,
+    InputValue,
     PluginDefinition,
     PluginParameter,
     PluginMetadata, // Changed from MetadataType
@@ -138,7 +138,7 @@ export class Engineer extends BaseEntity {
         res.status(200).json({ newPlugins: this.newPlugins });
     }
 
-    async createPlugin(verb: string, context: Map<string, PluginInput>, guidance: string, language?: string): Promise<PluginDefinition | undefined> {
+    async createPlugin(verb: string, context: Map<string, InputValue>, guidance: string, language?: string): Promise<PluginDefinition | undefined> {
         console.log('Creating plugin for verb:', verb, 'with language:', language || 'auto-detect');
         this.newPlugins.push(verb);
         const explanation = await this.generateExplanation(verb, context);
@@ -157,10 +157,12 @@ export class Engineer extends BaseEntity {
 
             The planner provides this additional guidance: ${guidance}
 
-            The plugin should expect inputs structured as a Map<string, PluginInput>, where PluginInput is defined as:
-            interface PluginInput {
-                inputValue: string | number | boolean | any[] | object | null;
-                args: Record<string, any>;
+            The plugin should expect inputs structured as a Map<string, InputValue>, where InputValue is defined as:
+            interface InputValue {
+                inputName: string;
+                value: string | number | boolean | any[] | object | null;
+                valueType: 'string' | 'number' | 'boolean' | 'array' | 'object' | 'any';
+                args?: Record<string, any>;
             }
             (Note: dependencyOutputs and agentDependencies are usually populated by the execution environment, not directly by you or planner).
 
@@ -176,7 +178,7 @@ export class Engineer extends BaseEntity {
               7. Add retry logic for external service calls if applicable.
               8. For Python plugins, ensure the main logic is in a \`main.py\` file.
               9. If the Python plugin requires external Python packages, include a \`requirements.txt\` file in the \`entryPoint.files\` listing these dependencies (e.g., \`requests==2.25.1\`).
-              10. Python plugins MUST read their inputs (a JSON string representing the input Map, not PluginInput directly but its serialized form) from standard input (stdin) and print their results (a JSON string representing a PluginOutput[] array) to standard output (stdout).
+              10. Python plugins MUST read their inputs (a JSON string representing the input Map, not InputValue directly but its serialized form) from standard input (stdin) and print their results (a JSON string representing a PluginOutput[] array) to standard output (stdout).
               11. Generated code should follow security best practices, including sanitizing any inputs used in shell commands or file paths, and avoiding common vulnerabilities.
 
             Provide a JSON object with the following structure:
@@ -201,7 +203,7 @@ export class Engineer extends BaseEntity {
                 "entryPoint": {
                     "main": "main.py", // For Python
                     "files": {
-                        "main.py": "# Python code here...\nimport json, sys\nif __name__ == '__main__':\n  try:\n    inputs_map_str = sys.stdin.read()\n    # inputs_map is a list of [key, PluginInput] pairs as a JSON string from MapSerializer.transformForSerialization(Map<string, PluginInput>)\n    # The Python script needs to deserialize this structure properly.\n    # Example: inputs_list_of_pairs = json.loads(inputs_map_str)\n    # inputs_dict = {item[0]: item[1]['inputValue'] for item in inputs_list_of_pairs} # Simplified example, actual structure of PluginInput is more complex\n    # A better approach for Python would be to expect a simple JSON object of inputs, not a serialized Map.\n    # For now, stick to the prompt that it's a serialized Map<string, PluginInput> from stdin.\n    result = [{'name': 'outputName', 'result': 'resultValue', 'resultType': 'string', 'success': true}]\n  except Exception as e:\n    result = [{'name': 'error', 'result': str(e), 'resultType': 'ERROR', 'success': false}]\n  print(json.dumps(result))",
+                        "main.py": "# Python code here...\nimport json, sys\nif __name__ == '__main__':\n  try:\n    inputs_map_str = sys.stdin.read()\n    # inputs_map is a list of [key, InputValue] pairs as a JSON string from MapSerializer.transformForSerialization(Map<string, InputValue>)\n    # The Python script needs to deserialize this structure properly.\n    # Example: inputs_list_of_pairs = json.loads(inputs_map_str)\n    # inputs_dict = {item[0]: item[1]['inputValue'] for item in inputs_list_of_pairs} # Simplified example, actual structure of InputValue is more complex\n    # A better approach for Python would be to expect a simple JSON object of inputs, not a serialized Map.\n    # For now, stick to the prompt that it's a serialized Map<string, InputValue> from stdin.\n    result = [{'name': 'outputName', 'result': 'resultValue', 'resultType': 'string', 'success': true}]\n  except Exception as e:\n    result = [{'name': 'error', 'result': str(e), 'resultType': 'ERROR', 'success': false}]\n  print(json.dumps(result))",
                         "requirements.txt": "# e.g., requests>=2.20"
                     },
                     "test": {
@@ -293,7 +295,7 @@ export class Engineer extends BaseEntity {
     /**
      * Create a containerized plugin
      */
-    async createContainerPlugin(verb: string, context: Map<string, PluginInput>, explanation: string, guidance: string): Promise<PluginDefinition | undefined> {
+    async createContainerPlugin(verb: string, context: Map<string, InputValue>, explanation: string, guidance: string): Promise<PluginDefinition | undefined> {
         try {
             const contextString = JSON.stringify(Array.from(context.entries()));
 
@@ -516,7 +518,7 @@ Context: ${contextString}`;
       return plugin;
   }
 
-    private async generateExplanation(verb: string, context: Map<string, PluginInput>): Promise<string> {
+    private async generateExplanation(verb: string, context: Map<string, InputValue>): Promise<string> {
         const contextString = JSON.stringify(Array.from(context.entries()));
         const prompt = `Given the action verb "${verb}" and the context (inputs for the current step) "${contextString}", provide a detailed explanation of what a plugin for this verb should do. Include expected inputs it would define and typical outputs it would produce.`;
         try {

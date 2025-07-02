@@ -133,21 +133,23 @@ export interface PlanDependency {
 export interface ActionVerbTask {
     id?: string;
     actionVerb: string; // Changed from verb
-    inputs: Map<string, PluginInput>; // Assuming PluginInput is defined/imported
+    inputReferences?: Map<string, InputReference>;
+    //inputValues: Map<string, InputValue>; 
     outputs?: Map<string, string>;
     description?: string;
     dependencies?: PlanDependency[];
     recommendedRole?: string;
 }
 
-// Assuming PluginInput is also defined in this file or another commonly imported one
+// Assuming InputValue is also defined in this file or another commonly imported one
 // If not, it needs to be defined or imported. For now, I'll add its definition here
 // based on previous context if it was missed.
-export interface PluginInput {
+export interface InputValue {
     inputName: string;
-    inputValue: any;
+    value: any;
+    valueType: PluginParameterType; // Type of the input value
     inputSource?: string; // Optional: to trace where an input value came from (e.g., stepId.outputName)
-    args: Record<string, any>; // Optional: any additional arguments relevant to this input
+    args?: Record<string, any>; // Optional: any additional arguments relevant to this input
 }
 
 // The pluginInput interface has been used improperly for step input definitions as well as input instances
@@ -163,7 +165,7 @@ export interface InputReference {
 	
 export interface InputValue {
 	inputName: string,
-	value: string,
+	value: any,
 	valueType: PluginParameterType,
 	args?: Record<string, any>
 }
@@ -199,7 +201,9 @@ export interface Step {
     stepNo: number;
     actionVerb: string;
     description?: string;
-    inputs: Map<string, PluginInput>;
+    inputReferences?: Map<string, InputReference>;
+    inputValues?: Map<string, InputValue>;
+    outputs: Map<string, InputValue>;
     dependencies: StepDependency[];
     status: 'pending' | 'running' | 'completed' | 'error';
     result?: PluginOutput[];

@@ -1,5 +1,4 @@
-import { PluginDefinition, environmentType, PluginInput, PluginOutput, PluginParameterType } from '../types/Plugin';
-import { verifyPluginSignature } from './pluginSigning';
+import { PluginDefinition, environmentType, InputValue, PluginOutput, PluginParameterType } from '../types/Plugin';
 import { validatePluginPermissions } from './pluginPermissions';
 import * as fs from 'fs/promises';
 import * as path from 'path';
@@ -75,7 +74,7 @@ async function loadPluginCode(plugin: PluginDefinition): Promise<string> {
  */
 export async function executePluginInSandbox(
   plugin: PluginDefinition,
-  inputs: PluginInput[],
+  inputs: InputValue[],
   environment: environmentType
 ): Promise<PluginOutput[]> {
   try {
@@ -147,7 +146,7 @@ export async function executePluginInSandbox(
       }
 
       // Execute the plugin function with the inputs
-      const input = inputs[0]; // Assuming the first input is the main input
+      const input = inputs[0].value; // Assuming the first input is the main input
       const result = await executeFunction(input);
       console.log('[isolatedSandbox] executeFunction result: ',result);
 

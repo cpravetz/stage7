@@ -2,7 +2,7 @@
 """
 SEARCH Plugin for Stage7 (Python Version)
 
-This plugin searches DuckDuckGo for a given term and returns a list of links.
+This plugin searches SearchXNG for a given term and returns a list of links.
 Converted from JavaScript to Python for better maintainability and consistency.
 """
 
@@ -17,10 +17,12 @@ logger = logging.getLogger(__name__)
 # BasicConfig for logging, in case not configured by environment
 # logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-class PluginInput:
-    """Represents a plugin input parameter"""
-    def __init__(self, input_value: Any, args: Dict[str, Any] = None):
-        self.input_value = input_value
+class InputValue:
+    """Represents a plugin input parameter in the new format"""
+    def __init__(self, inputName: str, value: Any, valueType: str, args: Dict[str, Any] = None):
+        self.inputName = inputName
+        self.value = value
+        self.valueType = valueType
         self.args = args or {}
 
 
@@ -183,12 +185,12 @@ def search_searxng(search_term: str) -> List[Dict[str, str]]:
         raise Exception(f"Failed to search SearxNG: {str(e)}")
 
 
-def execute_plugin(inputs: Dict[str, PluginInput]) -> List[PluginOutput]:
+def execute_plugin(inputs: Dict[str, InputValue]) -> List[PluginOutput]:
     """
     Main plugin execution function for SEARCH plugin
     
     Args:
-        inputs: Dictionary of input parameters
+        inputs: Dictionary of input parameters as InputValue instances
         
     Returns:
         List of PluginOutput objects
@@ -197,16 +199,16 @@ def execute_plugin(inputs: Dict[str, PluginInput]) -> List[PluginOutput]:
     try:
         # DEBUG_SEARCH_PYTHON: Log received inputs
         try:
-            inputs_log_str = json.dumps({k: v.input_value if isinstance(v, PluginInput) else v for k, v in inputs.items()})
+            inputs_log_str = json.dumps({k: v.value if isinstance(v, InputValue) else v for k, v in inputs.items()})
             print(f"DEBUG_SEARCH_PYTHON: execute_plugin: Received inputs: {inputs_log_str}", file=sys.stderr)
         except Exception as log_e:
             print(f"DEBUG_SEARCH_PYTHON: execute_plugin: Error logging inputs: {str(log_e)}", file=sys.stderr)
 
-        logger.info(f"SEARCH_PYTHON execute_plugin(): Received inputs: { {k: (v.input_value if isinstance(v, PluginInput) else v) for k, v in inputs.items()} }")
+        logger.info(f"SEARCH_PYTHON execute_plugin(): Received inputs: { {k: (v.value if isinstance(v, InputValue) else v) for k, v in inputs.items()} }")
 
         search_term_input_obj = inputs.get('searchTerm')
         if search_term_input_obj:
-            logger.info(f"SEARCH_PYTHON execute_plugin(): searchTerm PluginInput object: input_value='{search_term_input_obj.input_value}', type={type(search_term_input_obj.input_value)}")
+            logger.info(f"SEARCH_PYTHON execute_plugin(): searchTerm InputValue object: value='{search_term_input_obj.value}', type={type(search_term_input_obj.value)}")
         else:
             logger.warning("SEARCH_PYTHON execute_plugin(): 'searchTerm' key not found in inputs.")
 
@@ -215,7 +217,7 @@ def execute_plugin(inputs: Dict[str, PluginInput]) -> List[PluginOutput]:
         if not search_term_input:
             return [create_error_output("error", "Missing required input: searchTerm")]
         
-        search_term = search_term_input.input_value
+        search_term = search_term_input.value
         if not search_term or not isinstance(search_term, str):
             return [create_error_output("error", "Search term must be a non-empty string")]
         
@@ -246,7 +248,7 @@ def execute_plugin(inputs: Dict[str, PluginInput]) -> List[PluginOutput]:
             if not results:
                 return [create_success_output("results", [], "array", 
                     f"No search results found for '{search_term}' (tried DuckDuckGo and SearxNG)")]
-
+        
         # Return successful results
         outputs_final = [create_success_output("results", results, "array",
                                     f"Found {len(results)} search results for '{search_term}'")]
@@ -292,8 +294,8 @@ def main():
             print(f"DEBUG_SEARCH_PYTHON: main: Input data is not a list as expected. Type: {type(input_list_of_pairs)}", file=sys.stderr)
             raise ValueError("Input data should be a JSON array of [key, value] pairs.")
 
-        # Convert to PluginInput objects
-        inputs: Dict[str, PluginInput] = {}
+        # Convert to InputValue objects
+        inputs: Dict[str, InputValue] = {}
         for item in input_list_of_pairs:
             if not (isinstance(item, (list, tuple)) and len(item) == 2):
                 print(f"DEBUG_SEARCH_PYTHON: main: Invalid item format in input_list_of_pairs: {item}", file=sys.stderr)
@@ -301,19 +303,18 @@ def main():
 
             key, value_dict = item
 
-            if isinstance(value_dict, dict) and 'inputValue' in value_dict:
-                inputs[key] = PluginInput(value_dict['inputValue'], value_dict.get('args', {}))
+            if isinstance(value_dict, dict) and 'value' in value_dict:
+                inputs[key] = InputValue(value_dict['value'], value_dict.get('args', {}))
             else:
-                # This case might occur if a non-standard PluginInput structure is sent,
+                # This case might occur if a non-standard InputValue structure is sent,
                 # or if the value is simple (though CapabilitiesManager usually sends the full structure).
                 # For robustness, we'll still wrap it, but this path is less expected for typical inputs.
-                print(f"DEBUG_SEARCH_PYTHON: main: Value for key '{key}' is not a standard PluginInput dict, wrapping directly: {value_dict}", file=sys.stderr)
-                inputs[key] = PluginInput(value_dict)
+                print(f"DEBUG_SEARCH_PYTHON: main: Value for key '{key}' is not a standard InputValue dict, wrapping directly: {value_dict}", file=sys.stderr)
+                inputs[key] = InputValue(value_dict)
 
-        inputs_for_logging = {k: (v.input_value if isinstance(v, PluginInput) else v) for k, v in inputs.items()}
+        inputs_for_logging = {k: (v.input_value if isinstance(v, InputValue) else v) for k, v in inputs.items()}
         # This log is already covered by the DEBUG_SEARCH_PYTHON one below, but kept for compatibility with existing logs if any
-        logger.info(f"SEARCH_PYTHON main(): Parsed inputs dict (showing inputValues): {inputs_for_logging}")
-        print(f"DEBUG_SEARCH_PYTHON: main: Converted inputs dictionary (showing inputValues): {json.dumps(inputs_for_logging)}", file=sys.stderr)
+        print(f"DEBUG_SEARCH_PYTHON: main: Converted inputs dictionary (showing values): {json.dumps(inputs_for_logging)}", file=sys.stderr)
         
         # Execute the plugin
         outputs = execute_plugin(inputs)

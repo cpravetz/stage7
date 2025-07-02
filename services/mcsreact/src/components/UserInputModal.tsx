@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import axios from 'axios';
+import './UserInputModal.css';
 
 const api = axios.create({
     headers: {
@@ -8,22 +9,23 @@ const api = axios.create({
     },
   });
 
-
+export type AnswerType = 'text' | 'number' | 'boolean' | 'multipleChoice';
 
 interface UserInputModalProps {
     requestId: string;
     question: string;
     choices?: string[];
-    answerType: 'text' | 'number' | 'boolean' | 'multipleChoice';
+    answerType: AnswerType;
+    onSubmit: (requestId: string, response: any) => void;
     onClose: () => void;
 }
 
-const UserInputModal: React.FC<UserInputModalProps> = ({ requestId, question, choices, answerType, onClose }) => {
+const UserInputModal: React.FC<UserInputModalProps> = ({ requestId, question, choices, answerType, onSubmit, onClose }) => {
     const [response, setResponse] = useState<string | number | boolean>('');
 
     const handleSubmit = async () => {
         try {
-            await api.post('http://localhost:5020/submitUserInput', { requestId, response });
+            await onSubmit(requestId, response);
             onClose();
         } catch (error) { 
             console.error('Error submitting user input:', error instanceof Error ? error.message : error);
@@ -55,10 +57,17 @@ const UserInputModal: React.FC<UserInputModalProps> = ({ requestId, question, ch
     };
 
     return (
-        <div className="modal">
-            <h2>{question}</h2>
-            {renderInput()}
-            <button onClick={handleSubmit}>Submit</button>
+        <div className="modal user-input-modal">
+            <div className="modal-content">
+                <h2>User Input Required</h2>
+                <p className="modal-question">{question}</p>
+                <div className="modal-input">{renderInput()}</div>
+                <div className="modal-actions">
+                    <button className="modal-submit" onClick={handleSubmit}>Submit</button>
+                    <button className="modal-cancel" onClick={onClose}>Cancel</button>
+                </div>
+            </div>
+            <div className="modal-backdrop" onClick={onClose}></div>
         </div>
     );
 };

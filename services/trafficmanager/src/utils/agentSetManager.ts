@@ -1,7 +1,7 @@
 // No longer using Docker API directly
 import express from 'express';
 import axios from 'axios';
-import { MapSerializer, AgentSetManagerStatistics, AgentStatistics, PluginInput, MessageType, ServiceTokenManager } from '@cktmcs/shared';
+import { MapSerializer, AgentSetManagerStatistics, AgentStatistics, InputValue, MessageType, ServiceTokenManager } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 
 // NOTE: This axios instance doesn't include authentication headers
@@ -317,7 +317,7 @@ class AgentSetManager {
         return Array.from(this.agentSets.values()).find(set => set.agentCount < this.maxAgentsPerSet);
     }
 
-    async assignAgentToSet(agentId: string, actionVerb: string, inputs: Map<string, PluginInput>,  missionId: string, missionContext: string): Promise<string> {
+    async assignAgentToSet(agentId: string, actionVerb: string, inputs: Map<string, InputValue>,  missionId: string, missionContext: string): Promise<string> {
 
         // If we don't have any AgentSets, create one directly
         if (this.agentSets.size === 0) {

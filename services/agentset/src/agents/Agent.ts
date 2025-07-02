@@ -6,7 +6,7 @@ import { getServiceUrls } from '../utils/postOfficeInterface';
 import { WorkProduct } from '../utils/WorkProduct';
 import { MapSerializer, BaseEntity } from '@cktmcs/shared';
 import { AgentPersistenceManager } from '../utils/AgentPersistenceManager';
-import { PluginInput, PluginOutput, PluginParameterType, PlanTemplate, PlanExecutionRequest, ExecutionContext as PlanExecutionContext } from '@cktmcs/shared';
+import { PluginOutput, PluginParameterType, InputValue, ExecutionContext as PlanExecutionContext } from '@cktmcs/shared';
 import { ActionVerbTask } from '@cktmcs/shared';
 import { AgentConfig, AgentStatistics } from '@cktmcs/shared';
 import { MessageType } from '@cktmcs/shared';
@@ -20,7 +20,7 @@ export class Agent extends BaseEntity {
     private agentSetUrl: string;
     private agentPersistenceManager: AgentPersistenceManager;
     private stateManager: StateManager;
-    inputs: Map<string, PluginInput> | undefined;
+    inputValues: Map<string, InputValue> | undefined;
     status: AgentStatus;
     steps: Step[] = [];
     dependencies: string[];
@@ -41,10 +41,10 @@ export class Agent extends BaseEntity {
 
     constructor(config: AgentConfig) {
         super(config.id, 'AgentSet', `agentset`, process.env.PORT || '9000');
-        console.log(`Agent ${config.id} created. missionId=${config.missionId}. Inputs: ${JSON.stringify(config.inputs)}` );
+        console.log(`Agent ${config.id} created. missionId=${config.missionId}. Inputs: ${JSON.stringify(config.inputValues)}` );
         this.agentPersistenceManager = new AgentPersistenceManager();
         this.stateManager = new StateManager(config.id, this.agentPersistenceManager);
-        this.inputs = config.inputs instanceof Map ? config.inputs : new Map(Object.entries(config.inputs||{}));
+        this.inputValues = config.inputValues instanceof Map ? config.inputValues : new Map(Object.entries(config.inputValues||{}));
         this.missionId = config.missionId;
         this.agentSetUrl = config.agentSetUrl;
         this.status = AgentStatus.INITIALIZING;
@@ -64,7 +64,7 @@ export class Agent extends BaseEntity {
         const initialStep = new Step({
             actionVerb: config.actionVerb,
             stepNo: 1,
-            inputs: this.inputs,
+            inputValues: this.inputValues,
             description: 'Initial mission step',
             status: StepStatus.PENDING,
             persistenceManager: this.agentPersistenceManager
@@ -76,7 +76,7 @@ export class Agent extends BaseEntity {
             eventType: 'agent_created',
             agentId: this.id,
             missionId: this.missionId,
-            inputs: MapSerializer.transformForSerialization(this.inputs),
+            inputValues: MapSerializer.transformForSerialization(this.inputValues),
             status: this.status,
             timestamp: new Date().toISOString()
         });
@@ -333,9 +333,10 @@ Please consider this context and the available plugins when planning and executi
                     ? deserializedData.find(r => r.name === dep.outputName)?.result
                     : deserializedData[dep.outputName];
                 if (outputValue !== undefined) {
-                    step.inputs.set(dep.inputName, {
+                    step.inputValues.set(dep.inputName, {
                         inputName: dep.inputName,
-                        inputValue: outputValue,
+                        value: outputValue,
+                        valueType: PluginParameterType.STRING,
                         args: { outputKey: dep.outputName }
                     });
                 }
@@ -420,7 +421,7 @@ Please consider this context and the available plugins when planning and executi
         this.conversation.push({ role, content });
     }
 
-    private async handleAskStep(inputs: Map<string, PluginInput>): Promise<PluginOutput[]> {
+    private async handleAskStep(inputs: Map<string, InputValue>): Promise<PluginOutput[]> {
         if (this.status !== AgentStatus.RUNNING) {
             console.log(`Agent ${this.id} is not RUNNING, aborting handleAskStep.`);
             return [{
@@ -444,9 +445,9 @@ Please consider this context and the available plugins when planning and executi
                 error: 'Question is required for ASK plugin'
             }]
         }
-        const question = input.args.question || input.inputValue;
-        const choices = input.args.choices;
-        const timeout = input.args.timeout || 300000; // Default timeout of 5 minutes if not specified
+        const question = input.value || input.args?.question;
+        const choices = input.args?.choices;
+        const timeout = input.args?.timeout || 300000; // Default timeout of 5 minutes if not specified
 
         try {
             const response = await Promise.race([
@@ -553,7 +554,7 @@ Please consider this context and the available plugins when planning and executi
         return true; // No dependent step found
     }
 
-    private async createSubAgent(inputs: Map<string, PluginInput>): Promise<PluginOutput[]> {
+    private async createSubAgent(inputs: Map<string, InputValue>): Promise<PluginOutput[]> {
         if (this.status !== AgentStatus.RUNNING) {
             console.log(`Agent ${this.id} is not RUNNING, aborting createSubAgent.`);
             return [{
@@ -575,19 +576,19 @@ Please consider this context and the available plugins when planning and executi
             }
 
             // Check if a role is specified for the sub-agent
-            const roleId = inputs.get('roleId')?.inputValue as string;
+            const roleId = inputs.get('roleId')?.value as string;
             if (roleId) {
                 newInputs.delete('roleId');
             }
 
             // Check if role customizations are specified
-            const roleCustomizations = inputs.get('roleCustomizations')?.inputValue;
+            const roleCustomizations = inputs.get('roleCustomizations')?.value;
             if (roleCustomizations) {
                 newInputs.delete('roleCustomizations');
             }
 
             // Check if a recommended role is specified in the task
-            const recommendedRole = inputs.get('recommendedRole')?.inputValue as string;
+            const recommendedRole = inputs.get('recommendedRole')?.value as string;
             if (recommendedRole) {
                 newInputs.delete('recommendedRole');
             }
@@ -599,7 +600,7 @@ Please consider this context and the available plugins when planning and executi
             const subAgentConfig = {
                 agentId: subAgentId,
                 actionVerb: 'ACCOMPLISH',
-                inputs: MapSerializer.transformForSerialization(newInputs),
+                inputValues: MapSerializer.transformForSerialization(newInputs),
                 missionId: this.missionId,
                 dependencies: [this.id, ...(this.dependencies || [])],
                 missionContext: this.missionContext,
@@ -646,7 +647,7 @@ Please consider this context and the available plugins when planning and executi
         }
     }
 
-    private async useBrainForReasoning(inputs: Map<string, PluginInput>): Promise<PluginOutput[]> {
+    private async useBrainForReasoning(inputs: Map<string, InputValue>): Promise<PluginOutput[]> {
         if (this.status !== AgentStatus.RUNNING) {
             console.log(`Agent ${this.id} is not RUNNING, aborting useBrainForReasoning.`);
             return [{
@@ -658,7 +659,7 @@ Please consider this context and the available plugins when planning and executi
                 error: 'Agent is not in RUNNING state.'
             }];
         }
-        const prompt = inputs.get('prompt')?.inputValue as string;
+        const prompt = inputs.get('prompt')?.value as string;
         if (!prompt) {
             return [{
                 success: false,
@@ -670,8 +671,8 @@ Please consider this context and the available plugins when planning and executi
             }];
         }
 
-        const optimization = (inputs.get('optimization')?.inputValue as string) || 'accuracy';
-        const ConversationType = (inputs.get('ConversationType')?.inputValue as string) || 'text/text';
+        const optimization = (inputs.get('optimization')?.value as string) || 'accuracy';
+        const ConversationType = (inputs.get('ConversationType')?.value as string) || 'text/text';
 
         const validOptimizations = ['cost', 'accuracy', 'creativity', 'speed', 'continuity'];
         const validConversationTypes = ['text/text', 'text/image', 'text/audio', 'text/video', 'text/code'];
@@ -764,7 +765,7 @@ Please consider this context and the available plugins when planning and executi
     private async executeActionWithCapabilitiesManager(step: Step): Promise<PluginOutput[]> {
         try {
             if (step.actionVerb === 'ASK') {
-                return this.handleAskStep(step.inputs);
+                return this.handleAskStep(step.inputValues);
             }
 
             const payload = MapSerializer.transformForSerialization(step);
@@ -1237,7 +1238,7 @@ Please consider this context and the available plugins when planning and executi
                 taskId: uuidv4(),
                 taskType: step.actionVerb,
                 description: step.description || `Execute ${step.actionVerb}`,
-                inputs: MapSerializer.transformForSerialization(step.inputs),
+                inputValues: MapSerializer.transformForSerialization(step.inputValues),
                 priority: 'normal',
                 context: {
                     sourceAgentId: this.id,
@@ -1407,11 +1408,11 @@ Please consider this context and the available plugins when planning and executi
         const planStep = new Step({
             actionVerb: 'EXECUTE_PLAN_TEMPLATE',
             stepNo: this.steps.length + 1,
-            inputs: new Map([
-                ['templateId', { inputName: 'templateId', inputValue: templateId, args: {} }],
-                ['inputs', { inputName: 'inputs', inputValue: inputs, args: {} }],
-                ['userId', { inputName: 'userId', inputValue: this.id, args: {} }],
-                ['executionMode', { inputName: 'executionMode', inputValue: executionMode, args: {} }]
+            inputReferences: new Map([
+                ['templateId', { inputName: 'templateId', value: templateId, valueType: PluginParameterType.STRING, args: {} }],
+                ['inputs', { inputName: 'inputs', value: inputs, valueType: PluginParameterType.OBJECT, args: {} }],
+                ['userId', { inputName: 'userId', value: this.id, valueType: PluginParameterType.STRING, args: {} }],
+                ['executionMode', { inputName: 'executionMode', value: executionMode, valueType: PluginParameterType.STRING, args: {} }]
             ]),
             description: `Execute plan template: ${templateId}`,
             persistenceManager: this.agentPersistenceManager
@@ -1522,24 +1523,22 @@ Please consider this context and the available plugins when planning and executi
         (this as any).context[key] = value;
     }
 
-    async createStepForTask(task: any): Promise<void> {
-        // Minimal stub: create a new Step for the delegated task
-        const step = new Step({
-            actionVerb: task.type || task.actionVerb || 'DELEGATED_TASK',
-            stepNo: this.steps.length + 1,
-            inputs: new Map(Object.entries(task.inputs || {})),
-            description: task.description || 'Delegated task',
-            status: StepStatus.PENDING,
-            persistenceManager: this.agentPersistenceManager
-        });
-        this.steps.push(step);
-        await this.saveAgentState();
-    }
-
     async processTaskResult(result: any): Promise<void> {
         // Minimal stub: log the result and update agent state
         this.logEvent({ eventType: 'task_result_received', agentId: this.id, result, timestamp: new Date().toISOString() });
         // Optionally, update step status or agent state here
         await this.saveAgentState();
+    }
+
+    // Add a method to resume a paused step with user input
+    public async resumeStepWithUserInput(stepId: string, userInput: any) {
+        const step = this.steps.find(s => s.id === stepId);
+        if (step && step.status === StepStatus.PAUSED) {
+            // Set the user input as an input value for the step
+            step.inputValues.set('userInput', { inputName: 'userInput', value: userInput, valueType: PluginParameterType.STRING, args: {} });
+            step.status = StepStatus.PENDING;
+            // Resume agent execution
+            await this.runAgent();
+        }
     }
 }

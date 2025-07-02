@@ -210,7 +210,7 @@ export class AgentLifecycleManager {
     // Save agent state with this state ID
     const agentState = {
         ...agent,
-        inputs: agent.inputs || new Map<string, any>(), // Ensure inputs is always defined
+        inputs: agent.inputValues || new Map<string, any>(), // Ensure inputs is always defined
         missionContext: agent.getMissionContext ? agent.getMissionContext() : ''
     };
     await this.persistenceManager.saveAgent({

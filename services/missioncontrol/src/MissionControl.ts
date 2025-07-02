@@ -1,9 +1,9 @@
 import axios from 'axios';
 import express from 'express';
 import { Request, Response, NextFunction } from 'express';
-import { AgentStatistics, Mission, Status } from '@cktmcs/shared';
+import { AgentStatistics, Mission, PluginParameterType, Status } from '@cktmcs/shared';
 import { v4 as uuidv4, validate as uuidValidate } from 'uuid';
-import { BaseEntity, MessageType, PluginInput, MapSerializer, ServiceTokenManager } from '@cktmcs/shared';
+import { BaseEntity, MessageType, InputValue, MapSerializer, ServiceTokenManager } from '@cktmcs/shared';
 import { MissionStatistics } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { rateLimit } from 'express-rate-limit';
@@ -24,6 +24,9 @@ class MissionControl extends BaseEntity {
     private librarianUrl: string = process.env.LIBRARIAN_URL || 'librarian:5040';
     private brainUrl: string = process.env.BRAIN_URL || 'brain:5070';
     private engineerUrl: string = process.env.ENGINEER_URL || 'engineer:5050';
+
+    // Add: Map to track pending user input requests
+    private pendingUserInputs: Map<string, { missionId: string, stepId: string, agentId: string }> = new Map();
 
     constructor() {
         super('MissionControl', 'MissionControl', process.env.HOST || 'missioncontrol', process.env.PORT || '5030');
@@ -65,6 +68,13 @@ class MissionControl extends BaseEntity {
         app.post('/agentStatisticsUpdate', (req, res) => {
             this.handleAgentStatisticsUpdate(req, res).catch((error: any) => {
                 console.error('Error in handleAgentStatisticsUpdate:', error);
+                res.status(500).send({ error: 'Internal server error' });
+            });
+        });
+
+        app.post('/userInputResponse', (req, res) => {
+            this.handleUserInputResponse(req, res).catch((error: any) => {
+                console.error('Error in handleUserInputResponse:', error);
                 res.status(500).send({ error: 'Internal server error' });
             });
         });
@@ -274,10 +284,11 @@ class MissionControl extends BaseEntity {
             this.sendStatusUpdate(mission, 'Mission created');
 
             // Create the inputs map for the agent
-            const inputs = new Map<string, PluginInput>();
+            const inputs = new Map<string, InputValue>();
             inputs.set('goal', {
                 inputName: 'goal',
-                inputValue: mission.goal,
+                value: mission.goal,
+                valueType: PluginParameterType.STRING,
                 args: {}
             });
 
@@ -285,7 +296,8 @@ class MissionControl extends BaseEntity {
             if (mission.missionContext) {
                 inputs.set('missionContext', {
                     inputName: 'missionContext',
-                    inputValue: mission.missionContext,
+                    value: mission.missionContext,
+                    valueType: PluginParameterType.STRING,
                     args: {}
                 });
             }
@@ -744,6 +756,30 @@ class MissionControl extends BaseEntity {
             }
         }
     }
+
+    // Add: Handler for user input response
+    private async handleUserInputResponse(req: express.Request, res: express.Response) {
+        const { requestId, response } = req.body;
+        const pending = this.pendingUserInputs.get(requestId);
+        if (!pending) {
+            res.status(404).send({ error: 'No pending user input for this requestId' });
+            return;
+        }
+        // Resume the step with the user's response
+        await this.resumeStepWithUserInput(pending.missionId, pending.stepId, pending.agentId, response);
+        this.pendingUserInputs.delete(requestId);
+        res.status(200).send({ message: 'User input processed' });
+    }
+
+    // Add: Resume step logic (stub, to be implemented as per your step engine)
+    private async resumeStepWithUserInput(missionId: string, stepId: string, agentId: string, userInput: any) {
+        // TODO: Implement logic to resume the paused step with the provided user input
+        console.log(`Resuming step ${stepId} for agent ${agentId} in mission ${missionId} with user input:`, userInput);
+        // Example: fetch the step, update its input, and continue processing
+    }
+
+    // In your step execution logic, when you get a pending_user_input result from the plugin:
+    // this.pendingUserInputs.set(request_id, { missionId, stepId, agentId });
 }
 
 new MissionControl();

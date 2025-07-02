@@ -23,7 +23,7 @@ export class Llama4Model extends BaseModel {
             modelName: "meta-llama/llama-4-scout-17b-16e-instruct",
             interfaceName: "groq",
             serviceName: "groq",
-            tokenLimit: 128000, // Llama 4 has a large context window
+            tokenLimit: 30000, // Llama 4 has a large context window
             scoresByConversationType: scoresByConversationType,
             contentConversation: [LLMConversationType.TextToText, LLMConversationType.TextToCode]
         });

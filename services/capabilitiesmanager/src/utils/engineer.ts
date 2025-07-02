@@ -9,7 +9,7 @@ export const requestPluginFromEngineer = async (entity: BaseEntity, step: Step, 
         // Use the entity's authenticated API
         const response = await entity.authenticatedApi.post(`http://${engineerUrl}/createPlugin`, {
             verb: step.actionVerb,
-            context: step.inputs,
+            context: step.inputValues,
             accomplishGuidance: accomplishGuidance
         });
 

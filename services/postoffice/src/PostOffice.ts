@@ -915,6 +915,30 @@ export class PostOffice extends BaseEntity {
             return res.status(500).json({ error: 'Failed to retrieve step details' });
         }
     }
+
+    // Add this method to PostOffice
+    private async sendUserInputRequest(req: express.Request, res: express.Response) {
+        try {
+            const { question, answerType, choices } = req.body;
+            const request_id = require('uuid').v4();
+            // Store the request for later resolution
+            this.userInputRequests.set(request_id, (response: any) => {
+                // This callback will be called when the user responds
+                // You may want to notify the agent system here
+            });
+            // Broadcast to all connected clients (or filter by mission/user as needed)
+            this.webSocketHandler.broadcastToClients({
+                type: 'USER_INPUT_REQUEST',
+                request_id,
+                question,
+                answerType,
+                choices: choices || null
+            });
+            res.status(200).json({ request_id });
+        } catch (error) {
+            res.status(500).json({ error: 'Failed to send user input request' });
+        }
+    }
 }
 
 new PostOffice();

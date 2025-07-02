@@ -4,6 +4,7 @@ import { Box, Button, Container, Paper, Typography, Drawer, AppBar, Toolbar, Ico
 import MenuIcon from '@mui/icons-material/Menu';
 import CloseIcon from '@mui/icons-material/Close';
 import UserInputModal from './components/UserInputModal';
+import { AnswerType } from './components/UserInputModal';
 import TabbedPanel from './components/TabbedPanel';
 import TextInput from './components/TextInput';
 import MissionControls from './components/MissionControls';
@@ -43,7 +44,9 @@ const MainApp: React.FC = () => {
     agentStatistics,
     sendMessage: contextSendMessage,
     handleControlAction: contextHandleControlAction,
-    handleLoadMission: contextHandleLoadMission
+    handleLoadMission: contextHandleLoadMission,
+    pendingUserInput,
+    setPendingUserInput
   } = useWebSocket();
 
   // Responsive layout state
@@ -94,6 +97,19 @@ const MainApp: React.FC = () => {
     }
   };
 
+  // Handler for submitting user input from modal
+  const handleUserInputSubmit = async (requestId: string, response: any) => {
+    try {
+      await fetch('http://localhost:5020/submitUserInput', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requestId, response })
+      });
+      if (setPendingUserInput) setPendingUserInput(null);
+    } catch (error) {
+      console.error('Failed to submit user input:', error);
+    }
+  };
 
   // Use the sendMessage function from WebSocketContext
   const handleSendMessage = async (message: string) => {
@@ -258,6 +274,18 @@ const MainApp: React.FC = () => {
             )}
           </Box>
         </Box>
+
+        {/* User Input Modal */}
+        {pendingUserInput && (
+          <UserInputModal
+            requestId={pendingUserInput.request_id}
+            question={pendingUserInput.question}
+            choices={pendingUserInput.choices}
+            answerType={pendingUserInput.answerType as AnswerType}
+            onSubmit={handleUserInputSubmit}
+            onClose={() => {if (setPendingUserInput) setPendingUserInput(null)}}
+          />
+        )}
       </Box>
     </ErrorBoundary>
   );
