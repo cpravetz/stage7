@@ -5,7 +5,8 @@ import { agentSetManager } from './utils/agentSetManager';
 import { dependencyManager } from './utils/dependencyManager';
 import { AgentStatus } from './utils/status';
 import { Message, MessageType,TrafficManagerStatistics,
-        BaseEntity, PluginInput, MapSerializer } from '@cktmcs/shared';
+        BaseEntity, InputValue, MapSerializer, 
+        PluginParameterType} from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 
 
@@ -390,19 +391,20 @@ export class TrafficManager extends BaseEntity {
         console.log('createAgent req.body: ', req.body);
         const { actionVerb, inputs, dependencies, missionId, missionContext } = req.body;
         const inputsDeserialized = MapSerializer.transformFromSerialization(inputs);
-        let inputsMap: Map<string, PluginInput>;
+        let inputsMap: Map<string, InputValue>;
 
         if (inputsDeserialized instanceof Map) {
             inputsMap = inputsDeserialized;
         } else {
             inputsMap = new Map();
             for (const [key, value] of Object.entries(inputsDeserialized)) {
-                if (typeof value === 'object' && value !== null && 'inputValue' in value) {
-                    inputsMap.set(key, value as PluginInput);
+                if (typeof value === 'object' && value !== null && 'value' in value) {
+                    inputsMap.set(key, {inputName: key, value:value, valueType: PluginParameterType.ANY });
                 } else {
                     inputsMap.set(key, {
                         inputName: key,
-                        inputValue: value,
+                        value: value,
+                        valueType: PluginParameterType.ANY,
                         args: { [key]: value }
                     });
                 }

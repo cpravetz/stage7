@@ -1,7 +1,7 @@
 import axios from 'axios';
-import { PluginInput, PluginOutput, PluginParameterType, ActionVerbTask } from '@cktmcs/shared';
+import { InputValue, PluginOutput, PluginParameterType, ActionVerbTask } from '@cktmcs/shared';
 
-export async function execute(input: PluginInput): Promise<PluginOutput[]> {
+export async function execute(input: InputValue): Promise<PluginOutput[]> {
   return [{
     success: false,
     name: 'error',

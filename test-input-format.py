@@ -6,17 +6,17 @@ Test script to verify the input format expected by the ACCOMPLISH plugin
 import json
 
 # This is the format that should be passed to the Python plugin
-# It's an array of [key, value] pairs where value is a PluginInput object
+# It's an array of [key, value] pairs where value is a InputValue object
 
 test_inputs_array = [
     ["goal", {
         "inputName": "goal",
-        "inputValue": "Create a simple test plan",
+        "value": "Create a simple test plan",
         "args": {}
     }],
     ["verbToAvoid", {
         "inputName": "verbToAvoid", 
-        "inputValue": "TEST",
+        "value": "TEST",
         "args": {}
     }]
 ]
@@ -35,9 +35,9 @@ goal = None
 for key, value in inputs_map.items():
     print(f"\nProcessing key: {key}, value: {value}, type: {type(value)}")
     if key == 'goal':
-        if isinstance(value, dict) and 'inputValue' in value:
-            goal = value['inputValue']
-            print(f"Found goal in inputValue: {goal}")
+        if isinstance(value, dict) and 'value' in value:
+            goal = value['value']
+            print(f"Found goal in value: {goal}")
         else:
             goal = value
             print(f"Found goal as direct value: {goal}")

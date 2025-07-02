@@ -40,7 +40,7 @@ Your plugin receives input as a JSON object via stdin:
 ```json
 {
   "input_name": {
-    "inputValue": "actual_value",
+    "value": "actual_value",
     "args": {}
   }
 }
@@ -101,12 +101,12 @@ Create a test file in the `tests/` directory:
 ```python
 import unittest
 import json
-from main import execute_plugin, PluginInput
+from main import execute_plugin, InputValue
 
 class TestMyPlugin(unittest.TestCase):
     def test_basic_functionality(self):
         inputs = {
-            'example_input': PluginInput('test_value')
+            'example_input': InputValue('test_value')
         }
         outputs = execute_plugin(inputs)
         self.assertTrue(outputs[0].success)

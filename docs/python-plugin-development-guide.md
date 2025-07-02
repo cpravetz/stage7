@@ -116,7 +116,7 @@ python tools/python-plugin-cli.py create weather_checker --verb GET_WEATHER
 Edit `main.py` to implement your plugin:
 
 ```python
-def execute_plugin(inputs: Dict[str, PluginInput]) -> List[PluginOutput]:
+def execute_plugin(inputs: Dict[str, InputValue]) -> List[PluginOutput]:
     try:
         # Get inputs
         location = inputs.get('location')
@@ -165,7 +165,7 @@ Update `manifest.json` with your plugin details:
 
 Test your plugin locally:
 ```bash
-python tools/python-plugin-cli.py test plugins/weather_checker --input '{"location": {"inputValue": "London,UK"}}'
+python tools/python-plugin-cli.py test plugins/weather_checker --input '{"location": {"value": "London,UK"}}'
 ```
 
 ### 6. Validation
@@ -177,11 +177,11 @@ python tools/python-plugin-cli.py validate plugins/weather_checker
 
 ## API Reference
 
-### PluginInput Class
+### InputValue Class
 
 Represents an input parameter:
 ```python
-class PluginInput:
+class InputValue:
     def __init__(self, input_value: Any, args: Dict[str, Any] = None):
         self.input_value = input_value  # The actual input value
         self.args = args or {}          # Additional arguments
@@ -219,7 +219,7 @@ def create_error_output(name: str, error_message: str,
 ### Main Function Template
 
 ```python
-def execute_plugin(inputs: Dict[str, PluginInput]) -> List[PluginOutput]:
+def execute_plugin(inputs: Dict[str, InputValue]) -> List[PluginOutput]:
     """
     Main plugin execution function
     
@@ -296,11 +296,11 @@ except Exception as e:
 Create comprehensive unit tests:
 ```python
 import unittest
-from main import execute_plugin, PluginInput
+from main import execute_plugin, InputValue
 
 class TestMyPlugin(unittest.TestCase):
     def test_valid_input(self):
-        inputs = {'param': PluginInput('valid_value')}
+        inputs = {'param': InputValue('valid_value')}
         outputs = execute_plugin(inputs)
         self.assertTrue(outputs[0].success)
     
@@ -317,7 +317,7 @@ Test with the Stage7 system:
 # Test via CapabilitiesManager API
 curl -X POST http://localhost:5060/executeAction \
   -H "Content-Type: application/json" \
-  -d '{"actionVerb": "MY_ACTION", "inputs": {"param": {"inputValue": "test"}}}'
+  -d '{"actionVerb": "MY_ACTION", "inputs": {"param": {"value": "test"}}}'
 ```
 
 ## Deployment
