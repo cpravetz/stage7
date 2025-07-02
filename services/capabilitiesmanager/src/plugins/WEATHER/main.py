@@ -13,11 +13,14 @@ import requests
 from typing import Dict, List, Any, Optional
 
 
-class PluginInput:
-    """Represents a plugin input parameter"""
-    def __init__(self, input_value: Any, args: Dict[str, Any] = None):
-        self.input_value = input_value
+class InputValue:
+    """Represents a plugin input parameter in the new format"""
+    def __init__(self, inputName: str, value: Any, valueType: str, args: Dict[str, Any] = None):
+        self.inputName = inputName
+        self.value = value
+        self.valueType = valueType
         self.args = args or {}
+
 
 
 class PluginOutput:
@@ -124,7 +127,7 @@ def format_weather_info(weather_data: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def execute_plugin(inputs: Dict[str, PluginInput]) -> List[PluginOutput]:
+def execute_plugin(inputs: Dict[str, InputValue]) -> List[PluginOutput]:
     """
     Main plugin execution function for WEATHER plugin
     
@@ -195,13 +198,13 @@ def main():
         inputs_list = json.loads(inputs_str)
         inputs_map = {item[0]: item[1] for item in inputs_list}
 
-        # Convert to PluginInput objects for compatibility
+        # Convert to InputValue objects for compatibility
         inputs = {}
         for key, value in inputs_map.items():
-            if isinstance(value, dict) and 'inputValue' in value:
-                inputs[key] = PluginInput(value['inputValue'], value.get('args', {}))
+            if isinstance(value, dict) and 'value' in value:
+                inputs[key] = InputValue(value['value'], value.get('args', {}))
             else:
-                inputs[key] = PluginInput(value)
+                inputs[key] = InputValue(value)
 
         # Execute the plugin
         outputs = execute_plugin(inputs)

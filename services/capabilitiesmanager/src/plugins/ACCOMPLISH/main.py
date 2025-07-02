@@ -638,23 +638,13 @@ def main():
         if not inputs_str:
             raise ValueError("No input provided")
 
-        # Debug: Log the raw input string
-        logger.info(f"Raw input string: {inputs_str}")
-
         # Parse inputs - expecting serialized Map format
         inputs_list = json.loads(inputs_str)
-        logger.info(f"Parsed inputs list: {inputs_list}")
 
         inputs_map = {item[0]: item[1] for item in inputs_list}
-        logger.info(f"Inputs map: {inputs_map}")
 
         # Debug: Check if goal is in the inputs
-        if 'goal' in inputs_map:
-            goal_value = inputs_map['goal']
-            logger.info(f"Goal found in inputs: {goal_value}")
-            if isinstance(goal_value, dict) and 'inputValue' in goal_value:
-                logger.info(f"Goal inputValue: {goal_value['inputValue']}")
-        else:
+        if not ('goal' in inputs_map):
             logger.warning("Goal not found in inputs map")
             logger.info(f"Available keys: {list(inputs_map.keys())}")
 

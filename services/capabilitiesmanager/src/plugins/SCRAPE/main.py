@@ -147,8 +147,8 @@ class ScrapePlugin:
         
         for key, value in inputs_map.items():
             if key in ['selector', 'attribute', 'limit']:
-                if isinstance(value, dict) and 'inputValue' in value:
-                    config[key] = value['inputValue']
+                if isinstance(value, dict) and 'value' in value:
+                    config[key] = value['value']
                 else:
                     config[key] = value
         
@@ -169,8 +169,8 @@ class ScrapePlugin:
             url = None
             for key, value in inputs_map.items():
                 if key == 'url':
-                    if isinstance(value, dict) and 'inputValue' in value:
-                        url = value['inputValue']
+                    if isinstance(value, dict) and 'value' in value:
+                        url = value['value']
                     else:
                         url = value
                     break
@@ -223,7 +223,7 @@ class ScrapePlugin:
                 "success": False,
                 "name": "error",
                 "resultType": PluginParameterType.ERROR,
-                "resultDescription": f"Error scraping {inputs_map.get('url', {}).get('inputValue', 'undefined URL')}",
+                "resultDescription": f"Error scraping {inputs_map.get('url', {}).get('value', 'undefined URL')}",
                 "result": None,
                 "error": str(e)
             }]

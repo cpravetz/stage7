@@ -13,11 +13,14 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional
 
 
-class PluginInput:
-    """Represents a plugin input parameter"""
-    def __init__(self, input_value: Any, args: Dict[str, Any] = None):
-        self.input_value = input_value
+class InputValue:
+    """Represents a plugin input parameter in the new format"""
+    def __init__(self, inputName: str, value: Any, valueType: str, args: Dict[str, Any] = None):
+        self.inputName = inputName
+        self.value = value
+        self.valueType = valueType
         self.args = args or {}
+
 
 
 class PluginOutput:
@@ -167,7 +170,7 @@ def append_file(file_path: str, content: str) -> None:
         raise OSError(f"Failed to append to file {file_path}: {str(e)}")
 
 
-def execute_plugin(inputs: Dict[str, PluginInput]) -> List[PluginOutput]:
+def execute_plugin(inputs: Dict[str, InputValue]) -> List[PluginOutput]:
     """
     Main plugin execution function for FILE_OPS plugin
     
@@ -257,13 +260,13 @@ def main():
         # Parse JSON input
         raw_inputs = json.loads(input_data)
         
-        # Convert to PluginInput objects
+        # Convert to InputValue objects
         inputs = {}
         for key, value in raw_inputs.items():
-            if isinstance(value, dict) and 'inputValue' in value:
-                inputs[key] = PluginInput(value['inputValue'], value.get('args', {}))
+            if isinstance(value, dict) and 'value' in value:
+                inputs[key] = InputValue(value['value'], value.get('args', {}))
             else:
-                inputs[key] = PluginInput(value)
+                inputs[key] = InputValue(value)
         
         # Execute the plugin
         outputs = execute_plugin(inputs)

@@ -87,18 +87,18 @@ class GetUserInputPlugin:
 
             for key, value in inputs_map.items():
                 if key == 'question':
-                    if isinstance(value, dict) and 'inputValue' in value:
-                        question = value['inputValue']
+                    if isinstance(value, dict) and 'value' in value:
+                        question = value['value']
                     else:
                         question = value
                 elif key == 'choices':
-                    if isinstance(value, dict) and 'inputValue' in value:
-                        choices = value['inputValue']
+                    if isinstance(value, dict) and 'value' in value:
+                        choices = value['value']
                     else:
                         choices = value
                 elif key == 'answerType':
-                    if isinstance(value, dict) and 'inputValue' in value:
-                        answer_type = value['inputValue']
+                    if isinstance(value, dict) and 'value' in value:
+                        answer_type = value['value']
                     else:
                         answer_type = value
 
