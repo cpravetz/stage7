@@ -296,6 +296,8 @@ export class Step {
                 eventType: 'step_result',
                 stepId: this.id,
                 stepNo: this.stepNo,
+                actionVerb: this.actionVerb,
+                status: this.status,
                 result: result,
                 timestamp: new Date().toISOString()
             });
@@ -321,6 +323,8 @@ export class Step {
                 eventType: 'step_result',
                 stepId: this.id,
                 stepNo: this.stepNo,
+                actionVerb: this.actionVerb,
+                status: this.status,
                 result: errorResult,
                 timestamp: new Date().toISOString()
             });
