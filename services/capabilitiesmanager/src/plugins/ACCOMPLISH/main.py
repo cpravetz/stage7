@@ -57,7 +57,8 @@ class AccomplishPlugin:
         'DECIDE': {'required': ['condition', 'trueSteps', 'falseSteps'], 'optional': []},
         'WHILE': {'required': ['condition', 'steps'], 'optional': []},
         'UNTIL': {'required': ['condition', 'steps'], 'optional': []},
-        'DELEGATE': {'required': ['subAgentGoal'], 'optional': ['subAgentRole', 'subAgentTasks']} # Added for DELEGATE example
+        'FOREACH': {'required': ['array', 'steps'], 'optional': []},
+        'DELEGATE': {'required': ['subAgentGoal'], 'optional': ['subAgentRole', 'subAgentTasks']} 
     }
 
     ALLOWED_VALUE_TYPES = ['string', 'number', 'boolean', 'array', 'object', 'plan', 'plugin', 'any']
