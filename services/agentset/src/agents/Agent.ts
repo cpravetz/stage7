@@ -939,8 +939,6 @@ Please consider this context and the available plugins when planning and executi
         }
     }
 
-    // Original getMissionId method is replaced by the implementation below
-
     getStatus(): string {
         return this.status;
     }

@@ -1060,7 +1060,8 @@ export class AgentSet extends BaseEntity {
 
         let stats  : AgentSetStatistics = {
             agentsByStatus: new Map(),
-            agentsCount: 0
+            agentsCount: 0,
+            agentValuesCount: this.agents.size
         };
 
         try {
@@ -1088,7 +1089,8 @@ export class AgentSet extends BaseEntity {
             }
             const serializedStats = {
                 agentsByStatus: MapSerializer.transformForSerialization(stats.agentsByStatus),
-                agentsCount: stats.agentsCount
+                agentsCount: stats.agentsCount,
+                agentValuesCount: stats.agentValuesCount
             };
             res.status(200).send(serializedStats);
         } catch (error) {
