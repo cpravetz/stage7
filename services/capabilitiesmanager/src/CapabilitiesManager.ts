@@ -329,13 +329,16 @@ export class CapabilitiesManager extends BaseEntity {
             // Query PluginRegistry for the handler for this actionVerb
             // The handlerResult.handler will be a PluginManifest (or DefinitionManifest)
             const handlerResult = await this.getHandlerForActionVerb(step.actionVerb, trace_id);
+            console.log(`[${trace_id}] ${source_component}: Handler result for verb '${step.actionVerb}':`, handlerResult ? { type: handlerResult.type, lang: handlerResult.handler?.language, id: handlerResult.handler?.id } : null);
 
             if (handlerResult && handlerResult.handler) {
                 const manifest = handlerResult.handler; // Could be DefinitionManifest
+                console.log(`[${trace_id}] ${source_component}: Found handler for '${step.actionVerb}'. Language: '${manifest.language}', ID: '${manifest.id}'. Attempting direct execution.`);
 
                 if (manifest.language === DefinitionType.OPENAPI) {
                     const definitionManifest = manifest as DefinitionManifest;
                     if (definitionManifest.toolDefinition && (definitionManifest.toolDefinition as OpenAPITool).specUrl) {
+                        console.log(`[${trace_id}] ${source_component}: Executing '${step.actionVerb}' as OpenAPI tool.`);
                         const result = await this.executeOpenAPIToolInternal(definitionManifest.toolDefinition as OpenAPITool, step, trace_id);
                         res.status(200).send(MapSerializer.transformForSerialization(result));
                         return;
@@ -350,6 +353,7 @@ export class CapabilitiesManager extends BaseEntity {
                 } else if (manifest.language === DefinitionType.MCP) {
                     const definitionManifest = manifest as DefinitionManifest;
                      if (definitionManifest.toolDefinition && (definitionManifest.toolDefinition as MCPTool).actionMappings) {
+                        console.log(`[${trace_id}] ${source_component}: Executing '${step.actionVerb}' as MCP tool.`);
                         const result = await this.executeMCPTool(definitionManifest.toolDefinition as MCPTool, step, trace_id);
                         res.status(200).send(MapSerializer.transformForSerialization(result));
                         return;
@@ -362,6 +366,7 @@ export class CapabilitiesManager extends BaseEntity {
                         });
                     }
                 } else if (manifest.language === 'javascript' || manifest.language === 'python' || manifest.language === 'container') {
+                    console.log(`[${trace_id}] ${source_component}: Executing '${step.actionVerb}' as ${manifest.language} plugin.`);
                     // Standard code-based plugin execution
                     const pluginDefinition = manifest as PluginDefinition; // Assuming PluginManifest is compatible enough
                     const validatedInputs = await validateAndStandardizeInputs(pluginDefinition, step.inputValues || new Map<string, InputValue>());
@@ -1056,9 +1061,12 @@ export class CapabilitiesManager extends BaseEntity {
 
     private async executeAccomplishPlugin(goal: string, verbToAvoid: string, trace_id: string): Promise<PluginOutput[]> {
         const source_component = "CapabilitiesManager.executeAccomplishPlugin";
+        let availablePluginsStr = ""; // Initialize
         try {
             // Get available plugins string from pluginRegistry (which proxies to marketplace)
-            const availablePluginsStr = await this.pluginRegistry.getAvailablePluginsStr();
+            availablePluginsStr = await this.pluginRegistry.getAvailablePluginsStr();
+            console.log(`[${trace_id}] ${source_component}: Plugins string for ACCOMPLISH: ${availablePluginsStr.substring(0,100)}...`);
+
             const accomplishInputs : Map<string, InputValue> = new Map([
                 ['goal', { inputName: 'goal', value: goal, valueType: PluginParameterType.STRING, args: {} }],
                 ['verbToAvoid', { inputName: 'verbToAvoid', value: verbToAvoid, valueType: PluginParameterType.STRING, args: {} }],
