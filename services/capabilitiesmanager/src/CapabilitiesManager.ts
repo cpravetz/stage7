@@ -70,6 +70,15 @@ export class CapabilitiesManager extends BaseEntity {
     private async initialize(trace_id: string) {
         const source_component = "CapabilitiesManager.initialize";
         try {
+            // Ensure PluginRegistry is initialized before other dependent services
+            if (this.pluginRegistry && typeof this.pluginRegistry.initialize === 'function') {
+                await this.pluginRegistry.initialize(); // Await PluginRegistry initialization
+                console.log(`[${trace_id}] ${source_component}: PluginRegistry initialized.`);
+            } else {
+                console.error(`[${trace_id}] ${source_component}: PluginRegistry or its initialize method is not available.`);
+                // Potentially throw an error or handle critical failure
+            }
+
             this.configManager = await ConfigManager.initialize(this.librarianUrl);
             console.log(`[${trace_id}] ${source_component}: ConfigManager initialized.`);
 
