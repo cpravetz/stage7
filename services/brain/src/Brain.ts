@@ -261,11 +261,7 @@ export class Brain extends BaseEntity {
         }
 
         // Track the request
-        const requestId = this.modelManager.trackModelRequest(
-            selectedModel.modelName,
-            thread.conversationType,
-            JSON.stringify(messages)
-        );
+        const requestId = this.modelManager.trackModelRequest(selectedModel.name, thread.conversationType, JSON.stringify(messages));
 
         try {
             // Pass optionals to the model, including response_format if specified

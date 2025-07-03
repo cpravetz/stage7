@@ -388,7 +388,7 @@ Mission Context: {mission_context_str}
                 has_output_key = 'outputName' in input_value_obj
                 
                 if not (has_value ^ has_output_key): # Exactly one of 'value' or 'outputName' must be present
-                    return f"Step {i+1} input '{input_name}' must contain exactly one string property named either 'value' or 'outputName'."
+                    return f"Step {i+1} input '{input_name}' has neither a 'value' nor 'outputName' property. It must contain one or the other property with a string value."
 
                 # Ensure no other keys are present except 'value', 'outputName', 'valueType', and optional 'args'
                 # allowed_keys = {'value', 'outputName', 'valueType', 'args'}
