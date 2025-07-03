@@ -696,10 +696,13 @@ Please consider this context and the available plugins when planning and executi
         }
 
         const reasoningInput = {
-            exchanges: [{ role: 'user', content: prompt }],
+            exchanges: [...this.conversation, { role: 'user', content: prompt }], // Combine history with current prompt
             optimization: optimization,
-            ConversationType: ConversationType
+            ConversationType: ConversationType,
+            // Optionally include missionContext directly if not already in openingInstruction
+            // missionContext: this.missionContext
         };
+        console.log(`[Agent ${this.id}] useBrainForReasoning: Sending exchanges to Brain:`, JSON.stringify(reasoningInput.exchanges, null, 2));
 
         try {
             const response = await this.authenticatedApi.post(`http://${this.brainUrl}/chat`, reasoningInput);

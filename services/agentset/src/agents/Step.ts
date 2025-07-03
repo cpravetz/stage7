@@ -67,6 +67,20 @@ export class Step {
         this.dependencies = params.dependencies || [];
         this.status = params.status || StepStatus.PENDING;
         this.recommendedRole = params.recommendedRole;
+
+        // Validate recommendedRole
+        if (this.recommendedRole && !/^[a-zA-Z0-9_-]+$/.test(this.recommendedRole)) {
+            console.warn(`[Step Constructor] Invalid characters in recommendedRole: '${this.recommendedRole}'. Defaulting to undefined.`);
+            this.logEvent({
+                eventType: 'step_validation_warning',
+                stepId: this.id,
+                message: `Invalid recommendedRole '${this.recommendedRole}' sanitized.`,
+                originalValue: this.recommendedRole,
+                timestamp: new Date().toISOString()
+            });
+            this.recommendedRole = undefined;
+        }
+
         this.persistenceManager = params.persistenceManager;
         this.awaitsSignal = '';
         // Log step creation event
@@ -801,7 +815,7 @@ export class Step {
      */
     export function createFromPlan(plan: ActionVerbTask[], startingStepNo: number, persistenceManager: AgentPersistenceManager): Step[] {
         // Extend ActionVerbTask locally to include number and outputs for conversion
-        type PlanTask = ActionVerbTask & { number?: number; outputs?: Record<string, any> };
+        type PlanTask = ActionVerbTask & { number?: number; outputs?: Record<string, any>; id?: string; };
         const planTasks = plan as PlanTask[];
         const stepNumberToUUID: Record<number, string> = {};
         const outputNameToUUID: Record<string, string> = {};
@@ -869,6 +883,65 @@ export class Step {
                     });
                 });
             }
+            // Validate DECIDE task inputs before creating the Step object
+            if (task.actionVerb === 'DECIDE') {
+                const conditionInputRef = inputReferences.get('condition');
+                if (!conditionInputRef || (conditionInputRef.value === undefined && conditionInputRef.outputName === undefined)) {
+                    throw new Error(`[Step.createFromPlan] Validation Error for DECIDE step: 'condition' input must have a direct boolean 'value' or an 'outputName' reference. Received: ${JSON.stringify(conditionInputRef)}`);
+                }
+
+                const trueStepsInputRef = inputReferences.get('trueSteps');
+                if (!trueStepsInputRef || !Array.isArray(trueStepsInputRef.value)) {
+                    throw new Error(`[Step.createFromPlan] Validation Error for DECIDE step: 'trueSteps' input must be an array of ActionVerbTask objects. Received: ${JSON.stringify(trueStepsInputRef?.value)}`);
+                }
+                for (const subTask of trueStepsInputRef.value) {
+                    if (typeof subTask !== 'object' || subTask === null || !subTask.actionVerb) {
+                        throw new Error(`[Step.createFromPlan] Validation Error for DECIDE step: Each item in 'trueSteps' must be a valid ActionVerbTask object. Received item: ${JSON.stringify(subTask)}`);
+                    }
+                }
+
+                const falseStepsInputRef = inputReferences.get('falseSteps');
+                if (!falseStepsInputRef || !Array.isArray(falseStepsInputRef.value)) {
+                    throw new Error(`[Step.createFromPlan] Validation Error for DECIDE step: 'falseSteps' input must be an array of ActionVerbTask objects. Received: ${JSON.stringify(falseStepsInputRef?.value)}`);
+                }
+                for (const subTask of falseStepsInputRef.value) {
+                    if (typeof subTask !== 'object' || subTask === null || !subTask.actionVerb) {
+                        throw new Error(`[Step.createFromPlan] Validation Error for DECIDE step: Each item in 'falseSteps' must be a valid ActionVerbTask object. Received item: ${JSON.stringify(subTask)}`);
+                    }
+                }
+            }
+
+            // Validate actionVerb
+            if (task.actionVerb === 'GET_USER_INPUT') {
+                const questionInputRef = inputReferences.get('question');
+                if (!questionInputRef || questionInputRef.value === undefined || typeof questionInputRef.value !== 'string' || questionInputRef.value.trim() === '') {
+                    throw new Error(`[Step.createFromPlan] Validation Error for GET_USER_INPUT step: 'question' input must have a non-empty string 'value'. Received: ${JSON.stringify(questionInputRef)}`);
+                }
+            }
+
+            // In a real system, validPluginVerbs would be dynamically fetched or passed in.
+            // For now, we'll list known control-flow verbs and assume others come from plugins.
+            const knownControlFlowVerbs = [
+                'THINK', 'DELEGATE', 'ASK', 'DECIDE', 'REPEAT',
+                'WHILE', 'UNTIL', 'SEQUENCE', 'TIMEOUT',
+                'EXECUTE_PLAN_TEMPLATE', 'FOREACH'
+            ];
+            const isKnownControlFlow = knownControlFlowVerbs.includes(task.actionVerb);
+            const isPotentiallyValidPlugin = /^[A-Z_]+$/.test(task.actionVerb); // Basic check for typical plugin verb format
+
+            if (task.actionVerb === 'EXECUTE') { // Specifically disallow 'EXECUTE'
+                 throw new Error(`[Step.createFromPlan] Validation Error: The actionVerb 'EXECUTE' is not allowed. Please use a more specific verb.`);
+            }
+
+            if (!isKnownControlFlow && !isPotentiallyValidPlugin) {
+                // This is a basic heuristic. A more robust solution would involve
+                // checking against a dynamically provided list of all registered plugin verbs.
+                // For now, we're just checking the format and disallowing clearly bad ones.
+                // The CapabilitiesManager will ultimately determine if a plugin verb is truly valid.
+                console.warn(`[Step.createFromPlan] Warning: actionVerb '${task.actionVerb}' is not a known control flow verb and does not strictly match typical plugin verb format (UPPER_SNAKE_CASE). It will be passed to CapabilitiesManager for resolution.`);
+            }
+
+
             const step = new Step({
                 id: task.id!,
                 actionVerb: task.actionVerb,
@@ -880,7 +953,7 @@ export class Step {
                 recommendedRole: task.recommendedRole,
                 persistenceManager: persistenceManager
             });
-            console.log(`[Step.createFromPlan] Created step.actionVerb: '${step.actionVerb}', Step ID: ${step.id}, Dependencies: ${JSON.stringify(dependencies)}`);
+            // console.log(`[Step.createFromPlan] Created step.actionVerb: '${step.actionVerb}', Step ID: ${step.id}, Dependencies: ${JSON.stringify(dependencies)}`);
             return step;
         });
     }

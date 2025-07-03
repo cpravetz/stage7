@@ -1,4 +1,4 @@
-                    GNU GENERAL PUBLIC LICENSE (amended)
+                    GNU GENERAL PUBLIC LICENSE
                        Version 3, 29 June 2007
 
  Copyright (C) 2007 Free Software Foundation, Inc. <https://fsf.org/>
@@ -35,12 +35,7 @@ you modify it: responsibilities to respect the freedom of others.
 gratis or for a fee, you must pass on to the recipients the same
 freedoms that you received.  You must make sure that they, too, receive
 or can get the source code.  And you must show them these terms so they
-know their rights. 
-
-You may opt to keep your additions, amendements or dependent code
-proprietary, and doing so requires you agree to a 50% royalty on any 
-revenue earned one products or services incorporating this software, in
-whole or in part, to be paid to Seakaytee, Incorporated.
+know their rights.
 
   Developers that use the GNU GPL protect your rights with two steps:
 (1) assert copyright on the software, and (2) offer you this License
