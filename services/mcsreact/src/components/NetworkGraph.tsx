@@ -69,6 +69,9 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics }) =
     const networkRef = useRef<Network | null>(null);
     // Store zoom and pan state
     const viewStateRef = useRef<{scale: number, position: {x: number, y: number}} | null>(null);
+    // State to hold the data actually rendered by the graph
+    const [displayedNodes, setDisplayedNodes] = React.useState(() => new DataSet<Node>());
+    const [displayedEdges, setDisplayedEdges] = React.useState(() => new DataSet<Edge>());
     // Step overview dialog state
     const [stepOverview, setStepOverview] = React.useState<any | null>(null);
     const [stepOverviewOpen, setStepOverviewOpen] = React.useState(false);
@@ -278,26 +281,45 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics }) =
         return { nodes: newNodes, edges: newEdges };
     }, [agentStatistics]);
 
+    // Effect to update displayedNodes and displayedEdges only if new data is valid
+    useEffect(() => {
+        if (nodes.length > 0) {
+            // New data is valid (non-empty)
+            saveViewState(); // Save view state before updating data
+            setDisplayedNodes(nodes);
+            setDisplayedEdges(edges);
+            console.log('[NetworkGraph] Valid new data received, updating displayed graph data.');
+        } else if (displayedNodes.length > 0 && nodes.length === 0) {
+            // New data is empty, but we have old valid data, so we don't update displayedNodes/Edges
+            // This effectively keeps the old graph displayed.
+            console.log('[NetworkGraph] New data is empty, retaining previously displayed graph.');
+        } else if (displayedNodes.length === 0 && nodes.length === 0) {
+            // Both current display and new data are empty. Ensure graph is cleared if it exists.
+             if (networkRef.current) {
+                networkRef.current.setData({ nodes: new DataSet<Node>(), edges: new DataSet<Edge>() });
+                console.log('[NetworkGraph] Both displayed and new data are empty. Clearing graph.');
+            }
+        }
+    }, [nodes, edges]); // Dependency: run when nodes/edges from useMemo change
+
     useEffect(() => {
         if (!containerRef.current) {
             return;
         }
 
-        // --- Save view state before update ---
-        saveViewState();
-
         // Prevent refresh if StepOverviewDialog is open
         if (stepOverviewOpen) {
-            // Skip update if dialog is open; another update will happen soon enough
             return;
         }
 
-        if (nodes.length === 0) {
+        // Use displayedNodes and displayedEdges for rendering
+        if (displayedNodes.length === 0 && displayedEdges.length === 0) {
             if (networkRef.current) {
+                // If there's genuinely no data to display (neither old nor new)
                 networkRef.current.setData({ nodes: new DataSet<Node>(), edges: new DataSet<Edge>() });
-                console.log('[NetworkGraph] No nodes to display, clearing existing network.');
+                console.log('[NetworkGraph] No data to display (initial or cleared), ensuring network is empty.');
             } else {
-                console.log('[NetworkGraph] No nodes to display, network not initialized.');
+                console.log('[NetworkGraph] No data to display, network not initialized.');
             }
             return;
         }
@@ -355,12 +377,13 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics }) =
 
         if (networkRef.current) {
             networkRef.current.setOptions(options);
-            networkRef.current.setData({ nodes, edges });
-            // --- Restore view state after update ---
-            restoreViewState();
-            console.log('[NetworkGraph] Network updated with new data/options.');
+            // Use displayedNodes and displayedEdges here
+            networkRef.current.setData({ nodes: displayedNodes, edges: displayedEdges });
+            restoreViewState(); // Restore view state after data update
+            console.log('[NetworkGraph] Network updated with new data/options using displayedNodes/Edges.');
         } else {
-            networkRef.current = new Network(containerRef.current, { nodes, edges }, options);
+            // Use displayedNodes and displayedEdges here for initialization
+            networkRef.current = new Network(containerRef.current, { nodes: displayedNodes, edges: displayedEdges }, options);
             const securityClient = SecurityClient.getInstance(API_BASE_URL);
             // Add node click handler for step overview
             networkRef.current.on('click', async (params) => {
@@ -409,7 +432,7 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics }) =
                 networkRef.current = null;
             }
         };
-    }, [nodes, edges]);
+    }, [displayedNodes, displayedEdges, stepOverviewOpen]);
 
     // Step Overview Dialog (now replaces the network graph visually)
     const StepOverviewDialog = () => {

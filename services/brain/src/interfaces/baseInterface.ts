@@ -256,7 +256,11 @@ export abstract class BaseInterface {
                         (s: string) => s.replace(/'/g, '"'),          // Fix single quotes to double quotes
                         (s: string) => s.replace(/\/\/.*$/gm, ''),    // Remove single-line comments
                         (s: string) => s.replace(/(\w+):/g, '"$1":'), // Add quotes to unquoted keys
-                        (s: string) => s.replace(/,\s*([\]\}])/g, '$1') // Remove trailing commas (more robust)
+                        (s: string) => s.replace(/,\s*([\]\}])/g, '$1'), // Remove trailing commas (more robust)
+                        // Attempt to fix missing commas between key-value pairs if separated by a newline
+                        (s: string) => s.replace(/("\s*:\s*(?:true|false|null|"[^"]*"|[\d\.]+)\s*)\n(\s*")/g, '$1,\n$2'),
+                        // Attempt to fix key"":""value typos to key":"value
+                        (s: string) => s.replace(/("\s*":)":"\s*([^"]*")/g, '$1"$2"')
                     ];
                     for (const fix of fixes) {
                         try {
@@ -266,7 +270,7 @@ export abstract class BaseInterface {
                             parsed = JSON.parse(fixed);
                             break;
                         } catch (e) {
-                            candidate = fix(candidate);
+                            candidate = fix(candidate); // Keep applying fixes cumulatively if one fails
                         }
                     }
                 }

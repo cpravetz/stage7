@@ -419,6 +419,16 @@ export class GitHubRepository implements PluginRepository {
                     locators.push({
                         id: manifest.id, // Use ID from manifest
                         verb: manifest.verb,
+                        description: manifest.description,
+                        version: manifest.version,
+                        repository: {
+                            type: 'github',
+                            url: `https://github.com/${this.repoOwner}/${this.repoName}/tree/${effectiveBranch}/${this.pluginsDir}/${manifest.id}/${manifest.version}`
+                        }
+                    });
+                    locators.push({
+                        id: manifest.id, // Use ID from manifest
+                        verb: manifest.verb,
                         version: manifest.version,
                         repository: {
                             type: 'github',

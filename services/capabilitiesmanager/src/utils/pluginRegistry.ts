@@ -123,15 +123,14 @@ export class PluginRegistry {
     }
 
     public async initialize(): Promise<void> {
-        // Initialize existing plugins
+        // Initialize existing plugins by refreshing the cache
         try {
-            const locators = await this.pluginMarketplace.list();
-            for (const locator of locators) {
-                // Removed all updateCache calls
-            }
+            await this.refreshCache();
+            console.log("PluginRegistry initialized and cache populated.");
         } catch (error) {
-            console.error("PluginRegistry.initialize: Failed to list plugins from marketplace", error);
+            console.error("PluginRegistry.initialize: Failed to refresh plugin cache during initialization", error);
             // Decide if we should throw or continue with an empty/partially initialized registry
+            // For now, log the error and continue; the registry might be partially functional or recover.
         }
     }
 

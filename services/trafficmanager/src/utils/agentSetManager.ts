@@ -390,7 +390,7 @@ class AgentSetManager {
             } else {
                 console.warn(`AgentSetManager: AgentSet ${agentSetId} not found in agentSets map for agent ${agentId}. Cannot decrement count.`);
             }
-            this.agentToSetMap.delete(agentId);
+            // this.agentToSetMap.delete(agentId);
             console.log(`AgentSetManager: Agent ${agentId} removed from agentToSetMap.`);
         } else {
             console.warn(`AgentSetManager: Agent ${agentId} not found in agentToSetMap. Cannot remove or decrement count.`);

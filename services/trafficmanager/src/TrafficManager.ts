@@ -177,7 +177,7 @@ export class TrafficManager extends BaseEntity {
             // If agent is completed or aborted, remove it from AgentSetManager's tracking
             if (status === AgentStatus.COMPLETED || status === AgentStatus.ABORTED) {
                 console.log(`TrafficManager: Agent ${agentId} reached terminal state ${status}. Requesting removal from AgentSetManager.`);
-                await agentSetManager.removeAgentFromSet(agentId);
+                // await agentSetManager.removeAgentFromSet(agentId);
             }
 
             return { message: `Agent ${agentId} status updated to ${status}` }
