@@ -238,6 +238,9 @@ export class Step {
         delegateAction: (inputValues: Map<string, InputValue>) => Promise<PluginOutput[]>,
         askAction: (inputValues: Map<string, InputValue>) => Promise<PluginOutput[]>
     ): Promise<PluginOutput[]> {
+        // Ensure inputValues are populated from inputReferences before execution
+        this.populateInputsFromReferences();
+        this.populateInputsFromDependencies([this]); // Pass self to resolve dependencies
         this.status = StepStatus.RUNNING;
         try {
             let result: PluginOutput[];
@@ -303,8 +306,7 @@ export class Step {
             });
 
             await this.persistenceManager.saveWorkProduct({
-                agentId: this.id.split('_')[0], // Assuming the step ID is in the format 'agentId_stepId'
-                stepId: this.id,
+                agentId: this.id.split('_')[0],                stepId: this.id,
                 data: result
             });
             return result;
@@ -770,6 +772,23 @@ export class Step {
             this.logEvent({ eventType: 'step_recommendedRole_updated', stepId: this.id, newRecommendedRole: this.recommendedRole });
         }
         // Add handling for other modifiable fields here
+    }
+
+    /**
+     * Populates inputValues from inputReferences if not already present
+     */
+    public populateInputsFromReferences(): void {
+        if (!this.inputValues) this.inputValues = new Map<string, InputValue>();
+        this.inputReferences.forEach((inputRef, key) => {
+            if (!this.inputValues.has(key) && inputRef.value !== undefined) {
+                this.inputValues.set(key, {
+                    inputName: key,
+                    value: inputRef.value,
+                    valueType: inputRef.valueType,
+                    args: inputRef.args || {}
+                });
+            }
+        });
     }
 }
 

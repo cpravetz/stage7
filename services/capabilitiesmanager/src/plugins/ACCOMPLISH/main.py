@@ -57,8 +57,7 @@ class AccomplishPlugin:
         'DECIDE': {'required': ['condition', 'trueSteps', 'falseSteps'], 'optional': []},
         'WHILE': {'required': ['condition', 'steps'], 'optional': []},
         'UNTIL': {'required': ['condition', 'steps'], 'optional': []},
-        'FOREACH': {'required': ['array', 'steps'], 'optional': []},
-        'DELEGATE': {'required': ['subAgentGoal'], 'optional': ['subAgentRole', 'subAgentTasks']} 
+        'DELEGATE': {'required': ['subAgentGoal'], 'optional': ['subAgentRole', 'subAgentTasks']} # Added for DELEGATE example
     }
 
     ALLOWED_VALUE_TYPES = ['string', 'number', 'boolean', 'array', 'object', 'plan', 'plugin', 'any']
@@ -68,6 +67,45 @@ class AccomplishPlugin:
         self.security_manager_url = os.getenv('SECURITY_MANAGER_URL', 'securitymanager:5010')
         self.client_secret = os.getenv('CLIENT_SECRET', 'stage7AuthSecret')
         self.token = None
+        
+    def get_internal_verb_requirements_for_prompt(self) -> str:
+        """Generates a string listing required inputs for verbs defined in VERB_SCHEMAS."""
+        lines = []
+        for verb, schema in self.VERB_SCHEMAS.items():
+            if schema.get('required'):
+                lines.append(f"- For '{verb}': {', '.join(schema['required'])}")
+        return "\n".join(lines) if lines else "No specific internal verb requirements overridden."
+
+    def get_auth_token(self) -> Optional[str]:
+        """Get authentication token from SecurityManager"""
+        try:
+            response = requests.post(
+                f"http://{self.security_manager_url}/generateToken",
+                json={
+                    "clientId": "ACCOMPLISH_Plugin",
+                    "clientSecret": self.client_secret
+                },
+                timeout=10
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data.get('token')
+        except Exception as e:
+            logger.error(f"Failed to get auth token: {e}")
+            return None
+
+    def query_brain(self, prompt: str, brain_token: Optional[str] = None) -> Optional[str]:
+        self.security_manager_url = os.getenv('SECURITY_MANAGER_URL', 'securitymanager:5010')
+        self.client_secret = os.getenv('CLIENT_SECRET', 'stage7AuthSecret')
+        self.token = None
+
+    def get_internal_verb_requirements_for_prompt(self) -> str:
+        """Generates a string listing required inputs for verbs defined in VERB_SCHEMAS."""
+        lines = []
+        for verb, schema in self.VERB_SCHEMAS.items():
+            if schema.get('required'):
+                lines.append(f"- For '{verb}': {', '.join(schema['required'])}")
+        return "\n".join(lines) if lines else "No specific internal verb requirements overridden."
         
     def get_auth_token(self) -> Optional[str]:
         """Get authentication token from SecurityManager"""
@@ -252,8 +290,13 @@ Available Agent Roles:
 
 IMPORTANT: Your response MUST be a valid JSON object with no additional text or formatting. The JSON must start with {{ and end with }} and must include one of the three types: "DIRECT_ANSWER", "PLAN", or "PLUGIN".
 
-Plugins are available to execute steps of the plan. Some have required inputs - required properties for the inputs object. These plugins include:
+Plugins are available to execute steps of the plan. Some have required inputs - required properties for the inputs object.
+The `available_plugins_str` (provided by the system) lists these:
 {available_plugins_str}
+
+Additionally, for clarity, here are the known required inputs for some common verbs based on this plugin's internal definitions (ensure these are always provided for the respective verbs):
+{self.get_internal_verb_requirements_for_prompt()}
+When using these or any other actionVerbs, ensure ALL their required inputs (as specified in their definitions) are present.
 
 2. When the goal is discrete and can be accomplished most efficiently with a new plugin, define one. Creating a plugin should be avoided when the goal can be accomplished with a plan. If you determine a plugin is needed, respond with a JSON object in this format:
 
@@ -444,13 +487,61 @@ Mission Context: {mission_context_str}
         """
         logger.info('Auto-repairing plan...')
 
+    def get_internal_verb_requirements_for_prompt(self) -> str:
+        """Generates a string listing required inputs for verbs defined in VERB_SCHEMAS."""
+        lines = []
+        for verb, schema in self.VERB_SCHEMAS.items():
+            if schema.get('required'):
+                lines.append(f"- For '{verb}': {', '.join(schema['required'])}")
+        return "\n".join(lines) if lines else "No specific internal verb requirements overridden."
+
+    def auto_repair_plan(self, goal: str, available_plugins_str: str, mission_context_str: str, invalid_plan: list, validation_error: str, brain_token: Optional[str] = None) -> Optional[list]:
+        """
+        Ask the Brain to revise the invalid plan to correct the validation error.
+        If the error is due to an input not being produced by any previous step, explicitly inform the Brain of this fact in the prompt.
+        """
+        logger.info('Auto-repairing plan...')
+
         # Try to extract missing input(s) from the validation error message
         missing_input_hint = ""
         import re
-        match = re.search(r"input '([^']+)' is not produced by any previous step", validation_error)
-        if match:
-            missing_input = match.group(1)
-            missing_input_hint = f"\n\nNOTE: The input '{missing_input}' is not produced as an output by any previous step. Ensure that every input that references a previous step is actually produced as an output by a prior step, and that all dependencies are correctly defined."
+        
+        # Check for missing required input error
+        missing_req_match = re.search(r"missing required input '([^']+)' for verb '([^']+)'", validation_error) # Corrected regex
+        if missing_req_match:
+            missing_input = missing_req_match.group(1)
+            verb = missing_req_match.group(2)
+            step_number_match = re.search(r"\(step (\d+)\)", validation_error)
+            step_number_info = f" for step {step_number_match.group(1)}" if step_number_match else ""
+            
+            if verb in self.VERB_SCHEMAS and self.VERB_SCHEMAS[verb].get('required'):
+                required_list = ", ".join(self.VERB_SCHEMAS[verb]['required'])
+                missing_input_hint = (
+                    f"\n\nIMPORTANT NOTE: The error is: \"{validation_error}\". "
+                    f"This means for the step{step_number_info} using actionVerb '{verb}', an input is missing. "
+                    f"According to this plugin's internal definitions, the verb '{verb}' absolutely requires the following inputs: [{required_list}]. "
+                    f"Please ensure the revised plan provides ALL of these required inputs for the '{verb}' step."
+                )
+            else:
+                 missing_input_hint = f"\n\nNOTE: The error indicates a missing input for verb '{verb}'{step_number_info}. Please ensure all its necessary inputs are provided."
+        else:
+            # Check for input not produced error
+            not_produced_match = re.search(r"input '([^']+)' is not produced by any previous step", validation_error)
+            if not_produced_match:
+                missing_input = not_produced_match.group(1)
+                missing_input_hint = f"\n\nNOTE: The error is: \"{validation_error}\". This means the input '{missing_input}' for a step was expected to come from a previous step's output, but no previous step produces an output with this name. Please revise the plan to either correctly name the output in a preceding step or provide this input as a constant value if appropriate. Ensure all dependencies are correctly defined."
+            # Check for structural input errors (e.g. trueSteps not an object)
+            elif "is not an object. Expected {'value': '...'} or {'outputName': '...'}" in validation_error:
+                input_name_match = re.search(r"input '([^']+)' is not an object", validation_error)
+                input_name = input_name_match.group(1) if input_name_match else "a specific input"
+                missing_input_hint = (
+                    f"\n\nIMPORTANT NOTE: The error is: \"{validation_error}\". "
+                    f"This means that for {input_name} (e.g., 'trueSteps', 'steps'), the plan provided a direct array (e.g., `[{...}]`) or other non-object type. "
+                    f"However, this input MUST be an object, containing either a 'value' key (for a literal array of steps) or an 'outputName' key (if referencing steps from a previous output). "
+                    f"For example, if you intend to provide a list of steps directly, it should be formatted like: `\"{input_name}\": {{\"value\": [...]}}`. "
+                    f"Please correct the structure for this input in the revised plan."
+                )
+
 
         repair_prompt = f"""
 You previously generated this plan:
@@ -494,7 +585,11 @@ Revise the plan to correct the error. Only return the corrected plan as a JSON a
                 input_value = value_obj.get('value') if isinstance(value_obj, dict) else value_obj
 
                 if key == 'goal':
-                    goal = str(input_value) if input_value is not None else None
+                    if isinstance(input_value, dict) and 'inputValue' in input_value:
+                        goal = str(input_value['inputValue']) if input_value['inputValue'] is not None else None
+                        logger.info(f"Extracted goal from nested 'inputValue': {goal}")
+                    else:
+                        goal = str(input_value) if input_value is not None else None
                 elif key == 'available_plugins': # Expecting a string, potentially pre-formatted
                     if isinstance(input_value, list): # If agent sends a list of plugin names
                         available_plugins_str = "\n".join([f"- {p}" for p in input_value]) if input_value else "No plugins listed."
@@ -603,8 +698,39 @@ Revise the plan to correct the error. Only return the corrected plan as a JSON a
                         "resultDescription": f"Plugin recommendation for: {goal}",
                         "result": parsed.get("plugin", {}) # Return the entire plugin object
                     }]
+                # Heuristic: Check if the response is a single step object (potentially a plan with one step)
+                elif isinstance(parsed, dict) and 'actionVerb' in parsed and 'number' in parsed and 'inputs' in parsed and 'outputs' in parsed and 'description' in parsed:
+                    logger.warning(f"Brain response appears to be a single step object. Wrapping it as a PLAN. Original response: {response[:500]}")
+                    plan_data = [parsed] # Wrap the single step in a list
+                    # Proceed with validation and conversion as if it were a PLAN
+                    validation_error_message = self.validate_plan_data(plan_data)
+                    # (Auto-repair for a single heuristically wrapped step might be skipped or handled carefully)
+                    # For simplicity here, we'll assume if it's a single step, it should be valid or fail.
+                    if validation_error_message:
+                        logger.error(f"Validation failed for heuristically wrapped single-step plan: {validation_error_message}")
+                        return [{
+                            "success": False,
+                            "name": "plan_validation_error_heuristic_wrap",
+                            "resultType": PluginParameterType.ERROR,
+                            "resultDescription": f"Validation failed for heuristically wrapped single-step plan: {validation_error_message}",
+                            "result": {"logs": memory_handler.get_logs(), "original_response": response[:1000]},
+                            "error": validation_error_message
+                        }]
+                    tasks = self.convert_json_to_tasks(plan_data)
+                    if tasks and isinstance(tasks, list) and len(tasks) == 1 and tasks[0].get("resultType") == PluginParameterType.ERROR:
+                        return tasks # Propagate error from conversion
+                    logger.info(f"Successfully processed heuristically wrapped single-step plan for goal: {goal}")
+                    return [{
+                        "success": True,
+                        "name": "plan",
+                        "resultType": PluginParameterType.PLAN,
+                        "resultDescription": f"A plan (heuristically wrapped single step) to: {goal}",
+                        "result": tasks,
+                        "mimeType": "application/json",
+                        "logs": memory_handler.get_logs()
+                    }]
                 else:
-                    logger.error(f"Brain response is not a recognized JSON object (PLAN, DIRECT_ANSWER, PLUGIN). Response: {response[:500]}")
+                    logger.error(f"Brain response is not a recognized JSON object (PLAN, DIRECT_ANSWER, PLUGIN) nor a valid single step. Response: {response[:500]}")
                     return [{
                         "success": False,
                         "name": "brain_response_format_error",
