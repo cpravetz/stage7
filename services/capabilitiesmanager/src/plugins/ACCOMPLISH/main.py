@@ -105,8 +105,7 @@ class AccomplishPlugin:
         for verb, schema in self.VERB_SCHEMAS.items():
             if schema.get('required'):
                 lines.append(f"- For '{verb}': {', '.join(schema['required'])}")
-        return "\n".join(lines) if lines else "No specific internal verb requirements overridden."
-        
+        return "\n".join(lines) if lines else "No specific internal verb requirements overridden."        
     def get_auth_token(self) -> Optional[str]:
         """Get authentication token from SecurityManager"""
         try:
@@ -647,8 +646,13 @@ Revise the plan to correct the error. Only return the corrected plan as a JSON a
 
                     # Handle PLAN, DIRECT_ANSWER, or PLUGIN
                     if isinstance(parsed, dict) and parsed.get("type") == "PLAN" and \
-                       (isinstance(parsed.get("plan"), list) or isinstance(parsed.get("items"), list)):
-                        plan_data = parsed.get("plan") if isinstance(parsed.get("plan"), list) else parsed.get("items")
+                       (isinstance(parsed.get("plan"), list) or isinstance(parsed.get("items"), list) or isinstance(parsed.get("value"), list)):
+                        if isinstance(parsed.get("plan"), list):
+                            plan_data = parsed.get("plan")
+                        elif isinstance(parsed.get("items"), list):
+                            plan_data = parsed.get("items")
+                        else:
+                            plan_data = parsed.get("value")
                         logger.info(f"Successfully parsed top-level PLAN object. Plan length: {len(plan_data)}")
 
                         validation_error_message = self.validate_plan_data(plan_data)

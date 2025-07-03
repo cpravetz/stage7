@@ -11,6 +11,7 @@ export interface PluginRepositoryLink {
 export interface PluginLocator {
     id: string;
     verb: string;
+    description?: string;
     version?: string;
     repository: PluginRepositoryLink;
     language?: string;

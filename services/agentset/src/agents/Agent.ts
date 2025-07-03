@@ -303,15 +303,11 @@ Please consider this context and the available plugins when planning and executi
             // Final status update
             await this.notifyTrafficManager();
 
-            if (this.status === AgentStatus.COMPLETED) {
-                try {
-                    console.log(`Agent ${this.id} notifying AgentSet of completed status for removal.`);
-                    await this.authenticatedApi.post(`http://${this.agentSetUrl}/removeAgent`, { agentId: this.id, status: 'completed' });
-                } catch (error) {
-                    console.error(`Agent ${this.id} failed to notify AgentSet for removal after completion:`, error instanceof Error ? error.message : error);
-                    // Non-critical, proceed
-                }
-            }
+            // if (this.status === AgentStatus.COMPLETED) {
+            //     // The agent is now retained in the agent set for statistical purposes.
+            //     // The call to remove the agent from the agent set has been removed.
+            //     console.log(`Agent ${this.id} has completed. It will be retained in the AgentSet.`);
+            // }
         } catch (error) {
             console.error('Error running agent:', error instanceof Error ? error.message : error);
             this.status = AgentStatus.ERROR;
@@ -913,13 +909,11 @@ Please consider this context and the available plugins when planning and executi
         this.status = AgentStatus.ABORTED;
         await this.notifyTrafficManager();
         await this.saveAgentState();
-        try {
-            console.log(`Agent ${this.id} notifying AgentSet of abort status for removal.`);
-            await this.authenticatedApi.post(`http://${this.agentSetUrl}/removeAgent`, { agentId: this.id, status: 'aborted' });
-        } catch (error) {
-            console.error(`Agent ${this.id} failed to notify AgentSet for removal after abort:`, error instanceof Error ? error.message : error);
-            // Non-critical, proceed with agent functions
-        }
+        // if (this.status === AgentStatus.ABORTED) {
+        //     // The agent is now retained in the agent set for statistical purposes.
+        //     // The call to remove the agent from the agent set has been removed.
+        //     console.log(`Agent ${this.id} has aborted. It will be retained in the AgentSet.`);
+        // }
         if (this.checkpointInterval) {
             clearInterval(this.checkpointInterval);
             this.checkpointInterval = null;

@@ -1,14 +1,14 @@
 {
   "id": "plugin-SEARCH_PYTHON",
   "verb": "SEARCH",
-  "description": "Searches DuckDuckGo for a given term and returns a list of links",
-  "explanation": "This plugin takes a search term and returns a JSON array of search results from DuckDuckGo, including titles and URLs. Python version with enhanced functionality and maintainability.",
+  "description": "Searches the internet using SearchXNG for a given term and returns a list of links",
+  "explanation": "This plugin takes a search term and returns a JSON array of search results from SearchXNG, including titles and URLs. Python version with enhanced functionality and maintainability.",
   "inputDefinitions": [
     {
       "name": "searchTerm",
       "required": true,
       "type": "string",
-      "description": "The term to search for on DuckDuckGo"
+      "description": "The term to search for on SearchXNG"
     }
   ],
   "outputDefinitions": [
@@ -57,7 +57,7 @@
     "author": "Stage7 Development Team",
     "tags": [
       "search",
-      "duckduckgo",
+      "searchxng",
       "web",
       "api"
     ],

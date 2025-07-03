@@ -172,6 +172,7 @@ export class LocalRepository implements PluginRepository {
                     locators.push({
                         id: manifest.id,
                         verb: manifest.verb,
+                        description: manifest.description,
                         repository: {
                             type: this.type,
                             dependencies: manifest.repository.dependencies

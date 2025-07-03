@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { Agent } from '../agents/Agent';
+import { AgentStatus } from '../utils/agentStatus';
 import { AgentRole, PredefinedRoles } from './AgentRole';
 import { AuthenticatedApiClient } from '@cktmcs/shared';
 
@@ -405,7 +406,11 @@ export class SpecializationFramework {
   ): string | undefined {
     // Get all agents with the required role
     const candidates = Array.from(this.specializations.values())
-      .filter(spec => spec.roleId === roleId);
+      .filter(spec => spec.roleId === roleId)
+      .filter(spec => {
+        const agent = this.agents.get(spec.agentId);
+        return agent && agent.status !== AgentStatus.COMPLETED && agent.status !== AgentStatus.ABORTED;
+      });
 
     if (candidates.length === 0) {
       return undefined;
