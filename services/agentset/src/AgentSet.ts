@@ -715,7 +715,7 @@ export class AgentSet extends BaseEntity {
         const agent = this.agents.get(agentId);
 
         if (agent) {
-            this.agents.delete(agentId);
+            // this.agents.delete(agentId);
             this.lifecycleManager.unregisterAgent(agentId); // Unregister from lifecycle manager
             console.log(`Agent ${agentId} removed from AgentSet and unregistered from LifecycleManager due to status: ${status}. Current agent count: ${this.agents.size}`);
 

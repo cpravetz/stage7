@@ -68,6 +68,44 @@ class AccomplishPlugin:
         self.client_secret = os.getenv('CLIENT_SECRET', 'stage7AuthSecret')
         self.token = None
         
+    def get_internal_verb_requirements_for_prompt(self) -> str:
+        """Generates a string listing required inputs for verbs defined in VERB_SCHEMAS."""
+        lines = []
+        for verb, schema in self.VERB_SCHEMAS.items():
+            if schema.get('required'):
+                lines.append(f"- For '{verb}': {', '.join(schema['required'])}")
+        return "\n".join(lines) if lines else "No specific internal verb requirements overridden."
+
+    def get_auth_token(self) -> Optional[str]:
+        """Get authentication token from SecurityManager"""
+        try:
+            response = requests.post(
+                f"http://{self.security_manager_url}/generateToken",
+                json={
+                    "clientId": "ACCOMPLISH_Plugin",
+                    "clientSecret": self.client_secret
+                },
+                timeout=10
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data.get('token')
+        except Exception as e:
+            logger.error(f"Failed to get auth token: {e}")
+            return None
+
+    def query_brain(self, prompt: str, brain_token: Optional[str] = None) -> Optional[str]:
+        self.security_manager_url = os.getenv('SECURITY_MANAGER_URL', 'securitymanager:5010')
+        self.client_secret = os.getenv('CLIENT_SECRET', 'stage7AuthSecret')
+        self.token = None
+
+    def get_internal_verb_requirements_for_prompt(self) -> str:
+        """Generates a string listing required inputs for verbs defined in VERB_SCHEMAS."""
+        lines = []
+        for verb, schema in self.VERB_SCHEMAS.items():
+            if schema.get('required'):
+                lines.append(f"- For '{verb}': {', '.join(schema['required'])}")
+        return "\n".join(lines) if lines else "No specific internal verb requirements overridden."        
     def get_auth_token(self) -> Optional[str]:
         """Get authentication token from SecurityManager"""
         try:
@@ -251,8 +289,13 @@ Available Agent Roles:
 
 IMPORTANT: Your response MUST be a valid JSON object with no additional text or formatting. The JSON must start with {{ and end with }} and must include one of the three types: "DIRECT_ANSWER", "PLAN", or "PLUGIN".
 
-Plugins are available to execute steps of the plan. Some have required inputs - required properties for the inputs object. These plugins include:
+Plugins are available to execute steps of the plan. Some have required inputs - required properties for the inputs object.
+The `available_plugins_str` (provided by the system) lists these:
 {available_plugins_str}
+
+Additionally, for clarity, here are the known required inputs for some common verbs based on this plugin's internal definitions (ensure these are always provided for the respective verbs):
+{self.get_internal_verb_requirements_for_prompt()}
+When using these or any other actionVerbs, ensure ALL their required inputs (as specified in their definitions) are present.
 
 2. When the goal is discrete and can be accomplished most efficiently with a new plugin, define one. Creating a plugin should be avoided when the goal can be accomplished with a plan. If you determine a plugin is needed, respond with a JSON object in this format:
 
@@ -443,13 +486,61 @@ Mission Context: {mission_context_str}
         """
         logger.info('Auto-repairing plan...')
 
+    def get_internal_verb_requirements_for_prompt(self) -> str:
+        """Generates a string listing required inputs for verbs defined in VERB_SCHEMAS."""
+        lines = []
+        for verb, schema in self.VERB_SCHEMAS.items():
+            if schema.get('required'):
+                lines.append(f"- For '{verb}': {', '.join(schema['required'])}")
+        return "\n".join(lines) if lines else "No specific internal verb requirements overridden."
+
+    def auto_repair_plan(self, goal: str, available_plugins_str: str, mission_context_str: str, invalid_plan: list, validation_error: str, brain_token: Optional[str] = None) -> Optional[list]:
+        """
+        Ask the Brain to revise the invalid plan to correct the validation error.
+        If the error is due to an input not being produced by any previous step, explicitly inform the Brain of this fact in the prompt.
+        """
+        logger.info('Auto-repairing plan...')
+
         # Try to extract missing input(s) from the validation error message
         missing_input_hint = ""
         import re
-        match = re.search(r"input '([^']+)' is not produced by any previous step", validation_error)
-        if match:
-            missing_input = match.group(1)
-            missing_input_hint = f"\n\nNOTE: The input '{missing_input}' is not produced as an output by any previous step. Ensure that every input that references a previous step is actually produced as an output by a prior step, and that all dependencies are correctly defined."
+        
+        # Check for missing required input error
+        missing_req_match = re.search(r"missing required input '([^']+)' for verb '([^']+)'", validation_error) # Corrected regex
+        if missing_req_match:
+            missing_input = missing_req_match.group(1)
+            verb = missing_req_match.group(2)
+            step_number_match = re.search(r"\(step (\d+)\)", validation_error)
+            step_number_info = f" for step {step_number_match.group(1)}" if step_number_match else ""
+            
+            if verb in self.VERB_SCHEMAS and self.VERB_SCHEMAS[verb].get('required'):
+                required_list = ", ".join(self.VERB_SCHEMAS[verb]['required'])
+                missing_input_hint = (
+                    f"\n\nIMPORTANT NOTE: The error is: \"{validation_error}\". "
+                    f"This means for the step{step_number_info} using actionVerb '{verb}', an input is missing. "
+                    f"According to this plugin's internal definitions, the verb '{verb}' absolutely requires the following inputs: [{required_list}]. "
+                    f"Please ensure the revised plan provides ALL of these required inputs for the '{verb}' step."
+                )
+            else:
+                 missing_input_hint = f"\n\nNOTE: The error indicates a missing input for verb '{verb}'{step_number_info}. Please ensure all its necessary inputs are provided."
+        else:
+            # Check for input not produced error
+            not_produced_match = re.search(r"input '([^']+)' is not produced by any previous step", validation_error)
+            if not_produced_match:
+                missing_input = not_produced_match.group(1)
+                missing_input_hint = f"\n\nNOTE: The error is: \"{validation_error}\". This means the input '{missing_input}' for a step was expected to come from a previous step's output, but no previous step produces an output with this name. Please revise the plan to either correctly name the output in a preceding step or provide this input as a constant value if appropriate. Ensure all dependencies are correctly defined."
+            # Check for structural input errors (e.g. trueSteps not an object)
+            elif "is not an object. Expected {'value': '...'} or {'outputName': '...'}" in validation_error:
+                input_name_match = re.search(r"input '([^']+)' is not an object", validation_error)
+                input_name = input_name_match.group(1) if input_name_match else "a specific input"
+                missing_input_hint = (
+                    f"\n\nIMPORTANT NOTE: The error is: \"{validation_error}\". "
+                    f"This means that for {input_name} (e.g., 'trueSteps', 'steps'), the plan provided a direct array (e.g., `[{...}]`) or other non-object type. "
+                    f"However, this input MUST be an object, containing either a 'value' key (for a literal array of steps) or an 'outputName' key (if referencing steps from a previous output). "
+                    f"For example, if you intend to provide a list of steps directly, it should be formatted like: `\"{input_name}\": {{\"value\": [...]}}`. "
+                    f"Please correct the structure for this input in the revised plan."
+                )
+
 
         repair_prompt = f"""
 You previously generated this plan:
@@ -493,7 +584,11 @@ Revise the plan to correct the error. Only return the corrected plan as a JSON a
                 input_value = value_obj.get('value') if isinstance(value_obj, dict) else value_obj
 
                 if key == 'goal':
-                    goal = str(input_value) if input_value is not None else None
+                    if isinstance(input_value, dict) and 'inputValue' in input_value:
+                        goal = str(input_value['inputValue']) if input_value['inputValue'] is not None else None
+                        logger.info(f"Extracted goal from nested 'inputValue': {goal}")
+                    else:
+                        goal = str(input_value) if input_value is not None else None
                 elif key == 'available_plugins': # Expecting a string, potentially pre-formatted
                     if isinstance(input_value, list): # If agent sends a list of plugin names
                         available_plugins_str = "\n".join([f"- {p}" for p in input_value]) if input_value else "No plugins listed."
@@ -521,99 +616,112 @@ Revise the plan to correct the error. Only return the corrected plan as a JSON a
                     "error": "No goal provided to ACCOMPLISH plugin"
                 }]
 
-            # Generate prompt and query Brain
-            prompt = self.generate_prompt(goal, available_plugins_str, mission_context_str)
-            logger.info(f"Generated prompt for Brain: {prompt[:500]}...") # Log start of prompt
-            response = self.query_brain(prompt, brain_token)
+            max_retries_for_single_step = 1
+            for attempt in range(max_retries_for_single_step + 1):
+                # Generate prompt and query Brain
+                current_prompt = self.generate_prompt(goal, available_plugins_str, mission_context_str)
+                if attempt > 0: # This is a retry attempt
+                    logger.info(f"Retrying Brain query for goal '{goal}' due to previous single-step response. Attempt {attempt}.")
+                    current_prompt = f"The previous response was a single step, which is insufficient. Please provide a complete plan, a direct answer, or a plugin suggestion for the goal: '{goal}'.\n\nOriginal prompt context:\n{current_prompt}"
 
-            if not response:
-                logger.error("Failed to get response from Brain service")  
-                return [{
-                    "success": False,
-                    "name": "error",
-                    "resultType": PluginParameterType.ERROR,
-                    "resultDescription": "Failed to get response from Brain service",
-                    "result": {"logs": memory_handler.get_logs()},
-                    "error": "Brain service unavailable or returned empty response"
-                }]
+                logger.info(f"Generated prompt for Brain (attempt {attempt+1}): {current_prompt[:500]}...")
+                response = self.query_brain(current_prompt, brain_token)
 
-            # Parse Brain response
-            try:
-                # The response should already be cleaned by ensureJsonResponse in BaseInterface.ts
-                parsed = json.loads(response)
-                logger.info(f"Model response received: {response[:500]}...") # Log start of response
-
-                # Handle PLAN (top-level object), DIRECT_ANSWER, or PLUGIN
-                if isinstance(parsed, dict) and parsed.get("type") == "PLAN" and (isinstance(parsed.get("plan"), list) or isinstance(parsed.get("items"), list)):
-                    if isinstance(parsed.get("plan"), list):
-                        plan_data = parsed["plan"]
-                    else:
-                        plan_data = parsed["items"]
-                    logger.info(f"Successfully parsed top-level PLAN object. Plan length: {len(plan_data)}")
-                    validation_error_message = self.validate_plan_data(plan_data)
-                    repair_attempts = 0
-                    max_repair_attempts = 3
-                    while validation_error_message and repair_attempts < max_repair_attempts:
-                        logger.warning(f"Plan validation failed: {validation_error_message}. Attempting auto-repair.")
-                        repaired_plan = self.auto_repair_plan(goal, available_plugins_str, mission_context_str, plan_data, validation_error_message, brain_token)
-                        if not repaired_plan:
-                            break
-                        plan_data = repaired_plan
-                        validation_error_message = self.validate_plan_data(plan_data)
-                        repair_attempts += 1
-                    if validation_error_message:
+                if not response:
+                    logger.error("Failed to get response from Brain service")
+                    # If it's the last attempt, return the error, otherwise loop will continue if retries left
+                    if attempt == max_retries_for_single_step:
                         return [{
-                            "success": False,
-                            "name": "plan_validation_error",
-                            "resultType": PluginParameterType.ERROR,
-                            "resultDescription": validation_error_message,
+                            "success": False, "name": "error", "resultType": PluginParameterType.ERROR,
+                            "resultDescription": "Failed to get response from Brain service after retries.",
                             "result": {"logs": memory_handler.get_logs()},
-                            "error": validation_error_message
+                            "error": "Brain service unavailable or returned empty response after retries."
                         }]
-                    tasks = self.convert_json_to_tasks(plan_data)
-                    if tasks and isinstance(tasks, list) and len(tasks) == 1 and tasks[0].get("resultType") == PluginParameterType.ERROR:
-                        return tasks # Propagate error from conversion
-                    logger.info(f"Successfully processed plan for goal: {goal}")
-                    return [{
-                        "success": True,
-                        "name": "plan",
-                        "resultType": PluginParameterType.PLAN,
-                        "resultDescription": f"A plan to: {goal}",
-                        "result": tasks,
-                        "mimeType": "application/json",
-                        "logs": memory_handler.get_logs()
-                    }]
-                elif isinstance(parsed, dict) and parsed.get("type") == "DIRECT_ANSWER":
-                    logger.info(f"Received DIRECT_ANSWER: {parsed}")
-                    return [{
-                        "success": True,
-                        "name": "direct_answer",
-                        "resultType": "DIRECT_ANSWER",
-                        "resultDescription": f"Direct answer for: {goal}",
-                        "result": parsed.get("answer"),
-                        "explanation": parsed.get("explanation", "")
-                    }]
-                elif isinstance(parsed, dict) and parsed.get("type") == "PLUGIN":
-                    logger.info(f"Received PLUGIN: {parsed}")
-                    return [{
-                        "success": True,
-                        "name": "plugin",
-                        "resultType": "PLUGIN",
-                        "resultDescription": f"Plugin recommendation for: {goal}",
-                        "result": parsed.get("plugin", {}) # Return the entire plugin object
-                    }]
-                else:
-                    logger.error(f"Brain response is not a recognized JSON object (PLAN, DIRECT_ANSWER, PLUGIN). Response: {response[:500]}")
-                    return [{
-                        "success": False,
-                        "name": "brain_response_format_error",
-                        "resultType": PluginParameterType.ERROR,
-                        "resultDescription": "Brain did not return a recognized JSON object type.",
-                        "result": {"logs": memory_handler.get_logs()},
-                        "error": f"Unrecognized JSON object type: {parsed.get('type', 'N/A')}"
-                    }]
-            except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse Brain response as JSON: {e}. Response: {response[:500]}")
+                    continue # Try again if retries left
+
+                # Parse Brain response
+                try:
+                    parsed = json.loads(response)
+                    logger.info(f"Model response received (attempt {attempt+1}): {response[:500]}...")
+
+                    # Handle PLAN, DIRECT_ANSWER, or PLUGIN
+                    if isinstance(parsed, dict) and parsed.get("type") == "PLAN" and \
+                       (isinstance(parsed.get("plan"), list) or isinstance(parsed.get("items"), list) or isinstance(parsed.get("value"), list)):
+                        if isinstance(parsed.get("plan"), list):
+                            plan_data = parsed.get("plan")
+                        elif isinstance(parsed.get("items"), list):
+                            plan_data = parsed.get("items")
+                        else:
+                            plan_data = parsed.get("value")
+                        logger.info(f"Successfully parsed top-level PLAN object. Plan length: {len(plan_data)}")
+
+                        validation_error_message = self.validate_plan_data(plan_data)
+                        repair_attempts = 0
+                        max_repair_attempts = 3 # Max repair attempts for a given plan
+                        while validation_error_message and repair_attempts < max_repair_attempts:
+                            logger.warning(f"Plan validation failed: {validation_error_message}. Attempting auto-repair (repair attempt {repair_attempts+1}).")
+                            repaired_plan = self.auto_repair_plan(goal, available_plugins_str, mission_context_str, plan_data, validation_error_message, brain_token)
+                            if not repaired_plan:
+                                logger.error("Auto-repair failed to produce a new plan.")
+                                break
+                            plan_data = repaired_plan
+                            validation_error_message = self.validate_plan_data(plan_data)
+                            repair_attempts += 1
+
+                        if validation_error_message:
+                            return [{
+                                "success": False, "name": "plan_validation_error", "resultType": PluginParameterType.ERROR,
+                                "resultDescription": validation_error_message, "result": {"logs": memory_handler.get_logs()},
+                                "error": validation_error_message
+                            }]
+
+                        tasks = self.convert_json_to_tasks(plan_data)
+                        if tasks and isinstance(tasks, list) and tasks[0].get("resultType") == PluginParameterType.ERROR:
+                             return tasks # Propagate error from conversion
+                        logger.info(f"Successfully processed plan for goal: {goal}")
+                        return [{
+                            "success": True, "name": "plan", "resultType": PluginParameterType.PLAN,
+                            "resultDescription": f"A plan to: {goal}", "result": tasks,
+                            "mimeType": "application/json", "logs": memory_handler.get_logs()
+                        }]
+
+                    elif isinstance(parsed, dict) and parsed.get("type") == "DIRECT_ANSWER":
+                        logger.info(f"Received DIRECT_ANSWER: {parsed}")
+                        return [{"success": True, "name": "direct_answer", "resultType": "DIRECT_ANSWER",
+                                 "resultDescription": f"Direct answer for: {goal}", "result": parsed.get("answer"),
+                                 "explanation": parsed.get("explanation", "")}]
+
+                    elif isinstance(parsed, dict) and parsed.get("type") == "PLUGIN":
+                        logger.info(f"Received PLUGIN: {parsed}")
+                        return [{"success": True, "name": "plugin", "resultType": "PLUGIN",
+                                 "resultDescription": f"Plugin recommendation for: {goal}",
+                                 "result": parsed.get("plugin", {})}]
+
+                    # Check if the response is a single step object
+                    elif isinstance(parsed, dict) and 'actionVerb' in parsed and 'number' in parsed and \
+                         'inputs' in parsed and 'outputs' in parsed and 'description' in parsed:
+                        logger.warning(f"Brain response was a single step object (attempt {attempt+1}). This is considered incomplete.")
+                        if attempt < max_retries_for_single_step:
+                            continue # Trigger retry by continuing the loop
+                        else: # Max retries reached for single step
+                            return [{
+                                "success": False, "name": "incomplete_brain_response_single_step",
+                                "resultType": PluginParameterType.ERROR,
+                                "resultDescription": "Brain returned a single step after retries. A complete plan, direct answer, or plugin suggestion was expected.",
+                                "result": {"logs": memory_handler.get_logs(), "original_response": response[:1000]},
+                                "error": "Incomplete response from Brain: single step received after retries."
+                            }]
+                    else: # Unrecognized format
+                        logger.error(f"Brain response is not a recognized JSON object (PLAN, DIRECT_ANSWER, PLUGIN) nor a valid single step. Response: {response[:500]}")
+                        return [{
+                            "success": False, "name": "brain_response_format_error", "resultType": PluginParameterType.ERROR,
+                            "resultDescription": "Brain did not return a recognized JSON object type.",
+                            "result": {"logs": memory_handler.get_logs()},
+                            "error": f"Unrecognized JSON object type: {parsed.get('type', 'N/A')}"
+                        }]
+
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to parse Brain response as JSON (attempt {attempt+1}): {e}. Response: {response[:500]}")
                 return [{
                     "success": False,
                     "name": "error",

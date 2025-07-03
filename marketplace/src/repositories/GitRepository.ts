@@ -256,6 +256,7 @@ export class GitRepository implements PluginRepository {
                         locators.push({
                             id: manifest.id,
                             verb: manifest.verb,
+                            description: manifest.description,
                             repository: {
                                 type: this.type,
                                 url: this.config.url,

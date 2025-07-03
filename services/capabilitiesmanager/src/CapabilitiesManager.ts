@@ -70,6 +70,15 @@ export class CapabilitiesManager extends BaseEntity {
     private async initialize(trace_id: string) {
         const source_component = "CapabilitiesManager.initialize";
         try {
+            // Ensure PluginRegistry is initialized before other dependent services
+            if (this.pluginRegistry && typeof this.pluginRegistry.initialize === 'function') {
+                await this.pluginRegistry.initialize(); // Await PluginRegistry initialization
+                console.log(`[${trace_id}] ${source_component}: PluginRegistry initialized.`);
+            } else {
+                console.error(`[${trace_id}] ${source_component}: PluginRegistry or its initialize method is not available.`);
+                // Potentially throw an error or handle critical failure
+            }
+
             this.configManager = await ConfigManager.initialize(this.librarianUrl);
             console.log(`[${trace_id}] ${source_component}: ConfigManager initialized.`);
 
@@ -320,13 +329,16 @@ export class CapabilitiesManager extends BaseEntity {
             // Query PluginRegistry for the handler for this actionVerb
             // The handlerResult.handler will be a PluginManifest (or DefinitionManifest)
             const handlerResult = await this.getHandlerForActionVerb(step.actionVerb, trace_id);
+            console.log(`[${trace_id}] ${source_component}: Handler result for verb '${step.actionVerb}':`, handlerResult ? { type: handlerResult.type, lang: handlerResult.handler?.language, id: handlerResult.handler?.id } : null);
 
             if (handlerResult && handlerResult.handler) {
                 const manifest = handlerResult.handler; // Could be DefinitionManifest
+                console.log(`[${trace_id}] ${source_component}: Found handler for '${step.actionVerb}'. Language: '${manifest.language}', ID: '${manifest.id}'. Attempting direct execution.`);
 
                 if (manifest.language === DefinitionType.OPENAPI) {
                     const definitionManifest = manifest as DefinitionManifest;
                     if (definitionManifest.toolDefinition && (definitionManifest.toolDefinition as OpenAPITool).specUrl) {
+                        console.log(`[${trace_id}] ${source_component}: Executing '${step.actionVerb}' as OpenAPI tool.`);
                         const result = await this.executeOpenAPIToolInternal(definitionManifest.toolDefinition as OpenAPITool, step, trace_id);
                         res.status(200).send(MapSerializer.transformForSerialization(result));
                         return;
@@ -341,6 +353,7 @@ export class CapabilitiesManager extends BaseEntity {
                 } else if (manifest.language === DefinitionType.MCP) {
                     const definitionManifest = manifest as DefinitionManifest;
                      if (definitionManifest.toolDefinition && (definitionManifest.toolDefinition as MCPTool).actionMappings) {
+                        console.log(`[${trace_id}] ${source_component}: Executing '${step.actionVerb}' as MCP tool.`);
                         const result = await this.executeMCPTool(definitionManifest.toolDefinition as MCPTool, step, trace_id);
                         res.status(200).send(MapSerializer.transformForSerialization(result));
                         return;
@@ -353,6 +366,7 @@ export class CapabilitiesManager extends BaseEntity {
                         });
                     }
                 } else if (manifest.language === 'javascript' || manifest.language === 'python' || manifest.language === 'container') {
+                    console.log(`[${trace_id}] ${source_component}: Executing '${step.actionVerb}' as ${manifest.language} plugin.`);
                     // Standard code-based plugin execution
                     const pluginDefinition = manifest as PluginDefinition; // Assuming PluginManifest is compatible enough
                     const validatedInputs = await validateAndStandardizeInputs(pluginDefinition, step.inputValues || new Map<string, InputValue>());
@@ -866,14 +880,58 @@ export class CapabilitiesManager extends BaseEntity {
             console.log(`[${trace_id}] ${source_component}: Python dependencies processed successfully for ${pluginRootPath}. Marker file updated.`);
 
         } catch (error: any) {
-            console.error(`[${trace_id}] ${source_component}: Failed to install Python dependencies for ${pluginRootPath}: ${error.message}`);
-            // Log specific error details if available
-            if (error.stderr) {
-                console.error(`[${trace_id}] ${source_component}: Stderr from failed command: ${error.stderr}`);
+            const errorMessage = error.message || '';
+            const errorStderr = error.stderr || '';
+            const venvPath = path.join(pluginRootPath, 'venv');
+
+            // If the error is that a directory is not empty, it's often a sign of a corrupted venv.
+            // Let's try to fix this by forcefully removing the venv and retrying the installation once.
+            if (errorMessage.includes('ENOTEMPTY') || errorStderr.includes('ENOTEMPTY')) {
+                console.warn(`[${trace_id}] ${source_component}: Dependency installation failed with ENOTEMPTY. Attempting to repair by deleting venv and retrying.`);
+                try {
+                    // Forcefully remove the venv directory
+                    if (fs.existsSync(venvPath)) {
+                        fs.rmSync(venvPath, { recursive: true, force: true });
+                        console.log(`[${trace_id}] ${source_component}: Forcefully removed corrupted venv at ${venvPath}.`);
+                    }
+
+                    // Re-run the installation logic. Since we just deleted the venv, it will be recreated.
+                    const isWindows = process.platform === 'win32';
+                    const venvBinDir = isWindows ? path.join(venvPath, 'Scripts') : path.join(venvPath, 'bin');
+                    const venvPipPath = path.join(venvBinDir, isWindows ? 'pip.exe' : 'pip');
+                    const retryInstallCommand = `${isWindows ? 'python' : 'python3'} -m venv "${venvPath}" && "${venvPipPath}" install --upgrade pip && "${venvPipPath}" install -r "${requirementsPath}"`;
+
+                    console.log(`[${trace_id}] ${source_component}: Retrying install command: ${retryInstallCommand}`);
+                    await execAsync(retryInstallCommand, { cwd: pluginRootPath, timeout: 120000 });
+
+                    // If retry succeeds, write marker and return
+                    const requirementsContent = fs.readFileSync(requirementsPath, 'utf8');
+                    const requirementsHash = require('crypto').createHash('md5').update(requirementsContent).digest('hex');
+                    const markerPath = path.join(pluginRootPath, '.dependencies_installed');
+                    fs.writeFileSync(markerPath, requirementsHash);
+                    console.log(`[${trace_id}] ${source_component}: Python dependencies successfully installed after repair.`);
+                    return; // Success, exit the function.
+
+                } catch (retryError: any) {
+                    // If retry fails, throw a structured error to halt execution
+                    throw generateStructuredError({
+                        error_code: GlobalErrorCodes.CAPABILITIES_MANAGER_PLUGIN_DEPENDENCY_FAILED,
+                        severity: ErrorSeverity.CRITICAL,
+                        message: `Failed to install Python dependencies for ${pluginRootPath} even after retry: ${retryError.message}`,
+                        source_component, original_error: retryError, trace_id_param: trace_id,
+                        contextual_info: { pluginRootPath, initial_error: error.message, retry_stderr: retryError.stderr }
+                    });
+                }
             }
-            if (error.stdout) {
-                console.error(`[${trace_id}] ${source_component}: Stdout from failed command: ${error.stdout}`);
-            }
+
+            // For other errors, throw a structured error immediately to halt execution
+            throw generateStructuredError({
+                error_code: GlobalErrorCodes.CAPABILITIES_MANAGER_PLUGIN_DEPENDENCY_FAILED,
+                severity: ErrorSeverity.CRITICAL,
+                message: `Failed to install Python dependencies for ${pluginRootPath}: ${error.message}`,
+                source_component, original_error: error, trace_id_param: trace_id,
+                contextual_info: { pluginRootPath, stderr: error.stderr }
+            });
         }
     }
 
@@ -1003,9 +1061,12 @@ export class CapabilitiesManager extends BaseEntity {
 
     private async executeAccomplishPlugin(goal: string, verbToAvoid: string, trace_id: string): Promise<PluginOutput[]> {
         const source_component = "CapabilitiesManager.executeAccomplishPlugin";
+        let availablePluginsStr = ""; // Initialize
         try {
             // Get available plugins string from pluginRegistry (which proxies to marketplace)
-            const availablePluginsStr = await this.pluginRegistry.getAvailablePluginsStr();
+            availablePluginsStr = await this.pluginRegistry.getAvailablePluginsStr();
+            console.log(`[${trace_id}] ${source_component}: Plugins string for ACCOMPLISH: ${availablePluginsStr.substring(0,100)}...`);
+
             const accomplishInputs : Map<string, InputValue> = new Map([
                 ['goal', { inputName: 'goal', value: goal, valueType: PluginParameterType.STRING, args: {} }],
                 ['verbToAvoid', { inputName: 'verbToAvoid', value: verbToAvoid, valueType: PluginParameterType.STRING, args: {} }],
