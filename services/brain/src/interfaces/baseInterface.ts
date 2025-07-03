@@ -193,95 +193,189 @@ export abstract class BaseInterface {
         cleanedResponse = cleanedResponse.trim();
 
         let parsed: any;
+
+        const commonFixes = [
+            (s: string) => s.replace(/,\s*([\]\}])/g, '$1'), // Remove trailing commas (more robust)
+            (s: string) => s.replace(/'/g, '"'),          // Fix single quotes to double quotes
+            (s: string) => s.replace(/\/\/.*$/gm, ''),    // Remove single-line comments
+            // Add quotes to unquoted keys - careful not to break existing quoted keys or values
+            (s: string) => s.replace(/(?<!")(\b\w+\b)(?=\s*:)/g, '"$1"'),
+            // Attempt to fix missing commas between key-value pairs if separated by a newline
+            (s: string) => s.replace(/("\s*:\s*(?:true|false|null|"[^"]*"|-?[\d\.]+(?:e[+-]?\d+)?)\s*)\n(\s*")/gi, '$1,\n$2'),
+            // Attempt to fix key"":""value typos to key":"value
+            (s: string) => s.replace(/("\s*":)":"\s*([^"]*")/g, '$1"$2"'),
+            // Remove newline characters that might break string literals if not properly escaped by LLM
+            (s: string) => s.replace(/\\n(?!(t|r|b|f|\\|'|"))/g, '\n'), // Cautious newline replacement
+        ];
+
+        const applyFixes = (candidate: string): string => {
+            let current = candidate;
+            for (const fix of commonFixes) {
+                current = fix(current);
+            }
+            return current;
+        };
+
         try {
             parsed = JSON.parse(cleanedResponse);
             console.log('Response is valid JSON after initial cleaning.');
         } catch (e) {
-            console.log('Response is not valid JSON after initial cleaning, attempting extraction/repair.');
-            
-            const jsonPatterns = [
-                // Match complete objects or arrays with proper nesting
-                /(\{(?:[^{}]|{(?:[^{}]|{[^{}]*})*})*\})/g,
-                /(\[(?:[^\[\]]|\[(?:[^\[\]]|\[[^\[\]]*\])*\])*\])/g
-            ];
+            console.log('Response is not valid JSON after initial cleaning. Attempting targeted repairs and extraction.');
 
-            let bestMatch = null;
-            let bestScore = 0;
+            // Attempt 1: Try to fix the whole cleanedResponse string
+            try {
+                const fixedWhole = applyFixes(cleanedResponse);
+                parsed = JSON.parse(fixedWhole);
+                console.log('Successfully parsed after applying common fixes to the whole response.');
+            } catch (e2: any) { // Explicitly type e2 or use type guard
+                console.log('Could not parse after applying common fixes to whole response. Error:', e2 instanceof Error ? e2.message : String(e2));
 
-            for (const pattern of jsonPatterns) {
-                const matches = Array.from(cleanedResponse.matchAll(pattern));
-                for (const match of matches) {
-                    const candidate = match[1];
+                let potentialJsonString: string | null = null;
+                // Attempt 2: Check if the cleaned response IS a top-level object or array.
+                const trimmedCleaned = cleanedResponse.trim();
+                if ((trimmedCleaned.startsWith('{') && trimmedCleaned.endsWith('}')) || (trimmedCleaned.startsWith('[') && trimmedCleaned.endsWith(']'))) {
+                    potentialJsonString = trimmedCleaned;
+                }
+
+                if (potentialJsonString) {
+                    console.log('Identified cleaned response as potential top-level JSON. Attempting to parse with fixes.');
                     try {
-                        const tempParsed = JSON.parse(candidate);
-                        let score = candidate.length;
-
-                        if (typeof tempParsed === 'object' && tempParsed !== null) {
-                            // Boost score for expected top-level types
-                            if (tempParsed.type && ['PLAN', 'PLUGIN', 'DIRECT_ANSWER'].includes(tempParsed.type)) {
-                                score += 1000;
-                            }
-                            // Boost score for plan structure (if wrapped or raw array)
-                            if (tempParsed.plan && Array.isArray(tempParsed.plan)) {
-                                score += 500;
-                            } else if (Array.isArray(tempParsed) && tempParsed.length > 0) {
-                                // Check if it looks like a raw plan array by looking for 'verb' or 'actionVerb'
-                                const firstStep = tempParsed[0];
-                                if (typeof firstStep === 'object' && (firstStep.verb || firstStep.actionVerb) && firstStep.description) {
-                                    score += 1500; // High boost for raw plan array
-                                }
-                            }
-                        }
-
-                        if (score > bestScore) {
-                            bestScore = score;
-                            bestMatch = candidate;
-                        }
-                    } catch (e) {
-                        // This candidate is not valid JSON, continue
+                        const fixedPotential = applyFixes(potentialJsonString);
+                        parsed = JSON.parse(fixedPotential);
+                        console.log('Successfully parsed potential top-level JSON string after fixes.');
+                    } catch (e3: any) { // Explicitly type e3 or use type guard
+                        console.log('Failed to parse identified top-level JSON string even after fixes. Error:', e3 instanceof Error ? e3.message : String(e3));
+                        // Fall through to plan recovery if it contains "plan":
                     }
                 }
-            }
-            
-            if (bestMatch) {
-                console.log('Found best JSON match, parsing it.');
-                parsed = JSON.parse(bestMatch);
-            } else {
-                console.log('Could not extract valid JSON from response using patterns. Trying common repair strategies.');
-                const anyJsonMatch = cleanedResponse.match(/[\{\[][\s\S]*[\}\]]/);
-                if (anyJsonMatch) {
-                    let candidate = anyJsonMatch[0];
-                    const fixes = [
-                        (s: string) => s.replace(/,(\s*[}\]])/g, '$1'), // Remove trailing commas before a closing brace/bracket
-                        (s: string) => s.replace(/'/g, '"'),          // Fix single quotes to double quotes
-                        (s: string) => s.replace(/\/\/.*$/gm, ''),    // Remove single-line comments
-                        (s: string) => s.replace(/(\w+):/g, '"$1":'), // Add quotes to unquoted keys
-                        (s: string) => s.replace(/,\s*([\]\}])/g, '$1'), // Remove trailing commas (more robust)
-                        // Attempt to fix missing commas between key-value pairs if separated by a newline
-                        (s: string) => s.replace(/("\s*:\s*(?:true|false|null|"[^"]*"|[\d\.]+)\s*)\n(\s*")/g, '$1,\n$2'),
-                        // Attempt to fix key"":""value typos to key":"value
-                        (s: string) => s.replace(/("\s*":)":"\s*([^"]*")/g, '$1"$2"')
+
+                // Attempt 3: Targeted PLAN recovery (if not already parsed)
+                // This is crucial for the original problem.
+                if (!parsed && cleanedResponse.includes('"plan"')) {
+                    console.log('Attempting targeted PLAN recovery from cleanedResponse.');
+                    try {
+                        // Try to extract the main JSON object containing the plan
+                        // This regex tries to find a structure that looks like an object containing a "plan" array.
+                        const mainObjectMatch = cleanedResponse.match(/\{[\s\S]*"plan"\s*:\s*\[[\s\S]*?\][\s\S]*?\}/);
+                        let objectToProcessForPlan = cleanedResponse; // Default to whole response
+
+                        if (mainObjectMatch && mainObjectMatch[0]) {
+                             // If we find a plausible main object, focus on that.
+                            objectToProcessForPlan = mainObjectMatch[0];
+                            console.log('Found plausible main object for PLAN recovery.');
+                        }
+
+                        objectToProcessForPlan = applyFixes(objectToProcessForPlan);
+
+                        const planArrayMatch = objectToProcessForPlan.match(/"plan"\s*:\s*(\[[\s\S]*?\])/); // Non-greedy match for plan array
+                        if (planArrayMatch && planArrayMatch[1]) {
+                            let planArrayStr = planArrayMatch[1];
+                            planArrayStr = applyFixes(planArrayStr); // Apply fixes to the extracted array string
+
+                            const steps: any[] = [];
+                            let malformedSteps = 0;
+
+                            // More robust step splitting:
+                            // Iterate through the string, tracking brace depth to find individual objects.
+                            let depth = 0;
+                            let currentStepStart = -1;
+                            for (let i = 0; i < planArrayStr.length; i++) {
+                                if (planArrayStr[i] === '{') {
+                                    if (depth === 0) currentStepStart = i;
+                                    depth++;
+                                } else if (planArrayStr[i] === '}') {
+                                    depth--;
+                                    if (depth === 0 && currentStepStart !== -1) {
+                                        const stepStr = planArrayStr.substring(currentStepStart, i + 1);
+                                        try {
+                                            const fixedStepStr = applyFixes(stepStr); // Apply fixes per step
+                                            steps.push(JSON.parse(fixedStepStr));
+                                        } catch (stepError: any) { // Explicitly type stepError or use type guard
+                                            malformedSteps++;
+                                            console.log(`Could not parse step: [${stepStr}]. Error: ${stepError instanceof Error ? stepError.message : String(stepError)}`);
+                                        }
+                                        currentStepStart = -1;
+                                    }
+                                }
+                            }
+
+                            if (steps.length > 0 || (planArrayStr.trim() !== '[]' && malformedSteps > 0) ) { // Proceed if steps found or if array wasn't empty but all steps failed
+                                let type = "PLAN";
+                                let context = `Recovered ${steps.length} steps. ${malformedSteps} steps failed to parse.`;
+                                try {
+                                    // A light attempt to parse the main object without the plan array for its keys
+                                    const tempMainObjectStr = objectToProcessForPlan.replace(planArrayMatch[0], '"plan": []');
+                                    const tempMainObject = JSON.parse(applyFixes(tempMainObjectStr)); // Fixes on temp main obj
+                                    if (tempMainObject.type) type = tempMainObject.type;
+                                    if (tempMainObject.context) context = tempMainObject.context + " " + context;
+                                    else if (tempMainObject.description && steps.length === 0) context = tempMainObject.description + " " + context;
+
+
+                                    parsed = { type: type, plan: steps, context: context };
+                                    // If original object had other keys, try to preserve them
+                                    for(const key in tempMainObject) {
+                                        if (key !== "type" && key !== "plan" && key !== "context") {
+                                            parsed[key] = tempMainObject[key];
+                                        }
+                                    }
+
+                                } catch {
+                                     parsed = { type: type, plan: steps, context: context };
+                                }
+                                console.log(`Partially/Fully recovered PLAN object with ${steps.length} steps. ${malformedSteps} malformed.`);
+                            }
+                        }
+                    } catch (planRecoveryError: any) { // Explicitly type planRecoveryError or use type guard
+                        console.log('Error during PLAN array recovery attempt:', planRecoveryError instanceof Error ? planRecoveryError.message : String(planRecoveryError));
+                    }
+                }
+
+                // Attempt 4: Fallback to old regex pattern matching if still not parsed
+                if (!parsed) {
+                    console.log('Falling back to regex pattern fragment matching.');
+                    const jsonPatterns = [
+                        /(\{(?:[^{}]|{(?:[^{}]|{[^{}]*})*})*\})/g, // Match complete objects
+                        /(\[(?:[^\[\]]|\[(?:[^\[\]]|\[[^\[\]]*\])*\])*\])/g  // Match complete arrays
                     ];
-                    for (const fix of fixes) {
+                    let bestMatch: string | null = null;
+                    let bestScore = 0;
+
+                    for (const pattern of jsonPatterns) {
+                        const matches = Array.from(cleanedResponse.matchAll(pattern));
+                        for (const match of matches) {
+                            const candidate = match[1];
+                            try {
+                                const tempParsedCandidate = JSON.parse(applyFixes(candidate)); // Apply fixes here too
+                                let score = candidate.length;
+                                if (typeof tempParsedCandidate === 'object' && tempParsedCandidate !== null) {
+                                    if (tempParsedCandidate.type && ['PLAN', 'PLUGIN', 'DIRECT_ANSWER'].includes(tempParsedCandidate.type)) score += 1000;
+                                    if (tempParsedCandidate.plan && Array.isArray(tempParsedCandidate.plan)) score += 500;
+                                } else if (Array.isArray(tempParsedCandidate) && tempParsedCandidate.length > 0 && tempParsedCandidate[0] && (tempParsedCandidate[0].verb || tempParsedCandidate[0].actionVerb)) {
+                                    score += 1500; // Raw plan array
+                                }
+                                if (score > bestScore) {
+                                    bestScore = score;
+                                    bestMatch = candidate;
+                                }
+                            } catch (e) { /* ignore invalid fragments */ }
+                        }
+                    }
+                    if (bestMatch) {
+                        console.log('Found best JSON fragment via pattern matching, parsing it after fixes.');
                         try {
-                            const fixed = fix(candidate);
-                            JSON.parse(fixed);
-                            console.log('Successfully fixed JSON with repair strategy');
-                            parsed = JSON.parse(fixed);
-                            break;
-                        } catch (e) {
-                            candidate = fix(candidate); // Keep applying fixes cumulatively if one fails
+                            parsed = JSON.parse(applyFixes(bestMatch));
+                        } catch (fragmentParseError: any) { // Explicitly type fragmentParseError or use type guard
+                             console.log('Failed to parse best fragment even after fixes. Error:', fragmentParseError instanceof Error ? fragmentParseError.message : String(fragmentParseError));
                         }
                     }
                 }
             }
 
             if (!parsed) {
-                console.log('Could not extract or repair valid JSON from response', response);
+                console.log('Could not extract or repair valid JSON from response. Original response will be returned.', response);
                 return response;
             }
         }
-
 
         // At this point, 'parsed' is a valid JSON object or array.
         // Now, we handle specific schema adjustments for 'PLAN' types.
