@@ -88,7 +88,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     switch (data.type) {
       case 'say':
-        setConversationHistory((prev) => [...prev, `${data.sender}: ${data.content}`]);
+        setConversationHistory((prev) => [...prev, `${data.content}`]);
         break;
       case MessageType.REQUEST:
         setConversationHistory((prev) => [...prev, `${data.sender} asks: ${data.content}`]);
