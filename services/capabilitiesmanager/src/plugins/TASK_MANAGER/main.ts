@@ -1,5 +1,4 @@
-import { AuthenticatedApiClient } from '../../../../../../shared/src/AuthenticatedApiClient';
-import { IBaseEntity } from '../../../../../../shared/src/interfaces/IBaseEntity';
+import { AuthenticatedApiClient, IBaseEntity } from '@cktmcs/shared';
 
 const LIBRARIAN_URL = process.env.LIBRARIAN_URL || 'http://librarian:3000';
 const TASK_MANAGER_KEY = 'task-manager-tasks';
@@ -35,7 +34,7 @@ class LibrarianClient {
         return { tasks: [] };
       }
       return response.data;
-    } catch (error) {
+    } catch (error: any) {
       if (error.response && error.response.status === 404) {
         return { tasks: [] };
       }
