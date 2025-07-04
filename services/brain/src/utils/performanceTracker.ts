@@ -598,32 +598,71 @@ export class ModelPerformanceTracker {
   }
 
   /**
-   * Get all performance data
+   * Get all performance data, including unused models with default metrics
+   * @param allModels Array of all models (with .name and .contentConversation)
    * @returns Performance data for all models
    */
-  getAllPerformanceData(): ModelPerformanceData[] {
-    const data = Array.from(this.performanceData.values());
-    console.log(`[PerformanceTracker] Getting all performance data: ${data.length} models`);
-
-    // Log a summary of the data
-    if (data.length > 0) {
-      console.log('[PerformanceTracker] Performance data summary:');
-      data.forEach(model => {
-        console.log(`[PerformanceTracker] Model: ${model.modelName}`);
-        let totalUsage = 0;
-        let hasBlacklisted = false;
-
-        Object.entries(model.metrics).forEach(([type, metrics]) => {
-          totalUsage += metrics.usageCount;
-          if (metrics.blacklistedUntil) hasBlacklisted = true;
-          console.log(`[PerformanceTracker]   - ${type}: usage=${metrics.usageCount}, blacklisted=${metrics.blacklistedUntil ? 'Yes' : 'No'}`);
-        });
-
-        console.log(`[PerformanceTracker]   - Total usage: ${totalUsage}`);
-        console.log(`[PerformanceTracker]   - Has blacklisted conversation types: ${hasBlacklisted}`);
-      });
+  getAllPerformanceData(allModels?: { name: string, contentConversation: LLMConversationType[] }[]): ModelPerformanceData[] {
+    // If no allModels provided, fallback to old behavior
+    if (!allModels) {
+      const data = Array.from(this.performanceData.values());
+      console.log(`[PerformanceTracker] Getting all performance data: ${data.length} models`);
+      return data;
     }
 
+    const data: ModelPerformanceData[] = [];
+    const seen = new Set<string>();
+
+    // Add all models, filling in with default metrics if not present
+    for (const model of allModels) {
+      seen.add(model.name);
+      let modelData = this.performanceData.get(model.name);
+      if (!modelData) {
+        // Create default metrics for all supported conversation types
+        const metrics: Partial<Record<LLMConversationType, ModelPerformanceMetrics>> = {};
+        for (const convType of model.contentConversation) {
+          metrics[convType] = {
+            usageCount: 0,
+            successCount: 0,
+            failureCount: 0,
+            successRate: 0,
+            averageLatency: 0,
+            averageTokenCount: 0,
+            lastUsed: '',
+            consecutiveFailures: 0,
+            lastFailureTime: null,
+            blacklistedUntil: null,
+            feedbackScores: {
+              relevance: 0,
+              accuracy: 0,
+              helpfulness: 0,
+              creativity: 0,
+              overall: 0
+            }
+          };
+        }
+        modelData = {
+          modelName: model.name, // Use unique name
+          metrics: metrics as Record<LLMConversationType, ModelPerformanceMetrics>,
+          lastUpdated: ''
+        };
+      } else {
+        // Patch: ensure modelName is always the unique name
+        modelData.modelName = model.name;
+      }
+      data.push(modelData);
+    }
+
+    // Add any used models not in allModels (shouldn't happen, but for safety)
+    for (const [modelName, modelData] of this.performanceData.entries()) {
+      if (!seen.has(modelName)) {
+        // Patch: ensure modelName is always the unique name
+        modelData.modelName = modelName;
+        data.push(modelData);
+      }
+    }
+
+    console.log(`[PerformanceTracker] Getting all performance data (with unused): ${data.length} models`);
     return data;
   }
 

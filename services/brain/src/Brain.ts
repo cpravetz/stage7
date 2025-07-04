@@ -437,8 +437,14 @@ export class Brain extends BaseEntity {
 
             console.log('[Brain] Syncing model performance data to Librarian...');
 
-            // Get performance data
-            const performanceData = this.modelManager.performanceTracker.getAllPerformanceData();
+            // Get all models with name and contentConversation
+            const allModels = Array.from(this.modelManager.getAllModels().values()).map(model => ({
+                name: model.name,
+                contentConversation: model.contentConversation
+            }));
+
+            // Get performance data for all models (including unused)
+            const performanceData = this.modelManager.performanceTracker.getAllPerformanceData(allModels);
             console.log(`[Brain] Performance data contains ${performanceData.length} models`);
 
             // Check if we have any performance data to sync
