@@ -1,0 +1,219 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "DATA_TOOLKIT Plugin API",
+    "version": "1.0.0",
+    "description": "API for processing and manipulating structured data."
+  },
+  "paths": {
+    "/query_json": {
+      "post": {
+        "summary": "Query a JSON object using a JSONPath expression.",
+        "operationId": "query_json",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "json_object": {
+                    "type": "object",
+                    "description": "The JSON object to query."
+                  },
+                  "expression": {
+                    "type": "string",
+                    "description": "The JSONPath expression."
+                  }
+                },
+                "required": ["json_object", "expression"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Query successful.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "result": {
+                      "type": "array",
+                      "items": {}
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/validate_json": {
+      "post": {
+        "summary": "Validate a JSON string.",
+        "operationId": "validate_json",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "json_string": {
+                    "type": "string",
+                    "description": "The JSON string to validate."
+                  }
+                },
+                "required": ["json_string"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Validation check complete.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "is_valid": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/csv_to_json": {
+      "post": {
+        "summary": "Convert CSV data to a JSON array of objects.",
+        "operationId": "csv_to_json",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "csv_data": {
+                    "type": "string",
+                    "description": "The CSV data as a string."
+                  }
+                },
+                "required": ["csv_data"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Conversion successful.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/json_to_csv": {
+      "post": {
+        "summary": "Convert a JSON array of objects to CSV data.",
+        "operationId": "json_to_csv",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                },
+                "description": "A JSON array of objects."
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Conversion successful.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "csv_data": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/execute_sql_on_json": {
+      "post": {
+        "summary": "Execute a SQL query on a JSON array of objects.",
+        "operationId": "execute_sql_on_json",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "json_data": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    },
+                    "description": "The JSON data to query."
+                  },
+                  "sql_query": {
+                    "type": "string",
+                    "description": "The SQL query to execute."
+                  }
+                },
+                "required": ["json_data", "sql_query"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Query successful.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

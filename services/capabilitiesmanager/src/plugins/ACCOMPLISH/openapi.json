@@ -1,0 +1,192 @@
+{
+    "openapi": "3.0.0",
+    "info": {
+        "title": "ACCOMPLISH Plugin",
+        "version": "1.0.0",
+        "description": "Takes a goal and either creates a solution for the goal, recommends development of a new plugin, or creates a detailed plan to create the solution"
+    },
+    "paths": {
+        "/ACCOMPLISH": {
+            "post": {
+                "summary": "Takes a goal and creates a plan or provides a direct answer.",
+                "operationId": "accomplishGoal",
+                "requestBody": {
+                    "description": "The goal to accomplish, along with optional context.",
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "properties": {
+                                    "goal": {
+                                        "type": "string",
+                                        "description": "The goal to be accomplished or planned for."
+                                    },
+                                    "available_plugins": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "string"
+                                        },
+                                        "description": "A list of available plugin names to inform the planning process."
+                                    },
+                                    "mission_context": {
+                                        "type": "string",
+                                        "description": "Overall mission context to provide a broader understanding of the goal."
+                                    }
+                                },
+                                "required": [
+                                    "goal"
+                                ]
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successfully processed the goal. The result can be a plan, a direct answer, or a plugin suggestion.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": {
+                                        "$ref": "#/components/schemas/AccomplishResult"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request - Invalid input, such as a missing goal."
+                    },
+                    "500": {
+                        "description": "Internal Server Error - An error occurred during plugin execution."
+                    }
+                }
+            }
+        }
+    },
+    "components": {
+        "schemas": {
+            "AccomplishResult": {
+                "type": "object",
+                "properties": {
+                    "success": {
+                        "type": "boolean",
+                        "description": "Indicates if the operation was successful."
+                    },
+                    "name": {
+                        "type": "string",
+                        "enum": [
+                            "plan",
+                            "direct_answer",
+                            "plugin",
+                            "error"
+                        ],
+                        "description": "The type of result."
+                    },
+                    "resultType": {
+                        "type": "string",
+                        "enum": [
+                            "PLAN",
+                            "DIRECT_ANSWER",
+                            "PLUGIN",
+                            "ERROR"
+                        ],
+                        "description": "The formal type of the result."
+                    },
+                    "resultDescription": {
+                        "type": "string",
+                        "description": "A human-readable description of the result."
+                    },
+                    "result": {
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/Plan"
+                            },
+                            {
+                                "type": "string",
+                                "description": "A direct answer to the goal."
+                            },
+                            {
+                                "$ref": "#/components/schemas/PluginSuggestion"
+                            },
+                            {
+                                "$ref": "#/components/schemas/ErrorDetails"
+                            }
+                        ]
+                    }
+                },
+                "required": [
+                    "success",
+                    "name",
+                    "resultType",
+                    "resultDescription",
+                    "result"
+                ]
+            },
+            "Plan": {
+                "type": "array",
+                "description": "A detailed plan to achieve the goal, composed of multiple tasks.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "actionVerb": {
+                            "type": "string"
+                        },
+                        "inputReferences": {
+                            "type": "object"
+                        },
+                        "description": {
+                            "type": "string"
+                        },
+                        "outputs": {
+                            "type": "object"
+                        },
+                        "dependencies": {
+                            "type": "array",
+                            "items": {
+                                "type": "object"
+                            }
+                        },
+                        "recommendedRole": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "PluginSuggestion": {
+                "type": "object",
+                "description": "A recommendation to create a new plugin to handle the goal.",
+                "properties": {
+                    "id": {
+                        "type": "string"
+                    },
+                    "verb": {
+                        "type": "string"
+                    },
+                    "description": {
+                        "type": "string"
+                    },
+                    "explanation": {
+                        "type": "string"
+                    },
+                    "inputDefinitions": {
+                        "type": "array",
+                        "items": {
+                            "type": "object"
+                        }
+                    }
+                }
+            },
+            "ErrorDetails": {
+                "type": "object",
+                "properties": {
+                    "logs": {
+                        "type": "string",
+                        "description": "Execution logs captured during the process."
+                    }
+                }
+            }
+        }
+    }
+}

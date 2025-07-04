@@ -1,0 +1,72 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "SCRAPE Plugin",
+    "version": "1.0.0",
+    "description": "A plugin to scrape content from a given URL."
+  },
+  "servers": [
+    {
+      "url": "http://scrape-plugin"
+    }
+  ],
+  "paths": {
+    "/scrape": {
+      "post": {
+        "summary": "Scrape content from a URL",
+        "description": "Scrapes and extracts content from a web page based on the provided URL and optional selectors.",
+        "operationId": "scrape",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "description": "The URL of the web page to scrape."
+                  },
+                  "selector": {
+                    "type": "string",
+                    "description": "CSS selector to target specific elements for scraping. If not provided, all elements are considered."
+                  },
+                  "attribute": {
+                    "type": "string",
+                    "description": "The attribute to extract from the selected elements. Can be 'text', 'html', or a specific attribute name (e.g., 'href'). Defaults to 'text'."
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "description": "The maximum number of scraped items to return."
+                  }
+                },
+                "required": ["url"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successfully scraped content from the URL.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "content": {
+                       "type": "array",
+                       "items": {
+                         "type": "string"
+                       },
+                       "description": "An array of scraped content."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

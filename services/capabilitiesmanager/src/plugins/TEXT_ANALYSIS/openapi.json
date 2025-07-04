@@ -1,0 +1,92 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Text Analysis Plugin",
+    "version": "1.0.0",
+    "description": "A plugin for performing various text analysis operations."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:3000"
+    }
+  ],
+  "paths": {
+    "/analyze": {
+      "post": {
+        "summary": "Analyze Text",
+        "description": "Performs various text analysis operations on the provided text.",
+        "operationId": "analyzeText",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "description": "The text to be analyzed."
+                  },
+                  "analysis_type": {
+                    "type": "string",
+                    "description": "The type of analysis to perform.",
+                    "enum": [
+                      "all",
+                      "statistics",
+                      "keywords",
+                      "sentiment"
+                    ],
+                    "default": "all"
+                  },
+                  "keyword_count": {
+                    "type": "integer",
+                    "description": "The number of top keywords to return.",
+                    "default": 10
+                  }
+                },
+                "required": [
+                  "text"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Analysis successful",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "success": {
+                        "type": "boolean"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "resultType": {
+                        "type": "string"
+                      },
+                      "result": {
+                        "type": "object"
+                      },
+                      "resultDescription": {
+                        "type": "string"
+                      },
+                      "error": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,84 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Weather Plugin",
+    "version": "1.0.0",
+    "description": "A plugin to get the current weather for a location."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:3000"
+    }
+  ],
+  "paths": {
+    "/get_weather": {
+      "post": {
+        "summary": "Get current weather",
+        "description": "Fetches the current weather for a specified location using the OpenWeatherMap API.",
+        "operationId": "getWeather",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "location": {
+                    "type": "string",
+                    "description": "The city and state, e.g., 'San Francisco, CA'"
+                  },
+                  "api_key": {
+                    "type": "string",
+                    "description": "OpenWeatherMap API key"
+                  }
+                },
+                "required": ["location"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "weather_data": {
+                      "type": "object",
+                      "properties": {
+                        "location": { "type": "string" },
+                        "country": { "type": "string" },
+                        "temperature": { "type": "number" },
+                        "feels_like": { "type": "number" },
+                        "humidity": { "type": "number" },
+                        "pressure": { "type": "number" },
+                        "description": { "type": "string" },
+                        "main_condition": { "type": "string" },
+                        "wind_speed": { "type": "number" },
+                        "wind_direction": { "type": "number" },
+                        "visibility": { "type": "number" },
+                        "timestamp": { "type": "number" }
+                      }
+                    },
+                    "summary": {
+                      "type": "string",
+                      "description": "A human-readable summary of the weather."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    }
+  }
+}

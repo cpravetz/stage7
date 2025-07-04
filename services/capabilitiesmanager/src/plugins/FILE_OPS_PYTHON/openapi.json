@@ -1,0 +1,69 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "File Operations (Python)",
+    "version": "2.0.0",
+    "description": "Provides services for file operations: read, write, and append. This is a Python-based plugin with enhanced security."
+  },
+  "paths": {
+    "/file-operations": {
+      "post": {
+        "summary": "Perform a file operation",
+        "operationId": "fileOperation",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "description": "The relative path of the file to operate on."
+                  },
+                  "operation": {
+                    "type": "string",
+                    "description": "The operation to perform.",
+                    "enum": ["read", "write", "append"]
+                  },
+                  "content": {
+                    "type": "string",
+                    "description": "The content to write or append. Required for 'write' and 'append' operations."
+                  }
+                },
+                "required": ["path", "operation"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The result of the file operation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "result": {
+                      "type": "string",
+                      "description": "The content of the file for 'read' operations, or a success message for 'write' and 'append' operations."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input, such as a missing required parameter or an invalid operation."
+          },
+          "404": {
+            "description": "File not found for 'read' operation."
+          },
+          "500": {
+            "description": "An error occurred during the file operation."
+          }
+        }
+      }
+    }
+  }
+}

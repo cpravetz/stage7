@@ -1,0 +1,61 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "SEARCH Plugin",
+    "version": "2.0.0",
+    "description": "Searches the internet using DuckDuckGo or SearxNG for a given term and returns a list of links."
+  },
+  "paths": {
+    "/search": {
+      "post": {
+        "summary": "Perform a web search",
+        "operationId": "search",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "searchTerm": {
+                    "type": "string",
+                    "description": "The term to search for."
+                  }
+                },
+                "required": ["searchTerm"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "A list of search results.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "title": {
+                            "type": "string"
+                          },
+                          "url": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

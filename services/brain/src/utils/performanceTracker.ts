@@ -220,9 +220,10 @@ export class ModelPerformanceTracker {
     response: string,
     tokenCount: number,
     success: boolean,
-    error?: string
+    error?: string,
+    isRetry?: boolean
   ): void {
-    console.log(`[PerformanceTracker] Tracking response for request ${requestId}, success: ${success}, token count: ${tokenCount}`);
+    console.log(`[PerformanceTracker] Tracking response for request ${requestId}, success: ${success}, token count: ${tokenCount}, isRetry: ${isRetry}`);
     if (error) {
       console.log(`[PerformanceTracker] Error details: ${error}`);
     }
@@ -248,7 +249,7 @@ export class ModelPerformanceTracker {
     console.log(`[PerformanceTracker] Request latency: ${latency}ms`);
 
     // Update performance metrics
-    this.updateMetrics(requestData);
+    this.updateMetrics(requestData, isRetry);
 
     // Get updated metrics for logging
     const modelData = this.performanceData.get(requestData.modelName);
@@ -276,9 +277,9 @@ export class ModelPerformanceTracker {
    * Update metrics for a model
    * @param requestData Request data
    */
-  private updateMetrics(requestData: RequestData): void {
+  private updateMetrics(requestData: RequestData, isRetry: boolean = false): void {
     const { modelName, conversationType, startTime, endTime, tokenCount, success, error } = requestData;
-    console.log(`[PerformanceTracker] Updating metrics for model ${modelName}, conversation type ${conversationType}, success: ${success}`);
+    console.log(`[PerformanceTracker] Updating metrics for model ${modelName}, conversation type ${conversationType}, success: ${success}, isRetry: ${isRetry}`);
 
     // Get or create model data
     let modelData = this.performanceData.get(modelName);
@@ -319,9 +320,11 @@ export class ModelPerformanceTracker {
     }
 
     // Update metrics
-    const oldUsageCount = metrics.usageCount;
-    metrics.usageCount++;
-    console.log(`[PerformanceTracker] Incremented usage count for ${modelName} from ${oldUsageCount} to ${metrics.usageCount}`);
+    if (!isRetry) {
+        const oldUsageCount = metrics.usageCount;
+        metrics.usageCount++;
+        console.log(`[PerformanceTracker] Incremented usage count for ${modelName} from ${oldUsageCount} to ${metrics.usageCount}`);
+    }
 
     if (success) {
       const oldSuccessCount = metrics.successCount;
@@ -388,7 +391,7 @@ export class ModelPerformanceTracker {
 
     // Calculate success rate
     const oldSuccessRate = metrics.successRate;
-    metrics.successRate = metrics.successCount / metrics.usageCount;
+    metrics.successRate = metrics.usageCount > 0 ? metrics.successCount / metrics.usageCount : 0;
     console.log(`[PerformanceTracker] Updated success rate for ${modelName} from ${oldSuccessRate.toFixed(2)} to ${metrics.successRate.toFixed(2)}`);
 
     // Update latency (moving average)

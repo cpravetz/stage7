@@ -770,9 +770,11 @@ export class AgentSet extends BaseEntity {
 
         if (inputs?._type === 'Map') {
             inputsMap = MapSerializer.transformFromSerialization(inputs);
-        }else {
+        } else {
             if (inputs instanceof Map) {
                 inputsMap = inputs;
+            } else if (inputs === undefined || inputs === null) {
+                inputsMap = new Map();
             } else {
                 inputsMap = new Map();
                 for (const [key, value] of Object.entries(inputs)) {
@@ -858,6 +860,8 @@ export class AgentSet extends BaseEntity {
             } else {
                 if (inputs instanceof Map) {
                     inputsMap = inputs;
+                } else if (inputs === undefined || inputs === null) {
+                    inputsMap = new Map();
                 } else {
                     inputsMap = new Map();
                     for (const [key, value] of Object.entries(inputs)) {
@@ -1053,14 +1057,12 @@ export class AgentSet extends BaseEntity {
         }
 
         // Debug: Log all agent IDs and their mission IDs
-        console.log(`[AgentSet] getAgentStatistics called for missionId: ${missionId}`);
-        for (const agent of this.agents.values()) {
-            console.log(`[AgentSet] Agent ID: ${agent.id}, missionId: ${agent.getMissionId()}`);
-        }
+        console.log(`[AgentSet] getAgentStatistics called for missionId: ${missionId}, agentCount: ${this.agents.size}`);
 
         let stats  : AgentSetStatistics = {
             agentsByStatus: new Map(),
-            agentsCount: 0
+            agentsCount: 0,
+            agentValuesCount: this.agents.size
         };
 
         try {
@@ -1088,7 +1090,8 @@ export class AgentSet extends BaseEntity {
             }
             const serializedStats = {
                 agentsByStatus: MapSerializer.transformForSerialization(stats.agentsByStatus),
-                agentsCount: stats.agentsCount
+                agentsCount: stats.agentsCount,
+                agentValuesCount: stats.agentValuesCount
             };
             res.status(200).send(serializedStats);
         } catch (error) {

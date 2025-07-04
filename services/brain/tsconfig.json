@@ -14,7 +14,7 @@
       "@cktmcs/shared": ["../../shared/dist"],
       "@cktmcs/shared/*": ["../../shared/dist/*"]
     },
-    "types": ["express"],
+    "types": ["express", "jest", "node"], // Added 'jest' and 'node' for common Node.js types
     "resolveJsonModule": true,           // Allow importing JSON modules
     "sourceMap": true,                   // Generate source maps for debugging
     "allowJs": true,                     // Allow JavaScript files to be compiled
