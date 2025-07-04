@@ -944,7 +944,6 @@ Please consider this context and the available plugins when planning and executi
     }
 
     async getStatistics(globalStepMap?: Map<string, { agentId: string, step: any }>): Promise<AgentStatistics> {
-        console.log(`[Agent ${this.id}] Preparing statistics. Current steps count: ${this.steps.length}`);
 
         const stepStats = this.steps.map(step => {
             // Ensure step and its properties are defined before accessing
@@ -987,7 +986,6 @@ Please consider this context and the available plugins when planning and executi
             color: this.getAgentColor() // Assuming getAgentColor() is correctly defined elsewhere
         };
 
-        console.log(`[Agent ${this.id}] getStatistics result: total steps = ${this.steps.length}, stepStats = ${JSON.stringify(stepStats)}`);
         return statistics;
     }
 

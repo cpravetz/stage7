@@ -166,6 +166,24 @@ const ModelPerformanceDashboard: React.FC = () => {
           return;
         }
 
+        // Fetch all available models
+        const modelsResponse = await fetch(`${API_BASE_URL}/brain/models`, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          credentials: 'include',
+          mode: 'cors'
+        });
+        let allModels: string[] = [];
+        if (modelsResponse.ok) {
+          const modelsData = await modelsResponse.json();
+          if (modelsData && Array.isArray(modelsData.models)) {
+            allModels = modelsData.models;
+          }
+        }
+
         // Use the fetch API with proper CORS settings
         const performanceResponse = await fetch(`${API_BASE_URL}/brain/performance`, {
           method: 'GET',
@@ -206,6 +224,33 @@ const ModelPerformanceDashboard: React.FC = () => {
           });
         } else {
           console.warn('Performance data is not an array:', performanceDataArray);
+        }
+
+        // Merge allModels with formattedData so all models are present
+        if (allModels.length > 0) {
+          allModels.forEach(modelName => {
+            if (!formattedData[modelName]) {
+              formattedData[modelName] = {
+                usageCount: 0,
+                successCount: 0,
+                failureCount: 0,
+                successRate: 0,
+                averageLatency: 0,
+                averageTokenCount: 0,
+                lastUsed: '',
+                consecutiveFailures: 0,
+                lastFailureTime: null,
+                blacklistedUntil: null,
+                feedbackScores: {
+                  relevance: 0,
+                  accuracy: 0,
+                  helpfulness: 0,
+                  creativity: 0,
+                  overall: 0
+                }
+              };
+            }
+          });
         }
 
         setPerformanceData(formattedData);

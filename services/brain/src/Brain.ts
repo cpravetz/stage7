@@ -195,11 +195,24 @@ export class Brain extends BaseEntity {
                     return;
                 }
                 triedModels.add(selectedModel.modelName);
+                // Track the request for this attempt
+                const messages = thread.exchanges;
+                this.llmCalls++; // Increment for every attempt
+                const requestId = this.modelManager.trackModelRequest(selectedModel.name, thread.conversationType, JSON.stringify(messages));
                 try {
-                    await this._chatWithModel(selectedModel, thread, res);
+                    await this._chatWithModel(selectedModel, thread, res, requestId);
                     return; // Success, exit
                 } catch (error) {
                     lastError = error instanceof Error ? error.message : String(error);
+                    // Log the failed attempt as a retry
+                    this.modelManager.trackModelResponse(
+                        requestId,
+                        '',
+                        0,
+                        false,
+                        lastError,
+                        true // isRetry
+                    );
                     // Blacklist the model for 10 minutes
                     const blacklistUntil = new Date(Date.now() + 10 * 60 * 1000);
                     this.modelManager.blacklistModel(selectedModel.modelName, blacklistUntil);
@@ -220,31 +233,11 @@ export class Brain extends BaseEntity {
      * Helper to handle chatting with a specific model, including tracking and response logic.
      * Throws on error so retry logic can handle it.
      */
-    private async _chatWithModel(selectedModel: any, thread: any, res: express.Response) {
+    private async _chatWithModel(selectedModel: any, thread: any, res: express.Response, requestId?: string) {
         console.log(`Chatting with model ${selectedModel.modelName} using interface ${selectedModel.interfaceName} and conversation type ${thread.conversationType}`);
 
         // Extract only the message content from the exchanges
         const messages = thread.exchanges;
-
-        // Validate message format
-        if (messages && Array.isArray(messages)) {
-            for (let i = 0; i < messages.length; i++) {
-                const msg = messages[i];
-                // Check if the message has the required properties
-                if (!msg.role || !msg.content) {
-                    console.log(`Warning: Message at index ${i} is missing role or content:`, msg);
-                    // Try to fix the message if possible
-                    if (!msg.role) msg.role = 'user';
-                    if (!msg.content && (msg as any).message) {
-                        msg.content = (msg as any).message;
-                        console.log(`Fixed message at index ${i} by using 'message' property as 'content'`);
-                    }
-                }
-            }
-        } else {
-            console.log('Warning: messages is not an array or is undefined');
-        }
-        this.llmCalls++;
         thread.optionals.modelName = selectedModel.modelName;
 
         console.log('Chat messages provided:', JSON.stringify(messages, null, 2));
@@ -260,9 +253,8 @@ export class Brain extends BaseEntity {
             }
         }
 
-        // Track the request
-        const requestId = this.modelManager.trackModelRequest(selectedModel.name, thread.conversationType, JSON.stringify(messages));
-
+        // Use provided requestId or create if missing (for direct model call)
+        const reqId = requestId || this.modelManager.trackModelRequest(selectedModel.name, thread.conversationType, JSON.stringify(messages));
         try {
             // Pass optionals to the model, including response_format if specified
             console.log(`Brain: Passing optionals to model: ${JSON.stringify(thread.optionals)}`);
@@ -289,10 +281,12 @@ export class Brain extends BaseEntity {
             console.log(`[Brain] Estimated token count for response: ${estimatedTokenCount}`);
 
             this.modelManager.trackModelResponse(
-                requestId,
+                reqId,
                 modelResponse,
                 estimatedTokenCount,
-                true
+                true,
+                undefined, // error
+                false // isRetry
             );
 
             if (!modelResponse || modelResponse == 'No response generated') {
@@ -308,15 +302,14 @@ export class Brain extends BaseEntity {
                 mimeType: mimeType
             });
         } catch (error) {
-            // Track failed response
             this.modelManager.trackModelResponse(
-                requestId,
+                reqId,
                 '',
                 0,
                 false,
-                error instanceof Error ? error.message : String(error)
+                error instanceof Error ? error.message : String(error),
+                false // isRetry
             );
-            // Rethrow so the retry logic can handle blacklisting and retry
             throw error;
         }
     }

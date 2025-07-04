@@ -260,8 +260,8 @@ export class ModelManager {
      * @param success Success flag
      * @param error Error message
      */
-    trackModelResponse(requestId: string, response: string, tokenCount: number, success: boolean, error?: string): void {
-        console.log(`[ModelManager] Tracking model response for request ${requestId}, success: ${success}, token count: ${tokenCount}`);
+    trackModelResponse(requestId: string, response: string, tokenCount: number, success: boolean, error?: string, isRetry?: boolean): void {
+        console.log(`[ModelManager] Tracking model response for request ${requestId}, success: ${success}, token count: ${tokenCount}, isRetry: ${isRetry}`);
 
         // Get active request
         const request = this.activeRequests.get(requestId);
@@ -273,20 +273,13 @@ export class ModelManager {
         console.log(`[ModelManager] Found active request for model ${request.modelName}, conversation type ${request.conversationType}`);
 
         // Track response in performance tracker
-        this.performanceTracker.trackResponse(requestId, response, tokenCount, success, error);
+        this.performanceTracker.trackResponse(requestId, response, tokenCount, success, error, isRetry);
 
         // If the request failed, clear the model selection cache
         // This ensures we don't keep using a model that's failing
         if (!success) {
-            console.log(`Request failed for model ${request.modelName}. Clearing model selection cache.`);
             this.clearModelSelectionCache();
-        } else {
-            console.log(`[ModelManager] Successfully tracked response for model ${request.modelName}`);
         }
-
-        // Remove active request
-        this.activeRequests.delete(requestId);
-        console.log(`[ModelManager] Removed request ${requestId} from active requests. Remaining: ${this.activeRequests.size}`);
     }
 
     /**
