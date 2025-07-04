@@ -1,0 +1,178 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "TASK_MANAGER Plugin API",
+    "version": "1.0.0",
+    "description": "API for creating and managing tasks and subtasks."
+  },
+  "paths": {
+    "/create_task": {
+      "post": {
+        "summary": "Create a new main task",
+        "operationId": "create_task",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "goal": {
+                    "type": "string",
+                    "description": "The high-level goal of the task."
+                  }
+                },
+                "required": ["goal"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Task created successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "task_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/create_subtask": {
+      "post": {
+        "summary": "Create a new subtask",
+        "operationId": "create_subtask",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "parent_task_id": {
+                    "type": "string",
+                    "description": "The ID of the parent task."
+                  },
+                  "goal": {
+                    "type": "string",
+                    "description": "The goal of the subtask."
+                  }
+                },
+                "required": ["parent_task_id", "goal"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Subtask created successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "subtask_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/update_task_status": {
+      "post": {
+        "summary": "Update the status of a task or subtask",
+        "operationId": "update_task_status",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "task_id": {
+                    "type": "string",
+                    "description": "The ID of the task or subtask."
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": ["pending", "in_progress", "completed", "failed"]
+                  }
+                },
+                "required": ["task_id", "status"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Status updated successfully."
+          }
+        }
+      }
+    },
+    "/get_task_list": {
+      "get": {
+        "summary": "Get the list of all tasks and subtasks",
+        "operationId": "get_task_list",
+        "responses": {
+          "200": {
+            "description": "A list of tasks.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "tasks": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Task"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Task": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "goal": { "type": "string" },
+          "status": { "type": "string" },
+          "subtasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Subtask"
+            }
+          }
+        }
+      },
+      "Subtask": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "goal": { "type": "string" },
+          "status": { "type": "string" }
+        }
+      }
+    }
+  }
+}

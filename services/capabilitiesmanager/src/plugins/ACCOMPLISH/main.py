@@ -623,8 +623,8 @@ Revise the plan to correct the error. Only return the corrected plan as a JSON a
                 if attempt > 0: # This is a retry attempt
                     logger.info(f"Retrying Brain query for goal '{goal}' due to previous single-step response. Attempt {attempt}.")
                     current_prompt = f"The previous response was a single step, which is insufficient. Please provide a complete plan, a direct answer, or a plugin suggestion for the goal: '{goal}'.\n\nOriginal prompt context:\n{current_prompt}"
-
-                logger.info(f"Generated prompt for Brain (attempt {attempt+1}): {current_prompt[:500]}...")
+                else:
+                    logger.info(f"Generated prompt for Brain (attempt {attempt+1}): {current_prompt}")
                 response = self.query_brain(current_prompt, brain_token)
 
                 if not response:

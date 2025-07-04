@@ -1,0 +1,24 @@
+{
+  "id": "plugin-DATA_TOOLKIT",
+  "verb": "DATA_TOOLKIT",
+  "description": "A set of tools for processing and manipulating structured data formats like JSON, CSV, and SQL.",
+  "explanation": "This plugin provides commands to parse, query, and transform data from various sources, which is a critical capability for data analysis, reporting, and many other complex tasks.",
+  "language": "python",
+  "entryPoint": {
+    "main": "main.py",
+    "function": "execute_plugin"
+  },
+  "repository": {
+    "type": "local"
+  },
+  "security": {
+    "permissions": []
+  },
+  "version": "1.0.0",
+  "metadata": {
+    "author": "Stage7 Development Team",
+    "tags": ["data", "json", "csv", "sql", "toolkit"],
+    "category": "utility",
+    "license": "MIT"
+  }
+}

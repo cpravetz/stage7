@@ -1,0 +1,78 @@
+{
+  "id": "plugin-API_CLIENT",
+  "verb": "API_CLIENT",
+  "description": "A generic interface for interacting with third-party RESTful APIs.",
+  "explanation": "This plugin provides a command to make HTTP requests to any RESTful API, handling various authentication methods and returning the full HTTP response.",
+  "inputDefinitions": [
+    {
+      "name": "method",
+      "required": true,
+      "type": "string",
+      "description": "The HTTP method (e.g., GET, POST, PUT, DELETE)."
+    },
+    {
+      "name": "url",
+      "required": true,
+      "type": "string",
+      "description": "The API endpoint URL."
+    },
+    {
+      "name": "headers",
+      "required": false,
+      "type": "object",
+      "description": "A dictionary of HTTP headers."
+    },
+    {
+      "name": "body",
+      "required": false,
+      "type": "object",
+      "description": "The request body for methods like POST or PUT."
+    },
+    {
+      "name": "auth",
+      "required": false,
+      "type": "object",
+      "description": "Authentication details (e.g., API key, bearer token)."
+    }
+  ],
+  "outputDefinitions": [
+    {
+      "name": "status_code",
+      "required": true,
+      "type": "number",
+      "description": "The HTTP status code of the response."
+    },
+    {
+      "name": "headers",
+      "required": true,
+      "type": "object",
+      "description": "The response headers."
+    },
+    {
+      "name": "body",
+      "required": true,
+      "type": "object",
+      "description": "The response body."
+    }
+  ],
+  "language": "python",
+  "entryPoint": {
+    "main": "main.py",
+    "function": "execute_plugin"
+  },
+  "repository": {
+    "type": "local"
+  },
+  "security": {
+    "permissions": [
+      "network.request"
+    ]
+  },
+  "version": "1.0.0",
+  "metadata": {
+    "author": "Stage7 Development Team",
+    "tags": ["api", "rest", "http", "client"],
+    "category": "utility",
+    "license": "MIT"
+  }
+}

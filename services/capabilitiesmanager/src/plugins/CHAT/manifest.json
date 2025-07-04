@@ -1,0 +1,30 @@
+{
+  "id": "plugin-CHAT",
+  "verb": "CHAT",
+  "description": "Manages interactive chat sessions with the user.",
+  "explanation": "This plugin allows for starting, conducting, and ending a chat session to gather information or provide assistance.",
+  "language": "python",
+  "entryPoint": {
+    "main": "main.py",
+    "packageSource": {
+      "type": "local",
+      "path": "./"
+    }
+  },
+  "api": {
+    "type": "openapi",
+    "url": "file://openapi.json"
+  },
+  "repository": {
+    "type": "local"
+  },
+  "security": {
+    "permissions": [],
+    "sandboxOptions": {}
+  },
+  "distribution": {
+    "downloads": 0,
+    "rating": 0
+  },
+  "version": "1.0.0"
+}

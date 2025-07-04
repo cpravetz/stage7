@@ -1,0 +1,26 @@
+{
+  "id": "plugin-TASK_MANAGER",
+  "verb": "TASK_MANAGER",
+  "description": "A plugin for self-planning, creating, and managing tasks and subtasks.",
+  "explanation": "This plugin allows an agent to break down a large goal into a series of smaller, manageable steps and track their status.",
+  "language": "typescript",
+  "entryPoint": {
+    "main": "main.ts",
+    "function": "execute"
+  },
+  "repository": {
+    "type": "local"
+  },
+  "security": {
+    "permissions": [
+      "librarian.read",
+      "librarian.write"
+    ]
+  },
+  "version": "1.0.0",
+  "metadata": {
+    "author": "Stage7 Development Team",
+    "tags": ["task", "planning", "management", "subtask"],
+    "category": "agent"
+  }
+}

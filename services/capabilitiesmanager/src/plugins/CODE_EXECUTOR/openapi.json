@@ -1,0 +1,64 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "CODE_EXECUTOR Plugin API",
+    "version": "1.0.0",
+    "description": "API for executing code snippets in a sandboxed environment."
+  },
+  "paths": {
+    "/execute_code": {
+      "post": {
+        "summary": "Execute a code snippet",
+        "operationId": "execute_code",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "language": {
+                    "type": "string",
+                    "description": "The programming language of the code snippet.",
+                    "enum": ["python", "javascript"]
+                  },
+                  "code": {
+                    "type": "string",
+                    "description": "The code snippet to execute."
+                  }
+                },
+                "required": ["language", "code"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Code executed successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "stdout": {
+                      "type": "string",
+                      "description": "The standard output from the code execution."
+                    },
+                    "stderr": {
+                      "type": "string",
+                      "description": "The standard error from the code execution."
+                    },
+                    "exit_code": {
+                      "type": "number",
+                      "description": "The exit code of the execution process."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
