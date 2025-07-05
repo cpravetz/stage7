@@ -31,13 +31,13 @@ export class Brain extends BaseEntity {
         super('Brain', 'Brain', `brain`, process.env.PORT || '5020');
         this.modelManager = new ModelManager();
 
-        // Clear any existing blacklists to start with a clean slate
-        //this.modelManager.resetAllBlacklists();
-
         this.init();
 
-        // Start periodic sync of performance data to Librarian
-        this.setupPerformanceDataSync();
+        // On startup, restore metrics from Librarian
+        this.restorePerformanceDataFromLibrarian().then(() => {
+            // Start periodic sync of performance data to Librarian
+            this.setupPerformanceDataSync();
+        });
     }
 
     init() {
@@ -437,8 +437,14 @@ export class Brain extends BaseEntity {
 
             console.log('[Brain] Syncing model performance data to Librarian...');
 
-            // Get performance data
-            const performanceData = this.modelManager.performanceTracker.getAllPerformanceData();
+            // Get all models with name and contentConversation
+            const allModels = Array.from(this.modelManager.getAllModels().values()).map(model => ({
+                name: model.name,
+                contentConversation: model.contentConversation
+            }));
+
+            // Get performance data for all models (including unused)
+            const performanceData = this.modelManager.performanceTracker.getAllPerformanceData(allModels);
             console.log(`[Brain] Performance data contains ${performanceData.length} models`);
 
             // Check if we have any performance data to sync
@@ -456,25 +462,6 @@ export class Brain extends BaseEntity {
                 console.log(`[Brain] Current active model requests: ${this.modelManager.getActiveRequestsCount()}`);
 
                 return;
-            }
-
-            // Log details about each model for debugging
-            console.log('[Brain] Detailed performance data:');
-            for (const model of performanceData) {
-                console.log(`[Brain] Model: ${model.modelName}`);
-                for (const [conversationType, metrics] of Object.entries(model.metrics)) {
-                    console.log(`[Brain]   - Conversation type: ${conversationType}`);
-                    console.log(`[Brain]     - Usage count: ${metrics.usageCount}`);
-                    console.log(`[Brain]     - Success count: ${metrics.successCount}`);
-                    console.log(`[Brain]     - Failure count: ${metrics.failureCount}`);
-                    console.log(`[Brain]     - Success rate: ${metrics.successRate.toFixed(2)}`);
-                    console.log(`[Brain]     - Average latency: ${metrics.averageLatency.toFixed(2)}ms`);
-                    console.log(`[Brain]     - Average token count: ${metrics.averageTokenCount.toFixed(2)}`);
-                    console.log(`[Brain]     - Consecutive failures: ${metrics.consecutiveFailures}`);
-                    console.log(`[Brain]     - Blacklisted: ${metrics.blacklistedUntil ? `Yes, until ${new Date(metrics.blacklistedUntil).toLocaleString()}` : 'No'}`);
-                    console.log(`[Brain]     - Last used: ${new Date(metrics.lastUsed).toLocaleString()}`);
-                    console.log(`[Brain]     - Feedback scores:`, JSON.stringify(metrics.feedbackScores, null, 2));
-                }
             }
 
             // Get rankings for different conversation types and metrics
@@ -518,6 +505,8 @@ export class Brain extends BaseEntity {
                     storageType: 'mongo',
                     collection: 'mcsdata'
                 });
+                // After successful save, update in-memory tracker with latest data
+                this.modelManager.performanceTracker.setAllPerformanceData(performanceData);
             } catch (apiError) {
                 console.error('[Brain] API error syncing performance data to Librarian:',
                     apiError instanceof Error ? apiError.message : String(apiError));
@@ -536,7 +525,41 @@ export class Brain extends BaseEntity {
             console.log('[Brain] Will retry syncing performance data on next scheduled interval');
         }
     }
+
+    /**
+     * Restore performance metrics from Librarian on startup
+     */
+    private async restorePerformanceDataFromLibrarian() {
+        await this.discoverLibrarianService();
+        if (!this.librarianUrl) {
+            console.error('[Brain] Cannot restore performance data: Librarian service not found');
+            return;
+        }
+        try {
+            console.log('[Brain] Attempting to restore model performance data from Librarian...');
+            const response = await this.authenticatedApi.get(`http://${this.librarianUrl}/loadData/model-performance-data`);
+            if (response && response.data && response.data.data && response.data.data.performanceData) {
+                const perfData = response.data.data.performanceData;
+                if (Array.isArray(perfData)) {
+                    this.modelManager.performanceTracker.setAllPerformanceData(perfData);
+                    console.log(`[Brain] Restored ${perfData.length} model performance records from Librarian`);
+                } else {
+                    console.warn('[Brain] No valid performance data found in Librarian response');
+                }
+            } else {
+                console.warn('[Brain] No performance data found in Librarian');
+            }
+        } catch (err) {
+            console.error('[Brain] Error restoring performance data from Librarian:', err instanceof Error ? err.message : String(err));
+        }
+    }
 }
 
+// ---
+// To debug ACCOMPLISH registration, add logging in your registry/manager code:
+// Example:
+// console.log('Registered verbs:', Object.keys(localRegistry));
+// console.log('CapabilitiesManager verbs:', capabilitiesManager.listVerbs());
+// ---
 // Create an instance of the Brain
 new Brain();

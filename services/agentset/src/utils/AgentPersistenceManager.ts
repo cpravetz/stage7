@@ -62,7 +62,6 @@ export class AgentPersistenceManager {
                 storageType: 'mongo',
                 collection: 'agents'
             });
-            console.log(`Agent state saved successfully for agent ${agent.id}.`);
         } catch (error) { analyzeError(error as Error);
             console.error(`Error saving agent state for agent ${agent.id}:`, error instanceof Error ? error.message : error);
         }

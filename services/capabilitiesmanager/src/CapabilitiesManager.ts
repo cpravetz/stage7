@@ -43,8 +43,8 @@ export class CapabilitiesManager extends BaseEntity {
     private librarianUrl: string = process.env.LIBRARIAN_URL || 'librarian:5040';
     private server: any;
     private configManager!: ConfigManager;
-    private pluginRegistry: PluginRegistry;
-    private containerManager: ContainerManager;
+    private pluginRegistry!: PluginRegistry;
+    private containerManager!: ContainerManager;
     private serviceId = 'CapabilitiesManager';
 
     private failedPluginLookups: Map<string, number> = new Map(); // actionVerb -> last failure timestamp
@@ -54,17 +54,30 @@ export class CapabilitiesManager extends BaseEntity {
     constructor() {
         super('CapabilitiesManager', 'CapabilitiesManager', `capabilitiesmanager`, process.env.PORT || '5060');
         const trace_id = `${this.serviceId}-constructor-${uuidv4().substring(0,8)}`;
-        //console.log(`[${trace_id}] Starting CapabilitiesManager initialization...`);
-        
-        this.pluginRegistry = new PluginRegistry();
-        this.containerManager = new ContainerManager();
-
-        this.initialize(trace_id).catch(error => {
-            const initError = error instanceof Error ? error : new Error(String(error));
-            const message = (initError as any).message_human_readable || initError.message;
-            console.error(`[${trace_id}] INIT_FAILURE: ${message}`, (initError as any).contextual_info || initError.stack);
-            process.exit(1);
-        });
+        // Retry logic for initialization
+        this.pluginRegistry = new PluginRegistry(); 
+        const source_component = "CapabilitiesManager.constructor";
+        let attempts = 0;
+        const maxAttempts = 3;
+        const retryDelayMs = 2000;
+        const tryInitialize = async () => {
+            attempts++;
+            try {
+                await this.initialize(trace_id);
+            } catch (error) {
+                const initError = error instanceof Error ? error : new Error(String(error));
+                const message = (initError as any).message_human_readable || initError.message;
+                console.error(`[${trace_id}] INIT_FAILURE (attempt ${attempts}): ${message}`, (initError as any).contextual_info || initError.stack);
+                if (attempts < maxAttempts) {
+                    console.warn(`[${trace_id}] ${source_component}: Retrying initialization in ${retryDelayMs}ms...`);
+                    setTimeout(tryInitialize, retryDelayMs);
+                } else {
+                    console.error(`[${trace_id}] ${source_component}: Initialization failed after ${maxAttempts} attempts. CapabilitiesManager will not start.`);
+                    // Optionally, set a flag or notify health check endpoint
+                }
+            }
+        };
+        tryInitialize();
     }
 
     private async initialize(trace_id: string) {
@@ -311,7 +324,7 @@ export class CapabilitiesManager extends BaseEntity {
     private async executeActionVerb(req: express.Request, res: express.Response) {
         const trace_id = (req as any).trace_id || uuidv4();
         const source_component = "CapabilitiesManager.executeActionVerb";
-        const step = { ...req.body, inputValues: MapSerializer.transformFromSerialization(req.body.inputValues) } as Step;
+        const step = { ...req.body, inputValues: MapSerializer.transformFromSerialization(req.body.inputValues || {}) } as Step;
 
         if (!step.actionVerb || typeof step.actionVerb !== 'string') {
             const sError = generateStructuredError({
@@ -326,6 +339,12 @@ export class CapabilitiesManager extends BaseEntity {
         }
 
         try {
+            // Redirect 'ACCOMPLISH' to executeAccomplishPlugin
+            if (step.actionVerb === 'ACCOMPLISH' && step.inputValues) {
+                const accomplishResultArray = await this.executeAccomplishPlugin(step.inputValues.get('goal')?.value || '', 'EXECUTE', trace_id);
+                res.status(200).send(MapSerializer.transformForSerialization(accomplishResultArray));
+                return;
+            }
             // Query PluginRegistry for the handler for this actionVerb
             // The handlerResult.handler will be a PluginManifest (or DefinitionManifest)
             const handlerResult = await this.getHandlerForActionVerb(step.actionVerb, trace_id);
@@ -390,8 +409,6 @@ export class CapabilitiesManager extends BaseEntity {
                 }
             }
 
-            // If no specific handler found via PluginRegistry, or unknown type, fall back to ACCOMPLISH/Brain
-            this.logPluginLookupFailure(step.actionVerb, trace_id, `No handler found for actionVerb '${step.actionVerb}'. Invoking ACCOMPLISH/Brain for reasoning.`);
             const cachedPlanArray = await this.checkCachedPlan(step.actionVerb);
             if (cachedPlanArray && cachedPlanArray.length > 0) {
                 res.status(200).send(MapSerializer.transformForSerialization(cachedPlanArray));
@@ -400,8 +417,6 @@ export class CapabilitiesManager extends BaseEntity {
             const resultUnknownVerb = await this.handleUnknownVerb(step, trace_id);
             res.status(200).send(MapSerializer.transformForSerialization(resultUnknownVerb));
         } catch (error: any) {
-            // Patch: On handler fetch error, treat as missing and fall back to ACCOMPLISH/Brain
-            this.logPluginLookupFailure(step.actionVerb, trace_id, `Handler lookup failed for actionVerb '${step.actionVerb}': ${error.message}. Invoking ACCOMPLISH/Brain for reasoning.`);
             const cachedPlanArray = await this.checkCachedPlan(step.actionVerb);
             if (cachedPlanArray && cachedPlanArray.length > 0) {
                 res.status(200).send(MapSerializer.transformForSerialization(cachedPlanArray));
@@ -424,20 +439,6 @@ export class CapabilitiesManager extends BaseEntity {
                 return { type: 'plugin', handler: plugin };
             }
 
-            // Try to find an OpenAPI tool - This direct call will be removed.
-            // const openApiTool = await this.findOpenAPIToolByActionVerb(actionVerb);
-            // if (openApiTool) {
-            //     console.log(`[${trace_id}] ${source_component}: Found OpenAPI tool for actionVerb '${actionVerb}': ${openApiTool.id}`);
-            //     return { type: 'openapiTool', handler: openApiTool };
-            // }
-
-            // Try to find an MCP tool - This direct call will be removed.
-            // const mcpTool = await this.findMCPToolByActionVerb(actionVerb, trace_id);
-            // if (mcpTool) {
-            //     console.log(`[${trace_id}] ${source_component}: Found MCP tool for actionVerb '${actionVerb}': ${mcpTool.id}`);
-            //     return { type: 'mcpTool', handler: mcpTool };
-            // }
-
             // If plugin is found by pluginRegistry, it could be a code plugin, openapi tool, or mcp tool.
             // The type differentiation will happen based on plugin.language in executeActionVerb.
             if (plugin) {
@@ -452,21 +453,6 @@ export class CapabilitiesManager extends BaseEntity {
         } catch (error: any) {
             console.error(`[${trace_id}] ${source_component}: Error resolving handler for actionVerb '${actionVerb}':`, error.message);
             return null;
-        }
-    }
-
-    // private async findMCPToolByActionVerb(actionVerb: string, trace_id: string): Promise<MCPTool | null> {
-    //     // This method is being removed as MCP tools will be fetched via PluginRegistry -> PluginMarketplace.
-    //     // ... (implementation removed)
-    // }
-
-    // Helper to log plugin lookup failures with cooldown
-    private logPluginLookupFailure(actionVerb: string, trace_id: string, message: string) {
-        const now = Date.now();
-        const lastFailure = this.failedPluginLookups.get(actionVerb) || 0;
-        if (now - lastFailure > CapabilitiesManager.PLUGIN_LOOKUP_COOLDOWN_MS) {
-            console.warn(`[${trace_id}] ${message}`);
-            this.failedPluginLookups.set(actionVerb, now);
         }
     }
 
@@ -1060,6 +1046,7 @@ export class CapabilitiesManager extends BaseEntity {
     }
 
     private async executeAccomplishPlugin(goal: string, verbToAvoid: string, trace_id: string): Promise<PluginOutput[]> {
+        console.log('In executeAccomplishPlugin');
         const source_component = "CapabilitiesManager.executeAccomplishPlugin";
         let availablePluginsStr = ""; // Initialize
         try {
@@ -1878,8 +1865,6 @@ export class CapabilitiesManager extends BaseEntity {
 
             console.log(`[${trace_id}] ${source_component}: MCP Tool ${mcpTool.id} executed successfully.`);
             return outputs;
-
-       
 
         } catch ( error: any) {
             const sError = generateStructuredError({

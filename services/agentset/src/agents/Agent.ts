@@ -1121,7 +1121,6 @@ Please consider this context and the available plugins when planning and executi
                 role: this.role || 'executor'
             };
             await this.stateManager.saveState(stateToSave);
-            console.log(`[Agent ${agentIdForLog}] Saved state.`);
         } catch (error) {
             if (error instanceof Error) {
                 console.error(`[Agent ${agentIdForLog}] Error saving state: ${error.message}`, error.stack);

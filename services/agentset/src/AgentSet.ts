@@ -1112,7 +1112,6 @@ export class AgentSet extends BaseEntity {
                 try {
                     await agent.saveAgentState();
                     if (statistics) {
-                        console.log(`Forwarding statistics for agent ${agentId} to TrafficManager`);
                         await this.authenticatedApi.post(`http://${this.trafficManagerUrl}/agentStatisticsUpdate`, {
                             agentId,
                             status,

@@ -162,10 +162,22 @@ class AccomplishPlugin:
 
     def generate_prompt(self, goal: str, available_plugins_str: str, mission_context_str: str) -> str:
         """Generate the prompt for the Brain service"""
+        # Log the received available_plugins_str for debugging
+        logger.info(f"[ACCOMPLISH] Received available_plugins_str: {repr(available_plugins_str)}")
+        logger.info(f"[ACCOMPLISH] Received mission_context_str: {repr(mission_context_str)}")
         prompt = f"""
 Your task is to decide on the best way to to achieve the following goal: '{goal}' and provide a response in one of the JSON formats below.
 
 DO NOT include any schemas, explanations, markdown formatting, or additional text outside the JSON object.
+
+Output Decision Hierarchy: Before generating any output, first evaluate the goal:
+
+    DIRECT_ANSWER: If you have all the necessary information and can fully and completely resolve the goal directly, provide a DIRECT_ANSWER.
+
+    PLUGIN: If the goal is discrete, well-defined, and can be accomplished most efficiently with a new, single-purpose function not currently available, define a PLUGIN. Avoid creating a plugin if a plan is more suitable or efficient.
+
+    PLAN: Only if neither a DIRECT_ANSWER nor a PLUGIN is the most appropriate or efficient way to achieve the goal, should you generate a PLAN consisting of sub-divided steps.
+
 
 1. If the best option for reaching the goal should be to sub-divide into smaller steps, respond with a plan as a JSON object.  Plans must conform to this schema!
 
@@ -262,22 +274,21 @@ DO NOT include any schemas, explanations, markdown formatting, or additional tex
   "description": "Schema for a workflow consisting of sequential steps with dependencies"
 }}
 
-
 Rules for creating a plan:
-1. Number each step sequentially using the "number" field.
-2. Use specific, actionable verbs or phrases for each step using the "actionVerb" field (e.g., ANALYZE_CSV, ANALYZE_AUDIOFILE, PREDICT, WRITE_TEXT, WRITE_CODE, BOOK_A_CAR).
-3. The schema of each step MUST be exactly as defined above. Every field is mandatory, but the "inputs" field may be an empty object ({{}}).
-4. Each input in the "inputs" object MUST be an object with either (a) a 'value' property that is a string constant OR (b) an 'outputName' property that exactly matches an outputName from a previous step. Include the expected or known input value type as valueType and include optional args if the consuming step will need them.
-5. List dependencies for each step as an object in the "dependencies" field, where property names are the output keys needed and values are the step numbers that provide the required output (e.g., {{"outputname": 1}}). There MUST be a dependency entry for every input that comes from a previous step output.
-6. Specify the outputs of each step in the "outputs" field. At least one output is mandatory.
-7. Prioritize Output Naming for Dependencies: When a step's output is intended to be used as an input for a subsequent step, ensure the name of that output precisely matches the inputName expected by the dependent step. Avoid generic output names if the output is specifically consumed by another step.
-8. Aim for 5-10 steps in the plan, but more or fewer is acceptable, breaking down complex tasks as necessary.
-9. Be very thorough in your "description" fields. This is the only context or instruction the performer will have.
-10. Ensure the final step produces the desired outcome or mission of the goal.
-11. For each step, include a "recommendedRole" field with one of the available agent roles that would be best suited for the task.
-12. Create at least one output for every step.
-13. When using actionVerbs, ensure the required inputs are there and produced by preceeding steps using the correct name.  For example, a DELEGATE step should have a subAgentGoal defined as a goal and either provided as a constant in the step or defined by a preceeding step as an output named subAgenGoal.
-14. DO NOT RETURN THE SCHEMA - JUST THE PLAN!
+- Number each step sequentially using the "number" field.
+- Use specific, actionable verbs or phrases for each step using the "actionVerb" field (e.g., ANALYZE_CSV, ANALYZE_AUDIOFILE, PREDICT, WRITE_TEXT, WRITE_CODE, BOOK_A_CAR).
+- The schema of each step MUST be exactly as defined above. Every field is mandatory, but the "inputs" field may be an empty object ({{}}).
+- Each input in the "inputs" object MUST be an object with either (a) a 'value' property that is a string constant OR (b) an 'outputName' property that exactly matches an outputName from a previous step. You must specify one of these two. Include the expected or known input value type as valueType and include optional args if the consuming step will need them.
+- The name of each property within the inputs object (e.g., myParameter) MUST exactly match the parameter name expected by the actionVerb of that step. If an actionVerb requires a single item from a list produced by a previous step, use the outputName to reference the full list, and use the args field (e.g., "args": {{"index": 0}} for the first item) to specify which element to extract. Only use args for extraction if the actionVerb and underlying runner explicitly support this mechanism.
+- List dependencies for each step as an object in the "dependencies" field, where property names are the output keys needed and values are the step numbers that provide the required output (e.g., {{"outputname": 1}}). There MUST be a dependency entry for every input that comes from a previous step output.
+- Specify the outputs of each step in the "outputs" field. At least one output is mandatory for every step.
+- Prioritize Output Naming for Dependencies: When a step's output is intended to be used as an input for a subsequent step, ensure the name of that output precisely matches the outputName expected by the dependent step. Avoid generic output names if the output is specifically consumed by another step.
+- Aim for 5-10 steps in the plan, but more or fewer is acceptable, breaking down complex tasks as necessary.
+- Be very thorough in your "description" fields. This is the only context or instruction the performer will have.
+- Ensure the final step produces the desired outcome or mission of the goal.
+- For each step, include a "recommendedRole" field with one of the available agent roles that would be best suited for the task.
+- When using actionVerbs, ensure the required inputs are there and produced by preceeding steps using the correct name.  For example, a DELEGATE step should have a subAgentGoal defined as a goal and either provided as a constant in the step or defined by a preceeding step as an output named subAgenGoal.
+- DO NOT RETURN THE SCHEMA - JUST THE PLAN!
 
 Available Agent Roles:
 - coordinator: Coordinates activities of other agents, manages task allocation, and ensures mission success. Good for planning, delegation, and monitoring.
@@ -287,17 +298,14 @@ Available Agent Roles:
 - executor: Implements plans and executes tasks with precision and reliability. Good for task execution and process following.
 - domain_expert: Provides specialized knowledge and expertise in a specific domain. Good for technical analysis and expert advice.
 
-IMPORTANT: Your response MUST be a valid JSON object with no additional text or formatting. The JSON must start with {{ and end with }} and must include one of the three types: "DIRECT_ANSWER", "PLAN", or "PLUGIN".
-
-Plugins are available to execute steps of the plan. Some have required inputs - required properties for the inputs object.
-The `available_plugins_str` (provided by the system) lists these:
+Plugins are available to execute steps of the plan. Some have required inputs. The `available_plugins_str` (provided by the system) lists these:
 {available_plugins_str}
 
-Additionally, for clarity, here are the known required inputs for some common verbs based on this plugin's internal definitions (ensure these are always provided for the respective verbs):
-{self.get_internal_verb_requirements_for_prompt()}
-When using these or any other actionVerbs, ensure ALL their required inputs (as specified in their definitions) are present.
+When using actionVerbs, ensure ALL their required inputs are present in the step's inputs.
 
-2. When the goal is discrete and can be accomplished most efficiently with a new plugin, define one. Creating a plugin should be avoided when the goal can be accomplished with a plan. If you determine a plugin is needed, respond with a JSON object in this format:
+2. When the goal is discrete and will require new functionality to be accomplished, define a new plugin. 
+Creating a plugin should be avoided when the goal can be accomplished with a plan.
+If you determine a plugin is needed, respond with a JSON object in this format:
 
 {{
     "type": "PLUGIN",
@@ -305,7 +313,7 @@ When using these or any other actionVerbs, ensure ALL their required inputs (as 
         "id": "plugin-{{verb}}",
         "verb": "{{verb}}",
         "description": "A short description of the plugin",
-        "explanation": "A more complete description including inputs, process overview, and outputs than a software engineer can use to build the plugin",
+        "explanation": "A more complete plugin specification including purpose, inputs, process overview, and outputs than a software engineer can use to build the plugin",
         "inputDefinitions": [
             {{
                 "name": "{{input name}}",
@@ -383,17 +391,16 @@ Mission Context: {mission_context_str}
                     input_value_obj['valueType'] = PluginParameterType.ANY
                 if input_value_obj['valueType'] not in self.ALLOWED_VALUE_TYPES:
                     input_value_obj['valueType'] = PluginParameterType.ANY
+                
+                if 'inputName' in input_value_obj:
+                    input_value_obj['outputName'] = input_value_obj['inputName']
+                    del input_value_obj['inputName']
 
                 has_value = 'value' in input_value_obj
                 has_output_key = 'outputName' in input_value_obj
                 
                 if not (has_value ^ has_output_key): # Exactly one of 'value' or 'outputName' must be present
                     return f"Step {i+1} input '{input_name}' has neither a 'value' nor 'outputName' property. It must contain one or the other property with a string value."
-
-                # Ensure no other keys are present except 'value', 'outputName', 'valueType', and optional 'args'
-                # allowed_keys = {'value', 'outputName', 'valueType', 'args'}
-                # if not set(input_value_obj.keys()).issubset(allowed_keys):
-                #    return f"Step {i+1} input '{input_name}' contains unexpected keys. Allowed keys: {allowed_keys}"
 
             # Validate required inputs based on VERB_SCHEMAS
             if actionVerb in self.VERB_SCHEMAS:
@@ -479,13 +486,6 @@ Mission Context: {mission_context_str}
                 "error": str(e)
             }]
 
-    def auto_repair_plan(self, goal: str, available_plugins_str: str, mission_context_str: str, invalid_plan: list, validation_error: str, brain_token: Optional[str] = None) -> Optional[list]:
-        """
-        Ask the Brain to revise the invalid plan to correct the validation error.
-        If the error is due to an input not being produced by any previous step, explicitly inform the Brain of this fact in the prompt.
-        """
-        logger.info('Auto-repairing plan...')
-
     def get_internal_verb_requirements_for_prompt(self) -> str:
         """Generates a string listing required inputs for verbs defined in VERB_SCHEMAS."""
         lines = []
@@ -541,7 +541,6 @@ Mission Context: {mission_context_str}
                     f"Please correct the structure for this input in the revised plan."
                 )
 
-
         repair_prompt = f"""
 You previously generated this plan:
 
@@ -552,7 +551,7 @@ However, the following validation error was found:
 
 The plan was intended to address the goal: '{goal}'
 
-Revise the plan to correct the error. Only return the corrected plan as a JSON array, with no explanations or extra text.
+Revise the plan to correct the error. Only return the corrected plan in JSON, with no explanations or extra text.
 """
         response = self.query_brain(repair_prompt, brain_token)
         if not response:
@@ -567,6 +566,7 @@ Revise the plan to correct the error. Only return the corrected plan as a JSON a
                 return None
         except Exception as e:
             logger.error(f"Failed to parse auto-repaired plan: {e}")
+            logger.error(f"Failing auto-repair Response: {response}")
             return None
 
     def execute(self, inputs_map: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -594,16 +594,12 @@ Revise the plan to correct the error. Only return the corrected plan as a JSON a
                         available_plugins_str = "\n".join([f"- {p}" for p in input_value]) if input_value else "No plugins listed."
                     elif isinstance(input_value, str) and input_value.strip():
                         available_plugins_str = input_value
-                    logger.info(f"Found available_plugins: {available_plugins_str}")
                 elif key == 'mission_context':
                     if isinstance(input_value, str) and input_value.strip():
                         mission_context_str = input_value
                     logger.info(f"Found mission_context: {mission_context_str}")
                 elif key in ['__brain_auth_token', 'token']: # Keep existing token logic
                     brain_token = str(input_value) if input_value is not None else None
-
-            logger.info(f"Final available_plugins_str: {available_plugins_str}")
-            logger.info(f"Final mission_context_str: {mission_context_str}")
 
             if not goal:
                 logger.error("No goal provided to ACCOMPLISH plugin")
@@ -623,8 +619,6 @@ Revise the plan to correct the error. Only return the corrected plan as a JSON a
                 if attempt > 0: # This is a retry attempt
                     logger.info(f"Retrying Brain query for goal '{goal}' due to previous single-step response. Attempt {attempt}.")
                     current_prompt = f"The previous response was a single step, which is insufficient. Please provide a complete plan, a direct answer, or a plugin suggestion for the goal: '{goal}'.\n\nOriginal prompt context:\n{current_prompt}"
-                else:
-                    logger.info(f"Generated prompt for Brain (attempt {attempt+1}): {current_prompt}")
                 response = self.query_brain(current_prompt, brain_token)
 
                 if not response:

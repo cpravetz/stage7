@@ -1,20 +1,12 @@
 import { PluginDefinition, PluginManifest, PluginRepositoryType, PluginLocator, compareVersions } from '@cktmcs/shared'; // Added compareVersions
-// import express from 'express'; // Removed unused import
 import path from 'path';
 import os from 'os';
 import { promisify } from 'util';
 import { exec } from 'child_process';
 import fs from 'fs/promises';
-// import { fileURLToPath } from 'url'; // Removed unused import
-// import { dirname } from 'path'; // Removed unused import
 import { PluginMarketplace } from '@cktmcs/marketplace';
 
 const execAsync = promisify(exec);
-
-// Assuming __dirname is services/capabilitiesmanager/src/utils/
-// For inline plugins typically in services/capabilitiesmanager/src/plugins/
-// const INLINE_PLUGIN_BASE_DIR_FROM_UTILS = path.resolve(__dirname, '..', 'plugins'); // Removed unused constant
-
 
 export class PluginRegistry {
     private cache: Map<string, PluginRepositoryType>;
@@ -52,6 +44,10 @@ export class PluginRegistry {
         // Set currentDir to be 'services/capabilitiesmanager/src'
         // so inline plugins are resolved from 'services/capabilitiesmanager/src/plugins/{verb}'
         this.currentDir = path.resolve(__dirname, '..');
+        // Defensive: ensure pluginMarketplace is initialized before use
+        if (!this.pluginMarketplace || typeof this.pluginMarketplace.getRepositories !== 'function') {
+            throw new Error('PluginRegistry: pluginMarketplace is not initialized or invalid.');
+        }
         this.initialize();
     }
 
@@ -127,6 +123,9 @@ export class PluginRegistry {
         try {
             await this.refreshCache();
             console.log("PluginRegistry initialized and cache populated.");
+            // Log all registered verbs and plugin ids for diagnosis
+            console.log('PluginRegistry: Registered verbs after cache refresh:', Array.from(this.verbIndex.keys()));
+            console.log('PluginRegistry: Registered plugin ids after cache refresh:', Array.from(this.cache.keys()));
         } catch (error) {
             console.error("PluginRegistry.initialize: Failed to refresh plugin cache during initialization", error);
             // Decide if we should throw or continue with an empty/partially initialized registry
@@ -147,7 +146,12 @@ export class PluginRegistry {
         }
     }
 
-    async fetchOneByVerb(verb: string, version?: string): Promise<PluginManifest | undefined> { // Added version parameter
+    async fetchOneByVerb(verb: string, version?: string): Promise<PluginManifest | undefined> {
+        if (!this.pluginMarketplace || typeof this.pluginMarketplace.fetchOneByVerb !== 'function') {
+            console.error('PluginRegistry: pluginMarketplace is not initialized or fetchOneByVerb is not available.');
+            return undefined;
+        }
+        console.log('PluginRegistry.fetchOneByVerb called for verb:', verb);
         try {
             if (this.verbIndex.has(verb)) {
                 const id = this.verbIndex.get(verb);
@@ -261,18 +265,18 @@ export class PluginRegistry {
      * Refresh the plugin cache from all repositories
      */
     private async refreshCache(): Promise<void> {
+        if (!this.pluginMarketplace || typeof this.pluginMarketplace.getRepositories !== 'function') {
+            throw new Error('PluginRegistry: pluginMarketplace is not initialized or invalid in refreshCache.');
+        }
         try {
             console.log('Refreshing plugin cache...');
             this.cache.clear();
             this.verbIndex.clear();
-            
             const repositories = this.pluginMarketplace.getRepositories();
-            
             for (const [repoType, repository] of repositories.entries()) {
                 try {
                     console.log(`Loading plugins from ${repoType} repository...`);
                     const plugins = await repository.list(); // Lists PluginLocators
-
                     for (const locator of plugins) {
                         try {
                             // Fetch the default/latest manifest for caching basic info
@@ -289,13 +293,11 @@ export class PluginRegistry {
                             console.error(`Failed to fetch manifest for plugin ${locator.id} from ${repoType} repository during cache refresh:`, pluginError);
                         }
                     }
-
                     console.log(`Loaded ${plugins.length} plugins from ${repoType} repository`);
                 } catch (repoError) {
                     console.error(`Failed to list plugins from ${repoType} repository:`, repoError);
                 }
             }
-            
             console.log(`Plugin cache refreshed. Total plugins: ${this.cache.size}`);
         } catch (error) {
             console.error('Failed to refresh plugin cache:', error);
