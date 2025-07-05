@@ -26,7 +26,6 @@ export class StateManager {
                 conversation: agent.conversation,
                 missionContext: agent.missionContext
             });
-            console.log('Agent state saved successfully.');
         } catch (error) {
             console.error('Error saving agent state:', error instanceof Error ? error.message : error);
         }

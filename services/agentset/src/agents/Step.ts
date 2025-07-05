@@ -91,7 +91,7 @@ export class Step {
             actionVerb: this.actionVerb,
             //inputs: MapSerializer.transformForSerialization(this.inputs),
             inputReferences: MapSerializer.transformForSerialization(this.inputReferences),
-            dependencies: MapSerializer.transformForSerialization(this.dependencies),
+            dependencies: this.dependencies,
             status: this.status,
             description: this.description,
             recommendedRole: this.recommendedRole,
@@ -316,6 +316,7 @@ export class Step {
                 actionVerb: this.actionVerb,
                 status: this.status,
                 result: result,
+                dependencies: this.dependencies,
                 timestamp: new Date().toISOString()
             });
 
@@ -866,23 +867,33 @@ export class Step {
             }
 
             const dependencies: StepDependency[] = [];
-            // New format: dependencies is an array of objects mapping outputName to step number
-            if (task.dependencies && Array.isArray(task.dependencies)) {
-                task.dependencies.forEach((dep: any) => {
-                    // dep is { outputName: stepNo }
-                    const outputName = Object.keys(dep)[0];
-                    const sourceStepNo = dep[outputName];
+            if (task.dependencies && typeof task.dependencies === 'object' && !Array.isArray(task.dependencies)) {
+                Object.entries(task.dependencies).forEach(([dependencyOutputName, sourceStepNo]) => {
+                    if (typeof sourceStepNo !== 'number' || sourceStepNo < 1) {
+                        throw new Error(`[createFromPlan] Invalid step number for dependency '${dependencyOutputName}': ${sourceStepNo}`);
+                    }
                     const sourceStepId = stepNumberToUUID[sourceStepNo];
                     if (!sourceStepId) {
-                        throw new Error(`[createFromPlan] Cannot resolve dependency for step ${task.actionVerb} (stepNo ${startingStepNo + idx}): dep=${JSON.stringify(dep)}`);
+                        throw new Error(`[createFromPlan] Cannot resolve dependency for step ${task.actionVerb} (stepNo ${startingStepNo + idx}): outputName=${dependencyOutputName}, sourceStepNo=${sourceStepNo}`);
                     }
+
+                    // Find the corresponding inputName in inputReferences that expects this output.
+                    let dependencyInputName: string | undefined;
+                    for (const [inputName, inputRef] of inputReferences.entries()) {
+                        if (inputRef.outputName === dependencyOutputName) {
+                            dependencyInputName = inputName;
+                            break;
+                        }
+                    }
+
                     dependencies.push({
-                        inputName: outputName, // The input that will receive this output
+                        outputName: dependencyOutputName,
                         sourceStepId,
-                        outputName
+                        inputName: dependencyInputName || dependencyOutputName // Fallback to outputName if no explicit mapping found
                     });
                 });
             }
+
             // Validate DECIDE task inputs before creating the Step object
             if (task.actionVerb === 'DECIDE') {
                 const conditionInputRef = inputReferences.get('condition');
@@ -940,7 +951,6 @@ export class Step {
                 // The CapabilitiesManager will ultimately determine if a plugin verb is truly valid.
                 console.warn(`[Step.createFromPlan] Warning: actionVerb '${task.actionVerb}' is not a known control flow verb and does not strictly match typical plugin verb format (UPPER_SNAKE_CASE). It will be passed to CapabilitiesManager for resolution.`);
             }
-
 
             const step = new Step({
                 id: task.id!,

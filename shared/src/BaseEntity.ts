@@ -613,8 +613,6 @@ protected async cleanup() {
       const envPostOfficeUrl = process.env.POSTOFFICE_URL;
       let postOfficeUrl = envPostOfficeUrl || this.postOfficeUrl;
 
-      console.log(`Using PostOffice URL: ${postOfficeUrl}`);
-
       // Use authenticated API for HTTP communication
       const response = await this.authenticatedApi.post(`http://${postOfficeUrl}/message`, message);
       console.log(`Successfully sent message to ${recipient} via HTTP. Response status: ${response.status}`);
