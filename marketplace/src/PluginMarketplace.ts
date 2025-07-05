@@ -407,20 +407,15 @@ export class PluginMarketplace {
         }
         // Add internal verbs (hardcoded for now, could be made dynamic)
         lines.push('- DELEGATE: Create sub-agents with goals of their own.');
-        lines.push('- ACCOMPLISH - takes a specific goal and either achieves it or returns a plan to achieve it. (required input: goal)');
-        lines.push('- THINK - sends prompts to the chat function of the LLMs attached to the system in order to generate content from a conversation.(required input: prompt) (optional inputs: optimization (cost|accuracy|creativity|speed|continuity), ConversationType) accuracy is the default optimization');
-        lines.push('- GENERATE - uses LLM services to generate content from a prompt or other content. Services include image creation, audio transcription, image editing, etc. (required input: ConversationType) (optional inputs: modelName, optimization, prompt, file, audio, video, image...)');
-        lines.push('- FILE_OPS - provides services for file operations read, write, append (required inputs: path, operation, content)');
-        lines.push('- SEARCH - searches DuckDuckGo for a given term and returns a list of links (required input: searchTerm)');
-        lines.push('- SCRAPE - scrapes content from a given URL (required inputs: url, selector, attribute, limit)');
-        lines.push('- GET_USER_INPUT - requests input from the user (required inputs: question, answerType) (optional input: choices)');
-        lines.push('- DECIDE - Conditional branching based on a condition (required inputs: condition: {"inputName": "value"}, trueSteps[], falseSteps[])');
-        lines.push('- WHILE - Repeat steps while a condition is true (required inputs: condition: {"inputName": "value"}, steps[])');
-        lines.push('- UNTIL - Repeat steps until a condition becomes true (required inputs: condition: {"inputName": "value"}, steps[])');
-        lines.push('- SEQUENCE - Execute steps in strict sequential order / no concurrency (required inputs: steps[])');
-        lines.push('- TIMEOUT - Set a timeout for a group of steps (required inputs: timeout, steps[])');
-        lines.push('- REPEAT - Repeat steps a specific number of times (required inputs: count, steps[])');
-        lines.push('- FOREACH - Iterate over an array and execute steps for each item (required inputs: array, steps[plan])');
+        lines.push('- THINK: - sends prompts to the chat function of the LLMs attached to the system in order to generate content from a conversation.(required input: prompt) (optional inputs: optimization (cost|accuracy|creativity|speed|continuity), ConversationType) accuracy is the default optimization');
+        lines.push('- GENERATE: - uses LLM services to generate content from a prompt or other content. Services include image creation, audio transcription, image editing, etc. (required input: ConversationType) (optional inputs: modelName, optimization, prompt, file, audio, video, image...)');
+        lines.push('- DECIDE: - Conditional branching based on a condition (required inputs: condition: {"inputName": "value"}, trueSteps[], falseSteps[])');
+        lines.push('- WHILE: - Repeat steps while a condition is true (required inputs: condition: {"inputName": "value"}, steps[])');
+        lines.push('- UNTIL: - Repeat steps until a condition becomes true (required inputs: condition: {"inputName": "value"}, steps[])');
+        lines.push('- SEQUENCE: - Execute steps in strict sequential order / no concurrency (required inputs: steps[])');
+        lines.push('- TIMEOUT: - Set a timeout for a group of steps (required inputs: timeout, steps[])');
+        lines.push('- REPEAT: - Repeat steps a specific number of times (required inputs: count, steps[])');
+        lines.push('- FOREACH: - Iterate over an array and execute steps for each item (required inputs: array, steps[plan])');
 
         // Add more internal verbs as needed
         const result = lines.join('\n');

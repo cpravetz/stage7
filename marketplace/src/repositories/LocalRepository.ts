@@ -5,6 +5,8 @@ import path from 'path';
 export class LocalRepository implements PluginRepository {
     type: 'local' = 'local';
     private baseDir: string;
+    // Manifest path cache: id -> manifestPath, verb -> manifestPath
+    private manifestPathCache: Map<string, string> = new Map();
 
     constructor(config: RepositoryConfig) {
         this.baseDir = config.options?.localPath || path.join(process.cwd(), '/plugins');
@@ -12,17 +14,14 @@ export class LocalRepository implements PluginRepository {
 
     async store(manifest: PluginManifest): Promise<void> {
         const pluginDir = path.join(this.baseDir, manifest.verb);
-        
         try {
             // Create plugin directory
             await fs.mkdir(pluginDir, { recursive: true });
-    
             // Write manifest as stringified JSON
             await fs.writeFile(
                 path.join(pluginDir, 'manifest.json'),
                 JSON.stringify(manifest, null, 2)
             );
-    
             // Write plugin files if they exist
             if (manifest.entryPoint?.files) {
                 for (const [filename, content] of Object.entries(manifest.entryPoint.files)) {
@@ -33,6 +32,10 @@ export class LocalRepository implements PluginRepository {
                     await fs.writeFile(filePath, fileContent);
                 }
             }
+            // Update cache after storing
+            const manifestPath = path.join(pluginDir, 'manifest.json');
+            if (manifest.id) this.manifestPathCache.set(manifest.id, manifestPath);
+            if (manifest.verb) this.manifestPathCache.set(manifest.verb, manifestPath);
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             throw new Error(`Failed to publish plugin to local repository: ${errorMessage}`);
@@ -43,6 +46,22 @@ export class LocalRepository implements PluginRepository {
         if (!id) {
             console.log('LocalRepository.fetch: ID must be provided.');
             return undefined;
+        }
+        // Check cache first
+        if (this.manifestPathCache.has(id)) {
+            const cachedPath = this.manifestPathCache.get(id)!;
+            try {
+                const manifestContent = await fs.readFile(cachedPath, 'utf-8');
+                const manifest = JSON.parse(manifestContent) as PluginManifest;
+                // Defensive: check id matches
+                if (manifest.id === id) {
+                    console.log(`LocalRepository.fetch: Cache hit for id '${id}' at ${cachedPath}`);
+                    return manifest;
+                }
+            } catch (e) {
+                console.warn(`LocalRepository.fetch: Cache path for id '${id}' is invalid, will fall back.`, e);
+                this.manifestPathCache.delete(id);
+            }
         }
         try {
             let manifestPath: string;
@@ -79,7 +98,11 @@ export class LocalRepository implements PluginRepository {
                 }
             }
             const manifestContent = await fs.readFile(manifestPath, 'utf-8');
-            return JSON.parse(manifestContent) as PluginManifest;
+            const manifest = JSON.parse(manifestContent) as PluginManifest;
+            // Cache for future
+            if (manifest.id) this.manifestPathCache.set(manifest.id, manifestPath);
+            if (manifest.verb) this.manifestPathCache.set(manifest.verb, manifestPath);
+            return manifest;
         } catch (error) {
             if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
                 return undefined;
@@ -94,32 +117,41 @@ export class LocalRepository implements PluginRepository {
             console.log('LocalRepository.fetchByVerb: Verb must be provided.');
             return undefined;
         }
+        // Check cache first
+        if (this.manifestPathCache.has(verb)) {
+            const cachedPath = this.manifestPathCache.get(verb)!;
+            try {
+                const manifestContent = await fs.readFile(cachedPath, 'utf-8');
+                const manifest = JSON.parse(manifestContent) as PluginManifest;
+                if (manifest.verb === verb) {
+                    console.log(`LocalRepository.fetchByVerb: Cache hit for verb '${verb}' at ${cachedPath}`);
+                    return manifest;
+                }
+            } catch (e) {
+                console.warn(`LocalRepository.fetchByVerb: Cache path for verb '${verb}' is invalid, will fall back.`, e);
+                this.manifestPathCache.delete(verb);
+            }
+        }
         try {
-            // Assuming plugins are primarily identified by a directory matching their verb,
-            // and versions are subdirectories within that verb directory.
-            // e.g., {baseDir}/{verb}/{version}/manifest.json or {baseDir}/{verb}/manifest.json
             let manifestPath: string;
             const pluginDir = path.join(this.baseDir, verb);
-
             if (version) {
                 manifestPath = path.join(pluginDir, version, 'manifest.json');
             } else {
                 manifestPath = path.join(pluginDir, 'manifest.json');
             }
-            
-            const manifestContent = await fs.readFile(manifestPath, 'utf-8');
-            const manifest = JSON.parse(manifestContent) as PluginManifest;
-
-            // Additional check if the manifest's verb actually matches, as directory name might not be canonical.
-            if (manifest.verb !== verb) {
-                console.warn(`LocalRepository.fetchByVerb: Manifest verb '${manifest.verb}' does not match directory verb '${verb}'.`);
-                // Depending on strictness, could return undefined here. For now, returning the found manifest.
-            }
-            return manifest;
-        } catch (error) {
-            if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+            try {
+                const manifestContent = await fs.readFile(manifestPath, 'utf-8');
+                const manifest = JSON.parse(manifestContent) as PluginManifest;
+                if (manifest.verb !== verb) {
+                    console.warn(`LocalRepository.fetchByVerb: Manifest verb '${manifest.verb}' does not match directory verb '${verb}'.`);
+                }
+                // Cache for future
+                if (manifest.id) this.manifestPathCache.set(manifest.id, manifestPath);
+                if (manifest.verb) this.manifestPathCache.set(manifest.verb, manifestPath);
+                return manifest;
+            } catch (e) {
                 // Fallback for broader search if direct verb/version path fails
-                // This is simplistic and assumes any manifest with the verb is fine if no version specified.
                 if (!version) {
                     console.warn(`LocalRepository.fetchByVerb: Manifest not found at direct path for verb '${verb}'. Falling back to iterating directories.`);
                     const dirs = await fs.readdir(this.baseDir);
@@ -128,11 +160,18 @@ export class LocalRepository implements PluginRepository {
                         try {
                             const manifestData = JSON.parse(await fs.readFile(currentPath, 'utf-8')) as PluginManifest;
                             if (manifestData.verb === verb) {
-                                return manifestData; // Returns the first one found
+                                // Cache for future
+                                if (manifestData.id) this.manifestPathCache.set(manifestData.id, currentPath);
+                                if (manifestData.verb) this.manifestPathCache.set(manifestData.verb, currentPath);
+                                return manifestData;
                             }
                         } catch { continue; }
                     }
                 }
+                return undefined;
+            }
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
                 return undefined;
             }
             console.error(`LocalRepository.fetchByVerb: Error fetching plugin verb '${verb}'${version ? ` version '${version}'` : ''}:`, error);
@@ -142,13 +181,15 @@ export class LocalRepository implements PluginRepository {
 
     async delete(id: string): Promise<void> {
         const dirs = await fs.readdir(this.baseDir);
-        
         for (const dir of dirs) {
             const manifestPath = path.join(this.baseDir, dir, 'manifest.json');
             try {
                 const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf-8'));
                 if (manifest.id === id) {
                     await fs.rm(path.join(this.baseDir, dir), { recursive: true, force: true });
+                    // Remove from cache
+                    this.manifestPathCache.delete(id);
+                    if (manifest.verb) this.manifestPathCache.delete(manifest.verb);
                     return;
                 }
             } catch {
@@ -168,14 +209,27 @@ export class LocalRepository implements PluginRepository {
                     const manifestPath = path.join(this.baseDir, dir, 'manifest.json');
                     console.log('LocalRepo: Loading from ', manifestPath)
                     const manifestContent = await fs.readFile(manifestPath, 'utf-8');
-                    const manifest = JSON.parse(manifestContent);
+                    let manifest: any;
+                    try {
+                        manifest = JSON.parse(manifestContent);
+                    } catch (e) {
+                        console.log('Error loading from ', dir, 'Malformed manifest:', e);
+                        continue;
+                    }
+                    // Defensive: check required fields
+                    if (!manifest.id || !manifest.verb || !manifest.description || !manifest.repository ) {
+                        console.log('Error loading from ', dir, 'Manifest missing required fields');
+                        continue;
+                    }
+                    // Cache manifest path for both id and verb
+                    this.manifestPathCache.set(manifest.id, manifestPath);
+                    this.manifestPathCache.set(manifest.verb, manifestPath);
                     locators.push({
                         id: manifest.id,
                         verb: manifest.verb,
                         description: manifest.description,
                         repository: {
                             type: this.type,
-                            dependencies: manifest.repository.dependencies
                         }
                     });
                 } catch (error) {

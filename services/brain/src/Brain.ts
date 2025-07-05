@@ -464,25 +464,6 @@ export class Brain extends BaseEntity {
                 return;
             }
 
-            // Log details about each model for debugging
-            console.log('[Brain] Detailed performance data:');
-            for (const model of performanceData) {
-                console.log(`[Brain] Model: ${model.modelName}`);
-                for (const [conversationType, metrics] of Object.entries(model.metrics)) {
-                    console.log(`[Brain]   - Conversation type: ${conversationType}`);
-                    console.log(`[Brain]     - Usage count: ${metrics.usageCount}`);
-                    console.log(`[Brain]     - Success count: ${metrics.successCount}`);
-                    console.log(`[Brain]     - Failure count: ${metrics.failureCount}`);
-                    console.log(`[Brain]     - Success rate: ${metrics.successRate.toFixed(2)}`);
-                    console.log(`[Brain]     - Average latency: ${metrics.averageLatency.toFixed(2)}ms`);
-                    console.log(`[Brain]     - Average token count: ${metrics.averageTokenCount.toFixed(2)}`);
-                    console.log(`[Brain]     - Consecutive failures: ${metrics.consecutiveFailures}`);
-                    console.log(`[Brain]     - Blacklisted: ${metrics.blacklistedUntil ? `Yes, until ${new Date(metrics.blacklistedUntil).toLocaleString()}` : 'No'}`);
-                    console.log(`[Brain]     - Last used: ${new Date(metrics.lastUsed).toLocaleString()}`);
-                    console.log(`[Brain]     - Feedback scores:`, JSON.stringify(metrics.feedbackScores, null, 2));
-                }
-            }
-
             // Get rankings for different conversation types and metrics
             const conversationTypes = ['text/text', 'text/code', 'image/text'];
             const metrics = ['successRate', 'averageLatency', 'overall'];

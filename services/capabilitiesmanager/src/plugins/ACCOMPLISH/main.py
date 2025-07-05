@@ -270,7 +270,7 @@ Rules for creating a plan:
 4. Each input in the "inputs" object MUST be an object with either (a) a 'value' property that is a string constant OR (b) an 'outputName' property that exactly matches an outputName from a previous step. Include the expected or known input value type as valueType and include optional args if the consuming step will need them.
 5. List dependencies for each step as an object in the "dependencies" field, where property names are the output keys needed and values are the step numbers that provide the required output (e.g., {{"outputname": 1}}). There MUST be a dependency entry for every input that comes from a previous step output.
 6. Specify the outputs of each step in the "outputs" field. At least one output is mandatory.
-7. Prioritize Output Naming for Dependencies: When a step's output is intended to be used as an input for a subsequent step, ensure the name of that output precisely matches the inputName expected by the dependent step. Avoid generic output names if the output is specifically consumed by another step.
+7. Prioritize Output Naming for Dependencies: When a step's output is intended to be used as an input for a subsequent step, ensure the name of that output precisely matches the outputName expected by the dependent step. Avoid generic output names if the output is specifically consumed by another step.
 8. Aim for 5-10 steps in the plan, but more or fewer is acceptable, breaking down complex tasks as necessary.
 9. Be very thorough in your "description" fields. This is the only context or instruction the performer will have.
 10. Ensure the final step produces the desired outcome or mission of the goal.
@@ -293,8 +293,6 @@ Plugins are available to execute steps of the plan. Some have required inputs - 
 The `available_plugins_str` (provided by the system) lists these:
 {available_plugins_str}
 
-Additionally, for clarity, here are the known required inputs for some common verbs based on this plugin's internal definitions (ensure these are always provided for the respective verbs):
-{self.get_internal_verb_requirements_for_prompt()}
 When using these or any other actionVerbs, ensure ALL their required inputs (as specified in their definitions) are present.
 
 2. When the goal is discrete and can be accomplished most efficiently with a new plugin, define one. Creating a plugin should be avoided when the goal can be accomplished with a plan. If you determine a plugin is needed, respond with a JSON object in this format:
@@ -383,6 +381,10 @@ Mission Context: {mission_context_str}
                     input_value_obj['valueType'] = PluginParameterType.ANY
                 if input_value_obj['valueType'] not in self.ALLOWED_VALUE_TYPES:
                     input_value_obj['valueType'] = PluginParameterType.ANY
+                
+                if 'inputName' in input_value_obj:
+                    input_value_obj['outputName'] = input_value_obj['inputName']
+                    del input_value_obj['inputName']
 
                 has_value = 'value' in input_value_obj
                 has_output_key = 'outputName' in input_value_obj
