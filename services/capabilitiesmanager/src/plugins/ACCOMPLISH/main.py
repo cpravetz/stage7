@@ -275,21 +275,20 @@ Output Decision Hierarchy: Before generating any output, first evaluate the goal
 }}
 
 Rules for creating a plan:
-1. Number each step sequentially using the "number" field.
-2. Use specific, actionable verbs or phrases for each step using the "actionVerb" field (e.g., ANALYZE_CSV, ANALYZE_AUDIOFILE, PREDICT, WRITE_TEXT, WRITE_CODE, BOOK_A_CAR).
-3. The schema of each step MUST be exactly as defined above. Every field is mandatory, but the "inputs" field may be an empty object ({{}}).
-4. Each input in the "inputs" object MUST be an object with either (a) a 'value' property that is a string constant OR (b) an 'outputName' property that exactly matches an outputName from a previous step. You must specify one of these two. Include the expected or known input value type as valueType and include optional args if the consuming step will need them.
-5. The name of each property within the inputs object (e.g., myParameter) MUST exactly match the parameter name expected by the actionVerb of that step. If an actionVerb requires a single item from a list produced by a previous step, use the outputName to reference the full list, and use the args field (e.g., "args": {{"index": 0}} for the first item) to specify which element to extract. Only use args for extraction if the actionVerb and underlying runner explicitly support this mechanism.
-6. List dependencies for each step as an object in the "dependencies" field, where property names are the output keys needed and values are the step numbers that provide the required output (e.g., {{"outputname": 1}}). There MUST be a dependency entry for every input that comes from a previous step output.
-7. Specify the outputs of each step in the "outputs" field. At least one output is mandatory.
-8. Prioritize Output Naming for Dependencies: When a step's output is intended to be used as an input for a subsequent step, ensure the name of that output precisely matches the outputName expected by the dependent step. Avoid generic output names if the output is specifically consumed by another step.
-9. Aim for 5-10 steps in the plan, but more or fewer is acceptable, breaking down complex tasks as necessary.
-10. Be very thorough in your "description" fields. This is the only context or instruction the performer will have.
-11. Ensure the final step produces the desired outcome or mission of the goal.
-12. For each step, include a "recommendedRole" field with one of the available agent roles that would be best suited for the task.
-13. Create at least one output for every step.
-14. When using actionVerbs, ensure the required inputs are there and produced by preceeding steps using the correct name.  For example, a DELEGATE step should have a subAgentGoal defined as a goal and either provided as a constant in the step or defined by a preceeding step as an output named subAgenGoal.
-15. DO NOT RETURN THE SCHEMA - JUST THE PLAN!
+- Number each step sequentially using the "number" field.
+- Use specific, actionable verbs or phrases for each step using the "actionVerb" field (e.g., ANALYZE_CSV, ANALYZE_AUDIOFILE, PREDICT, WRITE_TEXT, WRITE_CODE, BOOK_A_CAR).
+- The schema of each step MUST be exactly as defined above. Every field is mandatory, but the "inputs" field may be an empty object ({{}}).
+- Each input in the "inputs" object MUST be an object with either (a) a 'value' property that is a string constant OR (b) an 'outputName' property that exactly matches an outputName from a previous step. You must specify one of these two. Include the expected or known input value type as valueType and include optional args if the consuming step will need them.
+- The name of each property within the inputs object (e.g., myParameter) MUST exactly match the parameter name expected by the actionVerb of that step. If an actionVerb requires a single item from a list produced by a previous step, use the outputName to reference the full list, and use the args field (e.g., "args": {{"index": 0}} for the first item) to specify which element to extract. Only use args for extraction if the actionVerb and underlying runner explicitly support this mechanism.
+- List dependencies for each step as an object in the "dependencies" field, where property names are the output keys needed and values are the step numbers that provide the required output (e.g., {{"outputname": 1}}). There MUST be a dependency entry for every input that comes from a previous step output.
+- Specify the outputs of each step in the "outputs" field. At least one output is mandatory for every step.
+- Prioritize Output Naming for Dependencies: When a step's output is intended to be used as an input for a subsequent step, ensure the name of that output precisely matches the outputName expected by the dependent step. Avoid generic output names if the output is specifically consumed by another step.
+- Aim for 5-10 steps in the plan, but more or fewer is acceptable, breaking down complex tasks as necessary.
+- Be very thorough in your "description" fields. This is the only context or instruction the performer will have.
+- Ensure the final step produces the desired outcome or mission of the goal.
+- For each step, include a "recommendedRole" field with one of the available agent roles that would be best suited for the task.
+- When using actionVerbs, ensure the required inputs are there and produced by preceeding steps using the correct name.  For example, a DELEGATE step should have a subAgentGoal defined as a goal and either provided as a constant in the step or defined by a preceeding step as an output named subAgenGoal.
+- DO NOT RETURN THE SCHEMA - JUST THE PLAN!
 
 Available Agent Roles:
 - coordinator: Coordinates activities of other agents, manages task allocation, and ensures mission success. Good for planning, delegation, and monitoring.
@@ -299,15 +298,14 @@ Available Agent Roles:
 - executor: Implements plans and executes tasks with precision and reliability. Good for task execution and process following.
 - domain_expert: Provides specialized knowledge and expertise in a specific domain. Good for technical analysis and expert advice.
 
-IMPORTANT: Your response MUST be a valid JSON object with no additional text or formatting. The JSON must start with {{ and end with }} and must include one of the three types: "DIRECT_ANSWER", "PLAN", or "PLUGIN".
-
-Plugins are available to execute steps of the plan. Some have required inputs - required properties for the inputs object.
-The `available_plugins_str` (provided by the system) lists these:
+Plugins are available to execute steps of the plan. Some have required inputs. The `available_plugins_str` (provided by the system) lists these:
 {available_plugins_str}
 
-When using these or any other actionVerbs, ensure ALL their required inputs (as specified in their definitions) are present.
+When using actionVerbs, ensure ALL their required inputs are present in the step's inputs.
 
-2. When the goal is discrete and can be accomplished most efficiently with a new plugin, define one. Creating a plugin should be avoided when the goal can be accomplished with a plan. If you determine a plugin is needed, respond with a JSON object in this format:
+2. When the goal is discrete and will require new functionality to be accomplished, define a new plugin. 
+Creating a plugin should be avoided when the goal can be accomplished with a plan.
+If you determine a plugin is needed, respond with a JSON object in this format:
 
 {{
     "type": "PLUGIN",
@@ -315,7 +313,7 @@ When using these or any other actionVerbs, ensure ALL their required inputs (as 
         "id": "plugin-{{verb}}",
         "verb": "{{verb}}",
         "description": "A short description of the plugin",
-        "explanation": "A more complete description including inputs, process overview, and outputs than a software engineer can use to build the plugin",
+        "explanation": "A more complete plugin specification including purpose, inputs, process overview, and outputs than a software engineer can use to build the plugin",
         "inputDefinitions": [
             {{
                 "name": "{{input name}}",

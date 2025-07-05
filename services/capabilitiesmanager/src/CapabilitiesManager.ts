@@ -324,7 +324,7 @@ export class CapabilitiesManager extends BaseEntity {
     private async executeActionVerb(req: express.Request, res: express.Response) {
         const trace_id = (req as any).trace_id || uuidv4();
         const source_component = "CapabilitiesManager.executeActionVerb";
-        const step = { ...req.body, inputValues: MapSerializer.transformFromSerialization(req.body.inputValues) } as Step;
+        const step = { ...req.body, inputValues: MapSerializer.transformFromSerialization(req.body.inputValues || {}) } as Step;
 
         if (!step.actionVerb || typeof step.actionVerb !== 'string') {
             const sError = generateStructuredError({
@@ -339,6 +339,12 @@ export class CapabilitiesManager extends BaseEntity {
         }
 
         try {
+            // Redirect 'ACCOMPLISH' to executeAccomplishPlugin
+            if (step.actionVerb === 'ACCOMPLISH' && step.inputValues) {
+                const accomplishResultArray = await this.executeAccomplishPlugin(step.inputValues.get('goal')?.value || '', 'EXECUTE', trace_id);
+                res.status(200).send(MapSerializer.transformForSerialization(accomplishResultArray));
+                return;
+            }
             // Query PluginRegistry for the handler for this actionVerb
             // The handlerResult.handler will be a PluginManifest (or DefinitionManifest)
             const handlerResult = await this.getHandlerForActionVerb(step.actionVerb, trace_id);
@@ -403,8 +409,6 @@ export class CapabilitiesManager extends BaseEntity {
                 }
             }
 
-            // If no specific handler found via PluginRegistry, or unknown type, fall back to ACCOMPLISH/Brain
-            this.logPluginLookupFailure(step.actionVerb, trace_id, `No handler found for actionVerb '${step.actionVerb}'. Invoking ACCOMPLISH/Brain for reasoning.`);
             const cachedPlanArray = await this.checkCachedPlan(step.actionVerb);
             if (cachedPlanArray && cachedPlanArray.length > 0) {
                 res.status(200).send(MapSerializer.transformForSerialization(cachedPlanArray));
@@ -413,8 +417,6 @@ export class CapabilitiesManager extends BaseEntity {
             const resultUnknownVerb = await this.handleUnknownVerb(step, trace_id);
             res.status(200).send(MapSerializer.transformForSerialization(resultUnknownVerb));
         } catch (error: any) {
-            // Patch: On handler fetch error, treat as missing and fall back to ACCOMPLISH/Brain
-            this.logPluginLookupFailure(step.actionVerb, trace_id, `Handler lookup failed for actionVerb '${step.actionVerb}': ${error.message}. Invoking ACCOMPLISH/Brain for reasoning.`);
             const cachedPlanArray = await this.checkCachedPlan(step.actionVerb);
             if (cachedPlanArray && cachedPlanArray.length > 0) {
                 res.status(200).send(MapSerializer.transformForSerialization(cachedPlanArray));
@@ -451,16 +453,6 @@ export class CapabilitiesManager extends BaseEntity {
         } catch (error: any) {
             console.error(`[${trace_id}] ${source_component}: Error resolving handler for actionVerb '${actionVerb}':`, error.message);
             return null;
-        }
-    }
-
-    // Helper to log plugin lookup failures with cooldown
-    private logPluginLookupFailure(actionVerb: string, trace_id: string, message: string) {
-        const now = Date.now();
-        const lastFailure = this.failedPluginLookups.get(actionVerb) || 0;
-        if (now - lastFailure > CapabilitiesManager.PLUGIN_LOOKUP_COOLDOWN_MS) {
-            console.warn(`[${trace_id}] ${message}`);
-            this.failedPluginLookups.set(actionVerb, now);
         }
     }
 
@@ -1054,6 +1046,7 @@ export class CapabilitiesManager extends BaseEntity {
     }
 
     private async executeAccomplishPlugin(goal: string, verbToAvoid: string, trace_id: string): Promise<PluginOutput[]> {
+        console.log('In executeAccomplishPlugin');
         const source_component = "CapabilitiesManager.executeAccomplishPlugin";
         let availablePluginsStr = ""; // Initialize
         try {
