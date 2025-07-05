@@ -31,13 +31,13 @@ export class Brain extends BaseEntity {
         super('Brain', 'Brain', `brain`, process.env.PORT || '5020');
         this.modelManager = new ModelManager();
 
-        // Clear any existing blacklists to start with a clean slate
-        //this.modelManager.resetAllBlacklists();
-
         this.init();
 
-        // Start periodic sync of performance data to Librarian
-        this.setupPerformanceDataSync();
+        // On startup, restore metrics from Librarian
+        this.restorePerformanceDataFromLibrarian().then(() => {
+            // Start periodic sync of performance data to Librarian
+            this.setupPerformanceDataSync();
+        });
     }
 
     init() {
@@ -505,6 +505,8 @@ export class Brain extends BaseEntity {
                     storageType: 'mongo',
                     collection: 'mcsdata'
                 });
+                // After successful save, update in-memory tracker with latest data
+                this.modelManager.performanceTracker.setAllPerformanceData(performanceData);
             } catch (apiError) {
                 console.error('[Brain] API error syncing performance data to Librarian:',
                     apiError instanceof Error ? apiError.message : String(apiError));
@@ -523,7 +525,41 @@ export class Brain extends BaseEntity {
             console.log('[Brain] Will retry syncing performance data on next scheduled interval');
         }
     }
+
+    /**
+     * Restore performance metrics from Librarian on startup
+     */
+    private async restorePerformanceDataFromLibrarian() {
+        await this.discoverLibrarianService();
+        if (!this.librarianUrl) {
+            console.error('[Brain] Cannot restore performance data: Librarian service not found');
+            return;
+        }
+        try {
+            console.log('[Brain] Attempting to restore model performance data from Librarian...');
+            const response = await this.authenticatedApi.get(`http://${this.librarianUrl}/loadData/model-performance-data`);
+            if (response && response.data && response.data.data && response.data.data.performanceData) {
+                const perfData = response.data.data.performanceData;
+                if (Array.isArray(perfData)) {
+                    this.modelManager.performanceTracker.setAllPerformanceData(perfData);
+                    console.log(`[Brain] Restored ${perfData.length} model performance records from Librarian`);
+                } else {
+                    console.warn('[Brain] No valid performance data found in Librarian response');
+                }
+            } else {
+                console.warn('[Brain] No performance data found in Librarian');
+            }
+        } catch (err) {
+            console.error('[Brain] Error restoring performance data from Librarian:', err instanceof Error ? err.message : String(err));
+        }
+    }
 }
 
+// ---
+// To debug ACCOMPLISH registration, add logging in your registry/manager code:
+// Example:
+// console.log('Registered verbs:', Object.keys(localRegistry));
+// console.log('CapabilitiesManager verbs:', capabilitiesManager.listVerbs());
+// ---
 // Create an instance of the Brain
 new Brain();

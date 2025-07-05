@@ -1,5 +1,7 @@
 import { LLMConversationType } from '../interfaces/baseInterface';
 import { analyzeError } from '@cktmcs/errorhandler';
+import fs from 'fs';
+import path from 'path';
 
 /**
  * Performance metrics for a model
@@ -73,8 +75,8 @@ export interface FeedbackData {
 export class ModelPerformanceTracker {
   private performanceData: Map<string, ModelPerformanceData> = new Map();
   private requestHistory: Map<string, RequestData> = new Map();
-
   private saveInterval: NodeJS.Timeout | null = null;
+  private static PERSIST_PATH = path.resolve(process.cwd(), 'performance-metrics.json');
 
   constructor() {
     this.loadPerformanceData();
@@ -107,15 +109,19 @@ export class ModelPerformanceTracker {
   }
 
   /**
-   * Load performance data from memory
-   * This method initializes the performance data with an empty map
-   * The Brain service will handle loading data from Librarian when needed
+   * Load performance data from disk if available
    */
   private async loadPerformanceData(): Promise<void> {
     try {
-      // Initialize with empty data
-      this.performanceData = new Map();
-      console.log('[PerformanceTracker] Initialized with empty performance data');
+      if (fs.existsSync(ModelPerformanceTracker.PERSIST_PATH)) {
+        const raw = fs.readFileSync(ModelPerformanceTracker.PERSIST_PATH, 'utf-8');
+        const arr: ModelPerformanceData[] = JSON.parse(raw);
+        this.performanceData = new Map(arr.map(d => [d.modelName, d]));
+        console.log(`[PerformanceTracker] Loaded performance data from disk: ${arr.length} models`);
+      } else {
+        this.performanceData = new Map();
+        console.log('[PerformanceTracker] Initialized with empty performance data');
+      }
     } catch (error) {
       console.error('Error initializing performance data:', error);
       analyzeError(error as Error);
@@ -124,15 +130,16 @@ export class ModelPerformanceTracker {
   }
 
   /**
-   * Save performance data
-   * This is a placeholder method that doesn't actually save to disk
-   * The Brain service will handle saving to Librarian
-   * @public - This method is public so it can be called from outside
+   * Save performance data to disk
    */
   async savePerformanceData(): Promise<void> {
-    // This is now a no-op method since saving is handled by the Brain service
-    // which calls getAllPerformanceData() and sends it to Librarian
-    console.log('[PerformanceTracker] savePerformanceData called - data will be synced by Brain service');
+    try {
+      const arr = Array.from(this.performanceData.values());
+      fs.writeFileSync(ModelPerformanceTracker.PERSIST_PATH, JSON.stringify(arr, null, 2), 'utf-8');
+      console.log(`[PerformanceTracker] Saved performance data to disk: ${arr.length} models`);
+    } catch (err) {
+      console.error('[PerformanceTracker] Error saving performance data:', err);
+    }
     return Promise.resolve();
   }
 
@@ -271,6 +278,9 @@ export class ModelPerformanceTracker {
       const oldestKey = Array.from(this.requestHistory.keys())[0];
       this.requestHistory.delete(oldestKey);
     }
+
+    // Save after every response
+    this.savePerformanceData().catch(e => console.error('[PerformanceTracker] Error saving after response:', e));
   }
 
   /**
@@ -559,7 +569,6 @@ export class ModelPerformanceTracker {
     modelData.lastUpdated = new Date().toISOString();
 
     // Save performance data
-    console.log(`[PerformanceTracker] Saving performance data after feedback update for ${modelName}`);
     this.savePerformanceData().catch(error => {
       console.error('[PerformanceTracker] Error saving performance data after feedback update:', error);
     });
@@ -830,4 +839,32 @@ export class ModelPerformanceTracker {
 
     return models;
   }
+
+  /**
+   * Set all performance data (used for restoring from Librarian)
+   */
+  setAllPerformanceData(perfData: ModelPerformanceData[]): void {
+    if (Array.isArray(perfData)) {
+      this.performanceData = new Map(perfData.map(d => [d.modelName, d]));
+      console.log(`[PerformanceTracker] setAllPerformanceData: loaded ${perfData.length} models`);
+    } else {
+      console.warn('[PerformanceTracker] setAllPerformanceData: input is not an array');
+    }
+  }
 }
+
+// --- ACCOMPLISH handler/plugin defensive check (add to your handler/plugin code) ---
+// Example:
+// const handler = getHandlerForActionVerb('ACCOMPLISH');
+// if (!handler) {
+//   console.error('No handler found for ACCOMPLISH');
+//   // handle error or fallback
+// } else if (typeof handler.fetchOneByVerb !== 'function') {
+//   console.error('Handler for ACCOMPLISH missing fetchOneByVerb');
+//   // handle error or fallback
+// } else {
+//   handler.fetchOneByVerb(...);
+// }
+//
+// Repeat similar checks for getAvailablePluginsStr and other methods.
+// Ensure ACCOMPLISH plugin/handler is registered and ACCOMPLISH data is seeded in Librarian.

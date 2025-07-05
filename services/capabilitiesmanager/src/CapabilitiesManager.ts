@@ -55,6 +55,7 @@ export class CapabilitiesManager extends BaseEntity {
         super('CapabilitiesManager', 'CapabilitiesManager', `capabilitiesmanager`, process.env.PORT || '5060');
         const trace_id = `${this.serviceId}-constructor-${uuidv4().substring(0,8)}`;
         // Retry logic for initialization
+        this.pluginRegistry = new PluginRegistry(); 
         const source_component = "CapabilitiesManager.constructor";
         let attempts = 0;
         const maxAttempts = 3;

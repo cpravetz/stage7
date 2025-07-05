@@ -264,20 +264,28 @@ DO NOT include any schemas, explanations, markdown formatting, or additional tex
 
 
 Rules for creating a plan:
-1. Number each step sequentially using the "number" field.
-2. Use specific, actionable verbs or phrases for each step using the "actionVerb" field (e.g., ANALYZE_CSV, ANALYZE_AUDIOFILE, PREDICT, WRITE_TEXT, WRITE_CODE, BOOK_A_CAR).
-3. The schema of each step MUST be exactly as defined above. Every field is mandatory, but the "inputs" field may be an empty object ({{}}).
-4. Each input in the "inputs" object MUST be an object with either (a) a 'value' property that is a string constant OR (b) an 'outputName' property that exactly matches an outputName from a previous step. Include the expected or known input value type as valueType and include optional args if the consuming step will need them.
-5. List dependencies for each step as an object in the "dependencies" field, where property names are the output keys needed and values are the step numbers that provide the required output (e.g., {{"outputname": 1}}). There MUST be a dependency entry for every input that comes from a previous step output.
-6. Specify the outputs of each step in the "outputs" field. At least one output is mandatory.
-7. Prioritize Output Naming for Dependencies: When a step's output is intended to be used as an input for a subsequent step, ensure the name of that output precisely matches the outputName expected by the dependent step. Avoid generic output names if the output is specifically consumed by another step.
-8. Aim for 5-10 steps in the plan, but more or fewer is acceptable, breaking down complex tasks as necessary.
-9. Be very thorough in your "description" fields. This is the only context or instruction the performer will have.
-10. Ensure the final step produces the desired outcome or mission of the goal.
-11. For each step, include a "recommendedRole" field with one of the available agent roles that would be best suited for the task.
-12. Create at least one output for every step.
-13. When using actionVerbs, ensure the required inputs are there and produced by preceeding steps using the correct name.  For example, a DELEGATE step should have a subAgentGoal defined as a goal and either provided as a constant in the step or defined by a preceeding step as an output named subAgenGoal.
-14. DO NOT RETURN THE SCHEMA - JUST THE PLAN!
+1. Output Decision Hierarchy: Before generating any output, first evaluate the goal:
+
+    DIRECT_ANSWER: If you have all the necessary information and can fully and completely resolve the goal directly, provide a DIRECT_ANSWER.
+
+    PLUGIN: If the goal is discrete, well-defined, and can be accomplished most efficiently with a new, single-purpose function not currently available, define a PLUGIN. Avoid creating a plugin if a plan is more suitable or efficient.
+
+    PLAN: Only if neither a DIRECT_ANSWER nor a PLUGIN is the most appropriate or efficient way to achieve the goal, should you generate a PLAN consisting of sub-divided steps.
+2. Number each step sequentially using the "number" field.
+3. Use specific, actionable verbs or phrases for each step using the "actionVerb" field (e.g., ANALYZE_CSV, ANALYZE_AUDIOFILE, PREDICT, WRITE_TEXT, WRITE_CODE, BOOK_A_CAR).
+4. The schema of each step MUST be exactly as defined above. Every field is mandatory, but the "inputs" field may be an empty object ({{}}).
+5. Each input in the "inputs" object MUST be an object with either (a) a 'value' property that is a string constant OR (b) an 'outputName' property that exactly matches an outputName from a previous step. You must specify one of these two. Include the expected or known input value type as valueType and include optional args if the consuming step will need them.
+6. List dependencies for each step as an object in the "dependencies" field, where property names are the output keys needed and values are the step numbers that provide the required output (e.g., {{"outputname": 1}}). There MUST be a dependency entry for every input that comes from a previous step output.
+7. Specify the outputs of each step in the "outputs" field. At least one output is mandatory.
+8. Prioritize Output Naming for Dependencies: When a step's output is intended to be used as an input for a subsequent step, ensure the name of that output precisely matches the outputName expected by the dependent step. Avoid generic output names if the output is specifically consumed by another step.
+9. Aim for 5-10 steps in the plan, but more or fewer is acceptable, breaking down complex tasks as necessary.
+10. Be very thorough in your "description" fields. This is the only context or instruction the performer will have.
+11. Ensure the final step produces the desired outcome or mission of the goal.
+12. For each step, include a "recommendedRole" field with one of the available agent roles that would be best suited for the task.
+13. Create at least one output for every step.
+14. When using actionVerbs, ensure the required inputs are there and produced by preceeding steps using the correct name.  For example, a DELEGATE step should have a subAgentGoal defined as a goal and either provided as a constant in the step or defined by a preceeding step as an output named subAgenGoal.
+15. DO NOT RETURN THE SCHEMA - JUST THE PLAN!
+16. The name of each property within the inputs object (e.g., myParameter) MUST exactly match the parameter name expected by the actionVerb of that step. If an actionVerb requires a single item from a list produced by a previous step, use the outputName to reference the full list, and use the args field (e.g., "args": {"index": 0} for the first item) to specify which element to extract. Only use args for extraction if the actionVerb and underlying runner explicitly support this mechanism.
 
 Available Agent Roles:
 - coordinator: Coordinates activities of other agents, manages task allocation, and ensures mission success. Good for planning, delegation, and monitoring.
