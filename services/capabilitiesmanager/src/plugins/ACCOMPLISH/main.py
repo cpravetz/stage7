@@ -162,6 +162,9 @@ class AccomplishPlugin:
 
     def generate_prompt(self, goal: str, available_plugins_str: str, mission_context_str: str) -> str:
         """Generate the prompt for the Brain service"""
+        # Log the received available_plugins_str for debugging
+        logger.info(f"[ACCOMPLISH] Received available_plugins_str: {repr(available_plugins_str)}")
+        logger.info(f"[ACCOMPLISH] Received mission_context_str: {repr(mission_context_str)}")
         prompt = f"""
 Your task is to decide on the best way to to achieve the following goal: '{goal}' and provide a response in one of the JSON formats below.
 
@@ -285,7 +288,7 @@ Rules for creating a plan:
 13. Create at least one output for every step.
 14. When using actionVerbs, ensure the required inputs are there and produced by preceeding steps using the correct name.  For example, a DELEGATE step should have a subAgentGoal defined as a goal and either provided as a constant in the step or defined by a preceeding step as an output named subAgenGoal.
 15. DO NOT RETURN THE SCHEMA - JUST THE PLAN!
-16. The name of each property within the inputs object (e.g., myParameter) MUST exactly match the parameter name expected by the actionVerb of that step. If an actionVerb requires a single item from a list produced by a previous step, use the outputName to reference the full list, and use the args field (e.g., "args": {"index": 0} for the first item) to specify which element to extract. Only use args for extraction if the actionVerb and underlying runner explicitly support this mechanism.
+16. The name of each property within the inputs object (e.g., myParameter) MUST exactly match the parameter name expected by the actionVerb of that step. If an actionVerb requires a single item from a list produced by a previous step, use the outputName to reference the full list, and use the args field (e.g., "args": {{"index": 0}} for the first item) to specify which element to extract. Only use args for extraction if the actionVerb and underlying runner explicitly support this mechanism.
 
 Available Agent Roles:
 - coordinator: Coordinates activities of other agents, manages task allocation, and ensures mission success. Good for planning, delegation, and monitoring.
@@ -604,16 +607,12 @@ Revise the plan to correct the error. Only return the corrected plan as a JSON a
                         available_plugins_str = "\n".join([f"- {p}" for p in input_value]) if input_value else "No plugins listed."
                     elif isinstance(input_value, str) and input_value.strip():
                         available_plugins_str = input_value
-                    logger.info(f"Found available_plugins: {available_plugins_str}")
                 elif key == 'mission_context':
                     if isinstance(input_value, str) and input_value.strip():
                         mission_context_str = input_value
                     logger.info(f"Found mission_context: {mission_context_str}")
                 elif key in ['__brain_auth_token', 'token']: # Keep existing token logic
                     brain_token = str(input_value) if input_value is not None else None
-
-            logger.info(f"Final available_plugins_str: {available_plugins_str}")
-            logger.info(f"Final mission_context_str: {mission_context_str}")
 
             if not goal:
                 logger.error("No goal provided to ACCOMPLISH plugin")
