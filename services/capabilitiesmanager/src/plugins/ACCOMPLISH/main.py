@@ -51,7 +51,7 @@ class AccomplishPlugin:
     # This helps validate the LLM's output against known plugin requirements.
     VERB_SCHEMAS = {
         'SEARCH': {'required': ['searchTerm'], 'optional': []},
-        'SCRAPE': {'required': ['url', 'selector', 'attribute', 'limit'], 'optional': []},
+        'SCRAPE': {'required': ['url'], 'optional': ['selector', 'attribute', 'limit' ]},
         'GET_USER_INPUT': {'required': ['question', 'answerType'], 'optional': ['choices']},
         'FILE_OPERATION': {'required': ['path', 'operation'], 'optional': ['content']},
         'DECIDE': {'required': ['condition', 'trueSteps', 'falseSteps'], 'optional': []},

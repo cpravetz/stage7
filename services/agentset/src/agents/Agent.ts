@@ -443,7 +443,7 @@ Please consider this context and the available plugins when planning and executi
         }
         const question = input.value || input.args?.question;
         const choices = input.args?.choices;
-        const timeout = input.args?.timeout || 300000; // Default timeout of 5 minutes if not specified
+        const timeout = input.args?.timeout || 600000; // Default timeout of 10 minutes if not specified
 
         try {
             const response = await Promise.race([

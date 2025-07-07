@@ -621,7 +621,7 @@ export class CapabilitiesManager extends BaseEntity {
                     PYTHONUNBUFFERED: '1',  // Ensure immediate output
                     PYTHONDONTWRITEBYTECODE: '1'  // Prevent .pyc files
                 },
-                timeout: pluginDefinition.security?.sandboxOptions?.timeout || 30000
+                timeout: pluginDefinition.security?.sandboxOptions?.timeout || 60000
             });
 
             console.log(`[${trace_id}] ${source_component}: Raw stdout from Python plugin ${pluginDefinition.verb} v${pluginDefinition.version}:\n${stdout}`);
