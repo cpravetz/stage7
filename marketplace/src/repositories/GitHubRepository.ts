@@ -48,7 +48,7 @@ export class GitHubRepository implements PluginRepository {
         this.username = process.env.GITHUB_USERNAME || config.credentials?.username || ''; // Used as default owner
 
         if (!this.token || !this.username) {
-            console.warn(`GitHubRepository: GITHUB_TOKEN ${this.token} or GITHUB_USERNAME ${this.username} is missing. Repository will be disabled but not throw.`);
+            console.warn(`GitHubRepository: GITHUB_TOKEN ${this.token} or GITHUB_USERNAME ${this.username} is missing.`);
             this.isEnabled = false;
             this.token = '';
             this.username = '';
@@ -170,7 +170,6 @@ export class GitHubRepository implements PluginRepository {
 
                 const messageDetails = responseData ? ( (typeof responseData === 'string' ? responseData : JSON.stringify(responseData)) || "No additional details from API.") : (error.message || "Unknown Axios error");
 
-                // Instead of throwing custom errors, use analyzeError to wrap the error
                 console.error(new Error(`GitHub API Error for ${method} ${url}. Status: ${status}. Details: ${messageDetails}`));
                 return Promise.reject(error);
             }

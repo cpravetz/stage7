@@ -146,55 +146,6 @@ export function isAuthenticated(req: Request, res: Response, next: NextFunction)
     next();
 }
 
-/**
- * Middleware to check if user is the owner of a resource
- * @param resourceIdParam Parameter name for resource ID
- * @param resourceType Resource type
- * @returns Express middleware
- */
-export function isResourceOwner(resourceIdParam: string, resourceType: string) {
-    return async (req: Request, res: Response, next: NextFunction) => {
-        try {
-            // Check if user is authenticated
-            if (!req.user) {
-                return res.status(401).json({ message: 'Authentication required' });
-            }
-
-            // Get resource ID from params
-            const resourceId = req.params[resourceIdParam];
-            if (!resourceId) {
-                return res.status(400).json({ message: `Resource ID parameter '${resourceIdParam}' is missing` });
-            }
-
-            // Get user ID from token
-            const userId = (req.user as User).id;
-
-            // Check if user is the owner of the resource
-            // This is a placeholder - implement actual ownership check
-            const isOwner = await checkResourceOwnership(userId, resourceId, resourceType);
-            if (!isOwner) {
-                return res.status(403).json({ message: 'You do not have permission to access this resource' });
-            }
-
-            next();
-        } catch (error) {
-            analyzeError(error as Error);
-            return res.status(500).json({ message: 'Authorization error' });
-        }
-    };
-}
-
-/**
- * Check if a user is the owner of a resource (placeholder - implement in actual service)
- * @param userId User ID
- * @param resourceId Resource ID
- * @param resourceType Resource type
- * @returns True if user is the owner
- */
-async function checkResourceOwnership(_userId: string, _resourceId: string, _resourceType: string): Promise<boolean> {
-    // This is a placeholder - implement actual ownership check
-    return true;
-}
 
 /**
  * Middleware to check if user has verified email

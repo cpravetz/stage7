@@ -59,7 +59,6 @@ export class CollaborationManager implements CollaborationProtocol {
     } catch (error) {
       analyzeError(error as Error);
       console.error('Error sending collaboration message:', error);
-      throw error;
     }
   }
 
@@ -85,7 +84,6 @@ export class CollaborationManager implements CollaborationProtocol {
     } catch (error) {
       analyzeError(error as Error);
       console.error('Error handling collaboration message:', error);
-      throw error;
     }
   }
 
@@ -130,7 +128,6 @@ export class CollaborationManager implements CollaborationProtocol {
     } catch (error) {
       analyzeError(error as Error);
       console.error('Error sharing knowledge:', error);
-      throw error;
     }
   }
 

@@ -98,7 +98,6 @@ export class PluginMarketplace {
         if (repository) {
             const repo = this.repositories.get(repository); // repo is InlinedPluginRepository | undefined
             if (!repo) {
-                // Instead of throwing, return empty list for missing/misconfigured repository
                 console.warn(`Repository ${repository} not found (list). Returning empty list.`);
                 return [];
             }
@@ -252,27 +251,11 @@ export class PluginMarketplace {
         }
     }
 
-
-    private async signPluginWithShared(plugin: PluginDefinition): Promise<string> {
-        try {
-            // Use the shared signPlugin function that supports RSA signing
-            return signPlugin(plugin);
-        } catch (error) {
-            analyzeError(error as Error);
-            throw new Error('Failed to sign plugin');
-        }
-    }
-
-    private async verifySignature(plugin: PluginManifest): Promise<boolean> {
-        // Use the shared verifyPluginSignature function that supports RSA verification
-        return verifyPluginSignature(plugin);
-    }
-
     public async store(plugin: PluginManifest): Promise<void> {
         try {
             // Validate container plugin manifest if it's a container plugin
             if (plugin.language === 'container') {
-                this.validateContainerPlugin(plugin);
+                if (!this.validateContainerPlugin(plugin)) { return };
             }
 
             let repositoryType = plugin.repository.type || this.defaultRepository; // Changed variable name for clarity
@@ -289,7 +272,7 @@ export class PluginMarketplace {
             }
         } catch (error) {
             analyzeError(error as Error);
-            throw new Error(`Failed to store plugin: ${error instanceof Error ? error.message : String(error)}`);
+            console.error(`Failed to store plugin: ${error instanceof Error ? error.message : String(error)}`);
         }
     }
 
@@ -327,43 +310,50 @@ export class PluginMarketplace {
      * Validate container plugin manifest
      * @param plugin Plugin manifest to validate
      */
-    private validateContainerPlugin(plugin: PluginManifest): void {
+    private validateContainerPlugin(plugin: PluginManifest): boolean {
         const containerConfig = (plugin as any).container;
         const apiConfig = (plugin as any).api;
 
         if (!containerConfig) {
-            throw new Error('Container plugin missing container configuration');
+            console.error('Container plugin missing container configuration');
+            return false;
         }
 
         if (!apiConfig) {
-            throw new Error('Container plugin missing API configuration');
+            console.error('Container plugin missing API configuration');
+            return false;
         }
 
         // Validate required container fields
         const requiredContainerFields = ['dockerfile', 'buildContext', 'image', 'ports'];
         for (const field of requiredContainerFields) {
             if (!containerConfig[field]) {
-                throw new Error(`Container configuration missing required field: ${field}`);
+                console.error(`Container configuration missing required field: ${field}`);
+                return false;
             }
         }
 
         // Validate API configuration
         if (!apiConfig.endpoint || !apiConfig.method) {
-            throw new Error('Container API configuration missing endpoint or method');
+            console.error('Container API configuration missing endpoint or method');
+            return false;
         }
 
         // Validate ports configuration
         if (!Array.isArray(containerConfig.ports) || containerConfig.ports.length === 0) {
-            throw new Error('Container configuration must specify at least one port mapping');
+            console.error('Container configuration must specify at least one port mapping');
+            return false;
         }
 
         // Validate health check configuration if present
         if (containerConfig.healthCheck) {
             const healthCheck = containerConfig.healthCheck;
             if (!healthCheck.path) {
-                throw new Error('Container health check configuration missing path');
+                console.error('Container health check configuration missing path');
+                return false;
             }
         }
+        return true;
     }
 
     /**

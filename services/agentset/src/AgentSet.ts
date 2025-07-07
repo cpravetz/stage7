@@ -15,7 +15,7 @@ import { ConflictResolution } from './collaboration/ConflictResolution';
 
 export class AgentSet extends BaseEntity {
     agents: Map<string, Agent> = new Map(); // Store agents by their ID
-    maxAgents: number = 10; // Example limit for agents in this set
+    maxAgents: number = 250; // Example limit for agents in this set
     persistenceManager: AgentPersistenceManager;
     private trafficManagerUrl: string = process.env.TRAFFICMANAGER_URL || 'trafficmanager:5080';
     private librarianUrl: string = process.env.LIBRARIAN_URL || 'librarian:5040';
