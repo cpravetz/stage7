@@ -2,6 +2,7 @@ import { User } from '../models/User';
 import { Role, SystemRoles } from '../models/Role';
 import { Permission, matchesPermission } from '../models/Permission';
 import { analyzeError } from '@cktmcs/errorhandler';
+import { updateUser, findUserById, findUserByEmail } from '../services/userService';
 
 /**
  * Authorization service for role-based access control
@@ -41,7 +42,7 @@ export class AuthorizationService {
     ): Promise<boolean> {
         try {
             // Get user
-            const user = await this.getUserById(userId);
+            const user = await findUserById(userId);
             if (!user) {
                 return false;
             }
@@ -98,7 +99,7 @@ export class AuthorizationService {
     async hasRole(userId: string, roleName: string): Promise<boolean> {
         try {
             // Get user
-            const user = await this.getUserById(userId);
+            const user = await findUserById(userId);
             if (!user) {
                 return false;
             }
@@ -118,7 +119,7 @@ export class AuthorizationService {
     async getUserPermissions(userId: string): Promise<string[]> {
         try {
             // Get user
-            const user = await this.getUserById(userId);
+            const user = await findUserById(userId);
             if (!user) {
                 return [];
             }
@@ -155,7 +156,7 @@ export class AuthorizationService {
             }
 
             // Get user
-            const user = await this.getUserById(userId);
+            const user = await findUserById(userId);
             if (!user) {
                 throw new Error(`User not found: ${userId}`);
             }
@@ -195,7 +196,7 @@ export class AuthorizationService {
             }
 
             // Get user
-            const user = await this.getUserById(userId);
+            const user = await findUserById(userId);
             if (!user) {
                 throw new Error(`User not found: ${userId}`);
             }
@@ -230,7 +231,7 @@ export class AuthorizationService {
             }
 
             // Get user
-            const user = await this.getUserById(userId);
+            const user = await findUserById(userId);
             if (!user) {
                 throw new Error(`User not found: ${userId}`);
             }
@@ -275,7 +276,7 @@ export class AuthorizationService {
             }
 
             // Get user
-            const user = await this.getUserById(userId);
+            const user = await findUserById(userId);
             if (!user) {
                 throw new Error(`User not found: ${userId}`);
             }
@@ -340,18 +341,6 @@ export class AuthorizationService {
         }
 
         return true;
-    }
-
-    /**
-     * Get user by ID (placeholder - implement in actual service)
-     * @param userId User ID
-     * @returns User or null
-     */
-    private async getUserById(userId: string): Promise<User | null> {
-        if (this.userRepository) {
-            return this.userRepository.findById(userId);
-        }
-        return null;
     }
 
     /**
