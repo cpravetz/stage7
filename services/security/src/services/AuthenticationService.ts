@@ -1,35 +1,34 @@
 import bcrypt from 'bcrypt';
 import { v4 as uuidv4 } from 'uuid';
+import * as speakeasy from 'speakeasy';
+import * as QRCode from 'qrcode';
 import { User } from '../models/User';
 import { TokenService } from './TokenService';
 import { Token, TokenType } from '../models/Token';
 import { SystemRoles } from '../models/Role';
 import { emailService } from './EmailService';
 import { analyzeError } from '@cktmcs/errorhandler';
+import { findUserById, findUserByEmail, createUser, updateUser } from './userService';
 
 /**
  * Authentication service
  */
 export class AuthenticationService {
-    private userRepository: any; // Replace with actual repository type
     private tokenService: TokenService;
     private maxLoginAttempts: number;
     private lockoutDuration: number; // In minutes
 
     /**
      * Constructor
-     * @param userRepository User repository
      * @param tokenService Token service
      * @param maxLoginAttempts Maximum login attempts before lockout
      * @param lockoutDuration Lockout duration in minutes
      */
     constructor(
-        userRepository: any = null,
         tokenService: TokenService = new TokenService(),
         maxLoginAttempts: number = 5,
         lockoutDuration: number = 30
     ) {
-        this.userRepository = userRepository;
         this.tokenService = tokenService;
         this.maxLoginAttempts = maxLoginAttempts;
         this.lockoutDuration = lockoutDuration;
@@ -46,13 +45,9 @@ export class AuthenticationService {
         sendVerificationEmail: boolean = true
     ): Promise<{ user: User; accessToken: Token; refreshToken: Token; verificationToken?: Token }> {
         try {
-            if (!this.userRepository) {
-                throw new Error('User repository is not available');
-            }
-
             // Check if email is already registered
             if (userData.email) {
-                const existingUser = await this.userRepository.findByEmail(userData.email);
+                const existingUser = await findUserByEmail(userData.email);
                 if (existingUser) {
                     throw new Error('Email is already registered');
                 }
@@ -64,8 +59,8 @@ export class AuthenticationService {
                 hashedPassword = await bcrypt.hash(userData.password, 10);
             }
 
-            // Create user
-            const user: User = {
+            // Create user data
+            const newUserData: Partial<User> = {
                 id: uuidv4(),
                 username: userData.username || '',
                 email: userData.email || '',
@@ -83,7 +78,7 @@ export class AuthenticationService {
             };
 
             // Save user
-            await this.userRepository.save(user);
+            const user = await createUser(newUserData);
 
             // Generate tokens
             const { accessToken, refreshToken } = await this.tokenService.generateTokenPair(user);
@@ -123,12 +118,8 @@ export class AuthenticationService {
         clientInfo?: Token['clientInfo']
     ): Promise<{ user: User; accessToken: Token; refreshToken: Token }> {
         try {
-            if (!this.userRepository) {
-                throw new Error('User repository is not available');
-            }
-
             // Find user by email
-            const user = await this.userRepository.findByEmail(email);
+            const user = await findUserByEmail(email);
             if (!user) {
                 throw new Error('Invalid email or password');
             }
@@ -159,7 +150,7 @@ export class AuthenticationService {
                 }
 
                 user.updatedAt = new Date();
-                await this.userRepository.save(user);
+                await updateUser(user.id, user);
 
                 throw new Error('Invalid email or password');
             }
@@ -169,7 +160,7 @@ export class AuthenticationService {
             user.lockoutUntil = undefined;
             user.lastLogin = new Date();
             user.updatedAt = new Date();
-            await this.userRepository.save(user);
+            await updateUser(user.id, user);
 
             // Generate tokens
             const { accessToken, refreshToken } = await this.tokenService.generateTokenPair(user, clientInfo);
@@ -226,15 +217,11 @@ export class AuthenticationService {
      */
     async verifyEmail(token: string): Promise<User> {
         try {
-            if (!this.userRepository) {
-                throw new Error('User repository is not available');
-            }
-
             // Verify token
             const payload = await this.tokenService.verifyToken(token, TokenType.VERIFICATION);
 
             // Find user
-            const user = await this.userRepository.findById(payload.sub);
+            const user = await findUserById(payload.sub);
             if (!user) {
                 throw new Error('User not found');
             }
@@ -243,7 +230,7 @@ export class AuthenticationService {
             user.isEmailVerified = true;
             user.verificationToken = undefined;
             user.updatedAt = new Date();
-            await this.userRepository.save(user);
+            await updateUser(user.id, user);
 
             // Revoke token
             await this.tokenService.revokeToken(payload.jti, 'Email verified');
@@ -262,12 +249,8 @@ export class AuthenticationService {
      */
     async requestPasswordReset(email: string): Promise<Token> {
         try {
-            if (!this.userRepository) {
-                throw new Error('User repository is not available');
-            }
-
             // Find user by email
-            const user = await this.userRepository.findByEmail(email);
+            const user = await findUserByEmail(email);
             if (!user) {
                 throw new Error('User not found');
             }
@@ -279,7 +262,7 @@ export class AuthenticationService {
             user.resetPasswordToken = resetToken.token;
             user.resetPasswordExpires = resetToken.expiresAt;
             user.updatedAt = new Date();
-            await this.userRepository.save(user);
+            await updateUser(user.id, user);
 
             // Send password reset email
             await emailService.sendPasswordResetEmail(
@@ -303,15 +286,11 @@ export class AuthenticationService {
      */
     async resetPassword(token: string, newPassword: string): Promise<User> {
         try {
-            if (!this.userRepository) {
-                throw new Error('User repository is not available');
-            }
-
             // Verify token
             const payload = await this.tokenService.verifyToken(token, TokenType.PASSWORD_RESET);
 
             // Find user
-            const user = await this.userRepository.findById(payload.sub);
+            const user = await findUserById(payload.sub);
             if (!user) {
                 throw new Error('User not found');
             }
@@ -334,7 +313,7 @@ export class AuthenticationService {
             user.resetPasswordToken = undefined;
             user.resetPasswordExpires = undefined;
             user.updatedAt = new Date();
-            await this.userRepository.save(user);
+            await updateUser(user.id, user);
 
             // Revoke token
             await this.tokenService.revokeToken(payload.jti, 'Password reset');
@@ -364,12 +343,8 @@ export class AuthenticationService {
      */
     async changePassword(userId: string, currentPassword: string, newPassword: string): Promise<User> {
         try {
-            if (!this.userRepository) {
-                throw new Error('User repository is not available');
-            }
-
             // Find user
-            const user = await this.userRepository.findById(userId);
+            const user = await findUserById(userId);
             if (!user) {
                 throw new Error('User not found');
             }
@@ -390,7 +365,7 @@ export class AuthenticationService {
             // Update user
             user.password = hashedPassword;
             user.updatedAt = new Date();
-            await this.userRepository.save(user);
+            await updateUser(user.id, user);
 
             // Revoke all user tokens except current
             await this.tokenService.revokeAllUserTokens(user.id, 'Password changed');
@@ -409,12 +384,8 @@ export class AuthenticationService {
      */
     async enableMfa(userId: string): Promise<string> {
         try {
-            if (!this.userRepository) {
-                throw new Error('User repository is not available');
-            }
-
             // Find user
-            const user = await this.userRepository.findById(userId);
+            const user = await findUserById(userId);
             if (!user) {
                 throw new Error('User not found');
             }
@@ -425,7 +396,7 @@ export class AuthenticationService {
             // Update user
             user.mfaSecret = mfaSecret;
             user.updatedAt = new Date();
-            await this.userRepository.save(user);
+            await updateUser(user.id, user);
 
             return mfaSecret;
         } catch (error) {
@@ -442,12 +413,8 @@ export class AuthenticationService {
      */
     async verifyMfaSetup(userId: string, token: string): Promise<User> {
         try {
-            if (!this.userRepository) {
-                throw new Error('User repository is not available');
-            }
-
             // Find user
-            const user = await this.userRepository.findById(userId);
+            const user = await findUserById(userId);
             if (!user) {
                 throw new Error('User not found');
             }
@@ -471,7 +438,7 @@ export class AuthenticationService {
             // Update user
             user.mfaEnabled = true;
             user.updatedAt = new Date();
-            await this.userRepository.save(user);
+            await updateUser(user.id, user);
 
             return user;
         } catch (error) {
@@ -488,12 +455,8 @@ export class AuthenticationService {
      */
     async disableMfa(userId: string, token: string): Promise<User> {
         try {
-            if (!this.userRepository) {
-                throw new Error('User repository is not available');
-            }
-
             // Find user
-            const user = await this.userRepository.findById(userId);
+            const user = await findUserById(userId);
             if (!user) {
                 throw new Error('User not found');
             }
@@ -518,7 +481,7 @@ export class AuthenticationService {
             user.mfaEnabled = false;
             user.mfaSecret = undefined;
             user.updatedAt = new Date();
-            await this.userRepository.save(user);
+            await updateUser(user.id, user);
 
             // Revoke all user tokens
             await this.tokenService.revokeAllUserTokens(user.id, 'MFA disabled');
@@ -541,12 +504,8 @@ export class AuthenticationService {
         token: string
     ): Promise<{ user: User; accessToken: Token; refreshToken: Token }> {
         try {
-            if (!this.userRepository) {
-                throw new Error('User repository is not available');
-            }
-
             // Find user
-            const user = await this.userRepository.findById(userId);
+            const user = await findUserById(userId);
             if (!user) {
                 throw new Error('User not found');
             }
@@ -578,22 +537,82 @@ export class AuthenticationService {
     }
 
     /**
-     * Generate MFA secret (placeholder - implement in actual service)
+     * Generate MFA secret using TOTP
      * @returns MFA secret
      */
     private generateMfaSecret(): string {
-        // This is a placeholder - implement actual MFA secret generation
-        return uuidv4();
+        try {
+            const secret = speakeasy.generateSecret({
+                name: 'Stage7',
+                issuer: 'Stage7 Platform',
+                length: 32
+            });
+            return secret.base32;
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error('Error generating MFA secret:', error);
+            // Fallback to a secure random secret
+            return speakeasy.generateSecret({ length: 32 }).base32;
+        }
     }
 
     /**
-     * Verify MFA token (placeholder - implement in actual service)
+     * Verify MFA token using TOTP
      * @param secret MFA secret
      * @param token MFA token
      * @returns True if token is valid
      */
     private verifyMfaToken(secret: string, token: string): boolean {
-        // This is a placeholder - implement actual MFA token verification
-        return true;
+        try {
+            if (!secret || !token) {
+                return false;
+            }
+
+            // Verify the token with a window of ±1 time step (30 seconds each)
+            // This allows for slight clock drift between client and server
+            const verified = speakeasy.totp.verify({
+                secret: secret,
+                encoding: 'base32',
+                token: token,
+                window: 1, // Allow 1 time step before and after current time
+                step: 30 // 30-second time step
+            });
+
+            return verified;
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error('Error verifying MFA token:', error);
+            return false;
+        }
+    }
+
+    /**
+     * Generate QR code for MFA setup
+     * @param userId User ID
+     * @param secret MFA secret
+     * @returns QR code data URL
+     */
+    async generateMfaQrCode(userId: string, secret: string): Promise<string> {
+        try {
+            const user = await findUserById(userId);
+            if (!user) {
+                throw new Error('User not found');
+            }
+
+            // Generate TOTP URL
+            const otpAuthUrl = speakeasy.otpauthURL({
+                secret: secret,
+                label: user.email,
+                issuer: 'Stage7 Platform',
+                encoding: 'base32'
+            });
+
+            // Generate QR code
+            const qrCodeDataUrl = await QRCode.toDataURL(otpAuthUrl);
+            return qrCodeDataUrl;
+        } catch (error) {
+            analyzeError(error as Error);
+            throw new Error('Failed to generate MFA QR code');
+        }
     }
 }

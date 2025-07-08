@@ -12,7 +12,102 @@ from typing import Dict, List, Any, Optional, Union
 import logging
 import io
 
-# Custom log handler to capture logs in memory
+
+schema = f"""
+{{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "array",
+  "items": {{
+    "type": "object",
+    "properties": {{
+      "number": {{
+        "type": "integer",
+        "minimum": 1,
+        "description": "Sequential step number"
+      }},
+      "actionVerb": {{
+        "type": "string",
+        "description": "The action to be performed in this step. It may be one of the plugin actionVerbs or a new actionVerb for a new type of task."
+      }},
+      "inputs": {{
+        "type": "object",
+        "patternProperties": {{
+          "^[a-zA-Z][a-zA-Z0-9_]*$": {{
+            "type": "object",
+            "properties": {{
+              "value": {{
+                "type": "string",
+                "description": "Constant string value for this input"
+              }},
+              "outputName": {{
+                "type": "string",
+                "description": "Reference to an output from a previous step"
+              }},
+              "valueType": {{
+                "type": "string",
+                "enum": ["string", "number", "boolean", "array", "object", "plan", "plugin", "any"],
+                "description": "The expected type of the input value"
+              }},
+              "args": {{
+                "type": "object",
+                "description": "Additional arguments for the input"
+              }}
+            }},
+            "required": ["valueType"],
+            "oneOf": [
+              {{"required": ["value"]}},
+              {{"required": ["outputName"]}}
+            ],
+            "additionalProperties": false
+          }}
+        }},
+        "additionalProperties": false,
+        "description": "Input parameters for this step"
+      }},
+      "description": {{
+        "type": "string",
+        "description": "Thorough description of what this step does and context needed to understand it"
+      }},
+      "outputs": {{
+        "type": "object",
+        "patternProperties": {{
+          "^[a-zA-Z][a-zA-Z0-9_]*$": {{
+            "type": "string",
+            "description": "Thorough description of the expected output"
+          }}
+        }},
+        "additionalProperties": false,
+        "description": "Expected outputs from this step"
+      }},
+      "dependencies": {{
+        "type": "array",
+        "items": {{
+          "type": "object",
+          "patternProperties": {{
+            "^[a-zA-Z][a-zA-Z0-9_]*$": {{
+              "type": "integer",
+              "minimum": 1,
+              "description": "Step number that produces the output for the input with this name"
+            }}
+          }},
+          "additionalProperties": false,
+          "minProperties": 1,
+          "maxProperties": 1
+        }},
+        "description": "Array of objects mapping all the outputNames of the inputs to the producing step numbers.  This eliminates issues with multiple steps producing outputs with identical names."
+      }},
+      "recommendedRole": {{
+        "type": "string",
+        "description": "Suggested role type for the agent executing this step"
+      }}
+    }},
+    "required": ["number", "actionVerb", "inputs", "description", "outputs", "dependencies"],
+    "additionalProperties": false
+  }},
+  "description": "Schema for a workflow consisting of sequential steps with dependencies"
+}}
+"""
+
 class InMemoryLogHandler(logging.Handler):
     def __init__(self):
         super().__init__()
@@ -181,98 +276,7 @@ Output Decision Hierarchy: Before generating any output, first evaluate the goal
 
 1. If the best option for reaching the goal should be to sub-divide into smaller steps, respond with a plan as a JSON object.  Plans must conform to this schema!
 
-{{
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "type": "array",
-  "items": {{
-    "type": "object",
-    "properties": {{
-      "number": {{
-        "type": "integer",
-        "minimum": 1,
-        "description": "Sequential step number"
-      }},
-      "actionVerb": {{
-        "type": "string",
-        "description": "The action to be performed in this step. It may be one of the plugin actionVerbs or a new actionVerb for a new type of task."
-      }},
-      "inputs": {{
-        "type": "object",
-        "patternProperties": {{
-          "^[a-zA-Z][a-zA-Z0-9_]*$": {{
-            "type": "object",
-            "properties": {{
-              "value": {{
-                "type": "string",
-                "description": "Constant string value for this input"
-              }},
-              "outputName": {{
-                "type": "string",
-                "description": "Reference to an output from a previous step"
-              }},
-              "valueType": {{
-                "type": "string",
-                "enum": ["string", "number", "boolean", "array", "object", "plan", "plugin", "any"],
-                "description": "The expected type of the input value"
-              }},
-              "args": {{
-                "type": "object",
-                "description": "Additional arguments for the input"
-              }}
-            }},
-            "required": ["valueType"],
-            "oneOf": [
-              {{"required": ["value"]}},
-              {{"required": ["outputName"]}}
-            ],
-            "additionalProperties": false
-          }}
-        }},
-        "additionalProperties": false,
-        "description": "Input parameters for this step"
-      }},
-      "description": {{
-        "type": "string",
-        "description": "Thorough description of what this step does and context needed to understand it"
-      }},
-      "outputs": {{
-        "type": "object",
-        "patternProperties": {{
-          "^[a-zA-Z][a-zA-Z0-9_]*$": {{
-            "type": "string",
-            "description": "Thorough description of the expected output"
-          }}
-        }},
-        "additionalProperties": false,
-        "description": "Expected outputs from this step"
-      }},
-      "dependencies": {{
-        "type": "array",
-        "items": {{
-          "type": "object",
-          "patternProperties": {{
-            "^[a-zA-Z][a-zA-Z0-9_]*$": {{
-              "type": "integer",
-              "minimum": 1,
-              "description": "Step number that produces the output for the input with this name"
-            }}
-          }},
-          "additionalProperties": false,
-          "minProperties": 1,
-          "maxProperties": 1
-        }},
-        "description": "Array of objects mapping all the outputNames of the inputs to the producing step numbers.  This eliminates issues with multiple steps producing outputs with identical names."
-      }},
-      "recommendedRole": {{
-        "type": "string",
-        "description": "Suggested role type for the agent executing this step"
-      }}
-    }},
-    "required": ["number", "actionVerb", "inputs", "description", "outputs", "dependencies"],
-    "additionalProperties": false
-  }},
-  "description": "Schema for a workflow consisting of sequential steps with dependencies"
-}}
+{schema} 
 
 Rules for creating a plan:
 - Number each step sequentially using the "number" field.
@@ -652,15 +656,83 @@ Revise the plan to correct the error. Only return the corrected plan in JSON, wi
                         validation_error_message = self.validate_plan_data(plan_data)
                         repair_attempts = 0
                         max_repair_attempts = 3 # Max repair attempts for a given plan
+
+                        # Extract the step schema from the prompt for reuse in repair prompt
+                        step_schema_start = self.generate_prompt(goal, available_plugins_str, mission_context_str).find('"type": "object"')
+                        step_schema = None
+                        if step_schema_start != -1:
+                            # Extract the schema substring for a single step object
+                            # The schema is large, so we extract from the first '{' to the matching closing '}'
+                            import json
+                            prompt_str = self.generate_prompt(goal, available_plugins_str, mission_context_str)
+                            try:
+                                # Extract the schema JSON from the prompt string
+                                # The prompt contains the full plan schema, we want the "items" schema which is the step schema
+                                # We'll parse the prompt to find the step schema JSON object
+                                import re
+                                match = re.search(r'\{[^{}]*"type": "object"[^{}]*\}', prompt_str[step_schema_start:])
+                                if match:
+                                    step_schema = match.group(0)
+                            except Exception as e:
+                                logger.warning(f"Failed to extract step schema from prompt: {e}")
+
                         while validation_error_message and repair_attempts < max_repair_attempts:
                             logger.warning(f"Plan validation failed: {validation_error_message}. Attempting auto-repair (repair attempt {repair_attempts+1}).")
-                            repaired_plan = self.auto_repair_plan(goal, available_plugins_str, mission_context_str, plan_data, validation_error_message, brain_token)
-                            if not repaired_plan:
-                                logger.error("Auto-repair failed to produce a new plan.")
-                                break
-                            plan_data = repaired_plan
-                            validation_error_message = self.validate_plan_data(plan_data)
-                            repair_attempts += 1
+
+                            # Try to extract the step number from the validation error message
+                            import re
+                            step_num_match = re.search(r"step (\d+)", validation_error_message)
+                            if step_num_match:
+                                step_num = int(step_num_match.group(1))
+                                if 1 <= step_num <= len(plan_data):
+                                    invalid_step = plan_data[step_num - 1]
+                                    # Prepare a repair prompt with only the invalid step, error message, and schema
+                                    repair_prompt = f"""
+You previously generated this step in your plan:
+
+{json.dumps(invalid_step, indent=2)}
+
+However, the following validation error was found for this step:
+\"{validation_error_message}\"
+
+The schema for a valid step is:
+
+{step_schema if step_schema else "Schema not available."}
+
+Please revise this step to correct the error. Only return the corrected step as a JSON object, with no explanations or extra text.
+"""
+                                    response = self.query_brain(repair_prompt, brain_token)
+                                    if not response:
+                                        logger.error("Auto-repair failed to produce a new step (empty response).")
+                                        break
+                                    try:
+                                        revised_step = json.loads(response)
+                                        if isinstance(revised_step, dict):
+                                            # Replace the invalid step with the revised step
+                                            plan_data[step_num - 1] = revised_step
+                                            # Revalidate the entire plan
+                                            validation_error_message = self.validate_plan_data(plan_data)
+                                            repair_attempts += 1
+                                            continue
+                                        else:
+                                            logger.error("Auto-repair response is not a JSON object for the step.")
+                                            break
+                                    except Exception as e:
+                                        logger.error(f"Failed to parse auto-repaired step: {e}")
+                                        logger.error(f"Failing auto-repair Response: {response}")
+                                        break
+                                else:
+                                    logger.error(f"Step number {step_num} out of range for plan length {len(plan_data)}.")
+                                    break
+                            else:
+                                # If no step number found, fallback to sending full plan for repair
+                                repaired_plan = self.auto_repair_plan(goal, available_plugins_str, mission_context_str, plan_data, validation_error_message, brain_token)
+                                if not repaired_plan:
+                                    logger.error("Auto-repair failed to produce a new plan (fallback).")
+                                    break
+                                plan_data = repaired_plan
+                                validation_error_message = self.validate_plan_data(plan_data)
+                                repair_attempts += 1
 
                         if validation_error_message:
                             return [{
@@ -692,19 +764,19 @@ Revise the plan to correct the error. Only return the corrected plan in JSON, wi
                                  "result": parsed.get("plugin", {})}]
 
                     # Check if the response is a single step object
-                    elif isinstance(parsed, dict) and 'actionVerb' in parsed and 'number' in parsed and \
-                         'inputs' in parsed and 'outputs' in parsed and 'description' in parsed:
-                        logger.warning(f"Brain response was a single step object (attempt {attempt+1}). This is considered incomplete.")
-                        if attempt < max_retries_for_single_step:
-                            continue # Trigger retry by continuing the loop
-                        else: # Max retries reached for single step
-                            return [{
-                                "success": False, "name": "incomplete_brain_response_single_step",
-                                "resultType": PluginParameterType.ERROR,
-                                "resultDescription": "Brain returned a single step after retries. A complete plan, direct answer, or plugin suggestion was expected.",
-                                "result": {"logs": memory_handler.get_logs(), "original_response": response[:1000]},
-                                "error": "Incomplete response from Brain: single step received after retries."
-                            }]
+                    #elif isinstance(parsed, dict) and 'actionVerb' in parsed and 'number' in parsed and \
+                        # 'inputs' in parsed and 'outputs' in parsed and 'description' in parsed:
+                        #logger.warning(f"Brain response was a single step object (attempt {attempt+1}). This is considered incomplete.")
+                        #if attempt < max_retries_for_single_step:
+                            #continue # Trigger retry by continuing the loop
+                        #else: # Max retries reached for single step
+                            #return [{
+                                #"success": False, "name": "incomplete_brain_response_single_step",
+                                #"resultType": PluginParameterType.ERROR,
+                                #"resultDescription": "Brain returned a single step after retries. A complete plan, direct answer, or plugin suggestion was expected.",
+                                #"result": {"logs": memory_handler.get_logs(), "original_response": response[:1000]},
+                                #"error": "Incomplete response from Brain: single step received after retries."
+                            #}]
                     else: # Unrecognized format
                         logger.error(f"Brain response is not a recognized JSON object (PLAN, DIRECT_ANSWER, PLUGIN) nor a valid single step. Response: {response[:500]}")
                         return [{

@@ -520,6 +520,31 @@ Please consider this context and the available plugins when planning and executi
                 scope = 'AgentStep';
             }
 
+            // If this is a final step, upload outputs to shared file space
+            if (isFinal && data && data.length > 0) {
+                try {
+                    const step = this.steps.find(s => s.id === stepId);
+                    if (step) {
+                        const librarianUrl = await this.getServiceUrl('Librarian');
+                        if (librarianUrl) {
+                            const uploadedFiles = await step.uploadOutputsToSharedSpace(
+                                this.missionId,
+                                librarianUrl,
+                                this.authenticatedApi
+                            );
+                            if (uploadedFiles.length > 0) {
+                                console.log(`Uploaded ${uploadedFiles.length} final step outputs to shared space for step ${stepId}`);
+                            }
+                        } else {
+                            console.warn('Librarian URL not available for uploading final step outputs');
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error uploading final step outputs to shared space:', error);
+                    // Don't fail the entire operation if file upload fails
+                }
+            }
+
             this.sendMessage(MessageType.WORK_PRODUCT_UPDATE, 'user', {
                 id: stepId,
                 type: type,

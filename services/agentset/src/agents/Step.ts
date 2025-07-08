@@ -6,7 +6,8 @@ import { PluginParameterType,
     StepDependency,
     ActionVerbTask,
     ExecutionContext as PlanExecutionContext,
-    PlanTemplate } from '@cktmcs/shared'; // Added ActionVerbTask
+    PlanTemplate,
+    MissionFile } from '@cktmcs/shared'; // Added ActionVerbTask and MissionFile
 import { MapSerializer } from '@cktmcs/shared';
 import { MessageType } from '@cktmcs/shared'; // Ensured MessageType is here, assuming it's separate or also from shared index
 import { AgentPersistenceManager } from '../utils/AgentPersistenceManager';
@@ -659,6 +660,161 @@ export class Step {
      */
     public storeTempData(key: string, data: any): void {
         this.tempData.set(key, data);
+    }
+
+    /**
+     * Uploads step outputs to the shared file space for final steps
+     * @param missionId The mission ID to associate the files with
+     * @param librarianUrl The Librarian URL for storing files
+     * @param authenticatedApi The authenticated API client
+     * @returns Promise<MissionFile[]> Array of uploaded files
+     */
+    public async uploadOutputsToSharedSpace(
+        missionId: string,
+        librarianUrl: string,
+        authenticatedApi: any
+    ): Promise<MissionFile[]> {
+        if (!this.result || this.result.length === 0) {
+            return [];
+        }
+
+        const uploadedFiles: MissionFile[] = [];
+
+        for (const output of this.result) {
+            try {
+                // Only upload outputs that have meaningful content
+                if (!output.result || output.result === '') {
+                    continue;
+                }
+
+                // Generate filename based on step and output
+                let fileName: string;
+                let mimeType: string;
+                let fileContent: string;
+
+                if (output.fileName) {
+                    // If output specifies a filename, use it
+                    fileName = output.fileName;
+                } else {
+                    // Generate filename based on step and output
+                    const sanitizedName = output.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+                    const extension = this.getFileExtensionForOutput(output);
+                    fileName = `step_${this.stepNo}_${sanitizedName}${extension}`;
+                }
+
+                // Set MIME type
+                mimeType = output.mimeType || this.getMimeTypeForOutput(output);
+
+                // Convert result to string content
+                if (typeof output.result === 'string') {
+                    fileContent = output.result;
+                } else {
+                    // For objects, serialize to JSON
+                    fileContent = JSON.stringify(output.result, null, 2);
+                    if (!fileName.endsWith('.json')) {
+                        fileName = fileName.replace(/\.[^.]*$/, '') + '.json';
+                    }
+                    mimeType = 'application/json';
+                }
+
+                // Create a MissionFile object
+                const missionFile: MissionFile = {
+                    id: uuidv4(),
+                    originalName: fileName,
+                    mimeType: mimeType,
+                    size: Buffer.byteLength(fileContent, 'utf8'),
+                    uploadedAt: new Date(),
+                    uploadedBy: `agent-${this.id.split('_')[0]}`,
+                    storagePath: `step-outputs/${missionId}/${fileName}`,
+                    description: `Output from step ${this.stepNo}: ${this.actionVerb} - ${output.resultDescription}`
+                };
+
+                // Store the file content in Librarian
+                await authenticatedApi.post(`http://${librarianUrl}/storeData`, {
+                    id: `step-output-${this.id}-${output.name}`,
+                    data: {
+                        fileContent: fileContent,
+                        missionFile: missionFile
+                    },
+                    storageType: 'mongo',
+                    collection: 'step-outputs'
+                });
+
+                // Load the current mission to update its attached files
+                const missionResponse = await authenticatedApi.get(`http://${librarianUrl}/loadData/${missionId}`, {
+                    params: { collection: 'missions', storageType: 'mongo' }
+                });
+
+                if (missionResponse.data && missionResponse.data.data) {
+                    const mission = missionResponse.data.data;
+                    const existingFiles = mission.attachedFiles || [];
+                    const updatedMission = {
+                        ...mission,
+                        attachedFiles: [...existingFiles, missionFile],
+                        updatedAt: new Date()
+                    };
+
+                    // Save the updated mission
+                    await authenticatedApi.post(`http://${librarianUrl}/storeData`, {
+                        id: missionId,
+                        data: updatedMission,
+                        collection: 'missions',
+                        storageType: 'mongo'
+                    });
+
+                    uploadedFiles.push(missionFile);
+                    console.log(`Uploaded step output to shared space: ${fileName}`);
+                }
+
+            } catch (error) {
+                console.error(`Failed to upload step output to shared space:`, error);
+                // Continue with other outputs even if one fails
+            }
+        }
+
+        return uploadedFiles;
+    }
+
+    /**
+     * Determines the appropriate file extension for an output
+     */
+    private getFileExtensionForOutput(output: PluginOutput): string {
+        if (output.fileName) {
+            const ext = output.fileName.substring(output.fileName.lastIndexOf('.'));
+            if (ext) return ext;
+        }
+
+        switch (output.resultType) {
+            case PluginParameterType.STRING:
+                return '.txt';
+            case PluginParameterType.OBJECT:
+            case PluginParameterType.ARRAY:
+                return '.json';
+            case PluginParameterType.PLAN:
+                return '.json';
+            default:
+                return '.txt';
+        }
+    }
+
+    /**
+     * Determines the appropriate MIME type for an output
+     */
+    private getMimeTypeForOutput(output: PluginOutput): string {
+        if (output.mimeType) {
+            return output.mimeType;
+        }
+
+        switch (output.resultType) {
+            case PluginParameterType.STRING:
+                return 'text/plain';
+            case PluginParameterType.OBJECT:
+            case PluginParameterType.ARRAY:
+            case PluginParameterType.PLAN:
+                return 'application/json';
+            default:
+                return 'text/plain';
+        }
     }
 
     /**

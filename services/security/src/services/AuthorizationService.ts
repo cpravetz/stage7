@@ -1,5 +1,5 @@
 import { User } from '../models/User';
-import { Role, SystemRoles } from '../models/Role';
+import { Role, SystemRoles, DEFAULT_ROLES } from '../models/Role';
 import { Permission, matchesPermission } from '../models/Permission';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { updateUser, findUserById, findUserByEmail } from '../services/userService';
@@ -8,24 +8,11 @@ import { updateUser, findUserById, findUserByEmail } from '../services/userServi
  * Authorization service for role-based access control
  */
 export class AuthorizationService {
-    private roleRepository: any; // Replace with actual repository type
-    private permissionRepository: any; // Replace with actual repository type
-    private userRepository: any; // Replace with actual repository type
-
     /**
-     * Constructor
-     * @param roleRepository Role repository
-     * @param permissionRepository Permission repository
-     * @param userRepository User repository
+     * Constructor - Uses existing user service functions
      */
-    constructor(
-        roleRepository: any = null,
-        permissionRepository: any = null,
-        userRepository: any = null
-    ) {
-        this.roleRepository = roleRepository;
-        this.permissionRepository = permissionRepository;
-        this.userRepository = userRepository;
+    constructor() {
+        // No repository dependencies needed - using service functions
     }
 
     /**
@@ -73,15 +60,8 @@ export class AuthorizationService {
                 }
             }
 
-            // Check permission conditions
-            if (this.permissionRepository) {
-                const permissions = await this.permissionRepository.findByName(requiredPermission);
-                for (const permission of permissions) {
-                    if (this.evaluatePermissionConditions(permission, context, userId)) {
-                        return true;
-                    }
-                }
-            }
+            // For now, we don't have a permission repository, so we rely on role-based permissions
+            // This could be extended in the future to support more complex permission conditions
 
             return false;
         } catch (error) {
@@ -151,20 +131,15 @@ export class AuthorizationService {
      */
     async assignRoleToUser(userId: string, roleId: string): Promise<void> {
         try {
-            if (!this.userRepository) {
-                throw new Error('User repository is not available');
-            }
-
             // Get user
             const user = await findUserById(userId);
             if (!user) {
                 throw new Error(`User not found: ${userId}`);
             }
 
-            // Check if role exists
-            const role = await this.getRoleById(roleId);
-            if (!role) {
-                throw new Error(`Role not found: ${roleId}`);
+            // Check if role exists (validate against system roles)
+            if (!Object.values(SystemRoles).includes(roleId as SystemRoles)) {
+                throw new Error(`Invalid role: ${roleId}`);
             }
 
             // Check if user already has the role
@@ -177,7 +152,7 @@ export class AuthorizationService {
             user.updatedAt = new Date();
 
             // Save user
-            await this.userRepository.save(user);
+            await updateUser(userId, user);
         } catch (error) {
             analyzeError(error as Error);
             throw error;
@@ -191,10 +166,6 @@ export class AuthorizationService {
      */
     async removeRoleFromUser(userId: string, roleId: string): Promise<void> {
         try {
-            if (!this.userRepository) {
-                throw new Error('User repository is not available');
-            }
-
             // Get user
             const user = await findUserById(userId);
             if (!user) {
@@ -212,7 +183,7 @@ export class AuthorizationService {
             user.updatedAt = new Date();
 
             // Save user
-            await this.userRepository.save(user);
+            await updateUser(userId, user);
         } catch (error) {
             analyzeError(error as Error);
             throw error;
@@ -226,20 +197,15 @@ export class AuthorizationService {
      */
     async assignPermissionToUser(userId: string, permissionName: string): Promise<void> {
         try {
-            if (!this.userRepository) {
-                throw new Error('User repository is not available');
-            }
-
             // Get user
             const user = await findUserById(userId);
             if (!user) {
                 throw new Error(`User not found: ${userId}`);
             }
 
-            // Check if permission exists
-            const permission = await this.getPermissionByName(permissionName);
-            if (!permission) {
-                throw new Error(`Permission not found: ${permissionName}`);
+            // Validate permission format (resource:action or resource:action:scope)
+            if (!this.isValidPermissionFormat(permissionName)) {
+                throw new Error(`Invalid permission format: ${permissionName}`);
             }
 
             // Initialize permissions array if needed
@@ -257,7 +223,7 @@ export class AuthorizationService {
             user.updatedAt = new Date();
 
             // Save user
-            await this.userRepository.save(user);
+            await updateUser(userId, user);
         } catch (error) {
             analyzeError(error as Error);
             throw error;
@@ -271,10 +237,6 @@ export class AuthorizationService {
      */
     async removePermissionFromUser(userId: string, permissionName: string): Promise<void> {
         try {
-            if (!this.userRepository) {
-                throw new Error('User repository is not available');
-            }
-
             // Get user
             const user = await findUserById(userId);
             if (!user) {
@@ -297,7 +259,7 @@ export class AuthorizationService {
             user.updatedAt = new Date();
 
             // Save user
-            await this.userRepository.save(user);
+            await updateUser(userId, user);
         } catch (error) {
             analyzeError(error as Error);
             throw error;
@@ -344,39 +306,43 @@ export class AuthorizationService {
     }
 
     /**
-     * Get role by ID (placeholder - implement in actual service)
-     * @param roleId Role ID
-     * @returns Role or null
-     */
-    private async getRoleById(roleId: string): Promise<Role | null> {
-        if (this.roleRepository) {
-            return this.roleRepository.findById(roleId);
-        }
-        return null;
-    }
-
-    /**
-     * Get roles by IDs (placeholder - implement in actual service)
+     * Get roles by IDs using system roles
      * @param roleIds Role IDs
      * @returns Roles
      */
     private async getRolesByIds(roleIds: string[]): Promise<Role[]> {
-        if (this.roleRepository) {
-            return this.roleRepository.findByIds(roleIds);
+        try {
+            const roles: Role[] = [];
+
+            for (const roleId of roleIds) {
+                if (Object.values(SystemRoles).includes(roleId as SystemRoles)) {
+                    const defaultRole = DEFAULT_ROLES[roleId as SystemRoles];
+                    if (defaultRole) {
+                        roles.push({
+                            id: roleId,
+                            ...defaultRole,
+                            createdAt: new Date(),
+                            updatedAt: new Date()
+                        });
+                    }
+                }
+            }
+
+            return roles;
+        } catch (error) {
+            analyzeError(error as Error);
+            return [];
         }
-        return [];
     }
 
     /**
-     * Get permission by name (placeholder - implement in actual service)
-     * @param permissionName Permission name
-     * @returns Permission or null
+     * Validate permission format
+     * @param permission Permission string
+     * @returns True if valid format
      */
-    private async getPermissionByName(permissionName: string): Promise<Permission | null> {
-        if (this.permissionRepository) {
-            const permissions = await this.permissionRepository.findByName(permissionName);
-            return permissions.length > 0 ? permissions[0] : null;
-        }
-        return null;
+    private isValidPermissionFormat(permission: string): boolean {
+        // Valid formats: resource:action or resource:action:scope
+        const parts = permission.split(':');
+        return parts.length >= 2 && parts.length <= 3 && parts.every(part => part.length > 0);
     }
 }

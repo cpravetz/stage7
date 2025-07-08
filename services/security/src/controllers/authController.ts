@@ -13,8 +13,8 @@ const userRepository = new MongoUserRepository();
 
 // Initialize services
 const tokenService = new TokenService({}, null, null, userRepository);
-const authenticationService = new AuthenticationService(userRepository, tokenService);
-const authorizationService = new AuthorizationService(null, null, userRepository);
+const authenticationService = new AuthenticationService(tokenService);
+const authorizationService = new AuthorizationService();
 
 export const register: AsyncRequestHandler = async (req, res, next) => {
     try {
