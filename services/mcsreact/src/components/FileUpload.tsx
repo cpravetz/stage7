@@ -44,23 +44,36 @@ interface FileUploadProps {
   onFilesChanged?: () => void;
 }
 
-const FileUpload: React.FC<FileUploadProps> = ({ missionId, onFilesChanged }) => {
-  const [files, setFiles] = useState<MissionFile[]>([]);
-  const [uploading, setUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
-  const [dragOver, setDragOver] = useState(false);
-  const [descriptionDialog, setDescriptionDialog] = useState(false);
-  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
-  const [description, setDescription] = useState('');
-  const fileInputRef = useRef<HTMLInputElement>(null);
+const FileUpload: React.FC<FileUploadProps & {
+  descriptionDialog: boolean;
+  setDescriptionDialog: (open: boolean) => void;
+  pendingFiles: File[];
+  setPendingFiles: (files: File[]) => void;
+  description: string;
+  setDescription: (desc: string) => void;
+}> = ({
+  missionId,
+  onFilesChanged,
+  descriptionDialog,
+  setDescriptionDialog,
+  pendingFiles,
+  setPendingFiles,
+  description,
+  setDescription
+}) => {
+  const [files, setFiles] = React.useState<MissionFile[]>([]);
+  const [uploading, setUploading] = React.useState(false);
+  const [uploadProgress, setUploadProgress] = React.useState(0);
+  const [error, setError] = React.useState<string | null>(null);
+  const [success, setSuccess] = React.useState<string | null>(null);
+  const [dragOver, setDragOver] = React.useState(false);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const securityClient = SecurityClient.getInstance(API_BASE_URL);
   const apiClient = securityClient.getApi();
 
   // Load existing files
-  const loadFiles = useCallback(async () => {
+  const loadFiles = React.useCallback(async () => {
     try {
       const response = await apiClient.get(`/missions/${missionId}/files`);
       setFiles(response.data.files || []);
@@ -217,21 +230,21 @@ const FileUpload: React.FC<FileUploadProps> = ({ missionId, onFilesChanged }) =>
   return (
     <Box>
       {/* Upload Area */}
-      <Paper
-        elevation={2}
-        sx={{
-          p: 3,
-          mb: 2,
-          border: dragOver ? '2px dashed #1976d2' : '2px dashed #ccc',
-          backgroundColor: dragOver ? 'rgba(25, 118, 210, 0.1)' : 'transparent',
-          cursor: 'pointer',
-          transition: 'all 0.3s ease'
-        }}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
-        onClick={() => fileInputRef.current?.click()}
-      >
+      <label htmlFor="file-upload-input" style={{ display: 'block', cursor: 'pointer' }}>
+        <Paper
+          elevation={2}
+          sx={{
+            p: 3,
+            mb: 2,
+            border: dragOver ? '2px dashed #1976d2' : '2px dashed #ccc',
+            backgroundColor: dragOver ? 'rgba(25, 118, 210, 0.1)' : 'transparent',
+            cursor: 'pointer',
+            transition: 'all 0.3s ease'
+          }}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+        >
         <Box textAlign="center">
           <UploadIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 1 }} />
           <Typography variant="h6" gutterBottom>
@@ -242,6 +255,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ missionId, onFilesChanged }) =>
           </Typography>
         </Box>
         <input
+          id="file-upload-input"
           ref={fileInputRef}
           type="file"
           multiple
@@ -249,6 +263,164 @@ const FileUpload: React.FC<FileUploadProps> = ({ missionId, onFilesChanged }) =>
           onChange={handleFileInputChange}
         />
       </Paper>
+      </label>
+
+      {/* Upload Progress */}
+      {uploading && (
+        <Box sx={{ mb: 2 }}>
+          <Typography variant="body2" gutterBottom>
+            Uploading... {uploadProgress}%
+          </Typography>
+          <LinearProgress variant="determinate" value={uploadProgress} />
+        </Box>
+      )}
+
+      {/* Error/Success Messages */}
+      {error && (
+        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
+          {error}
+        </Alert>
+      )}
+      {success && (
+        <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess(null)}>
+          {success}
+        </Alert>
+      )}
+
+      {/* Files List */}
+      <Typography variant="h6" gutterBottom>
+        Attached Files ({files.length})
+      </Typography>
+      
+      {files.length === 0 ? (
+        <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 2 }}>
+          No files attached to this mission
+        </Typography>
+      ) : (
+        <List>
+          {files.map((file) => (
+            <ListItem key={file.id} divider>
+              <FileIcon sx={{ mr: 2, color: 'text.secondary' }} />
+              <ListItemText
+                primary={file.originalName}
+                secondary={
+                  <Box>
+                    <Typography variant="caption" display="block">
+                      {formatFileSize(file.size)} • {new Date(file.uploadedAt).toLocaleDateString()}
+                    </Typography>
+                    {file.description && (
+                      <Chip label={file.description} size="small" sx={{ mt: 0.5 }} />
+                    )}
+                  </Box>
+                }
+              />
+              <ListItemSecondaryAction>
+                <IconButton onClick={() => handleDownload(file)} size="small">
+                  <DownloadIcon />
+                </IconButton>
+                <IconButton onClick={() => handleDelete(file)} size="small" color="error">
+                  <DeleteIcon />
+                </IconButton>
+              </ListItemSecondaryAction>
+            </ListItem>
+          ))}
+        </List>
+      )}
+
+      {/* Description Dialog */}
+      <Dialog open={descriptionDialog} onClose={() => setDescriptionDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          <AttachFileIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
+          Upload Files
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" gutterBottom>
+            Files to upload: {pendingFiles.map(f => f.name).join(', ')}
+          </Typography>
+          <TextField
+            fullWidth
+            label="Description (optional)"
+            multiline
+            rows={3}
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Add a description for these files..."
+            sx={{ mt: 2 }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDescriptionDialog(false)}>Cancel</Button>
+          <Button onClick={handleUpload} variant="contained" disabled={uploading}>
+            {uploading ? 'Uploading...' : 'Upload'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </Box>
+  );
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    
+    const droppedFiles = Array.from(e.dataTransfer.files);
+    handleFileSelect(droppedFiles);
+  };
+
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      const selectedFiles = Array.from(e.target.files);
+      handleFileSelect(selectedFiles);
+    }
+  };
+
+  return (
+    <Box>
+      {/* Upload Area */}
+      <label htmlFor="file-upload-input" style={{ display: 'block', cursor: 'pointer' }}>
+        <Paper
+          elevation={2}
+          sx={{
+            p: 3,
+            mb: 2,
+            border: dragOver ? '2px dashed #1976d2' : '2px dashed #ccc',
+            backgroundColor: dragOver ? 'rgba(25, 118, 210, 0.1)' : 'transparent',
+            cursor: 'pointer',
+            transition: 'all 0.3s ease'
+          }}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+        >
+        <Box textAlign="center">
+          <UploadIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 1 }} />
+          <Typography variant="h6" gutterBottom>
+            Drop files here or click to select
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Maximum file size: 50MB. Supported formats: documents, images, archives
+          </Typography>
+        </Box>
+        <input
+          id="file-upload-input"
+          ref={fileInputRef}
+          type="file"
+          multiple
+          style={{ display: 'none' }}
+          onChange={handleFileInputChange}
+        />
+      </Paper>
+      </label>
 
       {/* Upload Progress */}
       {uploading && (

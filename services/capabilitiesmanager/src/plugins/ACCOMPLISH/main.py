@@ -663,7 +663,6 @@ Revise the plan to correct the error. Only return the corrected plan in JSON, wi
                         if step_schema_start != -1:
                             # Extract the schema substring for a single step object
                             # The schema is large, so we extract from the first '{' to the matching closing '}'
-                            import json
                             prompt_str = self.generate_prompt(goal, available_plugins_str, mission_context_str)
                             try:
                                 # Extract the schema JSON from the prompt string

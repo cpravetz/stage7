@@ -18,7 +18,7 @@ const authorizationService = new AuthorizationService();
 
 export const register: AsyncRequestHandler = async (req, res, next) => {
     try {
-        console.log('Registration request received:', req.body);
+        console.log('Registration request received:', { email: req.body?.email, hasPassword: !!req.body?.password });
         const { email, password, firstName, lastName, username, name } = req.body;
 
         // Validate required fields
@@ -87,14 +87,18 @@ export const register: AsyncRequestHandler = async (req, res, next) => {
 
 export const login: AsyncRequestHandler = async (req, res, next) => {
     try {
+        console.log('Login attempt received:', { email: req.body?.email, hasPassword: !!req.body?.password });
+
         // Validate request
         if (!req.body || typeof req.body !== 'object') {
+            console.log('Invalid request body');
             return res.status(400).json({ message: 'Invalid request body' });
         }
 
         const { email, password } = req.body;
 
         if (!email || !password) {
+            console.log('Missing email or password');
             return res.status(400).json({ message: 'Missing email or password' });
         }
 
@@ -103,6 +107,8 @@ export const login: AsyncRequestHandler = async (req, res, next) => {
             ip: req.ip,
             userAgent: req.headers['user-agent'],
         };
+
+        console.log('Attempting login for email:', email);
 
         // Login user
         const result = await authenticationService.login(email, password, clientInfo);

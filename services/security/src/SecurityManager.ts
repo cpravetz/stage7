@@ -8,17 +8,22 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { refreshToken, register, login, logout } from './controllers/authController';
+import { BaseEntity } from '@cktmcs/shared';
+import { initUserService } from './services/userService';
 
 // Define Request and Response types for consistency
 type Request = express.Request;
 type Response = express.Response;
 
 const app = express();
-export class SecurityManager {
-    private port: string;
+export class SecurityManager extends BaseEntity {
 
     constructor() {
-        this.port = process.env.PORT || '5010';
+        super('SecurityManager', 'SecurityManager', 'securitymanager', process.env.PORT || '5010');
+
+        // Initialize user service with this SecurityManager instance
+        initUserService(this);
+
         this.configureMiddleware();
         this.configureRoutes();
     }
@@ -213,7 +218,7 @@ const exemptPaths = ['/auth/', '/verify', '/public-key', '/health', '/login', '/
 
     // Update middleware to match paths more flexibly
     if (exemptPaths.some(path => req.path.startsWith(path))) {
-        console.log(`[SecurityManager] Skipping token verification for exempt path: ${req.path}`);
+        //console.log(`[SecurityManager] Skipping token verification for exempt path: ${req.path}`);
         return next();
     }
 

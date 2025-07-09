@@ -5,6 +5,7 @@ import { AuthorizationService } from '../services/AuthorizationService';
 import { TokenType, TokenPayload } from '../models/Token';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { User } from '../models/User';
+import { findUserById } from '../services/userService';
 
 
 /**
@@ -183,7 +184,6 @@ export function requireEmailVerification() {
  */
 async function checkEmailVerification(userId: string): Promise<boolean> {
     try {
-        const { findUserById } = require('../services/userService');
         const user = await findUserById(userId);
         return user ? user.isEmailVerified : false;
     } catch (error) {
@@ -232,7 +232,6 @@ export function requireMfa() {
  */
 async function checkMfaEnabled(userId: string): Promise<boolean> {
     try {
-        const { findUserById } = require('../services/userService');
         const user = await findUserById(userId);
         return user ? user.mfaEnabled : false;
     } catch (error) {

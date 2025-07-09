@@ -227,6 +227,9 @@ export class FileUploadManager {
 
         } catch (error) {
             analyzeError(error as Error);
+            if (error && (error as any).response) {
+                console.error('Error response data from Librarian:', (error as any).response.data);
+            }
             console.error('Error getting mission files:', error instanceof Error ? error.message : error);
             res.status(500).json({ error: 'Failed to get mission files' });
         }

@@ -118,9 +118,14 @@ export class AuthenticationService {
         clientInfo?: Token['clientInfo']
     ): Promise<{ user: User; accessToken: Token; refreshToken: Token }> {
         try {
+            console.log('AuthenticationService.login called for email:', email);
+
             // Find user by email
             const user = await findUserByEmail(email);
+            console.log('User lookup result:', user ? 'User found' : 'User not found');
+
             if (!user) {
+                console.log('Login failed: User not found for email:', email);
                 throw new Error('Invalid email or password');
             }
 
