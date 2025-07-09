@@ -1,6 +1,6 @@
 import express from 'express';
 import { Agent } from './agents/Agent';
-import { MapSerializer, BaseEntity, createAuthenticatedAxios, PluginParameterType } from '@cktmcs/shared';
+import { MapSerializer, BaseEntity, createAuthenticatedAxios, PluginParameterType, OutputType } from '@cktmcs/shared';
 import { v4 as uuidv4 } from 'uuid';
 import { AgentSetStatistics, InputValue } from '@cktmcs/shared';
 import { AgentPersistenceManager } from './utils/AgentPersistenceManager';
@@ -1075,11 +1075,12 @@ export class AgentSet extends BaseEntity {
                     }
                 }
             }
+            const allStepsForMission = Array.from(globalStepMap.values()).map(entry => entry.step);
             for (const agent of this.agents.values()) {
                 if (agent.getMissionId() === missionId) {
                     const status = agent.getStatus();
                     // Pass the globalStepMap to getStatistics
-                    const agentStats = await agent.getStatistics(globalStepMap);
+                    const agentStats = await agent.getStatistics(globalStepMap, allStepsForMission);
                     if (!stats.agentsByStatus.has(status)) {
                         stats.agentsByStatus.set(status, [agentStats]);
                     } else {

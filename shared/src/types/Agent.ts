@@ -21,3 +21,9 @@ export interface AgentConfig {
     role?: string;
     roleCustomizations?: any;
 }
+
+export enum OutputType {
+    INTERIM = 'interim',
+    FINAL = 'final',
+    PLAN = 'plan',
+}
