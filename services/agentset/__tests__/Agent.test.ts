@@ -1,6 +1,6 @@
 // services/agentset/__tests__/Agent.test.ts
 import { Agent, CollaborationMessageType, ConflictResolution, CoordinationType, ResourceResponse, TaskUpdatePayload, CoordinationData } from '../src/agents/Agent';
-import { AgentConfig } from '@cktmcs/shared';
+import { AgentConfig, OutputType } from '@cktmcs/shared';
 import { Step, StepStatus, StepModification } from '../src/agents/Step';
 import { AgentPersistenceManager } from '../src/utils/AgentPersistenceManager';
 import { StateManager } from '../src/utils/StateManager';
@@ -118,6 +118,7 @@ describe('Agent', () => {
                 applyModifications: jest.fn(),
                 clearTempData: jest.fn(),
                 isEndpoint: jest.fn().mockReturnValue(false), // Default mock
+                getOutputType: jest.fn().mockReturnValue(OutputType.INTERIM), // Default mock
                 persistenceManager: new AgentPersistenceManager(),
                 awaitsSignal: undefined,
             } as unknown as Step;
@@ -284,6 +285,31 @@ describe('Agent', () => {
             await agent.handleCollaborationMessage(message);
 
             expect(agent.processResourceRequest).toHaveBeenCalledWith(resourcePayload);
+        });
+
+        it('should correctly pass allStepsForMission to getStatistics in saveWorkProductWithClassification', async () => {
+            const mockStep = agent.steps[0];
+            // Ensure getOutputType is called with the correct arguments
+            const getOutputTypeSpy = jest.spyOn(mockStep, 'getOutputType');
+
+            // Mock isStepFinal to control its return value
+            const isStepFinalSpy = jest.spyOn(Agent as any, 'isStepFinal').mockReturnValue(true);
+
+            const mockData = [{ success: true, name: 'output', resultType: PluginParameterType.STRING, result: 'test', resultDescription: 'Test Output' }];
+            await (agent as any).saveWorkProductWithClassification(mockStep.id, mockData, true, [agent]);
+
+            // Verify that getOutputType on the step was called with the agent's own steps
+            expect(getOutputTypeSpy).toHaveBeenCalledWith(agent.steps);
+
+            // Verify that the 'type' sent in the message is 'Final' because isStepFinal (global) and getOutputType (local) say so
+            expect((agent as any).sendMessage).toHaveBeenCalledWith(
+                expect.anything(), // messageType
+                expect.anything(), // recipient
+                expect.objectContaining({ type: 'Final' }) // payload
+            );
+
+            isStepFinalSpy.mockRestore();
+            getOutputTypeSpy.mockRestore();
         });
 
         it('should handle invalid RESOURCE_SHARE_REQUEST payload gracefully (e.g. missing resource)', async () => {

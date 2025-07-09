@@ -7,7 +7,8 @@ import { PluginParameterType,
     ActionVerbTask,
     ExecutionContext as PlanExecutionContext,
     PlanTemplate,
-    MissionFile } from '@cktmcs/shared'; // Added ActionVerbTask and MissionFile
+    MissionFile,
+    OutputType } from '@cktmcs/shared'; // Added ActionVerbTask, MissionFile, and OutputType
 import { MapSerializer } from '@cktmcs/shared';
 import { MessageType } from '@cktmcs/shared'; // Ensured MessageType is here, assuming it's separate or also from shared index
 import { AgentPersistenceManager } from '../utils/AgentPersistenceManager';
@@ -161,6 +162,19 @@ export class Step {
             s.dependencies.some(dep => dep.sourceStepId === this.id)
         );
         return dependents.length === 0;
+    }
+
+    getOutputType(allSteps: Step[]): OutputType {
+        // If the step generates a plan, its output type is PLAN
+        if (this.result?.some(r => r.resultType === PluginParameterType.PLAN)) {
+            return OutputType.PLAN;
+        }
+        // If the step is an endpoint and doesn't generate a plan, its output type is FINAL
+        if (this.isEndpoint(allSteps)) {
+            return OutputType.FINAL;
+        }
+        // Otherwise, its output type is INTERIM
+        return OutputType.INTERIM;
     }
 
     private async handleForeach(): Promise<PluginOutput[]> {
