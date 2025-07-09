@@ -517,7 +517,7 @@ Please consider this context and the available plugins when planning and executi
             const type = outputType === 'final' ? 'Final' : outputType === 'plan' ? 'Plan' : 'Interim';
 
             let scope: string;
-            if (this.steps.length === 1 || (isAgentEndpoint && isFinal)) {
+            if (this.steps.length === 1 || (isAgentEndpoint && outputType === OutputType.FINAL)) {
                 scope = 'MissionOutput';
             } else if (isAgentEndpoint) {
                 scope = 'AgentOutput';
