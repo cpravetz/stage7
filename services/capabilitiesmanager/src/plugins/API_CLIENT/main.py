@@ -1,5 +1,16 @@
-import requests
+#!/usr/bin/env python3
+"""
+API_CLIENT Plugin - A generic interface for interacting with third-party RESTful APIs.
+"""
+
+import sys
 import json
+import requests
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 def execute_plugin(inputs):
     """
@@ -12,7 +23,11 @@ def execute_plugin(inputs):
     auth = inputs.get("auth", {})
 
     if not method or not url:
-        return {"error": "The 'method' and 'url' parameters are required."}
+        return {
+            "success": False,
+            "error": "The 'method' and 'url' parameters are required.",
+            "outputs": []
+        }
 
     # Authentication handling
     auth_strategy = None
@@ -30,8 +45,9 @@ def execute_plugin(inputs):
             method=method.upper(),
             url=url,
             headers=headers,
-            json=body,
-            auth=auth_strategy
+            json=body if body else None,
+            auth=auth_strategy,
+            timeout=30
         )
         response.raise_for_status()  # Raise an exception for bad status codes
 
@@ -42,9 +58,72 @@ def execute_plugin(inputs):
             response_body = response.text
 
         return {
-            "status_code": response.status_code,
-            "headers": dict(response.headers),
-            "body": response_body
+            "success": True,
+            "outputs": [
+                {
+                    "name": "status_code",
+                    "value": response.status_code,
+                    "type": "number"
+                },
+                {
+                    "name": "headers",
+                    "value": dict(response.headers),
+                    "type": "object"
+                },
+                {
+                    "name": "body",
+                    "value": response_body,
+                    "type": "object" if isinstance(response_body, dict) else "string"
+                }
+            ]
         }
     except requests.exceptions.RequestException as e:
-        return {"error": str(e)}
+        logger.error(f"API request failed: {str(e)}")
+        return {
+            "success": False,
+            "error": str(e),
+            "outputs": []
+        }
+
+def main():
+    """Main entry point for the plugin."""
+    try:
+        # Read inputs from stdin
+        input_data = sys.stdin.read().strip()
+        if not input_data:
+            logger.error("No input data received")
+            result = {
+                "success": False,
+                "error": "No input data received",
+                "outputs": []
+            }
+        else:
+            # Parse the input data
+            inputs_array = json.loads(input_data)
+            inputs_dict = {key: value["value"] for key, value in inputs_array}
+
+            # Execute the plugin
+            result = execute_plugin(inputs_dict)
+
+        # Output the result as JSON
+        print(json.dumps(result))
+
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse input JSON: {str(e)}")
+        result = {
+            "success": False,
+            "error": f"Failed to parse input JSON: {str(e)}",
+            "outputs": []
+        }
+        print(json.dumps(result))
+    except Exception as e:
+        logger.error(f"Plugin execution failed: {str(e)}")
+        result = {
+            "success": False,
+            "error": f"Plugin execution failed: {str(e)}",
+            "outputs": []
+        }
+        print(json.dumps(result))
+
+if __name__ == "__main__":
+    main()

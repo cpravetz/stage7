@@ -8,7 +8,7 @@ import { MapSerializer, BaseEntity } from '@cktmcs/shared';
 import { AgentPersistenceManager } from '../utils/AgentPersistenceManager';
 import { PluginOutput, PluginParameterType, InputValue, ExecutionContext as PlanExecutionContext } from '@cktmcs/shared';
 import { ActionVerbTask } from '@cktmcs/shared';
-import { AgentConfig, AgentStatistics } from '@cktmcs/shared';
+import { AgentConfig, AgentStatistics, OutputType } from '@cktmcs/shared';
 import { MessageType } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { Step, StepStatus, createFromPlan } from './Step';
@@ -230,7 +230,8 @@ Please consider this context and the available plugins when planning and executi
                             this.executeActionWithCapabilitiesManager.bind(this),
                             this.useBrainForReasoning.bind(this),
                             this.createSubAgent.bind(this),
-                            this.handleAskStep.bind(this)
+                            this.handleAskStep.bind(this),
+                            this.steps
                         );
 
                         console.log(`Step ${step.actionVerb} result:`, result);
@@ -299,9 +300,6 @@ Please consider this context and the available plugins when planning and executi
                 this.say(`Agent ${this.id} has completed its work.`);
                 this.say(`Result: ${JSON.stringify(this.output)}`);
             }
-
-            // Final status update
-            await this.notifyTrafficManager();
 
             // if (this.status === AgentStatus.COMPLETED) {
             //     // The agent is now retained in the agent set for statistical purposes.
@@ -443,7 +441,7 @@ Please consider this context and the available plugins when planning and executi
         }
         const question = input.value || input.args?.question;
         const choices = input.args?.choices;
-        const timeout = input.args?.timeout || 300000; // Default timeout of 5 minutes if not specified
+        const timeout = input.args?.timeout || 600000; // Default timeout of 10 minutes if not specified
 
         try {
             const response = await Promise.race([
@@ -507,17 +505,44 @@ Please consider this context and the available plugins when planning and executi
         try {
             await this.agentPersistenceManager.saveWorkProduct(workProduct);
 
-            // New logic: check if any step in any agent depends on this step
-            const isFinal = Agent.isStepFinal(stepId, allAgents);
-            const type = isFinal ? 'Final' : 'Interim';
+            const step = this.steps.find(s => s.id === stepId);
+            if (!step) {
+                console.error(`Step with id ${stepId} not found in agent ${this.id}`);
+                return;
+            }
+
+            const outputType = step.getOutputType(this.steps);
+            const type = outputType === 'Final' ? 'Final' : outputType === 'Plan' ? 'Plan' : 'Interim';
 
             let scope: string;
-            if (this.steps.length === 1 || (isAgentEndpoint && isFinal)) {
+            if (this.steps.length === 1 || (isAgentEndpoint && outputType === OutputType.FINAL)) {
                 scope = 'MissionOutput';
             } else if (isAgentEndpoint) {
                 scope = 'AgentOutput';
             } else {
                 scope = 'AgentStep';
+            }
+
+            // If this is a final step, upload outputs to shared file space
+            if (outputType === 'Final' && data && data.length > 0) {
+                try {
+                    const librarianUrl = await this.getServiceUrl('Librarian');
+                    if (librarianUrl) {
+                        const uploadedFiles = await step.uploadOutputsToSharedSpace(
+                            this.missionId,
+                            librarianUrl,
+                            this.authenticatedApi
+                        );
+                        if (uploadedFiles.length > 0) {
+                            console.log(`Uploaded ${uploadedFiles.length} final step outputs to shared space for step ${stepId}`);
+                        }
+                    } else {
+                        console.warn('Librarian URL not available for uploading final step outputs');
+                    }
+                } catch (error) {
+                    console.error('Error uploading final step outputs to shared space:', error);
+                    // Don't fail the entire operation if file upload fails
+                }
             }
 
             this.sendMessage(MessageType.WORK_PRODUCT_UPDATE, 'user', {
@@ -943,7 +968,7 @@ Please consider this context and the available plugins when planning and executi
         return this.status;
     }
 
-    async getStatistics(globalStepMap?: Map<string, { agentId: string, step: any }>): Promise<AgentStatistics> {
+    async getStatistics(globalStepMap?: Map<string, { agentId: string, step: any }>, allStepsForMission?: Step[]): Promise<AgentStatistics> {
 
         const stepStats = this.steps.map(step => {
             // Ensure step and its properties are defined before accessing
@@ -962,13 +987,15 @@ Please consider this context and the available plugins when planning and executi
             }
 
             const stepNo = step?.stepNo || 0;
+            const outputType = step?.getOutputType(allStepsForMission || this.steps);
 
             return {
                 id: stepId,
                 verb: stepActionVerb, // Mapped to 'verb' for AgentStatistics interface
                 status: stepStatus,
                 dependencies: dependencies,
-                stepNo: stepNo
+                stepNo: stepNo,
+                outputType: outputType
             };
         }); // End of this.steps.map
 
@@ -1418,7 +1445,8 @@ Please consider this context and the available plugins when planning and executi
             this.executeActionWithCapabilitiesManager.bind(this),
             this.useBrainForReasoning.bind(this),
             this.createSubAgent.bind(this),
-            this.handleAskStep.bind(this)
+            this.handleAskStep.bind(this),
+            this.steps
         );
 
         // Save the work product

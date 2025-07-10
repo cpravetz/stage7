@@ -1,6 +1,6 @@
 import express from 'express';
 import { Agent } from './agents/Agent';
-import { MapSerializer, BaseEntity, createAuthenticatedAxios, PluginParameterType } from '@cktmcs/shared';
+import { MapSerializer, BaseEntity, createAuthenticatedAxios, PluginParameterType, OutputType } from '@cktmcs/shared';
 import { v4 as uuidv4 } from 'uuid';
 import { AgentSetStatistics, InputValue } from '@cktmcs/shared';
 import { AgentPersistenceManager } from './utils/AgentPersistenceManager';
@@ -15,7 +15,7 @@ import { ConflictResolution } from './collaboration/ConflictResolution';
 
 export class AgentSet extends BaseEntity {
     agents: Map<string, Agent> = new Map(); // Store agents by their ID
-    maxAgents: number = 10; // Example limit for agents in this set
+    maxAgents: number = 250; // Example limit for agents in this set
     persistenceManager: AgentPersistenceManager;
     private trafficManagerUrl: string = process.env.TRAFFICMANAGER_URL || 'trafficmanager:5080';
     private librarianUrl: string = process.env.LIBRARIAN_URL || 'librarian:5040';
@@ -1075,11 +1075,12 @@ export class AgentSet extends BaseEntity {
                     }
                 }
             }
+            const allStepsForMission = Array.from(globalStepMap.values()).map(entry => entry.step);
             for (const agent of this.agents.values()) {
                 if (agent.getMissionId() === missionId) {
                     const status = agent.getStatus();
                     // Pass the globalStepMap to getStatistics
-                    const agentStats = await agent.getStatistics(globalStepMap);
+                    const agentStats = await agent.getStatistics(globalStepMap, allStepsForMission);
                     if (!stats.agentsByStatus.has(status)) {
                         stats.agentsByStatus.set(status, [agentStats]);
                     } else {

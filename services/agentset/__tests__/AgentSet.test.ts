@@ -3,12 +3,12 @@ import { Agent } from '../src/agents/Agent';
 import { AgentPersistenceManager } from '../src/utils/AgentPersistenceManager';
 import express from 'express';
 import axios from 'axios';
+import { OutputType } from '@cktmcs/shared';
 
 jest.mock('../src/agents/Agent');
 jest.mock('../src/utils/AgentPersistenceManager');
 jest.mock('../src/lifecycle/AgentLifecycleManager'); // Mock AgentLifecycleManager
 jest.mock('axios');
-
 
 describe('AgentSet', () => {
   let agentSet: AgentSet;
@@ -126,14 +126,20 @@ describe('AgentSet', () => {
   describe('getAgentStatistics', () => {
     it('should return statistics for agents in a mission', async () => {
       const mockAgent1 = {
+        id: 'agent1',
+        missionId: 'test-mission',
+        steps: [{ id: 's1', getOutputType: jest.fn().mockReturnValue(OutputType.FINAL) }],
         getMissionId: jest.fn().mockReturnValue('test-mission'),
         getStatus: jest.fn().mockReturnValue('ACTIVE'),
-        getStatistics: jest.fn().mockResolvedValue({ someStats: 'value' })
+        getStatistics: jest.fn().mockResolvedValue({ id: 'agent1', steps: [{id: 's1', outputType: OutputType.FINAL}] })
       };
       const mockAgent2 = {
+        id: 'agent2',
+        missionId: 'test-mission',
+        steps: [{ id: 's2', getOutputType: jest.fn().mockReturnValue(OutputType.INTERIM) }],
         getMissionId: jest.fn().mockReturnValue('test-mission'),
         getStatus: jest.fn().mockReturnValue('IDLE'),
-        getStatistics: jest.fn().mockResolvedValue({ someOtherStats: 'value' })
+        getStatistics: jest.fn().mockResolvedValue({ id: 'agent2', steps: [{id: 's2', outputType: OutputType.INTERIM}] })
       };
       (agentSet as any).agents.set('agent1', mockAgent1);
       (agentSet as any).agents.set('agent2', mockAgent2);
@@ -149,16 +155,14 @@ describe('AgentSet', () => {
       await (agentSet as any).getAgentStatistics(mockReq, mockRes);
 
       expect(mockRes.status).toHaveBeenCalledWith(200);
-      // The actual data structure is a Map which gets serialized.
-      // For testing, we might need to check the structure after MapSerializer.transformForSerialization
-      // or trust that the Map content is correct.
       const responseData = (mockRes.json as jest.Mock).mock.calls[0][0];
       expect(responseData.agentsCount).toBe(2);
+      expect(typeof responseData.agentsByStatus).toBe('object');
 
-      // Deserialize for easier checking if it was serialized by the method
-      // const deserializedAgentsByStatus = new Map(Object.entries(responseData.agentsByStatus.value));
-      // For now, let's assume the structure is okay if counts match and it's an object.
-      expect(typeof responseData.agentsByStatus).toBe('object'); // Serialized Map
+      // Check that getStatistics was called with allStepsForMission
+      const allStepsForMission = [mockAgent1.steps[0], mockAgent2.steps[0]];
+      expect(mockAgent1.getStatistics).toHaveBeenCalledWith(expect.any(Map), allStepsForMission);
+      expect(mockAgent2.getStatistics).toHaveBeenCalledWith(expect.any(Map), allStepsForMission);
     });
   });
 

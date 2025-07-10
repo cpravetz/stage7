@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React from 'react';
 import {
   Box,
   Button,
@@ -28,6 +28,7 @@ import {
 import axios from 'axios'; // Keep axios for isAxiosError checks if needed, or remove if SecurityClient handles all error types.
 import { API_BASE_URL } from '../config';
 import { SecurityClient } from '../SecurityClient';
+import { useAuth } from '../context/AuthContext';
 
 interface MissionFile {
   id: string;
@@ -42,39 +43,66 @@ interface MissionFile {
 interface FileUploadProps {
   missionId: string;
   onFilesChanged?: () => void;
+  // NEW PROPS FOR DIALOG STATE MANAGEMENT
+  descriptionDialog: boolean;
+  setDescriptionDialog: React.Dispatch<React.SetStateAction<boolean>>;
+  pendingFiles: File[];
+  setPendingFiles: React.Dispatch<React.SetStateAction<File[]>>;
+  description: string;
+  setDescription: React.Dispatch<React.SetStateAction<string>>;
 }
 
-const FileUpload: React.FC<FileUploadProps> = ({ missionId, onFilesChanged }) => {
-  const [files, setFiles] = useState<MissionFile[]>([]);
-  const [uploading, setUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
-  const [dragOver, setDragOver] = useState(false);
-  const [descriptionDialog, setDescriptionDialog] = useState(false);
-  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
-  const [description, setDescription] = useState('');
-  const fileInputRef = useRef<HTMLInputElement>(null);
+const FileUpload: React.FC<FileUploadProps> = ({
+  missionId,
+  onFilesChanged,
+  // Destructure new props
+  descriptionDialog,
+  setDescriptionDialog,
+  pendingFiles,
+  setPendingFiles,
+  description,
+  setDescription,
+}) => {
+  const [files, setFiles] = React.useState<MissionFile[]>([]);
+  const [uploading, setUploading] = React.useState(false);
+  const [uploadProgress, setUploadProgress] = React.useState(0);
+  const [error, setError] = React.useState<string | null>(null);
+  const [success, setSuccess] = React.useState<string | null>(null);
+  const [dragOver, setDragOver] = React.useState(false);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
+  const { isAuthenticated, isInitializing } = useAuth();
   const securityClient = SecurityClient.getInstance(API_BASE_URL);
   const apiClient = securityClient.getApi();
 
-  // Load existing files
-  const loadFiles = useCallback(async () => {
+  const loadFiles = React.useCallback(async () => {
+    if (!isAuthenticated || isInitializing) {
+      console.log('[FileUpload] Skipping file load - not authenticated or still initializing');
+      return;
+    }
+
     try {
+      console.log('[FileUpload] Loading files for mission:', missionId);
       const response = await apiClient.get(`/missions/${missionId}/files`);
+      console.log('[FileUpload] Files loaded successfully:', response.data);
       setFiles(response.data.files || []);
     } catch (error) {
-      console.error('Error loading files:', error);
-      setError('Failed to load files');
+      console.error('[FileUpload] Error loading files:', error);
+      if (axios.isAxiosError(error)) {
+        const status = error.response?.status;
+        const message = error.response?.data?.error || error.message;
+        setError(`Failed to load files (${status}): ${message}`);
+      } else {
+        setError('Failed to load files: Unknown error');
+      }
     }
-  }, [missionId, apiClient]);
+  }, [missionId, apiClient, isAuthenticated, isInitializing]);
 
   React.useEffect(() => {
-    if (missionId) {
+    if (missionId && isAuthenticated && !isInitializing) {
       loadFiles();
     }
-  }, [missionId, loadFiles]);
+  }, [missionId, loadFiles, isAuthenticated, isInitializing]);
 
   const formatFileSize = (bytes: number): string => {
     if (bytes === 0) return '0 Bytes';
@@ -84,9 +112,9 @@ const FileUpload: React.FC<FileUploadProps> = ({ missionId, onFilesChanged }) =>
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
-  const handleFileSelect = (selectedFiles: File[]) => {
+  const handleFileSelect = React.useCallback((selectedFiles: File[]) => {
+    console.log(`[handleFileSelect] for ${selectedFiles.length} files`);
     const validFiles = selectedFiles.filter(file => {
-      // Basic validation
       if (file.size > 50 * 1024 * 1024) { // 50MB limit
         setError(`File ${file.name} is too large (max 50MB)`);
         return false;
@@ -96,12 +124,29 @@ const FileUpload: React.FC<FileUploadProps> = ({ missionId, onFilesChanged }) =>
 
     if (validFiles.length > 0) {
       setPendingFiles(validFiles);
+      setError(null); // Clear any existing errors
+      setSuccess(null); // Clear any existing success messages
       setDescriptionDialog(true);
     }
-  };
+  }, [setPendingFiles, setDescription, setDescriptionDialog]);
+
+const handleCancelUpload = React.useCallback(() => {
+    setPendingFiles([]); // Use prop setter
+    setDescription(''); // Use prop setter
+    setDescriptionDialog(false); // Use prop setter
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  }, [setPendingFiles, setDescription, setDescriptionDialog]);
+
 
   const handleUpload = async () => {
     if (pendingFiles.length === 0) return;
+
+    if (!isAuthenticated) {
+      setError('You must be authenticated to upload files');
+      return;
+    }
 
     setUploading(true);
     setUploadProgress(0);
@@ -109,32 +154,36 @@ const FileUpload: React.FC<FileUploadProps> = ({ missionId, onFilesChanged }) =>
     setSuccess(null);
 
     try {
+      console.log('[FileUpload] Starting upload for mission:', missionId);
+      console.log('[FileUpload] Files to upload:', pendingFiles.map(f => f.name));
+
       const formData = new FormData();
       pendingFiles.forEach(file => {
         formData.append('files', file);
       });
-      
+
       if (description.trim()) {
         formData.append('description', description.trim());
       }
 
+      console.log('[FileUpload] Making POST request to:', `/missions/${missionId}/files`);
+
       const response = await apiClient.post(`/missions/${missionId}/files`, formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data'
-        },
+        headers: { 'Content-Type': 'multipart/form-data' },
         onUploadProgress: (progressEvent) => {
           if (progressEvent.total) {
             const progress = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+            console.log('[FileUpload] Upload progress:', progress + '%');
             setUploadProgress(progress);
           }
         }
       });
 
+      console.log('[FileUpload] Upload successful:', response.data);
       setSuccess(`Successfully uploaded ${response.data.uploadedFiles.length} file(s)`);
       await loadFiles();
       onFilesChanged?.();
-      
-      // Reset state
+
       setPendingFiles([]);
       setDescription('');
       setDescriptionDialog(false);
@@ -143,8 +192,14 @@ const FileUpload: React.FC<FileUploadProps> = ({ missionId, onFilesChanged }) =>
       }
 
     } catch (error: any) {
-      console.error('Upload error:', error);
-      setError(error.response?.data?.error || 'Failed to upload files');
+      console.error('[FileUpload] Upload error:', error);
+      if (axios.isAxiosError(error)) {
+        const status = error.response?.status;
+        const message = error.response?.data?.error || error.message;
+        setError(`Upload failed (${status}): ${message}`);
+      } else {
+        setError('Upload failed: Unknown error');
+      }
     } finally {
       setUploading(false);
       setUploadProgress(0);
@@ -202,53 +257,65 @@ const FileUpload: React.FC<FileUploadProps> = ({ missionId, onFilesChanged }) =>
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
-    
     const droppedFiles = Array.from(e.dataTransfer.files);
     handleFileSelect(droppedFiles);
   };
-
+  
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
+    if (e.target.files && e.target.files.length > 0) {
       const selectedFiles = Array.from(e.target.files);
       handleFileSelect(selectedFiles);
+      // Reset the input immediately to allow selecting the same file again
+      e.target.value = '';
     }
   };
 
   return (
-    <Box>
+       <Box>
+      {/* Authentication Status */}
+      {!isAuthenticated && !isInitializing && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          Authentication required to upload files
+        </Alert>
+      )}
+
       {/* Upload Area */}
-      <Paper
-        elevation={2}
-        sx={{
-          p: 3,
-          mb: 2,
-          border: dragOver ? '2px dashed #1976d2' : '2px dashed #ccc',
-          backgroundColor: dragOver ? 'rgba(25, 118, 210, 0.1)' : 'transparent',
-          cursor: 'pointer',
-          transition: 'all 0.3s ease'
-        }}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
-        onClick={() => fileInputRef.current?.click()}
-      >
+      <label htmlFor="file-upload-input" style={{ display: 'block', cursor: isAuthenticated ? 'pointer' : 'not-allowed' }}>
+        <Paper
+          elevation={2}
+          sx={{
+            p: 3,
+            mb: 2,
+            border: dragOver ? '2px dashed #1976d2' : '2px dashed #ccc',
+            backgroundColor: dragOver ? 'rgba(25, 118, 210, 0.1)' : (!isAuthenticated ? 'rgba(0, 0, 0, 0.05)' : 'transparent'),
+            cursor: isAuthenticated ? 'pointer' : 'not-allowed',
+            transition: 'all 0.3s ease',
+            opacity: isAuthenticated ? 1 : 0.6
+          }}
+          onDragOver={isAuthenticated ? handleDragOver : undefined}
+          onDragLeave={isAuthenticated ? handleDragLeave : undefined}
+          onDrop={isAuthenticated ? handleDrop : undefined}
+        >
         <Box textAlign="center">
           <UploadIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 1 }} />
           <Typography variant="h6" gutterBottom>
             Drop files here or click to select
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Maximum file size: 50MB. Supported formats: documents, images, archives
+            Maximum file size: 50MB
           </Typography>
         </Box>
         <input
+          id="file-upload-input"
           ref={fileInputRef}
           type="file"
           multiple
           style={{ display: 'none' }}
           onChange={handleFileInputChange}
+          disabled={!isAuthenticated}
         />
       </Paper>
+      </label>
 
       {/* Upload Progress */}
       {uploading && (
@@ -312,8 +379,8 @@ const FileUpload: React.FC<FileUploadProps> = ({ missionId, onFilesChanged }) =>
         </List>
       )}
 
-      {/* Description Dialog */}
-      <Dialog open={descriptionDialog} onClose={() => setDescriptionDialog(false)} maxWidth="sm" fullWidth>
+{/* Description Dialog */}
+      <Dialog open={descriptionDialog} onClose={handleCancelUpload} maxWidth="sm" fullWidth>
         <DialogTitle>
           <AttachFileIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
           Upload Files
@@ -334,8 +401,12 @@ const FileUpload: React.FC<FileUploadProps> = ({ missionId, onFilesChanged }) =>
           />
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDescriptionDialog(false)}>Cancel</Button>
-          <Button onClick={handleUpload} variant="contained" disabled={uploading}>
+          <Button onClick={handleCancelUpload}>Cancel</Button>
+          <Button
+            onClick={handleUpload}
+            variant="contained"
+            disabled={uploading || !isAuthenticated}
+          >
             {uploading ? 'Uploading...' : 'Upload'}
           </Button>
         </DialogActions>
@@ -344,4 +415,4 @@ const FileUpload: React.FC<FileUploadProps> = ({ missionId, onFilesChanged }) =>
   );
 };
 
-export default FileUpload;
+export default React.memo(FileUpload);  

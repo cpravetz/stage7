@@ -173,7 +173,9 @@ export const analyzeError = async (error: Error) => {
     });
 
     if (!response.data || !response.data.response) {
-      throw new Error('Invalid response from Brain service');
+      console.error('Invalid response from Brain service');
+      processingError = false;
+      return;
     }
 
     const remediationGuidance = response.data.response;

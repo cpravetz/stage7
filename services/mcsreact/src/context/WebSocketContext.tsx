@@ -18,7 +18,7 @@ interface WebSocketContextType {
   activeMissionName: string | null;
   activeMissionId: string | null;
   isPaused: boolean;
-  workProducts: { type: 'Interim' | 'Final', name: string, url: string }[];
+  workProducts: { type: 'Interim' | 'Final' | 'Plan', name: string, url: string }[];
   agentDetails: any[];
   missionStatus: any;
   statistics: any;
@@ -49,7 +49,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [activeMissionName, setActiveMissionName] = useState<string | null>(null);
   const [activeMissionId, setActiveMissionId] = useState<string | null>(null);
   const [isPaused, setIsPaused] = useState<boolean>(false);
-  const [workProducts, setWorkProducts] = useState<{ type: 'Interim' | 'Final', name: string, url: string }[]>([]);
+  const [workProducts, setWorkProducts] = useState<{ type: 'Interim' | 'Final' | 'Plan', name: string, url: string }[]>([]);
   const [agentDetails, setAgentDetails] = useState<any[]>([]);
   const [missionStatus, setMissionStatus] = useState<any>(null);
   const [statistics, setStatistics] = useState<any>({
@@ -144,8 +144,8 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         const statusContent = data.data ? data.data.content : data.content;
         if (statusContent) {
           setActiveMission(statusContent.active);
-          setActiveMissionName(statusContent.name);
-          setActiveMissionId(statusContent.id);
+          if (activeMissionName !== statusContent.name) setActiveMissionName(statusContent.name);
+          if (activeMissionId !== statusContent.id) { setActiveMissionId(statusContent.id) };
           setMissionStatus(statusContent);
         }
         break;
@@ -485,8 +485,3 @@ export const useWebSocket = () => {
   }
   return context;
 };
-
-
-
-
-

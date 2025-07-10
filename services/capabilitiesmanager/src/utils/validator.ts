@@ -12,20 +12,40 @@ export const validateInputType = async (value: any, expectedType: string): Promi
         case 'array':
             return Array.isArray(value);
         case 'object':
-            return typeof value === 'object' && value !== null && !Array.isArray(value);
+            // Handle object validation - accept actual objects or valid JSON strings
+            if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+                return true;
+            }
+            // If it's a string, try to parse it as JSON
+            if (typeof value === 'string') {
+                try {
+                    const parsed = JSON.parse(value);
+                    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed);
+                } catch {
+                    return false;
+                }
+            }
+            return false;
         default:
             return true; // Allow unknown types to pass validation
     }
 }
 
 
-export const validateAndStandardizeInputs = async (plugin: PluginDefinition, inputs: Map<string, InputValue>): 
+export const validateAndStandardizeInputs = async (plugin: PluginDefinition, inputs: Map<string, InputValue>):
     Promise<{ success: boolean; inputs?: Map<string, InputValue>; error?: string }> => {
         console.log('validateAndStandardizeInputs: Called for plugin:', plugin.verb, 'version:', plugin.version);
         console.log('validateAndStandardizeInputs: Raw inputs received (serialized):', MapSerializer.transformForSerialization(inputs));
         const validInputs = new Map<string, InputValue>();
         try {
-            for (const inputDef of plugin.inputDefinitions) {
+            // Ensure inputDefinitions exists and is iterable
+            const inputDefinitions = plugin.inputDefinitions || [];
+            if (!Array.isArray(inputDefinitions)) {
+                console.error('validateAndStandardizeInputs: plugin.inputDefinitions is not an array:', typeof inputDefinitions, inputDefinitions);
+                return { success: false, error: `Plugin ${plugin.verb} has invalid inputDefinitions: expected array, got ${typeof inputDefinitions}` };
+            }
+
+            for (const inputDef of inputDefinitions) {
                 const inputName = inputDef.name;
                 let input = inputs.get(inputName);
 
@@ -39,15 +59,47 @@ export const validateAndStandardizeInputs = async (plugin: PluginDefinition, inp
                     }
                 }
 
-                // If input is missing and defaultValue is defined, use it
-                if (!input && inputDef.defaultValue !== undefined) {
-                    input = {
-                        inputName,
-                        value: inputDef.defaultValue,
-                        valueType: inputDef.type,
-                        args: {}
-                    };
-                    console.log(`validateAndStandardizeInputs: Added missing input '${inputName}' with defaultValue for plugin '${plugin.verb}'.`);
+                // If input is missing, try to provide a default value
+                if (!input) {
+                    let defaultValue: any = undefined;
+
+                    // First check if explicit defaultValue is defined
+                    if (inputDef.defaultValue !== undefined) {
+                        defaultValue = inputDef.defaultValue;
+                        console.log(`validateAndStandardizeInputs: Using explicit defaultValue for '${inputName}' in plugin '${plugin.verb}'.`);
+                    }
+                    // For optional inputs without explicit defaults, provide reasonable type-based defaults
+                    else if (!inputDef.required) {
+                        switch (inputDef.type.toLowerCase()) {
+                            case 'object':
+                                defaultValue = {};
+                                break;
+                            case 'array':
+                                defaultValue = [];
+                                break;
+                            case 'string':
+                                defaultValue = '';
+                                break;
+                            case 'number':
+                                defaultValue = 0;
+                                break;
+                            case 'boolean':
+                                defaultValue = false;
+                                break;
+                            default:
+                                defaultValue = null;
+                        }
+                        console.log(`validateAndStandardizeInputs: Using type-based default (${defaultValue}) for optional input '${inputName}' in plugin '${plugin.verb}'.`);
+                    }
+
+                    if (defaultValue !== undefined) {
+                        input = {
+                            inputName,
+                            value: defaultValue,
+                            valueType: inputDef.type,
+                            args: {}
+                        };
+                    }
                 }
 
                 // Handle required inputs
@@ -83,6 +135,19 @@ export const validateAndStandardizeInputs = async (plugin: PluginDefinition, inp
                             success: false,
                             error: `Invalid type for input \"${inputName}\". Expected ${inputDef.type}`
                         };
+                    }
+
+                    // Parse JSON strings for object types
+                    if (inputDef.type.toLowerCase() === 'object' && typeof input.value === 'string') {
+                        try {
+                            input.value = JSON.parse(input.value);
+                        } catch (error) {
+                            // This shouldn't happen since validation passed, but just in case
+                            return {
+                                success: false,
+                                error: `Invalid JSON string for object input \"${inputName}\"`
+                            };
+                        }
                     }
                 }
 

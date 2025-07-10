@@ -4,6 +4,21 @@
   "description": "Manages interactive chat sessions with the user.",
   "explanation": "This plugin allows for starting, conducting, and ending a chat session to gather information or provide assistance.",
   "language": "python",
+  "inputDefinitions": [
+    {
+      "name": "message",
+      "type": "string",
+      "description": "The message to send to the user",
+      "required": true
+    }
+  ],
+  "outputDefinitions": [
+    {
+      "name": "response",
+      "type": "string",
+      "description": "The user's response to the message"
+    }
+  ],
   "entryPoint": {
     "main": "main.py",
     "packageSource": {

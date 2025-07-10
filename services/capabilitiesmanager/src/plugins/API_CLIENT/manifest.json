@@ -65,7 +65,7 @@
   },
   "security": {
     "permissions": [
-      "network.request"
+      "net.fetch"
     ]
   },
   "version": "1.0.0",

@@ -256,12 +256,9 @@ const ModelPerformanceDashboard: React.FC = () => {
         setPerformanceData(formattedData);
 
         // Fetch rankings from the PostOffice service
-        console.log(`Fetching rankings for conversation type ${conversationType} and metric ${rankingMetric}...`);
         try {
           // Get a fresh token in case it was refreshed during the first API call
           const freshToken = securityClient.getAccessToken();
-          console.log('Using token for rankings API request:', freshToken ? `${freshToken.substring(0, 10)}...` : 'No token available');
-
           // Check if we have a token
           if (!freshToken) {
             throw new Error('No authentication token available for rankings request');

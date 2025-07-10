@@ -1,6 +1,6 @@
 import { Step, StepStatus, createFromPlan } from '../src/agents/Step';
 import { AgentPersistenceManager } from '../src/utils/AgentPersistenceManager';
-import { PluginParameterType, PluginOutput, InputValue, ActionVerbTask, InputReference } from '@cktmcs/shared';
+import { PluginParameterType, PluginOutput, InputValue, ActionVerbTask, InputReference, OutputType } from '@cktmcs/shared';
 
 // Mock AgentPersistenceManager
 jest.mock('../../utils/AgentPersistenceManager');
@@ -199,6 +199,54 @@ describe('Step', () => {
             expect(taskReferences?.get('loopIndex')?.value).toBe(0);
             expect(taskReferences?.get('configValue')?.value).toBe('xyz123');
             expect(taskReferences?.get('configValue')?.valueType).toBe(PluginParameterType.STRING);
+        });
+    });
+
+    describe('getOutputType', () => {
+        it('should return PLAN if the step result contains a plan', () => {
+            const step = new Step({
+                actionVerb: 'PLAN_ACTION',
+                stepNo: 1,
+                persistenceManager: mockPersistenceManager,
+                status: StepStatus.COMPLETED,
+                result: [{ name: 'plan', resultType: PluginParameterType.PLAN, result: [], success: true, resultDescription: '' }]
+            });
+            const allSteps: Step[] = [step];
+            expect(step.getOutputType(allSteps)).toBe(OutputType.PLAN);
+        });
+
+        it('should return FINAL if the step is an endpoint and does not generate a plan', () => {
+            const step = new Step({
+                actionVerb: 'FINAL_ACTION',
+                stepNo: 1,
+                persistenceManager: mockPersistenceManager,
+                status: StepStatus.COMPLETED,
+                result: [{ name: 'output', resultType: PluginParameterType.STRING, result: 'done', success: true, resultDescription: '' }]
+            });
+            const allSteps: Step[] = [step];
+            // Mock isEndpoint to return true for this step
+            jest.spyOn(step, 'isEndpoint').mockReturnValue(true);
+            expect(step.getOutputType(allSteps)).toBe(OutputType.FINAL);
+        });
+
+        it('should return INTERIM if the step is not an endpoint and does not generate a plan', () => {
+            const step1 = new Step({
+                actionVerb: 'INTERIM_ACTION',
+                stepNo: 1,
+                persistenceManager: mockPersistenceManager,
+                status: StepStatus.COMPLETED,
+                result: [{ name: 'output', resultType: PluginParameterType.STRING, result: 'interim output', success: true, resultDescription: '' }]
+            });
+            const step2 = new Step({
+                actionVerb: 'DEPENDENT_ACTION',
+                stepNo: 2,
+                persistenceManager: mockPersistenceManager,
+                dependencies: [{ sourceStepId: step1.id, outputName: 'output', inputName: 'input' }]
+            });
+            const allSteps: Step[] = [step1, step2];
+            // Mock isEndpoint for step1 to return false as step2 depends on it
+            jest.spyOn(step1, 'isEndpoint').mockReturnValue(false);
+            expect(step1.getOutputType(allSteps)).toBe(OutputType.INTERIM);
         });
     });
 });

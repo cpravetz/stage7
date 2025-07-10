@@ -6,7 +6,9 @@ import { PluginParameterType,
     StepDependency,
     ActionVerbTask,
     ExecutionContext as PlanExecutionContext,
-    PlanTemplate } from '@cktmcs/shared'; // Added ActionVerbTask
+    PlanTemplate,
+    MissionFile,
+    OutputType } from '@cktmcs/shared'; // Added ActionVerbTask, MissionFile, and OutputType
 import { MapSerializer } from '@cktmcs/shared';
 import { MessageType } from '@cktmcs/shared'; // Ensured MessageType is here, assuming it's separate or also from shared index
 import { AgentPersistenceManager } from '../utils/AgentPersistenceManager';
@@ -162,6 +164,19 @@ export class Step {
         return dependents.length === 0;
     }
 
+    getOutputType(allSteps: Step[]): OutputType {
+        // If the step generates a plan, its output type is PLAN
+        if (this.result?.some(r => r.resultType === PluginParameterType.PLAN)) {
+            return OutputType.PLAN;
+        }
+        // If the step is an endpoint and doesn't generate a plan, its output type is FINAL
+        if (this.isEndpoint(allSteps)) {
+            return OutputType.FINAL;
+        }
+        // Otherwise, its output type is INTERIM
+        return OutputType.INTERIM;
+    }
+
     private async handleForeach(): Promise<PluginOutput[]> {
         const arrayInput = this.inputValues.get('array');
         const stepsInput = this.inputValues.get('steps');
@@ -250,11 +265,15 @@ export class Step {
         executeAction: (step: Step) => Promise<PluginOutput[]>,
         thinkAction: (inputValues: Map<string, InputValue>) => Promise<PluginOutput[]>,
         delegateAction: (inputValues: Map<string, InputValue>) => Promise<PluginOutput[]>,
-        askAction: (inputValues: Map<string, InputValue>) => Promise<PluginOutput[]>
+        askAction: (inputValues: Map<string, InputValue>) => Promise<PluginOutput[]>,
+        allSteps?: Step[]
     ): Promise<PluginOutput[]> {
         // Ensure inputValues are populated from inputReferences before execution
         this.populateInputsFromReferences();
-        this.populateInputsFromDependencies([this]); // Pass self to resolve dependencies
+        // Only populate from dependencies if we have the full list of steps
+        if (allSteps) {
+            this.populateInputsFromDependencies(allSteps);
+        }
         this.status = StepStatus.RUNNING;
         try {
             let result: PluginOutput[];
@@ -662,6 +681,161 @@ export class Step {
     }
 
     /**
+     * Uploads step outputs to the shared file space for final steps
+     * @param missionId The mission ID to associate the files with
+     * @param librarianUrl The Librarian URL for storing files
+     * @param authenticatedApi The authenticated API client
+     * @returns Promise<MissionFile[]> Array of uploaded files
+     */
+    public async uploadOutputsToSharedSpace(
+        missionId: string,
+        librarianUrl: string,
+        authenticatedApi: any
+    ): Promise<MissionFile[]> {
+        if (!this.result || this.result.length === 0) {
+            return [];
+        }
+
+        const uploadedFiles: MissionFile[] = [];
+
+        for (const output of this.result) {
+            try {
+                // Only upload outputs that have meaningful content
+                if (!output.result || output.result === '') {
+                    continue;
+                }
+
+                // Generate filename based on step and output
+                let fileName: string;
+                let mimeType: string;
+                let fileContent: string;
+
+                if (output.fileName) {
+                    // If output specifies a filename, use it
+                    fileName = output.fileName;
+                } else {
+                    // Generate filename based on step and output
+                    const sanitizedName = output.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+                    const extension = this.getFileExtensionForOutput(output);
+                    fileName = `step_${this.stepNo}_${sanitizedName}${extension}`;
+                }
+
+                // Set MIME type
+                mimeType = output.mimeType || this.getMimeTypeForOutput(output);
+
+                // Convert result to string content
+                if (typeof output.result === 'string') {
+                    fileContent = output.result;
+                } else {
+                    // For objects, serialize to JSON
+                    fileContent = JSON.stringify(output.result, null, 2);
+                    if (!fileName.endsWith('.json')) {
+                        fileName = fileName.replace(/\.[^.]*$/, '') + '.json';
+                    }
+                    mimeType = 'application/json';
+                }
+
+                // Create a MissionFile object
+                const missionFile: MissionFile = {
+                    id: uuidv4(),
+                    originalName: fileName,
+                    mimeType: mimeType,
+                    size: Buffer.byteLength(fileContent, 'utf8'),
+                    uploadedAt: new Date(),
+                    uploadedBy: `agent-${this.id.split('_')[0]}`,
+                    storagePath: `step-outputs/${missionId}/${fileName}`,
+                    description: `Output from step ${this.stepNo}: ${this.actionVerb} - ${output.resultDescription}`
+                };
+
+                // Store the file content in Librarian
+                await authenticatedApi.post(`http://${librarianUrl}/storeData`, {
+                    id: `step-output-${this.id}-${output.name}`,
+                    data: {
+                        fileContent: fileContent,
+                        missionFile: missionFile
+                    },
+                    storageType: 'mongo',
+                    collection: 'step-outputs'
+                });
+
+                // Load the current mission to update its attached files
+                const missionResponse = await authenticatedApi.get(`http://${librarianUrl}/loadData/${missionId}`, {
+                    params: { collection: 'missions', storageType: 'mongo' }
+                });
+
+                if (missionResponse.data && missionResponse.data.data) {
+                    const mission = missionResponse.data.data;
+                    const existingFiles = mission.attachedFiles || [];
+                    const updatedMission = {
+                        ...mission,
+                        attachedFiles: [...existingFiles, missionFile],
+                        updatedAt: new Date()
+                    };
+
+                    // Save the updated mission
+                    await authenticatedApi.post(`http://${librarianUrl}/storeData`, {
+                        id: missionId,
+                        data: updatedMission,
+                        collection: 'missions',
+                        storageType: 'mongo'
+                    });
+
+                    uploadedFiles.push(missionFile);
+                    console.log(`Uploaded step output to shared space: ${fileName}`);
+                }
+
+            } catch (error) {
+                console.error(`Failed to upload step output to shared space:`, error);
+                // Continue with other outputs even if one fails
+            }
+        }
+
+        return uploadedFiles;
+    }
+
+    /**
+     * Determines the appropriate file extension for an output
+     */
+    private getFileExtensionForOutput(output: PluginOutput): string {
+        if (output.fileName) {
+            const ext = output.fileName.substring(output.fileName.lastIndexOf('.'));
+            if (ext) return ext;
+        }
+
+        switch (output.resultType) {
+            case PluginParameterType.STRING:
+                return '.txt';
+            case PluginParameterType.OBJECT:
+            case PluginParameterType.ARRAY:
+                return '.json';
+            case PluginParameterType.PLAN:
+                return '.json';
+            default:
+                return '.txt';
+        }
+    }
+
+    /**
+     * Determines the appropriate MIME type for an output
+     */
+    private getMimeTypeForOutput(output: PluginOutput): string {
+        if (output.mimeType) {
+            return output.mimeType;
+        }
+
+        switch (output.resultType) {
+            case PluginParameterType.STRING:
+                return 'text/plain';
+            case PluginParameterType.OBJECT:
+            case PluginParameterType.ARRAY:
+            case PluginParameterType.PLAN:
+                return 'application/json';
+            default:
+                return 'text/plain';
+        }
+    }
+
+    /**
      * Retrieves temporary data
      * @param key Identifier for the temp data
      */
@@ -941,7 +1115,7 @@ export class Step {
             const isPotentiallyValidPlugin = /^[A-Z_]+$/.test(task.actionVerb); // Basic check for typical plugin verb format
 
             if (task.actionVerb === 'EXECUTE') { // Specifically disallow 'EXECUTE'
-                 throw new Error(`[Step.createFromPlan] Validation Error: The actionVerb 'EXECUTE' is not allowed. Please use a more specific verb.`);
+                 task.actionVerb = 'ACCOMPLISH'
             }
 
             if (!isKnownControlFlow && !isPotentiallyValidPlugin) {
