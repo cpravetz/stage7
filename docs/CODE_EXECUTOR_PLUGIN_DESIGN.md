@@ -34,7 +34,7 @@ services/capabilitiesmanager/src/plugins/CODE_EXECUTOR/
 ```json
 {
   "id": "plugin-CODE_EXECUTOR",
-  "verb": "CODE_EXECUTOR",
+  "verb": "RUN_CODE",
   "description": "Executes code snippets in a sandboxed environment.",
   "explanation": "This plugin takes a code snippet and a language, and executes it in a secure, isolated Docker container. It returns the standard output, standard error, and exit code.",
   "inputDefinitions": [

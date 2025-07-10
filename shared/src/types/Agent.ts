@@ -23,7 +23,7 @@ export interface AgentConfig {
 }
 
 export enum OutputType {
-    INTERIM = 'interim',
-    FINAL = 'final',
-    PLAN = 'plan',
+    INTERIM = 'Interim',
+    FINAL = 'Final',
+    PLAN = 'Plan',
 }

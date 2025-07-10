@@ -733,17 +733,12 @@ export class PostOffice extends BaseEntity {
             const conversationType = req.query.conversationType as string || 'text/text';
             const metric = req.query.metric as string || 'overall';
 
-            console.log(`Retrieving model rankings from Librarian for conversationType=${conversationType}, metric=${metric}`);
-
             try {
                 const response = await this.authenticatedApi.post(`http://${librarianUrl}/queryData`, {
                     collection: 'mcsdata',
                     limit: 1,
                     query: { _id: 'model-performance-data' }
                 });
-
-                console.log('Full Librarian response for rankings:', JSON.stringify(response.data));
-                console.log('Raw Librarian response for rankings:', JSON.stringify(response.data.data));
 
                 if (!response.data || !response.data.data || response.data.data.length === 0) {
                     console.log('No model rankings data found, returning empty rankings');
@@ -754,25 +749,9 @@ export class PostOffice extends BaseEntity {
                 }
 
                 const data = response.data.data[0];
-                console.log('Rankings document:', JSON.stringify(data));
-                console.log('Rankings data type:', typeof data.rankings);
-                console.log('Is rankings an object?', typeof data.rankings === 'object' && data.rankings !== null);
-
-                if (data.rankings) {
-                    console.log('Rankings keys:', Object.keys(data.rankings));
-                    if (data.rankings[conversationType]) {
-                        console.log(`Rankings for ${conversationType} keys:`, Object.keys(data.rankings[conversationType]));
-                        if (data.rankings[conversationType][metric]) {
-                            console.log(`Rankings for ${conversationType}/${metric} type:`, typeof data.rankings[conversationType][metric]);
-                            console.log(`Is rankings for ${conversationType}/${metric} an array?`, Array.isArray(data.rankings[conversationType][metric]));
-                            console.log(`Rankings for ${conversationType}/${metric} length:`, data.rankings[conversationType][metric].length);
-                        }
-                    }
-                }
 
                 // Check if rankings exists
                 if (!data.rankings) {
-                    console.log('Rankings data is missing');
                     return res.status(200).json({
                         success: true,
                         rankings: []

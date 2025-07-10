@@ -11,7 +11,7 @@ import { SecurityClient } from '../SecurityClient';
 import FileUpload from './FileUpload';
 
 interface WorkProduct {
-  type: 'Interim' | 'Final';
+  type: 'Interim' | 'Final' | 'Plan';
   name: string;
   url: string;
 }
@@ -30,17 +30,17 @@ export const TabbedPanel: React.FC<TabbedPanelProps> = ({
   activeMissionId
 }) => {
   const [activeTab, setActiveTab] = useState('conversation');
-
   const theme = useTheme();
+  const [descriptionDialog, setDescriptionDialog] = useState(false);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [description, setDescription] = useState('');
 
-  // Interface for the TabPanel component
   interface TabPanelProps {
     children?: React.ReactNode;
     index: string;
     value: string;
   }
 
-  // TabPanel component to handle tab content
   const TabPanel = (props: TabPanelProps) => {
     const { children, value, index, ...other } = props;
 
@@ -50,14 +50,12 @@ export const TabbedPanel: React.FC<TabbedPanelProps> = ({
         hidden={value !== index}
         id={`tabpanel-${index}`}
         aria-labelledby={`tab-${index}`}
-        style={{ height: '100%', overflow: 'auto', display: value === index ? 'flex' : 'none', flexDirection: 'column' }}
+        style={{ height: '100%', display: value === index ? 'flex' : 'none', flexDirection: 'column' }}
         {...other}
       >
-        {value === index && (
-          <Box sx={{ height: '100%', p: 1, flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
-            {children}
-          </Box>
-        )}
+        <Box sx={{ height: '100%', p: 1, flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
+          {children}
+        </Box>
       </div>
     );
   };
@@ -70,54 +68,15 @@ export const TabbedPanel: React.FC<TabbedPanelProps> = ({
 
   const handleWorkProductClick = async (event: React.MouseEvent<HTMLElement>, url: string) => {
     event.preventDefault();
-    console.log('[TabbedPanel] handleWorkProductClick: Attempting to fetch URL with securityClient.getApi():', url);
     try {
       const apiClient = securityClient.getApi();
-      // The Authorization header is now automatically added by the apiClient's interceptor
-      console.log('[TabbedPanel] handleWorkProductClick: Using apiClient.get(). Auth header will be injected by interceptor.');
-
-      const response = await apiClient.get(url, {
-          responseType: 'blob' // Important for handling file downloads
-      });
-
-      console.log('[TabbedPanel] handleWorkProductClick: Axios response status:', response.status);
-      // Axios typically throws an error for non-2xx responses, so explicit !response.ok might not be needed
-      // However, if SecurityClient's interceptor is configured to not throw on 401 for some reason,
-      // or if other non-2xx statuses that don't throw by default are possible, an explicit check is safer.
-      // For now, assuming Axios default behavior (throws on 4xx/5xx).
-
-      const blob = response.data; // response.data is already a Blob due to responseType: 'blob'
+      const response = await apiClient.get(url, { responseType: 'blob' });
+      const blob = response.data;
       const blobUrl = window.URL.createObjectURL(blob);
       window.open(blobUrl, '_blank', 'noopener,noreferrer');
-    } catch (error: any) { // Catching as any to access error.response
-      console.error('[TabbedPanel] handleWorkProductClick: Error fetching work product via apiClient:', error);
-      if (error.response) {
-        // The request was made and the server responded with a status code
-        // that falls out of the range of 2xx
-        console.error('[TabbedPanel] Error Data:', error.response.data);
-        console.error('[TabbedPanel] Error Status:', error.response.status);
-        console.error('[TabbedPanel] Error Headers:', error.response.headers);
-        // Attempt to read error response if it's a blob containing JSON or text
-        if (error.response.data instanceof Blob) {
-          try {
-            const errorBlobText = await error.response.data.text();
-            console.error('[TabbedPanel] Error Blob Text:', errorBlobText);
-            alert(`Failed to open work product: Server responded with status ${error.response.status}. Details: ${errorBlobText.substring(0,100)}... Check console.`);
-            return;
-          } catch (blobError) {
-            console.error('[TabbedPanel] Error reading error blob:', blobError);
-          }
-        }
-        alert(`Failed to open work product: Server responded with status ${error.response.status}. Check console for details.`);
-      } else if (error.request) {
-        // The request was made but no response was received
-        console.error('[TabbedPanel] Error Request:', error.request);
-        alert('Failed to open work product: No response from server. Check console for details.');
-      } else {
-        // Something happened in setting up the request that triggered an Error
-        console.error('[TabbedPanel] Error Message:', error.message);
-        alert('Failed to open work product. Check console for details.');
-      }
+    } catch (error: any) {
+      console.error('[TabbedPanel] handleWorkProductClick: Error fetching work product:', error);
+      alert('Failed to open work product. See console for details.');
     }
   };
 
@@ -137,48 +96,20 @@ export const TabbedPanel: React.FC<TabbedPanelProps> = ({
           textColor="primary"
           indicatorColor="primary"
         >
-          <Tab
-            icon={<ChatIcon />}
-            iconPosition="start"
-            label="Conversation"
-            value="conversation"
-            id="tab-conversation"
-            aria-controls="tabpanel-conversation"
-          />
-          <Tab
-            icon={<AssessmentIcon />}
-            iconPosition="start"
-            label="Results"
-            value="results"
-            id="tab-results"
-            aria-controls="tabpanel-results"
-          />
-          <Tab
-            icon={<AccountTreeIcon />}
-            iconPosition="start"
-            label="Agent Network"
-            value="network"
-            id="tab-network"
-            aria-controls="tabpanel-network"
-          />
-          <Tab
-            icon={<AttachFileIcon />}
-            iconPosition="start"
-            label="Files"
-            value="files"
-            id="tab-files"
-            aria-controls="tabpanel-files"
-          />
+          <Tab icon={<ChatIcon />} iconPosition="start" label="Conversation" value="conversation" />
+          <Tab icon={<AssessmentIcon />} iconPosition="start" label="Results" value="results" />
+          <Tab icon={<AccountTreeIcon />} iconPosition="start" label="Agent Network" value="network" />
+          <Tab icon={<AttachFileIcon />} iconPosition="start" label="Files" value="files" />
         </Tabs>
       </Box>
 
-      <Box sx={{ flexGrow: 1, overflow: 'hidden' }}>
+      <Box sx={{ flexGrow: 1, overflow: 'auto' }}>
         <TabPanel value={activeTab} index="conversation">
           <ConversationHistory history={conversationHistory} />
         </TabPanel>
 
         <TabPanel value={activeTab} index="results">
-          <TableContainer component={Paper} sx={{ maxHeight: '100%', overflow: 'auto' }}>
+          <TableContainer component={Paper} sx={{ maxHeight: '100%' }}>
             <Table stickyHeader aria-label="work products table">
               <TableHead>
                 <TableRow>
@@ -198,23 +129,9 @@ export const TabbedPanel: React.FC<TabbedPanelProps> = ({
                 ) : (
                   workProducts.map((product, index) => (
                     <TableRow key={index} hover>
+                      <TableCell>{product.type}</TableCell>
                       <TableCell>
-                        <Typography variant="body2" color={product.type === 'Final' ? 'primary' : 'text.secondary'}>
-                          {product.type}
-                        </Typography>
-                      </TableCell>
-                      <TableCell>
-                        <Link
-                          component="button"
-                          variant="body2"
-                          onClick={(e) => handleWorkProductClick(e, product.url)}
-                          sx={{
-                            color: theme.palette.secondary.main,
-                            textDecoration: 'underline',
-                            cursor: 'pointer',
-                            textAlign: 'left', // Ensure link text aligns like normal text
-                          }}
-                        >
+                        <Link component="button" variant="body2" onClick={(e) => handleWorkProductClick(e, product.url)}>
                           {product.name}
                         </Link>
                       </TableCell>
@@ -227,14 +144,22 @@ export const TabbedPanel: React.FC<TabbedPanelProps> = ({
         </TabPanel>
 
         <TabPanel value={activeTab} index="network">
-          <Box sx={{ height: '100%', width: '100%', flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
             <NetworkGraph agentStatistics={agentStatistics} />
-          </Box>
         </TabPanel>
 
         <TabPanel value={activeTab} index="files">
           {activeMissionId ? (
-            <FileUpload missionId={activeMissionId} />
+            <FileUpload
+              missionId={activeMissionId}
+              onFilesChanged={() => { /* handle file changes, e.g., reload files list */ }}
+              // Pass lifted dialog state and setters as props
+              descriptionDialog={descriptionDialog}
+              setDescriptionDialog={setDescriptionDialog}
+              pendingFiles={pendingFiles}
+              setPendingFiles={setPendingFiles}
+              description={description}
+              setDescription={setDescription}
+            />
           ) : (
             <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 4 }}>
               No active mission. Create or load a mission to manage files.

@@ -86,7 +86,6 @@ export class ModelPerformanceTracker {
 
     // Set up periodic saving - more frequent (every 2 minutes)
     this.saveInterval = setInterval(() => {
-      console.log('Checking for excessive blacklists on regular interval...');
       // Reset excessive blacklists during periodic check
       this.resetExcessiveBlacklists();
     }, 2 * 60 * 1000); // Check every 2 minutes
@@ -117,10 +116,8 @@ export class ModelPerformanceTracker {
         const raw = fs.readFileSync(ModelPerformanceTracker.PERSIST_PATH, 'utf-8');
         const arr: ModelPerformanceData[] = JSON.parse(raw);
         this.performanceData = new Map(arr.map(d => [d.modelName, d]));
-        console.log(`[PerformanceTracker] Loaded performance data from disk: ${arr.length} models`);
       } else {
         this.performanceData = new Map();
-        console.log('[PerformanceTracker] Initialized with empty performance data');
       }
     } catch (error) {
       console.error('Error initializing performance data:', error);
@@ -136,7 +133,6 @@ export class ModelPerformanceTracker {
     try {
       const arr = Array.from(this.performanceData.values());
       fs.writeFileSync(ModelPerformanceTracker.PERSIST_PATH, JSON.stringify(arr, null, 2), 'utf-8');
-      console.log(`[PerformanceTracker] Saved performance data to disk: ${arr.length} models`);
     } catch (err) {
       console.error('[PerformanceTracker] Error saving performance data:', err);
     }
@@ -194,7 +190,6 @@ export class ModelPerformanceTracker {
     conversationType: LLMConversationType,
     prompt: string
   ): string {
-    console.log(`[PerformanceTracker] Tracking request ${requestId} for model ${modelName}, conversation type ${conversationType}`);
 
     // Store request data
     this.requestHistory.set(requestId, {
@@ -207,9 +202,6 @@ export class ModelPerformanceTracker {
       tokenCount: 0,
       success: false
     });
-
-    console.log(`[PerformanceTracker] Request history size: ${this.requestHistory.size}`);
-    console.log(`[PerformanceTracker] Current performance data contains ${this.performanceData.size} models`);
 
     return requestId;
   }
@@ -230,7 +222,6 @@ export class ModelPerformanceTracker {
     error?: string,
     isRetry?: boolean
   ): void {
-    console.log(`[PerformanceTracker] Tracking response for request ${requestId}, success: ${success}, token count: ${tokenCount}, isRetry: ${isRetry}`);
     if (error) {
       console.log(`[PerformanceTracker] Error details: ${error}`);
     }
@@ -242,8 +233,6 @@ export class ModelPerformanceTracker {
       return;
     }
 
-    console.log(`[PerformanceTracker] Found request data for model ${requestData.modelName}, conversation type ${requestData.conversationType}`);
-
     // Update request data
     requestData.response = response;
     requestData.endTime = Date.now();
@@ -253,7 +242,6 @@ export class ModelPerformanceTracker {
 
     // Calculate latency
     const latency = requestData.endTime - requestData.startTime;
-    console.log(`[PerformanceTracker] Request latency: ${latency}ms`);
 
     // Update performance metrics
     this.updateMetrics(requestData, isRetry);
@@ -262,16 +250,7 @@ export class ModelPerformanceTracker {
     const modelData = this.performanceData.get(requestData.modelName);
     if (modelData && modelData.metrics[requestData.conversationType]) {
       const metrics = modelData.metrics[requestData.conversationType];
-      console.log(`[PerformanceTracker] Updated metrics for model ${requestData.modelName}:
-        - Usage count: ${metrics.usageCount}
-        - Success rate: ${metrics.successRate.toFixed(2)}
-        - Average latency: ${metrics.averageLatency.toFixed(2)}ms
-        - Average token count: ${metrics.averageTokenCount.toFixed(2)}
-        - Consecutive failures: ${metrics.consecutiveFailures}
-        - Blacklisted: ${metrics.blacklistedUntil ? 'Yes, until ' + new Date(metrics.blacklistedUntil).toLocaleString() : 'No'}`);
     }
-
-    console.log(`[PerformanceTracker] Current performance data size: ${this.performanceData.size} models`);
 
     // Clean up request history (keep last 1000 requests)
     if (this.requestHistory.size > 1000) {
@@ -289,12 +268,10 @@ export class ModelPerformanceTracker {
    */
   private updateMetrics(requestData: RequestData, isRetry: boolean = false): void {
     const { modelName, conversationType, startTime, endTime, tokenCount, success, error } = requestData;
-    console.log(`[PerformanceTracker] Updating metrics for model ${modelName}, conversation type ${conversationType}, success: ${success}, isRetry: ${isRetry}`);
 
     // Get or create model data
     let modelData = this.performanceData.get(modelName);
     if (!modelData) {
-      console.log(`[PerformanceTracker] Creating new model data for ${modelName}`);
       modelData = {
         modelName,
         metrics: {} as Record<LLMConversationType, ModelPerformanceMetrics>,
@@ -306,7 +283,6 @@ export class ModelPerformanceTracker {
     // Get or create metrics for conversation type
     let metrics = modelData.metrics[conversationType];
     if (!metrics) {
-      console.log(`[PerformanceTracker] Creating new metrics for ${modelName}, conversation type ${conversationType}`);
       metrics = {
         usageCount: 0,
         successCount: 0,
@@ -333,28 +309,23 @@ export class ModelPerformanceTracker {
     if (!isRetry) {
         const oldUsageCount = metrics.usageCount;
         metrics.usageCount++;
-        console.log(`[PerformanceTracker] Incremented usage count for ${modelName} from ${oldUsageCount} to ${metrics.usageCount}`);
     }
 
     if (success) {
       const oldSuccessCount = metrics.successCount;
       metrics.successCount++;
-      console.log(`[PerformanceTracker] Incremented success count for ${modelName} from ${oldSuccessCount} to ${metrics.successCount}`);
 
       // Reset consecutive failures on success
       if (metrics.consecutiveFailures > 0) {
-        console.log(`[PerformanceTracker] Resetting consecutive failures for ${modelName} from ${metrics.consecutiveFailures} to 0`);
         metrics.consecutiveFailures = 0;
       }
     } else {
       const oldFailureCount = metrics.failureCount;
       metrics.failureCount++;
-      console.log(`[PerformanceTracker] Incremented failure count for ${modelName} from ${oldFailureCount} to ${metrics.failureCount}`);
 
       // Track consecutive failures
       metrics.consecutiveFailures++;
       metrics.lastFailureTime = new Date().toISOString();
-      console.log(`[PerformanceTracker] Incremented consecutive failures for ${modelName} to ${metrics.consecutiveFailures}`);
 
       if (error) {
         console.log(`[PerformanceTracker] Failure reason: ${error}`);
@@ -391,7 +362,6 @@ export class ModelPerformanceTracker {
         const blacklistedUntil = new Date(Date.now() + blacklistDuration);
         metrics.blacklistedUntil = blacklistedUntil.toISOString();
 
-        console.log(`[PerformanceTracker] Model ${modelName} blacklisted for ${actualBlacklistHours} hour(s) until ${blacklistedUntil.toLocaleString()} due to ${metrics.consecutiveFailures} consecutive failures`);
 
         if (isHuggingfaceModel) {
           console.log(`[PerformanceTracker] Huggingface model ${modelName} blacklisted more aggressively due to frequent failures`);
@@ -402,7 +372,6 @@ export class ModelPerformanceTracker {
     // Calculate success rate
     const oldSuccessRate = metrics.successRate;
     metrics.successRate = metrics.usageCount > 0 ? metrics.successCount / metrics.usageCount : 0;
-    console.log(`[PerformanceTracker] Updated success rate for ${modelName} from ${oldSuccessRate.toFixed(2)} to ${metrics.successRate.toFixed(2)}`);
 
     // Update latency (moving average)
     const latency = endTime - startTime;
@@ -410,24 +379,18 @@ export class ModelPerformanceTracker {
     metrics.averageLatency = metrics.averageLatency === 0
       ? latency
       : (metrics.averageLatency * 0.9) + (latency * 0.1);
-    console.log(`[PerformanceTracker] Updated average latency for ${modelName} from ${oldLatency.toFixed(2)}ms to ${metrics.averageLatency.toFixed(2)}ms`);
 
     // Update token count (moving average)
     const oldTokenCount = metrics.averageTokenCount;
     metrics.averageTokenCount = metrics.averageTokenCount === 0
       ? tokenCount
       : (metrics.averageTokenCount * 0.9) + (tokenCount * 0.1);
-    console.log(`[PerformanceTracker] Updated average token count for ${modelName} from ${oldTokenCount.toFixed(2)} to ${metrics.averageTokenCount.toFixed(2)}`);
 
     metrics.lastUsed = new Date().toISOString();
 
     // Update model data
     modelData.lastUpdated = new Date().toISOString();
 
-    // Log significant updates that would trigger a save
-    if (metrics.usageCount % 5 === 0 || !success) {
-      console.log(`[PerformanceTracker] Significant update detected (usageCount: ${metrics.usageCount}, success: ${success})`);
-    }
   }
 
   /**
@@ -476,13 +439,10 @@ export class ModelPerformanceTracker {
     conversationType: LLMConversationType,
     scores: any
   ): void {
-    console.log(`[PerformanceTracker] Updating feedback for model ${modelName}, conversation type ${conversationType}`);
-    console.log(`[PerformanceTracker] Received scores:`, JSON.stringify(scores, null, 2));
 
     // Get or create model data
     let modelData = this.performanceData.get(modelName);
     if (!modelData) {
-      console.log(`[PerformanceTracker] Creating new performance data for model ${modelName}`);
       modelData = {
         modelName,
         metrics: {} as Record<LLMConversationType, ModelPerformanceMetrics>,
@@ -494,7 +454,6 @@ export class ModelPerformanceTracker {
     // Get or create metrics for conversation type
     let metrics = modelData.metrics[conversationType];
     if (!metrics) {
-      console.log(`[PerformanceTracker] Creating new metrics for conversation type ${conversationType}`);
       metrics = {
         usageCount: 0,
         successCount: 0,
@@ -521,34 +480,27 @@ export class ModelPerformanceTracker {
     const { feedbackScores } = metrics;
     const weight = 0.2; // Higher weight for direct evaluations
 
-    console.log(`[PerformanceTracker] Current feedback scores for ${modelName}:`, JSON.stringify(feedbackScores, null, 2));
-
     // Track old values for logging
     const oldScores = { ...feedbackScores };
 
     if (scores.relevance !== undefined) {
       feedbackScores.relevance = (feedbackScores.relevance * (1 - weight)) + (scores.relevance * weight);
-      console.log(`[PerformanceTracker] Updated relevance score from ${oldScores.relevance.toFixed(2)} to ${feedbackScores.relevance.toFixed(2)}`);
     }
 
     if (scores.accuracy !== undefined) {
       feedbackScores.accuracy = (feedbackScores.accuracy * (1 - weight)) + (scores.accuracy * weight);
-      console.log(`[PerformanceTracker] Updated accuracy score from ${oldScores.accuracy.toFixed(2)} to ${feedbackScores.accuracy.toFixed(2)}`);
     }
 
     if (scores.helpfulness !== undefined) {
       feedbackScores.helpfulness = (feedbackScores.helpfulness * (1 - weight)) + (scores.helpfulness * weight);
-      console.log(`[PerformanceTracker] Updated helpfulness score from ${oldScores.helpfulness.toFixed(2)} to ${feedbackScores.helpfulness.toFixed(2)}`);
     }
 
     if (scores.creativity !== undefined) {
       feedbackScores.creativity = (feedbackScores.creativity * (1 - weight)) + (scores.creativity * weight);
-      console.log(`[PerformanceTracker] Updated creativity score from ${oldScores.creativity.toFixed(2)} to ${feedbackScores.creativity.toFixed(2)}`);
     }
 
     if (scores.overall !== undefined) {
       feedbackScores.overall = (feedbackScores.overall * (1 - weight)) + (scores.overall * weight);
-      console.log(`[PerformanceTracker] Updated overall score from ${oldScores.overall.toFixed(2)} to ${feedbackScores.overall.toFixed(2)}`);
     } else if (scores.relevance !== undefined || scores.accuracy !== undefined ||
                scores.helpfulness !== undefined || scores.creativity !== undefined) {
       // If overall is not provided but other scores are, calculate a new overall score
@@ -561,7 +513,6 @@ export class ModelPerformanceTracker {
       if (validScores.length > 0) {
         const avgScore = validScores.reduce((sum, score) => sum + score, 0) / validScores.length;
         feedbackScores.overall = (feedbackScores.overall * (1 - weight)) + (avgScore * weight);
-        console.log(`[PerformanceTracker] Calculated and updated overall score from ${oldScores.overall.toFixed(2)} to ${feedbackScores.overall.toFixed(2)}`);
       }
     }
 
@@ -573,8 +524,6 @@ export class ModelPerformanceTracker {
       console.error('[PerformanceTracker] Error saving performance data after feedback update:', error);
     });
 
-    console.log(`[PerformanceTracker] Updated feedback scores for model ${modelName}, conversation type ${conversationType}`);
-    console.log(`[PerformanceTracker] New feedback scores:`, JSON.stringify(feedbackScores, null, 2));
   }
 
   /**
@@ -615,7 +564,6 @@ export class ModelPerformanceTracker {
     // If no allModels provided, fallback to old behavior
     if (!allModels) {
       const data = Array.from(this.performanceData.values());
-      console.log(`[PerformanceTracker] Getting all performance data: ${data.length} models`);
       return data;
     }
 
@@ -671,7 +619,6 @@ export class ModelPerformanceTracker {
       }
     }
 
-    console.log(`[PerformanceTracker] Getting all performance data (with unused): ${data.length} models`);
     return data;
   }
 
@@ -711,7 +658,6 @@ export class ModelPerformanceTracker {
       const modelData = this.performanceData.get(modelName);
       if (modelData && modelData.metrics[conversationType]) {
         modelData.metrics[conversationType].blacklistedUntil = null;
-        console.log(`Model ${modelName} blacklist period has expired, removing from blacklist`);
       }
       return false;
     }
@@ -725,7 +671,6 @@ export class ModelPerformanceTracker {
    * This is a safety measure to prevent models from being blacklisted forever
    */
   resetExcessiveBlacklists(): void {
-    console.log('Checking for excessive blacklists...');
     const MAX_BLACKLIST_DURATION_MS = 7 * 24 * 60 * 60 * 1000; // 7 days in milliseconds
     const now = new Date();
     let resetCount = 0;
@@ -742,9 +687,6 @@ export class ModelPerformanceTracker {
               // Set a more reasonable blacklist duration (24 hours from now)
               const newBlacklistedUntil = new Date(now.getTime() + (24 * 60 * 60 * 1000));
               metrics.blacklistedUntil = newBlacklistedUntil.toISOString();
-              console.log(`Reset excessive blacklist for model ${modelName} (${conversationType}). ` +
-                          `Was blacklisted until ${blacklistedUntil.toLocaleString()}, ` +
-                          `now until ${newBlacklistedUntil.toLocaleString()}`);
               resetCount++;
             }
           }
@@ -753,12 +695,9 @@ export class ModelPerformanceTracker {
     }
 
     if (resetCount > 0) {
-      console.log(`Reset ${resetCount} excessive blacklists`);
       this.savePerformanceData().catch(error => {
         console.error('Error saving performance data after resetting blacklists:', error);
       });
-    } else {
-      console.log('No excessive blacklists found');
     }
   }
 
@@ -767,7 +706,6 @@ export class ModelPerformanceTracker {
    * This can be called manually to clear all blacklists
    */
   resetAllBlacklists(): void {
-    console.log('Resetting all blacklisted models...');
     let resetCount = 0;
 
     for (const [modelName, modelData] of this.performanceData.entries()) {
@@ -778,7 +716,6 @@ export class ModelPerformanceTracker {
             metrics.blacklistedUntil = null;
             // Reset consecutive failures
             metrics.consecutiveFailures = 0;
-            console.log(`Reset blacklist for model ${modelName} (${conversationType})`);
             resetCount++;
           }
         }
@@ -786,18 +723,14 @@ export class ModelPerformanceTracker {
     }
 
     if (resetCount > 0) {
-      console.log(`Reset ${resetCount} blacklisted models`);
       this.savePerformanceData().catch(error => {
         console.error('Error saving performance data after resetting all blacklists:', error);
       });
-    } else {
-      console.log('No blacklisted models found');
     }
 
     // Also clear the global Huggingface blacklist if it exists
     if ((global as any).huggingfaceBlacklistedUntil) {
       (global as any).huggingfaceBlacklistedUntil = null;
-      console.log('Cleared global Huggingface blacklist');
     }
   }
 
@@ -846,25 +779,8 @@ export class ModelPerformanceTracker {
   setAllPerformanceData(perfData: ModelPerformanceData[]): void {
     if (Array.isArray(perfData)) {
       this.performanceData = new Map(perfData.map(d => [d.modelName, d]));
-      console.log(`[PerformanceTracker] setAllPerformanceData: loaded ${perfData.length} models`);
     } else {
       console.warn('[PerformanceTracker] setAllPerformanceData: input is not an array');
     }
   }
 }
-
-// --- ACCOMPLISH handler/plugin defensive check (add to your handler/plugin code) ---
-// Example:
-// const handler = getHandlerForActionVerb('ACCOMPLISH');
-// if (!handler) {
-//   console.error('No handler found for ACCOMPLISH');
-//   // handle error or fallback
-// } else if (typeof handler.fetchOneByVerb !== 'function') {
-//   console.error('Handler for ACCOMPLISH missing fetchOneByVerb');
-//   // handle error or fallback
-// } else {
-//   handler.fetchOneByVerb(...);
-// }
-//
-// Repeat similar checks for getAvailablePluginsStr and other methods.
-// Ensure ACCOMPLISH plugin/handler is registered and ACCOMPLISH data is seeded in Librarian.

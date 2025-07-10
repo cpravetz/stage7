@@ -123,6 +123,80 @@ class TestAccomplishPlanValidation(unittest.TestCase):
         plan_data_write_with_content = [{"number": 1, "verb": "FILE_OPERATION", "inputs": {"path": "/foo.txt", "operation": "write", "content": "hello"}}]
         self.assertIsNone(self.plugin.validate_plan_data(plan_data_write_with_content))
 
+    def test_dependencies_correct_format(self):
+        """Test that dependencies in correct format {outputName: stepNo} are validated properly"""
+        plan_data = [
+            {
+                "number": 1,
+                "actionVerb": "SEARCH",
+                "description": "Search for cats",
+                "inputs": {"searchTerm": {"value": "cats", "valueType": "string"}},
+                "outputs": {"searchResults": "list of search results"},
+                "dependencies": {}
+            },
+            {
+                "number": 2,
+                "actionVerb": "ANALYZE",
+                "description": "Analyze the search results",
+                "inputs": {"data": {"outputName": "searchResults", "valueType": "string"}},
+                "outputs": {"analysis": "analysis results"},
+                "dependencies": {"searchResults": 1}  # Correct format
+            }
+        ]
+
+        error = self.plugin.validate_plan_data(plan_data)
+        self.assertIsNone(error, f"Plan with correct dependency format should pass validation. Error: {error}")
+
+    def test_dependencies_invalid_step_reference(self):
+        """Test that dependencies referencing non-existent outputs are caught"""
+        plan_data = [
+            {
+                "number": 1,
+                "actionVerb": "SEARCH",
+                "description": "Search for cats",
+                "inputs": {"searchTerm": {"value": "cats", "valueType": "string"}},
+                "outputs": {"searchResults": "list of search results"},
+                "dependencies": {}
+            },
+            {
+                "number": 2,
+                "actionVerb": "ANALYZE",
+                "description": "Analyze non-existent data",
+                "inputs": {"data": {"outputName": "nonExistentOutput", "valueType": "string"}},
+                "outputs": {"analysis": "analysis results"},
+                "dependencies": {"nonExistentOutput": 1}  # References output that step 1 doesn't produce
+            }
+        ]
+
+        error = self.plugin.validate_plan_data(plan_data)
+        self.assertIsNotNone(error, "Plan with dependency on non-existent output should fail")
+        self.assertIn("does not produce this output", error)
+
+    def test_dependencies_future_step_reference(self):
+        """Test that dependencies can't reference future steps"""
+        plan_data = [
+            {
+                "number": 1,
+                "actionVerb": "ANALYZE",
+                "description": "Analyze future data",
+                "inputs": {"data": {"outputName": "futureResults", "valueType": "string"}},
+                "outputs": {"analysis": "analysis results"},
+                "dependencies": {"futureResults": 2}  # References future step
+            },
+            {
+                "number": 2,
+                "actionVerb": "SEARCH",
+                "description": "Search for cats",
+                "inputs": {"searchTerm": {"value": "cats", "valueType": "string"}},
+                "outputs": {"futureResults": "list of search results"},
+                "dependencies": {}
+            }
+        ]
+
+        error = self.plugin.validate_plan_data(plan_data)
+        self.assertIsNotNone(error, "Plan with dependency on future step should fail")
+        self.assertIn("Dependencies must reference previous steps only", error)
+
 
     # Test the execute method's handling of validation error
     @patch.object(AccomplishPlugin, 'query_brain') # Mock query_brain

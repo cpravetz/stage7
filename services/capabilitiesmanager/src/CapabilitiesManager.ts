@@ -45,6 +45,15 @@ export class CapabilitiesManager extends BaseEntity {
     private configManager!: ConfigManager;
     private pluginRegistry!: PluginRegistry;
     private containerManager!: ContainerManager;
+    private initializationStatus: {
+        pluginRegistry: boolean;
+        configManager: boolean;
+        overall: boolean;
+    } = {
+        pluginRegistry: false,
+        configManager: false,
+        overall: false
+    };
     private serviceId = 'CapabilitiesManager';
 
     private failedPluginLookups: Map<string, number> = new Map(); // actionVerb -> last failure timestamp
@@ -85,15 +94,26 @@ export class CapabilitiesManager extends BaseEntity {
         try {
             // Ensure PluginRegistry is initialized before other dependent services
             if (this.pluginRegistry && typeof this.pluginRegistry.initialize === 'function') {
-                await this.pluginRegistry.initialize(); // Await PluginRegistry initialization
-                console.log(`[${trace_id}] ${source_component}: PluginRegistry initialized.`);
+                try {
+                    await this.pluginRegistry.initialize(); // Await PluginRegistry initialization
+                    this.initializationStatus.pluginRegistry = true;
+                    console.log(`[${trace_id}] ${source_component}: PluginRegistry initialized.`);
+                } catch (error) {
+                    console.warn(`[${trace_id}] ${source_component}: PluginRegistry initialization failed, continuing with limited functionality:`, error);
+                    // Continue initialization even if plugin registry fails
+                }
             } else {
-                console.error(`[${trace_id}] ${source_component}: PluginRegistry or its initialize method is not available.`);
-                // Potentially throw an error or handle critical failure
+                console.warn(`[${trace_id}] ${source_component}: PluginRegistry or its initialize method is not available.`);
             }
 
-            this.configManager = await ConfigManager.initialize(this.librarianUrl);
-            console.log(`[${trace_id}] ${source_component}: ConfigManager initialized.`);
+            try {
+                this.configManager = await ConfigManager.initialize(this.librarianUrl);
+                this.initializationStatus.configManager = true;
+                console.log(`[${trace_id}] ${source_component}: ConfigManager initialized.`);
+            } catch (error) {
+                console.warn(`[${trace_id}] ${source_component}: ConfigManager initialization failed, using defaults:`, error);
+                // Continue without ConfigManager - use default configurations
+            }
 
             await this.start(trace_id);
 
@@ -112,6 +132,10 @@ export class CapabilitiesManager extends BaseEntity {
                     });
                 }
             }
+
+            // Mark overall initialization as complete
+            this.initializationStatus.overall = true;
+            console.log(`[${trace_id}] ${source_component}: CapabilitiesManager initialization completed.`);
 
         } catch (error: any) {
             throw generateStructuredError({
@@ -140,6 +164,24 @@ export class CapabilitiesManager extends BaseEntity {
 
                 // Core routes
                 app.post('/executeAction', (req, res) => this.executeActionVerb(req, res));
+
+                // Health check endpoints
+                app.get('/health', (req, res) => {
+                    res.json({
+                        status: 'ok',
+                        service: 'CapabilitiesManager',
+                        initialization: this.initializationStatus
+                    });
+                });
+
+                app.get('/ready', (req, res) => {
+                    const isReady = this.initializationStatus.overall;
+                    res.status(isReady ? 200 : 503).json({
+                        ready: isReady,
+                        service: 'CapabilitiesManager',
+                        initialization: this.initializationStatus
+                    });
+                });
 
                 // --- Plugin CRUD API ---
                 app.get('/plugins', async (req, res) => {
@@ -388,7 +430,11 @@ export class CapabilitiesManager extends BaseEntity {
                     console.log(`[${trace_id}] ${source_component}: Executing '${step.actionVerb}' as ${manifest.language} plugin.`);
                     // Standard code-based plugin execution
                     const pluginDefinition = manifest as PluginDefinition; // Assuming PluginManifest is compatible enough
-                    const validatedInputs = await validateAndStandardizeInputs(pluginDefinition, step.inputValues || new Map<string, InputValue>());
+
+                    // Add optional inputs automatically before validation
+                    const enhancedInputs = this.addOptionalInputsToStep(step, pluginDefinition);
+
+                    const validatedInputs = await validateAndStandardizeInputs(pluginDefinition, enhancedInputs);
                     if (!validatedInputs.success || !validatedInputs.inputs) {
                         throw generateStructuredError({
                             error_code: GlobalErrorCodes.INPUT_VALIDATION_FAILED,
@@ -803,58 +849,124 @@ export class CapabilitiesManager extends BaseEntity {
             return;
         }
 
-        try {
-            // Check if dependencies are already installed by looking for a .dependencies_installed marker
-            const markerPath = path.join(pluginRootPath, '.dependencies_installed');
-            const requirementsContent = fs.readFileSync(requirementsPath, 'utf8');
-            const requirementsHash = require('crypto').createHash('md5').update(requirementsContent).digest('hex');
+        const markerPath = path.join(pluginRootPath, '.dependencies_installed');
+        const requirementsContent = fs.readFileSync(requirementsPath, 'utf8');
+        const requirementsHash = require('crypto').createHash('md5').update(requirementsContent).digest('hex');
 
-            if (fs.existsSync(markerPath)) {
-                const existingHash = fs.readFileSync(markerPath, 'utf8').trim();
-                if (existingHash === requirementsHash) {
-                    console.log(`[${trace_id}] ${source_component}: Dependencies already installed and up to date`);
-                    return;
+        if (fs.existsSync(markerPath)) {
+            const existingHash = fs.readFileSync(markerPath, 'utf8').trim();
+            if (existingHash === requirementsHash) {
+                console.log(`[${trace_id}] ${source_component}: Dependencies already installed and up to date`);
+                return;
+            }
+        }
+
+        const venvPath = path.join(pluginRootPath, 'venv');
+        // Platform-aware venv paths
+        const isWindows = process.platform === 'win32';
+        const venvBinDir = isWindows ? path.join(venvPath, 'Scripts') : path.join(venvPath, 'bin');
+        const venvPythonPath = path.join(venvBinDir, isWindows ? 'python.exe' : 'python');
+        const venvPipPath = path.join(venvBinDir, isWindows ? 'pip.exe' : 'pip');
+
+        // Helper to check if venv is healthy
+        function venvHealthy() {
+            return fs.existsSync(venvPythonPath) && fs.existsSync(venvPipPath);
+        }
+
+        // Helper to sleep for ms milliseconds
+        function sleep(ms: number) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+        // Helper to delete venv directory with retries
+        async function deleteVenvWithRetries(pathToDelete: string, maxRetries: number, delayMs: number): Promise<void> {
+            for (let attempt = 1; attempt <= maxRetries; attempt++) {
+                try {
+                    if (fs.existsSync(pathToDelete)) {
+                        fs.rmSync(pathToDelete, { recursive: true, force: true });
+                        console.log(`[${trace_id}] ${source_component}: Successfully deleted venv directory on attempt ${attempt}`);
+                        return;
+                    } else {
+                        console.log(`[${trace_id}] ${source_component}: venv directory does not exist, no need to delete`);
+                        return;
+                    }
+                } catch (err: any) {
+                    console.warn(`[${trace_id}] ${source_component}: Failed to delete venv directory on attempt ${attempt}: ${err.message}`);
+                    if (attempt < maxRetries) {
+                        await sleep(delayMs);
+                    } else {
+                        throw err;
+                    }
                 }
             }
+        }
 
-            const venvPath = path.join(pluginRootPath, 'venv');
-            // Platform-aware venv paths
-            const isWindows = process.platform === 'win32';
-            const venvBinDir = isWindows ? path.join(venvPath, 'Scripts') : path.join(venvPath, 'bin');
-            const venvPythonPath = path.join(venvBinDir, isWindows ? 'python.exe' : 'python');
-            const venvPipPath = path.join(venvBinDir, isWindows ? 'pip.exe' : 'pip');
-
-            // Helper to check if venv is healthy
-            function venvHealthy() {
-                return fs.existsSync(venvPythonPath) && fs.existsSync(venvPipPath);
+        // Check if venv exists but is not healthy, remove it with retries
+        if (fs.existsSync(venvPath) && !venvHealthy()) {
+            console.warn(`[${trace_id}] ${source_component}: Existing venv at ${venvPath} is broken (missing python or pip). Deleting and recreating.`);
+            try {
+                await deleteVenvWithRetries(venvPath, 5, 1000);
+            } catch (deleteError: any) {
+                throw generateStructuredError({
+                    error_code: GlobalErrorCodes.CAPABILITIES_MANAGER_PLUGIN_DEPENDENCY_FAILED,
+                    severity: ErrorSeverity.CRITICAL,
+                    message: `Failed to delete broken venv directory after multiple attempts: ${deleteError.message}`,
+                    source_component,
+                    original_error: deleteError,
+                    trace_id_param: trace_id,
+                    contextual_info: { pluginRootPath }
+                });
             }
+        }
 
-            // If venv exists but is not healthy, remove it
-            if (fs.existsSync(venvPath) && !venvHealthy()) {
-                console.warn(`[${trace_id}] ${source_component}: Existing venv at ${venvPath} is broken (missing python or pip). Deleting and recreating.`);
-                // Remove venv recursively
-                fs.rmSync(venvPath, { recursive: true, force: true });
+        // Helper to check if python3 or python is available
+        async function checkPythonExecutable(): Promise<string> {
+            const exec = require('child_process').exec;
+            const checkCmds = ['python3 --version', 'python --version'];
+            for (const cmd of checkCmds) {
+                try {
+                    await new Promise<void>((resolve, reject) => {
+                        exec(cmd, (error: any, stdout: string, stderr: string) => {
+                            if (!error) {
+                                console.log(`[${trace_id}] ${source_component}: Found python executable with command: ${cmd}`);
+                                resolve();
+                            } else {
+                                reject(error);
+                            }
+                        });
+                    });
+                    return cmd.split(' ')[0]; // Return 'python3' or 'python'
+                } catch {
+                    continue;
+                }
             }
+            throw new Error('No python3 or python executable found in PATH');
+        }
 
-            let installCommand: string;
+        try {
+            const pythonCmd = await checkPythonExecutable();
+
+            // Create venv if it doesn't exist
             if (!fs.existsSync(venvPath)) {
                 console.log(`[${trace_id}] ${source_component}: Creating virtual environment at ${venvPath}.`);
-                installCommand = `${isWindows ? 'python' : 'python3'} -m venv "${venvPath}" && "${venvPipPath}" install --upgrade pip && "${venvPipPath}" install -r "${requirementsPath}"`;
+                const createVenvCmd = `${pythonCmd} -m venv "${venvPath}"`;
+                console.log(`[${trace_id}] ${source_component}: Running command: ${createVenvCmd}`);
+                await execAsync(createVenvCmd, { cwd: pluginRootPath, timeout: 60000 });
             } else {
-                console.log(`[${trace_id}] ${source_component}: Virtual environment exists and is healthy at ${venvPath}. Installing dependencies using its pip.`);
-                installCommand = `"${venvPipPath}" install --upgrade pip && "${venvPipPath}" install -r "${requirementsPath}"`;
+                console.log(`[${trace_id}] ${source_component}: Virtual environment exists and is healthy at ${venvPath}.`);
             }
 
-            console.log(`[${trace_id}] ${source_component}: Install command: ${installCommand}`);
+            // Upgrade pip
+            const upgradePipCmd = `"${venvPipPath}" install --upgrade pip`;
+            console.log(`[${trace_id}] ${source_component}: Upgrading pip with command: ${upgradePipCmd}`);
+            await execAsync(upgradePipCmd, { cwd: pluginRootPath, timeout: 60000 });
 
-            const { stdout, stderr } = await execAsync(installCommand, {
-                cwd: pluginRootPath, // Execute in the plugin's root directory
-                timeout: 120000  // 2 minutes timeout for dependency installation
-            });
+            // Install requirements
+            const installReqsCmd = `"${venvPipPath}" install -r "${requirementsPath}"`;
+            console.log(`[${trace_id}] ${source_component}: Installing requirements with command: ${installReqsCmd}`);
+            const { stdout, stderr } = await execAsync(installReqsCmd, { cwd: pluginRootPath, timeout: 120000 });
 
             if (stderr && !stderr.includes('Successfully installed') && !stderr.includes('Requirement already satisfied')) {
-                // Some warnings might not include "Successfully installed" but are not critical errors.
-                // e.g. deprecation warnings. We log them but don't necessarily fail.
                 console.warn(`[${trace_id}] ${source_component}: Python dependency installation stderr: ${stderr}`);
             }
             if (stdout) {
@@ -868,38 +980,40 @@ export class CapabilitiesManager extends BaseEntity {
         } catch (error: any) {
             const errorMessage = error.message || '';
             const errorStderr = error.stderr || '';
-            const venvPath = path.join(pluginRootPath, 'venv');
 
             // If the error is that a directory is not empty, it's often a sign of a corrupted venv.
             // Let's try to fix this by forcefully removing the venv and retrying the installation once.
             if (errorMessage.includes('ENOTEMPTY') || errorStderr.includes('ENOTEMPTY')) {
                 console.warn(`[${trace_id}] ${source_component}: Dependency installation failed with ENOTEMPTY. Attempting to repair by deleting venv and retrying.`);
                 try {
-                    // Forcefully remove the venv directory
-                    if (fs.existsSync(venvPath)) {
-                        fs.rmSync(venvPath, { recursive: true, force: true });
-                        console.log(`[${trace_id}] ${source_component}: Forcefully removed corrupted venv at ${venvPath}.`);
+                    await deleteVenvWithRetries(venvPath, 5, 1000);
+                    // Retry venv creation and installation after deletion
+                    const pythonCmd = await checkPythonExecutable();
+                    const createVenvCmd = `${pythonCmd} -m venv "${venvPath}"`;
+                    console.log(`[${trace_id}] ${source_component}: Retrying venv creation with command: ${createVenvCmd}`);
+                    await execAsync(createVenvCmd, { cwd: pluginRootPath, timeout: 60000 });
+
+                    const upgradePipCmd = `"${venvPipPath}" install --upgrade pip`;
+                    console.log(`[${trace_id}] ${source_component}: Retrying pip upgrade with command: ${upgradePipCmd}`);
+                    await execAsync(upgradePipCmd, { cwd: pluginRootPath, timeout: 60000 });
+
+                    const installReqsCmd = `"${venvPipPath}" install -r "${requirementsPath}"`;
+                    console.log(`[${trace_id}] ${source_component}: Retrying requirements installation with command: ${installReqsCmd}`);
+                    const { stdout, stderr } = await execAsync(installReqsCmd, { cwd: pluginRootPath, timeout: 120000 });
+
+                    if (stderr && !stderr.includes('Successfully installed') && !stderr.includes('Requirement already satisfied')) {
+                        console.warn(`[${trace_id}] ${source_component}: Python dependency installation stderr on retry: ${stderr}`);
+                    }
+                    if (stdout) {
+                        console.log(`[${trace_id}] ${source_component}: Python dependency installation stdout on retry: ${stdout}`);
                     }
 
-                    // Re-run the installation logic. Since we just deleted the venv, it will be recreated.
-                    const isWindows = process.platform === 'win32';
-                    const venvBinDir = isWindows ? path.join(venvPath, 'Scripts') : path.join(venvPath, 'bin');
-                    const venvPipPath = path.join(venvBinDir, isWindows ? 'pip.exe' : 'pip');
-                    const retryInstallCommand = `${isWindows ? 'python' : 'python3'} -m venv "${venvPath}" && "${venvPipPath}" install --upgrade pip && "${venvPipPath}" install -r "${requirementsPath}"`;
-
-                    console.log(`[${trace_id}] ${source_component}: Retrying install command: ${retryInstallCommand}`);
-                    await execAsync(retryInstallCommand, { cwd: pluginRootPath, timeout: 120000 });
-
-                    // If retry succeeds, write marker and return
-                    const requirementsContent = fs.readFileSync(requirementsPath, 'utf8');
-                    const requirementsHash = require('crypto').createHash('md5').update(requirementsContent).digest('hex');
-                    const markerPath = path.join(pluginRootPath, '.dependencies_installed');
+                    // Create marker file with requirements hash
                     fs.writeFileSync(markerPath, requirementsHash);
                     console.log(`[${trace_id}] ${source_component}: Python dependencies successfully installed after repair.`);
                     return; // Success, exit the function.
 
                 } catch (retryError: any) {
-                    // If retry fails, throw a structured error to halt execution
                     throw generateStructuredError({
                         error_code: GlobalErrorCodes.CAPABILITIES_MANAGER_PLUGIN_DEPENDENCY_FAILED,
                         severity: ErrorSeverity.CRITICAL,
@@ -1002,7 +1116,7 @@ export class CapabilitiesManager extends BaseEntity {
         const source_component = "CapabilitiesManager.handleUnknownVerb";
         try {
             const context = ` ${step.description || ''} with inputs ${MapSerializer.transformForSerialization(step.inputValues)}`;
-            const goal = `Handle the action verb \"${step.actionVerb}\" in our plan with the following context: ${context} by defining a plan, generating an answer from the inputs, or recommending a new plugin for handling the actionVerb. Respond with a plan, a plugin request, or a literal result. Avoid using this action verb, ${step.actionVerb}, in the plan.`;
+            const goal = `Determine the best way to complete the step \"${step.actionVerb}\"  with the following context: ${context} by defining a plan, generating an answer from the inputs, or recommending a new plugin for handling the actionVerb. Respond with a plan, a plugin request, or a literal result. Avoid using the actionVerbs ${step.actionVerb} and ACCOMPLISH in the plan.`;
 
             const accomplishResultArray = await this.executeAccomplishPlugin(goal, step.actionVerb, trace_id);
             console.log(`[handleUnknownVerb] plugin result:`, accomplishResultArray);
@@ -1389,7 +1503,10 @@ export class CapabilitiesManager extends BaseEntity {
 
         if (plugin) {
             // Execute plugin
-            const validatedInputs = await validateAndStandardizeInputs(plugin, step.inputValues || new Map());
+            // Add optional inputs automatically before validation
+            const enhancedInputs = this.addOptionalInputsToStep(step, plugin);
+
+            const validatedInputs = await validateAndStandardizeInputs(plugin, enhancedInputs);
             if (!validatedInputs.success) {
                 throw new Error(validatedInputs.error || "Input validation failed");
             }
@@ -1964,6 +2081,65 @@ export class CapabilitiesManager extends BaseEntity {
             resultDescription: sError.message_human_readable,
             error: sError.message_human_readable,
         };
+    }
+
+    /**
+     * Automatically adds optional inputs (as defined in the plugin manifest) to a step's inputs
+     * if they are not already present. This ensures all optional inputs are available during execution.
+     */
+    private addOptionalInputsToStep(step: Step, pluginDefinition: PluginDefinition): Map<string, InputValue> {
+        const enhancedInputs = new Map<string, InputValue>(step.inputValues || new Map());
+
+        // Iterate through all input definitions in the plugin
+        for (const inputDef of pluginDefinition.inputDefinitions || []) {
+            // Skip if input is already present
+            if (enhancedInputs.has(inputDef.name)) {
+                continue;
+            }
+
+            // Skip required inputs - they should be provided by the step
+            if (inputDef.required) {
+                continue;
+            }
+
+            // Add optional input with appropriate default value
+            let defaultValue: any = undefined;
+
+            // Use explicit default if provided
+            if (inputDef.defaultValue !== undefined) {
+                defaultValue = inputDef.defaultValue;
+            } else {
+                // Provide type-based defaults for optional inputs
+                switch (inputDef.type?.toLowerCase()) {
+                    case 'object':
+                        defaultValue = {};
+                        break;
+                    case 'array':
+                        defaultValue = [];
+                        break;
+                    case 'string':
+                        defaultValue = '';
+                        break;
+                    case 'number':
+                        defaultValue = 0;
+                        break;
+                    case 'boolean':
+                        defaultValue = false;
+                        break;
+                    default:
+                        defaultValue = null;
+                }
+            }
+
+            enhancedInputs.set(inputDef.name, {
+                inputName: inputDef.name,
+                value: defaultValue,
+                valueType: inputDef.type || 'string',
+                args: {}
+            });
+        }
+
+        return enhancedInputs;
     }
 
 }

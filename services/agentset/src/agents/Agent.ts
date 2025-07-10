@@ -8,7 +8,7 @@ import { MapSerializer, BaseEntity } from '@cktmcs/shared';
 import { AgentPersistenceManager } from '../utils/AgentPersistenceManager';
 import { PluginOutput, PluginParameterType, InputValue, ExecutionContext as PlanExecutionContext } from '@cktmcs/shared';
 import { ActionVerbTask } from '@cktmcs/shared';
-import { AgentConfig, AgentStatistics } from '@cktmcs/shared';
+import { AgentConfig, AgentStatistics, OutputType } from '@cktmcs/shared';
 import { MessageType } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { Step, StepStatus, createFromPlan } from './Step';
@@ -230,7 +230,8 @@ Please consider this context and the available plugins when planning and executi
                             this.executeActionWithCapabilitiesManager.bind(this),
                             this.useBrainForReasoning.bind(this),
                             this.createSubAgent.bind(this),
-                            this.handleAskStep.bind(this)
+                            this.handleAskStep.bind(this),
+                            this.steps
                         );
 
                         console.log(`Step ${step.actionVerb} result:`, result);
@@ -299,9 +300,6 @@ Please consider this context and the available plugins when planning and executi
                 this.say(`Agent ${this.id} has completed its work.`);
                 this.say(`Result: ${JSON.stringify(this.output)}`);
             }
-
-            // Final status update
-            await this.notifyTrafficManager();
 
             // if (this.status === AgentStatus.COMPLETED) {
             //     // The agent is now retained in the agent set for statistical purposes.
@@ -514,10 +512,10 @@ Please consider this context and the available plugins when planning and executi
             }
 
             const outputType = step.getOutputType(this.steps);
-            const type = outputType === 'final' ? 'Final' : outputType === 'plan' ? 'Plan' : 'Interim';
+            const type = outputType === 'Final' ? 'Final' : outputType === 'Plan' ? 'Plan' : 'Interim';
 
             let scope: string;
-            if (this.steps.length === 1 || (isAgentEndpoint && isFinal)) {
+            if (this.steps.length === 1 || (isAgentEndpoint && outputType === OutputType.FINAL)) {
                 scope = 'MissionOutput';
             } else if (isAgentEndpoint) {
                 scope = 'AgentOutput';
@@ -526,7 +524,7 @@ Please consider this context and the available plugins when planning and executi
             }
 
             // If this is a final step, upload outputs to shared file space
-            if (outputType === 'final' && data && data.length > 0) {
+            if (outputType === 'Final' && data && data.length > 0) {
                 try {
                     const librarianUrl = await this.getServiceUrl('Librarian');
                     if (librarianUrl) {
@@ -1447,7 +1445,8 @@ Please consider this context and the available plugins when planning and executi
             this.executeActionWithCapabilitiesManager.bind(this),
             this.useBrainForReasoning.bind(this),
             this.createSubAgent.bind(this),
-            this.handleAskStep.bind(this)
+            this.handleAskStep.bind(this),
+            this.steps
         );
 
         // Save the work product

@@ -7,9 +7,18 @@ export class LocalRepository implements PluginRepository {
     private baseDir: string;
     // Manifest path cache: id -> manifestPath, verb -> manifestPath
     private manifestPathCache: Map<string, string> = new Map();
+    // Plugin list cache to avoid repeated folder scans
+    private pluginListCache: PluginLocator[] | null = null;
+    private cacheTimestamp: number = 0;
+    private readonly CACHE_TTL = 60000; // 1 minute cache TTL
 
     constructor(config: RepositoryConfig) {
         this.baseDir = config.options?.localPath || path.join(process.cwd(), '/plugins');
+    }
+
+    private invalidateCache(): void {
+        this.pluginListCache = null;
+        this.cacheTimestamp = 0;
     }
 
     async store(manifest: PluginManifest): Promise<void> {
@@ -36,6 +45,8 @@ export class LocalRepository implements PluginRepository {
             const manifestPath = path.join(pluginDir, 'manifest.json');
             if (manifest.id) this.manifestPathCache.set(manifest.id, manifestPath);
             if (manifest.verb) this.manifestPathCache.set(manifest.verb, manifestPath);
+            // Invalidate plugin list cache since we added a new plugin
+            this.invalidateCache();
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             throw new Error(`Failed to publish plugin to local repository: ${errorMessage}`);
@@ -130,6 +141,8 @@ export class LocalRepository implements PluginRepository {
             } catch (e) {
                 console.warn(`LocalRepository.fetchByVerb: Cache path for verb '${verb}' is invalid, will fall back.`, e);
                 this.manifestPathCache.delete(verb);
+                // Also invalidate the plugin list cache since there might be stale data
+                this.invalidateCache();
             }
         }
         try {
@@ -190,6 +203,8 @@ export class LocalRepository implements PluginRepository {
                     // Remove from cache
                     this.manifestPathCache.delete(id);
                     if (manifest.verb) this.manifestPathCache.delete(manifest.verb);
+                    // Invalidate plugin list cache since we removed a plugin
+                    this.invalidateCache();
                     return;
                 }
             } catch {
@@ -198,7 +213,12 @@ export class LocalRepository implements PluginRepository {
         }
     }
 
-    async list(): Promise<PluginLocator[]> {
+    private isCacheValid(): boolean {
+        return this.pluginListCache !== null &&
+               (Date.now() - this.cacheTimestamp) < this.CACHE_TTL;
+    }
+
+    private async loadPluginList(): Promise<PluginLocator[]> {
         const locators: PluginLocator[] = [];
         console.log('LocalRepo: Loading from ', this.baseDir);
         try {
@@ -217,7 +237,7 @@ export class LocalRepository implements PluginRepository {
                         continue;
                     }
                     // Defensive: check required fields
-                    if (!manifest.id || !manifest.verb || !manifest.description || !manifest.repository ) {
+                    if (!manifest.id || !manifest.verb || !manifest.description ) {
                         console.log('Error loading from ', dir, 'Manifest missing required fields');
                         continue;
                     }
@@ -245,5 +265,19 @@ export class LocalRepository implements PluginRepository {
         }
         console.log('LocalRepo: Locators count',locators.length);
         return locators;
+    }
+
+    async list(): Promise<PluginLocator[]> {
+        // Return cached list if valid
+        if (this.isCacheValid()) {
+            console.log('LocalRepo: Using cached plugin list');
+            return this.pluginListCache!;
+        }
+
+        // Load fresh list and cache it
+        console.log('LocalRepo: Loading fresh plugin list');
+        this.pluginListCache = await this.loadPluginList();
+        this.cacheTimestamp = Date.now();
+        return this.pluginListCache;
     }
 }

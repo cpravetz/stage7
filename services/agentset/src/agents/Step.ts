@@ -265,11 +265,15 @@ export class Step {
         executeAction: (step: Step) => Promise<PluginOutput[]>,
         thinkAction: (inputValues: Map<string, InputValue>) => Promise<PluginOutput[]>,
         delegateAction: (inputValues: Map<string, InputValue>) => Promise<PluginOutput[]>,
-        askAction: (inputValues: Map<string, InputValue>) => Promise<PluginOutput[]>
+        askAction: (inputValues: Map<string, InputValue>) => Promise<PluginOutput[]>,
+        allSteps?: Step[]
     ): Promise<PluginOutput[]> {
         // Ensure inputValues are populated from inputReferences before execution
         this.populateInputsFromReferences();
-        this.populateInputsFromDependencies([this]); // Pass self to resolve dependencies
+        // Only populate from dependencies if we have the full list of steps
+        if (allSteps) {
+            this.populateInputsFromDependencies(allSteps);
+        }
         this.status = StepStatus.RUNNING;
         try {
             let result: PluginOutput[];
@@ -1111,7 +1115,7 @@ export class Step {
             const isPotentiallyValidPlugin = /^[A-Z_]+$/.test(task.actionVerb); // Basic check for typical plugin verb format
 
             if (task.actionVerb === 'EXECUTE') { // Specifically disallow 'EXECUTE'
-                 throw new Error(`[Step.createFromPlan] Validation Error: The actionVerb 'EXECUTE' is not allowed. Please use a more specific verb.`);
+                 task.actionVerb = 'ACCOMPLISH'
             }
 
             if (!isKnownControlFlow && !isPotentiallyValidPlugin) {

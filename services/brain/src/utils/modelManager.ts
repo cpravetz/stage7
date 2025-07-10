@@ -191,8 +191,30 @@ export class ModelManager {
                 baseScore = (scores.speedScore + scores.accuracyScore + scores.creativityScore - scores.costScore) / 4;
         }
 
-        // Adjust score based on actual performance
-        return this.performanceTracker.adjustModelScore(baseScore, model.name, conversationType);
+        // Get performance metrics for reliability boost
+        const performanceMetrics = this.performanceTracker.getPerformanceMetrics(model.name, conversationType);
+
+        // Apply reliability boost for models with good track records
+        let reliabilityBoost = 0;
+        if (performanceMetrics.usageCount > 5) { // Only consider models with some usage history
+            // Boost score based on success rate and low consecutive failures
+            const successRateBoost = performanceMetrics.successRate * 20; // Up to 20 point boost for 100% success rate
+            const failuresPenalty = Math.min(performanceMetrics.consecutiveFailures * 10, 50); // Up to 50 point penalty
+            reliabilityBoost = successRateBoost - failuresPenalty;
+
+            // Extra boost for models that haven't failed recently
+            if (performanceMetrics.consecutiveFailures === 0) {
+                reliabilityBoost += 10;
+            }
+        }
+
+        // Adjust score based on actual performance and add reliability boost
+        const adjustedScore = this.performanceTracker.adjustModelScore(baseScore, model.name, conversationType);
+        const finalScore = adjustedScore + reliabilityBoost;
+
+        console.log(`Model ${model.name} score calculation: base=${baseScore}, adjusted=${adjustedScore}, reliability=${reliabilityBoost}, final=${finalScore}`);
+
+        return finalScore;
     }
 
     getAvailableModels(): string[] {
