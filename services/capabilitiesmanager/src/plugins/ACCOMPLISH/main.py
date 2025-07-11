@@ -275,6 +275,46 @@ There must be a dependency object property for every input dependent on another 
 
 Available plugins: {available_plugins_str[:1000]}{"..." if len(available_plugins_str) > 1000 else ""}
 
+PLANNING PRINCIPLES:
+1. **Dependency-Driven**: Most steps should depend on outputs from previous steps
+2. **Iterative Refinement**: Include steps that validate, refine, or improve earlier outputs
+3. **Conditional Logic**: Use DECIDE, WHILE, UNTIL for plans that adapt based on outcomes
+4. **Information Gathering**: Start with research/data collection before taking action
+5. **Validation**: Include verification steps to ensure quality and accuracy
+
+PLAN STRUCTURE GUIDELINES:
+- Begin with information gathering and research
+- Include analysis and validation steps
+- Use intermediate steps to refine and improve outputs
+- Add decision points where the plan might branch
+- Include final review and quality assurance steps
+
+STEP INTERDEPENDENCY:
+- Each step should build upon previous steps' outputs
+- Use outputName references to create chains of dependent tasks
+- Avoid isolated steps that don't connect to the overall flow
+
+CRITICAL INPUT/DEPENDENCY FORMAT:
+When a step needs output from a previous step, use BOTH:
+1. Input with outputName: {{"inputName": {{"outputName": "previousStepOutput", "valueType": "string"}}}}
+2. Dependency entry: {{"dependencies": {{"previousStepOutput": stepNumber}}}}
+
+EXAMPLE of correct step interdependency:
+{{
+  "number": 2,
+  "actionVerb": "ANALYZE",
+  "inputs": {{
+    "data": {{"outputName": "searchResults", "valueType": "string"}}
+  }},
+  "dependencies": {{"searchResults": 1}},
+  "outputs": {{"analysis": "Analysis of search results"}}
+}}
+
+CONTROL FLOW actionVerb USAGE:
+- Use DECIDE when the plan should branch based on conditions
+- Use WHILE for iterative improvement processes
+- Use UNTIL for goal-seeking behaviors
+- Use REPEAT for tasks that need multiple attempts
 Agent roles: coordinator, researcher, creative, critic, executor, domain_expert
 
 For DIRECT_ANSWER: {{"type": "DIRECT_ANSWER", "answer": "your answer"}}
@@ -592,6 +632,43 @@ Return ONLY the corrected JSON array. Fix ALL input format errors. Remove any pl
                         # Both present - remove outputName and keep value
                         logger.info(f"Auto-fixing input '{input_name}' in step {i+1}: removing outputName, keeping value")
                         del input_value_obj['outputName']
+
+                # Auto-fix incorrect step references in value field
+                if has_value and isinstance(input_value_obj['value'], str):
+                    value_str = input_value_obj['value'].lower()
+                    # Detect patterns like "output from step1", "output from step 1", "step1", etc.
+                    import re
+                    step_ref_pattern = r'(?:output\s+from\s+)?step\s*(\d+)'
+                    match = re.search(step_ref_pattern, value_str)
+                    if match:
+                        source_step_no = int(match.group(1))
+                        if source_step_no < i + 1:  # Valid previous step
+                            # Find what output this step produces that matches the input name
+                            if source_step_no <= len(plan_data):
+                                source_step = plan_data[source_step_no - 1]
+                                source_outputs = source_step.get('outputs', {})
+
+                                # Try to find matching output name
+                                output_name = None
+                                if input_name in source_outputs:
+                                    output_name = input_name
+                                elif len(source_outputs) == 1:
+                                    # If source step has only one output, use that
+                                    output_name = list(source_outputs.keys())[0]
+
+                                if output_name:
+                                    # Convert to proper outputName reference
+                                    del input_value_obj['value']
+                                    input_value_obj['outputName'] = output_name
+
+                                    # Add to dependencies
+                                    if 'dependencies' not in step:
+                                        step['dependencies'] = {}
+                                    step['dependencies'][output_name] = source_step_no
+
+                                    logger.info(f"Auto-fixed step {i+1} input '{input_name}': converted step reference to outputName='{output_name}', added dependency")
+                                    has_value = False
+                                    has_output_key = True
 
             # Validate required inputs based on VERB_SCHEMAS
             if actionVerb in self.VERB_SCHEMAS:

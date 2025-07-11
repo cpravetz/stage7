@@ -1494,7 +1494,7 @@ export class CapabilitiesManager extends BaseEntity {
 
     private async executeActionVerbInternal(step: Step, trace_id: string): Promise<PluginOutput[]> {
         // Handle special internal action verbs first
-        if (step.actionVerb === 'EXECUTE_PLAN_TEMPLATE_INTERNAL') {
+        if (step.actionVerb === 'EXECUTE_PLAN_TEMPLATE') {
             return await this.handleExecutePlanTemplateInternal(step, trace_id);
         }
 
