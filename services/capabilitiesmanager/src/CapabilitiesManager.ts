@@ -463,14 +463,94 @@ export class CapabilitiesManager extends BaseEntity {
             const resultUnknownVerb = await this.handleUnknownVerb(step, trace_id);
             res.status(200).send(MapSerializer.transformForSerialization(resultUnknownVerb));
         } catch (error: any) {
-            const cachedPlanArray = await this.checkCachedPlan(step.actionVerb);
-            if (cachedPlanArray && cachedPlanArray.length > 0) {
-                res.status(200).send(MapSerializer.transformForSerialization(cachedPlanArray));
-                return;
+            // Classify the error type to determine appropriate handling
+            const errorType = this.classifyError(error, trace_id);
+
+            switch (errorType) {
+                case 'unknown_verb':
+                    // Only handle as unknown verb if it's actually an unknown verb issue
+                    console.log(`[${trace_id}] ${source_component}: Handling as unknown verb: ${step.actionVerb}`);
+                    const resultUnknownVerb = await this.handleUnknownVerb(step, trace_id);
+                    res.status(200).send(MapSerializer.transformForSerialization(resultUnknownVerb));
+                    return;
+
+                case 'validation_error':
+                    // Input validation errors should be returned as errors, not handled as unknown verbs
+                    console.error(`[${trace_id}] ${source_component}: Input validation error for ${step.actionVerb}:`, error.message);
+                    res.status(400).json(createPluginOutputError(error));
+                    return;
+
+                case 'authentication_error':
+                    // Authentication errors should be returned as errors
+                    console.error(`[${trace_id}] ${source_component}: Authentication error for ${step.actionVerb}:`, error.message);
+                    res.status(401).json(createPluginOutputError(error));
+                    return;
+
+                case 'plugin_execution_error':
+                    // Plugin execution errors should be returned as errors
+                    console.error(`[${trace_id}] ${source_component}: Plugin execution error for ${step.actionVerb}:`, error.message);
+                    res.status(500).json(createPluginOutputError(error));
+                    return;
+
+                default:
+                    // Generic errors
+                    console.error(`[${trace_id}] ${source_component}: Execution error for ${step.actionVerb}:`, error);
+                    res.status(500).json(createPluginOutputError(error));
+                    return;
             }
-            const resultUnknownVerb = await this.handleUnknownVerb(step, trace_id);
-            res.status(200).send(MapSerializer.transformForSerialization(resultUnknownVerb));
         }
+    }
+
+    /**
+     * Classify error types to determine appropriate handling strategy
+     */
+    private classifyError(error: any, trace_id: string): string {
+        const source_component = "CapabilitiesManager.classifyError";
+
+        // Check error codes first
+        if (error.error_code) {
+            switch (error.error_code) {
+                case GlobalErrorCodes.INPUT_VALIDATION_FAILED:
+                    return 'validation_error';
+
+                case GlobalErrorCodes.AUTHENTICATION_ERROR:
+                    return 'authentication_error';
+
+                case GlobalErrorCodes.CAPABILITIES_MANAGER_PLUGIN_EXECUTION_FAILED:
+                case GlobalErrorCodes.ACCOMPLISH_PLUGIN_EXECUTION_FAILED:
+                    return 'plugin_execution_error';
+
+                case GlobalErrorCodes.CAPABILITIES_MANAGER_UNKNOWN_VERB_HANDLING_FAILED:
+                    return 'unknown_verb';
+
+                default:
+                    console.log(`[${trace_id}] ${source_component}: Unclassified error code: ${error.error_code}`);
+                    break;
+            }
+        }
+
+        // Check error messages for patterns
+        const errorMessage = error.message || error.toString();
+        const lowerMessage = errorMessage.toLowerCase();
+
+        if (lowerMessage.includes('validation') || lowerMessage.includes('required input') || lowerMessage.includes('missing input')) {
+            return 'validation_error';
+        }
+
+        if (lowerMessage.includes('authentication') || lowerMessage.includes('unauthorized') || lowerMessage.includes('token')) {
+            return 'authentication_error';
+        }
+
+        if (lowerMessage.includes('plugin not found') || lowerMessage.includes('unknown verb') || lowerMessage.includes('no handler')) {
+            return 'unknown_verb';
+        }
+
+        if (lowerMessage.includes('plugin execution') || lowerMessage.includes('execution failed')) {
+            return 'plugin_execution_error';
+        }
+
+        // Default to generic error
+        return 'generic_error';
     }
 
     /**
