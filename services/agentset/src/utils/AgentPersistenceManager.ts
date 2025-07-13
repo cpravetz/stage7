@@ -153,7 +153,7 @@ export class AgentPersistenceManager {
             const response = await this.authenticatedApi.get(`http://${this.librarianUrl}/loadWorkProduct/${stepId}`);
 
             if (!response.data || !response.data.data) {
-                console.error(`No data found for work product ${agentId}_${stepId}`);
+                console.log(`No work product found for step ${stepId} (this is normal if step hasn't been executed yet)`);
                 return null;
             }
 
@@ -162,7 +162,14 @@ export class AgentPersistenceManager {
                 stepId,
                 MapSerializer.transformFromSerialization(response.data.data) as PluginOutput[]
             );
-        } catch (error) { analyzeError(error as Error);
+        } catch (error) {
+            // 404 errors are normal when work products don't exist yet
+            if ((error as any).response?.status === 404) {
+                console.log(`Work product not found for step ${stepId} (step may not have been executed yet)`);
+                return null;
+            }
+
+            analyzeError(error as Error);
             console.error(`Error loading work product ${agentId}_${stepId}:`, error instanceof Error ? error.message : error);
             return null;
         }

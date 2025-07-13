@@ -91,7 +91,7 @@ export class Step {
             stepId: this.id,
             stepNo: this.stepNo,
             actionVerb: this.actionVerb,
-            //inputs: MapSerializer.transformForSerialization(this.inputs),
+            inputValues:MapSerializer.transformForSerialization(this.inputValues),
             inputReferences: MapSerializer.transformForSerialization(this.inputReferences),
             dependencies: this.dependencies,
             status: this.status,
@@ -305,9 +305,6 @@ export class Step {
                     break;
                 case 'TIMEOUT':
                     result = await this.handleTimeout();
-                    break;
-                case 'EXECUTE_PLAN_TEMPLATE':
-                    result = await this.handleExecutePlanTemplate(executeAction);
                     break;
                 case 'FOREACH':
                     result = await this.handleForeach();
@@ -862,69 +859,6 @@ export class Step {
         };
     }
 
-    /**
-     * Handle execution of a plan template
-     * This creates a new execution context and delegates to the CapabilitiesManager
-     */
-    private async handleExecutePlanTemplate(executeAction: (step: Step) => Promise<PluginOutput[]>): Promise<PluginOutput[]> {
-        const templateIdInput = this.inputValues.get('templateId')?.value;
-        const templateInputsInput = this.inputValues.get('inputs')?.value || {}; 
-        const userIdInput = this.inputValues.get('userId')?.value; // Ensure this is correctly typed
-        const executionModeInput = this.inputValues.get('executionMode')?.value; // Ensure this is correctly typed
-
-        if (!templateIdInput || typeof templateIdInput !== 'string') {
-            return [{
-                success: false,
-                name: 'error',
-                resultType: PluginParameterType.ERROR,
-                resultDescription: '[Step]Error in EXECUTE_PLAN_TEMPLATE step',
-                result: null,
-                error: 'Missing or invalid required input: templateId must be a string'
-            }];
-        }
-
-        const templateId = templateIdInput;
-        const templateInputs = templateInputsInput || {}; // Default to empty object if undefined
-        const userId = (userIdInput as string) || 'agent-user'; // Default userId
-        const executionMode = (executionModeInput as string) || 'automatic'; // Default executionMode
-
-        // Create a special step that will be sent to CapabilitiesManager for plan template execution
-        const planExecutionStep = new Step({
-            actionVerb: 'EXECUTE_PLAN_TEMPLATE_INTERNAL',
-            stepNo: this.stepNo,
-            inputReferences: new Map([
-                ['templateId', { inputName: 'templateId', value: templateId, valueType: PluginParameterType.STRING, args: {} }],
-                ['inputs', { inputName: 'inputs', value: templateInputs, valueType: PluginParameterType.OBJECT, args: {} }],
-                ['userId', { inputName: 'userId', value: userId, valueType: PluginParameterType.STRING, args: {} }],
-                ['executionMode', { inputName: 'executionMode', value: executionMode, valueType: PluginParameterType.STRING, args: {} }]
-            ]),
-            description: `Execute plan template: ${templateId}`,
-            persistenceManager: this.persistenceManager
-        });
-
-        // Execute through the CapabilitiesManager
-        const result = await executeAction(planExecutionStep);
-
-        // Check if the result contains an execution ID for monitoring
-        const executionIdResult = result.find(r => r.name === 'executionId');
-        if (executionIdResult && executionIdResult.success) {
-            // Return the execution ID so the agent can monitor progress
-            return [{
-                success: true,
-                name: 'planExecution',
-                resultType: PluginParameterType.OBJECT,
-                resultDescription: '[Step]Plan template execution started',
-                result: {
-                    executionId: executionIdResult.result,
-                    templateId: templateId,
-                    status: 'started'
-                }
-            }];
-        }
-
-        // If no execution ID, return the raw result
-        return result;
-    }
 
     /**
      * Applies modifications to the step instance.

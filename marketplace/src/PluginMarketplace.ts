@@ -386,15 +386,6 @@ export class PluginMarketplace {
         }
         // Format as a readable string for prompt injection
         const lines: string[] = [];
-        for (const plugin of pluginManifests) {
-            lines.push(`- ${plugin.verb}: ${plugin.description || 'No description.'}`);
-            if (plugin.inputDefinitions && plugin.inputDefinitions.length > 0) {
-                lines.push(`    Required Inputs:`);
-                for (const input of plugin.inputDefinitions) {
-                    lines.push(`      - ${input.name} (${input.type})${input.required ? ' [required]' : ''}: ${input.description || ''}`);
-                }
-            }
-        }
         // Add internal verbs (hardcoded for now, could be made dynamic)
         lines.push('- DELEGATE: Create sub-agents with goals of their own.');
         lines.push('- THINK: - sends prompts to the chat function of the LLMs attached to the system in order to generate content from a conversation.(required input: prompt) (optional inputs: optimization (cost|accuracy|creativity|speed|continuity), ConversationType) accuracy is the default optimization');
@@ -406,6 +397,16 @@ export class PluginMarketplace {
         lines.push('- TIMEOUT: - Set a timeout for a group of steps (required inputs: timeout, steps[])');
         lines.push('- REPEAT: - Repeat steps a specific number of times (required inputs: count, steps[])');
         lines.push('- FOREACH: - Iterate over an array and execute steps for each item (required inputs: array, steps[plan])');
+
+        for (const plugin of pluginManifests) {
+            lines.push(`- ${plugin.verb}: ${plugin.description || 'No description.'}`);
+/*            if (plugin.inputDefinitions && plugin.inputDefinitions.length > 0) {
+                lines.push(`    Required Inputs:`);
+                for (const input of plugin.inputDefinitions) {
+                    lines.push(`      - ${input.name} (${input.type})${input.required ? ' [required]' : ''}: ${input.description || ''}`);
+                }
+            }*/
+        }
 
         // Add more internal verbs as needed
         const result = lines.join('\n');
