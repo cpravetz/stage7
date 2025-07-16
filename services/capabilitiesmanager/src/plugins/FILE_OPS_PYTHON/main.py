@@ -11,6 +11,11 @@ import json
 import os
 from pathlib import Path
 from typing import Dict, List, Any, Optional
+import requests
+
+
+DEFAULT_SHARED_FOLDER = "shared"
+LIBRARIAN_URL = os.environ.get("LIBRARIAN_URL")
 
 
 class InputValue:
@@ -20,7 +25,6 @@ class InputValue:
         self.value = value
         self.valueType = valueType
         self.args = args or {}
-
 
 
 class PluginOutput:
@@ -184,15 +188,19 @@ def execute_plugin(inputs: Dict[str, InputValue]) -> List[PluginOutput]:
         # Get required inputs
         path_input = inputs.get('path')
         operation_input = inputs.get('operation')
+        postoffice_url_input = inputs.get('postOffice_url')
+        mission_id_input = inputs.get('missionId')
         
-        if not path_input:
-            return [create_error_output("error", "Missing required input: path")]
+        # Use default shared folder if path is missing or empty
+        if not path_input or not (isinstance(path_input.value, str) and path_input.value.strip()):
+            file_path = DEFAULT_SHARED_FOLDER
+        else:
+            file_path = path_input.value.strip()
         
         if not operation_input:
             return [create_error_output("error", "Missing required input: operation")]
         
-        file_path = path_input.input_value
-        operation = operation_input.input_value
+        operation = operation_input.value
         
         # Validate inputs
         if not isinstance(file_path, str) or not file_path.strip():
@@ -204,40 +212,117 @@ def execute_plugin(inputs: Dict[str, InputValue]) -> List[PluginOutput]:
         file_path = file_path.strip()
         operation = operation.lower().strip()
         
-        # Handle different operations
-        if operation == 'read':
-            try:
-                content = read_file(file_path)
-                return [create_success_output("result", content, "string", 
-                                            f"Read content from {file_path}")]
-            except Exception as e:
-                return [create_error_output("error", str(e))]
-        
-        elif operation in ['write', 'append']:
-            # Get content input
-            content_input = inputs.get('content')
-            content = content_input.input_value if content_input else ""
+        # If path is "shared", use postOffice API calls
+        if file_path == DEFAULT_SHARED_FOLDER:
+            if not postoffice_url_input or not isinstance(postoffice_url_input.value, str) or not postoffice_url_input.value.strip():
+                return [create_error_output("error", "Missing or invalid postOffice_url input")]
+            if not mission_id_input or not isinstance(mission_id_input.value, str) or not mission_id_input.value.strip():
+                return [create_error_output("error", "Missing or invalid missionId input")]
             
-            # Convert content to string if needed
-            if content is None:
-                content = ""
-            elif not isinstance(content, str):
-                content = str(content)
+            postoffice_url = postoffice_url_input.value.strip()
+            mission_id = mission_id_input.value.strip()
             
             try:
-                if operation == 'write':
-                    write_file(file_path, content)
-                    return [create_success_output("result", None, "null", 
-                                                f"Saved content to {file_path}")]
-                else:  # append
-                    append_file(file_path, content)
-                    return [create_success_output("result", None, "null", 
-                                                f"Appended content to {file_path}")]
-            except Exception as e:
-                return [create_error_output("error", str(e))]
+                headers = {"Content-Type": "application/json"}
+                
+                if operation == 'read':
+                    # List files
+                    list_response = requests.get(f"{postoffice_url}/missions/{mission_id}/files")
+                    list_response.raise_for_status()
+                    files = list_response.json().get('files', [])
+                    
+                    # Find file matching the path or default file name
+                    target_file = None
+                    for f in files:
+                        if f.get('originalName') == file_path or f.get('originalName') == "shared":
+                            target_file = f
+                            break
+                    if not target_file:
+                        return [create_error_output("error", "File not found in shared folder")]
+                    
+                    file_id = target_file.get('id')
+                    # Download file content
+                    download_response = requests.get(f"{postoffice_url}/missions/{mission_id}/files/{file_id}/download")
+                    download_response.raise_for_status()
+                    content = download_response.text
+                    return [create_success_output("result", content, "string", f"Read content from shared folder via postOffice API")]
+                
+                elif operation in ['write', 'append']:
+                    content_input = inputs.get('content')
+                    content = content_input.value if content_input else ""
+                    if content is None:
+                        content = ""
+                    elif not isinstance(content, str):
+                        content = str(content)
+                    
+                    # For append, download existing file content first
+                    existing_content = ""
+                    if operation == 'append':
+                        list_response = requests.get(f"{postoffice_url}/missions/{mission_id}/files")
+                        list_response.raise_for_status()
+                        files = list_response.json().get('files', [])
+                        target_file = None
+                        for f in files:
+                            if f.get('originalName') == file_path or f.get('originalName') == "shared":
+                                target_file = f
+                                break
+                        if target_file:
+                            file_id = target_file.get('id')
+                            download_response = requests.get(f"{postoffice_url}/missions/{mission_id}/files/{file_id}/download")
+                            download_response.raise_for_status()
+                            existing_content = download_response.text
+                    
+                    new_content = existing_content + content if operation == 'append' else content
+                    
+                    # Upload new file content
+                    files = {
+                        'files': ('shared.txt', new_content)
+                    }
+                    upload_response = requests.post(f"{postoffice_url}/missions/{mission_id}/files", files=files)
+                    upload_response.raise_for_status()
+                    
+                    action = "Appended" if operation == 'append' else "Saved"
+                    return [create_success_output("result", None, "null", f"{action} content to shared folder via postOffice API")]
+                
+                else:
+                    return [create_error_output("error", f"Unknown operation: {operation}")]
+            
+            except requests.RequestException as e:
+                return [create_error_output("error", f"postOffice API request failed: {str(e)}")]
         
+        # For other paths, use local file system operations
         else:
-            return [create_error_output("error", f"Unknown operation: {operation}")]
+            if operation == 'read':
+                try:
+                    content = read_file(file_path)
+                    return [create_success_output("result", content, "string", 
+                                                f"Read content from {file_path}")]
+                except Exception as e:
+                    return [create_error_output("error", str(e))]
+            
+            elif operation in ['write', 'append']:
+                content_input = inputs.get('content')
+                content = content_input.value if content_input else ""
+                
+                if content is None:
+                    content = ""
+                elif not isinstance(content, str):
+                    content = str(content)
+                
+                try:
+                    if operation == 'write':
+                        write_file(file_path, content)
+                        return [create_success_output("result", None, "null", 
+                                                    f"Saved content to {file_path}")]
+                    else:  # append
+                        append_file(file_path, content)
+                        return [create_success_output("result", None, "null", 
+                                                    f"Appended content to {file_path}")]
+                except Exception as e:
+                    return [create_error_output("error", str(e))]
+            
+            else:
+                return [create_error_output("error", f"Unknown operation: {operation}")]
         
     except Exception as e:
         return [create_error_output("error", f"Unexpected error: {str(e)}")]

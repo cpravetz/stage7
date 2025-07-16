@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-GET_USER_INPUT Plugin - Python Implementation
+ASK_USER_QUESTION Plugin - Python Implementation
 Requests input from the user via PostOffice service
 """
 
@@ -38,7 +38,7 @@ class GetUserInputPlugin:
             response = requests.post(
                 f"http://{self.security_manager_url}/generateToken",
                 json={
-                    "clientId": "GET_USER_INPUT_Plugin",
+                    "clientId": "ASK_USER_QUESTION_Plugin",
                     "clientSecret": self.client_secret
                 },
                 timeout=10
@@ -69,6 +69,9 @@ class GetUserInputPlugin:
                 headers=headers,
                 timeout=10
             )
+            logger.info(f"PostOffice response status: {response.status_code}")
+            logger.info(f"PostOffice response headers: {response.headers}")
+            logger.info(f"PostOffice response text: {response.text}")
             response.raise_for_status()
             data = response.json()
             # Expect PostOffice to return a request_id for async tracking
@@ -78,7 +81,7 @@ class GetUserInputPlugin:
             return None
 
     def execute(self, inputs_map: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Execute the GET_USER_INPUT plugin asynchronously"""
+        """Execute the ASK_USER_QUESTION plugin asynchronously"""
         try:
             # Extract inputs
             question = None
@@ -107,9 +110,9 @@ class GetUserInputPlugin:
                     "success": False,
                     "name": "error",
                     "resultType": PluginParameterType.ERROR,
-                    "resultDescription": "Question is required for GET_USER_INPUT plugin",
+                    "resultDescription": "Question is required for ASK_USER_QUESTION plugin",
                     "result": None,
-                    "error": "No question provided to GET_USER_INPUT plugin"
+                    "error": "No question provided to ASK_USER_QUESTION plugin"
                 }]
 
             # Prepare request data
@@ -159,12 +162,12 @@ class GetUserInputPlugin:
             }]
 
         except Exception as e:
-            logger.error(f"GET_USER_INPUT plugin execution failed: {e}")
+            logger.error(f"ASK_USER_QUESTION plugin execution failed: {e}")
             return [{
                 "success": False,
                 "name": "error",
                 "resultType": PluginParameterType.ERROR,
-                "resultDescription": f"Error in GET_USER_INPUT plugin execution",
+                "resultDescription": f"Error in ASK_USER_QUESTION plugin execution",
                 "result": None,
                 "error": str(e)
             }]

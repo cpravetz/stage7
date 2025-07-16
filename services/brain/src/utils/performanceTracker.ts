@@ -333,9 +333,23 @@ export class ModelPerformanceTracker {
 
       // Blacklist model if it has too many consecutive failures
       // Blacklist duration increases with more failures
-      // Huggingface models are blacklisted more aggressively
+      // Huggingface and Anthropic models are blacklisted more aggressively
       const isHuggingfaceModel = modelName.toLowerCase().includes('huggingface') || modelName.toLowerCase().includes('hf/');
-      const blacklistThreshold = isHuggingfaceModel ? 2 : 3; // Lower threshold for Huggingface models
+      const isAnthropicModel = modelName.toLowerCase().includes('anthropic') || modelName.toLowerCase().includes('claude');
+
+      // Special handling for connection errors - blacklist immediately
+      const isConnectionError = error && (
+        error.toLowerCase().includes('connection error') ||
+        error.toLowerCase().includes('econnrefused') ||
+        error.toLowerCase().includes('timeout') ||
+        error.toLowerCase().includes('network error')
+      );
+
+      let blacklistThreshold = (isHuggingfaceModel || isAnthropicModel) ? 2 : 3; // Lower threshold for problematic models
+      if (isConnectionError) {
+        blacklistThreshold = 1; // Immediate blacklist for connection errors
+        console.log(`[PerformanceTracker] Connection error detected for ${modelName}, reducing blacklist threshold to 1`);
+      }
 
       if (metrics.consecutiveFailures >= blacklistThreshold) {
         // Calculate blacklist duration: 1 hour * 2^(consecutiveFailures-threshold)

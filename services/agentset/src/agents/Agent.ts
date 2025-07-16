@@ -4,9 +4,9 @@ import axios from 'axios';
 import { AgentStatus } from '../utils/agentStatus';
 import { getServiceUrls } from '../utils/postOfficeInterface';
 import { WorkProduct } from '../utils/WorkProduct';
-import { MapSerializer, BaseEntity } from '@cktmcs/shared';
+import { MapSerializer, BaseEntity, LLMConversationType } from '@cktmcs/shared';
 import { AgentPersistenceManager } from '../utils/AgentPersistenceManager';
-import { PluginOutput, PluginParameterType, InputValue, ExecutionContext as PlanExecutionContext } from '@cktmcs/shared';
+import { PluginOutput, PluginParameterType, InputValue, ExecutionContext as PlanExecutionContext, MissionFile } from '@cktmcs/shared';
 import { ActionVerbTask } from '@cktmcs/shared';
 import { AgentConfig, AgentStatistics, OutputType } from '@cktmcs/shared';
 import { MessageType } from '@cktmcs/shared';
@@ -528,10 +528,9 @@ Please consider this context and the available plugins when planning and executi
                 try {
                     const librarianUrl = await this.getServiceUrl('Librarian');
                     if (librarianUrl) {
-                        const uploadedFiles = await step.uploadOutputsToSharedSpace(
-                            this.missionId,
-                            librarianUrl,
-                            this.authenticatedApi
+                        const uploadedFiles = await this.uploadStepOutputsToSharedSpace(
+                            step,
+                            librarianUrl
                         );
                         if (uploadedFiles.length > 0) {
                             console.log(`Uploaded ${uploadedFiles.length} final step outputs to shared space for step ${stepId}`);
@@ -693,10 +692,15 @@ Please consider this context and the available plugins when planning and executi
         }
 
         const optimization = (inputs.get('optimization')?.value as string) || 'accuracy';
-        const ConversationType = (inputs.get('ConversationType')?.value as string) || 'text/text';
+        const ConversationType = (inputs.get('ConversationType')?.value as LLMConversationType) || LLMConversationType.TextToText;
 
         const validOptimizations = ['cost', 'accuracy', 'creativity', 'speed', 'continuity'];
-        const validConversationTypes = ['text/text', 'text/image', 'text/audio', 'text/video', 'text/code'];
+        const validConversationTypes = [
+            LLMConversationType.TextToText, 
+            LLMConversationType.TextToImage, 
+            LLMConversationType.TextToAudio, 
+            LLMConversationType.TextToVideo, 
+            LLMConversationType.TextToCode];
 
         if (!validOptimizations.includes(optimization)) {
             return [{
@@ -737,7 +741,7 @@ Please consider this context and the available plugins when planning and executi
             let resultType: PluginParameterType;
             let parsedResult = brainResponse;
 
-            if (ConversationType === 'text/code' && mimeType === 'application/json') {
+            if (ConversationType === LLMConversationType.TextToCode && mimeType === 'application/json') {
                 try {
                     parsedResult = JSON.parse(brainResponse);
                     resultType = PluginParameterType.PLAN; // Assuming it's a plan
@@ -748,14 +752,14 @@ Please consider this context and the available plugins when planning and executi
                 }
             } else {
                 switch (ConversationType) {
-                    case 'text/image':
+                    case LLMConversationType.TextToImage:
                         resultType = PluginParameterType.OBJECT; // Assuming image data is returned as an object
                         break;
-                    case 'text/audio':
-                    case 'text/video':
+                    case LLMConversationType.TextToAudio:
+                    case LLMConversationType.TextToVideo:
                         resultType = PluginParameterType.OBJECT; // Assuming audio/video data is returned as an object
                         break;
-                    case 'text/code': // If not application/json, treat as string code
+                    case LLMConversationType.TextToCode: // If not application/json, treat as string code
                         resultType = PluginParameterType.STRING;
                         break;
                     default:
@@ -1559,6 +1563,157 @@ Please consider this context and the available plugins when planning and executi
             step.status = StepStatus.PENDING;
             // Resume agent execution
             await this.runAgent();
+        }
+    }
+
+    /**
+     * Uploads step outputs to the shared file space for final steps
+     * This replaces the removed Step.uploadOutputsToSharedSpace method
+     */
+    private async uploadStepOutputsToSharedSpace(
+        step: Step,
+        librarianUrl: string
+    ): Promise<MissionFile[]> {
+        if (!step.result || step.result.length === 0) {
+            return [];
+        }
+
+        const uploadedFiles: MissionFile[] = [];
+
+        for (const output of step.result) {
+            try {
+                // Only upload outputs that have meaningful content
+                if (!output.result || output.result === '') {
+                    continue;
+                }
+
+                // Generate filename based on step and output
+                let fileName: string;
+                let mimeType: string;
+                let fileContent: string;
+
+                if (output.fileName) {
+                    // If output specifies a filename, use it
+                    fileName = output.fileName;
+                } else {
+                    // Generate filename based on step and output
+                    const sanitizedName = output.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+                    const extension = this.getFileExtensionForOutput(output);
+                    fileName = `step_${step.stepNo}_${sanitizedName}${extension}`;
+                }
+
+                // Set MIME type
+                mimeType = output.mimeType || this.getMimeTypeForOutput(output);
+
+                // Convert result to string content
+                if (typeof output.result === 'string') {
+                    fileContent = output.result;
+                } else {
+                    // For objects, serialize to JSON
+                    fileContent = JSON.stringify(output.result, null, 2);
+                    if (!fileName.endsWith('.json')) {
+                        fileName = fileName.replace(/\.[^.]*$/, '') + '.json';
+                    }
+                    mimeType = 'application/json';
+                }
+
+                // Create a MissionFile object
+                const missionFile: MissionFile = {
+                    id: uuidv4(),
+                    originalName: fileName,
+                    mimeType: mimeType,
+                    size: Buffer.byteLength(fileContent, 'utf8'),
+                    uploadedAt: new Date(),
+                    uploadedBy: `agent-${this.id}`,
+                    storagePath: `step-outputs/${this.missionId}/${fileName}`,
+                    description: `Output from step ${step.stepNo}: ${step.actionVerb} - ${output.resultDescription}`
+                };
+
+                // Store the file content in Librarian
+                await this.authenticatedApi.post(`http://${librarianUrl}/storeData`, {
+                    id: `step-output-${step.id}-${output.name}`,
+                    data: {
+                        fileContent: fileContent,
+                        missionFile: missionFile
+                    },
+                    storageType: 'mongo',
+                    collection: 'step-outputs'
+                });
+
+                // Load the current mission to update its attached files
+                const missionResponse = await this.authenticatedApi.get(`http://${librarianUrl}/loadData/${this.missionId}`, {
+                    params: { collection: 'missions', storageType: 'mongo' }
+                });
+
+                if (missionResponse.data && missionResponse.data.data) {
+                    const mission = missionResponse.data.data;
+                    const existingFiles = mission.attachedFiles || [];
+                    const updatedMission = {
+                        ...mission,
+                        attachedFiles: [...existingFiles, missionFile],
+                        updatedAt: new Date()
+                    };
+
+                    // Save the updated mission
+                    await this.authenticatedApi.post(`http://${librarianUrl}/storeData`, {
+                        id: this.missionId,
+                        data: updatedMission,
+                        collection: 'missions',
+                        storageType: 'mongo'
+                    });
+
+                    uploadedFiles.push(missionFile);
+                    console.log(`Uploaded step output to shared space: ${fileName}`);
+                }
+
+            } catch (error) {
+                console.error(`Failed to upload step output to shared space:`, error);
+                // Continue with other outputs even if one fails
+            }
+        }
+
+        return uploadedFiles;
+    }
+
+    /**
+     * Determines the appropriate file extension for an output
+     */
+    private getFileExtensionForOutput(output: PluginOutput): string {
+        if (output.fileName) {
+            const ext = output.fileName.substring(output.fileName.lastIndexOf('.'));
+            if (ext) return ext;
+        }
+
+        switch (output.resultType) {
+            case PluginParameterType.STRING:
+                return '.txt';
+            case PluginParameterType.OBJECT:
+            case PluginParameterType.ARRAY:
+                return '.json';
+            case PluginParameterType.PLAN:
+                return '.json';
+            default:
+                return '.txt';
+        }
+    }
+
+    /**
+     * Determines the appropriate MIME type for an output
+     */
+    private getMimeTypeForOutput(output: PluginOutput): string {
+        if (output.mimeType) {
+            return output.mimeType;
+        }
+
+        switch (output.resultType) {
+            case PluginParameterType.STRING:
+                return 'text/plain';
+            case PluginParameterType.OBJECT:
+            case PluginParameterType.ARRAY:
+            case PluginParameterType.PLAN:
+                return 'application/json';
+            default:
+                return 'text/plain';
         }
     }
 }

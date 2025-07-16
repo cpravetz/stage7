@@ -82,14 +82,21 @@ export class ModelManager {
     selectModel(optimization: OptimizationType, conversationType: LLMConversationType): BaseModel | null {
         console.log(`Selecting model for optimization: ${optimization}, conversationType: ${conversationType}`);
 
-        // Check cache first
+        // Check cache first, but only if the cached model is not blacklisted
         const cacheKey = `${optimization}-${conversationType}`;
         const cachedResult = this.modelSelectionCache.get(cacheKey);
 
         if (cachedResult && (Date.now() - cachedResult.timestamp) < this.CACHE_TTL) {
-            console.log(`**** CACHE HIT **** Using cached model selection result: ${cachedResult.model.name}`);
-            console.log(`Cache age: ${Math.floor((Date.now() - cachedResult.timestamp) / 1000)} seconds`);
-            return cachedResult.model;
+            // Verify cached model is still available and not blacklisted
+            if (cachedResult.model.isAvailable() &&
+                !this.performanceTracker.isModelBlacklisted(cachedResult.model.name, conversationType)) {
+                console.log(`**** CACHE HIT **** Using cached model selection result: ${cachedResult.model.name}`);
+                console.log(`Cache age: ${Math.floor((Date.now() - cachedResult.timestamp) / 1000)} seconds`);
+                return cachedResult.model;
+            } else {
+                console.log(`**** CACHE INVALIDATED **** Cached model ${cachedResult.model.name} is no longer available or blacklisted`);
+                this.modelSelectionCache.delete(cacheKey);
+            }
         }
 
         console.log(`**** CACHE MISS **** No cached result for key: ${cacheKey}`);
@@ -123,8 +130,12 @@ export class ModelManager {
                 }
 
                 // Check if model is blacklisted
-                if (this.performanceTracker.isModelBlacklisted(model.name, conversationType)) {
+                const isBlacklisted = this.performanceTracker.isModelBlacklisted(model.name, conversationType);
+                if (isBlacklisted) {
+                    console.log(`Model ${model.name} is blacklisted for conversation type ${conversationType}`);
                     return false;
+                } else {
+                    console.log(`Model ${model.name} is NOT blacklisted for conversation type ${conversationType}`);
                 }
 
                 return true;
@@ -308,7 +319,7 @@ export class ModelManager {
      * Clear the model selection cache
      * This should be called when a model is blacklisted or when model availability changes
      */
-    private clearModelSelectionCache(): void {
+    public clearModelSelectionCache(): void {
         console.log('Clearing model selection cache');
         this.modelSelectionCache.clear();
     }
@@ -334,11 +345,27 @@ export class ModelManager {
     }
 
     /**
-     * Get all performance data
-     * @returns Performance data for all models
+     * Get all performance data in the format expected by the ModelPerformanceDashboard
+     * @returns Array of model performance data
      */
-    getAllPerformanceData() {
-        return this.performanceTracker.getAllPerformanceData();
+    getAllPerformanceData(): Array<{
+        modelName: string;
+        metrics: Record<string, any>;
+    }> {
+        const performanceData = this.performanceTracker.getAllPerformanceData();
+        const result: Array<{ modelName: string; metrics: Record<string, any> }> = [];
+
+        // Convert the performance data to the expected format
+        for (const [modelName, modelData] of Object.entries(performanceData)) {
+            if (modelData && modelData.metrics) {
+                result.push({
+                    modelName,
+                    metrics: modelData.metrics
+                });
+            }
+        }
+
+        return result;
     }
 
     /**

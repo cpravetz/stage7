@@ -2,11 +2,11 @@
 
 This document outlines testing considerations for built-in Step actionVerb handlers, particularly focusing on `ASK`, `WHILE`, and `DELEGATE` as mentioned in the issue.
 
-## `ASK` (GET_USER_INPUT Plugin)
+## `ASK` (ASK_USER_QUESTION Plugin)
 
-The `ASK` actionVerb is handled by the `GET_USER_INPUT` plugin within the Capabilities Manager.
+The `ASK` actionVerb is handled by the `ASK_USER_QUESTION` plugin within the Capabilities Manager.
 
-**Core Logic (Python Plugin - `plugins/GET_USER_INPUT/main.py`):**
+**Core Logic (Python Plugin - `plugins/ASK_USER_QUESTION/main.py`):**
 
 *   The plugin receives `question`, optional `choices`, and optional `answerType` as input.
 *   It constructs a JSON payload for the `PostOffice` service.
@@ -36,7 +36,7 @@ The `ASK` actionVerb is handled by the `GET_USER_INPUT` plugin within the Capabi
     *   `UserInputModal` is displayed correctly with the question and choices.
     *   User submits an answer.
     *   The answer is correctly sent back through the WebSocket to `PostOffice`.
-    *   The `GET_USER_INPUT` plugin receives the answer.
+    *   The `ASK_USER_QUESTION` plugin receives the answer.
 
 **Limitations of Unit Testing within Capabilities Manager:**
 

@@ -41,14 +41,6 @@ RUN npm run build --workspace=services/capabilitiesmanager
 # The source path is relative to the build context root (/usr/src/app)
 COPY services/capabilitiesmanager/src/plugins ./services/capabilitiesmanager/dist/plugins/
 
-# Install Python dependencies for example plugins
-RUN if [ -f examples/python-plugins/WEATHER/requirements.txt ]; then \
-    python3 -m pip install --break-system-packages -r examples/python-plugins/WEATHER/requirements.txt; \
-    fi
-RUN if [ -f examples/python-plugins/TEXT_ANALYSIS/requirements.txt ]; then \
-    python3 -m pip install --break-system-packages -r examples/python-plugins/TEXT_ANALYSIS/requirements.txt; \
-    fi
-
 # Make Python CLI tool executable
 RUN chmod +x tools/python-plugin-cli.py
 

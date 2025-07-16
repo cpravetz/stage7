@@ -17,11 +17,11 @@ The Stage7 plugin ecosystem has been **completely transformed** from a maintaina
    - **Improvements**: Robust authentication, comprehensive error handling, enhanced mission planning
    - **Location**: `services/capabilitiesmanager/src/plugins/ACCOMPLISH/`
 
-2. **GET_USER_INPUT Plugin** 📋 **MEDIUM** - ✅ **COMPLETED**
+2. **ASK_USER_QUESTION Plugin** 📋 **MEDIUM** - ✅ **COMPLETED**
    - **From**: JavaScript with basic functionality
    - **To**: Python with PostOffice integration
    - **Improvements**: Input validation, choice handling, timeout management
-   - **Location**: `services/capabilitiesmanager/src/plugins/GET_USER_INPUT/`
+   - **Location**: `services/capabilitiesmanager/src/plugins/ASK_USER_QUESTION/`
 
 3. **SCRAPE Plugin** 📋 **MEDIUM** - ✅ **COMPLETED**
    - **From**: JavaScript with limited capabilities
@@ -66,7 +66,7 @@ The Stage7 plugin ecosystem has been **completely transformed** from a maintaina
 
 ### **Production Plugin Set (5 Plugins Ready)**
 - ✅ **ACCOMPLISH**: Mission planning and goal achievement
-- ✅ **GET_USER_INPUT**: Interactive user input collection
+- ✅ **ASK_USER_QUESTION**: Interactive user input collection
 - ✅ **SCRAPE**: Web content extraction with rate limiting
 - ✅ **WEATHER**: Weather information retrieval
 - ✅ **TEXT_ANALYSIS**: Comprehensive text analysis

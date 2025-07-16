@@ -12,7 +12,7 @@ export class OpenAIInterface extends BaseInterface {
     interfaceName = 'openai';
 
     constructor() {
-        super();
+        super('openai');
         this.converters.set(LLMConversationType.TextToImage, {
             conversationType: LLMConversationType.TextToImage,
             requiredParams: ['service','prompt'],
@@ -77,14 +77,32 @@ export class OpenAIInterface extends BaseInterface {
             }
             return fullResponse || '';
         } catch (error) {
-            console.error('Error generating response from OpenAI:', error instanceof Error ? error.message : error);
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            console.error('Error generating response from OpenAI:', errorMessage);
             analyzeError(error as Error);
-            return '';
+
+            // Instead of returning empty string, throw a more descriptive error
+            if (errorMessage.includes('ECONNREFUSED') || errorMessage.includes('ENOTFOUND') ||
+                errorMessage.includes('timeout') || errorMessage.includes('network')) {
+                throw new Error(`OpenAI connection error: ${errorMessage}`);
+            } else if (errorMessage.includes('401') || errorMessage.includes('403')) {
+                throw new Error(`OpenAI authentication error: ${errorMessage}`);
+            } else if (errorMessage.includes('429')) {
+                throw new Error(`OpenAI rate limit error: ${errorMessage}`);
+            } else if (errorMessage.includes('404')) {
+                throw new Error(`OpenAI model not found: ${errorMessage}`);
+            } else {
+                throw new Error(`OpenAI API error: ${errorMessage}`);
+            }
         }
     }
 
     async convertTextToImage(args: ConvertParamsType): Promise<any> {
         const { service, prompt, modelName } = args;
+            if (!service) {
+                console.log('OpenAIInterface: No service provided for text-to-text conversion');
+                return Promise.resolve('');
+            }   
         try {
             const openAiApiClient = new OpenAI({ 
                 apiKey: service.apiKey
@@ -113,6 +131,10 @@ export class OpenAIInterface extends BaseInterface {
     
     async convertTextToAudio(args: ConvertParamsType): Promise<any> {
         const { service, input, modelName } = args;
+            if (!service) {
+                console.log('OpenAIInterface: No service provided for text-to-text conversion');
+                return Promise.resolve('');
+            }   
         try {
             const openAiApiClient = new OpenAI({ apiKey: service.apiKey });
             const response = await openAiApiClient.audio.speech.create({
@@ -133,6 +155,10 @@ export class OpenAIInterface extends BaseInterface {
 
     async convertAudioToText(args: ConvertParamsType): Promise<string> {
         const { service, audio, modelName } = args;
+            if (!service) {
+                console.log('OpenAIInterface: No service provided for text-to-text conversion');
+                return Promise.resolve('');
+            }   
         try {
             const openAiApiClient = new OpenAI({ apiKey: service.apiKey });
             if (!openAiApiClient || !audio) {
@@ -154,6 +180,9 @@ export class OpenAIInterface extends BaseInterface {
 
     async convertTextToCode(args: ConvertParamsType): Promise<string> {
         const { service, prompt, modelName } = args;
+        if (!service) {
+            throw new Error('OpenAIInterface: No service provided for text-to-code conversion');
+        }
         try {
             const openAiApiClient = new OpenAI({ apiKey: service.apiKey });
             const response = await openAiApiClient.chat.completions.create({
@@ -167,21 +196,36 @@ export class OpenAIInterface extends BaseInterface {
             });
 
             if (!response.choices[0].message?.content) {
-                console.error('OAI TextToCode:No content in OpenAI response');
-                return '';
+                throw new Error('OpenAI returned empty response');
             }
 
             return response.choices[0].message.content;
         } catch (error) {
-            console.error(`OAI Interface: Error generating code with ${service.serviceName}}:`, error instanceof Error ? error.message : error);
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            console.error(`OAI Interface: Error generating code with ${service.serviceName}:`, errorMessage);
             analyzeError(error as Error);
-            return '';
+
+            // Throw descriptive error instead of returning empty string
+            if (errorMessage.includes('ECONNREFUSED') || errorMessage.includes('ENOTFOUND') ||
+                errorMessage.includes('timeout') || errorMessage.includes('network')) {
+                throw new Error(`OpenAI connection error: ${errorMessage}`);
+            } else if (errorMessage.includes('401') || errorMessage.includes('403')) {
+                throw new Error(`OpenAI authentication error: ${errorMessage}`);
+            } else if (errorMessage.includes('404')) {
+                throw new Error(`OpenAI model not found: ${errorMessage}`);
+            } else {
+                throw new Error(`OpenAI API error: ${errorMessage}`);
+            }
         }
     }
         
     async convertImageToImage(args: ConvertParamsType): Promise<any> {
         const { service, image, prompt, modelName } = args;
         try {
+            if (!service) {
+                console.log('OpenAIInterface: No service provided for text-to-text conversion');
+                return Promise.resolve('');
+            }   
             const openAiApiClient = new OpenAI({ apiKey: service.apiKey });
             if (!openAiApiClient || !image) {
                 console.error('OAI ImageToImage: No image file provided');
@@ -217,6 +261,9 @@ export class OpenAIInterface extends BaseInterface {
 
     async convertTextToText(args: ConvertParamsType): Promise<string> {
         const { service, prompt, modelName } = args;
+        if (!service) {
+            throw new Error('OpenAIInterface: No service provided for text-to-text conversion');
+        }
         try {
             const openAiApiClient = new OpenAI({ apiKey: service.apiKey });
             const response = await openAiApiClient.chat.completions.create({
@@ -229,30 +276,41 @@ export class OpenAIInterface extends BaseInterface {
             });
 
             if (!response.choices[0].message?.content) {
-                console.error('OAI TextToText: No content in OpenAI response');
-                return '';
+                throw new Error('OpenAI returned empty response');
             }
 
             return response.choices[0].message.content;
         } catch (error) {
-            console.error(`OAI TextToText: Error generating code with ${service.serviceName}}:`, error instanceof Error ? error.message : error);
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            console.error(`OAI TextToText: Error generating response with ${service.serviceName}:`, errorMessage);
             analyzeError(error as Error);
-            return '';
+
+            // Throw descriptive error instead of returning empty string
+            if (errorMessage.includes('ECONNREFUSED') || errorMessage.includes('ENOTFOUND') ||
+                errorMessage.includes('timeout') || errorMessage.includes('network')) {
+                throw new Error(`OpenAI connection error: ${errorMessage}`);
+            } else if (errorMessage.includes('401') || errorMessage.includes('403')) {
+                throw new Error(`OpenAI authentication error: ${errorMessage}`);
+            } else if (errorMessage.includes('429')) {
+                throw new Error(`OpenAI rate limit error: ${errorMessage}`);
+            } else if (errorMessage.includes('404')) {
+                throw new Error(`OpenAI model not found: ${errorMessage}`);
+            } else {
+                throw new Error(`OpenAI API error: ${errorMessage}`);
+            }
         }
     }
 
     async convert(service: BaseService, conversionType: LLMConversationType, convertParams: ConvertParamsType): Promise<any> {
         const converter = this.converters.get(conversionType);
         if (!converter) {
-            console.error(`OAI convert: Unsupported conversion type: ${conversionType}`);
-            return undefined;
+            throw new Error(`Conversion type ${conversionType} not supported by OpenAI interface`);
         }
         const requiredParams = converter.requiredParams;
         convertParams.service = service;
-        const missingParams = requiredParams.filter(param => !(param in convertParams));
+        const missingParams = requiredParams.filter((param: any) => !(param in convertParams));
         if (missingParams.length > 0) {
-            console.error(`OAI convert:Missing required parameters: ${missingParams.join(', ')}`);
-            return undefined;
+            throw new Error(`Missing required parameters for OpenAI conversion: ${missingParams.join(', ')}`);
         }
         return converter.converter(convertParams);
     }

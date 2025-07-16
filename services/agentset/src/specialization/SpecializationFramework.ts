@@ -92,18 +92,31 @@ export class SpecializationFramework {
    */
   private async loadSpecializations(): Promise<void> {
     try {
-      const response = await this.authenticatedApi.get(`http://${this.librarianUrl}/loadData`, {
-        params: {
-          storageType: 'mongo',
-          collection: 'agent_specializations'
-        }
+      // Use queryData instead of loadData to get the document by ID
+      const response = await this.authenticatedApi.post(`http://${this.librarianUrl}/queryData`, {
+        collection: 'agent_specializations',
+        query: { _id: 'agent_specializations' },
+        limit: 1
       });
 
-      if (response.data && Array.isArray(response.data)) {
-        for (const specialization of response.data) {
-          this.specializations.set(specialization.agentId, specialization);
+      // Check if we got data back
+      if (response.data && response.data.data && Array.isArray(response.data.data) && response.data.data.length > 0) {
+        const document = response.data.data[0];
+        // The actual specializations array should be in the document's data field
+        const specializations = Array.isArray(document) ? document : (document.data || document);
+
+        if (Array.isArray(specializations)) {
+          for (const specialization of specializations) {
+            if (specialization && specialization.agentId) {
+              this.specializations.set(specialization.agentId, specialization);
+            }
+          }
+          console.log(`Loaded ${this.specializations.size} agent specializations`);
+        } else {
+          console.log('No valid specializations array found in document');
         }
-        console.log(`Loaded ${this.specializations.size} agent specializations`);
+      } else {
+        console.log('No agent specializations found in storage');
       }
     } catch (error) {
       analyzeError(error as Error);
@@ -137,18 +150,31 @@ export class SpecializationFramework {
    */
   private async loadKnowledgeDomains(): Promise<void> {
     try {
-      const response = await this.authenticatedApi.get(`http://${this.librarianUrl}/loadData`, {
-        params: {
-          storageType: 'mongo',
-          collection: 'knowledge_domains'
-        }
+      // Use queryData instead of loadData to get the document by ID
+      const response = await this.authenticatedApi.post(`http://${this.librarianUrl}/queryData`, {
+        collection: 'knowledge_domains',
+        query: { _id: 'knowledge_domains' },
+        limit: 1
       });
 
-      if (response.data && Array.isArray(response.data)) {
-        for (const domain of response.data) {
-          this.knowledgeDomains.set(domain.id, domain);
+      // Check if we got data back
+      if (response.data && response.data.data && Array.isArray(response.data.data) && response.data.data.length > 0) {
+        const document = response.data.data[0];
+        // The actual domains array should be in the document's data field
+        const domains = Array.isArray(document) ? document : (document.data || document);
+
+        if (Array.isArray(domains)) {
+          for (const domain of domains) {
+            if (domain && domain.id) {
+              this.knowledgeDomains.set(domain.id, domain);
+            }
+          }
+          console.log(`Loaded ${this.knowledgeDomains.size} knowledge domains`);
+        } else {
+          console.log('No valid domains array found in document');
         }
-        console.log(`Loaded ${this.knowledgeDomains.size} knowledge domains`);
+      } else {
+        console.log('No knowledge domains found in storage');
       }
     } catch (error) {
       analyzeError(error as Error);

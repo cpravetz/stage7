@@ -48,7 +48,7 @@ export class GitHubRepository implements PluginRepository {
         this.username = process.env.GITHUB_USERNAME || config.credentials?.username || ''; // Used as default owner
 
         if (!this.token || !this.username) {
-            console.warn(`GitHubRepository: GITHUB_TOKEN ${this.token} or GITHUB_USERNAME ${this.username} is missing.`);
+            console.log(`GitHubRepository: GITHUB_TOKEN or GITHUB_USERNAME is missing. GitHub access disabled.`);
             this.isEnabled = false;
             this.token = '';
             this.username = '';
@@ -73,7 +73,7 @@ export class GitHubRepository implements PluginRepository {
                  console.warn(`GitHubRepository: Invalid GitHub repository URL format: ${repoUrl}. Defaulting to ${this.username}/plugins.`);
             }
             this.repoOwner = this.username || 'default-owner'; // Fallback if username also missing
-            this.repoName = 'plugins';
+            this.repoName = 's7plugins';
             if (!this.username) {
                 console.warn('GitHubRepository: GITHUB_USERNAME not set, using default-owner as repository owner.');
             }
@@ -83,7 +83,7 @@ export class GitHubRepository implements PluginRepository {
 
         this.baseApiUrl = `https://api.github.com/repos/${this.repoOwner}/${this.repoName}`;
         this.baseContentUrl = `${this.baseApiUrl}/contents`;
-        this.pluginsDir = (config.options as any)?.pluginsPath || 'plugins'; // Use config or default
+        this.pluginsDir = (config.options as any)?.pluginsPath || 'plugins'; // Use config or default to 'plugins'
 
         console.log(`GitHubRepository: Initialized for ${this.repoOwner}/${this.repoName}. Plugins dir: '${this.pluginsDir}'. Default branch from config/env: ${this.defaultBranch || "not set, will fetch"}`);
         
@@ -396,7 +396,17 @@ export class GitHubRepository implements PluginRepository {
             }
             pluginIdDirs = response.data.filter((item: { type: string }) => item.type === 'dir');
         } catch (error) {
-            if ((error as any).code === 'RESOURCE_NOT_FOUND') {
+            // Check for 404 (directory doesn't exist) vs other errors like 401 (auth issues)
+            const isAxiosError = (error as any).response;
+            const status = isAxiosError ? (error as any).response.status : null;
+
+            if (status === 404) {
+                console.log(`GitHubRepository: pluginsDir '${this.pluginsDir}' not found on branch ${effectiveBranch}. This is normal for empty repositories.`);
+                return []; // Return empty array instead of trying to create directory
+            } else if (status === 401) {
+                console.error(`GitHubRepository: Authentication failed. Please check GITHUB_TOKEN and repository permissions.`);
+                return [];
+            } else if ((error as any).code === 'RESOURCE_NOT_FOUND') {
                 console.log(`GitHubRepository: pluginsDir '${this.pluginsDir}' not found on branch ${effectiveBranch}. Attempting to create.`);
                 try {
                     await this.createOrUpdateFile(`${this.pluginsDir}/README.md`, '# Plugins', 'Creating plugins directory', effectiveBranch);

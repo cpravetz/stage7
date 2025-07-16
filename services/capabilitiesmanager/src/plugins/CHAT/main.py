@@ -45,7 +45,7 @@ def get_auth_token():
         logger.error(f"Error contacting Security Manager: {e}")
         raise Exception(f"Error contacting security manager: {e}")
 
-def get_user_input(prompt: str) -> str:
+def ASK_USER_QUESTION(prompt: str) -> str:
     """
     Sends a prompt to the user via the PostOffice and waits for their response.
     """
@@ -116,7 +116,7 @@ def execute_plugin(inputs):
 
     try:
         # Get user response to the message
-        user_response = get_user_input(message)
+        user_response = ASK_USER_QUESTION(message)
 
         return {
             "success": True,

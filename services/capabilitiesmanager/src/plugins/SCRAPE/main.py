@@ -161,6 +161,39 @@ class ScrapePlugin:
                 del config['limit']
         
         return config
+    
+    def convert_to_full_url(partial_url, default_scheme='https', context_url=None):
+        """
+        Advanced URL converter with additional features.
+    
+        Args:
+            partial_url (str): The partial URL to convert
+            default_scheme (str): Default scheme to use if none provided
+            context_url (str): Optional context URL to inherit scheme from protocol-relative URLs
+    
+        Returns:
+            str: A full URL with scheme
+        """
+        if not partial_url:
+            raise ValueError("URL cannot be empty")
+    
+        # Strip whitespace
+        url = partial_url.strip()
+    
+        # Case 1: Already has a scheme
+        if url.startswith(('https://', 'http://', 'ftp://', 'ftps://')):
+            return url
+    
+        # Case 2: Protocol-relative URL (starts with //)
+        if url.startswith('//'):
+            # If context URL is provided, use its scheme
+            if context_url and context_url.startswith(('https://', 'http://')):
+                context_scheme = context_url.split('://')[0]
+                return f"{context_scheme}:{url}"
+            return f"{default_scheme}:{url}"
+    
+        # Case 3: Domain only (no scheme or //)
+        return f"{default_scheme}://{url}"
 
     def execute(self, inputs_map: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Execute the SCRAPE plugin"""
@@ -186,22 +219,20 @@ class ScrapePlugin:
                 }]
 
             # Validate URL
-            parsed_url = urlparse(url)
-            if not parsed_url.scheme or not parsed_url.netloc:
+            full_url = self.convert_to_full_url(url,'https')
+            if not full_url:
                 return [{
                     "success": False,
                     "name": "error",
                     "resultType": PluginParameterType.ERROR,
-                    "resultDescription": "Invalid URL format",
+                    "resultDescription": f"Invalid URL: {url}",
                     "result": None,
-                    "error": f"Invalid URL format: {url}"
+                    "error": f"Invalid URL: {url}"
                 }]
 
-            logger.info(f"SCRAPE: Fetching HTML from URL: {url}")
-            
+            url = full_url
             # Parse configuration
             config = self.parse_config(inputs_map)
-            
             # Fetch HTML content
             html = self.fetch_html(url)
             

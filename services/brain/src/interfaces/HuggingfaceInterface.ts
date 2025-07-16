@@ -20,7 +20,7 @@ export class HuggingfaceInterface extends BaseInterface {
     private static modelsBlacklistedUntilNextMonth = false;
 
     constructor() {
-        super();
+        super('huggingface');
         this.performanceTracker = new ModelPerformanceTracker();
         this.converters.set(LLMConversationType.TextToText, {
             conversationType: LLMConversationType.TextToText,
@@ -99,9 +99,9 @@ export class HuggingfaceInterface extends BaseInterface {
 
         // Find all Huggingface models and blacklist them
         let blacklistedCount = 0;
-        for (const modelData of performanceData) {
-            if (modelData.modelName.toLowerCase().includes('huggingface') ||
-                modelData.modelName.toLowerCase().includes('hf/')) {
+        for (const [modelName, modelData] of Object.entries(performanceData)) {
+            if (modelName.toLowerCase().includes('huggingface') ||
+                modelName.toLowerCase().includes('hf/')) {
 
                 // Blacklist for all conversation types
                 for (const conversationType of Object.keys(modelData.metrics)) {
@@ -138,9 +138,24 @@ export class HuggingfaceInterface extends BaseInterface {
             }
             response = response.replace(/```/g, '');
             return response;
-        } catch (error) { analyzeError(error as Error);
-            console.error('Error generating response from Huggingface:', error instanceof Error ? error.message : error);
-            return '';
+        } catch (error) {
+            analyzeError(error as Error);
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            console.error('Error generating response from Huggingface:', errorMessage);
+
+            // Throw descriptive error instead of returning empty string
+            if (errorMessage.includes('ECONNREFUSED') || errorMessage.includes('ENOTFOUND') ||
+                errorMessage.includes('timeout') || errorMessage.includes('network')) {
+                throw new Error(`Huggingface connection error: ${errorMessage}`);
+            } else if (errorMessage.includes('401') || errorMessage.includes('403')) {
+                throw new Error(`Huggingface authentication error: ${errorMessage}`);
+            } else if (errorMessage.includes('429')) {
+                throw new Error(`Huggingface rate limit error: ${errorMessage}`);
+            } else if (errorMessage.includes('404')) {
+                throw new Error(`Huggingface model not found: ${errorMessage}`);
+            } else {
+                throw new Error(`Huggingface API error: ${errorMessage}`);
+            }
         }
     }
 
@@ -227,10 +242,11 @@ export class HuggingfaceInterface extends BaseInterface {
                 // Check if this is a 404 error to blacklist the model temporarily
                 if (streamErrorMessage.includes('404')) {
                     console.log(`Received 404 error from Huggingface model ${options.modelName}, blacklisting temporarily.`);
-                    // Blacklist the model for 1 hour
+                    // Blacklist the model for 1 hour using the full model name with service prefix
                     const modelManager = require('../utils/modelManager').modelManagerInstance;
                     if (modelManager) {
-                        modelManager.performanceTracker.blacklistModel(options.modelName || '', new Date(Date.now() + 3600 * 1000));
+                        const fullModelName = `hf/${options.modelName}`;
+                        modelManager.performanceTracker.blacklistModel(fullModelName, new Date(Date.now() + 3600 * 1000));
                         modelManager.clearModelSelectionCache();
                     }
                     throw new Error(`Huggingface model ${options.modelName} returned 404 and has been blacklisted temporarily.`);
@@ -279,7 +295,8 @@ export class HuggingfaceInterface extends BaseInterface {
                 return `Error: Huggingface monthly credits exceeded. All Huggingface models have been blacklisted until the first of next month.`;
             }
 
-            // Return error message instead of throwing to prevent loops
+            // Return error message instead of throwing to prevent system crashes
+            // The Brain service will detect this as a failed response and handle fallback
             return `Error: ${errorMessage}`;
         }
     }
@@ -287,6 +304,10 @@ export class HuggingfaceInterface extends BaseInterface {
     async convertTextToText(args: ConvertParamsType): Promise<string> {
         try {
             const { service, prompt, modelName } = args;
+            if (!service) {
+                throw new Error('HuggingfaceInterface: No service provided for text-to-text conversion');
+            }
+
             const inference = new HfInference(service.apiKey);
 
             // Estimate the number of tokens in the input prompt
@@ -321,9 +342,13 @@ export class HuggingfaceInterface extends BaseInterface {
         }
     }
 
-    async convertTextToImage(args: ConvertParamsType): Promise<Blob> {
+    async convertTextToImage(args: ConvertParamsType): Promise<Blob| undefined> {
         try {
             const { service, prompt, modelName } = args;
+            if (!service) {
+                console.log('HuggingfaceInterface: No service provided for text-to-text conversion');
+                return Promise.resolve(undefined);
+            }   
             const inference = new HfInference(service.apiKey);
             const response = await inference.textToImage({
                 model: modelName || 'stabilityai/stable-diffusion-2',
@@ -344,9 +369,13 @@ export class HuggingfaceInterface extends BaseInterface {
         }
     }
 
-    async convertTextToAudio(args: ConvertParamsType): Promise<Blob> {
+    async convertTextToAudio(args: ConvertParamsType): Promise<Blob| undefined> {
         try {
             const { service, text, modelName } = args;
+            if (!service) {
+                console.log('HuggingfaceInterface: No service provided for text-to-text conversion');
+                return Promise.resolve(undefined);
+            }   
             const inference = new HfInference(service.apiKey);
             const response = await inference.textToSpeech({
                 model: modelName || 'facebook/fastspeech2-en-ljspeech',
@@ -370,6 +399,10 @@ export class HuggingfaceInterface extends BaseInterface {
     async convertAudioToText(args: ConvertParamsType): Promise<string> {
         try {
             const { service, audio, modelName } = args;
+            if (!service) {
+                console.log('HuggingfaceInterface: No service provided for text-to-text conversion');
+                return Promise.resolve('');
+            }   
             const inference = new HfInference(service.apiKey);
             if (!inference || !audio) {
                 console.error('No audio file provided');
@@ -399,6 +432,10 @@ export class HuggingfaceInterface extends BaseInterface {
     async convertImageToText(args: ConvertParamsType): Promise<string> {
         try {
             const { service, image, modelName } = args;
+            if (!service) {
+                console.log('HuggingfaceInterface: No service provided for text-to-text conversion');
+                return Promise.resolve('');
+            }   
             const inference = new HfInference(service.apiKey);
             if (!inference || !image) {
                 console.error('No image file provided');
@@ -429,15 +466,13 @@ export class HuggingfaceInterface extends BaseInterface {
         try {
             const converter = this.converters.get(conversionType);
             if (!converter) {
-                console.error(`Unsupported conversion type: ${conversionType}`);
-                return '';
+                throw new Error(`Conversion type ${conversionType} not supported by Huggingface interface`);
             }
             const requiredParams = converter.requiredParams;
             convertParams.service = service;
-            const missingParams = requiredParams.filter(param => !(param in convertParams));
+            const missingParams = requiredParams.filter((param: any) => !(param in convertParams));
             if (missingParams.length > 0) {
-                console.error(`HFinterface:Missing required parameters: ${missingParams.join(', ')}`);
-                return '';
+                throw new Error(`Missing required parameters for Huggingface conversion: ${missingParams.join(', ')}`);
             }
             return await converter.converter(convertParams);
         } catch (error) {

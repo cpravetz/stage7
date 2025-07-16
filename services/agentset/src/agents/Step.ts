@@ -1,4 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
+import axios from 'axios';
 import { PluginParameterType,
     PluginOutput,
     InputReference,
@@ -7,11 +8,153 @@ import { PluginParameterType,
     ActionVerbTask,
     ExecutionContext as PlanExecutionContext,
     PlanTemplate,
-    MissionFile,
-    OutputType } from '@cktmcs/shared'; // Added ActionVerbTask, MissionFile, and OutputType
+    OutputType } from '@cktmcs/shared'; // Added ActionVerbTask and OutputType
 import { MapSerializer } from '@cktmcs/shared';
 import { MessageType } from '@cktmcs/shared'; // Ensured MessageType is here, assuming it's separate or also from shared index
 import { AgentPersistenceManager } from '../utils/AgentPersistenceManager';
+
+/**
+ * Interface for validating action verbs against available plugins
+ */
+export interface PluginValidator {
+    /**
+     * Validates if an action verb is available as a plugin or control flow verb
+     * @param actionVerb The action verb to validate
+     * @returns Promise<boolean> True if the verb is valid
+     */
+    isValidActionVerb(actionVerb: string): Promise<boolean>;
+
+    /**
+     * Gets all available action verbs (both control flow and plugins)
+     * @returns Promise<string[]> Array of available action verbs
+     */
+    getAvailableActionVerbs(): Promise<string[]>;
+}
+
+/**
+ * Enhanced plugin validator that uses CapabilitiesManager for dynamic validation
+ */
+export class DefaultPluginValidator implements PluginValidator {
+    private capabilitiesManagerUrl: string;
+    private cachedVerbs: string[] | null = null;
+    private cacheExpiry: number = 0;
+    private readonly CACHE_TTL_MS = 60000; // 1 minute cache
+
+    // Known control flow verbs that are always valid
+    private readonly CONTROL_FLOW_VERBS = [
+        'THINK', 'DELEGATE', 'ASK', 'DECIDE', 'REPEAT',
+        'WHILE', 'UNTIL', 'SEQUENCE', 'TIMEOUT',
+        'EXECUTE_PLAN_TEMPLATE', 'FOREACH'
+    ];
+
+    constructor(capabilitiesManagerUrl?: string) {
+        this.capabilitiesManagerUrl = capabilitiesManagerUrl ||
+            process.env.CAPABILITIES_MANAGER_URL ||
+            'capabilitiesmanager:5030';
+    }
+
+    async isValidActionVerb(actionVerb: string): Promise<boolean> {
+        // Handle special case transformations
+        if (actionVerb === 'EXECUTE') {
+            return true; // Will be transformed to ACCOMPLISH
+        }
+
+        // Check control flow verbs first (no network call needed)
+        if (this.CONTROL_FLOW_VERBS.includes(actionVerb)) {
+            return true;
+        }
+
+        // Check if it matches typical plugin verb format
+        if (!/^[A-Z_]+$/.test(actionVerb)) {
+            return false;
+        }
+
+        // Query available plugins from CapabilitiesManager
+        try {
+            const availableVerbs = await this.getAvailableActionVerbs();
+            return availableVerbs.includes(actionVerb);
+        } catch (error) {
+            console.warn(`[DefaultPluginValidator] Failed to validate actionVerb '${actionVerb}': ${error instanceof Error ? error.message : error}`);
+            // Fallback: assume it's valid if it matches the format
+            return /^[A-Z_]+$/.test(actionVerb);
+        }
+    }
+
+    async getAvailableActionVerbs(): Promise<string[]> {
+        // Return cached result if still valid
+        if (this.cachedVerbs && Date.now() < this.cacheExpiry) {
+            return this.cachedVerbs;
+        }
+
+        try {
+            // Query CapabilitiesManager for available plugins
+            const response = await axios.get(
+                `http://${this.capabilitiesManagerUrl}/availablePlugins`,
+                {
+                    timeout: 5000,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    }
+                }
+            );
+
+            const plugins = response.data;
+            const pluginVerbs = plugins
+                .map((plugin: any) => plugin.verb)
+                .filter((verb: string) => verb && typeof verb === 'string');
+
+            // Combine control flow verbs with plugin verbs
+            const allVerbs = [...this.CONTROL_FLOW_VERBS, ...pluginVerbs];
+
+            // Cache the result
+            this.cachedVerbs = allVerbs;
+            this.cacheExpiry = Date.now() + this.CACHE_TTL_MS;
+
+            console.log(`[DefaultPluginValidator] Cached ${allVerbs.length} available action verbs`);
+            return allVerbs;
+        } catch (error) {
+            console.warn(`[DefaultPluginValidator] Failed to fetch available plugins: ${error instanceof Error ? error.message : error}`);
+            // Fallback to just control flow verbs
+            return this.CONTROL_FLOW_VERBS;
+        }
+    }
+
+
+
+    /**
+     * Force refresh the cache (useful for testing or when plugins are updated)
+     */
+    async refreshCache(): Promise<void> {
+        this.cachedVerbs = null;
+        this.cacheExpiry = 0;
+        await this.getAvailableActionVerbs();
+    }
+
+    /**
+     * Get detailed information about a specific plugin verb
+     */
+    async getPluginInfo(actionVerb: string): Promise<any | null> {
+        try {
+            const response = await axios.get(
+                `http://${this.capabilitiesManagerUrl}/availablePlugins`,
+                {
+                    timeout: 5000,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    }
+                }
+            );
+
+            const plugins = response.data;
+            return plugins.find((plugin: any) => plugin.verb === actionVerb) || null;
+        } catch (error) {
+            console.warn(`[DefaultPluginValidator] Failed to get plugin info for '${actionVerb}': ${error instanceof Error ? error.message : error}`);
+            return null;
+        }
+    }
+}
 
 
 export enum StepStatus {
@@ -677,160 +820,10 @@ export class Step {
         this.tempData.set(key, data);
     }
 
-    /**
-     * Uploads step outputs to the shared file space for final steps
-     * @param missionId The mission ID to associate the files with
-     * @param librarianUrl The Librarian URL for storing files
-     * @param authenticatedApi The authenticated API client
-     * @returns Promise<MissionFile[]> Array of uploaded files
-     */
-    public async uploadOutputsToSharedSpace(
-        missionId: string,
-        librarianUrl: string,
-        authenticatedApi: any
-    ): Promise<MissionFile[]> {
-        if (!this.result || this.result.length === 0) {
-            return [];
-        }
+    // Note: Shared folder interactions have been moved to plugins that need them (e.g., file_ops_python)
+    // Step outputs are now handled by the persistence manager and individual plugins as needed
 
-        const uploadedFiles: MissionFile[] = [];
 
-        for (const output of this.result) {
-            try {
-                // Only upload outputs that have meaningful content
-                if (!output.result || output.result === '') {
-                    continue;
-                }
-
-                // Generate filename based on step and output
-                let fileName: string;
-                let mimeType: string;
-                let fileContent: string;
-
-                if (output.fileName) {
-                    // If output specifies a filename, use it
-                    fileName = output.fileName;
-                } else {
-                    // Generate filename based on step and output
-                    const sanitizedName = output.name.replace(/[^a-zA-Z0-9_-]/g, '_');
-                    const extension = this.getFileExtensionForOutput(output);
-                    fileName = `step_${this.stepNo}_${sanitizedName}${extension}`;
-                }
-
-                // Set MIME type
-                mimeType = output.mimeType || this.getMimeTypeForOutput(output);
-
-                // Convert result to string content
-                if (typeof output.result === 'string') {
-                    fileContent = output.result;
-                } else {
-                    // For objects, serialize to JSON
-                    fileContent = JSON.stringify(output.result, null, 2);
-                    if (!fileName.endsWith('.json')) {
-                        fileName = fileName.replace(/\.[^.]*$/, '') + '.json';
-                    }
-                    mimeType = 'application/json';
-                }
-
-                // Create a MissionFile object
-                const missionFile: MissionFile = {
-                    id: uuidv4(),
-                    originalName: fileName,
-                    mimeType: mimeType,
-                    size: Buffer.byteLength(fileContent, 'utf8'),
-                    uploadedAt: new Date(),
-                    uploadedBy: `agent-${this.id.split('_')[0]}`,
-                    storagePath: `step-outputs/${missionId}/${fileName}`,
-                    description: `Output from step ${this.stepNo}: ${this.actionVerb} - ${output.resultDescription}`
-                };
-
-                // Store the file content in Librarian
-                await authenticatedApi.post(`http://${librarianUrl}/storeData`, {
-                    id: `step-output-${this.id}-${output.name}`,
-                    data: {
-                        fileContent: fileContent,
-                        missionFile: missionFile
-                    },
-                    storageType: 'mongo',
-                    collection: 'step-outputs'
-                });
-
-                // Load the current mission to update its attached files
-                const missionResponse = await authenticatedApi.get(`http://${librarianUrl}/loadData/${missionId}`, {
-                    params: { collection: 'missions', storageType: 'mongo' }
-                });
-
-                if (missionResponse.data && missionResponse.data.data) {
-                    const mission = missionResponse.data.data;
-                    const existingFiles = mission.attachedFiles || [];
-                    const updatedMission = {
-                        ...mission,
-                        attachedFiles: [...existingFiles, missionFile],
-                        updatedAt: new Date()
-                    };
-
-                    // Save the updated mission
-                    await authenticatedApi.post(`http://${librarianUrl}/storeData`, {
-                        id: missionId,
-                        data: updatedMission,
-                        collection: 'missions',
-                        storageType: 'mongo'
-                    });
-
-                    uploadedFiles.push(missionFile);
-                    console.log(`Uploaded step output to shared space: ${fileName}`);
-                }
-
-            } catch (error) {
-                console.error(`Failed to upload step output to shared space:`, error);
-                // Continue with other outputs even if one fails
-            }
-        }
-
-        return uploadedFiles;
-    }
-
-    /**
-     * Determines the appropriate file extension for an output
-     */
-    private getFileExtensionForOutput(output: PluginOutput): string {
-        if (output.fileName) {
-            const ext = output.fileName.substring(output.fileName.lastIndexOf('.'));
-            if (ext) return ext;
-        }
-
-        switch (output.resultType) {
-            case PluginParameterType.STRING:
-                return '.txt';
-            case PluginParameterType.OBJECT:
-            case PluginParameterType.ARRAY:
-                return '.json';
-            case PluginParameterType.PLAN:
-                return '.json';
-            default:
-                return '.txt';
-        }
-    }
-
-    /**
-     * Determines the appropriate MIME type for an output
-     */
-    private getMimeTypeForOutput(output: PluginOutput): string {
-        if (output.mimeType) {
-            return output.mimeType;
-        }
-
-        switch (output.resultType) {
-            case PluginParameterType.STRING:
-                return 'text/plain';
-            case PluginParameterType.OBJECT:
-            case PluginParameterType.ARRAY:
-            case PluginParameterType.PLAN:
-                return 'application/json';
-            default:
-                return 'text/plain';
-        }
-    }
 
     /**
      * Retrieves temporary data
@@ -920,9 +913,16 @@ export class Step {
      * Creates steps from a plan of action verb tasks
      * @param plan Array of action verb tasks
      * @param startingStepNo The starting step number
+     * @param persistenceManager The persistence manager for the steps
+     * @param pluginValidator Optional plugin validator (uses default if not provided)
      * @returns Array of Step instances
      */
-    export function createFromPlan(plan: ActionVerbTask[], startingStepNo: number, persistenceManager: AgentPersistenceManager): Step[] {
+    export function createFromPlan(
+        plan: ActionVerbTask[],
+        startingStepNo: number,
+        persistenceManager: AgentPersistenceManager,
+        pluginValidator?: PluginValidator
+    ): Step[] {
         // Extend ActionVerbTask locally to include number and outputs for conversion
         type PlanTask = ActionVerbTask & { number?: number; outputs?: Record<string, any>; id?: string; };
         const planTasks = plan as PlanTask[];
@@ -937,7 +937,7 @@ export class Step {
             stepNumberToUUID[stepNum] = uuid;
             stepLabelToUUID[`step_${stepNum}`] = uuid;
         });
-        // First pass: register outputs and GET_USER_INPUT steps
+        // First pass: register outputs and ASK_USER_QUESTION steps
         planTasks.forEach((task, idx) => {
             const stepUUID = task.id!;
             // Register outputs
@@ -1031,34 +1031,30 @@ export class Step {
             }
 
             // Validate actionVerb
-            if (task.actionVerb === 'GET_USER_INPUT') {
+            if (task.actionVerb === 'ASK_USER_QUESTION') {
                 const questionInputRef = inputReferences.get('question');
                 if (!questionInputRef || questionInputRef.value === undefined || typeof questionInputRef.value !== 'string' || questionInputRef.value.trim() === '') {
-                    throw new Error(`[Step.createFromPlan] Validation Error for GET_USER_INPUT step: 'question' input must have a non-empty string 'value'. Received: ${JSON.stringify(questionInputRef)}`);
+                    throw new Error(`[Step.createFromPlan] Validation Error for ASK_USER_QUESTION step: 'question' input must have a non-empty string 'value'. Received: ${JSON.stringify(questionInputRef)}`);
                 }
             }
 
-            // In a real system, validPluginVerbs would be dynamically fetched or passed in.
-            // For now, we'll list known control-flow verbs and assume others come from plugins.
-            const knownControlFlowVerbs = [
-                'THINK', 'DELEGATE', 'ASK', 'DECIDE', 'REPEAT',
-                'WHILE', 'UNTIL', 'SEQUENCE', 'TIMEOUT',
-                'EXECUTE_PLAN_TEMPLATE', 'FOREACH'
-            ];
-            const isKnownControlFlow = knownControlFlowVerbs.includes(task.actionVerb);
-            const isPotentiallyValidPlugin = /^[A-Z_]+$/.test(task.actionVerb); // Basic check for typical plugin verb format
-
-            if (task.actionVerb === 'EXECUTE') { // Specifically disallow 'EXECUTE'
-                 task.actionVerb = 'ACCOMPLISH'
+            // Handle special case transformations
+            if (task.actionVerb === 'EXECUTE') {
+                task.actionVerb = 'ACCOMPLISH';
             }
 
-            if (!isKnownControlFlow && !isPotentiallyValidPlugin) {
-                // This is a basic heuristic. A more robust solution would involve
-                // checking against a dynamically provided list of all registered plugin verbs.
-                // For now, we're just checking the format and disallowing clearly bad ones.
-                // The CapabilitiesManager will ultimately determine if a plugin verb is truly valid.
-                console.warn(`[Step.createFromPlan] Warning: actionVerb '${task.actionVerb}' is not a known control flow verb and does not strictly match typical plugin verb format (UPPER_SNAKE_CASE). It will be passed to CapabilitiesManager for resolution.`);
-            }
+            // Validate action verb using the plugin validator
+            // Note: We don't await here to keep the function synchronous for now
+            // The validation will be done by CapabilitiesManager at execution time
+            // This is just for early warning/logging
+            const validator = pluginValidator || new DefaultPluginValidator();
+            validator.isValidActionVerb(task.actionVerb).then(isValid => {
+                if (!isValid) {
+                    console.warn(`[Step.createFromPlan] Warning: actionVerb '${task.actionVerb}' may not be available. It will be validated by CapabilitiesManager at execution time.`);
+                }
+            }).catch(error => {
+                console.warn(`[Step.createFromPlan] Could not validate actionVerb '${task.actionVerb}': ${error instanceof Error ? error.message : error}`);
+            });
 
             const step = new Step({
                 id: task.id!,

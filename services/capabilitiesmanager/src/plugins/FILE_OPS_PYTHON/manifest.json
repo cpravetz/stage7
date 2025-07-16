@@ -6,7 +6,7 @@
   "inputDefinitions": [
     {
       "name": "path",
-      "required": true,
+      "required": false,
       "type": "string",
       "description": "The path for the filename to read, write, or append content (relative paths only for security)"
     },

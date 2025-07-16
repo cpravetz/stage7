@@ -205,7 +205,7 @@ The Stage7 plugin system is now positioned as a **best-in-class plugin developme
 
 ### Priority 2: Remaining Plugin Migrations
 - Convert ACCOMPLISH plugin from JavaScript to Python
-- Convert GET_USER_INPUT plugin from JavaScript to Python
+- Convert ASK_USER_QUESTION plugin from JavaScript to Python
 - Convert SCRAPE plugin from JavaScript to Python
 - Deprecate JavaScript plugin versions
 

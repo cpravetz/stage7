@@ -69,7 +69,7 @@ class PluginEcosystemTester {
         }
 
         // Check for our migrated plugins
-        const expectedPlugins = ['ACCOMPLISH', 'GET_USER_INPUT', 'SCRAPE', 'WEATHER', 'TEXT_ANALYSIS'];
+        const expectedPlugins = ['ACCOMPLISH', 'ASK_USER_QUESTION', 'SCRAPE', 'WEATHER', 'TEXT_ANALYSIS'];
         const foundPlugins = plugins.map(p => p.verb || p.id);
         
         for (const expected of expectedPlugins) {

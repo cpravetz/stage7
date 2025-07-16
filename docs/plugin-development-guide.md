@@ -14,7 +14,7 @@ The following plugins are ready for immediate use:
 
 ### Core Plugins
 - **ACCOMPLISH**: Mission planning and goal achievement
-- **GET_USER_INPUT**: Interactive user input collection
+- **ASK_USER_QUESTION**: Interactive user input collection
 - **SCRAPE**: Web content extraction with rate limiting
 
 ### Utility Plugins

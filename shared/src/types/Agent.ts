@@ -27,3 +27,21 @@ export enum OutputType {
     FINAL = 'Final',
     PLAN = 'Plan',
 }
+
+export enum LLMConversationType {
+    TextToText = 'text/text',
+    TextToImage = 'text/image',
+    TextToAudio = 'text/audio',
+    TextToVideo = 'text/video',
+    AudioToText = 'audio/text',
+    ImageToText = 'image/text',
+    ImageToImage = 'image/image',
+    ImageToAudio = 'image/audio',
+    ImageToVideo = 'image/video',
+    VideoToText = 'video/text',
+    VideoToImage = 'video/image',
+    VideoToAudio = 'video/audio',
+    VideoToVideo = 'video/video',
+    TextToCode = 'text/code',
+    CodeToText = 'code/text',
+}
