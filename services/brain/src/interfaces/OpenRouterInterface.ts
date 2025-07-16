@@ -10,7 +10,7 @@ export class OpenRouterInterface extends BaseInterface {
     interfaceName = 'openrouter';
 
     constructor() {
-        super();
+        super('openrouter');
         this.converters.set(LLMConversationType.TextToImage, {
             conversationType: LLMConversationType.TextToImage,
             requiredParams: ['service','prompt'],
@@ -34,12 +34,20 @@ export class OpenRouterInterface extends BaseInterface {
 
     async convertTextToText(args: ConvertParamsType): Promise<string> {
         const { service, prompt, modelName } = args;
+        if (!service) {
+            throw new Error('OpenRouterInterface: No service provided for text-to-text conversion');
+        }
+
         const messages: ExchangeType = [{ role: 'user', content: prompt || '' }];
         return this.chat(service, messages, { modelName });
     }
 
     async convertImageToText(args: ConvertParamsType): Promise<string> {
         const { service, image, prompt, modelName } = args;
+        if (!service) {
+            throw new Error('OpenRouterInterface: No service provided for image-to-text conversion');
+        }
+
         if (!image || !prompt) {
             console.log('No image file provided');
             return '';
@@ -65,6 +73,9 @@ export class OpenRouterInterface extends BaseInterface {
 
     async convertTextToCode(args: ConvertParamsType): Promise<string> {
         const { service, prompt, modelName } = args;
+        if (!service) {
+            throw new Error('OpenRouterInterface: No service provided for text-to-code conversion');
+        }
         const messages: ExchangeType = [
             { role: 'system', content: 'You are a code generation assistant. Provide only code without explanations.' },
             { role: 'user', content: prompt || '' }
@@ -74,6 +85,9 @@ export class OpenRouterInterface extends BaseInterface {
 
     async convertTextToImage(args: ConvertParamsType): Promise<string> {
         const { service, prompt, modelName } = args;
+        if (!service) {
+            throw new Error('OpenRouterInterface: No service provided for text-to-image conversion');
+        }
         const body = JSON.stringify({
             model: modelName || 'dall-e-2',
             messages: [{ role: 'user', content: prompt }],
@@ -138,7 +152,7 @@ export class OpenRouterInterface extends BaseInterface {
         }
         const requiredParams = converter.requiredParams;
         convertParams.service = service;
-        const missingParams = requiredParams.filter(param => !(param in convertParams));
+        const missingParams = requiredParams.filter((param: any) => !(param in convertParams));
         if (missingParams.length > 0) {
             console.log(`Missing required parameters: ${missingParams.join(', ')}`);
             return undefined;

@@ -35,21 +35,21 @@ import { API_BASE_URL } from '../config';
 import { SecurityClient } from '../SecurityClient';
 
 export enum LLMConversationType {
-    TextToText = 'text/text',
-    TextToImage = 'text/image',
-    TextToAudio = 'text/audio',
-    TextToVideo = 'text/video',
-    AudioToText = 'audio/text',
-    ImageToText = 'image/text',
-    ImageToImage = 'image/image',
-    ImageToAudio = 'image/audio',
-    ImageToVideo = 'image/video',
-    VideoToText = 'video/text',
-    VideoToImage = 'video/image',
-    VideoToAudio = 'video/audio',
-    VideoToVideo = 'video/video',
-    TextToCode = 'text/code',
-    CodeToText = 'code/text',
+    TextToText = 'TextToText',
+    TextToImage = 'TextToImage',
+    TextToAudio = 'TextToAudio',
+    TextToVideo = 'TextToVideo',
+    AudioToText = 'AudioToText',
+    ImageToText = 'ImageToText',
+    ImageToImage = 'ImageToImage',
+    ImageToAudio = 'ImageToAudio',
+    ImageToVideo = 'ImageToVideo',
+    VideoToText = 'VideoToText',
+    VideoToImage = 'VideoToImage',
+    VideoToAudio = 'VideoToAudio',
+    VideoToVideo = 'VideoToVideo',
+    TextToCode = 'TextToCode',
+    CodeToText = 'CodeToText',
 }
 
 interface ModelPerformanceMetrics {
@@ -166,7 +166,7 @@ const ModelPerformanceDashboard: React.FC = () => {
           return;
         }
 
-        // Fetch all available models
+        // Fetch all available models from Brain service
         const modelsResponse = await fetch(`${API_BASE_URL}/brain/models`, {
           method: 'GET',
           headers: {
@@ -184,7 +184,7 @@ const ModelPerformanceDashboard: React.FC = () => {
           }
         }
 
-        // Use the fetch API with proper CORS settings
+        // Fetch performance data from PostOffice service (not Brain directly)
         const performanceResponse = await fetch(`${API_BASE_URL}/brain/performance`, {
           method: 'GET',
           headers: {

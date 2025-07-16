@@ -14,6 +14,7 @@ import { exec as execCallback } from 'child_process';
 import { generateStructuredError, ErrorSeverity, GlobalErrorCodes, StructuredError } from './utils/errorReporter';
 import { ConfigManager } from './utils/configManager';
 import { PluginRegistry } from './utils/pluginRegistry';
+import { PluginContextManager } from './utils/PluginContextManager';
 import { validateAndStandardizeInputs } from './utils/validator';
 import { ContainerManager } from './utils/containerManager';
 import { ContainerExecutionRequest, ContainerPluginManifest } from './types/containerTypes';
@@ -45,6 +46,7 @@ export class CapabilitiesManager extends BaseEntity {
     private configManager!: ConfigManager;
     private pluginRegistry!: PluginRegistry;
     private containerManager!: ContainerManager;
+    private pluginContextManager!: PluginContextManager;
     private initializationStatus: {
         pluginRegistry: boolean;
         configManager: boolean;
@@ -64,7 +66,9 @@ export class CapabilitiesManager extends BaseEntity {
         super('CapabilitiesManager', 'CapabilitiesManager', `capabilitiesmanager`, process.env.PORT || '5060');
         const trace_id = `${this.serviceId}-constructor-${uuidv4().substring(0,8)}`;
         // Retry logic for initialization
-        this.pluginRegistry = new PluginRegistry(); 
+        this.pluginRegistry = new PluginRegistry();
+        // Initialize PluginContextManager with a direct reference to avoid circular calls
+        this.pluginContextManager = new PluginContextManager('localhost:5030');
         const source_component = "CapabilitiesManager.constructor";
         let attempts = 0;
         const maxAttempts = 3;
@@ -283,6 +287,39 @@ export class CapabilitiesManager extends BaseEntity {
                     }
                 });
 
+                // New endpoint for intelligent plugin context generation
+                app.post('/generatePluginContext', async (req: any, res: any) => {
+                    const trace_id = (req as any).trace_id || `${trace_id_parent}-context-${uuidv4().substring(0,8)}`;
+                    try {
+                        const { goal, constraints } = req.body;
+
+                        if (!goal || typeof goal !== 'string') {
+                            return res.status(400).json({
+                                error: 'Missing or invalid goal parameter'
+                            });
+                        }
+
+                        const defaultConstraints = {
+                            maxTokens: 2000,
+                            maxPlugins: 20,
+                            ...constraints
+                        };
+
+                        const context = await this.pluginContextManager.generateContext(goal, defaultConstraints);
+                        res.json(context);
+                    } catch (error: any) {
+                        const sError = generateStructuredError({
+                            error_code: GlobalErrorCodes.CAPABILITIES_MANAGER_PLUGIN_FETCH_FAILED,
+                            severity: ErrorSeverity.ERROR,
+                            message: "Failed to generate plugin context.",
+                            source_component: `${source_component}.generatePluginContext`,
+                            original_error: error,
+                            trace_id_param: trace_id
+                        });
+                        res.status(500).json(sError);
+                    }
+                });
+
                 this.server = app.listen(this.port, () => {
                     console.log(`[${trace_id_parent}] CapabilitiesManager server listening on port ${this.port}`);
                     resolve();
@@ -492,6 +529,12 @@ export class CapabilitiesManager extends BaseEntity {
                     res.status(500).json(createPluginOutputError(error));
                     return;
 
+                case 'brain_response_error':
+                    // Brain service response errors - these indicate issues with LLM responses
+                    console.error(`[${trace_id}] ${source_component}: Brain response error for ${step.actionVerb}:`, error.message);
+                    res.status(500).json(createPluginOutputError(error));
+                    return;
+
                 default:
                     // Generic errors
                     console.error(`[${trace_id}] ${source_component}: Execution error for ${step.actionVerb}:`, error);
@@ -512,44 +555,36 @@ export class CapabilitiesManager extends BaseEntity {
             switch (error.error_code) {
                 case GlobalErrorCodes.INPUT_VALIDATION_FAILED:
                     return 'validation_error';
-
                 case GlobalErrorCodes.AUTHENTICATION_ERROR:
                     return 'authentication_error';
-
                 case GlobalErrorCodes.CAPABILITIES_MANAGER_PLUGIN_EXECUTION_FAILED:
                 case GlobalErrorCodes.ACCOMPLISH_PLUGIN_EXECUTION_FAILED:
                     return 'plugin_execution_error';
-
                 case GlobalErrorCodes.CAPABILITIES_MANAGER_UNKNOWN_VERB_HANDLING_FAILED:
                     return 'unknown_verb';
-
-                default:
-                    console.log(`[${trace_id}] ${source_component}: Unclassified error code: ${error.error_code}`);
-                    break;
             }
         }
 
-        // Check error messages for patterns
         const errorMessage = error.message || error.toString();
         const lowerMessage = errorMessage.toLowerCase();
 
-        if (lowerMessage.includes('validation') || lowerMessage.includes('required input') || lowerMessage.includes('missing input')) {
+        // Classify based on error patterns
+        if (lowerMessage.includes('validation') || lowerMessage.includes('required input')) {
             return 'validation_error';
         }
-
-        if (lowerMessage.includes('authentication') || lowerMessage.includes('unauthorized') || lowerMessage.includes('token')) {
+        if (lowerMessage.includes('authentication') || lowerMessage.includes('unauthorized')) {
             return 'authentication_error';
         }
-
-        if (lowerMessage.includes('plugin not found') || lowerMessage.includes('unknown verb') || lowerMessage.includes('no handler')) {
+        if (lowerMessage.includes('plugin not found') || lowerMessage.includes('unknown verb')) {
             return 'unknown_verb';
         }
-
-        if (lowerMessage.includes('plugin execution') || lowerMessage.includes('execution failed')) {
-            return 'plugin_execution_error';
+        if (lowerMessage.includes('brain') && lowerMessage.includes('500')) {
+            return 'brain_service_error';
+        }
+        if (lowerMessage.includes('json') && lowerMessage.includes('parse')) {
+            return 'json_parse_error';
         }
 
-        // Default to generic error
         return 'generic_error';
     }
 
@@ -636,6 +671,52 @@ export class CapabilitiesManager extends BaseEntity {
                 env: currentEnv,
                 credentials: configSet ?? []
             };
+
+            // Add missionId and service URLs to inputsForPlugin if not already present
+            if (!inputsForPlugin.has('missionId')) {
+                const missionIdEnv = process.env.MISSION_ID || null;
+                if (missionIdEnv) {
+                    inputsForPlugin.set('missionId', {
+                        inputName: 'missionId',
+                        value: missionIdEnv,
+                        valueType: PluginParameterType.STRING,
+                        args: {}
+                    });
+                }
+            }
+            if (!inputsForPlugin.has('postOffice_url')) {
+                const postOfficeUrlEnv = process.env.POSTOFFICE_URL || null;
+                if (postOfficeUrlEnv) {
+                    inputsForPlugin.set('postOffice_url', {
+                        inputName: 'postOffice_url',
+                        value: postOfficeUrlEnv,
+                        valueType: PluginParameterType.STRING,
+                        args: {}
+                    });
+                }
+            }
+            if (!inputsForPlugin.has('brain_url')) {
+                const brainUrlEnv = process.env.BRAIN_URL || null;
+                if (brainUrlEnv) {
+                    inputsForPlugin.set('brain_url', {
+                        inputName: 'brain_url',
+                        value: brainUrlEnv,
+                        valueType: PluginParameterType.STRING,
+                        args: {}
+                    });
+                }
+            }
+            if (!inputsForPlugin.has('librarian_url')) {
+                const librarianUrlEnv = process.env.LIBRARIAN_URL || this.librarianUrl || null;
+                if (librarianUrlEnv) {
+                    inputsForPlugin.set('librarian_url', {
+                        inputName: 'librarian_url',
+                        value: librarianUrlEnv,
+                        valueType: PluginParameterType.STRING,
+                        args: {}
+                    });
+                }
+            }
 
             const executionInputs = new Map(inputsForPlugin);
             if (token) executionInputs.set('__auth_token', {

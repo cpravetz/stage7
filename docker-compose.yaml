@@ -230,7 +230,7 @@ services:
       GIT_DEFAULT_BRANCH: *gitDefaultBranch
       GIT_REPOSITORY_URL: *gitRepositoryUrl
       GITHUB_EMAIL: *githubEmail
-      DEFAULT_PLUGIN_REPOSITORY: "github"
+      DEFAULT_PLUGIN_REPOSITORY: "local"
       DEFAULT_REPOSITORY_URL: *defaultRepositoryUrl
       REPOSITORY_USERNAME: *repositoryUserName
       REPOSITORY_TOKEN: *repositoryToken

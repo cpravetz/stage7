@@ -4,7 +4,7 @@ import cors from 'cors';
 import WebSocket from 'ws';
 import http from 'http';
 import { Component } from './types/Component';
-import { Message, MessageType, BaseEntity } from '@cktmcs/shared';
+import { Message, MessageType, BaseEntity, LLMConversationType } from '@cktmcs/shared';
 import axios from 'axios';
 import { analyzeError } from '@cktmcs/errorhandler';
 import bodyParser from 'body-parser';
@@ -730,7 +730,7 @@ export class PostOffice extends BaseEntity {
             }
 
             // Get query parameters
-            const conversationType = req.query.conversationType as string || 'text/text';
+            const conversationType = req.query.conversationType as LLMConversationType || LLMConversationType.TextToText;
             const metric = req.query.metric as string || 'overall';
 
             try {

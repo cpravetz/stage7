@@ -1,7 +1,7 @@
 {
   "openapi": "3.0.0",
   "info": {
-    "title": "GET_USER_INPUT Plugin",
+    "title": "ASK_USER_QUESTION Plugin",
     "version": "1.0.0",
     "description": "A plugin to request input from the user."
   },

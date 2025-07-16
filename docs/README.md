@@ -20,7 +20,7 @@ stage7 is an advanced, self-modifying system designed to manage and execute comp
 
 ### Enterprise-Ready Plugin Ecosystem
 - **Multi-Language Support**: Develop plugins in Python, JavaScript, or any language via Docker containers
-- **Production-Ready Plugins**: 5 ready-to-use plugins (ACCOMPLISH, GET_USER_INPUT, SCRAPE, WEATHER, TEXT_ANALYSIS)
+- **Production-Ready Plugins**: 5 ready-to-use plugins (ACCOMPLISH, ASK_USER_QUESTION, SCRAPE, WEATHER, TEXT_ANALYSIS)
 - **Automated Plugin Creation**: Engineer service generates plugins automatically based on requirements
 - **Plugin Marketplace**: Discover, distribute, and manage plugins across the ecosystem
 
@@ -340,7 +340,7 @@ Stage7 features an enterprise-ready plugin ecosystem supporting multiple program
    - Integrates with Brain service for AI-powered planning
    - Supports both direct answers and multi-step plans
 
-2. **GET_USER_INPUT** - Interactive user input collection
+2. **ASK_USER_QUESTION** - Interactive user input collection
    - Collects user input via PostOffice service
    - Supports multiple choice questions and validation
    - Handles timeouts and cancellation

@@ -7,7 +7,7 @@ export class GroqInterface extends BaseInterface {
     interfaceName = 'groq';
 
     constructor() {
-        super();
+        super('groq');
 
         this.converters.set(LLMConversationType.TextToText, {
             conversationType: LLMConversationType.TextToText,
@@ -26,6 +26,11 @@ export class GroqInterface extends BaseInterface {
 
         if (!prompt) {
             console.log('GroqInterface: No prompt provided for text-to-text conversion');
+            return Promise.resolve('');
+        }
+
+        if (!service) {
+            console.log('GroqInterface: No service provided for text-to-text conversion');
             return Promise.resolve('');
         }
 
@@ -168,7 +173,7 @@ export class GroqInterface extends BaseInterface {
         }
 
         const requiredParams = converter.requiredParams;
-        const missingParams = requiredParams.filter(param => !(param in convertParams));
+        const missingParams = requiredParams.filter((param: any) => !(param in convertParams));
         if (missingParams.length > 0) {
             console.log(`Missing required parameters: ${missingParams.join(', ')}`);
             return undefined;

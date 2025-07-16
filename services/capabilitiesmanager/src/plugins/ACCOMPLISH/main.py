@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
 ACCOMPLISH Plugin - Python Implementation
-Accomplishes a given goal or creates a plan to achieve it
+Accomplishes a gi@ven goal or creates a plan to achieve it
 """
 
 import json
 import sys
 import os
+import re
 import requests
-from typing import Dict, List, Any, Optional, Union
+from typing import Dict, List, Any, Optional
 import logging
 import io
 
@@ -144,6 +145,7 @@ class AccomplishPlugin:
     def __init__(self):
         self.brain_url = os.getenv('BRAIN_URL', 'brain:5070')
         self.security_manager_url = os.getenv('SECURITY_MANAGER_URL', 'securitymanager:5010')
+        self.capabilities_manager_url = os.getenv('CAPABILITIES_MANAGER_URL', 'capabilitiesmanager:5030')
         self.client_secret = os.getenv('CLIENT_SECRET', 'stage7AuthSecret')
         self.token = None
         
@@ -167,12 +169,45 @@ class AccomplishPlugin:
             logger.error(f"Failed to get auth token: {e}")
             return None
 
+    def get_optimized_plugin_context(self, goal: str, max_tokens: int = 2000, max_plugins: int = 20) -> str:
+        """Get optimized plugin context using PluginContextManager"""
+        try:
+            headers = {
+                'Content-Type': 'application/json'
+            }
+
+            payload = {
+                'goal': goal,
+                'constraints': {
+                    'maxTokens': max_tokens,
+                    'maxPlugins': max_plugins
+                }
+            }
+
+            response = requests.post(
+                f"http://{self.capabilities_manager_url}/generatePluginContext",
+                json=payload,
+                headers=headers,
+                timeout=10
+            )
+
+            if response.status_code == 200:
+                context_data = response.json()
+                logger.info(f"[ACCOMPLISH] Received optimized plugin context: {context_data.get('confidence', 0):.2f} confidence, {context_data.get('totalTokens', 0)} tokens")
+                return context_data.get('formattedString', 'No plugins available.')
+            else:
+                logger.warning(f"[ACCOMPLISH] Failed to get optimized plugin context: HTTP {response.status_code}")
+                return "Failed to retrieve optimized plugin context."
+
+        except Exception as e:
+            logger.error(f"[ACCOMPLISH] Error getting optimized plugin context: {e}")
+            return "Error retrieving plugin context."
+
 
 
     def query_brain(self, prompt: str, brain_token: Optional[str] = None) -> Optional[str]:
-        """Query the Brain service with authentication and improved error handling"""
+        """Query Brain with simplified error handling"""
         try:
-            # Use provided brain token or fall back to getting our own
             token_to_use = brain_token or self.token
             if not token_to_use:
                 self.token = self.get_auth_token()
@@ -186,44 +221,30 @@ class AccomplishPlugin:
                 'Content-Type': 'application/json'
             }
 
-            logger.info(f"Querying Brain at {self.brain_url}/chat with prompt length: {len(prompt)} chars")
+            response = requests.post(
+                f"http://{self.brain_url}/chat",
+                json={
+                    "exchanges": [{"role": "user", "content": prompt}],
+                    "optimization": "accuracy",
+                    "ConversationType": "TextToCode"
+                },
+                headers=headers,
+                timeout=60
+            )
+            response.raise_for_status()
 
-            # Try with simplified optimization strategies
-            attempts = [
-                ("accuracy", "text/code"),
-                ("speed", "text/text")
-            ]
-
-            for opt, conv_type in attempts:
-                try:
-                    response = requests.post(
-                        f"http://{self.brain_url}/chat",
-                        json={
-                            "exchanges": [{"role": "user", "content": prompt}],
-                            "optimization": opt,
-                            "ConversationType": conv_type
-                        },
-                        headers=headers,
-                        timeout=60  # Reduced timeout
-                    )
-                    response.raise_for_status()
-
-                    data = response.json()
-                    result = data.get('result') or data.get('response', '')
-
-                    if result and result.strip():
-                        logger.info(f"Brain query successful with {opt}/{conv_type}")
-                        return result
-
-                except Exception as e:
-                    logger.warning(f"Brain query failed with {opt}/{conv_type}: {e}")
-                    continue
-
-            logger.error("All Brain query attempts failed")
+            data = response.json()
+            result = data.get('result') or data.get('response', '')
+            
+            if result and result.strip():
+                logger.info("Brain query successful")
+                return result
+            
+            logger.error("Empty response from Brain")
             return None
 
         except Exception as e:
-            logger.error(f"Failed to query Brain: {e}")
+            logger.error(f"Brain query failed: {e}")
             return None
 
     def generate_prompt(self, goal: str, available_plugins_str: str, mission_context_str: str, is_simplified: bool = False) -> str:
@@ -244,9 +265,9 @@ Do NOT wrap your response in ```json``` blocks. Return raw JSON only.
 
 **SUB-GOAL PLANNING**: If the goal is to figure out how to perform a single action (e.g., "Determine the best way to complete the step 'UPLOAD_RESUME'"), your primary objective is to create a concrete plan using EXISTING plugins.
 - **DO NOT** create a plan that just uses 'THINK'.
-- **INSTEAD**, create a plan that uses plugins like 'GET_USER_INPUT' (to ask for a file path), 'FILE_OPERATION' (to read the file), 'SCRAPE' (to get web content), etc.
+- **INSTEAD**, create a plan that uses plugins like 'ASK_USER_QUESTION' (to ask for a file path), 'FILE_OPERATION' (to read the file), 'SCRAPE' (to get web content), etc.
 - Your plan should *perform* the action, not just think about it.
-- For example, to handle an unknown actionVerb like 'UPLOAD_RESUME', a good plan would be: 1. Use GET_USER_INPUT to ask the user for the resume file path. 2. Use FILE_OPERATION to read the file content from that path.
+- For example, to handle an unknown actionVerb like 'UPLOAD_RESUME', a good plan would be: 1. Use ASK_USER_QUESTION to ask the user for the resume file path. 2. Use FILE_OPERATION to read the file content from that path.
 
 CRITICAL ERRORS TO AVOID:
 - Do NOT omit "description" fields - every step needs a thorough description
@@ -255,8 +276,8 @@ CRITICAL ERRORS TO AVOID:
 - Do NOT create circular dependencies - step N cannot depend on step N+1 or later
 - Do NOT create steps that depend on non-existent outputs from previous steps
 - Do NOT use tuple format for outputs - use object format only
-- Do NOT use "prompt" for GET_USER_INPUT - use "question" instead
-- Do NOT forget "answerType" for GET_USER_INPUT - always include it
+- Do NOT use "prompt" for ASK_USER_QUESTION - use "question" instead
+- Do NOT forget "answerType" for ASK_USER_QUESTION - always include it
 
 REQUIRED INPUT FORMATS:
 - Each input must be an object with either 'value' OR 'outputName' property
@@ -317,7 +338,7 @@ EXECUTION REQUIREMENTS:
 - Each step must have all required inputs either as direct values or dependencies
 - Avoid creating steps that just create more plans - create actionable steps
 - Final steps should produce concrete deliverables, not just more planning
-- If the goal requires file uploads or user input, include GET_USER_INPUT steps
+- If the goal requires file uploads or user input, include ASK_USER_QUESTION steps
 
 CONTROL FLOW actionVerb USAGE:
 - Use DECIDE when the plan should branch based on conditions
@@ -336,50 +357,111 @@ Mission Context: {mission_context_str}
 """
         return prompt.strip()
 
+    def _generate_simplified_prompt(self, goal: str, available_plugins_str: str, mission_context_str: str) -> str:
+        """Generate a simplified prompt for retry attempts"""
+        return f"""
+CRITICAL: Return ONLY valid JSON. No markdown, no code blocks, no explanations.
+Do NOT wrap in ```json``` blocks. Return raw JSON only.
+
+Create a plan to achieve this goal: {goal}
+
+Return EXACTLY this JSON structure:
+{{"type": "PLAN", "plan": [array_of_steps]}}
+
+Each step in the array must have ALL these fields:
+- "number": sequential integer starting from 1
+- "actionVerb": action to perform (string)
+- "description": what this step does (string)
+- "inputs": object with input definitions
+- "outputs": object with output names and descriptions
+- "dependencies": object mapping output names to step numbers
+- "recommendedRole": suggested role (string)
+
+ plugins: {available_plugins_str}
+
+Return ONLY valid JSON, no other text.
+"""
+
     def _parse_llm_response(self, response: str) -> Optional[Any]:
-        """Parse LLM response with multiple fallback strategies"""
+        """Parse LLM response - Brain should have already handled JSON cleanup"""
         if not response or not response.strip():
             return None
 
-        # Try direct JSON parsing first
+        # The Brain's ensureJsonResponse should have already cleaned up JSON issues
+        # We only need to parse the cleaned JSON response
         try:
-            return json.loads(response)
-        except json.JSONDecodeError:
-            pass
+            return json.loads(response.strip())
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse Brain response as JSON: {e}. Response: {response[:200]}...")
+            return None
 
-        # Try to extract JSON from markdown code blocks
-        import re
-        json_match = re.search(r'```(?:json)?\s*(\{.*?\}|\[.*?\])\s*```', response, re.DOTALL)
-        if json_match:
-            try:
-                return json.loads(json_match.group(1))
-            except json.JSONDecodeError:
-                pass
+    def _parse_plugin_requirements(self, available_plugins_str: str) -> Dict[str, Dict[str, Any]]:
+        """Parse the available_plugins_str to extract required inputs for each plugin."""
+        plugin_requirements = {}
 
-        # Try to find JSON-like content between first { and last }
-        first_brace = response.find('{')
-        last_brace = response.rfind('}')
-        if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
-            try:
-                json_content = response[first_brace:last_brace + 1]
-                return json.loads(json_content)
-            except json.JSONDecodeError:
-                pass
+        try:
+            import re
+            # Parse the available_plugins_str to extract plugin information
+            lines = available_plugins_str.split('\n')
+            for line in lines:
+                line = line.strip()
+                if line.startswith('- ') and ':' in line:
+                    # Extract plugin verb and requirements
+                    parts = line[2:].split(':', 1)  # Remove '- ' prefix
+                    if len(parts) >= 2:
+                        verb = parts[0].strip()
+                        description = parts[1].strip()
 
-        # Try to find JSON array content between first [ and last ]
-        first_bracket = response.find('[')
-        last_bracket = response.rfind(']')
-        if first_bracket != -1 and last_bracket != -1 and last_bracket > first_bracket:
-            try:
-                json_content = response[first_bracket:last_bracket + 1]
-                return json.loads(json_content)
-            except json.JSONDecodeError:
-                pass
+                        # Extract required inputs from description
+                        required_inputs = []
+                        optional_inputs = []
 
-        # Try to clean up common JSON formatting issues
-        cleaned_response = response.strip()
-        # The remainder of the _parse_llm_response function was cut off,
-        # but the relevant fix is outside of it.
+                        # Look for (required input: ...) pattern
+                        required_pattern = r'\(required input[s]?:\s*([^)]+)\)'
+                        required_matches = re.findall(required_pattern, description, re.IGNORECASE)
+                        for match in required_matches:
+                            inputs = [inp.strip() for inp in match.split(',')]
+                            required_inputs.extend(inputs)
+
+                        # Look for (optional inputs: ...) pattern
+                        optional_pattern = r'\(optional input[s]?:\s*([^)]+)\)'
+                        optional_matches = re.findall(optional_pattern, description, re.IGNORECASE)
+                        for match in optional_matches:
+                            inputs = [inp.strip() for inp in match.split(',')]
+                            optional_inputs.extend(inputs)
+
+                        # Add known required inputs for specific plugins based on their manifests
+                        if verb == 'ASK_USER_QUESTION':
+                            required_inputs = ['question']  # From manifest.json
+                            optional_inputs = ['choices', 'answerType']
+                        elif verb == 'THINK':
+                            required_inputs = ['prompt']
+                        elif verb == 'GENERATE':
+                            required_inputs = ['ConversationType']
+                        elif verb == 'DECIDE':
+                            required_inputs = ['condition', 'trueSteps', 'falseSteps']
+                        elif verb == 'WHILE':
+                            required_inputs = ['condition', 'steps']
+                        elif verb == 'UNTIL':
+                            required_inputs = ['condition', 'steps']
+                        elif verb == 'SEQUENCE':
+                            required_inputs = ['steps']
+                        elif verb == 'TIMEOUT':
+                            required_inputs = ['timeout', 'steps']
+                        elif verb == 'REPEAT':
+                            required_inputs = ['count', 'steps']
+                        elif verb == 'FOREACH':
+                            required_inputs = ['array', 'steps']
+
+                        plugin_requirements[verb] = {
+                            'required_inputs': required_inputs,
+                            'optional_inputs': optional_inputs,
+                            'description': description
+                        }
+        except Exception as e:
+            logger.warning(f"Failed to parse plugin requirements: {e}")
+
+        return plugin_requirements
 
     def _validate_inputs(self, inputs: Dict[str, Any], step_index: int, action_verb: str) -> List[Dict[str, Any]]:
         """Validate the inputs structure for a step."""
@@ -433,6 +515,35 @@ Mission Context: {mission_context_str}
                     "malformed_element": {"valueType": input_value['valueType']},
                     "expected_format": f"valueType must be one of: {', '.join(self.ALLOWED_VALUE_TYPES)}",
                     "correction_needed": f"Change valueType to a valid type for input '{input_name}'"
+                })
+
+        return errors
+
+    def _validate_plugin_requirements(self, inputs: Dict[str, Any], step_index: int, action_verb: str, plugin_requirements: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Validate that a step includes all required inputs for its actionVerb according to plugin manifests."""
+        errors = []
+        step_number = step_index + 1
+
+        # Check if we have requirements for this actionVerb
+        if action_verb not in plugin_requirements:
+            return errors  # No requirements found, skip validation
+
+        requirements = plugin_requirements[action_verb]
+        required_inputs = requirements.get('required_inputs', [])
+
+        # Check that all required inputs are present
+        provided_inputs = set(inputs.keys())
+
+        for required_input in required_inputs:
+            if required_input not in provided_inputs:
+                errors.append({
+                    "step_index": step_index,
+                    "error_type": "missing_required_plugin_input",
+                    "field": f"inputs.{required_input}",
+                    "error_message": f"Step {step_number} with actionVerb '{action_verb}' is missing required input '{required_input}'",
+                    "malformed_element": {"actionVerb": action_verb, "provided_inputs": list(provided_inputs)},
+                    "expected_format": f"Step must include required input '{required_input}' for actionVerb '{action_verb}'",
+                    "correction_needed": f"Add required input '{required_input}' to step {step_number}. Required inputs for {action_verb}: {required_inputs}"
                 })
 
         return errors
@@ -539,147 +650,51 @@ Mission Context: {mission_context_str}
         return errors
 
     # This method orchestrates the validation of a full plan
-    def validate_plan_data(self, plan_data: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-        """
-        Validate the entire plan data against the defined schema and rules.
-        Returns a detailed error report if validation fails, otherwise None.
-        """
-        all_errors = []
-
-        if not isinstance(plan_data, list):
+    def validate_plan_data(self, plan_data: List[Dict[str, Any]], available_plugins_str: str = "") -> Optional[Dict[str, Any]]:
+        """Validate plan data with consistent field naming"""
+        if not isinstance(plan_data, list) or not plan_data:
             return {
                 "error_type": "plan_structure_error",
-                "error_message": "Plan must be a JSON array of steps.",
-                "correction_needed": "Ensure the plan is a JSON array.",
-                "malformed_element": plan_data
-            }
-
-        if not plan_data:
-            return {
-                "error_type": "empty_plan",
-                "error_message": "Plan array is empty.",
-                "correction_needed": "Provide a non-empty plan array with at least one step."
+                "error_message": "Plan must be a non-empty JSON array of steps.",
+                "correction_needed": "Ensure the plan is a JSON array with at least one step."
             }
 
         for i, step in enumerate(plan_data):
-            step_number = i + 1 # 1-based indexing for reporting
-
-            # Basic structure validation for each step
-            required_fields = ["number", "actionVerb", "inputs", "description", "outputs", "dependencies"]
+            step_num = i + 1
+            
+            # Check required fields
+            required_fields = ['number', 'actionVerb', 'description', 'inputs', 'outputs']
             for field in required_fields:
                 if field not in step:
-                    all_errors.append({
-                        "step_index": i,
-                        "error_type": "missing_required_field",
-                        "field": field,
-                        "error_message": f"Step {step_number} is missing required field '{field}'.",
-                        "correction_needed": f"Add the '{field}' field to step {step_number}.",
-                        "malformed_element": step
-                    })
-
-            # Validate 'number' field
-            if 'number' in step and (not isinstance(step['number'], int) or step['number'] != step_number):
-                all_errors.append({
-                    "step_index": i,
+                    return {
+                        "error_type": "missing_field",
+                        "error_message": f"Step {step_num} missing required field '{field}'",
+                        "correction_needed": f"Add '{field}' field to step {step_num}",
+                        "step_number": step_num
+                    }
+            
+            # Validate step number sequence
+            if step.get('number') != step_num:
+                return {
                     "error_type": "invalid_step_number",
-                    "field": "number",
-                    "error_message": f"Step {step_number} has incorrect or missing 'number' field. Expected {step_number}.",
-                    "malformed_element": {"number": step.get('number')},
-                    "expected_format": f"Step number must be {step_number}",
-                    "correction_needed": f"Set 'number' field of step {step_number} to {step_number}."
-                })
+                    "error_message": f"Step {step_num} has incorrect number {step.get('number')}",
+                    "correction_needed": f"Set step number to {step_num}",
+                    "step_number": step_num
+                }
             
-            # Validate 'actionVerb'
-            if 'actionVerb' in step and (not isinstance(step['actionVerb'], str) or not step['actionVerb'].strip()):
-                all_errors.append({
-                    "step_index": i,
-                    "error_type": "invalid_action_verb",
-                    "field": "actionVerb",
-                    "error_message": f"Step {step_number} has invalid or empty 'actionVerb'.",
-                    "malformed_element": {"actionVerb": step.get('actionVerb')},
-                    "expected_format": "actionVerb must be a non-empty string",
-                    "correction_needed": f"Provide a valid non-empty string for 'actionVerb' in step {step_number}."
-                })
-
-            # Validate 'description'
-            if 'description' in step and (not isinstance(step['description'], str) or not step['description'].strip()):
-                all_errors.append({
-                    "step_index": i,
-                    "error_type": "invalid_description",
-                    "field": "description",
-                    "error_message": f"Step {step_number} has invalid or empty 'description'.",
-                    "malformed_element": {"description": step.get('description')},
-                    "expected_format": "description must be a non-empty string",
-                    "correction_needed": f"Provide a valid non-empty string for 'description' in step {step_number}."
-                })
-
-            # Validate 'inputs'
-            inputs_dict = step.get('inputs')
-            if not isinstance(inputs_dict, dict):
-                all_errors.append({
-                    "step_index": i,
-                    "error_type": "inputs_structure_error",
-                    "field": "inputs",
-                    "error_message": f"Step {step_number} has invalid 'inputs' field. Must be an object.",
-                    "malformed_element": inputs_dict,
-                    "expected_format": "Inputs must be an object: {'inputName': {'value': 'x', 'valueType': 'string'}}",
-                    "correction_needed": f"Ensure 'inputs' in step {step_number} is a proper JSON object."
-                })
-            else:
-                all_errors.extend(self._validate_inputs(inputs_dict, i, step.get('actionVerb', '')))
-
-
-            # Validate 'outputs'
-            outputs_dict = step.get('outputs')
-            if not isinstance(outputs_dict, dict):
-                all_errors.append({
-                    "step_index": i,
-                    "error_type": "outputs_structure_error",
-                    "field": "outputs",
-                    "error_message": f"Step {step_number} has invalid 'outputs' field. Must be an object.",
-                    "malformed_element": outputs_dict,
-                    "expected_format": "Outputs must be an object: {'outputName': 'description'}",
-                    "correction_needed": f"Ensure 'outputs' in step {step_number} is a proper JSON object."
-                })
-            else:
-                all_errors.extend(self._validate_outputs(outputs_dict, i))
-            
-            # Validate 'dependencies'
-            dependencies_dict = step.get('dependencies')
-            if not isinstance(dependencies_dict, dict):
-                all_errors.append({
-                    "step_index": i,
-                    "error_type": "dependencies_structure_error",
-                    "field": "dependencies",
-                    "error_message": f"Step {step_number} has invalid 'dependencies' field. Must be an object.",
-                    "malformed_element": dependencies_dict,
-                    "expected_format": "Dependencies must be an object: {'outputName': stepNumber}",
-                    "correction_needed": f"Ensure 'dependencies' in step {step_number} is a proper JSON object."
-                })
-            else:
-                all_errors.extend(self._validate_dependencies(dependencies_dict, i, plan_data))
-
-            # Validate 'recommendedRole' if present
-            if 'recommendedRole' in step and not isinstance(step['recommendedRole'], str):
-                all_errors.append({
-                    "step_index": i,
-                    "error_type": "invalid_recommended_role",
-                    "field": "recommendedRole",
-                    "error_message": f"Step {step_number} has invalid 'recommendedRole'. Must be a string.",
-                    "malformed_element": {"recommendedRole": step.get('recommendedRole')},
-                    "expected_format": "recommendedRole must be a string",
-                    "correction_needed": f"Ensure 'recommendedRole' in step {step_number} is a string."
-                })
-
-        if all_errors:
-            return {
-                "error_type": "validation_errors",
-                "error_message": f"Found {len(all_errors)} validation errors in the plan.",
-                "validation_errors": all_errors,
-                "correction_needed": "Review the 'validation_errors' list for detailed correction instructions."
-            }
-        return None # No errors
-
+            # Validate dependencies reference previous steps only
+            dependencies = step.get('dependencies', {})
+            if dependencies:
+                for dep_output, dep_step in dependencies.items():
+                    if dep_step >= step_num:
+                        return {
+                            "error_type": "invalid_dependency",
+                            "error_message": f"Step {step_num} depends on future step {dep_step}",
+                            "correction_needed": "Dependencies must reference previous steps only",
+                            "step_number": step_num
+                        }
+        
+        return None
 
     def convert_json_to_tasks(self, json_plan: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Convert JSON plan to task format. Assumes detailed validation has passed."""
@@ -845,63 +860,6 @@ Return the corrected plan as a JSON array. Fix only the specific error mentioned
 
         return prompt.strip()
 
-    def _report_plan_generation_success(self, brain_token: str, num_steps: int, attempt: int):
-        """Report successful plan generation to Brain for performance tracking."""
-        try:
-            if not brain_token:
-                logger.warning("No Brain token available to report plan generation success.")
-                return
-
-            headers = {
-                'Authorization': f'Bearer {brain_token}',
-                'Content-Type': 'application/json'
-            }
-            payload = {
-                "eventType": "plan_generation_success",
-                "data": {
-                    "numSteps": num_steps,
-                    "attempt": attempt
-                }
-            }
-            response = requests.post(
-                f"http://{self.brain_url}/event",
-                json=payload,
-                headers=headers,
-                timeout=5
-            )
-            response.raise_for_status()
-            logger.info("Successfully reported plan generation success to Brain.")
-        except Exception as e:
-            logger.warning(f"Failed to report plan generation success to Brain: {e}")
-
-    def _report_plan_generation_failure(self, brain_token: str, error_details: str, attempt: int):
-        """Report plan generation failure to Brain for performance tracking."""
-        try:
-            if not brain_token:
-                logger.warning("No Brain token available to report plan generation failure.")
-                return
-
-            headers = {
-                'Authorization': f'Bearer {brain_token}',
-                'Content-Type': 'application/json'
-            }
-            payload = {
-                "eventType": "plan_generation_failure",
-                "data": {
-                    "error": error_details,
-                    "attempt": attempt
-                }
-            }
-            response = requests.post(
-                f"http://{self.brain_url}/event",
-                json=payload,
-                headers=headers,
-                timeout=5
-            )
-            response.raise_for_status()
-            logger.info("Successfully reported plan generation failure to Brain.")
-        except Exception as e:
-            logger.warning(f"Failed to report plan generation failure to Brain: {e}")
 
     def execute(self, inputs_map: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Execute the ACCOMPLISH plugin"""
@@ -913,6 +871,7 @@ Return the corrected plan as a JSON array. Fix only the specific error mentioned
             brain_token = None
             available_plugins_str = "No specific plugins listed as available." # Default
             mission_context_str = "No overall mission context provided." # Default
+            use_optimized_context = True  # Flag to control whether to use optimized context
 
             for key, value_obj in inputs_map.items():
                 input_value = value_obj.get('value') if isinstance(value_obj, dict) else value_obj
@@ -928,12 +887,20 @@ Return the corrected plan as a JSON array. Fix only the specific error mentioned
                         available_plugins_str = "\n".join([f"- {p}" for p in input_value]) if input_value else "No plugins listed."
                     elif isinstance(input_value, str) and input_value.strip():
                         available_plugins_str = input_value
+                        use_optimized_context = False  # Use provided plugins instead of optimized context
                 elif key == 'mission_context':
                     if isinstance(input_value, str) and input_value.strip():
                         mission_context_str = input_value
                     logger.info(f"Found mission_context: {mission_context_str}")
                 elif key in ['__brain_auth_token', 'token']: # Keep existing token logic
                     brain_token = str(input_value) if input_value is not None else None
+
+            # Use optimized plugin context if no specific plugins were provided
+            if use_optimized_context and goal:
+                logger.info("[ACCOMPLISH] Using optimized plugin context")
+                available_plugins_str = self.get_optimized_plugin_context(goal)
+            else:
+                logger.info("[ACCOMPLISH] Using provided plugin context or fallback")
 
             if not goal:
                 logger.error("No goal provided to ACCOMPLISH plugin")
@@ -944,6 +911,16 @@ Return the corrected plan as a JSON array. Fix only the specific error mentioned
                     "resultDescription": "Goal is required for ACCOMPLISH plugin",
                     "result": {"logs": memory_handler.get_logs()},
                     "error": "No goal provided to ACCOMPLISH plugin"
+                }]
+            if not brain_token:
+                logger.error("No brain token provided to ACCOMPLISH plugin")
+                return [{
+                    "success": False,
+                    "name": "error",
+                    "resultType": PluginParameterType.ERROR,
+                    "resultDescription": "Brain token is required for ACCOMPLISH plugin",
+                    "result": {"logs": memory_handler.get_logs()},
+                    "error": "No brain token provided to ACCOMPLISH plugin"
                 }]
 
             max_retries = 2  # Reduced from 3 to 2
@@ -973,7 +950,7 @@ Return the corrected plan as a JSON array. Fix only the specific error mentioned
                             return [{
                                 "success": False, "name": "error", "resultType": PluginParameterType.ERROR,
                                 "resultDescription": "Failed to parse JSON response after cleanup attempts",
-                                "result": {"logs": memory_handler.get_logs()},
+                                "result": {"response": response, "logs": memory_handler.get_logs()},
                                 "error": "Invalid JSON response from Brain service after cleanup attempts"
                             }]
                         continue # Try again if retries left
@@ -992,7 +969,7 @@ Return the corrected plan as a JSON array. Fix only the specific error mentioned
                             plan_data = parsed.get("value")
                         logger.info(f"Successfully parsed top-level PLAN object. Plan length: {len(plan_data)}")
 
-                        validation_error_report = self.validate_plan_data(plan_data)
+                        validation_error_report = self.validate_plan_data(plan_data, available_plugins_str)
                         repair_attempts = 0
                         max_repair_attempts = 2
 
@@ -1006,24 +983,16 @@ Return the corrected plan as a JSON array. Fix only the specific error mentioned
                                 logger.error("Auto-repair failed to produce a new plan.")
                                 break
                             plan_data = repaired_plan
-                            validation_error_report = self.validate_plan_data(plan_data)
+                            validation_error_report = self.validate_plan_data(plan_data, available_plugins_str)
                             repair_attempts += 1
 
                         if validation_error_report:
                             error_message = validation_error_report.get("error_message", "Plan validation failed")
-                            self._report_plan_generation_failure(brain_token, error_message, attempt + 1)
-                            return [{
-                                "success": False, "name": "plan_validation_error", "resultType": PluginParameterType.ERROR,
-                                "resultDescription": error_message, "result": {"logs": memory_handler.get_logs()},
-                                "error": error_message
-                            }]
+                            logger.error(f"Plan validation failed: {error_message}")
 
                         tasks = self.convert_json_to_tasks(plan_data)
                         if tasks and isinstance(tasks, list) and tasks[0].get("resultType") == PluginParameterType.ERROR:
                              return tasks # Propagate error from conversion
-
-                        # Report successful plan generation to Brain for model performance tracking
-                        self._report_plan_generation_success(brain_token, len(plan_data), attempt + 1)
 
                         logger.info(f"Successfully processed plan for goal: {goal}")
                         return [{
@@ -1040,7 +1009,7 @@ Return the corrected plan as a JSON array. Fix only the specific error mentioned
                         plan_data = [parsed]
                         logger.info(f"Brain returned a single step directly, wrapping in PLAN object for validation.")
 
-                        validation_error_report = self.validate_plan_data(plan_data)
+                        validation_error_report = self.validate_plan_data(plan_data, available_plugins_str)
                         repair_attempts = 0
                         max_repair_attempts = 2
 
@@ -1053,23 +1022,16 @@ Return the corrected plan as a JSON array. Fix only the specific error mentioned
                                 logger.error("Auto-repair failed to produce a new plan.")
                                 break
                             plan_data = repaired_plan
-                            validation_error_report = self.validate_plan_data(plan_data)
+                            validation_error_report = self.validate_plan_data(plan_data, available_plugins_str)
                             repair_attempts += 1
 
                         if validation_error_report:
                             error_message = validation_error_report.get("error_message", "Plan validation failed")
-                            self._report_plan_generation_failure(brain_token, error_message, attempt + 1)
-                            return [{
-                                "success": False, "name": "plan_validation_error", "resultType": PluginParameterType.ERROR,
-                                "resultDescription": error_message, "result": {"logs": memory_handler.get_logs()},
-                                "error": error_message
-                            }]
+                            logger.error(f"Plan validation failed: {error_message}")
 
                         tasks = self.convert_json_to_tasks(plan_data)
                         if tasks and isinstance(tasks, list) and tasks[0].get("resultType") == PluginParameterType.ERROR:
                              return tasks
-
-                        self._report_plan_generation_success(brain_token, len(plan_data), attempt + 1)
 
                         logger.info(f"Successfully processed single step as plan for goal: {goal}")
                         return [{
@@ -1084,7 +1046,7 @@ Return the corrected plan as a JSON array. Fix only the specific error mentioned
                         logger.info(f"Brain returned array of steps directly, treating as plan. Steps: {len(parsed)}")
                         plan_data = parsed
 
-                        validation_error_report = self.validate_plan_data(plan_data)
+                        validation_error_report = self.validate_plan_data(plan_data, available_plugins_str)
                         repair_attempts = 0
                         max_repair_attempts = 2
 
@@ -1097,23 +1059,16 @@ Return the corrected plan as a JSON array. Fix only the specific error mentioned
                                 logger.error("Auto-repair failed to produce a new plan.")
                                 break
                             plan_data = repaired_plan
-                            validation_error_report = self.validate_plan_data(plan_data)
+                            validation_error_report = self.validate_plan_data(plan_data, available_plugins_str)
                             repair_attempts += 1
 
                         if validation_error_report:
                             error_message = validation_error_report.get("error_message", "Plan validation failed")
-                            self._report_plan_generation_failure(brain_token, error_message, attempt + 1)
-                            return [{
-                                "success": False, "name": "plan_validation_error", "resultType": PluginParameterType.ERROR,
-                                "resultDescription": error_message, "result": {"logs": memory_handler.get_logs()},
-                                "error": error_message
-                            }]
+                            logger.error(f"Plan validation failed: {error_message}")
 
                         tasks = self.convert_json_to_tasks(plan_data)
                         if tasks and isinstance(tasks, list) and tasks[0].get("resultType") == PluginParameterType.ERROR:
                              return tasks
-
-                        self._report_plan_generation_success(brain_token, len(plan_data), attempt + 1)
 
                         logger.info(f"Successfully processed direct array plan for goal: {goal}")
                         return [{
@@ -1136,18 +1091,9 @@ Return the corrected plan as a JSON array. Fix only the specific error mentioned
 
                     else: # Unrecognized format
                         logger.error(f"Brain response is not a recognized JSON object (PLAN, DIRECT_ANSWER, PLUGIN) nor a valid single step. Response: {response[:500]}")
-                        self._report_plan_generation_failure(brain_token, f"unrecognized_json_type: {parsed.get('type', 'N/A')}", attempt + 1)
-                        return [{
-                            "success": False, "name": "brain_response_format_error", "resultType": PluginParameterType.ERROR,
-                            "resultDescription": "Brain did not return a recognized JSON object type.",
-                            "result": {"logs": memory_handler.get_logs()},
-                            "error": f"Unrecognized JSON object type: {parsed.get('type', 'N/A')}"
-                        }]
 
                 except Exception as e:
                     logger.error(f"Failed to parse Brain response (attempt {attempt+1}): {e}. Response: {response[:500]}")
-                    # Report failure to Brain for model performance tracking
-                    self._report_plan_generation_failure(brain_token, f"json_parse_error: {str(e)}", attempt + 1)
 
                     # If it's the last attempt, return the error, otherwise continue to retry
                     if attempt == max_retries - 1:
@@ -1217,6 +1163,101 @@ def main():
             "error": str(e)
         }]
         print(json.dumps(error_result))
+
+    def _convert_inputs_format(self, inputs: dict) -> dict:
+        """Convert various input definition formats to the desired format"""
+        if not inputs:
+            return {}
+
+        converted = {}
+        for key, value in inputs.items():
+            if isinstance(value, dict):
+                # If it already has the correct format, keep it
+                if 'value' in value or 'outputName' in value:
+                    converted[key] = value
+                else:
+                    # Handle legacy formats
+                    new_input = {}
+
+                    # Check for old 'inputValue' field
+                    if 'inputValue' in value:
+                        new_input['value'] = value['inputValue']
+                    # Check for old 'inputName' field (this would be for outputName)
+                    elif 'inputName' in value:
+                        new_input['outputName'] = value['inputName']
+                    # If neither, treat the whole object as a value
+                    else:
+                        new_input['value'] = str(value)
+
+                    # Preserve valueType if present
+                    if 'valueType' in value:
+                        new_input['valueType'] = value['valueType']
+
+                    converted[key] = new_input
+            else:
+                # If it's a primitive, wrap it in the correct format
+                converted[key] = {'value': str(value)}
+
+        return converted
+
+    def _generate_outputs_from_step(self, step: dict) -> dict:
+        """Generate default outputs for a plan step if none provided"""
+        outputs = {}
+        action_verb = (step.get('actionVerb') or step.get('verb', '')).lower()
+
+        # Generate default outputs based on the actionVerb
+        if action_verb == 'ASK_USER_QUESTION':
+            outputs['user_input'] = 'The input provided by the user.'
+        elif action_verb == 'file_operation':
+            outputs['file_content'] = 'The content of the file or result of the file operation.'
+        elif action_verb == 'scrape':
+            outputs['scraped_content'] = 'The content scraped from the URL.'
+        elif action_verb == 'search':
+            outputs['search_results'] = 'The search results from the internet.'
+        elif action_verb == 'think':
+            outputs['thought_result'] = 'The result of the thinking process.'
+        else:
+            outputs['result'] = f'The result of the {action_verb} operation.'
+
+        return outputs
+
+    def _convert_dependencies_format(self, dependencies) -> dict:
+        """Convert various dependency formats to the desired format"""
+        converted = {}
+
+        if not dependencies:
+            return converted
+
+        if isinstance(dependencies, list):
+            # Handle array format like ["step_1", "step_2"]
+            for dep in dependencies:
+                if isinstance(dep, str):
+                    # Extract step number from "step_X" format
+                    import re
+                    match = re.match(r'step_(\d+)', dep)
+                    if match:
+                        step_number = int(match.group(1))
+                        output_key = f'output_from_{dep}'
+                        converted[output_key] = step_number
+        elif isinstance(dependencies, dict):
+            # Handle object format like {"outputKey": stepNumber} or {"outputKey": "step_1"}
+            for key, value in dependencies.items():
+                if isinstance(value, int):
+                    converted[key] = value
+                elif isinstance(value, str):
+                    # Try to parse step number from string
+                    import re
+                    match = re.match(r'step_(\d+)', value)
+                    if match:
+                        converted[key] = int(match.group(1))
+                    else:
+                        # Try to parse as direct number
+                        try:
+                            converted[key] = int(value)
+                        except ValueError:
+                            pass
+
+        return converted
 
 if __name__ == "__main__":
     main()

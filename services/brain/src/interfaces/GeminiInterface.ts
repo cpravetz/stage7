@@ -40,7 +40,7 @@ export class GeminiInterface extends BaseInterface {
     }
 
     constructor() {
-        super();
+        super('gemini');
         this.converters.set(LLMConversationType.TextToText, {
             conversationType: LLMConversationType.TextToText,
             requiredParams: ['service', 'prompt'],
@@ -65,6 +65,10 @@ export class GeminiInterface extends BaseInterface {
 
     async convertTextToText(args: ConvertParamsType): Promise<string> {
         const { service, prompt, modelName } = args;
+        if (!service) {
+            throw new Error('GeminiInterface: No service provided for text-to-text conversion');
+        }
+
         const messages: ExchangeType = [{ role: 'user', content: prompt || '' }];
         return this.chat(service, messages, { modelName });
     }
@@ -72,8 +76,7 @@ export class GeminiInterface extends BaseInterface {
     async convertImageToText(args: ConvertParamsType): Promise<string> {
         const { service, image, prompt } = args;
         if (!image || !prompt) {
-            console.log('No image file provided or prompt');
-            return '';
+            throw new Error('No image file provided or prompt for Gemini image-to-text conversion');
         }
 
         if (!service || !service.isAvailable() || !service.apiKey) {
@@ -140,8 +143,7 @@ export class GeminiInterface extends BaseInterface {
     async convertTextToImage(args: ConvertParamsType): Promise<string> {
         const { service, prompt } = args;
         if (!prompt) {
-            console.log('No prompt provided for image generation');
-            return '';
+            throw new Error('No prompt provided for Gemini image generation');
         }
 
         if (!service || !service.isAvailable() || !service.apiKey) {
@@ -322,7 +324,7 @@ export class GeminiInterface extends BaseInterface {
         }
         const requiredParams = converter.requiredParams;
         convertParams.service = service;
-        const missingParams = requiredParams.filter(param => !(param in convertParams));
+        const missingParams = requiredParams.filter((param: any) => !(param in convertParams));
         if (missingParams.length > 0) {
             console.log(`Missing required parameters: ${missingParams.join(', ')}`);
             return undefined;

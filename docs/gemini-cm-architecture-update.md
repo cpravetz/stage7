@@ -180,7 +180,7 @@ Phase 5 Priority 1 has been successfully implemented with full Docker-based plug
    - **Challenges**: LLM integration, plan generation, error handling
    - **Timeline**: 2-3 days
 
-2. **GET_USER_INPUT Plugin**
+2. **ASK_USER_QUESTION Plugin**
    - **Complexity**: Low - Simple user interaction
    - **Priority**: Medium - Used for interactive workflows
    - **Challenges**: WebSocket integration, input validation
@@ -200,7 +200,7 @@ Phase 5 Priority 1 has been successfully implemented with full Docker-based plug
 - Integrate with Brain service for LLM calls
 - Add comprehensive testing and validation
 
-**Step 2: GET_USER_INPUT Plugin Migration**
+**Step 2: ASK_USER_QUESTION Plugin Migration**
 - Convert to Python with WebSocket support
 - Add input validation and sanitization
 - Implement timeout and cancellation handling
@@ -260,10 +260,10 @@ Phase 5 Priority 1 has been successfully implemented with full Docker-based plug
    - **Location**: `services/capabilitiesmanager/src/plugins/ACCOMPLISH/`
    - **Dependencies**: Integrated with SecurityManager and Brain service
 
-2. **GET_USER_INPUT Plugin** 📋 **MEDIUM PRIORITY** - ✅ **COMPLETED**
+2. **ASK_USER_QUESTION Plugin** 📋 **MEDIUM PRIORITY** - ✅ **COMPLETED**
    - **Status**: ✅ Migrated to Python with PostOffice integration
    - **Features**: Enhanced input validation, choice handling, timeout management
-   - **Location**: `services/capabilitiesmanager/src/plugins/GET_USER_INPUT/`
+   - **Location**: `services/capabilitiesmanager/src/plugins/ASK_USER_QUESTION/`
    - **Dependencies**: Integrated with PostOffice service
 
 3. **SCRAPE Plugin** 📋 **MEDIUM PRIORITY** - ✅ **COMPLETED**
@@ -391,7 +391,7 @@ Phase 5 Priority 1 has been successfully implemented with full Docker-based plug
 #### Week 2: Remaining Migrations & System Integration
 
 **Days 1-2: Remaining Plugin Migrations**
-1. **GET_USER_INPUT Plugin**:
+1. **ASK_USER_QUESTION Plugin**:
    - Convert to Python with WebSocket support
    - Add input validation and sanitization
    - Implement timeout and cancellation handling
@@ -431,7 +431,7 @@ Phase 5 Priority 1 has been successfully implemented with full Docker-based plug
 
 **Phase 5 Priority 2 - Plugin Migrations:**
 - ✅ **ACCOMPLISH Plugin**: Migrated to Python with enhanced Brain integration
-- ✅ **GET_USER_INPUT Plugin**: Migrated to Python with PostOffice integration
+- ✅ **ASK_USER_QUESTION Plugin**: Migrated to Python with PostOffice integration
 - ✅ **SCRAPE Plugin**: Migrated to Python with BeautifulSoup4 and rate limiting
 - ✅ **WEATHER Plugin**: Moved from examples to production plugin set
 - ✅ **TEXT_ANALYSIS Plugin**: Moved from examples to production plugin set
@@ -452,7 +452,7 @@ Phase 5 Priority 1 has been successfully implemented with full Docker-based plug
 
 **Production Plugin Set (5 Plugins Ready):**
 - ✅ **ACCOMPLISH**: Mission planning and goal achievement
-- ✅ **GET_USER_INPUT**: Interactive user input collection
+- ✅ **ASK_USER_QUESTION**: Interactive user input collection
 - ✅ **SCRAPE**: Web content extraction with rate limiting
 - ✅ **WEATHER**: Weather information retrieval
 - ✅ **TEXT_ANALYSIS**: Comprehensive text analysis

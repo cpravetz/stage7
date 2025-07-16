@@ -7,7 +7,7 @@ export class MistralInterface extends BaseInterface {
     interfaceName: string = 'mistral';
 
     constructor() {
-        super();
+        super('mistral');
     }
 
     async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string } = {}): Promise<string> {

@@ -7,7 +7,7 @@ export class OpenWebUIInterface extends BaseInterface {
     private readonly DEFAULT_TIMEOUT = 300000; // 5 minutes timeout for knownow model
 
     constructor() {
-        super();
+        super('openwebui');
         console.log(`OpenWebUIInterface initialized with DEFAULT_TIMEOUT: ${this.DEFAULT_TIMEOUT}ms`);
     }
 

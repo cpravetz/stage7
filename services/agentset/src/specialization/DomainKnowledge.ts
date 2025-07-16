@@ -66,18 +66,31 @@ export class DomainKnowledge {
    */
   private async loadKnowledgeItems(): Promise<void> {
     try {
-      const response = await this.authenticatedApi.get(`http://${this.librarianUrl}/loadData`, {
-        params: {
-          storageType: 'mongo',
-          collection: 'domain_knowledge'
-        }
+      // Use queryData instead of loadData to get the document by ID
+      const response = await this.authenticatedApi.post(`http://${this.librarianUrl}/queryData`, {
+        collection: 'domain_knowledge',
+        query: { _id: 'domain_knowledge' },
+        limit: 1
       });
 
-      if (response.data && Array.isArray(response.data)) {
-        for (const item of response.data) {
-          this.knowledgeItems.set(item.id, item);
+      // Check if we got data back
+      if (response.data && response.data.data && Array.isArray(response.data.data) && response.data.data.length > 0) {
+        const document = response.data.data[0];
+        // The actual knowledge items array should be in the document's data field
+        const items = Array.isArray(document) ? document : (document.data || document);
+
+        if (Array.isArray(items)) {
+          for (const item of items) {
+            if (item && item.id) {
+              this.knowledgeItems.set(item.id, item);
+            }
+          }
+          console.log(`Loaded ${this.knowledgeItems.size} knowledge items`);
+        } else {
+          console.log('No valid knowledge items array found in document');
         }
-        console.log(`Loaded ${this.knowledgeItems.size} knowledge items`);
+      } else {
+        console.log('No domain knowledge found in storage');
       }
     } catch (error) {
       analyzeError(error as Error);

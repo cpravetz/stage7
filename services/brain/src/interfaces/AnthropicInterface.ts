@@ -7,7 +7,7 @@ export class AnthropicInterface extends BaseInterface {
     interfaceName = 'anthropic';
     
     constructor() {
-        super();
+        super('anthropic');
         this.converters.set(LLMConversationType.TextToText, {
             conversationType: LLMConversationType.TextToText,
             requiredParams: ['service', 'prompt'],
@@ -75,20 +75,38 @@ export class AnthropicInterface extends BaseInterface {
     
             return fullResponse || '';
         } catch (error) {
-            console.error('Error generating response from Anthropic:', error instanceof Error ? error.message : error);
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            console.error('Error generating response from Anthropic:', errorMessage);
             analyzeError(error as Error);
-            return '';
+
+            // Instead of returning empty string, throw a more descriptive error
+            if (errorMessage.includes('ECONNREFUSED') || errorMessage.includes('ENOTFOUND') ||
+                errorMessage.includes('timeout') || errorMessage.includes('network')) {
+                throw new Error(`Anthropic connection error: ${errorMessage}`);
+            } else if (errorMessage.includes('401') || errorMessage.includes('403')) {
+                throw new Error(`Anthropic authentication error: ${errorMessage}`);
+            } else if (errorMessage.includes('429')) {
+                throw new Error(`Anthropic rate limit error: ${errorMessage}`);
+            } else {
+                throw new Error(`Anthropic API error: ${errorMessage}`);
+            }
         }
     }
 
     async convertTextToText(args: ConvertParamsType): Promise<string> {
         const { service, prompt, modelName } = args;
+        if (!service) {
+            throw new Error('AnthropicInterface: No service provided for text-to-text conversion');
+        }
         const messages = [{ role: 'user', content: prompt || '' }];
         return this.chat(service, messages, { modelName: modelName });
     }
 
     async convertTextToCode(args: ConvertParamsType): Promise<string> {
         const { service, prompt, modelName } = args;
+        if (!service) {
+            throw new Error('AnthropicInterface: No service provided for text-to-code conversion');
+        }
         const messages = [
             { role: 'system', content: 'You are a code generation assistant. Provide only code without explanations.' },
             { role: 'user', content: prompt || ''}
@@ -99,14 +117,13 @@ export class AnthropicInterface extends BaseInterface {
     async convert(service: BaseService, conversionType: LLMConversationType, convertParams: ConvertParamsType): Promise<any> {
         const converter = this.converters.get(conversionType);
         if (!converter) {
-            return '';
+            throw new Error(`Conversion type ${conversionType} not supported by Anthropic interface`);
         }
         const requiredParams = converter.requiredParams;
         convertParams.service = service;
-        const missingParams = requiredParams.filter(param => !(param in convertParams));
+        const missingParams = requiredParams.filter((param:any) => !(param in convertParams));
         if (missingParams.length > 0) {
-            console.log(`Missing required parameters: ${missingParams.join(', ')}`);
-            return '';
+            throw new Error(`Missing required parameters for Anthropic conversion: ${missingParams.join(', ')}`);
         }
         return converter.converter(convertParams);
     }

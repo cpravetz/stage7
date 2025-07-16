@@ -1,6 +1,6 @@
 {
-  "id": "plugin-GET_USER_INPUT",
-  "verb": "GET_USER_INPUT",
+  "id": "plugin-ASK_USER_QUESTION",
+  "verb": "ASK_USER_QUESTION",
   "description": "Requests input from the user",
   "explanation": "This plugin sends a question to the user and returns their response",
   "inputDefinitions": [
