@@ -1,4 +1,5 @@
 import { InputValue, PluginDefinition, MapSerializer } from '@cktmcs/shared';
+import { PluginRegistry } from './pluginRegistry';
 
 
 export const validateInputType = async (value: any, expectedType: string): Promise<boolean> => {
@@ -177,3 +178,110 @@ export const validateAndStandardizeInputs = async (plugin: PluginDefinition, inp
             };
         }
     }
+
+/**
+ * Generic plan validation that can be used by any plugin
+ * Validates plan structure, action verbs, and input references
+ */
+export const validatePlanStructure = async (planData: any[], pluginRegistry: PluginRegistry): Promise<{ success: boolean; error?: string; errorType?: string; stepNumber?: number }> => {
+    if (!Array.isArray(planData) || planData.length === 0) {
+        return {
+            success: false,
+            error: "Plan must be a non-empty array of steps",
+            errorType: "plan_structure_error"
+        };
+    }
+
+    // Get available plugins from registry
+    const availablePlugins = new Set<string>();
+    try {
+        // Access the verbIndex to get all available verbs
+        const verbIndex = (pluginRegistry as any).verbIndex;
+        if (verbIndex && verbIndex instanceof Map) {
+            for (const verb of verbIndex.keys()) {
+                availablePlugins.add(verb);
+            }
+        }
+    } catch (error) {
+        console.warn('validatePlanStructure: Could not fetch plugins from registry:', error);
+        // Continue validation without plugin verification if registry is unavailable
+    }
+
+    for (let i = 0; i < planData.length; i++) {
+        const step = planData[i];
+        const stepNumber = i + 1;
+
+        // Check required fields
+        const requiredFields = ['actionVerb', 'description'];
+        for (const field of requiredFields) {
+            if (!step[field]) {
+                return {
+                    success: false,
+                    error: `Step ${stepNumber} missing required field '${field}'`,
+                    errorType: "missing_field",
+                    stepNumber
+                };
+            }
+        }
+
+        // Validate actionVerb is a known plugin (if we have plugin data)
+        const actionVerb = step.actionVerb;
+        if (availablePlugins.size > 0 && !availablePlugins.has(actionVerb)) {
+            return {
+                success: false,
+                error: `Step ${stepNumber} uses invalid actionVerb '${actionVerb}'. Available plugins: ${Array.from(availablePlugins).sort().join(', ')}`,
+                errorType: "invalid_action_verb",
+                stepNumber
+            };
+        }
+
+        // Validate input references format
+        if (step.inputReferences && typeof step.inputReferences === 'object') {
+            for (const [inputName, inputRef] of Object.entries(step.inputReferences)) {
+                if (inputRef && typeof inputRef === 'object' && 'value' in inputRef) {
+                    const value = (inputRef as any).value;
+                    // Check for malformed dictionary strings
+                    if (typeof value === 'string' && value.startsWith("{'") && value.endsWith("'}")) {
+                        return {
+                            success: false,
+                            error: `Step ${stepNumber} input '${inputName}' has malformed dictionary string: ${value}`,
+                            errorType: "malformed_input_reference",
+                            stepNumber
+                        };
+                    }
+                }
+            }
+        }
+
+        // Validate dependencies reference previous steps only
+        if (step.dependencies && typeof step.dependencies === 'object') {
+            for (const [outputName, depStep] of Object.entries(step.dependencies)) {
+                let depStepNumber: number;
+                try {
+                    depStepNumber = typeof depStep === 'string' ? parseInt(depStep, 10) : Number(depStep);
+                    if (isNaN(depStepNumber) || depStepNumber <= 0) {
+                        throw new Error('Invalid dependency step number');
+                    }
+                } catch {
+                    return {
+                        success: false,
+                        error: `Step ${stepNumber} dependency '${outputName}' has invalid step number: ${depStep}`,
+                        errorType: "invalid_dependency_value",
+                        stepNumber
+                    };
+                }
+
+                if (depStepNumber >= stepNumber) {
+                    return {
+                        success: false,
+                        error: `Step ${stepNumber} depends on future step ${depStepNumber}`,
+                        errorType: "invalid_dependency",
+                        stepNumber
+                    };
+                }
+            }
+        }
+    }
+
+    return { success: true };
+};

@@ -39,8 +39,9 @@ export abstract class BaseInterface {
      * @returns The response, possibly converted to valid JSON string.
      */
     public ensureJsonResponse(response: string, allowPartialRecovery: boolean = false): string {
+        console.log('[baseInterface] Ensuring JSON response');
         if (!response || response.trim() === '') {
-            throw new Error('Empty response received');
+            throw new Error('[baseInterface] Empty response received');
         }
 
         let cleanedResponse = response.trim();
@@ -57,12 +58,13 @@ export abstract class BaseInterface {
         
         try {
             const parsed = JSON.parse(cleanedResponse);
-            console.debug('Response is valid JSON after cleaning.');
+            console.debug('[baseInterface] Response is valid JSON after cleaning.');
             return JSON.stringify(parsed, null, 2);
         } catch (e) {
             if (!allowPartialRecovery) {
                 const errorMessage = e instanceof Error ? e.message : String(e);
-                console.log(`JSON parse failed: ${errorMessage}`);
+                console.log(`[baseInterface]JSON parse failed: ${errorMessage}`);
+                console.log('[baseInterface] malformed JSON:', cleanedResponse);
                 throw new Error(`JSON_PARSE_ERROR: ${errorMessage}`);
             }
             
@@ -84,7 +86,7 @@ export abstract class BaseInterface {
                 for (const match of matches) {
                     try {
                         const parsed = JSON.parse(match);
-                        console.log('Recovered partial JSON');
+                        console.log('Recovered partial JSON:', parsed);
                         return JSON.stringify(parsed, null, 2);
                     } catch (e) {
                         continue;
@@ -92,7 +94,7 @@ export abstract class BaseInterface {
                 }
             }
         }
-        
+        console.error('JSONRecovery attempt failed for:', response);
         throw new Error('JSON_RECOVERY_FAILED: Could not extract valid JSON');
     }
 
@@ -100,6 +102,7 @@ export abstract class BaseInterface {
      * Generic JSON cleaning - removes markdown blocks, fixes common JSON issues
      * Does NOT handle domain-specific schema validation
      */
+    /*
     private cleanJsonResponse(response: string): string {
         console.debug("Starting cleanJsonResponse")
         let cleaned = response.trim();
@@ -173,6 +176,7 @@ export abstract class BaseInterface {
             return cleaned; // Return best effort
         }
     }
+    */
 
     protected trimMessages(messages: ExchangeType, maxTokens: number): ExchangeType {
         console.debug("Starting trimMessages")

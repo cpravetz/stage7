@@ -390,7 +390,7 @@ export class PluginMarketplace {
         lines.push('- DELEGATE: Create sub-agents with goals of their own.');
         lines.push('- THINK: - sends prompts to the chat function of the LLMs attached to the system in order to generate content from a conversation.(required input: prompt) (optional inputs: optimization (cost|accuracy|creativity|speed|continuity), ConversationType) accuracy is the default optimization');
         lines.push('- GENERATE: - uses LLM services to generate content from a prompt or other content. Services include image creation, audio transcription, image editing, etc. (required input: ConversationType) (optional inputs: modelName, optimization, prompt, file, audio, video, image...)');
-        lines.push('- DECIDE: - Conditional branching based on a condition (required inputs: condition: {"inputName": "value"}, trueSteps[], falseSteps[])');
+        lines.push('- IF_THEN: - Conditional branching based on a condition (required inputs: condition: {"inputName": "value"}, trueSteps[], falseSteps[])');
         lines.push('- WHILE: - Repeat steps while a condition is true (required inputs: condition: {"inputName": "value"}, steps[])');
         lines.push('- UNTIL: - Repeat steps until a condition becomes true (required inputs: condition: {"inputName": "value"}, steps[])');
         lines.push('- SEQUENCE: - Execute steps in strict sequential order / no concurrency (required inputs: steps[])');

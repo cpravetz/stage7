@@ -213,13 +213,15 @@ class AccomplishPlugin:
                 self.token = self.get_auth_token()
                 token_to_use = self.token
                 if not token_to_use:
-                    logger.error("Failed to obtain authentication token")
+                    logger.error("[ACCOMPLISH] Failed to obtain authentication token")
                     return None
 
             headers = {
                 'Authorization': f'Bearer {token_to_use}',
                 'Content-Type': 'application/json'
             }
+
+            logger.info(f"[ACCOMPLISH] Querying Brain with prompt: {prompt[:200]}...")
 
             response = requests.post(
                 f"http://{self.brain_url}/chat",
@@ -237,21 +239,21 @@ class AccomplishPlugin:
             result = data.get('result') or data.get('response', '')
             
             if result and result.strip():
-                logger.info("Brain query successful")
+                logger.info(f"[ACCOMPLISH] Brain query successful: {result}")
                 return result
             
-            logger.error("Empty response from Brain")
+            logger.error("[ACCOMPLISH] Empty response from Brain")
             return None
 
         except Exception as e:
-            logger.error(f"Brain query failed: {e}")
+            logger.error(f"[ACCOMPLISH] Brain query failed: {e}")
             return None
 
     def generate_prompt(self, goal: str, available_plugins_str: str, mission_context_str: str, is_simplified: bool = False) -> str:
         """Generate the prompt for the Brain service"""
         # Log the received available_plugins_str for debugging
-        logger.info(f"[ACCOMPLISH] Received available_plugins_str: {repr(available_plugins_str)}")
-        logger.info(f"[ACCOMPLISH] Received mission_context_str: {repr(mission_context_str)}")
+        #logger.info(f"[ACCOMPLISH] Received available_plugins_str: {repr(available_plugins_str)}")
+        #logger.info(f"[ACCOMPLISH] Received mission_context_str: {repr(mission_context_str)}")
 
         if is_simplified:
             # Generate a much simpler, focused prompt for retry attempts
@@ -263,7 +265,6 @@ Your task is to decide on the best way to achieve the goal: '{goal}' and provide
 CRITICAL: Return ONLY valid JSON. No explanations, markdown, code blocks, or additional text.
 Do NOT wrap your response in ```json``` blocks. Return raw JSON only.
 
-**SUB-GOAL PLANNING**: If the goal is to figure out how to perform a single action (e.g., "Determine the best way to complete the step 'UPLOAD_RESUME'"), your primary objective is to create a concrete plan using EXISTING plugins.
 - **DO NOT** create a plan that just uses 'THINK'.
 - **INSTEAD**, create a plan that uses plugins like 'ASK_USER_QUESTION' (to ask for a file path), 'FILE_OPERATION' (to read the file), 'SCRAPE' (to get web content), etc.
 - Your plan should *perform* the action, not just think about it.
@@ -308,10 +309,10 @@ CRITICAL FIELD REQUIREMENTS:
 Available plugins: {available_plugins_str[:1000]}{"..." if len(available_plugins_str) > 1000 else ""}
 
 PLANNING PRINCIPLES:
-1. **Reuse existing plugins**: If a plugin or actionVerb already exists, use it instead of creating a new one
+1. **Reuse existing plugins**: If a plugin or actionVerb already exists to perform a step in the plan, use it instead of creating a new one
 2. **Dependency-Driven**: Most steps should depend on outputs from previous steps
 3. **Iterative Refinement**: Include steps that validate, refine, or improve earlier outputs
-4. **Conditional Logic**: Use DECIDE, WHILE, UNTIL for plans that adapt based on outcomes
+4. **Conditional Logic**: Use IF_THEN, WHILE, UNTIL for plans that adapt based on outcomes
 5. **Information Gathering**: Start with research/data collection before taking action
 6. **Validation**: Include verification steps to ensure quality and accuracy
 7. **Over Explain**: Make descriptions and explanations very thorough
@@ -341,7 +342,7 @@ EXECUTION REQUIREMENTS:
 - If the goal requires file uploads or user input, include ASK_USER_QUESTION steps
 
 CONTROL FLOW actionVerb USAGE:
-- Use DECIDE when the plan should branch based on conditions
+- Use IF_THEN when the plan should branch based on conditions
 - Use WHILE for iterative improvement processes
 - Use UNTIL for goal-seeking behaviors
 - Use REPEAT for tasks that need multiple attempts
@@ -392,7 +393,7 @@ Return ONLY valid JSON, no other text.
         try:
             return json.loads(response.strip())
         except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse Brain response as JSON: {e}. Response: {response[:200]}...")
+            logger.error(f"[ACCOMPLISH] Failed to parse Brain response as JSON: {e}. Response: {response[:200]}...")
             return None
 
     def _parse_plugin_requirements(self, available_plugins_str: str) -> Dict[str, Dict[str, Any]]:
@@ -438,7 +439,7 @@ Return ONLY valid JSON, no other text.
                             required_inputs = ['prompt']
                         elif verb == 'GENERATE':
                             required_inputs = ['ConversationType']
-                        elif verb == 'DECIDE':
+                        elif verb == 'IF_THEN':
                             required_inputs = ['condition', 'trueSteps', 'falseSteps']
                         elif verb == 'WHILE':
                             required_inputs = ['condition', 'steps']
@@ -669,9 +670,11 @@ Return ONLY valid JSON, no other text.
                 "correction_needed": "Ensure the plan is a JSON array with at least one step."
             }
 
+
+
         for i, step in enumerate(plan_data):
             step_num = i + 1
-            
+
             # Check required fields
             required_fields = ['number', 'actionVerb', 'description', 'inputs', 'outputs']
             for field in required_fields:
@@ -682,6 +685,8 @@ Return ONLY valid JSON, no other text.
                         "correction_needed": f"Add '{field}' field to step {step_num}",
                         "step_number": step_num
                     }
+
+
             
             # Validate step number sequence
             if step.get('number') != step_num:
@@ -691,6 +696,22 @@ Return ONLY valid JSON, no other text.
                     "correction_needed": f"Set step number to {step_num}",
                     "step_number": step_num
                 }
+
+            # Validate input references format
+            if 'inputReferences' in step:
+                input_refs = step['inputReferences']
+                if isinstance(input_refs, dict):
+                    for input_name, input_ref in input_refs.items():
+                        if isinstance(input_ref, dict) and 'value' in input_ref:
+                            value = input_ref['value']
+                            # Check for malformed dictionary strings
+                            if isinstance(value, str) and value.startswith("{'") and value.endswith("'}"):
+                                return {
+                                    "error_type": "malformed_input_reference",
+                                    "error_message": f"Step {step_num} input '{input_name}' has malformed dictionary string: {value}",
+                                    "correction_needed": f"Fix input reference format for '{input_name}' in step {step_num} - use proper dependency reference or direct value",
+                                    "step_number": step_num
+                                }
             
             # Validate dependencies reference previous steps only
             dependencies = step.get('dependencies', {})
@@ -795,6 +816,7 @@ Return ONLY valid JSON, no other text.
             }
 
         repair_prompt = self._generate_error_driven_repair_prompt(goal, invalid_plan, validation_error_report)
+        logger.info(f"Auto-repair prompt: {repair_prompt}")
 
         response = self.query_brain(repair_prompt, brain_token)
         if not response:
