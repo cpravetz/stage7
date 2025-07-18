@@ -1,7 +1,7 @@
-import { BaseInterface, LLMConversationType } from './baseInterface';
+import { BaseInterface } from './baseInterface';
+import { LLMConversationType } from '@cktmcs/shared';
 import { BaseService, ExchangeType } from '../services/baseService';
 import axios from 'axios';
-import { analyzeError } from '@cktmcs/errorhandler';
 
 export class MistralInterface extends BaseInterface {
     interfaceName: string = 'mistral';
@@ -66,7 +66,6 @@ export class MistralInterface extends BaseInterface {
                 throw new Error('Unexpected response format from Mistral');
             }
         } catch (error) {
-            analyzeError(error as Error);
             console.error('Error in Mistral interface:', error instanceof Error ? error.message : String(error));
             throw error;
         }

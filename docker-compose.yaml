@@ -106,7 +106,7 @@ services:
       postoffice:
         condition: service_healthy
       librarian:
-        condition: service_started
+        condition: service_healthy
       securitymanager:
         condition: service_started
     env_file:

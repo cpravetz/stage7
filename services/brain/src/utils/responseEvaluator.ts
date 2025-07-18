@@ -2,7 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { analyzeError } from '@cktmcs/errorhandler';
 import fs from 'fs/promises';
 import path from 'path';
-import { LLMConversationType } from '../interfaces/baseInterface';
+import { LLMConversationType } from '@cktmcs/shared';
 
 /**
  * Evaluation criteria

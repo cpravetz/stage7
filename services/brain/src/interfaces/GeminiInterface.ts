@@ -1,5 +1,5 @@
-import { BaseInterface, LLMConversationType, ConvertParamsType } from './baseInterface';
-import { analyzeError } from '@cktmcs/errorhandler';
+import { BaseInterface, ConvertParamsType } from './baseInterface';
+import { LLMConversationType } from '@cktmcs/shared';
 import { BaseService, ExchangeType } from '../services/baseService';
 import fs from 'fs';
 import { GoogleGenerativeAI } from '@google/generative-ai';
@@ -134,7 +134,6 @@ export class GeminiInterface extends BaseInterface {
             const response = result.response;
             return response.text();
         } catch (error) {
-            analyzeError(error as Error);
             console.error('Error in Gemini image analysis:', error instanceof Error ? error.message : error);
             throw error;
         }
@@ -204,7 +203,6 @@ export class GeminiInterface extends BaseInterface {
 
 
         } catch (error) {
-            analyzeError(error as Error);
             console.error('Error in Gemini image generation:', error instanceof Error ? error.message : error);
 
             // Check if the error is related to the model not being available
@@ -310,7 +308,6 @@ export class GeminiInterface extends BaseInterface {
                 return result.response.text();
             }
         } catch (error) {
-            analyzeError(error as Error);
             console.error('Error generating response from Gemini:', error instanceof Error ? error.message : error);
             throw error; // Rethrow to allow the Brain to handle the error
         }

@@ -1,5 +1,6 @@
 import { ModelManager, OptimizationType } from '../src/utils/modelManager';
-import { LLMConversionType, BaseModel } from '../src/models/baseModel';
+import { BaseModel } from '../src/models/baseModel';
+import { LLMConversationType } from '@cktmcs/shared';
 import { BaseInterface } from '../src/interfaces/baseInterface';
 
 jest.mock('fs', () => ({
@@ -17,7 +18,7 @@ jest.mock('/mocked/path/model1.ts', () => ({
   default: {
     name: 'Model1',
     interfaceKey: 'interface1',
-    contentConversation: [LLMConversionType.TextToText],
+    contentConversation: [LLMConversationType.TextToText],
     costScore: 0.8,
     accuracyScore: 0.7,
     creativityScore: 0.6,
@@ -29,7 +30,7 @@ jest.mock('/mocked/path/model2.ts', () => ({
   default: {
     name: 'Model2',
     interfaceKey: 'interface2',
-    contentConversation: [LLMConversionType.TextToText],
+    contentConversation: [LLMConversationType.TextToText],
     costScore: 0.7,
     accuracyScore: 0.8,
     creativityScore: 0.9,
@@ -71,8 +72,8 @@ describe('ModelManager', () => {
     it('should return undefined when no compatible models are found', () => {
       // Override the models with incompatible conversion types
       (modelManager as any).models = new Map([
-        ['model1', { contentConversation: [LLMConversionType.TextToImage] }],
-        ['model2', { contentConversation: [LLMConversionType.TextToImage] }],
+        ['model1', { contentConversation: [LLMConversationType.TextToImage] }],
+        ['model2', { contentConversation: [LLMConversationType.TextToImage] }],
       ]);
       const result = modelManager.selectModel('cost');
       expect(result).toBeUndefined();

@@ -289,7 +289,7 @@ if (process.env.GITHUB_TOKEN && process.env.GITHUB_USERNAME && process.env.GITHU
 1. **Create Model Performance Tracker**
 ```typescript
 // services/brain/src/utils/performanceTracker.ts
-import { LLMConversationType } from '../interfaces/baseInterface';
+import { LLMConversationType } from '@cktmcs/shared';
 
 interface ModelUsageRecord {
   modelName: string;

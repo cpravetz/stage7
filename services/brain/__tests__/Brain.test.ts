@@ -1,8 +1,7 @@
 import { Brain } from '../src/Brain';
 import express from 'express';
-import axios from 'axios';
-import { BaseModelManager } from '../src/utils/modelManager';
-import { LLMConversationType } from '../src/models/Model';
+import { LLMConversationType } from '@cktmcs/shared';
+import { ModelManager } from '../src/utils/modelManager';
 
 jest.mock('express', () => {
   const mockExpress = {

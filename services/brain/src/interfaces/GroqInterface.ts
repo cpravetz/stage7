@@ -1,5 +1,5 @@
-import { BaseInterface, LLMConversationType, ConvertParamsType } from './baseInterface';
-import { analyzeError } from '@cktmcs/errorhandler';
+import { BaseInterface, ConvertParamsType } from './baseInterface';
+import { LLMConversationType } from '@cktmcs/shared';
 import { BaseService, ExchangeType } from '../services/baseService';
 import OpenAI from 'openai';
 
@@ -136,12 +136,24 @@ export class GroqInterface extends BaseInterface {
 
             // Return the response
             if (completion.choices && completion.choices.length > 0) {
-                return completion.choices[0].message.content || '';
+                const content = completion.choices[0].message.content || '';
+
+                // --- Ensure JSON if required ---
+                let requireJson = false;
+                if (options.modelName && options.modelName.toLowerCase().includes('code')) requireJson = true;
+                if (messages && messages.length > 0 && messages[0].content &&
+                    (messages[0].content.includes('JSON') || messages[0].content.includes('json'))) {
+                    requireJson = true;
+                }
+                if (requireJson) {
+                    return this.ensureJsonResponse(content, true);
+                }
+
+                return content;
             }
 
             return '';
         } catch (error) {
-            analyzeError(error as Error);
             console.error('Error generating response from Groq:', error instanceof Error ? error.message : error);
             throw error; // Rethrow to allow the Brain to handle the error
         }

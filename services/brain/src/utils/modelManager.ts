@@ -3,7 +3,8 @@ import path from 'path';
 import { BaseModel } from '../models/baseModel';
 import { serviceManager } from './serviceManager';
 import { interfaceManager } from './interfaceManager';
-import { BaseInterface, LLMConversationType } from '../interfaces/baseInterface';
+import { BaseInterface } from '../interfaces/baseInterface';
+import { LLMConversationType } from '@cktmcs/shared';
 import { BaseService } from '../services/baseService';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { ModelPerformanceTracker } from './performanceTracker';
@@ -34,13 +35,26 @@ export class ModelManager {
     blacklistModel(modelName: string, until: Date): void {
         console.log(`Blacklisting model ${modelName} until ${until.toISOString()}`);
         for (const conversationType of Object.values(LLMConversationType)) {
+            console.log(`[DEBUG] Setting blacklist for ${modelName} with conversation type: ${conversationType}`);
             const metrics = this.performanceTracker.getPerformanceMetrics(modelName, conversationType);
             if (metrics) {
                 metrics.blacklistedUntil = until.toISOString();
                 metrics.consecutiveFailures = Math.max(metrics.consecutiveFailures, 5); // Ensure it stays blacklisted
+                console.log(`[DEBUG] Set blacklistedUntil for ${modelName}/${conversationType} to ${until.toISOString()}`);
+            } else {
+                console.log(`[DEBUG] No metrics found for ${modelName}/${conversationType}`);
             }
         }
         this.clearModelSelectionCache();
+
+        // Immediately save the blacklist to disk and trigger database sync
+        this.performanceTracker.savePerformanceData().then(() => {
+            console.log(`[ModelManager] Blacklist for ${modelName} saved to disk`);
+            // Trigger immediate database sync by emitting an event that Brain can listen to
+            this.triggerImmediateDatabaseSync();
+        }).catch(error => {
+            console.error(`[ModelManager] Failed to save blacklist for ${modelName}:`, error);
+        });
     }
 
     private async loadModels() {
@@ -92,6 +106,7 @@ export class ModelManager {
                 !this.performanceTracker.isModelBlacklisted(cachedResult.model.name, conversationType)) {
                 console.log(`**** CACHE HIT **** Using cached model selection result: ${cachedResult.model.name}`);
                 console.log(`Cache age: ${Math.floor((Date.now() - cachedResult.timestamp) / 1000)} seconds`);
+
                 return cachedResult.model;
             } else {
                 console.log(`**** CACHE INVALIDATED **** Cached model ${cachedResult.model.name} is no longer available or blacklisted`);
@@ -285,6 +300,8 @@ export class ModelManager {
         return requestId;
     }
 
+
+
     /**
      * Track a response from a model
      * @param requestId Request ID
@@ -408,6 +425,11 @@ export class ModelManager {
         return this.performanceTracker.resetAllBlacklists();
     }
 
+        /**
+     * Trigger immediate database sync for blacklist changes
+     * This method can be overridden by Brain to trigger immediate sync
+     */
+
     /**
      * Update model performance data based on evaluation
      * @param modelName Model name
@@ -434,6 +456,15 @@ export class ModelManager {
      */
     getActiveRequestsCount(): number {
         return this.activeRequests.size;
+    }
+
+    /**
+     * Trigger immediate database sync for blacklist changes
+     * This method can be overridden by Brain to trigger immediate sync
+     */
+    triggerImmediateDatabaseSync(): void {
+        // Default implementation - can be overridden by Brain
+        console.log('[ModelManager] Immediate database sync requested');
     }
 
     /**
@@ -515,3 +546,6 @@ export class ModelManager {
         return summary;
     }
 }
+
+// Create and export a singleton instance
+export const modelManagerInstance = new ModelManager();

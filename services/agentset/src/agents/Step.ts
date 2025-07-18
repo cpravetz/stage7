@@ -42,7 +42,7 @@ export class DefaultPluginValidator implements PluginValidator {
 
     // Known control flow verbs that are always valid
     private readonly CONTROL_FLOW_VERBS = [
-        'THINK', 'DELEGATE', 'ASK', 'DECIDE', 'REPEAT',
+        'THINK', 'DELEGATE', 'ASK', 'IF_THEN', 'REPEAT',
         'WHILE', 'UNTIL', 'SEQUENCE', 'TIMEOUT',
         'EXECUTE_PLAN_TEMPLATE', 'FOREACH'
     ];
@@ -431,7 +431,7 @@ export class Step {
                 case MessageType.REQUEST:
                     result = await askAction(this.inputValues);
                     break;
-                case 'DECIDE':
+                case 'IF_THEN':
                     result = await this.handleDecide();
                     break;
                 case 'REPEAT':
@@ -1002,30 +1002,30 @@ export class Step {
                 });
             }
 
-            // Validate DECIDE task inputs before creating the Step object
-            if (task.actionVerb === 'DECIDE') {
+            // Validate IF_THEN task inputs before creating the Step object
+            if (task.actionVerb === 'IF_THEN') {
                 const conditionInputRef = inputReferences.get('condition');
                 if (!conditionInputRef || (conditionInputRef.value === undefined && conditionInputRef.outputName === undefined)) {
-                    throw new Error(`[Step.createFromPlan] Validation Error for DECIDE step: 'condition' input must have a direct boolean 'value' or an 'outputName' reference. Received: ${JSON.stringify(conditionInputRef)}`);
+                    throw new Error(`[Step.createFromPlan] Validation Error for IF_THEN step: 'condition' input must have a direct boolean 'value' or an 'outputName' reference. Received: ${JSON.stringify(conditionInputRef)}`);
                 }
 
                 const trueStepsInputRef = inputReferences.get('trueSteps');
                 if (!trueStepsInputRef || !Array.isArray(trueStepsInputRef.value)) {
-                    throw new Error(`[Step.createFromPlan] Validation Error for DECIDE step: 'trueSteps' input must be an array of ActionVerbTask objects. Received: ${JSON.stringify(trueStepsInputRef?.value)}`);
+                    throw new Error(`[Step.createFromPlan] Validation Error for IF_THEN step: 'trueSteps' input must be an array of ActionVerbTask objects. Received: ${JSON.stringify(trueStepsInputRef?.value)}`);
                 }
                 for (const subTask of trueStepsInputRef.value) {
                     if (typeof subTask !== 'object' || subTask === null || !subTask.actionVerb) {
-                        throw new Error(`[Step.createFromPlan] Validation Error for DECIDE step: Each item in 'trueSteps' must be a valid ActionVerbTask object. Received item: ${JSON.stringify(subTask)}`);
+                        throw new Error(`[Step.createFromPlan] Validation Error for IF_THEN step: Each item in 'trueSteps' must be a valid ActionVerbTask object. Received item: ${JSON.stringify(subTask)}`);
                     }
                 }
 
                 const falseStepsInputRef = inputReferences.get('falseSteps');
                 if (!falseStepsInputRef || !Array.isArray(falseStepsInputRef.value)) {
-                    throw new Error(`[Step.createFromPlan] Validation Error for DECIDE step: 'falseSteps' input must be an array of ActionVerbTask objects. Received: ${JSON.stringify(falseStepsInputRef?.value)}`);
+                    throw new Error(`[Step.createFromPlan] Validation Error for IF_THEN step: 'falseSteps' input must be an array of ActionVerbTask objects. Received: ${JSON.stringify(falseStepsInputRef?.value)}`);
                 }
                 for (const subTask of falseStepsInputRef.value) {
                     if (typeof subTask !== 'object' || subTask === null || !subTask.actionVerb) {
-                        throw new Error(`[Step.createFromPlan] Validation Error for DECIDE step: Each item in 'falseSteps' must be a valid ActionVerbTask object. Received item: ${JSON.stringify(subTask)}`);
+                        throw new Error(`[Step.createFromPlan] Validation Error for IF_THEN step: Each item in 'falseSteps' must be a valid ActionVerbTask object. Received item: ${JSON.stringify(subTask)}`);
                     }
                 }
             }

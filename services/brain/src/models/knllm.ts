@@ -1,5 +1,5 @@
 import { BaseModel, ModelScore } from './baseModel';
-import { LLMConversationType } from '../interfaces/baseInterface';
+import { LLMConversationType } from '@cktmcs/shared';
 
 export class KNLLMModel extends BaseModel {
     constructor() {

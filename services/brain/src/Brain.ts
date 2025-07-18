@@ -1,7 +1,7 @@
 import express from 'express';
 import bodyParser from 'body-parser';
-import { OptimizationType, ModelManager } from './utils/modelManager';
-import { LLMConversationType } from './interfaces/baseInterface';
+import { OptimizationType, ModelManager, modelManagerInstance } from './utils/modelManager';
+import { LLMConversationType } from '@cktmcs/shared';
 import { ExchangeType } from './services/baseService';
 import { BaseEntity } from '@cktmcs/shared';
 import dotenv from 'dotenv';
@@ -30,7 +30,13 @@ export class Brain extends BaseEntity {
 
     constructor() {
         super('Brain', 'Brain', `brain`, process.env.PORT || '5020');
-        this.modelManager = new ModelManager();
+        this.modelManager = modelManagerInstance;
+
+        // Override the triggerImmediateDatabaseSync method to trigger immediate sync
+        this.modelManager.triggerImmediateDatabaseSync = () => {
+            console.log('[Brain] Immediate database sync triggered by blacklist change');
+            this.syncPerformanceDataToLibrarian();
+        };
 
         this.init();
 
@@ -138,23 +144,44 @@ export class Brain extends BaseEntity {
     }
 
     async generate(req: express.Request, res: express.Response) {
+        let selectedModel: any = null;
+        let trackingRequestId: string = '';
+
         try {
             const modelName = req.body.modelName;
             const optimization = req.body.optimization;
             const conversationType = req.body.conversationType;
-            const model = modelName ? this.modelManager.getModel(modelName) : this.modelManager.selectModel(optimization, conversationType);
+            selectedModel = modelName ? this.modelManager.getModel(modelName) : this.modelManager.selectModel(optimization, conversationType);
 
-            if (!model || !model.isAvailable() || !model.service) {
+            if (!selectedModel || !selectedModel.isAvailable() || !selectedModel.service) {
                 res.json({ response: 'No suitable model found.', mimeType: 'text/plain' });
                 console.log('No suitable model found.');
             } else {
                 const convertParams = req.body.convertParams;
-                convertParams.max_length = convertParams.max_length ? Math.min(convertParams.max_length, model.tokenLimit) : model.tokenLimit;
+                convertParams.max_length = convertParams.max_length ? Math.min(convertParams.max_length, selectedModel.tokenLimit) : selectedModel.tokenLimit;
+
+                // Track the model request
+                const prompt = JSON.stringify(convertParams);
+                trackingRequestId = this.modelManager.trackModelRequest(selectedModel.name, conversationType, prompt);
+
                 this.llmCalls++;
-                model.llminterface?.convert(model.service, conversationType, convertParams);
+                const result = await selectedModel.llminterface?.convert(selectedModel.service, conversationType, convertParams);
+
+                // Track successful response
+                this.modelManager.trackModelResponse(trackingRequestId, result || '', 0, true);
+
+                res.json({ response: result, mimeType: 'text/plain' });
             }
         } catch (error) {
-            analyzeError(error as Error);
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            console.error(`[Brain Generate] Error: ${errorMessage}`);
+
+            // Track failed response if we have a model and tracking ID
+            if (selectedModel && trackingRequestId) {
+                console.log(`[Brain Generate] Tracking failure for model ${selectedModel.name}`);
+                this.modelManager.trackModelResponse(trackingRequestId, '', 0, false, errorMessage);
+            }
+
             res.status(400).json({ error: 'Invalid request' });
         }
     }
@@ -162,11 +189,14 @@ export class Brain extends BaseEntity {
     async chat(req: express.Request, res: express.Response) {
         const requestId = uuidv4();
         console.log(`[Brain Chat] Request ${requestId} received`);
-        
+
+        let selectedModel: any = null;
+        let trackingRequestId: string = '';
+
         try {
             const thread = this.createThreadFromRequest(req);
-            const selectedModel = this.modelManager.selectModel(thread.optimization || 'accuracy', thread.conversationType || LLMConversationType.TextToText);
-            
+            selectedModel = this.modelManager.selectModel(thread.optimization || 'accuracy', thread.conversationType || LLMConversationType.TextToText);
+
             if (!selectedModel || !selectedModel.isAvailable()) {
                 console.log(`[Brain Chat] No suitable model found for ${thread.optimization}/${thread.conversationType}`);
                 res.status(503).json({ error: 'No suitable model available' });
@@ -177,13 +207,21 @@ export class Brain extends BaseEntity {
 
             // Track the model request
             const prompt = thread.exchanges.map((e: any) => e.content).join(' ');
-            const trackingRequestId = this.modelManager.trackModelRequest(selectedModel.modelName, thread.conversationType || LLMConversationType.TextToText, prompt);
+            trackingRequestId = this.modelManager.trackModelRequest(selectedModel.name, thread.conversationType || LLMConversationType.TextToText, prompt);
 
             await this._chatWithModel(selectedModel, thread, res, trackingRequestId);
-            
+
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             console.error(`[Brain Chat] Error: ${errorMessage}`);
+
+            // If we have a selected model and tracking ID, make sure to track the failure
+            // This ensures blacklisting works even if the error is caught at this level
+            if (selectedModel && trackingRequestId) {
+                console.log(`[Brain Chat] Tracking failure for model ${selectedModel.name}`);
+                this.modelManager.trackModelResponse(trackingRequestId, '', 0, false, errorMessage);
+            }
+
             res.status(500).json({ error: errorMessage });
         }
     }
@@ -206,8 +244,12 @@ export class Brain extends BaseEntity {
                 throw new Error(modelResponse || 'Model returned empty response');
             }
 
-            // Track successful response
-            this.modelManager.trackModelResponse(requestId, modelResponse, 0, true);
+            // Track successful response with token count if available
+            let tokenCount = 0;
+            if (typeof modelResponse === 'object' && modelResponse && 'usage' in modelResponse) {
+                tokenCount = (modelResponse as any).usage?.total_tokens || 0;
+            }
+            this.modelManager.trackModelResponse(requestId, typeof modelResponse === 'string' ? modelResponse : JSON.stringify(modelResponse), tokenCount, true, undefined, thread.isRetryAttempt || false);
 
             res.json({
                 result: modelResponse,
@@ -219,11 +261,44 @@ export class Brain extends BaseEntity {
             const errorMessage = error instanceof Error ? error.message : String(error);
             console.error(`[Brain] Model ${selectedModel.modelName} failed: ${errorMessage}`);
 
-            // Track failed response and clear cache to enable fallback
-            this.modelManager.trackModelResponse(requestId, '', 0, false, errorMessage);
+            // Check if this is a JSON parsing error that might be recoverable
+            const isJsonError = errorMessage.includes('JSON_PARSE_ERROR') ||
+                               errorMessage.includes('JSON_RECOVERY_FAILED') ||
+                               errorMessage.includes('JSON parse') ||
+                               errorMessage.includes('malformed JSON') ||
+                               errorMessage.includes('invalid JSON');
 
-            // Clear the model selection cache to force re-selection
-            this.modelManager.clearModelSelectionCache();
+            if (isJsonError && !thread.isRetryAttempt) {
+                console.log(`[Brain] JSON error detected, attempting retry with corrective prompt`);
+
+                // Add a corrective message to the thread
+                const correctedThread = {
+                    ...thread,
+                    isRetryAttempt: true,
+                    exchanges: [
+                        ...thread.exchanges,
+                        {
+                            role: 'user',
+                            content: 'The previous response had JSON formatting issues. Please provide a valid JSON response with proper syntax, no trailing commas, and properly escaped quotes.'
+                        }
+                    ]
+                };
+
+                // Track this as a retry attempt (don't count as failure yet)
+                console.log(`[Brain] Retrying with same model ${selectedModel.modelName} for JSON correction`);
+                const retryTrackingRequestId = this.modelManager.trackModelRequest(selectedModel.name, thread.conversationType || LLMConversationType.TextToText, 'JSON_RETRY');
+
+                try {
+                    return await this._chatWithModel(selectedModel, correctedThread, res, retryTrackingRequestId);
+                } catch (retryError) {
+                    console.log(`[Brain] JSON retry failed, proceeding to model fallback`);
+                    // Track the retry failure
+                    this.modelManager.trackModelResponse(retryTrackingRequestId, '', 0, false, retryError instanceof Error ? retryError.message : String(retryError), true);
+                }
+            }
+
+            // Track failed response - this will automatically blacklist the model if needed
+            this.modelManager.trackModelResponse(requestId, '', 0, false, errorMessage, false);
 
             // Try fallback to next available model
             const fallbackModel = this.modelManager.selectModel(
@@ -231,11 +306,11 @@ export class Brain extends BaseEntity {
                 thread.conversationType || LLMConversationType.TextToText
             );
 
-            if (fallbackModel && fallbackModel.modelName !== selectedModel.modelName) {
+            if (fallbackModel && fallbackModel.name !== selectedModel.name) {
                 console.log(`[Brain] Attempting fallback to model: ${fallbackModel.modelName}`);
                 // Track the fallback model request
                 const prompt = thread.exchanges.map((e: any) => e.content).join(' ');
-                const fallbackTrackingRequestId = this.modelManager.trackModelRequest(fallbackModel.modelName, thread.conversationType || LLMConversationType.TextToText, prompt);
+                const fallbackTrackingRequestId = this.modelManager.trackModelRequest(fallbackModel.name, thread.conversationType || LLMConversationType.TextToText, prompt);
                 return await this._chatWithModel(fallbackModel, thread, res, fallbackTrackingRequestId);
             }
 

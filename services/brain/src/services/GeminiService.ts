@@ -8,16 +8,12 @@ export class GeminiService extends BaseService {
         super(
             'gemini',
             process.env.GEMINI_API_KEY || '',
-            'https://generativelanguage.googleapis.com/v1',
+            'https://generativelanguage.googleapis.com/v1beta',
             ['gemini']
         );
-        console.log(`Gemini Service created, ApiKey starts ${this.apiKey.substring(0,6)}`);
     }
 
     isAvailable(): boolean {
-        return this.apiKey !== '';
+        return !!this.apiKey;
     }
 }
-
-const geminiService = new GeminiService();
-export default geminiService;

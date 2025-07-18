@@ -1,6 +1,6 @@
 import axios, { AxiosError } from 'axios';
-import { BaseInterface, LLMConversationType, ConvertParamsType } from './baseInterface';
-import { analyzeError } from '@cktmcs/errorhandler';
+import { BaseInterface, ConvertParamsType } from './baseInterface';
+import { LLMConversationType } from '@cktmcs/shared';
 import { BaseService, ExchangeType } from '../services/baseService';
 
 export class AnthropicInterface extends BaseInterface {
@@ -77,7 +77,6 @@ export class AnthropicInterface extends BaseInterface {
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             console.error('Error generating response from Anthropic:', errorMessage);
-            analyzeError(error as Error);
 
             // Instead of returning empty string, throw a more descriptive error
             if (errorMessage.includes('ECONNREFUSED') || errorMessage.includes('ENOTFOUND') ||

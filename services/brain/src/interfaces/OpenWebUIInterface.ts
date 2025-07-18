@@ -1,4 +1,5 @@
-import { BaseInterface, LLMConversationType } from './baseInterface';
+import { BaseInterface } from './baseInterface';
+import { LLMConversationType } from '@cktmcs/shared';
 import { BaseService, ExchangeType } from '../services/baseService';
 import { analyzeError } from '@cktmcs/errorhandler';
 
