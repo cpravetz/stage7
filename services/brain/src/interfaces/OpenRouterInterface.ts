@@ -1,7 +1,7 @@
-import { BaseInterface, LLMConversationType, ConvertParamsType } from './baseInterface';
+import { BaseInterface, ConvertParamsType } from './baseInterface';
+import { LLMConversationType } from '@cktmcs/shared';
 import OpenAI from 'openai';
 import { ChatCompletionMessageParam } from 'openai/resources/chat';
-import { analyzeError } from '@cktmcs/errorhandler';
 import { BaseService, ExchangeType } from '../services/baseService';
 import fs from 'fs';
 import { Stream } from 'openai/streaming';

@@ -1,7 +1,7 @@
-import { BaseInterface, LLMConversationType, ConvertParamsType } from './baseInterface';
+import { BaseInterface, ConvertParamsType } from './baseInterface';
+import { LLMConversationType } from '@cktmcs/shared';
 import OpenAI from 'openai';
 import { ChatCompletionMessageParam } from 'openai/resources/chat';
-import { analyzeError } from '@cktmcs/errorhandler';
 import { BaseService, ExchangeType } from '../services/baseService';
 import fs from 'fs';
 import { ImageEditParams, ImageGenerateParams } from 'openai/resources';
@@ -79,7 +79,7 @@ export class OpenAIInterface extends BaseInterface {
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             console.error('Error generating response from OpenAI:', errorMessage);
-            analyzeError(error as Error);
+            //analyzeError(error as Error);
 
             // Instead of returning empty string, throw a more descriptive error
             if (errorMessage.includes('ECONNREFUSED') || errorMessage.includes('ENOTFOUND') ||
@@ -124,7 +124,7 @@ export class OpenAIInterface extends BaseInterface {
             return response.data[0];
         } catch (error) {
             console.error('Error generating image from OpenAI:', error instanceof Error ? error.message : error);
-            analyzeError(error as Error);
+            //analyzeError(error as Error);
             return {};
         }
     }
@@ -148,7 +148,7 @@ export class OpenAIInterface extends BaseInterface {
             return buffer;
         } catch (error) {
             console.error('Error generating audio from OpenAI:', error instanceof Error ? error.message : error);
-            analyzeError(error as Error);
+            //analyzeError(error as Error);
             return undefined;
         }
     }
@@ -173,7 +173,7 @@ export class OpenAIInterface extends BaseInterface {
             return response.text;
         } catch (error) {
             console.error('Error transcribing audio with OpenAI:', error instanceof Error ? error.message : error);
-            analyzeError(error as Error);
+            //analyzeError(error as Error);
             return '';
         }
     }
@@ -203,7 +203,7 @@ export class OpenAIInterface extends BaseInterface {
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             console.error(`OAI Interface: Error generating code with ${service.serviceName}:`, errorMessage);
-            analyzeError(error as Error);
+            //analyzeError(error as Error);
 
             // Throw descriptive error instead of returning empty string
             if (errorMessage.includes('ECONNREFUSED') || errorMessage.includes('ENOTFOUND') ||
@@ -254,7 +254,7 @@ export class OpenAIInterface extends BaseInterface {
             return response.data[0];
         } catch (error) {
             console.error('Error editing image with OpenAI:', error instanceof Error ? error.message : error);
-            analyzeError(error as Error);
+            //analyzeError(error as Error);
             return {};
         }
     }
@@ -283,7 +283,7 @@ export class OpenAIInterface extends BaseInterface {
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             console.error(`OAI TextToText: Error generating response with ${service.serviceName}:`, errorMessage);
-            analyzeError(error as Error);
+            //analyzeError(error as Error);
 
             // Throw descriptive error instead of returning empty string
             if (errorMessage.includes('ECONNREFUSED') || errorMessage.includes('ENOTFOUND') ||

@@ -1,17 +1,5 @@
 import { BaseModel, ModelScore } from './baseModel';
-import { LLMConversationType } from '../interfaces/baseInterface';
-
-const geminiModel = new BaseModel();
-geminiModel.name = 'google/gemini-pro-1.5-exp';
-geminiModel.modelName = 'gemini-pro-1.5';
-geminiModel.interfaceName = 'gemini';
-geminiModel.serviceName = 'gemini';
-geminiModel.tokenLimit = 32000;
-geminiModel.contentConversation = [
-    LLMConversationType.TextToText,
-    LLMConversationType.TextToCode,
-    LLMConversationType.CodeToText,
-];
+import { LLMConversationType } from '@cktmcs/shared';
 
 // Set scores for different conversation types
 const scoresByConversationType = new Map<LLMConversationType, ModelScore>([
@@ -21,6 +9,18 @@ const scoresByConversationType = new Map<LLMConversationType, ModelScore>([
     [LLMConversationType.CodeToText, { costScore: 90, accuracyScore: 105, creativityScore: 105, speedScore: 105 }],
 ]);
 
-geminiModel.setScores(scoresByConversationType);
+const geminiModel = new BaseModel({
+    name: 'google/gemini-pro-1.5-exp',
+    modelName: 'gemini-pro-1.5',
+    interfaceName: 'gemini',
+    serviceName: 'gemini',
+    tokenLimit: 32000,
+    scoresByConversationType: scoresByConversationType,
+    contentConversation: [
+        LLMConversationType.TextToText,
+        LLMConversationType.TextToCode,
+        LLMConversationType.CodeToText,
+    ]
+});
 
 export default geminiModel;

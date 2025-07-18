@@ -4,14 +4,20 @@ import { LLMConversationType } from '@cktmcs/shared';
 export class DeepSeekR1Model extends BaseModel {
     constructor() {
         const scoresByConversationType = new Map<LLMConversationType, ModelScore>([
+            [LLMConversationType.TextToCode, {
+                costScore: 100,
+                accuracyScore: 88,
+                creativityScore: 85,
+                speedScore: 90
+            }],
             [LLMConversationType.CodeToText, {
-                costScore: 95,
+                costScore: 100,
                 accuracyScore: 88,
                 creativityScore: 85,
                 speedScore: 90
             }],
             [LLMConversationType.TextToCode, {
-                costScore: 95,
+                costScore: 100,
                 accuracyScore: 88,
                 creativityScore: 85,
                 speedScore: 90
@@ -19,13 +25,13 @@ export class DeepSeekR1Model extends BaseModel {
         ]);
 
         super({
-            name: "deepseek-ai/DeepSeek-R1",
-            modelName: "deepseek-ai/DeepSeek-R1",
-            interfaceName: "huggingface",
-            serviceName: "HFService",
-            tokenLimit: 8192, // Adjust this value if needed
+            name: "or/deepseek-ai/DeepSeek-R1:free",
+            modelName: "deepseek-ai/DeepSeek-R1:free",
+            interfaceName: "openrouter",
+            serviceName: "ORService",
+            tokenLimit: 164000, 
             scoresByConversationType: scoresByConversationType,
-            contentConversation: [LLMConversationType.CodeToText, LLMConversationType.TextToCode]
+            contentConversation: [LLMConversationType.TextToText, LLMConversationType.CodeToText, LLMConversationType.TextToCode]
         });
     }
 }

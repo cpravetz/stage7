@@ -1,4 +1,4 @@
-import { LLMConversationType } from '../interfaces/baseInterface';
+import { LLMConversationType } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 import fs from 'fs';
 import path from 'path';
@@ -337,18 +337,24 @@ export class ModelPerformanceTracker {
       const isHuggingfaceModel = modelName.toLowerCase().includes('huggingface') || modelName.toLowerCase().includes('hf/');
       const isAnthropicModel = modelName.toLowerCase().includes('anthropic') || modelName.toLowerCase().includes('claude');
 
-      // Special handling for connection errors - blacklist immediately
-      const isConnectionError = error && (
-        error.toLowerCase().includes('connection error') ||
-        error.toLowerCase().includes('econnrefused') ||
-        error.toLowerCase().includes('timeout') ||
-        error.toLowerCase().includes('network error')
+      // Generic approach: Any LLM error should trigger immediate blacklisting
+      // Only exclude user input errors (like malformed JSON) from immediate blacklisting
+      const isUserInputError = error && (
+        error.toLowerCase().includes('invalid json') ||
+        error.toLowerCase().includes('malformed json') ||
+        error.toLowerCase().includes('json parse error') ||
+        error.toLowerCase().includes('syntax error')
       );
 
-      let blacklistThreshold = (isHuggingfaceModel || isAnthropicModel) ? 2 : 3; // Lower threshold for problematic models
-      if (isConnectionError) {
-        blacklistThreshold = 1; // Immediate blacklist for connection errors
-        console.log(`[PerformanceTracker] Connection error detected for ${modelName}, reducing blacklist threshold to 1`);
+      let blacklistThreshold = 1; // Default to immediate blacklisting for any LLM error
+
+      if (isUserInputError) {
+        // User input errors should use normal consecutive failure threshold
+        blacklistThreshold = (isHuggingfaceModel || isAnthropicModel) ? 2 : 3;
+        console.log(`[PerformanceTracker] User input error detected for ${modelName}, using normal threshold ${blacklistThreshold}`);
+      } else {
+        // Any other error (connection, configuration, decommissioned model, etc.) gets immediate blacklisting
+        console.log(`[PerformanceTracker] LLM error detected for ${modelName} (${error}), using immediate blacklisting`);
       }
 
       if (metrics.consecutiveFailures >= blacklistThreshold) {

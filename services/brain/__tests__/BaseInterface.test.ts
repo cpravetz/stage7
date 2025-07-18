@@ -1,4 +1,5 @@
-import { BaseInterface, LLMConversationType, ConvertParamsType } from '../src/interfaces/baseInterface';
+import { BaseInterface, ConvertParamsType } from '../src/interfaces/baseInterface';
+import { LLMConversationType } from '@cktmcs/shared';
 import { BaseService, ExchangeType } from '../src/services/baseService';
 
 // Create a concrete class for testing since BaseInterface is abstract

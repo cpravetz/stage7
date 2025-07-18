@@ -1,6 +1,6 @@
-import { BaseInterface, LLMConversationType, ConvertParamsType } from './baseInterface';
+import { BaseInterface, ConvertParamsType } from './baseInterface';
+import { LLMConversationType } from '@cktmcs/shared';
 import { HfInference } from '@huggingface/inference';
-import { analyzeError } from '@cktmcs/errorhandler';
 import { BaseService, ExchangeType } from '../services/baseService';
 import fs from 'fs';
 import { ModelPerformanceTracker } from '../utils/performanceTracker';
@@ -139,7 +139,6 @@ export class HuggingfaceInterface extends BaseInterface {
             response = response.replace(/```/g, '');
             return response;
         } catch (error) {
-            analyzeError(error as Error);
             const errorMessage = error instanceof Error ? error.message : String(error);
             console.error('Error generating response from Huggingface:', errorMessage);
 
@@ -239,16 +238,8 @@ export class HuggingfaceInterface extends BaseInterface {
                 const streamErrorMessage = streamError instanceof Error ? streamError.message : String(streamError);
                 console.error('Error in Huggingface stream:', streamErrorMessage);
 
-                // Check if this is a 404 error to blacklist the model temporarily
+                // Check if this is a 404 error - let the Brain handle blacklisting
                 if (streamErrorMessage.includes('404')) {
-                    console.log(`Received 404 error from Huggingface model ${options.modelName}, blacklisting temporarily.`);
-                    // Blacklist the model for 1 hour using the full model name with service prefix
-                    const modelManager = require('../utils/modelManager').modelManagerInstance;
-                    if (modelManager) {
-                        const fullModelName = `hf/${options.modelName}`;
-                        modelManager.performanceTracker.blacklistModel(fullModelName, new Date(Date.now() + 3600 * 1000));
-                        modelManager.clearModelSelectionCache();
-                    }
                     throw new Error(`Huggingface model ${options.modelName} returned 404 and has been blacklisted temporarily.`);
                 }
 
@@ -284,7 +275,6 @@ export class HuggingfaceInterface extends BaseInterface {
                 }
             }
         } catch (error) {
-            analyzeError(error as Error);
             const errorMessage = error instanceof Error ? error.message : String(error);
             console.error('Error generating response from Huggingface:', errorMessage);
 
@@ -337,7 +327,6 @@ export class HuggingfaceInterface extends BaseInterface {
                 this.blacklistAllHuggingfaceModelsUntilNextMonth(errorMessage);
                 return `Error: Huggingface monthly credits exceeded. All Huggingface models have been blacklisted until the first of next month.`;
             }
-            analyzeError(error as Error);
             return `Error: ${errorMessage}`;
         }
     }
@@ -364,7 +353,6 @@ export class HuggingfaceInterface extends BaseInterface {
                 // Blacklist all Huggingface models until the first of next month
                 this.blacklistAllHuggingfaceModelsUntilNextMonth(errorMessage);
             }
-            analyzeError(error as Error);
             throw error; // Re-throw to be handled by the caller
         }
     }
@@ -391,7 +379,6 @@ export class HuggingfaceInterface extends BaseInterface {
                 // Blacklist all Huggingface models until the first of next month
                 this.blacklistAllHuggingfaceModelsUntilNextMonth(errorMessage);
             }
-            analyzeError(error as Error);
             throw error; // Re-throw to be handled by the caller
         }
     }
@@ -424,7 +411,6 @@ export class HuggingfaceInterface extends BaseInterface {
                 this.blacklistAllHuggingfaceModelsUntilNextMonth(errorMessage);
                 return `Error: Huggingface monthly credits exceeded. All Huggingface models have been blacklisted until the first of next month.`;
             }
-            analyzeError(error as Error);
             return `Error: ${errorMessage}`;
         }
     }
@@ -457,7 +443,6 @@ export class HuggingfaceInterface extends BaseInterface {
                 this.blacklistAllHuggingfaceModelsUntilNextMonth(errorMessage);
                 return `Error: Huggingface monthly credits exceeded. All Huggingface models have been blacklisted until the first of next month.`;
             }
-            analyzeError(error as Error);
             return `Error: ${errorMessage}`;
         }
     }
@@ -484,7 +469,6 @@ export class HuggingfaceInterface extends BaseInterface {
                 this.blacklistAllHuggingfaceModelsUntilNextMonth(errorMessage);
                 return `Error: Huggingface monthly credits exceeded. All Huggingface models have been blacklisted until the first of next month.`;
             }
-            analyzeError(error as Error);
             // For other errors, return a generic error message
             return `Error: ${errorMessage}`;
         }

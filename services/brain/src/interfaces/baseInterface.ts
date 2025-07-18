@@ -1,16 +1,5 @@
 import { BaseService, ExchangeType } from '../services/baseService';
-
-// Define LLM types directly here since they were previously in this file
-export enum LLMConversationType {
-    TextToText = 'TextToText',
-    TextToCode = 'TextToCode',
-    CodeToText = 'CodeToText',
-    TextToImage = 'TextToImage',
-    TextToAudio = 'TextToAudio',
-    AudioToText = 'AudioToText',
-    ImageToText = 'ImageToText',
-    ImageToImage = 'ImageToImage'
-}
+import { LLMConversationType } from '@cktmcs/shared';
 
 export type ConvertParamsType = {
     service?: BaseService;

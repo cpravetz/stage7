@@ -1,40 +1,40 @@
 import { BaseModel, ModelScore } from './baseModel';
 import { LLMConversationType } from '@cktmcs/shared';
 
-export class Claude2Model extends BaseModel {
+export class Dolphin324BModel extends BaseModel {
     constructor() {
         const scoresByConversationType = new Map<LLMConversationType, ModelScore>([
             [LLMConversationType.TextToText, {
-                costScore: 70,
-                accuracyScore: 95,
-                creativityScore: 90,
-                speedScore: 85
+                costScore: 100,  
+                accuracyScore: 75,  
+                creativityScore: 40,  
+                speedScore: 50  
             }],
             [LLMConversationType.TextToCode, {
-                costScore: 70,
-                accuracyScore: 95,
-                creativityScore: 90,
-                speedScore: 85
+                costScore: 100,  
+                accuracyScore: 75,  
+                creativityScore: 40,  
+                speedScore: 50  
             }],
             [LLMConversationType.CodeToText, {
-                costScore: 70,
-                accuracyScore: 95,
-                creativityScore: 90,
-                speedScore: 85
+                costScore: 100,  
+                accuracyScore: 75,  
+                creativityScore: 40,  
+                speedScore: 50  
             }]
         ]);
 
         super({
-            name: "anthropic/claude-2",
-            modelName: "anthropic/claude-2",
+            name: "or/cognitivecomputations/dolphin3.0-mistral-24b:free",
+            modelName: "cognitivecomputations/dolphin3.0-mistral-24b:free",
             interfaceName: "openrouter",
             serviceName: "ORService",
-            tokenLimit: 100000, // Adjust this value if you know the exact token limit for Claude 2
+            tokenLimit: 32000, 
             scoresByConversationType: scoresByConversationType,
             contentConversation: [LLMConversationType.TextToCode, LLMConversationType.CodeToText, LLMConversationType.TextToText]
         });
     }
 }
 
-const aiModel = new Claude2Model();
+const aiModel = new Dolphin324BModel();
 export default aiModel;

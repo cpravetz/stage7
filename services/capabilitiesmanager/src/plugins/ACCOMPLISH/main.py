@@ -566,7 +566,17 @@ Return ONLY valid JSON, no other text.
                 })
                 continue
 
-            if not isinstance(dep_step_number, int) or dep_step_number <= 0:
+            # Convert dep_step_number to int if it's a string
+            try:
+                if isinstance(dep_step_number, str):
+                    dep_step_number = int(dep_step_number)
+                elif not isinstance(dep_step_number, int):
+                    raise ValueError("Not a valid integer type")
+
+                if dep_step_number <= 0:
+                    raise ValueError("Must be positive")
+
+            except (ValueError, TypeError):
                 errors.append({
                     "step_index": step_index,
                     "error_type": "dependency_step_error",
@@ -686,6 +696,25 @@ Return ONLY valid JSON, no other text.
             dependencies = step.get('dependencies', {})
             if dependencies:
                 for dep_output, dep_step in dependencies.items():
+                    # Convert dep_step to int if it's a string to avoid type comparison errors
+                    try:
+                        if isinstance(dep_step, str):
+                            dep_step = int(dep_step)
+                        elif not isinstance(dep_step, int):
+                            return {
+                                "error_type": "invalid_dependency_type",
+                                "error_message": f"Step {step_num} dependency '{dep_output}' has invalid type {type(dep_step)}",
+                                "correction_needed": f"Set dependency step number to integer for '{dep_output}'",
+                                "step_number": step_num
+                            }
+                    except (ValueError, TypeError):
+                        return {
+                            "error_type": "invalid_dependency_value",
+                            "error_message": f"Step {step_num} dependency '{dep_output}' has invalid value {dep_step}",
+                            "correction_needed": f"Set dependency step number to valid integer for '{dep_output}'",
+                            "step_number": step_num
+                        }
+
                     if dep_step >= step_num:
                         return {
                             "error_type": "invalid_dependency",
@@ -706,15 +735,24 @@ Return ONLY valid JSON, no other text.
                 inputs_dict = step.get('inputs', {})
 
                 for input_name, input_obj in inputs_dict.items():
-                    if isinstance(input_obj, dict):
-                        # The input_obj should already be in the correct format after validation
-                        # Just pass it through directly
+                    if isinstance(input_obj, dict) and "value" in input_obj and "valueType" in input_obj:
+                        # The input_obj is already in the correct format
                         input_references[input_name] = input_obj
+                    elif isinstance(input_obj, dict):
+                        # It's a dict but not in the expected format, try to extract value
+                        if "value" in input_obj:
+                            input_references[input_name] = input_obj
+                        else:
+                            # Convert the dict to a string representation
+                            input_references[input_name] = {
+                                "value": str(input_obj),
+                                "valueType": "string"
+                            }
                     else:
-                        logger.warning(f"Unexpected input format for '{input_name}': {input_obj}")
-                        # Try to handle as a direct value
+                        # Handle as a direct value (string, number, etc.)
+                        logger.info(f"Converting simple input format for '{input_name}': {input_obj}")
                         input_references[input_name] = {
-                            "value": input_obj,
+                            "value": str(input_obj),
                             "valueType": "string"
                         }
 

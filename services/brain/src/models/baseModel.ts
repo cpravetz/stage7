@@ -1,5 +1,6 @@
 import { BaseService, ExchangeType } from '../services/baseService';
-import { BaseInterface, LLMConversationType, ConvertParamsType } from '../interfaces/baseInterface';
+import { BaseInterface, ConvertParamsType } from '../interfaces/baseInterface';
+import { LLMConversationType } from '@cktmcs/shared';
 
 export interface ModelScore {
     costScore: number;
@@ -102,11 +103,17 @@ export class BaseModel {
             return false;
         }
 
-        // DISABLED: No longer checking for Huggingface blacklisting
-        // Clear any existing blacklist to ensure all models are available
-        if ((global as any).huggingfaceBlacklistedUntil) {
-            console.log('Clearing existing Huggingface blacklist');
-            (global as any).huggingfaceBlacklistedUntil = null;
+        // Check if this is a Huggingface model and if there's a global blacklist
+        if (this.name.toLowerCase().includes('hf/') || this.name.toLowerCase().includes('huggingface')) {
+            const globalBlacklistUntil = (global as any).huggingfaceBlacklistedUntil;
+            if (globalBlacklistUntil) {
+                const blacklistDate = new Date(globalBlacklistUntil);
+                const now = new Date();
+                if (now < blacklistDate) {
+                    console.log(`Huggingface model ${this.name} is globally blacklisted until ${blacklistDate.toISOString()}`);
+                    return false;
+                }
+            }
         }
 
         return true;
