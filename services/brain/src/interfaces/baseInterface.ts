@@ -40,6 +40,7 @@ export abstract class BaseInterface {
      */
     public ensureJsonResponse(response: string, allowPartialRecovery: boolean = false): string {
         console.log('[baseInterface] Ensuring JSON response');
+        console.log('[baseInterface] Original response:', response);
         if (!response || response.trim() === '') {
             throw new Error('[baseInterface] Empty response received');
         }
@@ -74,19 +75,128 @@ export abstract class BaseInterface {
     }
 
     private attemptJsonRecovery(response: string): string {
-        // Try to extract valid JSON objects/arrays from the response
-        const jsonPatterns = [
-            /\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/g,
-            /\[[^\[\]]*(?:\[[^\[\]]*\][^\[\]]*)*\]/g
+        console.log('[baseInterface] Attempting JSON repair...');
+
+        try {
+            // Step 1: Try to repair common JSON issues without losing content
+            let repaired = this.repairCommonJsonIssues(response);
+
+            // Step 2: Try parsing the repaired JSON
+            const parsed = JSON.parse(repaired);
+            console.log('[baseInterface] JSON repair successful');
+            return JSON.stringify(parsed, null, 2);
+
+        } catch (e) {
+            console.log('[baseInterface] JSON repair failed:', e instanceof Error ? e.message : String(e));
+            console.log('[baseInterface] Attempting content extraction...');
+
+            // Step 3: Only as last resort, try to extract JSON blocks
+            const extracted = this.extractJsonFromText(response);
+            if (extracted) {
+                return extracted;
+            }
+
+            console.error('[baseInterface] All JSON recovery attempts failed for:', response.substring(0, 200) + '...');
+            throw new Error('JSON_RECOVERY_FAILED: Could not repair or extract valid JSON');
+        }
+    }
+
+    private repairCommonJsonIssues(text: string): string {
+        let repaired = text.trim();
+
+        console.log('[baseInterface] Starting JSON repair on text length:', repaired.length);
+
+        // Remove markdown code blocks
+        repaired = repaired.replace(/```(?:json)?\s*\n?/g, '');
+        repaired = repaired.replace(/```\s*$/g, '');
+
+        // Only remove prefixes/suffixes if they're clearly not part of JSON
+        // Be more conservative to avoid removing valid content
+        repaired = repaired.replace(/^[^{[]*?(?=[{[])/g, ''); // Remove text before first { or [ (non-greedy)
+        repaired = repaired.replace(/(?<=[}\]])[^}\]]*$/g, ''); // Remove text after last } or ] (non-greedy)
+
+        // Fix trailing commas (handle multi-line)
+        repaired = repaired.replace(/,(\s*[}\]])/g, '$1');
+
+        // Fix unquoted keys (simple cases) - handle multi-line
+        repaired = repaired.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":');
+
+        // Fix single quotes to double quotes (but be careful with content)
+        repaired = repaired.replace(/'/g, '"');
+
+        // Fix common escape issues
+        repaired = repaired.replace(/\\"/g, '\\"');
+
+        // Remove duplicate commas
+        repaired = repaired.replace(/,+/g, ',');
+
+        // Fix missing commas between objects/arrays (handle multi-line)
+        repaired = repaired.replace(/}(\s*){/g, '},$1{');
+        repaired = repaired.replace(/](\s*)\[/g, '],$1[');
+
+        // Additional fixes for multi-line JSON issues
+        // Fix missing commas after values (common LLM issue)
+        repaired = repaired.replace(/("(?:[^"\\]|\\.)*"|\d+|true|false|null)(\s*\n\s*)(")/g, '$1,$2$3');
+        repaired = repaired.replace(/}(\s*\n\s*)"([^"]+)":/g, '},$1"$2":');
+
+        console.log('[baseInterface] JSON repair completed, new length:', repaired.length);
+
+        return repaired;
+    }
+
+    private extractJsonFromText(text: string): string | null {
+        console.log('[baseInterface] Attempting to extract JSON from text...');
+
+        // First, try to find JSON that looks like a complete response (has "type" field)
+        const responsePatterns = [
+            // Look for objects that contain "type" field - these are likely complete responses
+            /\{\s*"type"\s*:\s*"[^"]+"\s*,[\s\S]*?\}/g,
+            /\{\s*'type'\s*:\s*'[^']+'\s*,[\s\S]*?\}/g
         ];
-        
-        for (const pattern of jsonPatterns) {
-            const matches = response.match(pattern);
+
+        for (const pattern of responsePatterns) {
+            const matches = text.match(pattern);
             if (matches) {
-                for (const match of matches) {
+                console.log(`[baseInterface] Found ${matches.length} potential complete responses`);
+
+                // Try the longest match first (most likely to be complete)
+                const sortedMatches = matches.sort((a, b) => b.length - a.length);
+
+                for (const match of sortedMatches) {
                     try {
                         const parsed = JSON.parse(match);
-                        console.log('Recovered partial JSON:', parsed);
+                        if (parsed.type) {
+                            console.log('[baseInterface] Successfully extracted complete response with type:', parsed.type);
+                            return JSON.stringify(parsed, null, 2);
+                        }
+                    } catch (e) {
+                        console.log('[baseInterface] Failed to parse potential response:', e instanceof Error ? e.message : String(e));
+                        continue;
+                    }
+                }
+            }
+        }
+
+        // Fallback: look for any valid JSON, but prefer larger objects
+        console.log('[baseInterface] No complete responses found, trying general JSON extraction...');
+        const generalPatterns = [
+            // Match complete objects with proper nesting
+            /\{(?:[^{}]|{(?:[^{}]|{[^{}]*})*})*\}/g,
+            // Match complete arrays with proper nesting
+            /\[(?:[^\[\]]|\[(?:[^\[\]]|\[[^\[\]]*\])*\])*\]/g
+        ];
+
+        for (const pattern of generalPatterns) {
+            const matches = text.match(pattern);
+            if (matches) {
+                // Filter out small objects that are likely fragments
+                const largeMatches = matches.filter(match => match.length > 50);
+                const sortedMatches = largeMatches.sort((a, b) => b.length - a.length);
+
+                for (const match of sortedMatches) {
+                    try {
+                        const parsed = JSON.parse(match);
+                        console.log('[baseInterface] Extracted JSON (fallback)');
                         return JSON.stringify(parsed, null, 2);
                     } catch (e) {
                         continue;
@@ -94,8 +204,9 @@ export abstract class BaseInterface {
                 }
             }
         }
-        console.error('JSONRecovery attempt failed for:', response);
-        throw new Error('JSON_RECOVERY_FAILED: Could not extract valid JSON');
+
+        console.log('[baseInterface] No valid JSON found in text');
+        return null;
     }
 
     /**

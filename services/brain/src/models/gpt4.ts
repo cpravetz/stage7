@@ -4,10 +4,10 @@ import { LLMConversationType } from '@cktmcs/shared';
 export class GPT4Model extends BaseModel {
     constructor() {
         const scoresByConversationType = new Map<LLMConversationType, ModelScore>([
-            [LLMConversationType.TextToText, { costScore: 60, accuracyScore: 95, creativityScore: 93, speedScore: 85 }],
-            [LLMConversationType.TextToCode, { costScore: 65, accuracyScore: 92, creativityScore: 90, speedScore: 83 }],
-            [LLMConversationType.CodeToText, { costScore: 65, accuracyScore: 93, creativityScore: 91, speedScore: 84 }],
-            [LLMConversationType.ImageToText, { costScore: 70, accuracyScore: 90, creativityScore: 88, speedScore: 82 }],
+            [LLMConversationType.TextToText, { costScore: 60, accuracyScore: 55, creativityScore: 53, speedScore: 85 }],
+            [LLMConversationType.TextToCode, { costScore: 65, accuracyScore: 52, creativityScore: 50, speedScore: 83 }],
+            [LLMConversationType.CodeToText, { costScore: 65, accuracyScore: 53, creativityScore: 51, speedScore: 84 }],
+            [LLMConversationType.ImageToText, { costScore: 70, accuracyScore: 50, creativityScore: 58, speedScore: 82 }],
         ]);
 
         super({

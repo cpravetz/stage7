@@ -212,41 +212,51 @@ export class Step {
         this.dependencies = params.dependencies || [];
         this.status = params.status || StepStatus.PENDING;
         this.recommendedRole = params.recommendedRole;
-
+        this.persistenceManager = params.persistenceManager;
+        
         // Validate recommendedRole
         if (this.recommendedRole && !/^[a-zA-Z0-9_-]+$/.test(this.recommendedRole)) {
             console.warn(`[Step Constructor] Invalid characters in recommendedRole: '${this.recommendedRole}'. Defaulting to undefined.`);
-            this.logEvent({
-                eventType: 'step_validation_warning',
-                stepId: this.id,
-                message: `Invalid recommendedRole '${this.recommendedRole}' sanitized.`,
-                originalValue: this.recommendedRole,
-                timestamp: new Date().toISOString()
-            });
+            // Only log if persistenceManager is available
+            if (this.persistenceManager) {
+                this.logEvent({
+                    eventType: 'step_validation_warning',
+                    stepId: this.id,
+                    message: `Invalid recommendedRole '${this.recommendedRole}' sanitized.`,
+                    originalValue: this.recommendedRole,
+                    timestamp: new Date().toISOString()
+                });
+            }
             this.recommendedRole = undefined;
         }
 
         this.persistenceManager = params.persistenceManager;
         this.awaitsSignal = '';
-        // Log step creation event
-        this.logEvent({
-            eventType: 'step_created',
-            stepId: this.id,
-            stepNo: this.stepNo,
-            actionVerb: this.actionVerb,
-            inputValues:MapSerializer.transformForSerialization(this.inputValues),
-            inputReferences: MapSerializer.transformForSerialization(this.inputReferences),
-            dependencies: this.dependencies,
-            status: this.status,
-            description: this.description,
-            recommendedRole: this.recommendedRole,
-            timestamp: new Date().toISOString()
-        });
+        // Log step creation event (only if persistenceManager is available)
+        if (this.persistenceManager) {
+            this.logEvent({
+                eventType: 'step_created',
+                stepId: this.id,
+                stepNo: this.stepNo,
+                actionVerb: this.actionVerb,
+                inputValues:MapSerializer.transformForSerialization(this.inputValues),
+                inputReferences: MapSerializer.transformForSerialization(this.inputReferences),
+                dependencies: this.dependencies,
+                status: this.status,
+                description: this.description,
+                recommendedRole: this.recommendedRole,
+                timestamp: new Date().toISOString()
+            });
+        }
     }
 
     async logEvent(event: any): Promise<void> {
         if (!event) {
             console.error('Step logEvent called with empty event');
+            return;
+        }
+        if (!this.persistenceManager) {
+            console.warn('Step logEvent called but persistenceManager is undefined');
             return;
         }
         try {
@@ -425,7 +435,9 @@ export class Step {
                     result = await thinkAction(this.inputValues);
                     break;
                 case 'DELEGATE':
-                    result = await delegateAction(this.inputValues);
+                    // Instead of creating new agents, use ACCOMPLISH to generate a plan
+                    // and return it for incorporation into the current agent
+                    result = await this.handleDelegate(executeAction);
                     break;
                 case 'ASK':
                 case MessageType.REQUEST:
@@ -744,6 +756,65 @@ export class Step {
         }];
     }
 
+    private async handleDelegate(executeAction: (step: Step) => Promise<PluginOutput[]>): Promise<PluginOutput[]> {
+        // Convert DELEGATE to ACCOMPLISH to generate a plan instead of creating new agents
+        const goal = this.inputValues.get('goal')?.value ||
+                    this.inputValues.get('task')?.value ||
+                    this.inputValues.get('description')?.value ||
+                    this.description;
+
+        if (!goal) {
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: 'Missing goal/task for delegation',
+                result: null,
+                error: 'Goal, task, or description input is required for DELEGATE action'
+            }];
+        }
+
+        // Create a temporary ACCOMPLISH step to generate the plan
+        const accomplishStep = new Step({
+            actionVerb: 'ACCOMPLISH',
+            stepNo: this.stepNo,
+            inputReferences: new Map(),
+            inputValues: new Map([
+                ['goal', {
+                    inputName: 'goal',
+                    value: goal,
+                    valueType: PluginParameterType.STRING,
+                    args: {}
+                }]
+            ]),
+            description: `Generate plan for: ${goal}`,
+            persistenceManager: this.persistenceManager
+        });
+
+        // Execute the ACCOMPLISH step to get a plan
+        const accomplishResult = await executeAction(accomplishStep);
+
+        if (accomplishResult && accomplishResult.length > 0 && accomplishResult[0].success) {
+            // Return the plan for incorporation into the current agent
+            return [{
+                success: true,
+                name: 'delegatedPlan',
+                resultType: PluginParameterType.PLAN,
+                resultDescription: 'Plan generated from delegation',
+                result: accomplishResult[0].result
+            }];
+        } else {
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: 'Failed to generate plan for delegation',
+                result: null,
+                error: accomplishResult?.[0]?.error || 'Unknown error in delegation planning'
+            }];
+        }
+    }
+
     private async handleSequence(): Promise<PluginOutput[]> {
         const stepsInput = this.inputValues.get('steps');
 
@@ -956,13 +1027,16 @@ export class Step {
         // Second pass: create steps and resolve dependencies
         return planTasks.map((task, idx) => {
             const inputReferences = new Map<string, InputReference>();
-            if (task.inputReferences) {
-                for (const [inputName, inputDef] of Object.entries(task.inputReferences as Record<string, any>)) {
+
+            // Handle both 'inputs' (from ACCOMPLISH plugin) and 'inputReferences' (from other sources)
+            const inputSource = (task as any).inputs || task.inputReferences;
+            if (inputSource) {
+                for (const [inputName, inputDef] of Object.entries(inputSource as Record<string, any>)) {
                     if (typeof inputDef !== 'object' || inputDef === null) {
                         console.warn(`[createFromPlan] Skipping invalid input definition for '${inputName}' in task '${task.actionVerb}'.`);
                         continue;
                     }
-                    
+
                     const reference: InputReference = {
                         inputName: inputName,
                         value: inputDef.value,
@@ -1002,43 +1076,6 @@ export class Step {
                 });
             }
 
-            // Validate IF_THEN task inputs before creating the Step object
-            if (task.actionVerb === 'IF_THEN') {
-                const conditionInputRef = inputReferences.get('condition');
-                if (!conditionInputRef || (conditionInputRef.value === undefined && conditionInputRef.outputName === undefined)) {
-                    throw new Error(`[Step.createFromPlan] Validation Error for IF_THEN step: 'condition' input must have a direct boolean 'value' or an 'outputName' reference. Received: ${JSON.stringify(conditionInputRef)}`);
-                }
-
-                const trueStepsInputRef = inputReferences.get('trueSteps');
-                if (!trueStepsInputRef || !Array.isArray(trueStepsInputRef.value)) {
-                    throw new Error(`[Step.createFromPlan] Validation Error for IF_THEN step: 'trueSteps' input must be an array of ActionVerbTask objects. Received: ${JSON.stringify(trueStepsInputRef?.value)}`);
-                }
-                for (const subTask of trueStepsInputRef.value) {
-                    if (typeof subTask !== 'object' || subTask === null || !subTask.actionVerb) {
-                        throw new Error(`[Step.createFromPlan] Validation Error for IF_THEN step: Each item in 'trueSteps' must be a valid ActionVerbTask object. Received item: ${JSON.stringify(subTask)}`);
-                    }
-                }
-
-                const falseStepsInputRef = inputReferences.get('falseSteps');
-                if (!falseStepsInputRef || !Array.isArray(falseStepsInputRef.value)) {
-                    throw new Error(`[Step.createFromPlan] Validation Error for IF_THEN step: 'falseSteps' input must be an array of ActionVerbTask objects. Received: ${JSON.stringify(falseStepsInputRef?.value)}`);
-                }
-                for (const subTask of falseStepsInputRef.value) {
-                    if (typeof subTask !== 'object' || subTask === null || !subTask.actionVerb) {
-                        throw new Error(`[Step.createFromPlan] Validation Error for IF_THEN step: Each item in 'falseSteps' must be a valid ActionVerbTask object. Received item: ${JSON.stringify(subTask)}`);
-                    }
-                }
-            }
-
-            // Validate actionVerb
-            if (task.actionVerb === 'ASK_USER_QUESTION') {
-                const questionInputRef = inputReferences.get('question');
-                if (!questionInputRef || questionInputRef.value === undefined || typeof questionInputRef.value !== 'string' || questionInputRef.value.trim() === '') {
-                    throw new Error(`[Step.createFromPlan] Validation Error for ASK_USER_QUESTION step: 'question' input must have a non-empty string 'value'. Received: ${JSON.stringify(questionInputRef)}`);
-                }
-            }
-
-            // Handle special case transformations
             if (task.actionVerb === 'EXECUTE') {
                 task.actionVerb = 'ACCOMPLISH';
             }

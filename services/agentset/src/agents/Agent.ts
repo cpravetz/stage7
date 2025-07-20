@@ -512,7 +512,7 @@ Please consider this context and the available plugins when planning and executi
             }
 
             const outputType = step.getOutputType(this.steps);
-            const type = outputType === 'Final' ? 'Final' : outputType === 'Plan' ? 'Plan' : 'Interim';
+            const type = outputType === OutputType.FINAL ? 'Final' : outputType === OutputType.PLAN ? 'Plan' : 'Interim';
 
             let scope: string;
             if (this.steps.length === 1 || (isAgentEndpoint && outputType === OutputType.FINAL)) {

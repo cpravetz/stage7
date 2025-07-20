@@ -5,12 +5,11 @@ import fs from 'fs';
 import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import { Step, MapSerializer, BaseEntity, ServiceTokenManager } from '@cktmcs/shared';
-import { InputValue, InputReference, PluginOutput, PluginDefinition, PluginParameterType, environmentType, PluginManifest, PluginLocator, PluginRepositoryType, PluginParameter, DefinitionManifest, DefinitionType, OpenAPITool, MCPTool, MCPActionMapping, MCPAuthentication, MCPServiceTarget, OpenAPIExecutionRequest, OpenAPIExecutionResult } from '@cktmcs/shared'; // Added DefinitionManifest, DefinitionType
-import { PlanTemplate, ExecutionContext as PlanExecutionContext, StepExecution, PlanExecutionStatus, StepExecutionStatus } from '@cktmcs/shared'; // Removed OpenAPITool, MCPTool etc from here as they are imported above
+import { InputValue, PluginOutput, PluginDefinition, PluginParameterType, environmentType, PluginManifest, PluginLocator, PluginRepositoryType, PluginParameter, DefinitionManifest, DefinitionType, OpenAPITool, MCPTool, MCPActionMapping, MCPAuthentication, MCPServiceTarget, OpenAPIExecutionRequest, OpenAPIExecutionResult } from '@cktmcs/shared'; // Added DefinitionManifest, DefinitionType
 import { executePluginInSandbox } from '@cktmcs/shared';
 import { validatePluginPermissions, hasDangerousPermissions } from '@cktmcs/shared';
 import { promisify } from 'util';
-import { exec as execCallback } from 'child_process';
+import { exec as execCallback, spawn } from 'child_process';
 import { generateStructuredError, ErrorSeverity, GlobalErrorCodes, StructuredError } from './utils/errorReporter';
 import { ConfigManager } from './utils/configManager';
 import { PluginRegistry } from './utils/pluginRegistry';
@@ -804,41 +803,65 @@ export class CapabilitiesManager extends BaseEntity {
         const mainFilePath = path.join(pluginRootPath, pluginDefinition.entryPoint!.main);
 
         console.log(`[${trace_id}] ${source_component}: Python execution - Main file path: ${mainFilePath}, Root path: ${pluginRootPath}`);
-
+        
         try {
-            // Check if plugin has dependencies and install them if needed
             await this.ensurePythonDependencies(pluginRootPath, trace_id);
 
-            // Convert Map to array of [key, value] pairs for Python plugin compatibility
+            const venvPythonPath = path.join(pluginRootPath, 'venv', 'bin', 'python');
+            const pythonExecutable = fs.existsSync(venvPythonPath) ? venvPythonPath : 'python3';
+
             const inputsArray: [string, InputValue][] = Array.from(inputValues.entries());
-
             const inputsJsonString = JSON.stringify(inputsArray);
+            //console.log(`[${trace_id}] ${source_component}: Piping inputsJsonString to Python plugin: ${inputsJsonString}`);
 
-            // Use enhanced Python execution with better error handling and security
-            const pythonCommand = await this.buildPythonCommand(mainFilePath, pluginRootPath, inputsJsonString, pluginDefinition);
+            return new Promise<PluginOutput[]>((resolve, reject) => {
+                const pythonProcess = spawn(pythonExecutable, [mainFilePath, pluginRootPath], {
+                    cwd: pluginRootPath,
+                    env: {
+                        ...environment.env,
+                        PYTHONPATH: pluginRootPath,
+                        PYTHONUNBUFFERED: '1',
+                        PYTHONDONTWRITEBYTECODE: '1'
+                    },
+                    timeout: pluginDefinition.security?.sandboxOptions?.timeout || 60000
+                });
 
-            console.log(`[${trace_id}] ${source_component}: Executing Python command: ${pythonCommand}`);
-            console.log(`[${trace_id}] ${source_component}: Piping inputsJsonString to Python plugin: ${inputsJsonString}`);
+                let stdout = '';
+                let stderr = '';
 
-            const { stdout, stderr } = await execAsync(pythonCommand, {
-                cwd: pluginRootPath,
-                env: {
-                    ...environment.env,
-                    PYTHONPATH: pluginRootPath,
-                    PYTHONUNBUFFERED: '1',  // Ensure immediate output
-                    PYTHONDONTWRITEBYTECODE: '1'  // Prevent .pyc files
-                },
-                timeout: pluginDefinition.security?.sandboxOptions?.timeout || 60000
+                pythonProcess.stdout.on('data', (data) => {
+                    stdout += data.toString();
+                });
+
+                pythonProcess.stderr.on('data', (data) => {
+                    stderr += data.toString();
+                });
+
+                pythonProcess.on('close', (code) => {
+                    if (code !== 0) {
+                        const error = new Error(`Python script exited with code ${code}. Stderr: ${stderr}`);
+                        (error as any).stdout = stdout;
+                        (error as any).stderr = stderr;
+                        reject(error);
+                    } else {
+                        console.log(`[${trace_id}] ${source_component}: Raw stdout from Python plugin ${pluginDefinition.verb} v${pluginDefinition.version}:\n${stdout}`);
+                        if (stderr) {
+                            console.warn(`[${trace_id}] ${source_component}: Raw stderr from Python plugin ${pluginDefinition.verb} v${pluginDefinition.version}:\n${stderr}`);
+                        }
+                        const result = this.validatePythonOutput(stdout, pluginDefinition, trace_id);
+                        resolve(result);
+                    }
+                });
+
+                pythonProcess.on('error', (err) => {
+                    // This catches errors like ENOENT if pythonExecutable is not found
+                    reject(err);
+                });
+
+                // Write inputs to stdin and close it to signal end of input
+                pythonProcess.stdin.write(inputsJsonString);
+                pythonProcess.stdin.end();
             });
-
-            console.log(`[${trace_id}] ${source_component}: Raw stdout from Python plugin ${pluginDefinition.verb} v${pluginDefinition.version}:\n${stdout}`);
-            if (stderr) {
-                console.warn(`[${trace_id}] ${source_component}: Raw stderr from Python plugin ${pluginDefinition.verb} v${pluginDefinition.version}:\n${stderr}`);
-            }
-
-            // Validate and parse output
-            const result = this.validatePythonOutput(stdout, pluginDefinition, trace_id);
-            return result;
 
         } catch (error: any) {
             console.error(`[${trace_id}] ${source_component}: Error during execAsync for ${pluginDefinition.verb} v${pluginDefinition.version}. Error: ${error.message}`);
@@ -854,7 +877,7 @@ export class CapabilitiesManager extends BaseEntity {
                 message: `Python plugin ${pluginDefinition.verb} v${pluginDefinition.version} execution failed: ${error.message}`,
                 source_component,
                 original_error: error,
-                trace_id_param: trace_id,
+                trace_id,
                 contextual_info: {
                     plugin_id: pluginDefinition.id,
                     version: pluginDefinition.version,
@@ -1196,22 +1219,6 @@ export class CapabilitiesManager extends BaseEntity {
         }
     }
 
-    private async buildPythonCommand(mainFilePath: string, pluginRootPath: string, inputsJson: string, pluginDefinition: PluginDefinition): Promise<string> {
-        const venvPythonPath = path.join(pluginRootPath, 'venv', 'bin', 'python');
-        const pythonExecutable = fs.existsSync(venvPythonPath) ? `"${venvPythonPath}"` : 'python3';
-
-        // Use a more reliable approach to pass JSON to Python
-        // Instead of shell escaping, we'll use base64 encoding to avoid shell interpretation issues
-        const base64Input = Buffer.from(inputsJson).toString('base64');
-
-        // Build the command with base64 encoded input
-        // The plugin's main script is executed with the python from its venv (if available) or system python3.
-        // The pluginRootPath is passed as an argument to the script, useful if the script needs to know its own location.
-        const command = `echo "${base64Input}" | base64 -d | ${pythonExecutable} "${mainFilePath}" "${pluginRootPath}"`;
-
-        return command;
-    }
-
     private validatePythonOutput(stdout: string, pluginDefinition: PluginDefinition, trace_id: string): PluginOutput[] {
         const source_component = "CapabilitiesManager.validatePythonOutput";
         console.log(`[${trace_id}] ${source_component}: Validating Python output for ${pluginDefinition.verb} v${pluginDefinition.version}. Received stdout:\n${stdout}`);
@@ -1286,23 +1293,71 @@ export class CapabilitiesManager extends BaseEntity {
             }
 
             const accomplishResult = accomplishResultArray[0];
-            switch (accomplishResult.resultType) {
-                case PluginParameterType.PLAN:
-                case PluginParameterType.STRING:
-                case PluginParameterType.NUMBER:
-                case PluginParameterType.BOOLEAN:
-                case PluginParameterType.DIRECT_ANSWER:
-                case PluginParameterType.PLUGIN:
-                    return accomplishResultArray;
+            if (accomplishResult.resultType === PluginParameterType.PLAN) {
+                // Original step's outputs
+                const originalOutputs = step.outputs;
 
-                default:
+                // The plan steps returned by ACCOMPLISH plugin
+                // ACCOMPLISH now returns the plan array directly as accomplishResult[0].result
+                const newPlanSteps = (accomplishResult as any)[0]?.result as any[];
+
+                if (!Array.isArray(newPlanSteps) || newPlanSteps.length === 0) {
                     throw generateStructuredError({
                         error_code: GlobalErrorCodes.INTERNAL_ERROR_CM,
                         severity: ErrorSeverity.ERROR,
-                        message: `Unexpected result type '${accomplishResult.resultType}' from ACCOMPLISH plugin.`,
+                        message: "ACCOMPLISH plugin returned an empty or invalid plan.",
                         source_component,
                         trace_id_param: trace_id
                     });
+                }
+
+                // The ACCOMPLISH plugin returns a plan that Step.createFromPlan can handle directly
+                // No conversion needed - just pass it through
+
+                // Ensure outputs of final steps match original step outputs
+                // Find final steps (steps that are not dependencies of any other step)
+                const allDependencies = new Set<string>();
+                for (const stepItem of newPlanSteps) {
+                    if (stepItem.dependencies) {
+                        for (const depOutput in stepItem.dependencies) {
+                            allDependencies.add(depOutput);
+                        }
+                    }
+                }
+                // Final steps are those whose outputs are not dependencies of others
+                const finalSteps = newPlanSteps.filter(stepItem => {
+                    if (!stepItem.outputs) return false;
+                    return Object.keys(stepItem.outputs).some(outputName => !allDependencies.has(outputName));
+                });
+
+                // For each final step, set outputs to match original step outputs if not already set
+                for (const finalStep of finalSteps) {
+                    if (!finalStep.outputs) {
+                        finalStep.outputs = {};
+                    }
+                    for (const [key, value] of originalOutputs.entries()) {
+                        if (!(key in finalStep.outputs)) {
+                            finalStep.outputs[key] = value;
+                        }
+                    }
+                }
+
+                // Reset dependencies on the original step to the new steps producing the outputs
+                // This logic depends on the Agent's plan management, so here we just return the new plan
+                // The Agent or caller should handle inserting these steps and resetting dependencies accordingly
+
+                // Return the new plan as PluginOutput[]
+                return [{
+                    success: true,
+                    name: 'plan',
+                    resultType: PluginParameterType.PLAN,
+                    resultDescription: `A plan to accomplish the original step '${step.actionVerb}'`,
+                    result: newPlanSteps,
+                    mimeType: 'application/json'
+                }];
+            } else {
+                // For other result types, return as is
+                return accomplishResultArray;
             }
         } catch (error: any) {
             if (error.error_id && error.trace_id) {
@@ -1397,322 +1452,6 @@ export class CapabilitiesManager extends BaseEntity {
             });
             return null;
         }
-    }
-
-    private async cachePlan(actionVerb: string, planOutput: PluginOutput): Promise<void> {
-        const trace_id = uuidv4();
-        const source_component = "CapabilitiesManager.cachePlan";
-        try {
-            await this.authenticatedApi.post(`http://${this.librarianUrl}/storeData`, {
-                collection: 'actionPlans',
-                id: actionVerb,
-                data: [planOutput]
-            });
-            console.log(`[${trace_id}] ${source_component}: Cached plan for verb: ${actionVerb}`);
-        } catch (error:any) {
-            generateStructuredError({
-                error_code: GlobalErrorCodes.INTERNAL_ERROR_CM,
-                severity: ErrorSeverity.WARNING,
-                message: `Could not cache plan for verb '${actionVerb}'. ${error.message}`,
-                source_component,
-                original_error: error,
-                trace_id_param: trace_id
-            });
-        }
-    }
-    
-    private async executeTemplate(template: PlanTemplate, context: PlanExecutionContext, trace_id: string): Promise<void> {
-        const source_component = "CapabilitiesManager.executeTemplate";
-
-        try {
-            context.status = 'running';
-            await this.updateExecutionContext(context);
-
-            // Build dependency graph
-            const dependencyGraph = this.buildDependencyGraph(template.tasks);
-
-            // Execute tasks in dependency order
-            for (const taskId of dependencyGraph) {
-                const task = template.tasks.find(t => t.id === taskId);
-                if (!task) continue;
-
-                const stepExecution: StepExecution = {
-                    taskId: task.id,
-                    stepId: uuidv4(),
-                    status: 'pending',
-                    inputs: {},
-                    outputs: {},
-                    retryCount: 0
-                };
-
-                context.steps.push(stepExecution);
-                await this.executeStep(template, task, stepExecution, context, trace_id);
-            }
-
-            // Extract final outputs
-            context.outputs = this.extractOutputs(template, context);
-            context.status = 'completed';
-            context.metadata.endTime = new Date();
-
-        } catch (error: any) {
-            console.error(`[${trace_id}] ${source_component}: Template execution failed:`, error);
-            context.status = 'failed';
-            context.metadata.endTime = new Date();
-        } finally {
-            await this.updateExecutionContext(context);
-        }
-    }
-
-    private buildDependencyGraph(tasks: any[]): string[] {
-        // Simple topological sort for task dependencies
-        const graph = new Map<string, string[]>();
-        const inDegree = new Map<string, number>();
-
-        // Initialize graph
-        for (const task of tasks) {
-            graph.set(task.id, task.dependsOn || []);
-            inDegree.set(task.id, 0);
-        }
-
-        // Calculate in-degrees
-        for (const [taskId, deps] of graph) {
-            for (const dep of deps) {
-                inDegree.set(dep, (inDegree.get(dep) || 0) + 1);
-            }
-        }
-
-        // Topological sort
-        const result: string[] = [];
-        const queue: string[] = [];
-
-        for (const [taskId, degree] of inDegree) {
-            if (degree === 0) queue.push(taskId);
-        }
-
-        while (queue.length > 0) {
-            const current = queue.shift()!;
-            result.push(current);
-
-            const deps = graph.get(current) || [];
-            for (const dep of deps) {
-                const newDegree = (inDegree.get(dep) || 0) - 1;
-                inDegree.set(dep, newDegree);
-                if (newDegree === 0) queue.push(dep);
-            }
-        }
-
-        return result;
-    }
-
-    private async executeStep(template: PlanTemplate, task: any, stepExecution: StepExecution, context: PlanExecutionContext, trace_id: string): Promise<void> {
-        const source_component = "CapabilitiesManager.executeStep";
-
-        try {
-            stepExecution.status = 'running';
-            stepExecution.startTime = new Date();
-
-            // Resolve inputs
-            stepExecution.inputs = this.resolveStepInputs(task, context);
-
-            // Create Step object for execution
-            const step: Step = {
-                id: stepExecution.stepId,
-                stepNo: context.steps.length,
-                actionVerb: task.actionVerb,
-                description: task.description,
-                inputValues: new Map(Object.entries(stepExecution.inputs).map(([k, v]) => [k, { inputName: k, value: v, valueType: PluginParameterType.STRING, args: {} }])),
-                outputs: new Map(),
-                dependencies: [],
-                status: 'pending'
-            };
-
-            // Execute the step
-            const result = await this.executeActionVerbInternal(step, trace_id);
-
-            stepExecution.outputs = this.extractStepOutputs(result);
-            // Determine step status based on plugin output
-            if (Array.isArray(result) && result.some(r => r.success === true)) {
-                stepExecution.status = 'completed';
-            } else {
-                stepExecution.status = 'failed';
-                // Try to set error message from first output
-                if (Array.isArray(result) && result.length > 0) {
-                    stepExecution.error = result[0].error || result[0].resultDescription || 'Step failed';
-                } else {
-                    stepExecution.error = 'Step failed (no output)';
-                }
-            }
-            stepExecution.endTime = new Date();
-
-        } catch (error: any) {
-            console.error(`[${trace_id}] ${source_component}: Step execution failed:`, error);
-            stepExecution.status = 'failed';
-            stepExecution.error = error.message;
-            stepExecution.endTime = new Date();
-        } finally {
-            await this.updateExecutionContext(context);
-        }
-    }
-
-    private resolveStepInputs(task: any, context: PlanExecutionContext): { [key: string]: any } {
-        const resolvedInputs: { [key: string]: any } = {};
-
-        for (const [inputName, inputValue] of Object.entries(task.inputs)) {
-            if (typeof inputValue === 'string') {
-                // Handle template references like {{inputs.topic}} or {{tasks.search.outputs.results}}
-                if (inputValue.startsWith('{{') && inputValue.endsWith('}}')) {
-                    const reference = inputValue.slice(2, -2).trim();
-                    resolvedInputs[inputName] = this.resolveReference(reference, context);
-                } else {
-                    resolvedInputs[inputName] = inputValue;
-                }
-            } else {
-                resolvedInputs[inputName] = inputValue;
-            }
-        }
-
-        return resolvedInputs;
-    }
-
-    private resolveReference(reference: string, context: PlanExecutionContext): any {
-        const parts = reference.split('.');
-
-        if (parts[0] === 'inputs') {
-            // Reference to execution inputs
-            return this.getNestedValue(context.inputs, parts.slice(1));
-        } else if (parts[0] === 'tasks') {
-            // Reference to task outputs
-            const taskId = parts[1];
-            const step = context.steps.find(s => s.taskId === taskId);
-            if (step && parts[2] === 'outputs') {
-                return this.getNestedValue(step.outputs, parts.slice(3));
-            }
-        }
-
-        return null;
-    }
-
-    private getNestedValue(obj: any, path: string[]): any {
-        let current = obj;
-        for (const key of path) {
-            if (current && typeof current === 'object' && key in current) {
-                current = current[key];
-            } else {
-                return null;
-            }
-        }
-        return current;
-    }
-
-    private extractStepOutputs(result: PluginOutput[]): { [key: string]: any } {
-        const outputs: { [key: string]: any } = {};
-
-        for (const output of result) {
-            if (output.success) {
-                outputs[output.name] = output.result;
-            }
-        }
-
-        return outputs;
-    }
-
-    private extractOutputs(template: PlanTemplate, context: PlanExecutionContext): { [key: string]: any } {
-        const outputs: { [key: string]: any } = {};
-
-        for (const outputDef of template.outputs) {
-            if (outputDef.name) {
-                // For plan templates, we need to check if there's a source reference
-                // If not, try to find the output in the last step or by name
-                let value = null;
-
-                // Try to find the output in the completed steps
-                for (const step of context.steps) {
-                    if (step.outputs && step.outputs[outputDef.name]) {
-                        value = step.outputs[outputDef.name];
-                        break;
-                    }
-                }
-
-                outputs[outputDef.name] = value;
-            }
-        }
-
-        return outputs;
-    }
-
-    private async updateExecutionContext(context: PlanExecutionContext): Promise<void> {
-        try {
-            await this.authenticatedApi.post(`http://${this.librarianUrl}/storeData`, {
-                collection: 'executionContexts',
-                id: context.id,
-                data: context,
-                storageType: 'mongo'
-            });
-        } catch (error: any) {
-            console.error('Failed to update execution context:', error);
-        }
-    }
-
-    private async executeActionVerbInternal(step: Step, trace_id: string): Promise<PluginOutput[]> {
-        // Handle special internal action verbs first
-        if (step.actionVerb === 'EXECUTE_PLAN_TEMPLATE') {
-            return await this.handleExecutePlanTemplateInternal(step, trace_id);
-        }
-
-        // First try to find a plugin
-        const plugin = await this.pluginRegistry.fetchOneByVerb(step.actionVerb) as PluginDefinition | null;
-
-        if (plugin) {
-            // Execute plugin
-            // Add optional inputs automatically before validation
-            const enhancedInputs = this.addOptionalInputsToStep(step, plugin);
-
-            const validatedInputs = await validateAndStandardizeInputs(plugin, enhancedInputs);
-            if (!validatedInputs.success) {
-                throw new Error(validatedInputs.error || "Input validation failed");
-            }
-
-            const manifestForExecution: PluginManifest = {
-                ...plugin,
-                repository: {
-                    type: 'local' as any,
-                    url: '',
-                    dependencies: {}
-                }
-            };
-
-            const { pluginRootPath, effectiveManifest } = await this.pluginRegistry.preparePluginForExecution(manifestForExecution);
-            return await this.executePlugin(effectiveManifest, validatedInputs.inputs!, pluginRootPath, trace_id);
-        }
-
-        // If plugin (which could be a DefinitionManifest) is found:
-        if (plugin) {
-            // Check if it's a DefinitionManifest for OpenAPI or MCP
-            if ((plugin as any).language === DefinitionType.OPENAPI && (plugin as DefinitionManifest).toolDefinition) {
-                const definitionManifest = plugin as DefinitionManifest;
-                const openApiToolDef = definitionManifest.toolDefinition as OpenAPITool;
-                if (openApiToolDef.specUrl) { // Basic check for valid OpenAPITool
-                    return await this.executeOpenAPIToolInternal(openApiToolDef, step, trace_id);
-                } else {
-                    throw new Error(`OpenAPI manifest for verb '${step.actionVerb}' is missing a valid toolDefinition in executeActionVerbInternal.`);
-                }
-            } else if ((plugin as any).language === DefinitionType.MCP && (plugin as DefinitionManifest).toolDefinition) {
-                const definitionManifest = plugin as DefinitionManifest;
-                const mcpToolDef = definitionManifest.toolDefinition as MCPTool;
-                if (mcpToolDef.actionMappings) { // Basic check for valid MCPTool
-                    return await this.executeMCPTool(mcpToolDef, step, trace_id);
-                } else {
-                     throw new Error(`MCP manifest for verb '${step.actionVerb}' is missing a valid toolDefinition in executeActionVerbInternal.`);
-                }
-            } else if ((plugin as any).language === 'javascript' || (plugin as any).language === 'python' || (plugin as any).language === 'container') {
-                 console.warn(`[${trace_id}] executeActionVerbInternal: Handler found with language '${(plugin as any).language}' but not a recognized definition type or standard code type. Falling back.`);
-            } else {
-                 console.warn(`[${trace_id}] executeActionVerbInternal: Handler found with language '${(plugin as any).language}' but not a recognized definition type (OpenAPI, MCP) or standard code type. Falling back.`);
-            }
-        }
-
-        // If no handler found via PluginRegistry, or if it was an unknown type, handle as unknown verb
-        return await this.handleUnknownVerb(step, trace_id);
     }
 
     private async executeOpenAPIToolInternal(tool: OpenAPITool, step: Step, trace_id: string): Promise<PluginOutput[]> {
@@ -1886,97 +1625,6 @@ export class CapabilitiesManager extends BaseEntity {
                 // Other error
                 throw new Error(`Request setup error: ${error.message}`);
             }
-        }
-    }
-
-    private async handleExecutePlanTemplateInternal(step: Step, trace_id: string): Promise<PluginOutput[]> {
-        const source_component = "CapabilitiesManager.handleExecutePlanTemplateInternal";
-
-        try {
-            const templateId = step.inputValues?.get('templateId')?.value as string;
-            const inputs = step.inputValues?.get('inputs')?.value || {};
-            const userId = step.inputValues?.get('userId')?.value as string || 'agent-user';
-            const executionMode = step.inputValues?.get('executionMode')?.value as string || 'automatic';
-
-            if (!templateId) {
-                throw new Error('Template ID is required for plan template execution');
-            }
-
-            // Get the plan template
-            const templateResponse = await this.authenticatedApi.get(`http://${this.librarianUrl}/loadData/${templateId}`, {
-                params: {
-                    collection: 'planTemplates',
-                    storageType: 'mongo'
-                }
-            });
-
-            if (!templateResponse.data?.data) {
-                throw new Error(`Plan template not found: ${templateId}`);
-            }
-
-            const template: PlanTemplate = templateResponse.data.data;
-
-            // Create execution context
-            const executionContext: PlanExecutionContext = {
-                id: uuidv4(),
-                planTemplateId: template.id,
-                planTemplateVersion: template.metadata.version,
-                status: 'pending' as PlanExecutionStatus,
-                inputs: inputs,
-                steps: [],
-                outputs: {},
-                metadata: {
-                    startTime: new Date(),
-                    userId: userId,
-                    executionMode: executionMode as any
-                }
-            };
-
-            // Store initial execution context
-            await this.authenticatedApi.post(`http://${this.librarianUrl}/storeData`, {
-                collection: 'executionContexts',
-                id: executionContext.id,
-                data: executionContext,
-                storageType: 'mongo'
-            });
-
-            // Start execution (async)
-            this.executeTemplate(template, executionContext, trace_id).catch(error => {
-                console.error(`[${trace_id}] ${source_component}: Template execution failed:`, error);
-            });
-
-            console.log(`[${trace_id}] ${source_component}: Started execution of template: ${templateId}`);
-
-            return [{
-                success: true,
-                name: 'executionId',
-                resultType: PluginParameterType.STRING,
-                result: executionContext.id,
-                resultDescription: 'Plan template execution started'
-            }, {
-                success: true,
-                name: 'templateId',
-                resultType: PluginParameterType.STRING,
-                result: templateId,
-                resultDescription: 'Template ID being executed'
-            }, {
-                success: true,
-                name: 'status',
-                resultType: PluginParameterType.STRING,
-                result: 'started',
-                resultDescription: 'Execution status'
-            }];
-
-        } catch (error: any) {
-            console.error(`[${trace_id}] ${source_component}: Error executing plan template:`, error);
-            return [{
-                success: false,
-                name: 'error',
-                resultType: PluginParameterType.ERROR,
-                result: null,
-                resultDescription: `Plan template execution failed: ${error.message}`,
-                error: error.message
-            }];
         }
     }
 
