@@ -4,18 +4,7 @@ import { LLMConversationType } from '@cktmcs/shared';
 export class Pixtral12BModel extends BaseModel {
     constructor() {
         const scoresByConversationType = new Map<LLMConversationType, ModelScore>([
-            [LLMConversationType.TextToText, {
-                costScore: 85,
-                accuracyScore: 88,
-                creativityScore: 85,
-                speedScore: 90
-            }],
-            [LLMConversationType.TextToCode, {
-                costScore: 85,
-                accuracyScore: 88,
-                creativityScore: 85,
-                speedScore: 90
-            }],
+
             [LLMConversationType.ImageToText, {
                 costScore: 85,
                 accuracyScore: 90,
@@ -32,8 +21,6 @@ export class Pixtral12BModel extends BaseModel {
             tokenLimit: 32768,
             scoresByConversationType: scoresByConversationType,
             contentConversation: [
-                LLMConversationType.TextToText, 
-                LLMConversationType.TextToCode,
                 LLMConversationType.ImageToText
             ]
         });

@@ -19,6 +19,38 @@ export class FileUploadManager {
         this.fileUploadService = new FileUploadService();
     }
 
+    get fileUploadServiceInstance() {
+        return this.fileUploadService;
+    }
+
+    getUploadMiddleware() {
+        return multer({
+            storage: multer.memoryStorage(),
+            limits: {
+                fileSize: 50 * 1024 * 1024, // 50MB limit
+                files: 10 // Maximum 10 files per request
+            },
+            fileFilter: (req, file, cb) => {
+                // Basic file type validation
+                const allowedMimeTypes = [
+                    'text/plain', 'text/markdown', 'application/pdf',
+                    'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                    'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+                    'text/csv', 'application/json', 'application/xml', 'text/yaml',
+                    'image/png', 'image/jpeg', 'image/gif', 'image/svg+xml', 'image/bmp',
+                    'application/zip', 'application/x-tar', 'application/gzip', 'application/x-7z-compressed'
+                ];
+
+                if (allowedMimeTypes.includes(file.mimetype)) {
+                    cb(null, true);
+                } else {
+                    cb(new Error(`File type ${file.mimetype} not allowed`));
+                }
+            }
+        }).array('files', 10);
+    }
+
     setupRoutes(app: express.Application) {
         // Configure multer for file uploads
         const upload = multer({

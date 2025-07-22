@@ -202,17 +202,22 @@ class AccomplishPlugin:
         prompt = f"""
 Your task is to decide on the best way to achieve the goal: '{goal}' and provide a response in one of the JSON formats below.
 
-CRITICAL: Return ONLY valid JSON. No explanations, markdown, code blocks, or additional text.
-Do NOT wrap your response in ```json``` blocks. Return raw JSON only.
+CRITICAL JSON REQUIREMENTS:
+- Return ONLY valid JSON - no explanations, markdown, code blocks, or additional text
+- Do NOT wrap your response in ```json``` blocks or any markdown formatting
+- Do NOT include "### ANALYSIS:" or "### RECOMMENDATIONS:" or any other text
+- Start your response immediately with {{ and end with }}
+- Your entire response must be parseable as JSON
 
 - **DO NOT** create a plan that just uses 'THINK'.
 - **INSTEAD**, create a plan that uses plugins like 'ASK_USER_QUESTION' (to ask for a file path), 'FILE_OPERATION' (to read the file), 'SCRAPE' (to get web content), etc.
 - Your plan should *perform* the action, not just think about it.
-- For example, to handle an unknown actionVerb like 'UPLOAD_RESUME', a good plan would be: 1. Use ASK_USER_QUESTION to ask the user for the resume file path. 2. Use FILE_OPERATION with operation="read" to read the file content from that path.
+- Take any part of the prompt and use it as a input value in your plan.
+- To get a file from the user, use 'ASK_USER_QUESTION' with an 'answerType' of 'file'. The plugin will pause and wait for the user to upload a file, then return a file ID. This file ID can then be used by other plugins like 'FILE_OPERATION'.
 
 CRITICAL PLUGIN REQUIREMENTS:
 - FILE_OPERATION ALWAYS requires "operation" input with value "read", "write", or "append"
-- ASK_USER_QUESTION ALWAYS requires "question" input and should include "answerType" input
+- ASK_USER_QUESTION ALWAYS requires "question" input, not "prompt" input, and should include "answerType" input
 
 CRITICAL ERRORS TO AVOID:
 - Do NOT omit "description" fields - every step needs a thorough description
@@ -220,7 +225,6 @@ CRITICAL ERRORS TO AVOID:
 - Do NOT create circular dependencies - step N cannot depend on step N+1 or later
 - Do NOT create steps that depend on non-existent outputs from previous steps
 - Do NOT use tuple format for outputs - use object format only
-- Do NOT use "prompt" for ASK_USER_QUESTION - use "question" instead
 - Do NOT forget "answerType": {{"value": "string", "valueType": "string"}} for ASK_USER_QUESTION
 
 REQUIRED INPUT FORMATS:
@@ -247,11 +251,8 @@ Available plugins: {available_plugins}
 PLANNING PRINCIPLES:
 1. **Reuse existing plugins**: If a plugin or actionVerb already exists to perform a step in the plan, use it instead of creating a new one
 2. **Dependency-Driven**: Most steps should depend on outputs from previous steps
-3. **Iterative Refinement**: Include steps that validate, refine, or improve earlier outputs
-4. **Conditional Logic**: Use IF_THEN, WHILE, UNTIL for plans that adapt based on outcomes
-5. **Information Gathering**: Start with research/data collection before taking action
-6. **Over Explain**: Make descriptions and explanations very thorough
-7. **DELEGATE Usage**: ONLY use DELEGATE for truly independent work streams that require separate agent management (e.g., parallel research tracks, independent validation processes). Do NOT use DELEGATE for simple task breakdown - use specific plugins or sub-plans instead.
+3. **Over Explain**: Make descriptions and explanations very thorough
+4. **DELEGATE Usage**: ONLY use DELEGATE for truly independent work streams that require separate agent management (e.g., parallel research tracks, independent validation processes). Do NOT use DELEGATE for simple task breakdown - use specific plugins or sub-plans instead.
 
 CRITICAL INPUT/DEPENDENCY FORMAT:
 When a step needs output from a previous step, use BOTH:
@@ -268,7 +269,7 @@ CONTROL FLOW actionVerb USAGE:
 - Use UNTIL for goal-seeking behaviors
 - Use REPEAT for tasks that need multiple attempts
 
-Inputs representing sets of steps for Control Flow actionVerbs must conform to the plan schema and be declared a type "plan"
+Control Flow actionVerbs require an Input with a set of steps (two for IF_THEN) that must conform to the plan schema and be declared a type "plan"
 
 AGENT ROLES - Choose the most appropriate role for each step:
 
@@ -290,7 +291,7 @@ AGENT ROLES - Choose the most appropriate role for each step:
 3. PLUGIN format:
 {{"type": "PLUGIN", "plugin": {{"id": "plugin-name", "actionVerb": "VERB", "description": "...", "explanation": "...", "inputDefinitions": []}}}}
 
-Return ONLY the JSON, no explanations."""
+FINAL REMINDER: Your response must start with {{ and end with }}. No other text allowed."""
 
         return prompt
     

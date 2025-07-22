@@ -26,6 +26,7 @@ export class PostOffice extends BaseEntity {
     private wss: WebSocket.Server;
     private clients: Map<string, WebSocket> = new Map();
     private userInputRequests: Map<string, (response: any) => void> = new Map();
+    private userInputRequestMetadata: Map<string, { answerType: string; question: string; choices?: string[] }> = new Map();
     private messageQueue: Map<string, Message[]> = new Map();
     private messageRouter: MessageRouter;
     private clientMessageQueue: Map<string, Message[]> = new Map(); // Queue for messages to clients without active connections
@@ -164,7 +165,7 @@ export class PostOffice extends BaseEntity {
         this.app.use('/securityManager/*', async (req, res, next) => this.routeSecurityRequest(req, res, next));
         this.app.get('/requestComponent', (req, res) => this.requestComponent(req, res));
         this.app.get('/getServices', (req, res) => this.getServices(req, res));
-        this.app.post('/submitUserInput', (req, res) => this.submitUserInput(req, res));
+        this.app.post('/submitUserInput', this.fileUploadManager.getUploadMiddleware(), (req, res) => { this.submitUserInput(req, res)});
         this.app.post('/sendUserInputRequest', (req, res) => this.sendUserInputRequest(req, res));
         this.app.post('/createMission', (req, res) => this.createMission(req, res));
         this.app.post('/loadMission', (req, res) => this.loadMission(req, res));
@@ -605,16 +606,70 @@ export class PostOffice extends BaseEntity {
         return this.serviceDiscoveryManager.getComponentUrl(type);
     }
 
-    private submitUserInput(req: express.Request, res: express.Response) {
-        const { requestId, response } = req.body;
-        const resolver = this.userInputRequests.get(requestId);
+    private async submitUserInput(req: express.Request, res: express.Response) {
+        try {
+            const { requestId, response } = req.body;
+            const files = req.files as Express.Multer.File[];
 
-        if (resolver && typeof resolver === 'function')  {
-            resolver(response);
+            const resolver = this.userInputRequests.get(requestId);
+            const metadata = this.userInputRequestMetadata.get(requestId);
+
+            if (!resolver || typeof resolver !== 'function') {
+                return res.status(404).send({ error: 'User input request not found' });
+            }
+
+            if (!metadata) {
+                return res.status(404).send({ error: 'User input request metadata not found' });
+            }
+
+            let finalResponse = response;
+
+            // Handle file uploads for 'file' answerType
+            if (metadata.answerType === 'file') {
+                if (!files || files.length === 0) {
+                    return res.status(400).send({ error: 'No files provided for file input request' });
+                }
+
+                try {
+                    // Upload the first file and get its ID
+                    const file = files[0];
+                    const uploadedFile = await this.fileUploadManager.fileUploadServiceInstance.uploadFile(
+                        file.buffer,
+                        file.originalname,
+                        file.mimetype,
+                        'user', // TODO: Get actual user ID from authentication
+                        { description: `File uploaded in response to: ${metadata.question}` }
+                    );
+
+                    // Store the file metadata in Librarian
+                    const librarianUrl = this.getComponentUrl('Librarian');
+                    if (librarianUrl) {
+                        const missionFile = this.fileUploadManager.fileUploadServiceInstance.convertToMissionFile(uploadedFile);
+                        await this.authenticatedApi.post(`http://${librarianUrl}/storeData`, {
+                            id: uploadedFile.id,
+                            data: missionFile,
+                            collection: 'files',
+                            storageType: 'mongo'
+                        });
+                    }
+
+                    // Return the file ID as the response
+                    finalResponse = uploadedFile.id;
+                } catch (uploadError) {
+                    console.error('Error uploading file for user input:', uploadError);
+                    return res.status(500).send({ error: 'Failed to upload file' });
+                }
+            }
+
+            // Resolve the request with the response (either text response or file ID)
+            resolver(finalResponse);
             this.userInputRequests.delete(requestId);
+            this.userInputRequestMetadata.delete(requestId);
+
             res.status(200).send({ message: 'User input received' });
-        } else {
-            res.status(404).send({ error: 'User input request not found' });
+        } catch (error) {
+            console.error('Error in submitUserInput:', error);
+            res.status(500).send({ error: 'Internal server error' });
         }
     }
     private async getSavedMissions(req: express.Request, res: express.Response) {
@@ -901,6 +956,14 @@ export class PostOffice extends BaseEntity {
         try {
             const { question, answerType, choices } = req.body;
             const request_id = require('uuid').v4();
+
+            // Store the request metadata
+            this.userInputRequestMetadata.set(request_id, {
+                answerType: answerType || 'text',
+                question,
+                choices
+            });
+
             // Store the request for later resolution
             this.userInputRequests.set(request_id, (response: any) => {
                 // This callback will be called when the user responds
@@ -911,7 +974,7 @@ export class PostOffice extends BaseEntity {
                 type: 'USER_INPUT_REQUEST',
                 request_id,
                 question,
-                answerType,
+                answerType: answerType || 'text',
                 choices: choices || null
             });
             res.status(200).json({ request_id });

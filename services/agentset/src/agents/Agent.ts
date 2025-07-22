@@ -447,11 +447,12 @@ Please consider this context and the available plugins when planning and executi
         }
         const question = input.value || input.args?.question;
         const choices = input.args?.choices;
+        const answerType = input.args?.answerType || 'text';
         const timeout = input.args?.timeout || 600000; // Default timeout of 10 minutes if not specified
 
         try {
             const response = await Promise.race([
-                this.askUser(question, choices),
+                this.askUser(question, choices, answerType),
                 new Promise((_, reject) => setTimeout(() => reject(new Error('Question timeout')), timeout))
             ]);
 
@@ -484,10 +485,10 @@ Please consider this context and the available plugins when planning and executi
             }];
         }
     }
-    private async askUser(question: string, choices?: string[]): Promise<string> {
+    private async askUser(question: string, choices?: string[], answerType: string = 'text'): Promise<string> {
         return new Promise((resolve) => {
             this.currentQuestionResolve = resolve;
-            this.ask(question, choices);
+            this.ask(question, choices, answerType);
         });
     }
 

@@ -929,10 +929,23 @@ export class Step {
                         }
                     }
 
+                    // If dependencyInputName is not found in inputReferences, add it
+                    if (!dependencyInputName) {
+                        dependencyInputName = dependencyOutputName;
+                        // Add a new InputReference for this missing dependency
+                        inputReferences.set(dependencyInputName, {
+                            inputName: dependencyInputName,
+                            outputName: dependencyOutputName,
+                            value: undefined,
+                            valueType: PluginParameterType.ANY,
+                            args: undefined
+                        });
+                    }
+
                     dependencies.push({
                         outputName: dependencyOutputName,
                         sourceStepId,
-                        inputName: dependencyInputName || dependencyOutputName // Fallback to outputName if no explicit mapping found
+                        inputName: dependencyInputName // Now guaranteed to be in inputReferences
                     });
                 });
             }
