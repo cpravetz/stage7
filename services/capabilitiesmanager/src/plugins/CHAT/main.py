@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 POSTOFFICE_URL = os.getenv('POSTOFFICE_URL', 'http://postoffice:5020')
 SECURITY_MANAGER_URL = os.getenv('SECURITY_MANAGER_URL', 'http://securitymanager:5010')
 CLIENT_SECRET = os.getenv('CLIENT_SECRET')
-PLUGIN_CLIENT_ID = "plugin-CHAT"
+PLUGIN_CLIENT_ID = "CapabilitiesManager"
 
 def get_auth_token():
     """Gets or refreshes the auth token from the Security Manager."""
@@ -29,8 +29,8 @@ def get_auth_token():
     try:
         logger.info(f"Requesting auth token from {SECURITY_MANAGER_URL}")
         response = requests.post(
-            f"{SECURITY_MANAGER_URL}/generateToken",
-            json={"clientId": PLUGIN_CLIENT_ID, "clientSecret": CLIENT_SECRET},
+            f"{SECURITY_MANAGER_URL}/auth/service",
+            json={"componentType": PLUGIN_CLIENT_ID, "clientSecret": CLIENT_SECRET},
             timeout=15
         )
         response.raise_for_status()

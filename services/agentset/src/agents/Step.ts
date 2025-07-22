@@ -1,5 +1,4 @@
 import { v4 as uuidv4 } from 'uuid';
-import axios from 'axios';
 import { PluginParameterType,
     PluginOutput,
     InputReference,
@@ -13,148 +12,10 @@ import { MapSerializer } from '@cktmcs/shared';
 import { MessageType } from '@cktmcs/shared'; // Ensured MessageType is here, assuming it's separate or also from shared index
 import { AgentPersistenceManager } from '../utils/AgentPersistenceManager';
 
-/**
- * Interface for validating action verbs against available plugins
- */
-export interface PluginValidator {
-    /**
-     * Validates if an action verb is available as a plugin or control flow verb
-     * @param actionVerb The action verb to validate
-     * @returns Promise<boolean> True if the verb is valid
-     */
-    isValidActionVerb(actionVerb: string): Promise<boolean>;
-
-    /**
-     * Gets all available action verbs (both control flow and plugins)
-     * @returns Promise<string[]> Array of available action verbs
-     */
-    getAvailableActionVerbs(): Promise<string[]>;
-}
-
-/**
- * Enhanced plugin validator that uses CapabilitiesManager for dynamic validation
- */
-export class DefaultPluginValidator implements PluginValidator {
-    private capabilitiesManagerUrl: string;
-    private cachedVerbs: string[] | null = null;
-    private cacheExpiry: number = 0;
-    private readonly CACHE_TTL_MS = 60000; // 1 minute cache
-
-    // Known control flow verbs that are always valid
-    private readonly CONTROL_FLOW_VERBS = [
-        'THINK', 'DELEGATE', 'ASK', 'IF_THEN', 'REPEAT',
-        'WHILE', 'UNTIL', 'SEQUENCE', 'TIMEOUT',
-        'EXECUTE_PLAN_TEMPLATE', 'FOREACH'
-    ];
-
-    constructor(capabilitiesManagerUrl?: string) {
-        this.capabilitiesManagerUrl = capabilitiesManagerUrl ||
-            process.env.CAPABILITIES_MANAGER_URL ||
-            'capabilitiesmanager:5030';
-    }
-
-    async isValidActionVerb(actionVerb: string): Promise<boolean> {
-        // Handle special case transformations
-        if (actionVerb === 'EXECUTE') {
-            return true; // Will be transformed to ACCOMPLISH
-        }
-
-        // Check control flow verbs first (no network call needed)
-        if (this.CONTROL_FLOW_VERBS.includes(actionVerb)) {
-            return true;
-        }
-
-        // Check if it matches typical plugin verb format
-        if (!/^[A-Z_]+$/.test(actionVerb)) {
-            return false;
-        }
-
-        // Query available plugins from CapabilitiesManager
-        try {
-            const availableVerbs = await this.getAvailableActionVerbs();
-            return availableVerbs.includes(actionVerb);
-        } catch (error) {
-            console.warn(`[DefaultPluginValidator] Failed to validate actionVerb '${actionVerb}': ${error instanceof Error ? error.message : error}`);
-            // Fallback: assume it's valid if it matches the format
-            return /^[A-Z_]+$/.test(actionVerb);
-        }
-    }
-
-    async getAvailableActionVerbs(): Promise<string[]> {
-        // Return cached result if still valid
-        if (this.cachedVerbs && Date.now() < this.cacheExpiry) {
-            return this.cachedVerbs;
-        }
-
-        try {
-            // Query CapabilitiesManager for available plugins
-            const response = await axios.get(
-                `http://${this.capabilitiesManagerUrl}/availablePlugins`,
-                {
-                    timeout: 5000,
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Accept': 'application/json'
-                    }
-                }
-            );
-
-            const plugins = response.data;
-            const pluginVerbs = plugins
-                .map((plugin: any) => plugin.verb)
-                .filter((verb: string) => verb && typeof verb === 'string');
-
-            // Combine control flow verbs with plugin verbs
-            const allVerbs = [...this.CONTROL_FLOW_VERBS, ...pluginVerbs];
-
-            // Cache the result
-            this.cachedVerbs = allVerbs;
-            this.cacheExpiry = Date.now() + this.CACHE_TTL_MS;
-
-            console.log(`[DefaultPluginValidator] Cached ${allVerbs.length} available action verbs`);
-            return allVerbs;
-        } catch (error) {
-            console.warn(`[DefaultPluginValidator] Failed to fetch available plugins: ${error instanceof Error ? error.message : error}`);
-            // Fallback to just control flow verbs
-            return this.CONTROL_FLOW_VERBS;
-        }
-    }
+// Plugin validation removed - the system is designed to handle unknown actionVerbs dynamically
+// through the CapabilitiesManager's fallback to ACCOMPLISH plugin
 
 
-
-    /**
-     * Force refresh the cache (useful for testing or when plugins are updated)
-     */
-    async refreshCache(): Promise<void> {
-        this.cachedVerbs = null;
-        this.cacheExpiry = 0;
-        await this.getAvailableActionVerbs();
-    }
-
-    /**
-     * Get detailed information about a specific plugin verb
-     */
-    async getPluginInfo(actionVerb: string): Promise<any | null> {
-        try {
-            const response = await axios.get(
-                `http://${this.capabilitiesManagerUrl}/availablePlugins`,
-                {
-                    timeout: 5000,
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Accept': 'application/json'
-                    }
-                }
-            );
-
-            const plugins = response.data;
-            return plugins.find((plugin: any) => plugin.verb === actionVerb) || null;
-        } catch (error) {
-            console.warn(`[DefaultPluginValidator] Failed to get plugin info for '${actionVerb}': ${error instanceof Error ? error.message : error}`);
-            return null;
-        }
-    }
-}
 
 
 export enum StepStatus {
@@ -212,41 +73,51 @@ export class Step {
         this.dependencies = params.dependencies || [];
         this.status = params.status || StepStatus.PENDING;
         this.recommendedRole = params.recommendedRole;
-
+        this.persistenceManager = params.persistenceManager;
+        
         // Validate recommendedRole
         if (this.recommendedRole && !/^[a-zA-Z0-9_-]+$/.test(this.recommendedRole)) {
             console.warn(`[Step Constructor] Invalid characters in recommendedRole: '${this.recommendedRole}'. Defaulting to undefined.`);
-            this.logEvent({
-                eventType: 'step_validation_warning',
-                stepId: this.id,
-                message: `Invalid recommendedRole '${this.recommendedRole}' sanitized.`,
-                originalValue: this.recommendedRole,
-                timestamp: new Date().toISOString()
-            });
+            // Only log if persistenceManager is available
+            if (this.persistenceManager) {
+                this.logEvent({
+                    eventType: 'step_validation_warning',
+                    stepId: this.id,
+                    message: `Invalid recommendedRole '${this.recommendedRole}' sanitized.`,
+                    originalValue: this.recommendedRole,
+                    timestamp: new Date().toISOString()
+                });
+            }
             this.recommendedRole = undefined;
         }
 
         this.persistenceManager = params.persistenceManager;
         this.awaitsSignal = '';
-        // Log step creation event
-        this.logEvent({
-            eventType: 'step_created',
-            stepId: this.id,
-            stepNo: this.stepNo,
-            actionVerb: this.actionVerb,
-            inputValues:MapSerializer.transformForSerialization(this.inputValues),
-            inputReferences: MapSerializer.transformForSerialization(this.inputReferences),
-            dependencies: this.dependencies,
-            status: this.status,
-            description: this.description,
-            recommendedRole: this.recommendedRole,
-            timestamp: new Date().toISOString()
-        });
+        // Log step creation event (only if persistenceManager is available)
+        if (this.persistenceManager) {
+            this.logEvent({
+                eventType: 'step_created',
+                stepId: this.id,
+                stepNo: this.stepNo,
+                actionVerb: this.actionVerb,
+                inputValues:MapSerializer.transformForSerialization(this.inputValues),
+                inputReferences: MapSerializer.transformForSerialization(this.inputReferences),
+                dependencies: this.dependencies,
+                status: this.status,
+                description: this.description,
+                recommendedRole: this.recommendedRole,
+                timestamp: new Date().toISOString()
+            });
+        }
     }
 
     async logEvent(event: any): Promise<void> {
         if (!event) {
             console.error('Step logEvent called with empty event');
+            return;
+        }
+        if (!this.persistenceManager) {
+            console.warn('Step logEvent called but persistenceManager is undefined');
             return;
         }
         try {
@@ -425,7 +296,9 @@ export class Step {
                     result = await thinkAction(this.inputValues);
                     break;
                 case 'DELEGATE':
-                    result = await delegateAction(this.inputValues);
+                    // Instead of creating new agents, use ACCOMPLISH to generate a plan
+                    // and return it for incorporation into the current agent
+                    result = await this.handleDelegate(executeAction);
                     break;
                 case 'ASK':
                 case MessageType.REQUEST:
@@ -466,6 +339,7 @@ export class Step {
             });
 
             this.status = StepStatus.COMPLETED;
+            this.result = result; // Store the result on the step object
 
             // Log step result event
             await this.logEvent({
@@ -494,6 +368,7 @@ export class Step {
                 result: error instanceof Error ? error.message : String(error),
                 error: error instanceof Error ? error.message : String(error)
             }];
+            this.result = errorResult; // Store the error result on the step object
 
             await this.logEvent({
                 eventType: 'step_result',
@@ -744,6 +619,65 @@ export class Step {
         }];
     }
 
+    private async handleDelegate(executeAction: (step: Step) => Promise<PluginOutput[]>): Promise<PluginOutput[]> {
+        // Convert DELEGATE to ACCOMPLISH to generate a plan instead of creating new agents
+        const goal = this.inputValues.get('goal')?.value ||
+                    this.inputValues.get('task')?.value ||
+                    this.inputValues.get('description')?.value ||
+                    this.description;
+
+        if (!goal) {
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: 'Missing goal/task for delegation',
+                result: null,
+                error: 'Goal, task, or description input is required for DELEGATE action'
+            }];
+        }
+
+        // Create a temporary ACCOMPLISH step to generate the plan
+        const accomplishStep = new Step({
+            actionVerb: 'ACCOMPLISH',
+            stepNo: this.stepNo,
+            inputReferences: new Map(),
+            inputValues: new Map([
+                ['goal', {
+                    inputName: 'goal',
+                    value: goal,
+                    valueType: PluginParameterType.STRING,
+                    args: {}
+                }]
+            ]),
+            description: `Generate plan for: ${goal}`,
+            persistenceManager: this.persistenceManager
+        });
+
+        // Execute the ACCOMPLISH step to get a plan
+        const accomplishResult = await executeAction(accomplishStep);
+
+        if (accomplishResult && accomplishResult.length > 0 && accomplishResult[0].success) {
+            // Return the plan for incorporation into the current agent
+            return [{
+                success: true,
+                name: 'delegatedPlan',
+                resultType: PluginParameterType.PLAN,
+                resultDescription: 'Plan generated from delegation',
+                result: accomplishResult[0].result
+            }];
+        } else {
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: 'Failed to generate plan for delegation',
+                result: null,
+                error: accomplishResult?.[0]?.error || 'Unknown error in delegation planning'
+            }];
+        }
+    }
+
     private async handleSequence(): Promise<PluginOutput[]> {
         const stepsInput = this.inputValues.get('steps');
 
@@ -914,14 +848,12 @@ export class Step {
      * @param plan Array of action verb tasks
      * @param startingStepNo The starting step number
      * @param persistenceManager The persistence manager for the steps
-     * @param pluginValidator Optional plugin validator (uses default if not provided)
      * @returns Array of Step instances
      */
     export function createFromPlan(
         plan: ActionVerbTask[],
         startingStepNo: number,
-        persistenceManager: AgentPersistenceManager,
-        pluginValidator?: PluginValidator
+        persistenceManager: AgentPersistenceManager
     ): Step[] {
         // Extend ActionVerbTask locally to include number and outputs for conversion
         type PlanTask = ActionVerbTask & { number?: number; outputs?: Record<string, any>; id?: string; };
@@ -956,13 +888,16 @@ export class Step {
         // Second pass: create steps and resolve dependencies
         return planTasks.map((task, idx) => {
             const inputReferences = new Map<string, InputReference>();
-            if (task.inputReferences) {
-                for (const [inputName, inputDef] of Object.entries(task.inputReferences as Record<string, any>)) {
+
+            // Handle both 'inputs' (from ACCOMPLISH plugin) and 'inputReferences' (from other sources)
+            const inputSource = (task as any).inputs || task.inputReferences;
+            if (inputSource) {
+                for (const [inputName, inputDef] of Object.entries(inputSource as Record<string, any>)) {
                     if (typeof inputDef !== 'object' || inputDef === null) {
                         console.warn(`[createFromPlan] Skipping invalid input definition for '${inputName}' in task '${task.actionVerb}'.`);
                         continue;
                     }
-                    
+
                     const reference: InputReference = {
                         inputName: inputName,
                         value: inputDef.value,
@@ -1002,59 +937,14 @@ export class Step {
                 });
             }
 
-            // Validate IF_THEN task inputs before creating the Step object
-            if (task.actionVerb === 'IF_THEN') {
-                const conditionInputRef = inputReferences.get('condition');
-                if (!conditionInputRef || (conditionInputRef.value === undefined && conditionInputRef.outputName === undefined)) {
-                    throw new Error(`[Step.createFromPlan] Validation Error for IF_THEN step: 'condition' input must have a direct boolean 'value' or an 'outputName' reference. Received: ${JSON.stringify(conditionInputRef)}`);
-                }
-
-                const trueStepsInputRef = inputReferences.get('trueSteps');
-                if (!trueStepsInputRef || !Array.isArray(trueStepsInputRef.value)) {
-                    throw new Error(`[Step.createFromPlan] Validation Error for IF_THEN step: 'trueSteps' input must be an array of ActionVerbTask objects. Received: ${JSON.stringify(trueStepsInputRef?.value)}`);
-                }
-                for (const subTask of trueStepsInputRef.value) {
-                    if (typeof subTask !== 'object' || subTask === null || !subTask.actionVerb) {
-                        throw new Error(`[Step.createFromPlan] Validation Error for IF_THEN step: Each item in 'trueSteps' must be a valid ActionVerbTask object. Received item: ${JSON.stringify(subTask)}`);
-                    }
-                }
-
-                const falseStepsInputRef = inputReferences.get('falseSteps');
-                if (!falseStepsInputRef || !Array.isArray(falseStepsInputRef.value)) {
-                    throw new Error(`[Step.createFromPlan] Validation Error for IF_THEN step: 'falseSteps' input must be an array of ActionVerbTask objects. Received: ${JSON.stringify(falseStepsInputRef?.value)}`);
-                }
-                for (const subTask of falseStepsInputRef.value) {
-                    if (typeof subTask !== 'object' || subTask === null || !subTask.actionVerb) {
-                        throw new Error(`[Step.createFromPlan] Validation Error for IF_THEN step: Each item in 'falseSteps' must be a valid ActionVerbTask object. Received item: ${JSON.stringify(subTask)}`);
-                    }
-                }
-            }
-
-            // Validate actionVerb
-            if (task.actionVerb === 'ASK_USER_QUESTION') {
-                const questionInputRef = inputReferences.get('question');
-                if (!questionInputRef || questionInputRef.value === undefined || typeof questionInputRef.value !== 'string' || questionInputRef.value.trim() === '') {
-                    throw new Error(`[Step.createFromPlan] Validation Error for ASK_USER_QUESTION step: 'question' input must have a non-empty string 'value'. Received: ${JSON.stringify(questionInputRef)}`);
-                }
-            }
-
-            // Handle special case transformations
             if (task.actionVerb === 'EXECUTE') {
                 task.actionVerb = 'ACCOMPLISH';
             }
 
             // Validate action verb using the plugin validator
             // Note: We don't await here to keep the function synchronous for now
-            // The validation will be done by CapabilitiesManager at execution time
-            // This is just for early warning/logging
-            const validator = pluginValidator || new DefaultPluginValidator();
-            validator.isValidActionVerb(task.actionVerb).then(isValid => {
-                if (!isValid) {
-                    console.warn(`[Step.createFromPlan] Warning: actionVerb '${task.actionVerb}' may not be available. It will be validated by CapabilitiesManager at execution time.`);
-                }
-            }).catch(error => {
-                console.warn(`[Step.createFromPlan] Could not validate actionVerb '${task.actionVerb}': ${error instanceof Error ? error.message : error}`);
-            });
+            // Plugin validation is handled by CapabilitiesManager at execution time
+            // No need for early validation warnings as they can be confusing
 
             const step = new Step({
                 id: task.id!,

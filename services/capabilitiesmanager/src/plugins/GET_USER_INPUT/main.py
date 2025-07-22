@@ -36,9 +36,9 @@ class GetUserInputPlugin:
         """Get authentication token from SecurityManager"""
         try:
             response = requests.post(
-                f"http://{self.security_manager_url}/generateToken",
+                f"http://{self.security_manager_url}/auth/service",
                 json={
-                    "clientId": "ASK_USER_QUESTION_Plugin",
+                    "componentType": "CapabilitiesManager",
                     "clientSecret": self.client_secret
                 },
                 timeout=10

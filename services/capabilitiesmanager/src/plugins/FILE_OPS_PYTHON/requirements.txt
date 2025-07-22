@@ -1,3 +1,5 @@
 # FILE_OPS Plugin Dependencies
 # This plugin uses only Python standard library modules
-# No external dependencies required
+# Adding minimal dependency to ensure virtual environment creation for security
+setuptools>=65.0.0
+requests>=2.28.0

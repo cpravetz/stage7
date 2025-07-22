@@ -164,21 +164,32 @@ export class LocalRepository implements PluginRepository {
                 if (manifest.verb) this.manifestPathCache.set(manifest.verb, manifestPath);
                 return manifest;
             } catch (e) {
-                // Fallback for broader search if direct verb/version path fails
+                // Fallback: use cached plugin list instead of scanning directories
                 if (!version) {
-                    console.warn(`LocalRepository.fetchByVerb: Manifest not found at direct path for verb '${verb}'. Falling back to iterating directories.`);
-                    const dirs = await fs.readdir(this.baseDir);
-                    for (const dir of dirs) {
-                        const currentPath = path.join(this.baseDir, dir, 'manifest.json');
-                        try {
-                            const manifestData = JSON.parse(await fs.readFile(currentPath, 'utf-8')) as PluginManifest;
-                            if (manifestData.verb === verb) {
-                                // Cache for future
-                                if (manifestData.id) this.manifestPathCache.set(manifestData.id, currentPath);
-                                if (manifestData.verb) this.manifestPathCache.set(manifestData.verb, currentPath);
-                                return manifestData;
-                            }
-                        } catch { continue; }
+                    console.warn(`LocalRepository.fetchByVerb: Manifest not found at direct path for verb '${verb}'. Using cached plugin list for search.`);
+                    try {
+                        const pluginList = await this.list(); // This uses cache if available
+                        const targetPlugin = pluginList.find(plugin => plugin.verb === verb);
+                        if (targetPlugin) {
+                            // Try to fetch by ID instead
+                            return await this.fetch(targetPlugin.id);
+                        }
+                    } catch (listError) {
+                        console.warn(`LocalRepository.fetchByVerb: Failed to use cached plugin list, falling back to directory scan:`, listError);
+                        // Final fallback: directory scan
+                        const dirs = await fs.readdir(this.baseDir);
+                        for (const dir of dirs) {
+                            const currentPath = path.join(this.baseDir, dir, 'manifest.json');
+                            try {
+                                const manifestData = JSON.parse(await fs.readFile(currentPath, 'utf-8')) as PluginManifest;
+                                if (manifestData.verb === verb) {
+                                    // Cache for future
+                                    if (manifestData.id) this.manifestPathCache.set(manifestData.id, currentPath);
+                                    if (manifestData.verb) this.manifestPathCache.set(manifestData.verb, currentPath);
+                                    return manifestData;
+                                }
+                            } catch { continue; }
+                        }
                     }
                 }
                 return undefined;

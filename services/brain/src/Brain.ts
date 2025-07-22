@@ -165,6 +165,7 @@ export class Brain extends BaseEntity {
                 trackingRequestId = this.modelManager.trackModelRequest(selectedModel.name, conversationType, prompt);
 
                 this.llmCalls++;
+                console.log(`[Brain Generate] Using model ${selectedModel.modelName}-${conversationType}`);
                 const result = await selectedModel.llminterface?.convert(selectedModel.service, conversationType, convertParams);
 
                 // Track successful response
@@ -203,7 +204,7 @@ export class Brain extends BaseEntity {
                 return;
             }
 
-            console.log(`[Brain Chat] Using model ${selectedModel.modelName}`);
+            console.log(`[Brain Chat] Posting message Using model ${selectedModel.modelName}`);
 
             // Track the model request
             const prompt = thread.exchanges.map((e: any) => e.content).join(' ');
@@ -229,6 +230,7 @@ export class Brain extends BaseEntity {
     private async _chatWithModel(selectedModel: any, thread: any, res: express.Response, requestId: string): Promise<void> {
         try {
             this.llmCalls++;
+            console.log(`[Brain Chat] Using model ${selectedModel.modelName} for request ${requestId}`);
             const modelResponse = await selectedModel.llminterface.chat(
                 selectedModel.service,
                 thread.exchanges,
