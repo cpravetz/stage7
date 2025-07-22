@@ -183,7 +183,8 @@ class AccomplishPlugin:
             goal_value = goal_value.strip()
             if not goal_value:
                 raise ValueError("Goal cannot be empty")
-            
+
+            # Note: verbToAvoid parameter is no longer used as circular references are allowed
             logger.info(f"Validated inputs: goal='{goal_value[:50]}...'")
             return inputs
             
@@ -194,6 +195,9 @@ class AccomplishPlugin:
         """Step 2: Assemble prompt from inputs and constants"""
         goal = inputs['goal']['value']
         available_plugins = inputs.get('available_plugins', {}).get('value', '')
+
+        # Note: verbToAvoid parameter is no longer used for circular reference detection
+        # as nesting of actionVerbs is legitimate and proper
         
         prompt = f"""
 Your task is to decide on the best way to achieve the goal: '{goal}' and provide a response in one of the JSON formats below.
@@ -204,7 +208,11 @@ Do NOT wrap your response in ```json``` blocks. Return raw JSON only.
 - **DO NOT** create a plan that just uses 'THINK'.
 - **INSTEAD**, create a plan that uses plugins like 'ASK_USER_QUESTION' (to ask for a file path), 'FILE_OPERATION' (to read the file), 'SCRAPE' (to get web content), etc.
 - Your plan should *perform* the action, not just think about it.
-- For example, to handle an unknown actionVerb like 'UPLOAD_RESUME', a good plan would be: 1. Use ASK_USER_QUESTION to ask the user for the resume file path. 2. Use FILE_OPERATION to read the file content from that path.
+- For example, to handle an unknown actionVerb like 'UPLOAD_RESUME', a good plan would be: 1. Use ASK_USER_QUESTION to ask the user for the resume file path. 2. Use FILE_OPERATION with operation="read" to read the file content from that path.
+
+CRITICAL PLUGIN REQUIREMENTS:
+- FILE_OPERATION ALWAYS requires "operation" input with value "read", "write", or "append"
+- ASK_USER_QUESTION ALWAYS requires "question" input and should include "answerType" input
 
 CRITICAL ERRORS TO AVOID:
 - Do NOT omit "description" fields - every step needs a thorough description
@@ -243,6 +251,7 @@ PLANNING PRINCIPLES:
 4. **Conditional Logic**: Use IF_THEN, WHILE, UNTIL for plans that adapt based on outcomes
 5. **Information Gathering**: Start with research/data collection before taking action
 6. **Over Explain**: Make descriptions and explanations very thorough
+7. **DELEGATE Usage**: ONLY use DELEGATE for truly independent work streams that require separate agent management (e.g., parallel research tracks, independent validation processes). Do NOT use DELEGATE for simple task breakdown - use specific plugins or sub-plans instead.
 
 CRITICAL INPUT/DEPENDENCY FORMAT:
 When a step needs output from a previous step, use BOTH:
@@ -261,7 +270,19 @@ CONTROL FLOW actionVerb USAGE:
 
 Inputs representing sets of steps for Control Flow actionVerbs must conform to the plan schema and be declared a type "plan"
 
-Agent roles: coordinator, researcher, creative, critic, executor, domain_expert
+AGENT ROLES - Choose the most appropriate role for each step:
+
+1. **coordinator**: Orchestrates activities, manages task allocation, breaks down complex goals into manageable tasks, delegates to specialized agents, monitors progress, resolves conflicts. Use for: planning steps, delegation steps, progress monitoring, conflict resolution.
+
+2. **researcher**: Gathers, analyzes, and synthesizes information from various sources. Evaluates credibility and relevance of sources, identifies patterns and insights. Use for: information gathering, data analysis, web scraping, research tasks, fact-finding.
+
+3. **creative**: Generates creative ideas, content, and solutions. Creates engaging content in various formats, develops innovative solutions, crafts compelling narratives. Use for: content creation, idea generation, writing, design, storytelling, brainstorming.
+
+4. **critic**: Evaluates ideas, plans, and content. Identifies potential issues and risks, assesses quality and effectiveness, provides constructive feedback. Use for: review steps, quality assessment, validation, testing, feedback provision.
+
+5. **executor**: Implements plans and executes tasks with precision and reliability. Follows established processes, pays attention to details, ensures quality and accuracy. Use for: implementation steps, file operations, API calls, data processing, routine tasks.
+
+6. **domain_expert**: Provides specialized knowledge and expertise in specific fields. Analyzes domain-specific problems, offers expert advice and recommendations. Use for: technical analysis, specialized knowledge application, expert consultation, complex problem solving.
 
 2. DIRECT_ANSWER format:
 {{"type": "DIRECT_ANSWER", "answer": "your answer"}}
@@ -288,7 +309,7 @@ Return ONLY the JSON, no explanations."""
                 
                 # Step 5: Validate schema
                 validation_result = self._validate_response_schema(response, response_type)
-                
+
                 if validation_result['valid']:
                     # Step 6: Return valid response
                     return response
@@ -349,8 +370,24 @@ Return ONLY the JSON, no explanations."""
             raise ValueError(f"Response is not a JSON object, got: {type(response)}")
 
         response_type = response.get('type', '')
+
+        # Handle case where Brain returns a step object instead of plan wrapper
         if not response_type:
-            raise ValueError(f"Response missing 'type' field. Response keys: {list(response.keys())}")
+            # Check if this looks like a step object (has actionVerb, number, etc.)
+            if ('actionVerb' in response and 'number' in response and
+                'description' in response and 'outputs' in response):
+                logger.info("Brain returned step object instead of plan wrapper, auto-wrapping as PLAN")
+                # Auto-wrap the step in a plan structure
+                wrapped_response = {
+                    "type": "PLAN",
+                    "plan": [response]
+                }
+                # Replace the original response with the wrapped version
+                response.clear()
+                response.update(wrapped_response)
+                return "PLAN"
+            else:
+                raise ValueError(f"Response missing 'type' field. Response keys: {list(response.keys())}")
 
         response_type = response_type.upper()
         if response_type not in ['PLAN', 'DIRECT_ANSWER', 'PLUGIN']:
@@ -427,7 +464,9 @@ Return ONLY the JSON, no explanations."""
                 return {'valid': False, 'error': f'Plugin missing required field: {field}'}
         
         return {'valid': True}
-    
+
+    # Circular reference validation methods removed as nesting of actionVerbs is legitimate
+
     def _try_fix_error(self, response: Dict[str, Any], error: str) -> Optional[Dict[str, Any]]:
         """Step 7: Try to fix simple errors automatically"""
         try:

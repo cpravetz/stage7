@@ -67,7 +67,7 @@ export class CapabilitiesManager extends BaseEntity {
         // Retry logic for initialization
         this.pluginRegistry = new PluginRegistry();
         // Initialize PluginContextManager with a direct reference to avoid circular calls
-        this.pluginContextManager = new PluginContextManager('localhost:5030');
+        this.pluginContextManager = new PluginContextManager(`localhost:${process.env.PORT || '5060'}`);
         const source_component = "CapabilitiesManager.constructor";
         let attempts = 0;
         const maxAttempts = 3;
@@ -419,7 +419,7 @@ export class CapabilitiesManager extends BaseEntity {
         try {
             // Redirect 'ACCOMPLISH' to executeAccomplishPlugin
             if (step.actionVerb === 'ACCOMPLISH' && step.inputValues) {
-                const accomplishResultArray = await this.executeAccomplishPlugin(step.inputValues.get('goal')?.value || '', 'EXECUTE', trace_id);
+                const accomplishResultArray = await this.executeAccomplishPlugin(step.inputValues.get('goal')?.value || '', trace_id);
                 res.status(200).send(MapSerializer.transformForSerialization(accomplishResultArray));
                 return;
             }
@@ -807,8 +807,32 @@ export class CapabilitiesManager extends BaseEntity {
         try {
             await this.ensurePythonDependencies(pluginRootPath, trace_id);
 
-            const venvPythonPath = path.join(pluginRootPath, 'venv', 'bin', 'python');
-            const pythonExecutable = fs.existsSync(venvPythonPath) ? venvPythonPath : 'python3';
+            // Platform-aware venv paths (same logic as in ensurePythonDependencies)
+            const isWindows = process.platform === 'win32';
+            const venvBinDir = isWindows ? path.join(pluginRootPath, 'venv', 'Scripts') : path.join(pluginRootPath, 'venv', 'bin');
+            const venvPythonPath = path.join(venvBinDir, isWindows ? 'python.exe' : 'python');
+
+            // Check if venv python exists, otherwise fall back to system python
+            let pythonExecutable: string;
+            if (fs.existsSync(venvPythonPath)) {
+                pythonExecutable = venvPythonPath;
+            } else {
+                // Try to find system python - check multiple options
+                const pythonOptions = isWindows ? ['python.exe', 'python', 'python3.exe', 'python3'] : ['python3', 'python'];
+                pythonExecutable = 'python3'; // default fallback
+
+                for (const option of pythonOptions) {
+                    try {
+                        require('child_process').execSync(`${option} --version`, { stdio: 'ignore' });
+                        pythonExecutable = option;
+                        break;
+                    } catch {
+                        continue;
+                    }
+                }
+
+                console.log(`[${trace_id}] ${source_component}: Using Python executable: ${pythonExecutable}`);
+            }
 
             const inputsArray: [string, InputValue][] = Array.from(inputValues.entries());
             const inputsJsonString = JSON.stringify(inputsArray);
@@ -855,7 +879,11 @@ export class CapabilitiesManager extends BaseEntity {
 
                 pythonProcess.on('error', (err) => {
                     // This catches errors like ENOENT if pythonExecutable is not found
-                    reject(err);
+                    console.error(`[${trace_id}] ${source_component}: Python process spawn error: ${err.message}`);
+                    console.error(`[${trace_id}] ${source_component}: Attempted to execute: ${pythonExecutable}`);
+                    console.error(`[${trace_id}] ${source_component}: Working directory: ${pluginRootPath}`);
+                    console.error(`[${trace_id}] ${source_component}: Main file: ${mainFilePath}`);
+                    reject(new Error(`Failed to spawn Python process: ${err.message}. Executable: ${pythonExecutable}`));
                 });
 
                 // Write inputs to stdin and close it to signal end of input
@@ -1026,24 +1054,7 @@ export class CapabilitiesManager extends BaseEntity {
     private async ensurePythonDependencies(pluginRootPath: string, trace_id: string): Promise<void> {
         const source_component = "CapabilitiesManager.ensurePythonDependencies";
         const requirementsPath = path.join(pluginRootPath, 'requirements.txt');
-
-        // Check if requirements.txt exists
-        if (!fs.existsSync(requirementsPath)) {
-            console.log(`[${trace_id}] ${source_component}: No requirements.txt found, skipping dependency installation`);
-            return;
-        }
-
         const markerPath = path.join(pluginRootPath, '.dependencies_installed');
-        const requirementsContent = fs.readFileSync(requirementsPath, 'utf8');
-        const requirementsHash = require('crypto').createHash('md5').update(requirementsContent).digest('hex');
-
-        if (fs.existsSync(markerPath)) {
-            const existingHash = fs.readFileSync(markerPath, 'utf8').trim();
-            if (existingHash === requirementsHash) {
-                console.log(`[${trace_id}] ${source_component}: Dependencies already installed and up to date`);
-                return;
-            }
-        }
 
         const venvPath = path.join(pluginRootPath, 'venv');
         // Platform-aware venv paths
@@ -1127,6 +1138,7 @@ export class CapabilitiesManager extends BaseEntity {
             throw new Error('No python3 or python executable found in PATH');
         }
 
+        let requirementsHash: string | null = null;
         try {
             const pythonCmd = await checkPythonExecutable();
 
@@ -1145,21 +1157,38 @@ export class CapabilitiesManager extends BaseEntity {
             console.log(`[${trace_id}] ${source_component}: Upgrading pip with command: ${upgradePipCmd}`);
             await execAsync(upgradePipCmd, { cwd: pluginRootPath, timeout: 60000 });
 
-            // Install requirements
-            const installReqsCmd = `"${venvPipPath}" install -r "${requirementsPath}"`;
-            console.log(`[${trace_id}] ${source_component}: Installing requirements with command: ${installReqsCmd}`);
-            const { stdout, stderr } = await execAsync(installReqsCmd, { cwd: pluginRootPath, timeout: 120000 });
+            if (fs.existsSync(requirementsPath)) {
+                const requirementsContent = fs.readFileSync(requirementsPath, 'utf8');
+                requirementsHash = require('crypto').createHash('md5').update(requirementsContent).digest('hex');
 
-            if (stderr && !stderr.includes('Successfully installed') && !stderr.includes('Requirement already satisfied')) {
-                console.warn(`[${trace_id}] ${source_component}: Python dependency installation stderr: ${stderr}`);
-            }
-            if (stdout) {
-                console.log(`[${trace_id}] ${source_component}: Python dependency installation stdout: ${stdout}`);
-            }
+                if (fs.existsSync(markerPath)) {
+                    const existingHash = fs.readFileSync(markerPath, 'utf8').trim();
+                    if (existingHash === requirementsHash) {
+                        console.log(`[${trace_id}] ${source_component}: Dependencies already installed and up to date`);
+                        return;
+                    }
+                }
 
-            // Create marker file with requirements hash
-            fs.writeFileSync(markerPath, requirementsHash);
-            console.log(`[${trace_id}] ${source_component}: Python dependencies processed successfully for ${pluginRootPath}. Marker file updated.`);
+                // Install requirements
+                const installReqsCmd = `"${venvPipPath}" install -r "${requirementsPath}"`;
+                console.log(`[${trace_id}] ${source_component}: Installing requirements with command: ${installReqsCmd}`);
+                const { stdout, stderr } = await execAsync(installReqsCmd, { cwd: pluginRootPath, timeout: 120000 });
+
+                if (stderr && !stderr.includes('Successfully installed') && !stderr.includes('Requirement already satisfied')) {
+                    console.warn(`[${trace_id}] ${source_component}: Python dependency installation stderr: ${stderr}`);
+                }
+                if (stdout) {
+                    console.log(`[${trace_id}] ${source_component}: Python dependency installation stdout: ${stdout}`);
+                }
+
+                // Create marker file with requirements hash
+                if (requirementsHash !== null) {
+                    fs.writeFileSync(markerPath, requirementsHash);
+                    console.log(`[${trace_id}] ${source_component}: Python dependencies processed successfully for ${pluginRootPath}. Marker file updated.`);
+                }
+            } else {
+                console.log(`[${trace_id}] ${source_component}: No requirements.txt found, skipping dependency installation`);
+            }
 
         } catch (error: any) {
             const errorMessage = error.message || '';
@@ -1192,9 +1221,10 @@ export class CapabilitiesManager extends BaseEntity {
                         console.log(`[${trace_id}] ${source_component}: Python dependency installation stdout on retry: ${stdout}`);
                     }
 
-                    // Create marker file with requirements hash
-                    fs.writeFileSync(markerPath, requirementsHash);
-                    console.log(`[${trace_id}] ${source_component}: Python dependencies successfully installed after repair.`);
+                    if (requirementsHash) {// Create marker file with requirements hash
+                        fs.writeFileSync(markerPath, requirementsHash);
+                        console.log(`[${trace_id}] ${source_component}: Python dependencies successfully installed after repair.`);
+                    }
                     return; // Success, exit the function.
 
                 } catch (retryError: any) {
@@ -1284,9 +1314,9 @@ export class CapabilitiesManager extends BaseEntity {
         const source_component = "CapabilitiesManager.handleUnknownVerb";
         try {
             const context = ` ${step.description || ''} with inputs ${MapSerializer.transformForSerialization(step.inputValues)}`;
-            const goal = `Determine the best way to complete the step \"${step.actionVerb}\"  with the following context: ${context} by defining a plan, generating an answer from the inputs, or recommending a new plugin for handling the actionVerb. Respond with a plan, a plugin request, or a literal result. Avoid using the actionVerbs ${step.actionVerb} and ACCOMPLISH in the plan.`;
+            const goal = `Determine the best way to complete the step \"${step.actionVerb}\"  with the following context: ${context} by defining a plan, generating an answer from the inputs, or recommending a new plugin for handling the actionVerb. Respond with a plan, a plugin request, or a literal result. Do not use the actionVerb ${step.actionVerb}. Use THINK to use an LLM.`;
 
-            const accomplishResultArray = await this.executeAccomplishPlugin(goal, step.actionVerb, trace_id);
+            const accomplishResultArray = await this.executeAccomplishPlugin(goal, trace_id);
             console.log(`[handleUnknownVerb] plugin result:`, accomplishResultArray);
             if (!accomplishResultArray[0].success) {
                 return accomplishResultArray;
@@ -1375,8 +1405,7 @@ export class CapabilitiesManager extends BaseEntity {
         }
     }
 
-    private async executeAccomplishPlugin(goal: string, verbToAvoid: string, trace_id: string): Promise<PluginOutput[]> {
-        console.log('In executeAccomplishPlugin');
+    private async executeAccomplishPlugin(goal: string, trace_id: string): Promise<PluginOutput[]> {
         const source_component = "CapabilitiesManager.executeAccomplishPlugin";
         let availablePluginsStr = ""; // Initialize
         try {
@@ -1386,7 +1415,6 @@ export class CapabilitiesManager extends BaseEntity {
 
             const accomplishInputs : Map<string, InputValue> = new Map([
                 ['goal', { inputName: 'goal', value: goal, valueType: PluginParameterType.STRING, args: {} }],
-                ['verbToAvoid', { inputName: 'verbToAvoid', value: verbToAvoid, valueType: PluginParameterType.STRING, args: {} }],
                 ['available_plugins', { inputName: 'available_plugins', value: availablePluginsStr, valueType: PluginParameterType.STRING, args: {} }]
             ]);
 

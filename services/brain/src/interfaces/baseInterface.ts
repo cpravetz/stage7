@@ -46,29 +46,39 @@ export abstract class BaseInterface {
         }
 
         let cleanedResponse = response.trim();
-        
+
+        // First, try to parse the original response as-is
+        try {
+            const parsed = JSON.parse(cleanedResponse);
+            console.log('[baseInterface] Response is valid JSON after cleaning.');
+            return JSON.stringify(parsed, null, 2);
+        } catch (e) {
+            // Only if parsing fails, try basic cleaning
+            console.log('[baseInterface] Initial JSON parse failed, attempting basic cleaning...');
+        }
+
         // Remove markdown code blocks
         cleanedResponse = cleanedResponse.replace(/^```(?:json)?\s*\n?/gm, '').replace(/\n?```\s*$/gm, '');
-        
+
         // Remove comments
         cleanedResponse = cleanedResponse.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
-        
+
         // Basic JSON fixes
         cleanedResponse = cleanedResponse.replace(/,(\s*[}\]])/g, '$1'); // trailing commas
         cleanedResponse = cleanedResponse.replace(/([{,]\s*)(\w+)(\s*:)/g, '$1"$2"$3'); // unquoted keys
-        
+
         try {
             const parsed = JSON.parse(cleanedResponse);
-            console.debug('[baseInterface] Response is valid JSON after cleaning.');
+            console.log('[baseInterface] Response is valid JSON after cleaning.');
             return JSON.stringify(parsed, null, 2);
         } catch (e) {
             if (!allowPartialRecovery) {
                 const errorMessage = e instanceof Error ? e.message : String(e);
-                console.log(`[baseInterface]JSON parse failed: ${errorMessage}`);
+                console.log(`[baseInterface] JSON parse failed: ${errorMessage}`);
                 console.log('[baseInterface] malformed JSON:', cleanedResponse);
                 throw new Error(`JSON_PARSE_ERROR: ${errorMessage}`);
             }
-            
+
             // Only attempt recovery if explicitly requested
             return this.attemptJsonRecovery(cleanedResponse);
         }

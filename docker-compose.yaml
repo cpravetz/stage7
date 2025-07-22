@@ -168,6 +168,8 @@ services:
         condition: service_healthy
       securitymanager:
         condition: service_started
+    env_file:
+      - .env
     environment:
       NODE_ENV: production
       PORT: &engineerPort 5050
@@ -210,6 +212,8 @@ services:
         condition: service_healthy
       securitymanager:
         condition: service_started
+    env_file:
+      - .env
     environment:
       NODE_ENV: production
       PORT: &capabilitiesmanagerPort 5060

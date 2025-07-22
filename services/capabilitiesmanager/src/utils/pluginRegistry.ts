@@ -4,6 +4,7 @@ import os from 'os';
 import { promisify } from 'util';
 import { exec } from 'child_process';
 import fs from 'fs/promises';
+import * as fsSync from 'fs';
 import { PluginMarketplace } from '@cktmcs/marketplace';
 
 const execAsync = promisify(exec);
@@ -111,8 +112,34 @@ export class PluginRegistry {
             return { pluginRootPath, effectiveManifest: manifest };
         } else {
             // Handle 'inline' plugins or plugins without packageSource (legacy)
-            // Inline plugins are expected to be in `services/capabilitiesmanager/src/plugins/{verb}`
-            const pluginRootPath = path.join(this.currentDir, 'plugins', manifest.verb);
+            // First try to find the plugin directory by verb name
+            let pluginRootPath = path.join(this.currentDir, 'plugins', manifest.verb);
+
+            // If the verb-named directory doesn't exist, scan for the correct directory
+            if (!fsSync.existsSync(pluginRootPath)) {
+                const pluginsDir = path.join(this.currentDir, 'plugins');
+                try {
+                    const dirs = fsSync.readdirSync(pluginsDir);
+                    for (const dir of dirs) {
+                        const manifestPath = path.join(pluginsDir, dir, 'manifest.json');
+                        if (fsSync.existsSync(manifestPath)) {
+                            try {
+                                const dirManifest = JSON.parse(fsSync.readFileSync(manifestPath, 'utf-8'));
+                                if (dirManifest.verb === manifest.verb || dirManifest.id === manifest.id) {
+                                    pluginRootPath = path.join(pluginsDir, dir);
+                                    break;
+                                }
+                            } catch (e) {
+                                // Skip invalid manifest files
+                                continue;
+                            }
+                        }
+                    }
+                } catch (e) {
+                    // If scanning fails, fall back to the original path
+                }
+            }
+
             console.log(`Using inline plugin path for ${manifest.id} (${manifest.verb}): ${pluginRootPath}`);
             return { pluginRootPath, effectiveManifest: manifest };
         }

@@ -479,22 +479,8 @@ export class AgentSet extends BaseEntity {
                 if (agentId) {
                     res.status(200).send({ agentId });
                 } else {
-                    // If no agent with the role exists, create a new one with the specified role
-                    const newAgentId = uuidv4();
-                    const newAgentConfig = {
-                        agentId: newAgentId,
-                        actionVerb: 'ACCOMPLISH',
-                        inputs: { goal: { inputValue: `Act as a ${roleId} agent`, inputName: 'goal', args: {} } },
-                        missionId: missionId || 'system',
-                        roleId: roleId
-                    };
-
-                    // Create the new agent asynchronously
-                    this.addAgentWithConfig(newAgentConfig)
-                        .then(() => console.log(`Created new agent ${newAgentId} with role ${roleId}`))
-                        .catch(err => console.error(`Failed to create new agent with role ${roleId}:`, err));
-
-                    res.status(200).send({ agentId: newAgentId, newlyCreated: true });
+                    // No agent with the role exists - return null to let current agent handle the task
+                    res.status(200).send({ agentId: null });
                 }
             } catch (error) {
                 analyzeError(error as Error);

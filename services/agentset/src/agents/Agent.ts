@@ -113,6 +113,12 @@ export class Agent extends BaseEntity {
                this.status !== AgentStatus.ERROR &&
                this.status !== AgentStatus.ABORTED) {
             await this.runAgent();
+
+            // Add a small delay to prevent tight loops when agent is waiting
+            if (this.status === AgentStatus.RUNNING &&
+                !this.steps.some(step => step.status === StepStatus.PENDING || step.status === StepStatus.RUNNING)) {
+                await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds before checking again
+            }
         }
         return this.status;
     }
@@ -216,8 +222,8 @@ Please consider this context and the available plugins when planning and executi
                                 // Continue to the next step
                                 continue;
                             }
-                            // If delegation failed, execute the step anyway
-                            console.log(`Delegation failed, executing step with current agent`);
+                            // Delegation not available, executing step with current agent (preferred behavior)
+                            console.log(`No specialized agent available, executing step with current agent`);
                         }
 
                         this.say(`Executing step: ${step.actionVerb} - ${step.description || 'No description'}`);
@@ -513,6 +519,8 @@ Please consider this context and the available plugins when planning and executi
 
             const outputType = step.getOutputType(this.steps);
             const type = outputType === OutputType.FINAL ? 'Final' : outputType === OutputType.PLAN ? 'Plan' : 'Interim';
+            console.log(`Agent ${this.id}: Step ${stepId} outputType=${outputType}, type=${type}, step.result=${JSON.stringify(step.result?.map(r => ({name: r.name, resultType: r.resultType})))}`);
+            console.log(`Agent ${this.id}: PluginParameterType.PLAN=${PluginParameterType.PLAN}, OutputType.PLAN=${OutputType.PLAN}`);
 
             let scope: string;
             if (this.steps.length === 1 || (isAgentEndpoint && outputType === OutputType.FINAL)) {

@@ -165,6 +165,7 @@ export class PostOffice extends BaseEntity {
         this.app.get('/requestComponent', (req, res) => this.requestComponent(req, res));
         this.app.get('/getServices', (req, res) => this.getServices(req, res));
         this.app.post('/submitUserInput', (req, res) => this.submitUserInput(req, res));
+        this.app.post('/sendUserInputRequest', (req, res) => this.sendUserInputRequest(req, res));
         this.app.post('/createMission', (req, res) => this.createMission(req, res));
         this.app.post('/loadMission', (req, res) => this.loadMission(req, res));
         this.app.get('/librarian/retrieve/:id', (req, res) => this.retrieveWorkProduct(req, res));

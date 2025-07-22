@@ -46,9 +46,9 @@ class ScrapePlugin:
         """Get authentication token from SecurityManager"""
         try:
             response = requests.post(
-                f"http://{self.security_manager_url}/generateToken",
+                f"http://{self.security_manager_url}/auth/service",
                 json={
-                    "clientId": "SCRAPE_Plugin",
+                    "componentType": "CapabilitiesManager",
                     "clientSecret": self.client_secret
                 },
                 timeout=10
