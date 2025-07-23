@@ -253,6 +253,72 @@ export const validatePlanStructure = async (planData: any[], pluginRegistry: Plu
             }
         }
 
+        // Validate IF_THEN structure
+        if (step.actionVerb === 'IF_THEN') {
+            const inputs = step.inputs || {};
+            if (!inputs.condition) {
+                return {
+                    success: false,
+                    error: `Step ${stepNumber} IF_THEN missing required 'condition' input`,
+                    errorType: "missing_if_then_condition",
+                    stepNumber
+                };
+            }
+
+            // Validate trueSteps and falseSteps are arrays if present
+            if (inputs.trueSteps && !Array.isArray(inputs.trueSteps.value)) {
+                return {
+                    success: false,
+                    error: `Step ${stepNumber} IF_THEN 'trueSteps' must be an array`,
+                    errorType: "invalid_if_then_structure",
+                    stepNumber
+                };
+            }
+
+            if (inputs.falseSteps && !Array.isArray(inputs.falseSteps.value)) {
+                return {
+                    success: false,
+                    error: `Step ${stepNumber} IF_THEN 'falseSteps' must be an array`,
+                    errorType: "invalid_if_then_structure",
+                    stepNumber
+                };
+            }
+        }
+
+        // Validate FILE_OPERATION structure
+        if (step.actionVerb === 'FILE_OPERATION') {
+            const inputs = step.inputs || {};
+            if (!inputs.operation) {
+                return {
+                    success: false,
+                    error: `Step ${stepNumber} FILE_OPERATION missing required 'operation' input`,
+                    errorType: "missing_file_operation",
+                    stepNumber
+                };
+            }
+
+            const operation = inputs.operation.value;
+            if (operation === 'write' || operation === 'append') {
+                if (!inputs.content && !inputs.fileId) {
+                    return {
+                        success: false,
+                        error: `Step ${stepNumber} FILE_OPERATION ${operation} requires 'content' input`,
+                        errorType: "missing_file_content",
+                        stepNumber
+                    };
+                }
+            } else if (operation === 'read') {
+                if (!inputs.fileId) {
+                    return {
+                        success: false,
+                        error: `Step ${stepNumber} FILE_OPERATION read requires 'fileId' input`,
+                        errorType: "missing_file_id",
+                        stepNumber
+                    };
+                }
+            }
+        }
+
         // Validate dependencies reference previous steps only
         if (step.dependencies && typeof step.dependencies === 'object') {
             for (const [outputName, depStep] of Object.entries(step.dependencies)) {

@@ -115,6 +115,10 @@ class GetUserInputPlugin:
                     "error": "No question provided to ASK_USER_QUESTION plugin"
                 }]
 
+            # Add condition: if question includes 'upload', set answerType to 'File'
+            if 'upload' in question.lower():
+                answer_type = 'file'
+
             # Prepare request data
             request_data = {
                 "question": question,

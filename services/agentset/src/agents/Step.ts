@@ -49,6 +49,9 @@ export class Step {
     timeout?: number;
     recommendedRole?: string;
     awaitsSignal: string;
+    retryCount: number;
+    maxRetries: number;
+    lastError: any | null;
     private tempData: Map<string, any> = new Map();
     private persistenceManager: AgentPersistenceManager;
 
@@ -62,7 +65,8 @@ export class Step {
         dependencies?: StepDependency[],
         status?: StepStatus,
         recommendedRole?: string,
-        persistenceManager: AgentPersistenceManager
+        persistenceManager: AgentPersistenceManager,
+        maxRetries?: number
     }) {
         this.id = params.id || uuidv4();
         this.stepNo = params.stepNo;
@@ -74,6 +78,9 @@ export class Step {
         this.status = params.status || StepStatus.PENDING;
         this.recommendedRole = params.recommendedRole;
         this.persistenceManager = params.persistenceManager;
+        this.retryCount = 0;
+        this.maxRetries = params.maxRetries || 3;
+        this.lastError = null;
         
         // Validate recommendedRole
         if (this.recommendedRole && !/^[a-zA-Z0-9_-]+$/.test(this.recommendedRole)) {
@@ -929,10 +936,23 @@ export class Step {
                         }
                     }
 
+                    // If dependencyInputName is not found in inputReferences, add it
+                    if (!dependencyInputName) {
+                        dependencyInputName = dependencyOutputName;
+                        // Add a new InputReference for this missing dependency
+                        inputReferences.set(dependencyInputName, {
+                            inputName: dependencyInputName,
+                            outputName: dependencyOutputName,
+                            value: undefined,
+                            valueType: PluginParameterType.ANY,
+                            args: undefined
+                        });
+                    }
+
                     dependencies.push({
                         outputName: dependencyOutputName,
                         sourceStepId,
-                        inputName: dependencyInputName || dependencyOutputName // Fallback to outputName if no explicit mapping found
+                        inputName: dependencyInputName // Now guaranteed to be in inputReferences
                     });
                 });
             }

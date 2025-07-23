@@ -155,7 +155,7 @@ export function createAuthenticatedAxios(
       'Content-Type': 'application/json',
       'Access-Control-Allow-Origin': '*',
     },
-    timeout: 30000, // 30 second timeout
+    timeout: 60000, // 60 second timeout
   });
 
   // Add request interceptor for authentication
@@ -410,7 +410,7 @@ export function createClientAuthenticatedAxios(
     enableRetry = true,
     maxRetries = MAX_RETRIES,
     headers = {},
-    timeout = 30000
+    timeout = 60000
   } = options;
 
   // Set log level for this instance

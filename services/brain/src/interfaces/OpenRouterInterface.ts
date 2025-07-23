@@ -76,8 +76,22 @@ export class OpenRouterInterface extends BaseInterface {
         if (!service) {
             throw new Error('OpenRouterInterface: No service provided for text-to-code conversion');
         }
+
+        // Check if this is a JSON request based on prompt content
+        const isJsonRequest = prompt && (
+            prompt.includes('JSON') ||
+            prompt.includes('json') ||
+            prompt.includes('{"type":') ||
+            prompt.includes('must start with {') ||
+            prompt.includes('return a JSON object')
+        );
+
+        const systemMessage = isJsonRequest
+            ? 'You are a JSON generation assistant. You must respond with valid JSON only. No explanations, no markdown, no code blocks - just pure JSON starting with { and ending with }.'
+            : 'You are a code generation assistant. Provide only code without explanations.';
+
         const messages: ExchangeType = [
-            { role: 'system', content: 'You are a code generation assistant. Provide only code without explanations.' },
+            { role: 'system', content: systemMessage },
             { role: 'user', content: prompt || '' }
         ];
         return this.chat(service, messages, { modelName });

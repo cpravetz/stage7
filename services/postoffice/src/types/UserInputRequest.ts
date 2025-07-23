@@ -15,7 +15,7 @@ export interface UserInputRequest {
     /**
      * The type of answer expected from the user.
      */
-    answerType: 'text' | 'number' | 'boolean' | 'multipleChoice';
+    answerType: 'text' | 'number' | 'boolean' | 'multipleChoice' | 'file';
 }
 
 /**
@@ -29,6 +29,7 @@ export interface UserInputResponse {
 
     /**
      * The user's response. The type depends on the answerType of the request.
+     * For 'file' answerType, this will be the file ID string.
      */
     response: string | number | boolean;
 }

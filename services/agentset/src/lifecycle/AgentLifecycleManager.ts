@@ -539,11 +539,20 @@ export class AgentLifecycleManager {
           if (agent.getStatus() === AgentStatus.ERROR) {
             console.warn(`Attempting to recover agent ${agentId} from error state`);
 
-            // Try to restore to last known good state
-            const versions = this.agentVersions.get(agentId) || [];
-            if (versions.length > 1) {
-              const previousVersion = versions[versions.length - 2].version;
-              await this.restoreVersion(agentId, previousVersion);
+            // First try to resume the agent in its current state (for transient errors like timeouts)
+            try {
+              console.log(`Attempting to resume agent ${agentId} in current state`);
+              await this.resumeAgent(agentId);
+              console.log(`Successfully resumed agent ${agentId}`);
+            } catch (resumeError) {
+              console.warn(`Failed to resume agent ${agentId}, attempting version restore:`, resumeError);
+
+              // If resume fails, try to restore to last known good state
+              const versions = this.agentVersions.get(agentId) || [];
+              if (versions.length > 1) {
+                const previousVersion = versions[versions.length - 2].version;
+                await this.restoreVersion(agentId, previousVersion);
+              }
             }
           }
         }

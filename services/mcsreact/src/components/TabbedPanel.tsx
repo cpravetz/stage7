@@ -7,6 +7,7 @@ import AttachFileIcon from '@mui/icons-material/AttachFile';
 import ConversationHistory from './ConversationHistory';
 import { AgentStatistics } from '../shared-browser';
 import { NetworkGraph } from './NetworkGraph';
+import { MissionFile } from '../context/WebSocketContext';
 import { SecurityClient } from '../SecurityClient';
 import FileUpload from './FileUpload';
 
@@ -19,6 +20,7 @@ interface WorkProduct {
 interface TabbedPanelProps {
   conversationHistory: string[];
   workProducts: WorkProduct[];
+  sharedFiles: MissionFile[];
   agentStatistics: Map<string, Array<AgentStatistics>>;
   activeMissionId?: string;
 }
@@ -26,6 +28,7 @@ interface TabbedPanelProps {
 export const TabbedPanel: React.FC<TabbedPanelProps> = ({
   conversationHistory,
   workProducts,
+  sharedFiles,
   agentStatistics,
   activeMissionId
 }) => {
@@ -151,6 +154,7 @@ export const TabbedPanel: React.FC<TabbedPanelProps> = ({
           {activeMissionId ? (
             <FileUpload
               missionId={activeMissionId}
+              sharedFiles={sharedFiles}
               onFilesChanged={() => { /* handle file changes, e.g., reload files list */ }}
               // Pass lifted dialog state and setters as props
               descriptionDialog={descriptionDialog}

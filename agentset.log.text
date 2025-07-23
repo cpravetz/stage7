@@ -1,0 +1,128 @@
+2025-07-23 13:05:17.879 | RSA private key for plugin signing not found (this is normal for most services)
+2025-07-23 13:05:17.911 | Loaded RSA public key for plugin verification
+2025-07-23 13:05:18.084 | Attempting to connect to RabbitMQ (attempt 1/20)...
+2025-07-23 13:05:18.085 | Using RabbitMQ URL: amqp://stage7:stage7password@rabbitmq:5672
+2025-07-23 13:05:18.085 | Attempting to connect to RabbitMQ host: rabbitmq
+2025-07-23 13:05:18.086 | Connecting to RabbitMQ at amqp://stage7:stage7password@rabbitmq:5672
+2025-07-23 13:05:18.105 | Attempting to register with Consul (attempt 1/10)...
+2025-07-23 13:05:18.105 | Using Consul URL: consul:8500
+2025-07-23 13:05:18.353 | Initialized 6 predefined roles: coordinator, researcher, creative, critic, executor, domain_expert
+2025-07-23 13:05:18.497 | AgentSet initialized with fixed ID: primary-agentset
+2025-07-23 13:05:18.551 | AgentSet application running on agentset:5100
+2025-07-23 13:05:18.551 | [shouldBypassAuth] Bypassing auth for auth path: /v1/agent/service/register (matched /register)
+2025-07-23 13:05:19.213 | [shouldBypassAuth] Bypassing auth for auth path: /registerComponent (matched /register)
+2025-07-23 13:05:19.326 | Service primary-agentset registered with Consul
+2025-07-23 13:05:19.326 | Successfully registered AgentSet with Consul
+2025-07-23 13:05:19.351 | AgentSet registered successfully with PostOffice
+2025-07-23 13:05:19.690 | No valid specializations array found in document
+2025-07-23 13:05:19.825 | No knowledge domains found in storage
+2025-07-23 13:05:19.880 | No domain knowledge found in storage
+2025-07-23 13:05:32.508 | Connected to RabbitMQ
+2025-07-23 13:05:32.517 | Channel created successfully
+2025-07-23 13:05:32.517 | RabbitMQ channel ready
+2025-07-23 13:05:32.581 | Connection test successful - RabbitMQ connection is stable
+2025-07-23 13:05:32.581 | Creating queue: agentset-primary-agentset
+2025-07-23 13:05:32.595 | Binding queue to exchange: stage7
+2025-07-23 13:05:32.617 | Successfully connected to RabbitMQ and set up queues/bindings
+2025-07-23 13:09:14.260 | Created ServiceTokenManager for AgentSet
+2025-07-23 13:09:14.318 | Adding agent with req.body {
+2025-07-23 13:09:14.318 |   agentId: '1a08b4f4-f621-4169-9f59-33ae91125e5f',
+2025-07-23 13:09:14.318 |   actionVerb: 'ACCOMPLISH',
+2025-07-23 13:09:14.318 |   inputs: { _type: 'Map', entries: [ [Array] ] },
+2025-07-23 13:09:14.318 |   missionId: 'a24838a6-1645-46cf-b1cc-0c513256c7e8',
+2025-07-23 13:09:14.318 |   missionContext: ''
+2025-07-23 13:09:14.318 | }
+2025-07-23 13:09:14.323 | Adding agent with inputs { _type: 'Map', entries: [ [ 'goal', [Object] ] ] }
+2025-07-23 13:09:14.326 | addAgent provided inputs: { _type: 'Map', entries: [ [ 'goal', [Object] ] ] }
+2025-07-23 13:09:14.326 | addAgent inputsMap: Map(1) {
+2025-07-23 13:09:14.326 |   'goal' => {
+2025-07-23 13:09:14.326 |     inputName: 'goal',
+2025-07-23 13:09:14.326 |     value: 'Find me a job. Use my resume and my linkedin profile www.linkedin.com/in/chrispravetz to figure out what sort of jobs I should pursue and make a plan to find those jobs, both published and unpublished. You can find my professional interests on my blog at www.pravetz.net Create a list of people or organizations I should contact and provide draft messages for each. Create lists of posted jobs I should apply to and create cover letters and customized resumes for each. Figure out a way to continue to monitor the internet for future job posts that match the target jobs.\n',
+2025-07-23 13:09:14.326 |     valueType: 'string',
+2025-07-23 13:09:14.326 |     args: {}
+2025-07-23 13:09:14.326 |   }
+2025-07-23 13:09:14.326 | }
+2025-07-23 13:09:14.335 | Attempting to connect to RabbitMQ (attempt 1/20)...
+2025-07-23 13:09:14.335 | Using RabbitMQ URL: amqp://stage7:stage7password@rabbitmq:5672
+2025-07-23 13:09:14.335 | Attempting to connect to RabbitMQ host: rabbitmq
+2025-07-23 13:09:14.336 | Connecting to RabbitMQ at amqp://stage7:stage7password@rabbitmq:5672
+2025-07-23 13:09:14.340 | Attempting to register with Consul (attempt 1/10)...
+2025-07-23 13:09:14.340 | Using Consul URL: consul:8500
+2025-07-23 13:09:14.365 | Agent 1a08b4f4-f621-4169-9f59-33ae91125e5f created. missionId=a24838a6-1645-46cf-b1cc-0c513256c7e8. Inputs: {}
+2025-07-23 13:09:14.370 | Service CapabilitiesManager found via environment variable CAPABILITIESMANAGER_URL: capabilitiesmanager:5060
+2025-07-23 13:09:14.371 | Service TrafficManager found via environment variable TRAFFICMANAGER_URL: trafficmanager:5080
+2025-07-23 13:09:14.391 | [Agent 1a08b4f4-f621-4169-9f59-33ae91125e5f] Set up checkpointing every 15 minutes.
+2025-07-23 13:09:14.396 | [shouldBypassAuth] Bypassing auth for auth path: /v1/agent/service/register (matched /register)
+2025-07-23 13:09:14.474 | Service Brain discovered via service discovery: brain:5070
+2025-07-23 13:09:14.509 | Service Librarian discovered via service discovery: librarian:5040
+2025-07-23 13:09:14.533 | Service 1a08b4f4-f621-4169-9f59-33ae91125e5f registered with Consul
+2025-07-23 13:09:14.533 | Successfully registered AgentSet with Consul
+2025-07-23 13:09:14.542 | Event logged successfully: {"eventType":"step_created","stepId":"a3c59ff8-5d6e-4e0f-be53-b20b512d36f1","stepNo":1,"actionVerb":"ACCOMPLISH","inputValues":{"_type":"Map","entries":[["goal",{"inputName":"goal","value":"Find me a job. Use my resume and my linkedin profile www.linkedin.com/in/chrispravetz to figure out what sort of jobs I should pursue and make a plan to find those jobs, both published and unpublished. You can find my professional interests on my blog at www.pravetz.net Create a list of people or organizations I should contact and provide draft messages for each. Create lists of posted jobs I should apply to and create cover letters and customized resumes for each. Figure out a way to continue to monitor the internet for future job posts that match the target jobs.\n","valueType":"string","args":{}}]]},"inputReferences":{"_type":"Map","entries":[]},"dependencies":[],"status":"pending","description":"Initial mission step","timestamp":"2025-07-23T17:09:14.367Z"}
+2025-07-23 13:09:14.546 | Event logged successfully: {"eventType":"agent_created","agentId":"1a08b4f4-f621-4169-9f59-33ae91125e5f","missionId":"a24838a6-1645-46cf-b1cc-0c513256c7e8","inputValues":{"_type":"Map","entries":[["goal",{"inputName":"goal","value":"Find me a job. Use my resume and my linkedin profile www.linkedin.com/in/chrispravetz to figure out what sort of jobs I should pursue and make a plan to find those jobs, both published and unpublished. You can find my professional interests on my blog at www.pravetz.net Create a list of people or organizations I should contact and provide draft messages for each. Create lists of posted jobs I should apply to and create cover letters and customized resumes for each. Figure out a way to continue to monitor the internet for future job posts that match the target jobs.\n","valueType":"string","args":{}}]]},"status":"initializing","timestamp":"2025-07-23T17:09:14.368Z"}
+2025-07-23 13:09:14.576 | Saved 1 agent specializations
+2025-07-23 13:09:14.577 | Applied role Executor to agent 1a08b4f4-f621-4169-9f59-33ae91125e5f
+2025-07-23 13:09:14.577 | Assigned default role executor to agent 1a08b4f4-f621-4169-9f59-33ae91125e5f
+2025-07-23 13:09:14.587 | Connected to RabbitMQ
+2025-07-23 13:09:14.611 | Channel created successfully
+2025-07-23 13:09:14.612 | RabbitMQ channel ready
+2025-07-23 13:09:14.689 | [shouldBypassAuth] Bypassing auth for auth path: /registerComponent (matched /register)
+2025-07-23 13:09:14.691 | Connection test successful - RabbitMQ connection is stable
+2025-07-23 13:09:14.691 | Creating queue: agentset-1a08b4f4-f621-4169-9f59-33ae91125e5f
+2025-07-23 13:09:14.715 | Binding queue to exchange: stage7
+2025-07-23 13:09:14.742 | AgentSet registered successfully with PostOffice
+2025-07-23 13:09:14.760 | Successfully connected to RabbitMQ and set up queues/bindings
+2025-07-23 13:09:14.775 | Service Engineer found via PostOffice: engineer:5050
+2025-07-23 13:09:14.798 | Service MissionControl found via PostOffice: missioncontrol:5030
+2025-07-23 13:09:14.799 | Service URLs: {
+2025-07-23 13:09:14.799 |   capabilitiesManagerUrl: 'capabilitiesmanager:5060',
+2025-07-23 13:09:14.799 |   brainUrl: 'brain:5070',
+2025-07-23 13:09:14.799 |   trafficManagerUrl: 'trafficmanager:5080',
+2025-07-23 13:09:14.799 |   librarianUrl: 'librarian:5040'
+2025-07-23 13:09:14.799 | }
+2025-07-23 13:09:14.799 | Agent 1a08b4f4-f621-4169-9f59-33ae91125e5f initialized successfully. Status: running. Commencing main execution loop.
+2025-07-23 13:09:14.800 | AgentSet 1a08b4f4-f621-4169-9f59-33ae91125e5f saying: Agent 1a08b4f4-f621-4169-9f59-33ae91125e5f initialized and commencing operations.
+2025-07-23 13:09:14.803 | AgentSet 1a08b4f4-f621-4169-9f59-33ae91125e5f sending message of type say to user
+2025-07-23 13:09:14.820 | Agent 1a08b4f4-f621-4169-9f59-33ae91125e5f notifying TrafficManager of status: running
+2025-07-23 13:09:14.820 | AgentSet 1a08b4f4-f621-4169-9f59-33ae91125e5f sending message of type agentUpdate to trafficmanager
+2025-07-23 13:09:14.828 | Successfully sent message to user via HTTP. Response status: 200
+2025-07-23 13:09:14.828 | Successfully sent message to PostOffice: Agent 1a08b4f4-f621-4169-9f59-33ae91125e5f initialized and commencing operations.
+2025-07-23 13:09:14.846 | Successfully sent message to trafficmanager via HTTP. Response status: 200
+2025-07-23 13:09:16.270 | AgentSet received update from agent 1a08b4f4-f621-4169-9f59-33ae91125e5f with status running
+2025-07-23 13:09:16.310 | Successfully notified AgentSet at agentset:5100
+2025-07-23 13:09:16.310 | Executing step ACCOMPLISH (a3c59ff8-5d6e-4e0f-be53-b20b512d36f1)...
+2025-07-23 13:09:16.310 | AgentSet 1a08b4f4-f621-4169-9f59-33ae91125e5f saying: Executing step: ACCOMPLISH - Initial mission step
+2025-07-23 13:09:16.312 | AgentSet 1a08b4f4-f621-4169-9f59-33ae91125e5f sending message of type say to user
+2025-07-23 13:09:16.323 | Successfully sent message to user via HTTP. Response status: 200
+2025-07-23 13:09:16.323 | Successfully sent message to PostOffice: Executing step: ACCOMPLISH - Initial mission step
+2025-07-23 13:09:49.695 | [AuthenticatedAxios] Request lidptix0nq: Failed after 33371ms: {
+2025-07-23 13:09:49.695 |   status: undefined,
+2025-07-23 13:09:49.695 |   statusText: undefined,
+2025-07-23 13:09:49.695 |   data: undefined,
+2025-07-23 13:09:49.695 |   url: 'http://capabilitiesmanager:5060/executeAction'
+2025-07-23 13:09:49.695 | }
+2025-07-23 13:10:25.741 | Error executing action with CapabilitiesManager: timeout of 30000ms exceeded
+2025-07-23 13:10:25.741 | Agent 1a08b4f4-f621-4169-9f59-33ae91125e5f notifying TrafficManager of status: error
+2025-07-23 13:10:25.741 | AgentSet 1a08b4f4-f621-4169-9f59-33ae91125e5f sending message of type agentUpdate to trafficmanager
+2025-07-23 13:10:25.835 | Successfully sent message to trafficmanager via HTTP. Response status: 200
+2025-07-23 13:10:25.851 | AgentSet received update from agent 1a08b4f4-f621-4169-9f59-33ae91125e5f with status error
+2025-07-23 13:10:25.970 | Successfully notified AgentSet at agentset:5100
+2025-07-23 13:10:26.016 | Starting cleanup for failed step a3c59ff8-5d6e-4e0f-be53-b20b512d36f1
+2025-07-23 13:10:26.107 | Completed cleanup for failed step a3c59ff8-5d6e-4e0f-be53-b20b512d36f1
+2025-07-23 13:10:26.155 | Event logged successfully: {"eventType":"step_result","stepId":"a3c59ff8-5d6e-4e0f-be53-b20b512d36f1","stepNo":1,"actionVerb":"ACCOMPLISH","status":"completed","result":[{"success":false,"name":"error","resultType":"error","resultDescription":"Error in executeActionWithCapabilitiesManager","result":null,"error":"timeout of 30000ms exceeded","mimeType":"text/plain"}],"dependencies":[],"timestamp":"2025-07-23T17:10:26.104Z"}
+2025-07-23 13:10:26.155 | Saving work product for agent a3c59ff8-5d6e-4e0f-be53-b20b512d36f1, step a3c59ff8-5d6e-4e0f-be53-b20b512d36f1
+2025-07-23 13:10:26.269 | Step ACCOMPLISH result: [
+2025-07-23 13:10:26.269 |   {
+2025-07-23 13:10:26.269 |     success: false,
+2025-07-23 13:10:26.269 |     name: 'error',
+2025-07-23 13:10:26.269 |     resultType: 'error',
+2025-07-23 13:10:26.269 |     resultDescription: 'Error in executeActionWithCapabilitiesManager',
+2025-07-23 13:10:26.269 |     result: null,
+2025-07-23 13:10:26.269 |     error: 'timeout of 30000ms exceeded',
+2025-07-23 13:10:26.269 |     mimeType: 'text/plain'
+2025-07-23 13:10:26.269 |   }
+2025-07-23 13:10:26.269 | ]
+2025-07-23 13:10:26.276 | AgentSet 1a08b4f4-f621-4169-9f59-33ae91125e5f saying: Completed step: ACCOMPLISH
+2025-07-23 13:10:26.276 | AgentSet 1a08b4f4-f621-4169-9f59-33ae91125e5f sending message of type say to user
+2025-07-23 13:10:26.276 | Agent 1a08b4f4-f621-4169-9f59-33ae91125e5f is not RUNNING, skipping checkAndResumeBlockedAgents.
+2025-07-23 13:10:26.284 | Successfully sent message to user via HTTP. Response status: 200
+2025-07-23 13:10:26.284 | Successfully sent message to PostOffice: Completed step: ACCOMPLISH

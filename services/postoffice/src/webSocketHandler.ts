@@ -214,6 +214,26 @@ export class WebSocketHandler {
   }
 
   /**
+   * Broadcast a message to all clients associated with a specific mission
+   * @param missionId Mission ID
+   * @param message Message to broadcast
+   */
+  broadcastToMissionClients(missionId: string, message: any): void {
+    console.log(`Broadcasting message of type ${message.type} to clients of mission ${missionId}`);
+    const clientIds = this.missionClients.get(missionId);
+
+    if (clientIds) {
+      clientIds.forEach(clientId => {
+        // The sendToClient method already handles queuing if the client is not connected
+        this.sendToClient(clientId, message);
+      });
+      console.log(`Broadcast to mission ${missionId} complete: sent to ${clientIds.size} clients.`);
+    } else {
+      console.log(`No clients found for mission ${missionId} to broadcast message.`);
+    }
+  }
+
+  /**
    * Broadcast a message to all connected clients
    * @param message Message to broadcast
    */
@@ -238,4 +258,3 @@ export class WebSocketHandler {
     console.log(`Broadcast complete: sent to ${sentCount} of ${this.clients.size} clients`);
   }
 }
-

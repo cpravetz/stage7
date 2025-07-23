@@ -174,6 +174,60 @@ def append_file(file_path: str, content: str) -> None:
         raise OSError(f"Failed to append to file {file_path}: {str(e)}")
 
 
+def handle_file_id_operation(file_id: str, operation_input: InputValue, postoffice_url_input: InputValue) -> List[PluginOutput]:
+    """
+    Handle file operations using file ID (MissionFile strategy)
+
+    Args:
+        file_id: The file ID to operate on
+        operation_input: The operation to perform
+        postoffice_url_input: PostOffice URL for API calls
+
+    Returns:
+        List of PluginOutput objects
+    """
+    if not operation_input:
+        return [create_error_output("error", "Missing required input: operation")]
+
+    operation = operation_input.value
+    if not isinstance(operation, str) or operation not in ['read', 'write', 'append']:
+        return [create_error_output("error", "Operation must be 'read', 'write', or 'append'")]
+
+    if not postoffice_url_input or not isinstance(postoffice_url_input.value, str) or not postoffice_url_input.value.strip():
+        return [create_error_output("error", "Missing or invalid postOffice_url input")]
+
+    postoffice_url = postoffice_url_input.value.strip()
+    operation = operation.lower().strip()
+
+    try:
+        if operation == 'read':
+            # Get file metadata from Librarian via PostOffice
+            response = requests.get(f"{postoffice_url}/librarian/retrieve/{file_id}")
+            response.raise_for_status()
+            file_metadata = response.json()
+
+            if not file_metadata or 'storagePath' not in file_metadata:
+                return [create_error_output("error", f"File metadata not found for file ID: {file_id}")]
+
+            storage_path = file_metadata['storagePath']
+
+            # Read the file content from storage path
+            if os.path.exists(storage_path):
+                with open(storage_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                return [create_success_output("result", content, "string", f"Read content from file ID: {file_id}")]
+            else:
+                return [create_error_output("error", f"File not found at storage path: {storage_path}")]
+
+        elif operation in ['write', 'append']:
+            return [create_error_output("error", f"Operation '{operation}' not supported for file ID operations. File ID operations are read-only.")]
+
+    except requests.RequestException as e:
+        return [create_error_output("error", f"API request failed: {str(e)}")]
+    except Exception as e:
+        return [create_error_output("error", f"File operation failed: {str(e)}")]
+
+
 def execute_plugin(inputs: Dict[str, InputValue]) -> List[PluginOutput]:
     """
     Main plugin execution function for FILE_OPS plugin
@@ -187,10 +241,15 @@ def execute_plugin(inputs: Dict[str, InputValue]) -> List[PluginOutput]:
     try:
         # Get required inputs
         path_input = inputs.get('path')
+        file_id_input = inputs.get('fileId')
         operation_input = inputs.get('operation')
         postoffice_url_input = inputs.get('postOffice_url')
         mission_id_input = inputs.get('missionId')
-        
+
+        # Check if fileId is provided (new MissionFile strategy)
+        if file_id_input and isinstance(file_id_input.value, str) and file_id_input.value.strip():
+            return handle_file_id_operation(file_id_input.value.strip(), operation_input, postoffice_url_input)
+
         # Use default shared folder if path is missing or empty
         if not path_input or not (isinstance(path_input.value, str) and path_input.value.strip()):
             file_path = DEFAULT_SHARED_FOLDER

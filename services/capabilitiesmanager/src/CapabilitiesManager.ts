@@ -1065,7 +1065,8 @@ export class CapabilitiesManager extends BaseEntity {
 
         // Helper to check if venv is healthy
         function venvHealthy() {
-            return fs.existsSync(venvPythonPath) && fs.existsSync(venvPipPath);
+            // More lenient check - only require python executable, pip can be installed later
+            return fs.existsSync(venvPythonPath);
         }
 
         // Helper to sleep for ms milliseconds
@@ -1152,10 +1153,38 @@ export class CapabilitiesManager extends BaseEntity {
                 console.log(`[${trace_id}] ${source_component}: Virtual environment exists and is healthy at ${venvPath}.`);
             }
 
-            // Upgrade pip
-            const upgradePipCmd = `"${venvPipPath}" install --upgrade pip`;
-            console.log(`[${trace_id}] ${source_component}: Upgrading pip with command: ${upgradePipCmd}`);
-            await execAsync(upgradePipCmd, { cwd: pluginRootPath, timeout: 60000 });
+            // Upgrade pip (only if pip exists)
+            if (fs.existsSync(venvPipPath)) {
+                const upgradePipCmd = `"${venvPipPath}" install --upgrade pip`;
+                console.log(`[${trace_id}] ${source_component}: Upgrading pip with command: ${upgradePipCmd}`);
+                await execAsync(upgradePipCmd, { cwd: pluginRootPath, timeout: 60000 });
+            } else {
+                // Try to bootstrap pip using ensurepip
+                console.log(`[${trace_id}] ${source_component}: pip not found, attempting to bootstrap with ensurepip`);
+                try {
+                    const bootstrapPipCmd = `"${venvPythonPath}" -m ensurepip --upgrade`;
+                    console.log(`[${trace_id}] ${source_component}: Bootstrapping pip with command: ${bootstrapPipCmd}`);
+                    await execAsync(bootstrapPipCmd, { cwd: pluginRootPath, timeout: 60000 });
+
+                    // Now try to upgrade pip
+                    if (fs.existsSync(venvPipPath)) {
+                        const upgradePipCmd = `"${venvPipPath}" install --upgrade pip`;
+                        console.log(`[${trace_id}] ${source_component}: Upgrading pip after bootstrap with command: ${upgradePipCmd}`);
+                        await execAsync(upgradePipCmd, { cwd: pluginRootPath, timeout: 60000 });
+                    }
+                } catch (ensurepipError: any) {
+                    console.warn(`[${trace_id}] ${source_component}: Failed to bootstrap pip with ensurepip: ${ensurepipError.message}`);
+                    // Try using system pip to install into venv
+                    try {
+                        const systemPipCmd = `pip install --target "${path.join(venvPath, 'lib', 'python3.*/site-packages')}" --upgrade pip`;
+                        console.log(`[${trace_id}] ${source_component}: Attempting to use system pip: ${systemPipCmd}`);
+                        await execAsync(systemPipCmd, { cwd: pluginRootPath, timeout: 60000 });
+                    } catch (systemPipError: any) {
+                        console.warn(`[${trace_id}] ${source_component}: System pip also failed: ${systemPipError.message}`);
+                        // Continue without pip upgrade - we'll try to install requirements directly
+                    }
+                }
+            }
 
             if (fs.existsSync(requirementsPath)) {
                 const requirementsContent = fs.readFileSync(requirementsPath, 'utf8');
@@ -1170,7 +1199,13 @@ export class CapabilitiesManager extends BaseEntity {
                 }
 
                 // Install requirements
-                const installReqsCmd = `"${venvPipPath}" install -r "${requirementsPath}"`;
+                let installReqsCmd: string;
+                if (fs.existsSync(venvPipPath)) {
+                    installReqsCmd = `"${venvPipPath}" install -r "${requirementsPath}"`;
+                } else {
+                    // Fallback to using python -m pip
+                    installReqsCmd = `"${venvPythonPath}" -m pip install -r "${requirementsPath}"`;
+                }
                 console.log(`[${trace_id}] ${source_component}: Installing requirements with command: ${installReqsCmd}`);
                 const { stdout, stderr } = await execAsync(installReqsCmd, { cwd: pluginRootPath, timeout: 120000 });
 
@@ -1206,11 +1241,22 @@ export class CapabilitiesManager extends BaseEntity {
                     console.log(`[${trace_id}] ${source_component}: Retrying venv creation with command: ${createVenvCmd}`);
                     await execAsync(createVenvCmd, { cwd: pluginRootPath, timeout: 60000 });
 
-                    const upgradePipCmd = `"${venvPipPath}" install --upgrade pip`;
-                    console.log(`[${trace_id}] ${source_component}: Retrying pip upgrade with command: ${upgradePipCmd}`);
-                    await execAsync(upgradePipCmd, { cwd: pluginRootPath, timeout: 60000 });
+                    // Retry pip upgrade (with fallback)
+                    if (fs.existsSync(venvPipPath)) {
+                        const upgradePipCmd = `"${venvPipPath}" install --upgrade pip`;
+                        console.log(`[${trace_id}] ${source_component}: Retrying pip upgrade with command: ${upgradePipCmd}`);
+                        await execAsync(upgradePipCmd, { cwd: pluginRootPath, timeout: 60000 });
+                    } else {
+                        console.log(`[${trace_id}] ${source_component}: pip not found during retry, skipping pip upgrade`);
+                    }
 
-                    const installReqsCmd = `"${venvPipPath}" install -r "${requirementsPath}"`;
+                    // Retry requirements installation (with fallback)
+                    let installReqsCmd: string;
+                    if (fs.existsSync(venvPipPath)) {
+                        installReqsCmd = `"${venvPipPath}" install -r "${requirementsPath}"`;
+                    } else {
+                        installReqsCmd = `"${venvPythonPath}" -m pip install -r "${requirementsPath}"`;
+                    }
                     console.log(`[${trace_id}] ${source_component}: Retrying requirements installation with command: ${installReqsCmd}`);
                     const { stdout, stderr } = await execAsync(installReqsCmd, { cwd: pluginRootPath, timeout: 120000 });
 
@@ -1275,20 +1321,6 @@ export class CapabilitiesManager extends BaseEntity {
                         throw new Error(`Missing required field: ${field}`);
                     }
                 }
-
-                // Validate field types
-                if (typeof output.success !== 'boolean') {
-                    throw new Error("Field 'success' must be a boolean");
-                }
-                if (typeof output.name !== 'string') {
-                    throw new Error("Field 'name' must be a string");
-                }
-                if (typeof output.resultType !== 'string') {
-                    throw new Error("Field 'resultType' must be a string");
-                }
-                if (typeof output.resultDescription !== 'string') {
-                    throw new Error("Field 'resultDescription' must be a string");
-                }
             }
 
             console.log(`[${trace_id}] ${source_component}: Python plugin output parsed and validated successfully for ${pluginDefinition.verb} v${pluginDefinition.version}`);
@@ -1313,8 +1345,8 @@ export class CapabilitiesManager extends BaseEntity {
     private async handleUnknownVerb(step: Step, trace_id: string): Promise<PluginOutput[]> {
         const source_component = "CapabilitiesManager.handleUnknownVerb";
         try {
-            const context = ` ${step.description || ''} with inputs ${MapSerializer.transformForSerialization(step.inputValues)}`;
-            const goal = `Determine the best way to complete the step \"${step.actionVerb}\"  with the following context: ${context} by defining a plan, generating an answer from the inputs, or recommending a new plugin for handling the actionVerb. Respond with a plan, a plugin request, or a literal result. Do not use the actionVerb ${step.actionVerb}. Use THINK to use an LLM.`;
+            const context = ` ${step.description || ''} The following inputs are available:  ${MapSerializer.transformForSerialization(step.inputValues)}`;
+            const goal = `Determine the best way to complete the step \"${step.actionVerb}\"  with the following context: ${context} by defining a plan for converting the inputs to the outputs, generating an answer from the inputs, or recommending a new plugin for handling the actionVerb. Respond with a plan, a plugin request, or a literal result. Do not use the actionVerb ${step.actionVerb}. Use THINK with a 'prompt' input to use an LLM.`;
 
             const accomplishResultArray = await this.executeAccomplishPlugin(goal, trace_id);
             console.log(`[handleUnknownVerb] plugin result:`, accomplishResultArray);

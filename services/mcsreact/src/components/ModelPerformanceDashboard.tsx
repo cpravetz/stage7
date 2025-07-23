@@ -491,9 +491,12 @@ const ModelPerformanceDashboard: React.FC = () => {
                       onChange={handleConversationTypeChange}
                     >
                       <MenuItem value={LLMConversationType.TextToText}>Text to Text</MenuItem>
+                      <MenuItem value={LLMConversationType.TextToCode}>Text to Code</MenuItem>
                       <MenuItem value={LLMConversationType.TextToImage}>Text to Image</MenuItem>
                       <MenuItem value={LLMConversationType.TextToAudio}>Text to Audio</MenuItem>
                       <MenuItem value={LLMConversationType.TextToVideo}>Text to Video</MenuItem>
+                      <MenuItem value={LLMConversationType.ImageToText}>Image to Text</MenuItem>
+                      <MenuItem value={LLMConversationType.AudioToText}>Audio to Text</MenuItem>
                     </Select>
                   </FormControl>
                 </Grid>

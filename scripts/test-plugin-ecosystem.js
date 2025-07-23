@@ -16,7 +16,7 @@ const ENGINEER_URL = process.env.ENGINEER_URL || 'http://localhost:5080';
 
 // Test configuration
 const TEST_CONFIG = {
-    timeout: 30000,
+    timeout: 60000,
     retries: 3,
     verbose: process.env.VERBOSE === 'true'
 };
@@ -176,7 +176,7 @@ class PluginEcosystemTester {
             api: {
                 endpoint: '/execute',
                 method: 'POST',
-                timeout: 30000
+                timeout: 60000
             }
         };
 

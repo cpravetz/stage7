@@ -144,180 +144,174 @@ export class Brain extends BaseEntity {
     }
 
     async generate(req: express.Request, res: express.Response) {
-        let selectedModel: any = null;
-        let trackingRequestId: string = '';
+        const maxRetries = 3;
+        const modelName = req.body.modelName;
+        const optimization = req.body.optimization;
+        const conversationType = req.body.conversationType;
+        const convertParams = req.body.convertParams;
 
-        try {
-            const modelName = req.body.modelName;
-            const optimization = req.body.optimization;
-            const conversationType = req.body.conversationType;
-            selectedModel = modelName ? this.modelManager.getModel(modelName) : this.modelManager.selectModel(optimization, conversationType);
+        let attempt = 0;
+        let lastError: string = '';
 
-            if (!selectedModel || !selectedModel.isAvailable() || !selectedModel.service) {
-                res.json({ response: 'No suitable model found.', mimeType: 'text/plain' });
-                console.log('No suitable model found.');
-            } else {
-                const convertParams = req.body.convertParams;
-                convertParams.max_length = convertParams.max_length ? Math.min(convertParams.max_length, selectedModel.tokenLimit) : selectedModel.tokenLimit;
+        while (attempt < maxRetries) {
+            attempt++;
+            let selectedModel: any = null;
+            let trackingRequestId: string = '';
+
+            try {
+                // Select model for this attempt
+                selectedModel = modelName && attempt === 1 ?
+                    this.modelManager.getModel(modelName) :
+                    this.modelManager.selectModel(optimization, conversationType);
+
+                if (!selectedModel || !selectedModel.isAvailable() || !selectedModel.service) {
+                    if (attempt === 1) {
+                        console.log(`[Brain Generate] No suitable model found on attempt ${attempt}`);
+                        lastError = 'No suitable model found';
+                        continue;
+                    } else {
+                        break; // No more models available
+                    }
+                }
+
+                // Prepare parameters for this model
+                const modelConvertParams = { ...convertParams };
+                modelConvertParams.max_length = modelConvertParams.max_length ?
+                    Math.min(modelConvertParams.max_length, selectedModel.tokenLimit) :
+                    selectedModel.tokenLimit;
 
                 // Track the model request
-                const prompt = JSON.stringify(convertParams);
+                const prompt = JSON.stringify(modelConvertParams);
                 trackingRequestId = this.modelManager.trackModelRequest(selectedModel.name, conversationType, prompt);
 
                 this.llmCalls++;
-                console.log(`[Brain Generate] Using model ${selectedModel.modelName}-${conversationType}`);
-                const result = await selectedModel.llminterface?.convert(selectedModel.service, conversationType, convertParams);
+                console.log(`[Brain Generate] Attempt ${attempt}: Using model ${selectedModel.modelName}-${conversationType}`);
+
+                const result = await selectedModel.llminterface?.convert(selectedModel.service, conversationType, modelConvertParams);
 
                 // Track successful response
                 this.modelManager.trackModelResponse(trackingRequestId, result || '', 0, true);
 
                 res.json({ response: result, mimeType: 'text/plain' });
-            }
-        } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            console.error(`[Brain Generate] Error: ${errorMessage}`);
+                return; // Success!
 
-            // Track failed response if we have a model and tracking ID
-            if (selectedModel && trackingRequestId) {
-                console.log(`[Brain Generate] Tracking failure for model ${selectedModel.name}`);
-                this.modelManager.trackModelResponse(trackingRequestId, '', 0, false, errorMessage);
-            }
+            } catch (error) {
+                const errorMessage = error instanceof Error ? error.message : String(error);
+                lastError = errorMessage;
+                console.error(`[Brain Generate] Attempt ${attempt} failed with model ${selectedModel?.modelName || 'unknown'}: ${errorMessage}`);
 
-            res.status(400).json({ error: 'Invalid request' });
+                // Track failed response
+                if (selectedModel && trackingRequestId) {
+                    console.log(`[Brain Generate] Tracking failure for model ${selectedModel.name}`);
+                    this.modelManager.trackModelResponse(trackingRequestId, '', 0, false, errorMessage);
+                }
+
+                // Continue to next attempt unless this was the last one
+                if (attempt < maxRetries) {
+                    console.log(`[Brain Generate] Attempting retry ${attempt + 1}/${maxRetries}`);
+                }
+            }
         }
+
+        // All attempts failed
+        console.error(`[Brain Generate] All ${maxRetries} attempts failed. Last error: ${lastError}`);
+        res.status(500).json({ error: `All model attempts failed. Last error: ${lastError}` });
     }
 
     async chat(req: express.Request, res: express.Response) {
         const requestId = uuidv4();
         console.log(`[Brain Chat] Request ${requestId} received`);
 
-        let selectedModel: any = null;
-        let trackingRequestId: string = '';
+        const maxRetries = 3;
+        const thread = this.createThreadFromRequest(req);
 
-        try {
-            const thread = this.createThreadFromRequest(req);
-            selectedModel = this.modelManager.selectModel(thread.optimization || 'accuracy', thread.conversationType || LLMConversationType.TextToText);
+        let attempt = 0;
+        let lastError: string = '';
 
-            if (!selectedModel || !selectedModel.isAvailable()) {
-                console.log(`[Brain Chat] No suitable model found for ${thread.optimization}/${thread.conversationType}`);
-                res.status(503).json({ error: 'No suitable model available' });
-                return;
+        while (attempt < maxRetries) {
+            attempt++;
+            let selectedModel: any = null;
+            let trackingRequestId: string = '';
+
+            try {
+                // Select model for this attempt
+                selectedModel = this.modelManager.selectModel(
+                    thread.optimization || 'accuracy',
+                    thread.conversationType || LLMConversationType.TextToText
+                );
+
+                if (!selectedModel || !selectedModel.isAvailable()) {
+                    lastError = `No suitable model found for ${thread.optimization}/${thread.conversationType}`;
+                    console.log(`[Brain Chat] Attempt ${attempt}: ${lastError}`);
+                    if (attempt === maxRetries) {
+                        break; // No more attempts, will return error
+                    }
+                    continue;
+                }
+
+                console.log(`[Brain Chat] Attempt ${attempt}: Using model ${selectedModel.modelName}`);
+
+                // Track the model request
+                const prompt = thread.exchanges.map((e: any) => e.content).join(' ');
+                trackingRequestId = this.modelManager.trackModelRequest(selectedModel.name, thread.conversationType || LLMConversationType.TextToText, prompt);
+
+                await this._chatWithModel(selectedModel, thread, res, trackingRequestId);
+                return; // Success!
+
+            } catch (error) {
+                const errorMessage = error instanceof Error ? error.message : String(error);
+                lastError = errorMessage;
+                console.error(`[Brain Chat] Attempt ${attempt} failed with model ${selectedModel?.modelName || 'unknown'}: ${errorMessage}`);
+
+                // Track failed response
+                if (selectedModel && trackingRequestId) {
+                    console.log(`[Brain Chat] Tracking failure for model ${selectedModel.name}`);
+                    this.modelManager.trackModelResponse(trackingRequestId, '', 0, false, errorMessage);
+                }
+
+                // Continue to next attempt unless this was the last one
+                if (attempt < maxRetries) {
+                    console.log(`[Brain Chat] Attempting retry ${attempt + 1}/${maxRetries}`);
+                }
             }
-
-            console.log(`[Brain Chat] Posting message Using model ${selectedModel.modelName}`);
-
-            // Track the model request
-            const prompt = thread.exchanges.map((e: any) => e.content).join(' ');
-            trackingRequestId = this.modelManager.trackModelRequest(selectedModel.name, thread.conversationType || LLMConversationType.TextToText, prompt);
-
-            await this._chatWithModel(selectedModel, thread, res, trackingRequestId);
-
-        } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            console.error(`[Brain Chat] Error: ${errorMessage}`);
-
-            // If we have a selected model and tracking ID, make sure to track the failure
-            // This ensures blacklisting works even if the error is caught at this level
-            if (selectedModel && trackingRequestId) {
-                console.log(`[Brain Chat] Tracking failure for model ${selectedModel.name}`);
-                this.modelManager.trackModelResponse(trackingRequestId, '', 0, false, errorMessage);
-            }
-
-            res.status(500).json({ error: errorMessage });
         }
+
+        // All attempts failed
+        console.error(`[Brain Chat] All ${maxRetries} attempts failed. Last error: ${lastError}`);
+        res.status(500).json({ error: `All model attempts failed. Last error: ${lastError}` });
     }
 
     private async _chatWithModel(selectedModel: any, thread: any, res: express.Response, requestId: string): Promise<void> {
-        try {
-            this.llmCalls++;
-            console.log(`[Brain Chat] Using model ${selectedModel.modelName} for request ${requestId}`);
-            const modelResponse = await selectedModel.llminterface.chat(
-                selectedModel.service,
-                thread.exchanges,
-                {
-                    max_length: thread.max_length || selectedModel.tokenLimit,
-                    temperature: thread.temperature || 0.7,
-                    modelName: selectedModel.modelName
-                }
-            );
+        this.llmCalls++;
+        console.log(`[Brain Chat] Using model ${selectedModel.modelName} for request ${requestId}`);
 
-            if (!modelResponse || modelResponse === 'No response generated' ||
-                (typeof modelResponse === 'string' && modelResponse.startsWith('Error:'))) {
-                throw new Error(modelResponse || 'Model returned empty response');
+        const modelResponse = await selectedModel.llminterface.chat(
+            selectedModel.service,
+            thread.exchanges,
+            {
+                max_length: thread.max_length || selectedModel.tokenLimit,
+                temperature: thread.temperature || 0.7,
+                modelName: selectedModel.modelName
             }
+        );
 
-            // Track successful response with token count if available
-            let tokenCount = 0;
-            if (typeof modelResponse === 'object' && modelResponse && 'usage' in modelResponse) {
-                tokenCount = (modelResponse as any).usage?.total_tokens || 0;
-            }
-            this.modelManager.trackModelResponse(requestId, typeof modelResponse === 'string' ? modelResponse : JSON.stringify(modelResponse), tokenCount, true, undefined, thread.isRetryAttempt || false);
-
-            res.json({
-                result: modelResponse,
-                model: selectedModel.modelName,
-                requestId: requestId
-            });
-
-        } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            console.error(`[Brain] Model ${selectedModel.modelName} failed: ${errorMessage}`);
-
-            // Check if this is a JSON parsing error that might be recoverable
-            const isJsonError = errorMessage.includes('JSON_PARSE_ERROR') ||
-                               errorMessage.includes('JSON_RECOVERY_FAILED') ||
-                               errorMessage.includes('JSON parse') ||
-                               errorMessage.includes('malformed JSON') ||
-                               errorMessage.includes('invalid JSON');
-
-            if (isJsonError && !thread.isRetryAttempt) {
-                console.log(`[Brain] JSON error detected, attempting retry with corrective prompt`);
-
-                // Add a corrective message to the thread
-                const correctedThread = {
-                    ...thread,
-                    isRetryAttempt: true,
-                    exchanges: [
-                        ...thread.exchanges,
-                        {
-                            role: 'user',
-                            content: 'The previous response had JSON formatting issues. Please provide a valid JSON response with proper syntax, no trailing commas, and properly escaped quotes.'
-                        }
-                    ]
-                };
-
-                // Track this as a retry attempt (don't count as failure yet)
-                console.log(`[Brain] Retrying with same model ${selectedModel.modelName} for JSON correction`);
-                const retryTrackingRequestId = this.modelManager.trackModelRequest(selectedModel.name, thread.conversationType || LLMConversationType.TextToText, 'JSON_RETRY');
-
-                try {
-                    return await this._chatWithModel(selectedModel, correctedThread, res, retryTrackingRequestId);
-                } catch (retryError) {
-                    console.log(`[Brain] JSON retry failed, proceeding to model fallback`);
-                    // Track the retry failure
-                    this.modelManager.trackModelResponse(retryTrackingRequestId, '', 0, false, retryError instanceof Error ? retryError.message : String(retryError), true);
-                }
-            }
-
-            // Track failed response - this will automatically blacklist the model if needed
-            this.modelManager.trackModelResponse(requestId, '', 0, false, errorMessage, false);
-
-            // Try fallback to next available model
-            const fallbackModel = this.modelManager.selectModel(
-                thread.optimization || 'accuracy',
-                thread.conversationType || LLMConversationType.TextToText
-            );
-
-            if (fallbackModel && fallbackModel.name !== selectedModel.name) {
-                console.log(`[Brain] Attempting fallback to model: ${fallbackModel.modelName}`);
-                // Track the fallback model request
-                const prompt = thread.exchanges.map((e: any) => e.content).join(' ');
-                const fallbackTrackingRequestId = this.modelManager.trackModelRequest(fallbackModel.name, thread.conversationType || LLMConversationType.TextToText, prompt);
-                return await this._chatWithModel(fallbackModel, thread, res, fallbackTrackingRequestId);
-            }
-
-            throw error; // Re-throw if no fallback available
+        if (!modelResponse || modelResponse === 'No response generated' ||
+            (typeof modelResponse === 'string' && modelResponse.startsWith('Error:'))) {
+            throw new Error(modelResponse || 'Model returned empty response');
         }
+
+        // Track successful response with token count if available
+        let tokenCount = 0;
+        if (typeof modelResponse === 'object' && modelResponse && 'usage' in modelResponse) {
+            tokenCount = (modelResponse as any).usage?.total_tokens || 0;
+        }
+        this.modelManager.trackModelResponse(requestId, typeof modelResponse === 'string' ? modelResponse : JSON.stringify(modelResponse), tokenCount, true);
+
+        res.json({
+            result: modelResponse,
+            model: selectedModel.modelName,
+            requestId: requestId
+        });
     }
 
     /**

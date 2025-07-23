@@ -120,6 +120,18 @@ export abstract class BaseInterface {
         repaired = repaired.replace(/```(?:json)?\s*\n?/g, '');
         repaired = repaired.replace(/```\s*$/g, '');
 
+        // Remove markdown headers and analysis sections that models often add
+        repaired = repaired.replace(/^###?\s+[A-Z][A-Z\s]*:?\s*\n/gm, '');
+        repaired = repaired.replace(/^#{1,6}\s+.*$/gm, '');
+
+        // Remove common markdown patterns that interfere with JSON
+        repaired = repaired.replace(/^\*\*[^*]+\*\*:?\s*/gm, '');
+        repaired = repaired.replace(/^-\s+\*\*[^*]+\*\*:?\s*/gm, '');
+        repaired = repaired.replace(/^[0-9]+\.\s+\*\*[^*]+\*\*:?\s*/gm, '');
+
+        // Remove "end of response" markers
+        repaired = repaired.replace(/###?\s*"?end of response"?\s*$/gmi, '');
+
         // Only remove prefixes/suffixes if they're clearly not part of JSON
         // Be more conservative to avoid removing valid content
         repaired = repaired.replace(/^[^{[]*?(?=[{[])/g, ''); // Remove text before first { or [ (non-greedy)

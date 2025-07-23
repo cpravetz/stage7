@@ -9,7 +9,13 @@ export class HFLlamaModel extends BaseModel {
                 accuracyScore: 100,
                 creativityScore: 80,
                 speedScore: 80
-            }]
+            }],
+            [LLMConversationType.TextToText, {
+                costScore: 100,
+                accuracyScore: 100,
+                creativityScore: 80,
+                speedScore: 80
+            }]        
         ]);
 
         super({
