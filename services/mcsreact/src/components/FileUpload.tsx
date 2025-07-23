@@ -42,7 +42,8 @@ interface MissionFile {
 
 interface FileUploadProps {
   missionId: string;
-  onFilesChanged?: () => void;
+  sharedFiles: MissionFile[];
+  onFilesChanged: () => void;
   // NEW PROPS FOR DIALOG STATE MANAGEMENT
   descriptionDialog: boolean;
   setDescriptionDialog: React.Dispatch<React.SetStateAction<boolean>>;
@@ -54,6 +55,7 @@ interface FileUploadProps {
 
 const FileUpload: React.FC<FileUploadProps> = ({
   missionId,
+  sharedFiles,
   onFilesChanged,
   // Destructure new props
   descriptionDialog,
@@ -63,7 +65,6 @@ const FileUpload: React.FC<FileUploadProps> = ({
   description,
   setDescription,
 }) => {
-  const [files, setFiles] = React.useState<MissionFile[]>([]);
   const [uploading, setUploading] = React.useState(false);
   const [uploadProgress, setUploadProgress] = React.useState(0);
   const [error, setError] = React.useState<string | null>(null);
@@ -74,35 +75,6 @@ const FileUpload: React.FC<FileUploadProps> = ({
   const { isAuthenticated, isInitializing } = useAuth();
   const securityClient = SecurityClient.getInstance(API_BASE_URL);
   const apiClient = securityClient.getApi();
-
-  const loadFiles = React.useCallback(async () => {
-    if (!isAuthenticated || isInitializing) {
-      console.log('[FileUpload] Skipping file load - not authenticated or still initializing');
-      return;
-    }
-
-    try {
-      console.log('[FileUpload] Loading files for mission:', missionId);
-      const response = await apiClient.get(`/missions/${missionId}/files`);
-      console.log('[FileUpload] Files loaded successfully:', response.data);
-      setFiles(response.data.files || []);
-    } catch (error) {
-      console.error('[FileUpload] Error loading files:', error);
-      if (axios.isAxiosError(error)) {
-        const status = error.response?.status;
-        const message = error.response?.data?.error || error.message;
-        setError(`Failed to load files (${status}): ${message}`);
-      } else {
-        setError('Failed to load files: Unknown error');
-      }
-    }
-  }, [missionId, apiClient, isAuthenticated, isInitializing]);
-
-  React.useEffect(() => {
-    if (missionId && isAuthenticated && !isInitializing) {
-      loadFiles();
-    }
-  }, [missionId, loadFiles, isAuthenticated, isInitializing]);
 
   const formatFileSize = (bytes: number): string => {
     if (bytes === 0) return '0 Bytes';
@@ -181,8 +153,7 @@ const handleCancelUpload = React.useCallback(() => {
 
       console.log('[FileUpload] Upload successful:', response.data);
       setSuccess(`Successfully uploaded ${response.data.uploadedFiles.length} file(s)`);
-      await loadFiles();
-      onFilesChanged?.();
+      onFilesChanged(); // Notify parent that the file list has changed
 
       setPendingFiles([]);
       setDescription('');
@@ -236,8 +207,7 @@ const handleCancelUpload = React.useCallback(() => {
     try {
       await apiClient.delete(`/missions/${missionId}/files/${file.id}`);
       setSuccess(`File "${file.originalName}" deleted successfully`);
-      await loadFiles();
-      onFilesChanged?.();
+      onFilesChanged(); // Notify parent that the file list has changed
     } catch (error) {
       console.error('Delete error:', error);
       setError('Failed to delete file');
@@ -341,16 +311,16 @@ const handleCancelUpload = React.useCallback(() => {
 
       {/* Files List */}
       <Typography variant="h6" gutterBottom>
-        Attached Files ({files.length})
+        Attached Files ({sharedFiles.length})
       </Typography>
       
-      {files.length === 0 ? (
+      {sharedFiles.length === 0 ? (
         <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 2 }}>
           No files attached to this mission
         </Typography>
       ) : (
         <List>
-          {files.map((file) => (
+          {sharedFiles.map((file) => (
             <ListItem key={file.id} divider>
               <FileIcon sx={{ mr: 2, color: 'text.secondary' }} />
               <ListItemText

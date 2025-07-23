@@ -103,7 +103,7 @@ export class AsyncLLM {
     exchanges: Array<{ role: string, content: string }>,
     optimization: string = 'accuracy',
     optionals: Record<string, any> = {},
-    timeoutMs: number = 30000
+    timeoutMs: number = 60000
   ): Promise<{ response: string, mimeType: string }> {
     // Make sure we're initialized
     if (!this.initialized) {

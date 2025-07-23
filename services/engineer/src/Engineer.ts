@@ -752,7 +752,7 @@ Context: ${contextString}`;
                 description: operation.summary || operation.description,
                 inputs,
                 outputs,
-                timeout: 30000 // Default 30 second timeout
+                timeout: 60000 // Default 60 second timeout
             };
 
         } catch (error) {

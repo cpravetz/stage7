@@ -40,6 +40,7 @@ const MainApp: React.FC = () => {
     activeMissionId,
     isPaused,
     workProducts,
+    sharedFiles,
     statistics,
     agentStatistics,
     sendMessage: contextSendMessage,
@@ -233,6 +234,9 @@ const MainApp: React.FC = () => {
               <TabbedPanel
                 conversationHistory={conversationHistory}
                 workProducts={workProducts}
+                // The new `sharedFiles` state from the context is passed down.
+                // This will be received by FileUpload to render the file list.
+                sharedFiles={sharedFiles}
                 agentStatistics={agentStatistics}
                 activeMissionId={activeMissionId || undefined}
               />
@@ -283,7 +287,9 @@ const MainApp: React.FC = () => {
             choices={pendingUserInput.choices}
             answerType={pendingUserInput.answerType as AnswerType}
             onSubmit={handleUserInputSubmit}
-            onClose={() => {if (setPendingUserInput) setPendingUserInput(null)}}
+            onClose={() => {
+              if (setPendingUserInput) setPendingUserInput(null);
+            }}
           />
         )}
       </Box>

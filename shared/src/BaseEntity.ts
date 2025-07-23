@@ -813,7 +813,7 @@ protected async cleanup() {
 
   private askPromises: Map<string, Promise<string>> = new Map();
 
-  ask(content: string, choices?: string[], answerType: string = 'text'): Promise<string> {
+  ask(content: string, answerType: string = 'text', choices?: string[]): Promise<string> {
     return new Promise(async (resolve) => {
       const questionGuid = uuidv4();
       this.questions.push(questionGuid);

@@ -1,5 +1,7 @@
 import React, { useState, useRef } from 'react';
 import './UserInputModal.css';
+import { SecurityClient } from '../SecurityClient';
+import { API_BASE_URL } from '../config';
 
 export type AnswerType = 'text' | 'number' | 'boolean' | 'multipleChoice' | 'file';
 
@@ -34,21 +36,16 @@ const UserInputModal: React.FC<UserInputModalProps> = ({ requestId, question, ch
                 formData.append('requestId', requestId);
                 formData.append('files', selectedFile);
 
-                // Get authentication token from localStorage
-                const token = localStorage.getItem('authToken');
-                const headers: HeadersInit = {};
-                if (token) {
-                    headers['Authorization'] = `Bearer ${token}`;
-                }
+                // Use SecurityClient's axios instance for authenticated request
+                const securityClient = SecurityClient.getInstance(API_BASE_URL);
+                const apiClient = securityClient.getApi();
 
                 // Submit file upload
-                const response = await fetch('http://localhost:5020/submitUserInput', {
-                    method: 'POST',
-                    headers,
-                    body: formData
+                const response = await apiClient.post('/submitUserInput', formData, {
+                    headers: { 'Content-Type': 'multipart/form-data' }
                 });
 
-                if (!response.ok) {
+                if (response.status !== 200) {
                     throw new Error('Failed to upload file');
                 }
 

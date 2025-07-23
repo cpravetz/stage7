@@ -6,6 +6,16 @@ import { SecurityClient } from '../SecurityClient';
 import { MapSerializer } from '../shared-browser';
 import { API_BASE_URL, WS_URL } from '../config';
 
+export interface MissionFile {
+  id: string;
+  originalName: string;
+  size: number;
+  mimeType: string;
+  uploadedAt: string;
+  uploadedBy: string;
+  description?: string;
+}
+
 // Define the context type
 interface WebSocketContextType {
   isConnected: boolean;
@@ -19,6 +29,7 @@ interface WebSocketContextType {
   activeMissionId: string | null;
   isPaused: boolean;
   workProducts: { type: 'Interim' | 'Final' | 'Plan', name: string, url: string }[];
+  sharedFiles: MissionFile[];
   agentDetails: any[];
   missionStatus: any;
   statistics: any;
@@ -50,6 +61,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [activeMissionId, setActiveMissionId] = useState<string | null>(null);
   const [isPaused, setIsPaused] = useState<boolean>(false);
   const [workProducts, setWorkProducts] = useState<{ type: 'Interim' | 'Final' | 'Plan', name: string, url: string }[]>([]);
+  const [sharedFiles, setSharedFiles] = useState<MissionFile[]>([]);
   const [agentDetails, setAgentDetails] = useState<any[]>([]);
   const [missionStatus, setMissionStatus] = useState<any>(null);
   const [statistics, setStatistics] = useState<any>({
@@ -60,13 +72,28 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   });
   const [agentStatistics, setAgentStatistics] = useState<Map<string, Array<any>>>(new Map());
 
-  // Add state for pending user input
+  // Add state for pending user input queue and current pending user input
+  const [pendingUserInputQueue, setPendingUserInputQueue] = useState<Array<{
+    request_id: string;
+    question: string;
+    answerType: string;
+    choices?: string[];
+  }>>([]);
   const [pendingUserInput, setPendingUserInput] = useState<{
     request_id: string;
     question: string;
     answerType: string;
     choices?: string[];
   } | null>(null);
+
+  // Add effect to dequeue next user input when current is cleared
+  React.useEffect(() => {
+    if (pendingUserInput === null && pendingUserInputQueue.length > 0) {
+      const [next, ...rest] = pendingUserInputQueue;
+      setPendingUserInput(next);
+      setPendingUserInputQueue(rest);
+    }
+  }, [pendingUserInput, pendingUserInputQueue]);
 
   const ws = useRef<WebSocket | null>(null);
   const reconnectAttempts = useRef<number>(0);
@@ -80,11 +107,24 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       WORK_PRODUCT_UPDATE: "workProductUpdate",
       STATISTICS: "agentStatistics",
       STATUS_UPDATE: "statusUpdate",
-      AGENT_UPDATE: "agentUpdate"
+      AGENT_UPDATE: "agentUpdate",
+      SHARED_FILES_UPDATE: "shared_files_update" // Event-driven update for file list
     };
 
     console.log('Processing WebSocket message:', data.type);
     console.log('Message content:', data);
+
+    const dequeueNextUserInput = () => {
+      setPendingUserInputQueue((queue) => {
+        if (queue.length === 0) {
+          setPendingUserInput(null);
+          return [];
+        }
+        const [next, ...rest] = queue;
+        setPendingUserInput(next);
+        return rest;
+      });
+    };
 
     switch (data.type) {
       case 'say':
@@ -161,18 +201,25 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           }
         });
         break;
+      case MessageType.SHARED_FILES_UPDATE:
+        // Replaces the entire list of shared files with the new list from the server.
+        setSharedFiles(data.payload.files || []);
+        break;
       case 'USER_INPUT_REQUEST':
-        setPendingUserInput({
-          request_id: data.request_id,
-          question: data.question,
-          answerType: data.answerType,
-          choices: data.choices
-        });
+        setPendingUserInputQueue((queue) => [
+          ...queue,
+          {
+            request_id: data.request_id,
+            question: data.question,
+            answerType: data.answerType,
+            choices: data.choices
+          }
+        ]);
         break;
       default:
         console.log('Unknown message type:', data.type);
     }
-  }, [API_BASE_URL]);
+  }, [API_BASE_URL, pendingUserInput]);
 
   // Connect to WebSocket
   const connectWebSocket = useCallback(() => {
@@ -459,6 +506,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     activeMissionId,
     isPaused,
     workProducts,
+    sharedFiles,
     agentDetails,
     missionStatus,
     statistics,
@@ -467,7 +515,22 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     handleControlAction,
     handleLoadMission,
     pendingUserInput,
-    setPendingUserInput
+    setPendingUserInput: (value) => {
+      if (value === null) {
+        // When clearing current pendingUserInput, dequeue next from queue
+        setPendingUserInput(null);
+        setPendingUserInputQueue((queue) => {
+          if (queue.length === 0) {
+            return [];
+          }
+          const [next, ...rest] = queue;
+          setPendingUserInput(next);
+          return rest;
+        });
+      } else {
+        setPendingUserInput(value);
+      }
+    }
   };
 
   return (

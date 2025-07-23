@@ -145,7 +145,7 @@ export class CollaborationManager implements CollaborationProtocol {
         request,
         [recipientId]
       );
-      const maxWaitTime = 30000;
+      const maxWaitTime = 60000;
       const startTime = Date.now();
       while (Date.now() - startTime < maxWaitTime) {
         const updatedConflict = this.conflictResolution.getConflict(conflict.id);

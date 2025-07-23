@@ -13,6 +13,7 @@ import { MessageType } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { Step, StepStatus, createFromPlan } from './Step';
 import { StateManager } from '../utils/StateManager';
+import { classifyStepError } from '../utils/ErrorClassifier';
 
 
 export class Agent extends BaseEntity {
@@ -194,108 +195,117 @@ Please consider this context and the available plugins when planning and executi
 
             while (this.status === AgentStatus.RUNNING &&
                    this.steps.some(step => step.status === StepStatus.PENDING || step.status === StepStatus.RUNNING)) {
+                try {
+                    for (const step of this.steps.filter(s => s.status === StepStatus.PENDING)) {
+                        if (this.status === AgentStatus.RUNNING && step.areDependenciesSatisfied(this.steps)) {
+                            console.log(`Executing step ${step.actionVerb} (${step.id})...`);
 
-                for (const step of this.steps.filter(s => s.status === StepStatus.PENDING)) {
-                    if (this.status === AgentStatus.RUNNING && step.areDependenciesSatisfied(this.steps)) {
-                        console.log(`Executing step ${step.actionVerb} (${step.id})...`);
+                            // Check if this step has a recommended role that doesn't match this agent's role
+                            if (step.recommendedRole && step.recommendedRole !== this.role && this.role !== 'coordinator') {
+                                console.log(`Step ${step.id} recommends role ${step.recommendedRole}, but this agent has role ${this.role}`);
 
-                        // Check if this step has a recommended role that doesn't match this agent's role
-                        if (step.recommendedRole && step.recommendedRole !== this.role && this.role !== 'coordinator') {
-                            console.log(`Step ${step.id} recommends role ${step.recommendedRole}, but this agent has role ${this.role}`);
+                                // If this agent is not suited for this step, delegate it to a more appropriate agent
+                                const delegationResult = await this.delegateStepToSpecializedAgent(step);
+                                if (delegationResult.success) {
+                                    // Mark this step as completed since it's been delegated
+                                    step.status = StepStatus.COMPLETED;
+                                    const isAgentEndpointForDelegation = step.isEndpoint(this.steps);
+                                    const hasDependentsForDelegation = await this.hasDependentAgents();
+                                    const allAgents = this.getAllAgentsInMission();
+                                    await this.saveWorkProductWithClassification(step.id, [{
+                                        success: true,
+                                        name: 'delegation',
+                                        resultType: PluginParameterType.OBJECT,
+                                        resultDescription: 'Step delegated to specialized agent',
+                                        result: delegationResult.result
+                                    }], isAgentEndpointForDelegation, allAgents);
 
-                            // If this agent is not suited for this step, delegate it to a more appropriate agent
-                            const delegationResult = await this.delegateStepToSpecializedAgent(step);
-                            if (delegationResult.success) {
-                                // Mark this step as completed since it's been delegated
-                                step.status = StepStatus.COMPLETED;
-                                const isAgentEndpointForDelegation = step.isEndpoint(this.steps);
-                                const hasDependentsForDelegation = await this.hasDependentAgents();
-                                const allAgents = this.getAllAgentsInMission();
-                                await this.saveWorkProductWithClassification(step.id, [{
-                                    success: true,
-                                    name: 'delegation',
-                                    resultType: PluginParameterType.OBJECT,
-                                    resultDescription: 'Step delegated to specialized agent',
-                                    result: delegationResult.result
-                                }], isAgentEndpointForDelegation, allAgents);
-
-                                // Continue to the next step
-                                continue;
+                                    // Continue to the next step
+                                    continue;
+                                }
+                                // Delegation not available, executing step with current agent (preferred behavior)
+                                console.log(`No specialized agent available, executing step with current agent`);
                             }
-                            // Delegation not available, executing step with current agent (preferred behavior)
-                            console.log(`No specialized agent available, executing step with current agent`);
-                        }
 
-                        this.say(`Executing step: ${step.actionVerb} - ${step.description || 'No description'}`);
+                            this.say(`Executing step: ${step.actionVerb} - ${step.description || 'No description'}`);
 
-                        await this.populateInputsFromLibrarian(step);
+                            await this.populateInputsFromLibrarian(step);
 
-                        let result: PluginOutput[];
+                            let result: PluginOutput[];
 
-                        result = await step.execute(
-                            this.executeActionWithCapabilitiesManager.bind(this),
-                            this.useBrainForReasoning.bind(this),
-                            this.createSubAgent.bind(this),
-                            this.handleAskStep.bind(this),
-                            this.steps
-                        );
+                            result = await step.execute(
+                                this.executeActionWithCapabilitiesManager.bind(this),
+                                this.useBrainForReasoning.bind(this),
+                                this.createSubAgent.bind(this),
+                                this.handleAskStep.bind(this),
+                                this.steps
+                            );
 
-                        console.log(`Step ${step.actionVerb} result:`, result);
-                        this.say(`Completed step: ${step.actionVerb}`);
+                            // Check if the step execution resulted in an error
+                            if (result && result.length > 0 && !result[0].success && result[0].resultType === PluginParameterType.ERROR) {
+                                const error = new Error(result[0].error || result[0].result || 'Step execution failed');
+                                await this.handleStepFailure(step, error);
+                                continue; // Skip to next iteration to check if step should be retried
+                            }
 
-                        if (result[0]?.resultType === PluginParameterType.PLAN) {
-                            const planningStepResult = result[0]?.result; // Added optional chaining here for safety
-                            let actualPlanArray: ActionVerbTask[] | undefined = undefined;
-                            let planSourceDescription = "direct array"; // For logging
+                            console.log(`Step ${step.actionVerb} result:`, result);
+                            this.say(`Completed step: ${step.actionVerb}`);
 
-                            if (Array.isArray(planningStepResult)) {
-                                actualPlanArray = planningStepResult as ActionVerbTask[];
-                            } else if (typeof planningStepResult === 'object' && planningStepResult !== null) {
-                                if (planningStepResult.plan && Array.isArray(planningStepResult.plan)) {
-                                    console.log(`[Agent.ts] runAgent (${this.id}): Plan received is a direct array. Using it directly.`);
-                                    actualPlanArray = planningStepResult.plan as ActionVerbTask[];
-                                    planSourceDescription = "direct array";
-                                } else {
-                                    const tasksArray = (planningStepResult as any).tasks;
-                                    const stepsArray = (planningStepResult as any).steps;
+                            if (result[0]?.resultType === PluginParameterType.PLAN) {
+                                const planningStepResult = result[0]?.result; // Added optional chaining here for safety
+                                let actualPlanArray: ActionVerbTask[] | undefined = undefined;
+                                let planSourceDescription = "direct array"; // For logging
 
-                                    if (Array.isArray(tasksArray)) {
-                                        console.log(`[Agent.ts] runAgent (${this.id}): Plan received is wrapped in a "tasks" object. Extracting tasks array.`);
-                                        actualPlanArray = tasksArray as ActionVerbTask[];
-                                        planSourceDescription = "object with 'tasks' array";
-                                    } else if (Array.isArray(stepsArray)) {
-                                        console.log(`[Agent.ts] runAgent (${this.id}): Plan received is wrapped in a "steps" object. Extracting steps array.`);
-                                        actualPlanArray = stepsArray as ActionVerbTask[];
-                                        planSourceDescription = "object with 'steps' array";
+                                if (Array.isArray(planningStepResult)) {
+                                    actualPlanArray = planningStepResult as ActionVerbTask[];
+                                } else if (typeof planningStepResult === 'object' && planningStepResult !== null) {
+                                    if (planningStepResult.plan && Array.isArray(planningStepResult.plan)) {
+                                        console.log(`[Agent.ts] runAgent (${this.id}): Plan received is a direct array. Using it directly.`);
+                                        actualPlanArray = planningStepResult.plan as ActionVerbTask[];
+                                        planSourceDescription = "direct array";
+                                    } else {
+                                        const tasksArray = (planningStepResult as any).tasks;
+                                        const stepsArray = (planningStepResult as any).steps;
+
+                                        if (Array.isArray(tasksArray)) {
+                                            console.log(`[Agent.ts] runAgent (${this.id}): Plan received is wrapped in a "tasks" object. Extracting tasks array.`);
+                                            actualPlanArray = tasksArray as ActionVerbTask[];
+                                            planSourceDescription = "object with 'tasks' array";
+                                        } else if (Array.isArray(stepsArray)) {
+                                            console.log(`[Agent.ts] runAgent (${this.id}): Plan received is wrapped in a "steps" object. Extracting steps array.`);
+                                            actualPlanArray = stepsArray as ActionVerbTask[];
+                                            planSourceDescription = "object with 'steps' array";
+                                        }
                                     }
                                 }
+                                if (actualPlanArray && Array.isArray(actualPlanArray)) { // Added extra Array.isArray check for robustness
+                                    this.say(`Generated a plan (${planSourceDescription}) with ${actualPlanArray.length} steps`);
+                                    this.addStepsFromPlan(actualPlanArray);
+                                    await this.notifyTrafficManager();
+                                } else {
+                                    const errorMessage = `Error: Expected a plan (array, or object with 'tasks'/'steps' array) from Brain service, but received: ${JSON.stringify(planningStepResult)}`;
+                                    console.error(`[Agent.ts] runAgent (${this.id}): ${errorMessage}`);
+                                    this.say(`Failed to generate a valid plan. Details: ${JSON.stringify(planningStepResult)}`);
+                                    this.status = AgentStatus.ERROR;
+                                    await this.notifyTrafficManager();
+                                }
                             }
-                            if (actualPlanArray && Array.isArray(actualPlanArray)) { // Added extra Array.isArray check for robustness
-                                this.say(`Generated a plan (${planSourceDescription}) with ${actualPlanArray.length} steps`);
-                                this.addStepsFromPlan(actualPlanArray);
-                                await this.notifyTrafficManager();
-                            } else {
-                                const errorMessage = `Error: Expected a plan (array, or object with 'tasks'/'steps' array) from Brain service, but received: ${JSON.stringify(planningStepResult)}`;
-                                console.error(`[Agent.ts] runAgent (${this.id}): ${errorMessage}`);
-                                this.say(`Failed to generate a valid plan. Details: ${JSON.stringify(planningStepResult)}`);
-                                this.status = AgentStatus.ERROR;
-                                await this.notifyTrafficManager();
+
+                            // Only save work product if agent is not in error state from plan validation
+                            if (this.status !== AgentStatus.ERROR) {
+                                const isAgentEndpoint = step.isEndpoint(this.steps);
+                                const hasDependents = await this.hasDependentAgents();
+                                await this.handleStepSuccess(step, result);
                             }
                         }
-
-                        // Only save work product if agent is not in error state from plan validation
-                        if (this.status !== AgentStatus.ERROR) {
-                            const isAgentEndpoint = step.isEndpoint(this.steps);
-                            const hasDependents = await this.hasDependentAgents();
-                            await this.saveWorkProductWithClassification(step.id, result, isAgentEndpoint, this.getAllAgentsInMission());
-                        }
-
-                        // Send status update after each step completion
-                        await this.notifyTrafficManager();
                     }
+                    await this.checkAndResumeBlockedAgents();
+                } catch (error) {
+                    console.error('Error in agent main loop:', error instanceof Error ? error.message : error);
+                    this.status = AgentStatus.ERROR;
+                    this.say(`Error in agent execution: ${error instanceof Error ? error.message : String(error)}`);
+                    await this.notifyTrafficManager();
                 }
-
-                await this.checkAndResumeBlockedAgents();
             }
 
             if (this.status === AgentStatus.RUNNING) {
@@ -488,7 +498,7 @@ Please consider this context and the available plugins when planning and executi
     private async askUser(question: string, choices?: string[], answerType: string = 'text'): Promise<string> {
         return new Promise((resolve) => {
             this.currentQuestionResolve = resolve;
-            this.ask(question, choices, answerType);
+            this.ask(question, answerType, choices);
         });
     }
 
@@ -1724,5 +1734,91 @@ Please consider this context and the available plugins when planning and executi
             default:
                 return 'text/plain';
         }
+    }
+
+    private async handleStepSuccess(step: Step, result: PluginOutput[]): Promise<void> {
+        const isAgentEndpoint = step.isEndpoint(this.steps);
+        await this.saveWorkProductWithClassification(step.id, result, isAgentEndpoint, this.getAllAgentsInMission());
+        await this.notifyTrafficManager();
+    }
+
+    private async handleStepFailure(step: Step, error: Error): Promise<void> {
+        step.lastError = error;
+        const errorType = classifyStepError(error);
+
+        if (errorType === 'transient' && step.retryCount < step.maxRetries) {
+            step.retryCount++;
+            step.status = StepStatus.PENDING;
+            console.log(`Step ${step.id} failed with transient error. Retrying (${step.retryCount}/${step.maxRetries})...`);
+            await this.logEvent({
+                eventType: 'step_retry',
+                agentId: this.id,
+                stepId: step.id,
+                retryCount: step.retryCount,
+                maxRetries: step.maxRetries,
+                error: error.message,
+                timestamp: new Date().toISOString()
+            });
+        } else {
+            step.status = StepStatus.ERROR;
+            this.propagateFailure(step.id);
+            await this.replanFromFailure(step);
+        }
+        await this.notifyTrafficManager();
+    }
+
+    private propagateFailure(failedStepId: string): void {
+        const failedStepIndex = this.steps.findIndex(s => s.id === failedStepId);
+        if (failedStepIndex === -1) return;
+
+        for (let i = failedStepIndex + 1; i < this.steps.length; i++) {
+            const currentStep = this.steps[i];
+            const dependsOnFailedStep = currentStep.dependencies.some(dep => {
+                const sourceStep = this.steps.find(s => s.id === dep.sourceStepId);
+                return sourceStep && (sourceStep.status === StepStatus.ERROR || sourceStep.id === failedStepId);
+            });
+
+            if (dependsOnFailedStep) {
+                currentStep.status = StepStatus.ERROR;
+            }
+        }
+    }
+
+    private async getCompletedWorkProductsSummary(): Promise<string> {
+        let summary = 'Completed Work Products:\n';
+        for (const step of this.steps) {
+            if (step.status === StepStatus.COMPLETED && step.result) {
+                summary += `Step ${step.stepNo}: ${step.actionVerb}\n`;
+                for (const output of step.result) {
+                    summary += `  - ${output.name}: ${output.resultDescription}\n`;
+                }
+            }
+        }
+        return summary;
+    }
+
+    private async replanFromFailure(failedStep: Step): Promise<void> {
+        const workProductsSummary = await this.getCompletedWorkProductsSummary();
+        const recoveryGoal = `
+Original Mission Goal: ${this.missionContext}
+Failed Step: ${failedStep.actionVerb} - ${failedStep.description}
+Error: ${failedStep.lastError.message}
+Completed Work Products:
+${workProductsSummary}
+
+Create a new plan to achieve the original goal, avoiding the previous error.
+        `;
+
+        const recoveryStep = new Step({
+            actionVerb: 'ACCOMPLISH',
+            stepNo: this.steps.length + 1,
+            inputValues: new Map([
+                ['goal', { inputName: 'goal', value: recoveryGoal, valueType: PluginParameterType.STRING, args: {} }]
+            ]),
+            description: 'Recover from permanent failure',
+            persistenceManager: this.agentPersistenceManager
+        });
+
+        this.steps.push(recoveryStep);
     }
 }

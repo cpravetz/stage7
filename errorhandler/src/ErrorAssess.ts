@@ -165,7 +165,7 @@ export const analyzeError = async (error: Error) => {
         exchanges: conversation,
         optimization: 'accuracy'
     }, {
-        timeout: 30000, // 30 second timeout
+        timeout: 60000, // 30 second timeout
         headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${token}`
