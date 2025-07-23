@@ -9,6 +9,12 @@ export class GLlama3Model extends BaseModel {
                 accuracyScore: 100,
                 creativityScore: 80,
                 speedScore: 80
+            }],
+            [LLMConversationType.TextToCode, {
+                costScore: 100,
+                accuracyScore: 100,
+                creativityScore: 80,
+                speedScore: 80
             }]
         ]);
 

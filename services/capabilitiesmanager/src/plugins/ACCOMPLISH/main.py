@@ -118,7 +118,7 @@ logger = logging.getLogger(__name__)
 class AccomplishPlugin:
     def __init__(self):
         self.max_retries = 3
-        self.timeout = 30
+        self.timeout = 60  # Increased from 30 to 60 seconds for Brain calls
         
     def execute(self, inputs_str: str) -> str:
         """Main execution method"""
@@ -217,6 +217,8 @@ CRITICAL JSON REQUIREMENTS:
 
 CRITICAL PLUGIN REQUIREMENTS:
 - FILE_OPERATION ALWAYS requires "operation" input with value "read", "write", or "append"
+- For FILE_OPERATION read: use "fileId" input (from file uploads)
+- For FILE_OPERATION write/append: use "content" input (text to write) and "path" input (file path)
 - ASK_USER_QUESTION ALWAYS requires "question" input, not "prompt" input, and should include "answerType" input
 
 CRITICAL ERRORS TO AVOID:
@@ -226,6 +228,17 @@ CRITICAL ERRORS TO AVOID:
 - Do NOT create steps that depend on non-existent outputs from previous steps
 - Do NOT use tuple format for outputs - use object format only
 - Do NOT forget "answerType": {{"value": "string", "valueType": "string"}} for ASK_USER_QUESTION
+
+FORBIDDEN PATTERNS - NEVER USE THESE:
+- Do NOT use FILE_OPERATION with 'fileId' input for writing content - use 'content' input instead
+- Do NOT reference text content as file IDs - file IDs come from file uploads only
+- Do NOT create overly complex conditional workflows - prefer linear plans when possible
+
+IF_THEN USAGE RULES (use sparingly):
+- IF_THEN steps should have simple conditions and minimal nested steps
+- trueSteps and falseSteps should be arrays of complete step objects with proper numbering
+- Steps inside trueSteps/falseSteps cannot be referenced by later steps outside the conditional
+- Prefer linear plans over conditional logic when possible
 
 REQUIRED INPUT FORMATS:
 - Each input must be an object with either 'value' OR 'outputName' property
@@ -522,6 +535,10 @@ RIGHT: "answerType": {"value": "number", "valueType": "string"}
 
 WRONG: "question": "What is your name?"
 RIGHT: "question": {"value": "What is your name?", "valueType": "string"}
+
+For ASK_USER_QUESTION with file upload, do not nest inputs:
+CORRECT: "answerType": {"value": "file", "valueType": "string"}
+CORRECT: "question": {"value": "Please upload your resume", "valueType": "string"}
 
 For references to previous step outputs:
 RIGHT: "inputName": {"outputName": "previousStepOutput", "valueType": "string"}

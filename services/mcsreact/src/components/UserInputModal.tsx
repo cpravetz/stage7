@@ -1,10 +1,4 @@
 import React, { useState, useRef } from 'react';
-import {
-  Box,
-  Paper,
-  Typography
-} from '@mui/material';
-import { CloudUpload as UploadIcon } from '@mui/icons-material';
 import './UserInputModal.css';
 
 export type AnswerType = 'text' | 'number' | 'boolean' | 'multipleChoice' | 'file';
@@ -22,13 +16,16 @@ const UserInputModal: React.FC<UserInputModalProps> = ({ requestId, question, ch
     const [response, setResponse] = useState<string | number | boolean>('');
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
     const [dragOver, setDragOver] = useState(false);
+    const [isSubmitting, setIsSubmitting] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const handleSubmit = async () => {
+        setIsSubmitting(true);
         try {
             if (answerType === 'file') {
                 if (!selectedFile) {
                     alert('Please select a file');
+                    setIsSubmitting(false);
                     return;
                 }
 
@@ -62,6 +59,8 @@ const UserInputModal: React.FC<UserInputModalProps> = ({ requestId, question, ch
             }
         } catch (error) {
             console.error('Error submitting user input:', error instanceof Error ? error.message : error);
+        } finally {
+            setIsSubmitting(false);
         }
     };
 
@@ -80,7 +79,12 @@ const UserInputModal: React.FC<UserInputModalProps> = ({ requestId, question, ch
         setDragOver(false);
         if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
             setSelectedFile(e.dataTransfer.files[0]);
-            e.dataTransfer.clearData();
+            // Removed e.dataTransfer.clearData() to prevent NoModificationAllowedError
+            // try {
+            //     e.dataTransfer.clearData();
+            // } catch (error) {
+            //     console.warn('Failed to clear dataTransfer data:', error);
+            // }
         }
     };
 
@@ -114,42 +118,47 @@ const UserInputModal: React.FC<UserInputModalProps> = ({ requestId, question, ch
                 );
             case 'file':
                 return (
-                    <div>
-                        <label htmlFor="file-upload-input" style={{ display: 'block', cursor: 'pointer' }}>
-                            <Paper
-                                elevation={2}
-                                sx={{
-                                    p: 3,
-                                    mb: 2,
-                                    border: dragOver ? '2px dashed #1976d2' : '2px dashed #ccc',
-                                    backgroundColor: dragOver ? 'rgba(25, 118, 210, 0.1)' : 'transparent',
-                                    cursor: 'pointer',
-                                    transition: 'all 0.3s ease',
-                                    textAlign: 'center',
-                                }}
-                                onDragOver={handleDragOver}
-                                onDragLeave={handleDragLeave}
-                                onDrop={handleDrop}
-                            >
-                                <Box>
-                                    <UploadIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 1 }} />
-                                    <Typography variant="h6" gutterBottom>
-                                        Drop file here or click to select
-                                    </Typography>
-                                    <Typography variant="body2" color="text.secondary">
-                                        {selectedFile ? `Selected: ${selectedFile.name}` : 'No file selected'}
-                                    </Typography>
-                                </Box>
-                                <input
-                                    id="file-upload-input"
-                                    ref={fileInputRef}
-                                    type="file"
-                                    style={{ display: 'none' }}
-                                    onChange={handleFileInputChange}
-                                    accept=".txt,.md,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.json,.xml,.yaml,.yml,.png,.jpg,.jpeg,.gif,.svg,.bmp,.zip,.tar,.gz,.7z"
-                                />
-                            </Paper>
-                        </label>
+                    <div className="file-upload-container">
+                        <div
+                            className={`file-drop-zone ${dragOver ? 'drag-over' : ''} ${selectedFile ? 'has-file' : ''}`}
+                            onDragOver={handleDragOver}
+                            onDragLeave={handleDragLeave}
+                            onDrop={handleDrop}
+                            onClick={() => fileInputRef.current?.click()}
+                        >
+                            <div className="upload-icon">📁</div>
+                            <div className="upload-text">
+                                <div className="upload-title">
+                                    {selectedFile ? 'File Selected' : 'Drop file here or click to select'}
+                                </div>
+                                <div className="upload-subtitle">
+                                    {selectedFile ? selectedFile.name : 'Supports documents, images, and archives'}
+                                </div>
+                            </div>
+                            <input
+                                ref={fileInputRef}
+                                type="file"
+                                style={{ display: 'none' }}
+                                onChange={handleFileInputChange}
+                                accept=".txt,.md,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.json,.xml,.yaml,.yml,.png,.jpg,.jpeg,.gif,.svg,.bmp,.zip,.tar,.gz,.7z"
+                            />
+                        </div>
+                        {selectedFile && (
+                            <div className="file-info">
+                                <span className="file-name">{selectedFile.name}</span>
+                                <span className="file-size">({(selectedFile.size / 1024).toFixed(1)} KB)</span>
+                                <button
+                                    type="button"
+                                    className="remove-file"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        setSelectedFile(null);
+                                    }}
+                                >
+                                    ✕
+                                </button>
+                            </div>
+                        )}
                     </div>
                 );
         }
@@ -162,8 +171,10 @@ const UserInputModal: React.FC<UserInputModalProps> = ({ requestId, question, ch
                 <p className="modal-question">{question}</p>
                 <div className="modal-input">{renderInput()}</div>
                 <div className="modal-actions">
-                    <button className="modal-submit" onClick={handleSubmit}>Submit</button>
-                    <button className="modal-cancel" onClick={onClose}>Cancel</button>
+                    <button className="modal-submit" onClick={handleSubmit} disabled={isSubmitting}>
+                        {isSubmitting ? 'Submitting...' : 'Submit'}
+                    </button>
+                    <button className="modal-cancel" onClick={onClose} disabled={isSubmitting}>Cancel</button>
                 </div>
             </div>
             <div className="modal-backdrop" onClick={onClose}></div>
