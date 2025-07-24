@@ -4,6 +4,8 @@
 
 stage7 is an advanced, self-modifying system designed to manage and execute complex missions using Large Language Models (LLMs) and custom plugins. The system is composed of several independent Node.js instances that interact with each other to collectively manage agents, process LLM conversations, and complete given missions.
 
+The plugin ecosystem supports not only code-based plugins (Python, JavaScript, Container) but also definition-based plugins for OpenAPI and MCP tools. All plugin types are managed, discovered, and executed through a unified Plugin Marketplace and CapabilitiesManager, enabling seamless integration of external APIs and internal services as first-class plugins.
+
 ## Key Components
 
 1. **MissionControl**: Manages the overall operation of the system, initializing and controlling missions.
@@ -19,10 +21,11 @@ stage7 is an advanced, self-modifying system designed to manage and execute comp
 ## 🚀 Key Features
 
 ### Enterprise-Ready Plugin Ecosystem
-- **Multi-Language Support**: Develop plugins in Python, JavaScript, or any language via Docker containers
-- **Production-Ready Plugins**: 5 ready-to-use plugins (ACCOMPLISH, ASK_USER_QUESTION, SCRAPE, WEATHER, TEXT_ANALYSIS)
+- **Extensible Plugin Types**: Develop plugins in Python, JavaScript, any language via Docker containers, or as OpenAPI/MCP tool definitions
+- **Production-Ready Plugins**: 10+ ready-to-use plugins (ACCOMPLISH, ASK_USER_QUESTION, SCRAPE, WEATHER, TEXT_ANALYSIS, API_CLIENT, CODE_EXECUTOR, DATA_TOOLKIT, SEARCH_PYTHON, TASK_MANAGER, CHAT, GET_USER_INPUT, FILE_OPS_PYTHON, and more)
 - **Automated Plugin Creation**: Engineer service generates plugins automatically based on requirements
-- **Plugin Marketplace**: Discover, distribute, and manage plugins across the ecosystem
+- **Definition-Based Plugins**: Integrate external APIs and proprietary services as plugins using OpenAPI or MCP tool definitions
+- **Unified Plugin Marketplace**: Discover, distribute, and manage all plugin types (code, OpenAPI, MCP) across the ecosystem
 
 ### Advanced AI Capabilities
 - **Self-modifying**: The system can create new plugins for itself using AI
@@ -218,6 +221,12 @@ Here are some example missions to get you started:
 1. "Research the latest trends in renewable energy and create a summary report"
 2. "Analyze the Python code in my GitHub repository and suggest improvements"
 3. "Create a marketing plan for a new mobile app"
+4. "Call an external CRM API using the API_CLIENT plugin to create a new contact."
+5. "Automate a workflow using an OpenAPI-defined tool for order processing."
+6. "Aggregate and transform CSV data using the DATA_TOOLKIT plugin."
+7. "Run a Python code snippet to analyze sales data using CODE_EXECUTOR."
+8. "Search the web for the latest research using SEARCH_PYTHON and summarize with ACCOMPLISH."
+9. "Trigger an internal business process using an MCP tool plugin."
 
 ### Using Self-Hosted LLMs
 
@@ -335,49 +344,38 @@ Stage7 features an enterprise-ready plugin ecosystem supporting multiple program
 
 ### Production Plugins (Ready to Use)
 
-1. **ACCOMPLISH** - Mission planning and goal achievement
-   - Creates comprehensive plans for complex goals
-   - Integrates with Brain service for AI-powered planning
-   - Supports both direct answers and multi-step plans
 
-2. **ASK_USER_QUESTION** - Interactive user input collection
-   - Collects user input via PostOffice service
-   - Supports multiple choice questions and validation
-   - Handles timeouts and cancellation
+#### Core Production Plugins
+1. **ACCOMPLISH** – Mission planning and goal achievement
+2. **ASK_USER_QUESTION** – Interactive user input collection
+3. **SCRAPE** – Web content extraction
+4. **WEATHER** – Weather information retrieval
+5. **TEXT_ANALYSIS** – Comprehensive text analysis
+6. **API_CLIENT** – Generic REST API client for any third-party API (OpenAPI/REST)
+7. **CODE_EXECUTOR** – Securely execute code snippets in Python/JavaScript
+8. **DATA_TOOLKIT** – Parse, query, and transform JSON, CSV, SQL, and more
+9. **SEARCH_PYTHON** – Internet search using SearchXNG
+10. **TASK_MANAGER** – Self-planning, task and subtask management
+11. **CHAT** – Interactive chat session management
+12. **GET_USER_INPUT** – User input collection (form-based)
+13. **FILE_OPS_PYTHON** – File operations and manipulation
 
-3. **SCRAPE** - Web content extraction
-   - Extracts content from web pages using BeautifulSoup4
-   - Includes rate limiting and respectful scraping
-   - Supports CSS selectors and attribute extraction
-
-4. **WEATHER** - Weather information retrieval
-   - Fetches weather data from OpenWeatherMap API
-   - Provides comprehensive weather information
-   - Supports location-based queries
-
-5. **TEXT_ANALYSIS** - Comprehensive text analysis
-   - Text statistics (word count, sentence count, etc.)
-   - Keyword extraction with frequency analysis
-   - Basic sentiment analysis
+#### Definition-Based Plugins (OpenAPI & MCP Tools)
+- **OpenAPI Tools**: Integrate any OpenAPI 3.0+ compatible API as a plugin. Define endpoints, authentication, and action verbs via OpenAPI specs. Managed and executed like any other plugin.
+- **MCP Tools**: Integrate proprietary or internal services as plugins using MCP tool definitions. Enables agents to call internal business logic or workflows as plugins.
 
 ### Plugin Development
 
 #### Supported Plugin Types
 
-1. **Python Plugins** (Recommended)
-   - Direct execution with dependency management
-   - Full access to Python ecosystem
-   - Enhanced error handling and logging
 
-2. **JavaScript Plugins** (Legacy Support)
-   - Sandbox execution with security controls
-   - Node.js runtime environment
-   - Maintained for backward compatibility
+1. **Python Plugins** – Direct execution with dependency management
+2. **JavaScript Plugins** – Node.js sandboxed execution (legacy)
+3. **Container Plugins** – Docker-based, any language, full isolation
+4. **OpenAPI Tools** – External API integration via OpenAPI 3.0+ definitions
+5. **MCP Tools** – Internal/proprietary service integration via MCP tool definitions
 
-3. **Container Plugins** (Ultimate Flexibility)
-   - Docker-based execution supporting any programming language
-   - Complete isolation and resource management
-   - HTTP API communication protocol
+All plugin types are managed, discovered, and executed through a unified Plugin Marketplace and CapabilitiesManager.
 
 #### Quick Start Guide
 
@@ -395,10 +393,11 @@ node scripts/test-plugin-ecosystem.js
 
 ### Plugin Development Best Practices
 
+
 1. **Plugin Structure**
-   - Follow the standard plugin template for your chosen language
+   - Follow the standard plugin template for your chosen language or definition format (OpenAPI/MCP)
    - Include comprehensive input/output definitions
-   - Document dependencies and prerequisites
+   - Document dependencies, prerequisites, and authentication requirements
    - Provide usage examples and clear documentation
 
 2. **Security Considerations**
@@ -436,9 +435,9 @@ node scripts/test-plugin-ecosystem.js
    - Secure storage practices
 
 4. **Plugin Security**
-   - Plugins are signed using RSA keys
+   - All plugin types (code, OpenAPI, MCP) are signed using RSA keys
    - Signatures are verified before plugin execution
-   - Sandbox environment for plugin execution
+   - Sandbox or secure environment for all plugin execution, including external API calls
 
 ## Support
 
@@ -661,7 +660,7 @@ node scripts/test-plugin-ecosystem.js
 ## CapabilitiesManager
 
 ### POST /executeAction
-**Description:** Executes a specific action verb (plugin).
+**Description:** Executes a specific action verb (plugin, OpenAPI tool, or MCP tool).
 
 **Input:**
 ```json
@@ -686,16 +685,16 @@ node scripts/test-plugin-ecosystem.js
 - 500: `{ "status": "Error processing message", "error": "string" }`
 
 ### GET /availablePlugins
-**Description:** Retrieves a list of all available plugins.
+**Description:** Retrieves a list of all available plugins, including code plugins, OpenAPI tools, and MCP tools.
 
 **Output:**
-- 200: Array of PluginDefinition objects
+- 200: Array of PluginDefinition and DefinitionManifest objects
 
 ### POST /storeNewPlugin
-**Description:** Stores a new plugin in the registry.
+**Description:** Stores a new plugin or tool definition in the registry.
 
 **Input:**
-- Body: PluginDefinition object
+- Body: PluginDefinition or DefinitionManifest object (for OpenAPI/MCP tools)
 
 **Output:**
 - 200: `{ "message": "Plugin registered successfully", "pluginId": "string" }`
