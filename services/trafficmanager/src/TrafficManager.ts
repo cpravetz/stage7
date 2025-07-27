@@ -53,6 +53,7 @@ export class TrafficManager extends BaseEntity {
         router.get('/getAgentLocation/:agentId', this.getAgentLocationRoute.bind(this));
         router.post('/updateAgentLocation', this.updateAgentLocationRoute.bind(this));
         router.post('/agentStatisticsUpdate', this.agentStatisticsUpdateRoute.bind(this));
+        router.get('/mission/:missionId/roster', this.getMissionRosterRoute.bind(this));
 
         // Use the router
         this.app.use(router);
@@ -114,6 +115,10 @@ export class TrafficManager extends BaseEntity {
 
     private async agentStatisticsUpdateRoute(req: express.Request, res: express.Response) {
         await this.handleAgentStatisticsUpdate(req, res);
+    }
+
+    private async getMissionRosterRoute(req: express.Request, res: express.Response) {
+        await this.getMissionRoster(req, res);
     }
 
     private async updateAgentStatus(message: Message) {
@@ -614,6 +619,22 @@ export class TrafficManager extends BaseEntity {
             analyzeError(error as Error);
             console.error('Error updating agent statistics:', error instanceof Error ? error.message : error);
             res.status(500).send({ error: 'Failed to update agent statistics' });
+        }
+    }
+
+    // AWARENESS IMPLEMENTATION: Community Awareness (Mission Roster)
+    private async getMissionRoster(req: express.Request, res: express.Response) {
+        const { missionId } = req.params;
+        if (!missionId) {
+            return res.status(400).send({ error: 'missionId is required' });
+        }
+        try {
+            const roster = await agentSetManager.getAgentsByMission(missionId);
+            res.status(200).json(roster);
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error('Error getting mission roster:', error instanceof Error ? error.message : error);
+            res.status(500).send({ error: 'Failed to get mission roster' });
         }
     }
 }

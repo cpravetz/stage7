@@ -561,6 +561,32 @@ class AgentSetManager {
         }
     }
 
+    async getAgentsByMission(missionId: string): Promise<any[]> {
+        if (!this.isValidMissionId(missionId)) {
+            throw new Error(`Invalid missionId: ${missionId}`);
+        }
+        const allAgents: any[] = [];
+        const allAgentSetUrls = Array.from(this.agentSets.values()).map(set => set.url);
+
+        const requests = allAgentSetUrls.map(url => {
+            const fullUrl = url.startsWith('http') ? url : `http://${url}`;
+            return this.apiCall('get', `${fullUrl}/mission/${missionId}/agents`)
+                .then(response => response.data)
+                .catch(error => {
+                    console.error(`Failed to get agents from ${url} for mission ${missionId}:`, error.message);
+                    return []; // Return empty array on error to not fail the whole aggregation
+                });
+        });
+
+        const results = await Promise.all(requests);
+        results.forEach(agents => allAgents.push(...agents));
+
+        // Deduplicate agents in case of any overlap or stale data
+        const uniqueAgents = Array.from(new Map(allAgents.map(agent => [agent.id, agent])).values());
+
+        return uniqueAgents;
+    }
+
     async loadOneAgent(agentId: string): Promise<boolean> {
         try {
             const agentSetUrl = await this.getAgentSetUrlForAgent(agentId);

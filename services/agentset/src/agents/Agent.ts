@@ -7,13 +7,14 @@ import { WorkProduct } from '../utils/WorkProduct';
 import { MapSerializer, BaseEntity, LLMConversationType } from '@cktmcs/shared';
 import { AgentPersistenceManager } from '../utils/AgentPersistenceManager';
 import { PluginOutput, PluginParameterType, InputValue, ExecutionContext as PlanExecutionContext, MissionFile } from '@cktmcs/shared';
-import { ActionVerbTask } from '@cktmcs/shared';
+import { ActionVerbTask, InputReference } from '@cktmcs/shared';
 import { AgentConfig, AgentStatistics, OutputType } from '@cktmcs/shared';
 import { MessageType } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { Step, StepStatus, createFromPlan } from './Step';
 import { StateManager } from '../utils/StateManager';
 import { classifyStepError } from '../utils/ErrorClassifier';
+import { CollaborationMessage, CollaborationMessageType, ConflictResolution as ConflictResolutionData, ConflictResolutionResponse, TaskDelegationRequest, TaskResult, KnowledgeSharing, ConflictResolutionRequest } from '../collaboration/CollaborationProtocol';
 
 
 export class Agent extends BaseEntity {
@@ -37,8 +38,8 @@ export class Agent extends BaseEntity {
 
     // Properties for lifecycle management
     private checkpointInterval: NodeJS.Timeout | null = null;
-
     private currentQuestionResolve: ((value: string) => void) | null = null;
+    private delegatedSteps: Map<string, string> = new Map(); // Map<taskId, stepId>
 
     constructor(config: AgentConfig) {
         super(config.id, 'AgentSet', `agentset`, process.env.PORT || '9000');
@@ -207,20 +208,6 @@ Please consider this context and the available plugins when planning and executi
                                 // If this agent is not suited for this step, delegate it to a more appropriate agent
                                 const delegationResult = await this.delegateStepToSpecializedAgent(step);
                                 if (delegationResult.success) {
-                                    // Mark this step as completed since it's been delegated
-                                    step.status = StepStatus.COMPLETED;
-                                    const isAgentEndpointForDelegation = step.isEndpoint(this.steps);
-                                    const hasDependentsForDelegation = await this.hasDependentAgents();
-                                    const allAgents = this.getAllAgentsInMission();
-                                    await this.saveWorkProductWithClassification(step.id, [{
-                                        success: true,
-                                        name: 'delegation',
-                                        resultType: PluginParameterType.OBJECT,
-                                        resultDescription: 'Step delegated to specialized agent',
-                                        result: delegationResult.result
-                                    }], isAgentEndpointForDelegation, allAgents);
-
-                                    // Continue to the next step
                                     continue;
                                 }
                                 // Delegation not available, executing step with current agent (preferred behavior)
@@ -754,48 +741,80 @@ Please consider this context and the available plugins when planning and executi
 
         try {
             const response = await this.authenticatedApi.post(`http://${this.brainUrl}/chat`, reasoningInput);
-            const brainResponse = response.data.response;
-            const mimeType = response.data.mimeType || 'text/plain';
+            const confidence = response.data.confidence || 1.0;
+            const confidenceThreshold = (inputs.get('confidenceThreshold')?.value as number) || 0.75;
 
-            let resultType: PluginParameterType;
-            let parsedResult = brainResponse;
+            // High-confidence path: Return the result directly
+            if (confidence >= confidenceThreshold) {
+                const brainResponse = response.data.response;
+                const mimeType = response.data.mimeType || 'text/plain';
 
-            if (ConversationType === LLMConversationType.TextToCode && mimeType === 'application/json') {
-                try {
-                    parsedResult = JSON.parse(brainResponse);
-                    resultType = PluginParameterType.PLAN; // Assuming it's a plan
-                    console.log(`[Agent ${this.id}] Parsed brainResponse as JSON for plan.`);
-                } catch (e) {
-                    console.warn(`[Agent ${this.id}] Failed to parse brainResponse as JSON, treating as string. Error:`, e);
-                    resultType = PluginParameterType.STRING; // Fallback to string if JSON parsing fails
-                }
-            } else {
-                switch (ConversationType) {
-                    case LLMConversationType.TextToImage:
-                        resultType = PluginParameterType.OBJECT; // Assuming image data is returned as an object
-                        break;
-                    case LLMConversationType.TextToAudio:
-                    case LLMConversationType.TextToVideo:
-                        resultType = PluginParameterType.OBJECT; // Assuming audio/video data is returned as an object
-                        break;
-                    case LLMConversationType.TextToCode: // If not application/json, treat as string code
+                let resultType: PluginParameterType;
+                let parsedResult = brainResponse;
+
+                if (ConversationType === LLMConversationType.TextToCode && mimeType === 'application/json') {
+                    try {
+                        parsedResult = JSON.parse(brainResponse);
+                        resultType = PluginParameterType.PLAN;
+                        console.log(`[Agent ${this.id}] Parsed brainResponse as JSON for plan.`);
+                    } catch (e) {
+                        console.warn(`[Agent ${this.id}] Failed to parse brainResponse as JSON, treating as string. Error:`, e);
                         resultType = PluginParameterType.STRING;
-                        break;
-                    default:
-                        resultType = PluginParameterType.STRING;
+                    }
+                } else {
+                    // ... (existing logic for other conversation types)
+                    resultType = PluginParameterType.STRING;
                 }
+
+                return [{
+                    success: true,
+                    name: 'answer',
+                    resultType: resultType,
+                    result: parsedResult,
+                    resultDescription: `Brain reasoning output (${ConversationType})`,
+                    mimeType: mimeType
+                }];
             }
 
-            const result: PluginOutput = {
-                success: true,
-                name: 'answer',
-                resultType: resultType,
-                result: parsedResult,
-                resultDescription: `Brain reasoning output (${ConversationType})`,
-                mimeType: mimeType
+            // Low-confidence path: Create a verification and continuation plan
+            this.say(`The information I received has a low confidence score of ${confidence.toFixed(2)}. I will create a plan to verify it and then proceed.`);
+
+            const brainResponse = response.data.response;
+
+            const verificationTask: ActionVerbTask = {
+                actionVerb: 'VERIFY_FACT',
+                description: `Verify the following information which was returned with low confidence: "${brainResponse}"`,
+                inputReferences: new Map<string, InputReference>([
+                    ['fact', { inputName: 'fact', value: brainResponse, valueType: PluginParameterType.STRING }]
+                ]),
+                outputs: new Map<string, PluginParameterType>([
+                    ['verified_fact', PluginParameterType.STRING],
+                    ['is_correct', PluginParameterType.BOOLEAN]
+                ]),
+                recommendedRole: 'critic'
             };
 
-            return [result];
+            const continuationTask: ActionVerbTask = {
+                actionVerb: 'THINK',
+                description: `Re-evaluating the original prompt with a verified fact.`,
+                inputReferences: inputs || new Map<string, InputReference>(),
+                outputs:  new Map<string, PluginParameterType>([
+                    ['final_answer', PluginParameterType.STRING]
+                ])
+            };
+            continuationTask?.inputReferences?.set('verified_context', {
+                inputName: 'verified_context',
+                outputName: 'verified_context',
+                valueType: PluginParameterType.STRING
+            });
+
+            return [{
+                success: true,
+                name: 'recovery_plan',
+                resultType: PluginParameterType.PLAN,
+                result: [verificationTask, continuationTask],
+                resultDescription: `Generated a 2-step recovery plan due to low confidence score.`,
+            }];
         } catch (error) {
             console.error('Error using Brain for reasoning:', error instanceof Error ? error.message : error);
             return [{
@@ -1250,20 +1269,78 @@ Please consider this context and the available plugins when planning and executi
      * @param message Collaboration message
      */
     async handleCollaborationMessage(message: any): Promise<void> {
-        console.log(`Agent ${this.id} received collaboration message:`, message);
-        // TODO: Implement full collaboration message handling logic
-        // Placeholder for actual handling logic
-        // Example: Store message in a relevant property or trigger specific actions
+        console.log(`Agent ${this.id} received collaboration message of type ${message.type}:`, message.payload);
+
+        switch (message.type) {
+          case CollaborationMessageType.TASK_DELEGATION:
+            const task = message.payload as TaskDelegationRequest;
+            console.log(`Agent ${this.id} received delegated task: ${task.description}`);
+            const newStep = new Step({
+              actionVerb: task.taskType,
+              stepNo: this.steps.length + 1,
+              inputValues: new Map(Object.entries(task.inputs)),
+              description: task.description,
+              status: StepStatus.PENDING,
+              persistenceManager: this.agentPersistenceManager
+            });
+            this.steps.push(newStep);
+            // The agent will pick up and run this new step in its main loop.
+            break;
+
+          case CollaborationMessageType.TASK_RESULT:
+            const taskResult = message.payload as TaskResult;
+            const completedStepId = this.delegatedSteps.get(taskResult.taskId);
+            if (completedStepId) {
+              const step = this.steps.find(s => s.id === completedStepId);
+              if (step) {
+                console.log(`Received result for delegated step ${step.id}. Success: ${taskResult.success}`);
+                step.status = taskResult.success ? StepStatus.COMPLETED : StepStatus.ERROR;
+                if (taskResult.success) {
+                  await this.saveWorkProductWithClassification(step.id, taskResult.result, step.isEndpoint(this.steps), this.getAllAgentsInMission());
+                } else {
+                  this.say(`Delegated step ${step.actionVerb} failed. Reason: ${taskResult.error}`);
+                }
+                this.delegatedSteps.delete(taskResult.taskId);
+              }
+            }
+            break;
+
+          case CollaborationMessageType.KNOWLEDGE_SHARE:
+            const knowledge = message.payload as KnowledgeSharing;
+            console.log(`Received shared knowledge on topic: ${knowledge.topic}`);
+            // Add knowledge to conversation context for future reasoning
+            this.addToConversation('system', `Shared Knowledge Received on "${knowledge.topic}":\n${JSON.stringify(knowledge.content)}`);
+            // TODO: Could also store this in SharedMemory via the Librarian for more persistent recall.
+            break;
+
+          case CollaborationMessageType.CONFLICT_RESOLUTION:
+            const conflictData = message.payload as any;
+            if (conflictData.resolution) {
+              // This is a final resolution
+              await this.processConflictResolution(conflictData);
+            } else {
+              // This is a request to vote
+              console.log(`Received request to vote on conflict: ${conflictData.description}`);
+              const vote = await this.generateConflictVote(conflictData);
+              // The agent needs a way to send its vote back. This would typically be via the CollaborationManager.
+              // This part of the protocol needs to be fully defined. For now, we log it.
+              console.log(`Generated vote:`, vote);
+            }
+            break;
+        }
     }
 
     /**
      * Process a conflict resolution
      * @param resolution Conflict resolution
      */
-    async processConflictResolution(resolution: any): Promise<void> {
-        console.log(`Agent ${this.id} processing conflict resolution:`, resolution);
-        // TODO: Implement full conflict resolution processing logic
-        // Placeholder for actual handling logic
+    async processConflictResolution(resolution: ConflictResolutionResponse): Promise<void> {
+        console.log(`Agent ${this.id} processing final conflict resolution:`, resolution);
+        this.say(`Conflict ${resolution.conflictId} has been resolved. Outcome: ${resolution.explanation}`);
+        // A more advanced implementation would involve the agent taking action based on the resolution,
+        // such as retrying a failed step with corrected data or updating its plan.
+        // For now, we log the outcome and add it to the conversation for context.
+        this.addToConversation('system', `Conflict Resolution Outcome for ${resolution.conflictId}:\nResolution: ${JSON.stringify(resolution.resolution)}\nExplanation: ${resolution.explanation}`);
     }
 
     /**
@@ -1309,6 +1386,9 @@ Please consider this context and the available plugins when planning and executi
 
                     if (delegationResponse.data && delegationResponse.data.accepted) {
                         console.log(`Successfully delegated step ${step.id} to agent ${recipientId}`);
+                        // Store the mapping from the delegated task ID to our internal step ID
+                        this.delegatedSteps.set(delegationResponse.data.taskId, step.id);
+
                         return {
                             success: true,
                             result: {

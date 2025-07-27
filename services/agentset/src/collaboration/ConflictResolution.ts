@@ -452,11 +452,11 @@ export class ConflictResolution {
         exchanges: [
           {
             role: 'system',
-            content: 'You are a conflict resolution expert. Your task is to analyze different perspectives and propose a fair resolution that addresses the concerns of all parties.'
+            content: 'You are a conflict resolution expert. Your task is to analyze different perspectives and propose a fair resolution. Respond with a JSON object containing two keys: "resolution" (the proposed solution) and "explanation" (your reasoning).'
           },
           {
             role: 'user',
-            content: `Please help resolve the following conflict:\n\nDescription: ${conflict.description}\n\nConflicting data: ${JSON.stringify(conflict.conflictingData, null, 2)}\n\nVotes and explanations:\n${votesWithExplanations.map(v => `- Agent ${v.agentId}: ${JSON.stringify(v.vote)}\n  Explanation: ${v.explanation}`).join('\n\n')}\n\nPlease provide a resolution that addresses the concerns of all parties, and explain your reasoning.`
+            content: `Please help resolve the following conflict:\n\nDescription: ${conflict.description}\n\nConflicting data: ${JSON.stringify(conflict.conflictingData, null, 2)}\n\nVotes and explanations:\n${votesWithExplanations.map(v => `- Agent ${v.agentId}: ${JSON.stringify(v.vote)}\n  Explanation: ${v.explanation}`).join('\n\n')}\n\nPlease provide a JSON response with a "resolution" and "explanation".`
           }
         ],
         optimization: 'accuracy'
@@ -470,12 +470,18 @@ export class ConflictResolution {
       // Parse LLM response
       const llmResponse = response.data.response;
 
-      // Extract resolution and explanation
-      const resolutionMatch = llmResponse.match(/Resolution:\s*(.*?)(?:\n\n|$)/s);
-      const explanationMatch = llmResponse.match(/Explanation:\s*(.*?)(?:\n\n|$)/s);
+      let resolution: any;
+      let explanation: string;
 
-      const resolution = resolutionMatch ? resolutionMatch[1].trim() : llmResponse;
-      const explanation = explanationMatch ? explanationMatch[1].trim() : 'Resolved by AI-assisted negotiation';
+      try {
+        const parsedResponse = JSON.parse(llmResponse);
+        resolution = parsedResponse.resolution || llmResponse;
+        explanation = parsedResponse.explanation || 'Resolved by AI-assisted negotiation.';
+      } catch (e) {
+        console.warn('Could not parse LLM response as JSON, falling back to text.', e);
+        resolution = llmResponse;
+        explanation = 'Resolved by AI-assisted negotiation (response was not valid JSON).';
+      }
 
       return { resolution, explanation };
     } catch (error) {

@@ -474,7 +474,7 @@ export class AgentSet extends BaseEntity {
        this.app.post('/findAgentWithRole', (req: express.Request, res: express.Response): void => {
             try {
                 const { roleId, missionId } = req.body;
-                const agentId = this.specializationFramework.findBestAgentForTask(roleId, [], missionId);
+                const agentId = this.specializationFramework.findBestAgentForTask(roleId, '', missionId);
 
                 if (agentId) {
                     res.status(200).send({ agentId });
@@ -1186,6 +1186,8 @@ export class AgentSet extends BaseEntity {
             'search': 'researcher',
             'find': 'researcher',
 
+            'code' : 'coder',
+            
             'create': 'creative',
             'generate': 'creative',
             'design': 'creative',

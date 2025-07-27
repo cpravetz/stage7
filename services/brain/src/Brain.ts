@@ -307,8 +307,17 @@ export class Brain extends BaseEntity {
         }
         this.modelManager.trackModelResponse(requestId, typeof modelResponse === 'string' ? modelResponse : JSON.stringify(modelResponse), tokenCount, true);
 
+        // AWARENESS IMPLEMENTATION: Add confidence score to response
+        let confidence = 0.9; // Default confidence
+        let finalResponse = modelResponse;
+        if (typeof modelResponse === 'object' && modelResponse && 'confidence' in modelResponse) {
+            confidence = (modelResponse as any).confidence;
+            finalResponse = (modelResponse as any).result || modelResponse;
+        }
+
         res.json({
-            result: modelResponse,
+            response: finalResponse,
+            confidence: confidence,
             model: selectedModel.modelName,
             requestId: requestId
         });

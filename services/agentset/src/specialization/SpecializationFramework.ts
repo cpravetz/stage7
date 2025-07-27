@@ -5,20 +5,24 @@ import { AgentStatus } from '../utils/agentStatus';
 import { AgentRole, PredefinedRoles } from './AgentRole';
 import { AuthenticatedApiClient } from '@cktmcs/shared';
 
+
+
+export interface TaskPerformanceMetrics {
+    successRate: number;
+    taskCount: number;
+    averageTaskDuration: number;
+    lastEvaluation: string;
+    qualityScore: number;
+}
+
 /**
  * Agent specialization
  */
 export interface AgentSpecialization {
   agentId: string;
   roleId: string;
-  proficiency: number; // 0-100
   assignedAt: string;
-  performance: {
-    successRate: number; // 0-100
-    taskCount: number;
-    averageTaskDuration: number; // seconds
-    lastEvaluation: string;
-  };
+  performanceByTask: Map<string, TaskPerformanceMetrics>;
   customizations?: {
     capabilities?: string[];
     responsibilities?: string[];
@@ -233,14 +237,8 @@ export class SpecializationFramework {
     const specialization: AgentSpecialization = {
       agentId,
       roleId,
-      proficiency: 50, // Start with medium proficiency
       assignedAt: new Date().toISOString(),
-      performance: {
-        successRate: 0,
-        taskCount: 0,
-        averageTaskDuration: 0,
-        lastEvaluation: new Date().toISOString()
-      },
+      performanceByTask: new Map(),
       customizations
     };
 
@@ -357,67 +355,95 @@ export class SpecializationFramework {
    */
   async updateAgentPerformance(
     agentId: string,
+    actionVerb: string, 
     success: boolean,
     duration: number
   ): Promise<void> {
-    const specialization = this.specializations.get(agentId);
+
+   const specialization = this.specializations.get(agentId);
 
     if (!specialization) {
       return; // Agent has no specialization
     }
 
-    // Update performance metrics
-    const performance = specialization.performance;
+  
+    let taskPerformance = specialization.performanceByTask.get(actionVerb);
 
-    // Update success rate using weighted average
-    const weight = 0.1; // Weight of new task
-    performance.successRate = (performance.successRate * (1 - weight)) + (success ? 100 : 0) * weight;
+        if (!taskPerformance) {
+            taskPerformance = {
+                successRate: 0,
+                taskCount: 0,
+                averageTaskDuration: 0,
+                lastEvaluation: new Date().toISOString(),
+                qualityScore: 50 // Start with neutral quality
+            };
+        }
 
-    // Update task count
-    performance.taskCount += 1;
+        // Update metrics using a weighted average for stability
+        const weight = 0.1;
+        taskPerformance.successRate = (taskPerformance.successRate * (1 - weight)) + (success ? 100 : 0) * weight;
+        taskPerformance.taskCount += 1;
+        taskPerformance.averageTaskDuration = (taskPerformance.averageTaskDuration * (taskPerformance.taskCount - 1) + duration) / taskPerformance.taskCount;
+        taskPerformance.lastEvaluation = new Date().toISOString();
 
-    // Update average duration using weighted average
-    if (performance.taskCount === 1) {
-      performance.averageTaskDuration = duration;
-    } else {
-      performance.averageTaskDuration = (performance.averageTaskDuration * (performance.taskCount - 1) + duration) / performance.taskCount;
+        specialization.performanceByTask.set(actionVerb, taskPerformance);
+        
+        await this.saveSpecializations();
+        console.log(`Updated performance for agent ${agentId} on task '${actionVerb}'.`);
+  }
+
+/**
+     * Records feedback from a critic agent to adjust the quality score for a task.
+     * @param agentId The ID of the agent who performed the original task.
+     * @param actionVerb The action verb of the original task.
+     * @param qualityScore A score from 0 to 100 indicating the quality of the work.
+     */
+    async recordFeedback(agentId: string, actionVerb: string, qualityScore: number): Promise<void> {
+        const specialization = this.specializations.get(agentId);
+        if (!specialization) {
+            console.warn(`Cannot record feedback. Agent ${agentId} has no specialization.`);
+            return;
+        }
+
+        let taskPerformance = specialization.performanceByTask.get(actionVerb);
+        if (!taskPerformance) {
+            taskPerformance = {
+                successRate: 75, // Assume success if it's being reviewed
+                taskCount: 1,
+                averageTaskDuration: 0,
+                lastEvaluation: new Date().toISOString(),
+                qualityScore: 50
+            };
+        }
+
+        // Update quality score using a weighted average
+        const feedbackWeight = 0.25;
+        taskPerformance.qualityScore = (taskPerformance.qualityScore * (1 - feedbackWeight)) + (qualityScore * feedbackWeight);
+        taskPerformance.lastEvaluation = new Date().toISOString();
+
+        specialization.performanceByTask.set(actionVerb, taskPerformance);
+        await this.saveSpecializations();
+        console.log(`Recorded feedback for agent ${agentId} on task '${actionVerb}'. New quality score: ${taskPerformance.qualityScore.toFixed(2)}`);
     }
 
-    // Update last evaluation
-    performance.lastEvaluation = new Date().toISOString();
+    /**
+     * Calculates a dynamic proficiency score for a given task.
+     * @param taskPerformance The performance metrics for the task.
+     * @returns A proficiency score from 0 to 100.
+     */
+    private getTaskProficiency(taskPerformance: TaskPerformanceMetrics): number {
+        if (!taskPerformance) return 50; // Default proficiency for unknown tasks
 
-    // Update proficiency based on performance
-    this.updateProficiency(specialization);
+        const successFactor = taskPerformance.successRate / 100;
+        const experienceFactor = Math.min(1, taskPerformance.taskCount / 20); // Full experience at 20 tasks
+        const qualityFactor = taskPerformance.qualityScore / 100;
 
-    // Save specializations
-    await this.saveSpecializations();
-  }
+        // Weighted average of different factors
+        const proficiency = (successFactor * 0.4) + (experienceFactor * 0.2) + (qualityFactor * 0.4);
 
-  /**
-   * Update agent proficiency
-   * @param specialization Agent specialization
-   */
-  private updateProficiency(specialization: AgentSpecialization): void {
-    const performance = specialization.performance;
-
-    // Calculate proficiency based on success rate and task count
-    const successFactor = performance.successRate / 100;
-    const experienceFactor = Math.min(1, performance.taskCount / 100);
-
-    // Combine factors with weights
-    const successWeight = 0.7;
-    const experienceWeight = 0.3;
-
-    const newProficiency = (successFactor * successWeight + experienceFactor * experienceWeight) * 100;
-
-    // Apply smoothing to avoid large jumps
-    const smoothingFactor = 0.2;
-    specialization.proficiency = specialization.proficiency * (1 - smoothingFactor) + newProficiency * smoothingFactor;
-
-    // Ensure proficiency is within bounds
-    specialization.proficiency = Math.max(0, Math.min(100, specialization.proficiency));
-  }
-
+        return Math.max(0, Math.min(100, proficiency * 100));
+    }
+    
   /**
    * Find the best agent for a task
    * @param roleId Required role
@@ -427,6 +453,7 @@ export class SpecializationFramework {
    */
   findBestAgentForTask(
     roleId: string,
+    actionVerb?: string,
     knowledgeDomains: string[] = [],
     missionId?: string
   ): string | undefined {
@@ -455,7 +482,10 @@ export class SpecializationFramework {
 
     // Score candidates
     const scoredCandidates = finalCandidates.map(spec => {
-      let score = spec.proficiency;
+      const taskPerformance = spec.performanceByTask.get(actionVerb || 'ACCOMPLISH');
+      // If no specific performance data, use an average of all tasks for that agent or a default.
+      const proficiency = taskPerformance ? this.getTaskProficiency(taskPerformance) : 50;
+      let score = proficiency;
 
       // Bonus for knowledge domain match
       if (knowledgeDomains.length > 0) {
@@ -555,15 +585,7 @@ export class SpecializationFramework {
 
     // Add task-specific instructions
     prompt += `\n\nCurrent Task: ${taskDescription}\n\n`;
-
-    // Add proficiency level
-    let proficiencyLevel = 'novice';
-    if (specialization.proficiency > 30) proficiencyLevel = 'intermediate';
-    if (specialization.proficiency > 70) proficiencyLevel = 'expert';
-    if (specialization.proficiency > 90) proficiencyLevel = 'master';
-
-    prompt += `Your current proficiency level is ${proficiencyLevel} (${Math.round(specialization.proficiency)}%).\n\n`;
-
+    
     // Add relevant knowledge domains
     const relevantDomains = (specialization.customizations?.knowledgeDomains || role.knowledgeDomains)
       .map(domainId => this.knowledgeDomains.get(domainId))

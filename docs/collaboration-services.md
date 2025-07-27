@@ -13,6 +13,33 @@ The collaboration system consists of four main components:
 
 ---
 
+## Purpose and Strategy
+
+The fundamental purpose of the collaboration system is to enable a **"divide and conquer"** strategy for problem-solving. It allows the system to tackle missions that are too complex, large, or require a breadth of specialized skills that would be inefficient for a single agent to handle. It transforms the system from a collection of siloed workers into a coordinated, intelligent team.
+
+The core strategy is **delegation to specialized agents**. Instead of creating a single, monolithic "super-agent", the system creates smaller, focused agents with specific roles (e.g., `Researcher`, `Writer`, `Coder`). When a coordinator agent encounters a step requiring a specific skill, it delegates that step to an agent with the appropriate role.
+
+### Use Cases
+
+*   **Complex Research Task:** A main agent running `ACCOMPLISH` creates a plan.
+    -   Step 1: "Search for articles on quantum computing". The main agent delegates this to a `ResearcherAgent`.
+    -   Step 2: "Scrape the content from the top 5 articles". This is delegated to a `ScraperAgent`.
+    -   Step 3: "Summarize the scraped content". This is delegated to a `SummarizerAgent`.
+    -   Step 4: "Write a final report". The main agent takes the summaries and writes the report.
+
+*   **Conflict Resolution:**
+    -   `AgentA`'s research says a fact is TRUE. `AgentB`'s research says the same fact is FALSE.
+    -   One agent initiates a `resolveConflict` request.
+    -   Other agents in the mission are asked to vote or provide evidence.
+    -   The `ConflictResolution` system uses a strategy (e.g., `NEGOTIATION` using an LLM) to determine the most likely correct answer based on the provided evidence.
+
+*   **Knowledge Sharing:**
+    -   A `ScraperAgent` finds a very useful API documentation page.
+    -   It uses `shareKnowledge` to `broadcast` the URL and a summary to all other agents in the mission.
+    -   A `CoderAgent` later in the plan can then use this shared knowledge without having to re-discover it.
+
+---
+
 ## CollaborationManager
 
 The `CollaborationManager` class implements the `CollaborationProtocol` interface and acts as the core coordinator for collaboration among agents.

@@ -298,6 +298,8 @@ AGENT ROLES - Choose the most appropriate role for each step:
 
 6. **domain_expert**: Provides specialized knowledge and expertise in specific fields. Analyzes domain-specific problems, offers expert advice and recommendations. Use for: technical analysis, specialized knowledge application, expert consultation, complex problem solving.
 
+7. **coder**: Develops, tests, and maintains software and code. Writes clean, efficient, and well-documented
+
 2. DIRECT_ANSWER format:
 {{"type": "DIRECT_ANSWER", "answer": "your answer"}}
 
