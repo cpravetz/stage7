@@ -32,6 +32,15 @@ The plugin ecosystem supports not only code-based plugins (Python, JavaScript, C
 - **Reflective**: Analyzes runtime errors and develops code improvements to address issues
 - **Self-optimizing**: Uses context to route LLM conversations to the best available LLM for processing
 - **Mission Planning**: ACCOMPLISH plugin creates comprehensive plans for complex goals
+- **Agent Awareness & Specialization**: The system utilizes a sophisticated framework of agent roles to ensure tasks are handled by the most appropriate specialist.
+  - **Dynamic Role Assignment**: For each step in a mission plan, the system assigns one of the following roles to the executing agent:
+    - **Coordinator**: Orchestrates activities, manages task allocation, and breaks down complex goals.
+    - **Researcher**: Gathers, analyzes, and synthesizes information from various sources.
+    - **Creative**: Generates novel ideas, content, and solutions.
+    - **Critic**: Evaluates plans and content, identifying potential risks and issues.
+    - **Executor**: Implements plans and executes tasks with precision and reliability.
+    - **Domain Expert**: Provides specialized knowledge in specific fields.
+    - **Coder**: Develops, tests, and maintains software and code.
 
 ### Scalable Architecture
 - **Microservices Design**: Independent components that can be scaled as needed

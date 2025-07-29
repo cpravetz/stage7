@@ -195,12 +195,15 @@ class AccomplishPlugin:
         """Step 2: Assemble prompt from inputs and constants"""
         goal = inputs['goal']['value']
         available_plugins = inputs.get('available_plugins', {}).get('value', '')
+        # Gather all available workproducts/inputs (excluding goal and available_plugins)
+        available_workproducts = []
+        for k, v in inputs.items():
+            if k not in ('goal', 'available_plugins'):
+                available_workproducts.append(f"- {k}: {v.get('value', v)}")
+        available_workproducts_str = '\n'.join(available_workproducts) if available_workproducts else 'None yet.'
 
-        # Note: verbToAvoid parameter is no longer used for circular reference detection
-        # as nesting of actionVerbs is legitimate and proper
-        
         prompt = f"""
-Your task is to decide on the best way to achieve the goal: '{goal}' and provide a response in one of the JSON formats below.
+Your task is to decide on the best way to achieve the goal: '{{goal}}' and provide a response in one of the JSON formats below.
 
 CRITICAL JSON REQUIREMENTS:
 - Return ONLY valid JSON - no explanations, markdown, code blocks, or additional text
@@ -209,11 +212,10 @@ CRITICAL JSON REQUIREMENTS:
 - Start your response immediately with {{ and end with }}
 - Your entire response must be parseable as JSON
 
-- **DO NOT** create a plan that just uses 'THINK'.
-- **INSTEAD**, create a plan that uses plugins like 'ASK_USER_QUESTION' (to ask for a file path), 'FILE_OPERATION' (to read the file), 'SCRAPE' (to get web content), etc.
-- Your plan should *perform* the action, not just think about it.
-- Take any part of the prompt and use it as a input value in your plan.
-- To get a file from the user, use 'ASK_USER_QUESTION' with an 'answerType' of 'file'. The plugin will pause and wait for the user to upload a file, then return a file ID. This file ID can then be used by other plugins like 'FILE_OPERATION'.
+IMPORTANT: At every step, you are provided with a list of all available inputs and workproducts (including files, outputs, and user-provided data). Before adding a step to request or generate a new input, ALWAYS check if it is already available in the list below. Only add a new input request if it is not already present. When planning, always reference previous outputs using the correct dependency and outputName mechanism, so workproducts are carried through the plan.
+
+AVAILABLE INPUTS/WORKPRODUCTS SO FAR:
+{available_workproducts_str}
 
 CRITICAL PLUGIN REQUIREMENTS:
 - FILE_OPERATION ALWAYS requires "operation" input with value "read", "write", or "append"
@@ -262,7 +264,6 @@ CRITICAL: You have the following tools available. You MUST use the exact 'action
 --- AVAILABLE TOOLS SCHEMA ---
 {available_plugins}
 --- END AVAILABLE TOOLS SCHEMA ---
-
 
 Available plugins: {available_plugins}
 
