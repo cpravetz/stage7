@@ -1440,9 +1440,25 @@ export class CapabilitiesManager extends BaseEntity {
     private async executeAccomplishPlugin(goal: string, trace_id: string): Promise<PluginOutput[]> {
         const source_component = "CapabilitiesManager.executeAccomplishPlugin";
         let availablePluginsStr = ""; // Initialize
-        try {
-            // Get available plugins string from pluginRegistry (which proxies to marketplace)
-            availablePluginsStr = await this.pluginRegistry.getAvailablePluginsStr();
+        try {            
+            // Fetch detailed plugin manifests to provide a schema to the Brain
+            const allPlugins = await this.pluginRegistry.list();
+            const manifestPromises = allPlugins.map(p => 
+                this.pluginRegistry.fetchOne(p.id, p.version, p.repository.type)
+                    .catch(e => {
+                        console.warn(`[${trace_id}] Failed to fetch manifest for ${p.id} v${p.version}: ${e.message}`);
+                        return null; // Return null on failure to not break Promise.all
+                    })
+            );
+            const manifests = (await Promise.all(manifestPromises)).filter((m): m is PluginManifest => m !== null);
+            
+            // Create a lean, prompt-friendly version of the manifests
+            const leanManifests = manifests.map(m => ({
+                actionVerb: m.verb,
+                description: m.description,
+                inputs: (m.inputDefinitions || []).map(i => ({ name: i.name, description: i.description, type: i.type, required: i.required }))
+            }));
+            availablePluginsStr = JSON.stringify(leanManifests, null, 2);
             console.log(`[${trace_id}] ${source_component}: Plugins string for ACCOMPLISH: ${availablePluginsStr.substring(0,100)}...`);
 
             const accomplishInputs : Map<string, InputValue> = new Map([

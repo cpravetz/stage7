@@ -395,25 +395,23 @@ export class GitHubRepository implements PluginRepository {
                  return [];
             }
             pluginIdDirs = response.data.filter((item: { type: string }) => item.type === 'dir');
-        } catch (error) {
-            // Check for 404 (directory doesn't exist) vs other errors like 401 (auth issues)
-            const isAxiosError = (error as any).response;
-            const status = isAxiosError ? (error as any).response.status : null;
-
-            if (status === 404) {
-                console.log(`GitHubRepository: pluginsDir '${this.pluginsDir}' not found on branch ${effectiveBranch}. This is normal for empty repositories.`);
-                return []; // Return empty array instead of trying to create directory
-            } else if (status === 401) {
-                console.error(`GitHubRepository: Authentication failed. Please check GITHUB_TOKEN and repository permissions.`);
-                return [];
-            } else if ((error as any).code === 'RESOURCE_NOT_FOUND') {
-                console.log(`GitHubRepository: pluginsDir '${this.pluginsDir}' not found on branch ${effectiveBranch}. Attempting to create.`);
-                try {
-                    await this.createOrUpdateFile(`${this.pluginsDir}/README.md`, '# Plugins', 'Creating plugins directory', effectiveBranch);
-                } catch (initError) { console.error(`GitHubRepository: Failed to create pluginsDir: ${(initError as Error).message}`); }
-                return [];
+        } catch (error: unknown) {
+            // Check for Axios-specific errors to get status code
+            if (axios.isAxiosError(error) && error.response) {
+                const { status } = error.response;
+                if (status === 404) {
+                    // This is the case where the plugins directory doesn't exist.
+                    console.log(`GitHubRepository: pluginsDir '${this.pluginsDir}' not found on branch ${effectiveBranch}. This is normal for new or empty repositories.`);
+                    return []; // Gracefully exit with an empty list.
+                } else if (status === 401) {
+                    // This is the authentication error seen in the logs.
+                    console.error(`GitHubRepository: Authentication failed (401). Please check GITHUB_TOKEN and repository permissions.`);
+                    return []; // Gracefully exit with an empty list.
+                }
             }
-            console.error(`GitHubRepository: Error listing plugin ID dirs from ${this.pluginsDir}: ${(error as Error).message}`);
+            // For all other errors, log it and exit gracefully.
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            console.error(`GitHubRepository: An unexpected error occurred while listing plugins from '${this.pluginsDir}': ${errorMessage}`);
             return [];
         }
 
@@ -429,15 +427,6 @@ export class GitHubRepository implements PluginRepository {
                         id: manifest.id, // Use ID from manifest
                         verb: manifest.verb,
                         description: manifest.description,
-                        version: manifest.version,
-                        repository: {
-                            type: 'github',
-                            url: `https://github.com/${this.repoOwner}/${this.repoName}/tree/${effectiveBranch}/${this.pluginsDir}/${manifest.id}/${manifest.version}`
-                        }
-                    });
-                    locators.push({
-                        id: manifest.id, // Use ID from manifest
-                        verb: manifest.verb,
                         version: manifest.version,
                         repository: {
                             type: 'github',

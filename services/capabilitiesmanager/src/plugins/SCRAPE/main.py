@@ -143,25 +143,25 @@ class ScrapePlugin:
 
     def parse_config(self, inputs_map: Dict[str, Any]) -> Dict[str, Any]:
         """Parse scraping configuration from inputs"""
-        config = {}
-        
-        for key, value in inputs_map.items():
-            if key in ['selector', 'attribute', 'limit']:
-                if isinstance(value, dict) and 'value' in value:
-                    config[key] = value['value']
-                else:
-                    config[key] = value
-        
+        config = {
+            'selector': self._get_input_value(inputs_map, 'selector'),
+            'attribute': self._get_input_value(inputs_map, 'attribute'),
+            'limit': self._get_input_value(inputs_map, 'limit')
+        }
+
+        # Filter out None values so we can use .get() with defaults later
+        config = {k: v for k, v in config.items() if v is not None}
+
         # Convert limit to integer if provided
         if 'limit' in config:
             try:
                 config['limit'] = int(config['limit'])
             except (ValueError, TypeError):
-                logger.warning(f"Invalid limit value: {config['limit']}, ignoring")
+                logger.warning(f"Invalid limit value provided: {config['limit']}. Ignoring limit.")
                 del config['limit']
-        
+
         return config
-    
+
     def convert_to_full_url(partial_url, default_scheme='https', context_url=None):
         """
         Advanced URL converter with additional features.
@@ -195,20 +195,26 @@ class ScrapePlugin:
         # Case 3: Domain only (no scheme or //)
         return f"{default_scheme}://{url}"
 
+    def _get_input_value(self, inputs: Dict[str, Any], key: str, default: Any = None) -> Any:
+        """Safely gets a value from the parsed inputs dictionary and strips it if it's a string."""
+        value_obj = inputs.get(key)
+        
+        if isinstance(value_obj, dict):
+            value = value_obj.get('value', default)
+        else:
+            value = value_obj if value_obj is not None else default
+            
+        if isinstance(value, str):
+            return value.strip()
+        return value
+
     def execute(self, inputs_map: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Execute the SCRAPE plugin"""
         try:
-            # Extract URL
-            url = None
-            for key, value in inputs_map.items():
-                if key == 'url':
-                    if isinstance(value, dict) and 'value' in value:
-                        url = value['value']
-                    else:
-                        url = value
-                    break
+            # Extract URL using the helper
+            url_input = self._get_input_value(inputs_map, 'url')
 
-            if not url:
+            if not url_input:
                 return [{
                     "success": False,
                     "name": "error",
@@ -218,23 +224,22 @@ class ScrapePlugin:
                     "error": "No URL provided to SCRAPE plugin"
                 }]
 
-            # Validate URL
-            full_url = self.convert_to_full_url(url,'https')
+            # Validate and convert URL
+            full_url = self.convert_to_full_url(url_input, 'https')
             if not full_url:
                 return [{
                     "success": False,
                     "name": "error",
                     "resultType": PluginParameterType.ERROR,
-                    "resultDescription": f"Invalid URL: {url}",
+                    "resultDescription": f"Invalid URL: {url_input}",
                     "result": None,
-                    "error": f"Invalid URL: {url}"
+                    "error": f"Invalid URL: {url_input}"
                 }]
 
-            url = full_url
             # Parse configuration
             config = self.parse_config(inputs_map)
             # Fetch HTML content
-            html = self.fetch_html(url)
+            html = self.fetch_html(full_url)
             
             # Scrape content
             scraped_data = self.scrape_content(html, config)
@@ -243,7 +248,7 @@ class ScrapePlugin:
                 "success": True,
                 "name": "content",
                 "resultType": PluginParameterType.ARRAY,
-                "resultDescription": f"Scraped content from {url}",
+                "resultDescription": f"Scraped content from {full_url}",
                 "result": scraped_data,
                 "mimeType": "application/json"
             }]
@@ -254,7 +259,7 @@ class ScrapePlugin:
                 "success": False,
                 "name": "error",
                 "resultType": PluginParameterType.ERROR,
-                "resultDescription": f"Error scraping {inputs_map.get('url', {}).get('value', 'undefined URL')}",
+                "resultDescription": f"Error scraping {self._get_input_value(inputs_map, 'url', 'undefined URL')}",
                 "result": None,
                 "error": str(e)
             }]

@@ -304,15 +304,14 @@ export class PluginRegistry {
                 try {
                     console.log(`Loading plugins from ${repoType} repository...`);
                     const plugins = await repository.list(); // Lists PluginLocators
+                    if (!Array.isArray(plugins)) {
+                        console.error(`Failed to list plugins from ${repoType} repository: plugins is not iterable`);
+                        continue; // Skip this repository
+                    }
                     for (const locator of plugins) {
                         try {
-                            // Fetch the default/latest manifest for caching basic info
-                            // More sophisticated caching might cache all versions or have a separate version index
-                            const manifest = await repository.fetch(locator.id); // Fetches a single manifest
+                            const manifest = await repository.fetch(locator.id);
                             if (manifest) {
-                                // This basic cache does not store version specific manifests,
-                                // it just maps ID to repo and verb to ID for initial discovery.
-                                // Version resolution happens in fetchAllVersions or when fetchOne is called with a version.
                                 this.cache.set(manifest.id, repoType as PluginRepositoryType);
                                 this.verbIndex.set(manifest.verb, manifest.id);
                             }

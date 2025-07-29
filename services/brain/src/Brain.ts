@@ -192,7 +192,7 @@ export class Brain extends BaseEntity {
                 // Track successful response
                 this.modelManager.trackModelResponse(trackingRequestId, result || '', 0, true);
 
-                res.json({ response: result, mimeType: 'text/plain' });
+                res.json({ result: result, mimeType: 'text/plain' });
                 return; // Success!
 
             } catch (error) {
@@ -316,7 +316,7 @@ export class Brain extends BaseEntity {
         }
 
         res.json({
-            response: finalResponse,
+            result: finalResponse,
             confidence: confidence,
             model: selectedModel.modelName,
             requestId: requestId
@@ -608,7 +608,7 @@ export class Brain extends BaseEntity {
     private createThreadFromRequest(req: express.Request): Thread {
         const body = req.body;
         
-        return {
+        const thread: Thread = {
             exchanges: body.exchanges || [],
             optimization: body.optimization || 'accuracy',
             conversationType: body.ConversationType || body.conversationType || LLMConversationType.TextToText,
@@ -618,14 +618,29 @@ export class Brain extends BaseEntity {
                 ...body.optionals
             }
         };
+
+        // A more robust check for any request that requires a JSON plan, like those from ACCOMPLISH
+        const requiresJsonPlan = thread.exchanges.length > 0 &&
+            thread.exchanges[0].content &&
+            (thread.exchanges[0].content.includes('For PLAN responses, return a JSON object with this exact structure:') ||
+                thread.exchanges[0].content.includes('Your entire response must be parseable as JSON'));
+
+        if (requiresJsonPlan) {
+            console.log('[Brain Chat] Detected request requiring a JSON plan, ensuring JSON response format');
+            if (!thread.optionals) thread.optionals = {};
+            thread.optionals.response_format = { "type": "json_object" };
+            thread.optionals.temperature = 0.2;
+
+            if (!thread.exchanges.some(ex => ex.role === 'system')) {
+                thread.exchanges.unshift({
+                    role: 'system',
+                    content: 'You are a JSON generation assistant. You must respond with valid JSON only. Your entire response must be parseable as JSON. Do not include any explanations, markdown, or code blocks - just the raw JSON object.'
+                });
+            }
+        }
+
+        return thread;
     }
 }
 
-// ---
-// To debug ACCOMPLISH registration, add logging in your registry/manager code:
-// Example:
-// console.log('Registered verbs:', Object.keys(localRegistry));
-// console.log('CapabilitiesManager verbs:', capabilitiesManager.listVerbs());
-// ---
-// Create an instance of the Brain
 new Brain();

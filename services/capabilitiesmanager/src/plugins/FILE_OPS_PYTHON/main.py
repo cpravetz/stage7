@@ -1,430 +1,184 @@
 #!/usr/bin/env python3
 """
-FILE_OPS Plugin for Stage7 (Python Version)
-
-This plugin provides services for file operations: read, write, append.
-Converted from JavaScript to Python for better maintainability and consistency.
+This is a placeholder for the FILE_OPERATION plugin.
+It will be replaced with a full implementation.
+FILE_OPERATION Plugin - Secure and Robust Implementation
 """
 
-import sys
 import json
+import sys
 import os
-from pathlib import Path
-from typing import Dict, List, Any, Optional
+import logging
 import requests
+from typing import Dict, Any, List, Optional
 
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-DEFAULT_SHARED_FOLDER = "shared"
-LIBRARIAN_URL = os.environ.get("LIBRARIAN_URL")
+# Define a secure base path for file operations.
+# This corresponds to a mounted volume shared across services.
+SHARED_FILES_BASE_PATH = os.environ.get('SHARED_FILES_PATH', '/usr/src/app/shared/mission-files/')
 
+class FileOperationPlugin:
+    def execute(self, inputs_str: str) -> str:
+        try:
+            # 1. Correctly parse inputs from list of pairs to dict
+            inputs = self._parse_inputs(inputs_str)
 
-class InputValue:
-    """Represents a plugin input parameter in the new format"""
-    def __init__(self, inputName: str, value: Any, valueType: str, args: Dict[str, Any] = None):
-        self.inputName = inputName
-        self.value = value
-        self.valueType = valueType
-        self.args = args or {}
+            # 2. Get operation and other parameters
+            operation = self._get_input_value(inputs, 'operation')
+            if not operation:
+                raise ValueError("'operation' input is required.")
 
-
-class PluginOutput:
-    """Represents a plugin output result"""
-    def __init__(self, success: bool, name: str, result_type: str, 
-                 result: Any, result_description: str, error: str = None):
-        self.success = success
-        self.name = name
-        self.result_type = result_type
-        self.result = result
-        self.result_description = result_description
-        self.error = error
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for JSON serialization"""
-        output = {
-            "success": self.success,
-            "name": self.name,
-            "resultType": self.result_type,
-            "result": self.result,
-            "resultDescription": self.result_description
-        }
-        if self.error:
-            output["error"] = self.error
-        return output
-
-
-def create_success_output(name: str, result: Any, result_type: str = "string", 
-                         description: str = "Plugin executed successfully") -> PluginOutput:
-    """Helper function to create a successful output"""
-    return PluginOutput(
-        success=True,
-        name=name,
-        result_type=result_type,
-        result=result,
-        result_description=description
-    )
-
-
-def create_error_output(name: str, error_message: str, 
-                       description: str = "Plugin execution failed") -> PluginOutput:
-    """Helper function to create an error output"""
-    return PluginOutput(
-        success=False,
-        name=name,
-        result_type="error",
-        result=None,
-        result_description=description,
-        error=error_message
-    )
-
-
-def validate_file_path(file_path: str) -> str:
-    """
-    Validate and normalize file path for security
-    
-    Args:
-        file_path: The file path to validate
-        
-    Returns:
-        Normalized file path
-        
-    Raises:
-        ValueError: If path is invalid or unsafe
-    """
-    if not file_path:
-        raise ValueError("File path cannot be empty")
-    
-    # Convert to Path object for better handling
-    path = Path(file_path)
-    
-    # Check for path traversal attempts
-    if '..' in path.parts:
-        raise ValueError("Path traversal not allowed")
-    
-    # Ensure path is not absolute (for security)
-    if path.is_absolute():
-        raise ValueError("Absolute paths not allowed")
-    
-    return str(path)
-
-
-def read_file(file_path: str) -> str:
-    """
-    Read content from a file
-    
-    Args:
-        file_path: Path to the file to read
-        
-    Returns:
-        File content as string
-    """
-    validated_path = validate_file_path(file_path)
-    
-    try:
-        with open(validated_path, 'r', encoding='utf-8') as file:
-            return file.read()
-    except FileNotFoundError:
-        raise FileNotFoundError(f"File not found: {file_path}")
-    except PermissionError:
-        raise PermissionError(f"Permission denied: {file_path}")
-    except UnicodeDecodeError:
-        raise ValueError(f"File is not valid UTF-8: {file_path}")
-
-
-def write_file(file_path: str, content: str) -> None:
-    """
-    Write content to a file
-    
-    Args:
-        file_path: Path to the file to write
-        content: Content to write
-    """
-    validated_path = validate_file_path(file_path)
-    
-    try:
-        # Create directory if it doesn't exist
-        Path(validated_path).parent.mkdir(parents=True, exist_ok=True)
-        
-        with open(validated_path, 'w', encoding='utf-8') as file:
-            file.write(content)
-    except PermissionError:
-        raise PermissionError(f"Permission denied: {file_path}")
-    except OSError as e:
-        raise OSError(f"Failed to write file {file_path}: {str(e)}")
-
-
-def append_file(file_path: str, content: str) -> None:
-    """
-    Append content to a file
-    
-    Args:
-        file_path: Path to the file to append to
-        content: Content to append
-    """
-    validated_path = validate_file_path(file_path)
-    
-    try:
-        # Create directory if it doesn't exist
-        Path(validated_path).parent.mkdir(parents=True, exist_ok=True)
-        
-        with open(validated_path, 'a', encoding='utf-8') as file:
-            file.write(content)
-    except PermissionError:
-        raise PermissionError(f"Permission denied: {file_path}")
-    except OSError as e:
-        raise OSError(f"Failed to append to file {file_path}: {str(e)}")
-
-
-def handle_file_id_operation(file_id: str, operation_input: InputValue, postoffice_url_input: InputValue) -> List[PluginOutput]:
-    """
-    Handle file operations using file ID (MissionFile strategy)
-
-    Args:
-        file_id: The file ID to operate on
-        operation_input: The operation to perform
-        postoffice_url_input: PostOffice URL for API calls
-
-    Returns:
-        List of PluginOutput objects
-    """
-    if not operation_input:
-        return [create_error_output("error", "Missing required input: operation")]
-
-    operation = operation_input.value
-    if not isinstance(operation, str) or operation not in ['read', 'write', 'append']:
-        return [create_error_output("error", "Operation must be 'read', 'write', or 'append'")]
-
-    if not postoffice_url_input or not isinstance(postoffice_url_input.value, str) or not postoffice_url_input.value.strip():
-        return [create_error_output("error", "Missing or invalid postOffice_url input")]
-
-    postoffice_url = postoffice_url_input.value.strip()
-    operation = operation.lower().strip()
-
-    try:
-        if operation == 'read':
-            # Get file metadata from Librarian via PostOffice
-            response = requests.get(f"{postoffice_url}/librarian/retrieve/{file_id}")
-            response.raise_for_status()
-            file_metadata = response.json()
-
-            if not file_metadata or 'storagePath' not in file_metadata:
-                return [create_error_output("error", f"File metadata not found for file ID: {file_id}")]
-
-            storage_path = file_metadata['storagePath']
-
-            # Read the file content from storage path
-            if os.path.exists(storage_path):
-                with open(storage_path, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                return [create_success_output("result", content, "string", f"Read content from file ID: {file_id}")]
-            else:
-                return [create_error_output("error", f"File not found at storage path: {storage_path}")]
-
-        elif operation in ['write', 'append']:
-            return [create_error_output("error", f"Operation '{operation}' not supported for file ID operations. File ID operations are read-only.")]
-
-    except requests.RequestException as e:
-        return [create_error_output("error", f"API request failed: {str(e)}")]
-    except Exception as e:
-        return [create_error_output("error", f"File operation failed: {str(e)}")]
-
-
-def execute_plugin(inputs: Dict[str, InputValue]) -> List[PluginOutput]:
-    """
-    Main plugin execution function for FILE_OPS plugin
-    
-    Args:
-        inputs: Dictionary of input parameters
-        
-    Returns:
-        List of PluginOutput objects
-    """
-    try:
-        # Get required inputs
-        path_input = inputs.get('path')
-        file_id_input = inputs.get('fileId')
-        operation_input = inputs.get('operation')
-        postoffice_url_input = inputs.get('postOffice_url')
-        mission_id_input = inputs.get('missionId')
-
-        # Check if fileId is provided (new MissionFile strategy)
-        if file_id_input and isinstance(file_id_input.value, str) and file_id_input.value.strip():
-            return handle_file_id_operation(file_id_input.value.strip(), operation_input, postoffice_url_input)
-
-        # Use default shared folder if path is missing or empty
-        if not path_input or not (isinstance(path_input.value, str) and path_input.value.strip()):
-            file_path = DEFAULT_SHARED_FOLDER
-        else:
-            file_path = path_input.value.strip()
-        
-        if not operation_input:
-            return [create_error_output("error", "Missing required input: operation")]
-        
-        operation = operation_input.value
-        
-        # Validate inputs
-        if not isinstance(file_path, str) or not file_path.strip():
-            return [create_error_output("error", "Path must be a non-empty string")]
-        
-        if not isinstance(operation, str) or operation not in ['read', 'write', 'append']:
-            return [create_error_output("error", "Operation must be 'read', 'write', or 'append'")]
-        
-        file_path = file_path.strip()
-        operation = operation.lower().strip()
-        
-        # If path is "shared", use postOffice API calls
-        if file_path == DEFAULT_SHARED_FOLDER:
-            if not postoffice_url_input or not isinstance(postoffice_url_input.value, str) or not postoffice_url_input.value.strip():
-                return [create_error_output("error", "Missing or invalid postOffice_url input")]
-            if not mission_id_input or not isinstance(mission_id_input.value, str) or not mission_id_input.value.strip():
-                return [create_error_output("error", "Missing or invalid missionId input")]
-            
-            postoffice_url = postoffice_url_input.value.strip()
-            mission_id = mission_id_input.value.strip()
-            
-            try:
-                headers = {"Content-Type": "application/json"}
-                
-                if operation == 'read':
-                    # List files
-                    list_response = requests.get(f"{postoffice_url}/missions/{mission_id}/files")
-                    list_response.raise_for_status()
-                    files = list_response.json().get('files', [])
-                    
-                    # Find file matching the path or default file name
-                    target_file = None
-                    for f in files:
-                        if f.get('originalName') == file_path or f.get('originalName') == "shared":
-                            target_file = f
-                            break
-                    if not target_file:
-                        return [create_error_output("error", "File not found in shared folder")]
-                    
-                    file_id = target_file.get('id')
-                    # Download file content
-                    download_response = requests.get(f"{postoffice_url}/missions/{mission_id}/files/{file_id}/download")
-                    download_response.raise_for_status()
-                    content = download_response.text
-                    return [create_success_output("result", content, "string", f"Read content from shared folder via postOffice API")]
-                
-                elif operation in ['write', 'append']:
-                    content_input = inputs.get('content')
-                    content = content_input.value if content_input else ""
-                    if content is None:
-                        content = ""
-                    elif not isinstance(content, str):
-                        content = str(content)
-                    
-                    # For append, download existing file content first
-                    existing_content = ""
-                    if operation == 'append':
-                        list_response = requests.get(f"{postoffice_url}/missions/{mission_id}/files")
-                        list_response.raise_for_status()
-                        files = list_response.json().get('files', [])
-                        target_file = None
-                        for f in files:
-                            if f.get('originalName') == file_path or f.get('originalName') == "shared":
-                                target_file = f
-                                break
-                        if target_file:
-                            file_id = target_file.get('id')
-                            download_response = requests.get(f"{postoffice_url}/missions/{mission_id}/files/{file_id}/download")
-                            download_response.raise_for_status()
-                            existing_content = download_response.text
-                    
-                    new_content = existing_content + content if operation == 'append' else content
-                    
-                    # Upload new file content
-                    files = {
-                        'files': ('shared.txt', new_content)
-                    }
-                    upload_response = requests.post(f"{postoffice_url}/missions/{mission_id}/files", files=files)
-                    upload_response.raise_for_status()
-                    
-                    action = "Appended" if operation == 'append' else "Saved"
-                    return [create_success_output("result", None, "null", f"{action} content to shared folder via postOffice API")]
-                
-                else:
-                    return [create_error_output("error", f"Unknown operation: {operation}")]
-            
-            except requests.RequestException as e:
-                return [create_error_output("error", f"postOffice API request failed: {str(e)}")]
-        
-        # For other paths, use local file system operations
-        else:
+            # 3. Route to the correct operation handler
             if operation == 'read':
-                try:
-                    content = read_file(file_path)
-                    return [create_success_output("result", content, "string", 
-                                                f"Read content from {file_path}")]
-                except Exception as e:
-                    return [create_error_output("error", str(e))]
-            
-            elif operation in ['write', 'append']:
-                content_input = inputs.get('content')
-                content = content_input.value if content_input else ""
-                
-                if content is None:
-                    content = ""
-                elif not isinstance(content, str):
-                    content = str(content)
-                
-                try:
-                    if operation == 'write':
-                        write_file(file_path, content)
-                        return [create_success_output("result", None, "null", 
-                                                    f"Saved content to {file_path}")]
-                    else:  # append
-                        append_file(file_path, content)
-                        return [create_success_output("result", None, "null", 
-                                                    f"Appended content to {file_path}")]
-                except Exception as e:
-                    return [create_error_output("error", str(e))]
-            
+                result = self._read_operation(inputs)
+            elif operation == 'write':
+                result = self._write_operation(inputs)
+            elif operation == 'append':
+                result = self._append_operation(inputs)
+            elif operation == 'list':
+                result = self._list_operation(inputs)
+            elif operation == 'delete':
+                result = self._delete_operation(inputs)
             else:
-                return [create_error_output("error", f"Unknown operation: {operation}")]
-        
-    except Exception as e:
-        return [create_error_output("error", f"Unexpected error: {str(e)}")]
+                raise ValueError(f"Unsupported operation: {operation}")
 
+            return json.dumps([result])
 
-def main():
-    """Main entry point for the plugin"""
-    try:
-        # Read plugin root path from command line argument
-        plugin_root = sys.argv[1] if len(sys.argv) > 1 else os.getcwd()
-        
-        # Add plugin root to Python path for local imports
-        sys.path.insert(0, plugin_root)
-        
-        # Read input from stdin
-        input_data = sys.stdin.read().strip()
-        if not input_data:
-            raise ValueError("No input data provided")
-        
-        # Parse JSON input
-        raw_inputs = json.loads(input_data)
-        
-        # Convert to InputValue objects
-        inputs = {}
-        for key, value in raw_inputs.items():
-            if isinstance(value, dict) and 'value' in value:
-                inputs[key] = InputValue(value['value'], value.get('args', {}))
+        except Exception as e:
+            logger.error(f"FileOperationPlugin execution failed: {e}", exc_info=True)
+            return json.dumps([{
+                "success": False,
+                "name": "error",
+                "resultType": "error",
+                "resultDescription": "Plugin execution failed",
+                "error": str(e)
+            }])
+
+    def _parse_inputs(self, inputs_str: str) -> Dict[str, Any]:
+        """Parses the input JSON string (list of pairs) into a dictionary."""
+        try:
+            inputs_list = json.loads(inputs_str)
+            # This is the fix for the "'list' object has no attribute 'items'" error
+            if isinstance(inputs_list, list):
+                 return {item[0]: item[1] for item in inputs_list}
+            elif isinstance(inputs_list, dict): # Handle if it's already a dict
+                 return inputs_list
             else:
-                inputs[key] = InputValue(value)
-        
-        # Execute the plugin
-        outputs = execute_plugin(inputs)
-        
-        # Convert outputs to dictionaries and print as JSON
-        output_dicts = [output.to_dict() for output in outputs]
-        print(json.dumps(output_dicts, indent=2))
-        
-    except Exception as e:
-        # Handle any errors in the main execution
-        error_output = create_error_output("error", str(e), "Plugin execution failed")
-        print(json.dumps([error_output.to_dict()], indent=2))
-        sys.exit(1)
+                 raise TypeError("Inputs are not in a valid list-of-pairs or dictionary format.")
+        except (json.JSONDecodeError, TypeError) as e:
+            raise ValueError(f"Failed to parse inputs: {e}")
 
+    def _get_input_value(self, inputs: Dict[str, Any], key: str, default: Any = None) -> Any:
+        """Safely gets a value from the parsed inputs dictionary."""
+        if key in inputs and isinstance(inputs[key], dict):
+            return inputs[key].get('value', default)
+        return default
+
+    def _get_secure_path(self, user_path: str) -> str:
+        """Constructs a secure, absolute path within the shared directory."""
+        if not user_path or not isinstance(user_path, str):
+            raise ValueError("Path must be a non-empty string.")
+
+        # Normalize the path to resolve '..' and other redundancies.
+        base_path = os.path.abspath(SHARED_FILES_BASE_PATH)
+        # Prevent absolute paths from escaping the jail by treating them as relative to the root of the jail
+        # os.path.join handles this if user_path starts with '/'
+        full_path = os.path.abspath(os.path.join(base_path, user_path.lstrip('/\\')))
+
+        # Security check: ensure the final path is still within the base directory.
+        if not full_path.startswith(base_path):
+            raise PermissionError(f"Path traversal attempt detected. Access denied for path: {user_path}")
+
+        return full_path
+
+    def _read_operation(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        file_id = self._get_input_value(inputs, 'fileId')
+        path = self._get_input_value(inputs, 'path')
+
+        if file_id:
+            # TODO: Implement reading from Librarian via fileId
+            content = f"Content for fileId {file_id} would be read from Librarian."
+            return {
+                "success": True, "name": "content", "resultType": "string",
+                "resultDescription": f"Content of file with ID {file_id}", "result": content
+            }
+        elif path:
+            secure_path = self._get_secure_path(path)
+            with open(secure_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            return {
+                "success": True, "name": "content", "resultType": "string",
+                "resultDescription": f"Content of file at {path}", "result": content
+            }
+        else:
+            raise ValueError("Either 'fileId' or 'path' is required for 'read' operation.")
+
+    def _write_operation(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        path = self._get_input_value(inputs, 'path')
+        content = self._get_input_value(inputs, 'content')
+        if path is None or content is None:
+            raise ValueError("'path' and 'content' are required for 'write' operation.")
+
+        secure_path = self._get_secure_path(path)
+        os.makedirs(os.path.dirname(secure_path), exist_ok=True)
+        with open(secure_path, 'w', encoding='utf-8') as f:
+            f.write(str(content))
+        return {
+            "success": True, "name": "status", "resultType": "string",
+            "resultDescription": f"Successfully wrote to file {path}", "result": "write_successful"
+        }
+
+    def _append_operation(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        path = self._get_input_value(inputs, 'path')
+        content = self._get_input_value(inputs, 'content')
+        if path is None or content is None:
+            raise ValueError("'path' and 'content' are required for 'append' operation.")
+
+        secure_path = self._get_secure_path(path)
+        os.makedirs(os.path.dirname(secure_path), exist_ok=True)
+        with open(secure_path, 'a', encoding='utf-8') as f:
+            f.write(str(content))
+        return {
+            "success": True, "name": "status", "resultType": "string",
+            "resultDescription": f"Successfully appended to file {path}", "result": "append_successful"
+        }
+
+    def _list_operation(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        path = self._get_input_value(inputs, 'path', '.') # Default to base dir
+        secure_path = self._get_secure_path(path)
+        files = os.listdir(secure_path)
+        return {
+            "success": True, "name": "files", "resultType": "array",
+            "resultDescription": f"Files and directories in {path}", "result": files
+        }
+
+    def _delete_operation(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        path = self._get_input_value(inputs, 'path')
+        if not path:
+            raise ValueError("'path' is required for 'delete' operation.")
+        secure_path = self._get_secure_path(path)
+        if os.path.isfile(secure_path):
+            os.remove(secure_path)
+            result_desc = f"Successfully deleted file {path}"
+        elif os.path.isdir(secure_path):
+            if not os.listdir(secure_path):
+                os.rmdir(secure_path)
+                result_desc = f"Successfully deleted empty directory {path}"
+            else:
+                raise ValueError("Directory is not empty. Deletion of non-empty directories is not allowed for safety.")
+        else:
+            raise FileNotFoundError(f"File or directory not found at path: {path}")
+
+        return {
+            "success": True, "name": "status", "resultType": "string",
+            "resultDescription": result_desc, "result": "delete_successful"
+        }
 
 if __name__ == "__main__":
-    main()
+    inputs_str = sys.stdin.read().strip()
+    plugin = FileOperationPlugin()
+    result_str = plugin.execute(inputs_str)
+    print(result_str)

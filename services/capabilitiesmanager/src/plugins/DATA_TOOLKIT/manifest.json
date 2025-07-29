@@ -3,6 +3,65 @@
   "verb": "DATA_TOOLKIT",
   "description": "A set of tools for processing and manipulating structured data formats like JSON, CSV, and SQL.",
   "explanation": "This plugin provides commands to parse, query, and transform data from various sources, which is a critical capability for data analysis, reporting, and many other complex tasks.",
+  "inputDefinitions": [
+    {
+      "name": "operation",
+      "type": "string",
+      "required": true,
+      "description": "The data operation to perform.",
+      "enum": [
+        "query_json",
+        "validate_json",
+        "csv_to_json",
+        "json_to_csv",
+        "execute_sql_on_json"
+      ]
+    },
+    {
+      "name": "json_object",
+      "type": "object",
+      "required": false,
+      "description": "The JSON object to query. Used with 'query_json'."
+    },
+    {
+      "name": "expression",
+      "type": "string",
+      "required": false,
+      "description": "The JSONPath expression to use. Used with 'query_json'."
+    },
+    {
+      "name": "json_string",
+      "type": "string",
+      "required": false,
+      "description": "The JSON string to validate. Used with 'validate_json'."
+    },
+    {
+      "name": "csv_data",
+      "type": "string",
+      "required": false,
+      "description": "The CSV data as a string. Used with 'csv_to_json'."
+    },
+    {
+      "name": "json_data",
+      "type": "array",
+      "required": false,
+      "description": "A JSON array of objects. Used with 'json_to_csv' and 'execute_sql_on_json'."
+    },
+    {
+      "name": "sql_query",
+      "type": "string",
+      "required": false,
+      "description": "The SQL query to execute on the JSON data. Used with 'execute_sql_on_json'."
+    }
+  ],
+  "outputDefinitions": [
+    {
+      "name": "result",
+      "type": "any",
+      "required": true,
+      "description": "The result of the data operation. The structure depends on the operation performed."
+    }
+  ],  
   "language": "python",
   "entryPoint": {
     "main": "main.py",

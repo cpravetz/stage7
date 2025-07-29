@@ -4,6 +4,7 @@ import path from 'path';
 
 export class LocalRepository implements PluginRepository {
     type: 'local' = 'local';
+    private loadingCache: boolean = false; // Flag to prevent multiple concurrent cache loads
     private baseDir: string;
     // Manifest path cache: id -> manifestPath, verb -> manifestPath
     private manifestPathCache: Map<string, string> = new Map();
@@ -231,10 +232,8 @@ export class LocalRepository implements PluginRepository {
 
     private async loadPluginList(): Promise<PluginLocator[]> {
         const locators: PluginLocator[] = [];
-        console.log('LocalRepo: Loading from ', this.baseDir);
         try {
             const dirs = await fs.readdir(this.baseDir);
-            console.log('LocalRepo: Loading from ', dirs)
             for (const dir of dirs) {
                 try {
                     const manifestPath = path.join(this.baseDir, dir, 'manifest.json');
@@ -280,15 +279,16 @@ export class LocalRepository implements PluginRepository {
 
     async list(): Promise<PluginLocator[]> {
         // Return cached list if valid
-        if (this.isCacheValid()) {
+        if (this.isCacheValid() || this.loadingCache) {
             console.log('LocalRepo: Using cached plugin list');
             return this.pluginListCache!;
         }
-
+        this.loadingCache = true;
         // Load fresh list and cache it
         console.log('LocalRepo: Loading fresh plugin list');
         this.pluginListCache = await this.loadPluginList();
         this.cacheTimestamp = Date.now();
+        this.loadingCache = false;
         return this.pluginListCache;
     }
 }

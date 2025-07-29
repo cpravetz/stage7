@@ -2,12 +2,16 @@ import express from 'express';
 import axios from 'axios';
 import bodyParser from 'body-parser';
 import dotenv from 'dotenv';
+import fs from 'fs';
+import path from 'path';
 import { storeInRedis, loadFromRedis, deleteFromRedis } from './utils/redisUtils';
 import { storeInMongo, loadFromMongo, loadManyFromMongo, aggregateInMongo, deleteManyFromMongo } from './utils/mongoUtils';
 import { WorkProduct } from './types/WorkProduct';
 import { BaseEntity, MapSerializer } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { v4 as uuidv4 } from 'uuid';
+
+const LARGE_ASSET_PATH = process.env.LARGE_ASSET_PATH || '/usr/src/app/shared/librarian-assets';
 
 
 dotenv.config();
@@ -35,35 +39,11 @@ export class Librarian extends BaseEntity {
     constructor() {
         super('Librarian', 'Librarian', `librarian`, process.env.PORT || '5040');
         this.app = express();
-        this.app.use(bodyParser.json());
         this.setupRoutes();
         this.startServer();
       }
 
       private setupRoutes() {
-        // Use the BaseEntity verifyToken method for authentication
-        this.app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
-            // Skip authentication for health endpoints
-            if (req.path === '/health' || req.path === '/ready') {
-                return next();
-            }
-
-            // Use the BaseEntity verifyToken method
-            this.verifyToken(req, res, next);
-        });
-
-        this.app.post('/storeData', (req: express.Request, res: express.Response) => { this.storeData(req, res)});
-        this.app.get('/loadData/:id', (req: express.Request, res: express.Response) => { this.loadData(req, res)} );
-        this.app.get('/loadData', (req: express.Request, res: express.Response) => { this.loadDataByQuery(req, res)} );
-        this.app.post('/queryData', (req: express.Request, res: express.Response) => { this.queryData(req, res) });
-        this.app.get('/getDataHistory/:id', (req: express.Request, res: express.Response) => { this.getDataHistory(req, res)} );
-        this.app.post('/searchData', (req: express.Request, res: express.Response) => {this.searchData(req, res)});
-        this.app.delete('/deleteData/:id', (req: express.Request, res: express.Response) => { this.deleteData(req, res)});
-        this.app.post('/storeWorkProduct', (req: express.Request, res: express.Response) => { this.storeWorkProduct(req, res) });
-        this.app.get('/loadWorkProduct/:stepId', (req: express.Request, res: express.Response) => { this.loadWorkProduct(req, res) });
-        this.app.get('/loadAllWorkProducts/:agentId', (req: express.Request, res: express.Response) => { this.loadAllWorkProducts(req, res) });
-        this.app.get('/getSavedMissions', (req: express.Request, res: express.Response) => { this.getSavedMissions(req, res) });
-        this.app.delete('/deleteCollection', (req: express.Request, res: express.Response) => { this.deleteCollection(req, res) });
         this.app.get('/health', (req: express.Request, res: express.Response): void => {
             res.status(200).json({
                 status: 'healthy',
@@ -72,6 +52,38 @@ export class Librarian extends BaseEntity {
             });
         });
 
+        // --- Large Asset Streaming Routes ---
+        // These routes handle raw data streams and must be defined *before* bodyParser.json() is used.
+        const assetRouter = express.Router();
+        assetRouter.use((req, res, next) => this.verifyToken(req, res, next)); // Authenticate asset routes
+        assetRouter.post('/:collection/:id', (req, res) => this.storeLargeAsset(req, res));
+        assetRouter.get('/:collection/:id', (req, res) => this.loadLargeAsset(req, res));
+        this.app.use('/assets', assetRouter);
+
+        // --- Standard JSON Routes ---
+        // Apply the JSON body parser with an increased limit for all subsequent routes.
+        this.app.use(bodyParser.json({ limit: '10mb' }));
+
+        // Use the BaseEntity verifyToken method for authentication on all subsequent routes
+        this.app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
+            if (req.path === '/health' || req.path === '/ready') { // Health check already handled, but good practice
+                return next();
+            }
+            this.verifyToken(req, res, next);
+        });
+
+        this.app.post('/storeData', (req, res) => this.storeData(req, res));
+        this.app.get('/loadData/:id', (req, res) => this.loadData(req, res));
+        this.app.get('/loadData', (req, res) => this.loadDataByQuery(req, res));
+        this.app.post('/queryData', (req, res) => this.queryData(req, res));
+        this.app.get('/getDataHistory/:id', (req, res) => this.getDataHistory(req, res));
+        this.app.post('/searchData', (req, res) => this.searchData(req, res));
+        this.app.delete('/deleteData/:id', (req, res) => this.deleteData(req, res));
+        this.app.post('/storeWorkProduct', (req, res) => this.storeWorkProduct(req, res));
+        this.app.get('/loadWorkProduct/:stepId', (req, res) => this.loadWorkProduct(req, res));
+        this.app.get('/loadAllWorkProducts/:agentId', (req, res) => this.loadAllWorkProducts(req, res));
+        this.app.get('/getSavedMissions', (req, res) => this.getSavedMissions(req, res));
+        this.app.delete('/deleteCollection', (req, res) => this.deleteCollection(req, res));
       }
 
       private startServer() {
@@ -79,6 +91,85 @@ export class Librarian extends BaseEntity {
         this.app.listen(port, '0.0.0.0', () => {
         console.log(`Librarian listening at http://0.0.0.0:${port}`);
         });
+    }
+
+    private async storeLargeAsset(req: express.Request, res: express.Response) {
+        const { collection, id } = req.params;
+        const assetDir = path.join(LARGE_ASSET_PATH, collection);
+
+        try {
+            await fs.promises.mkdir(assetDir, { recursive: true });
+            const filePath = path.join(assetDir, id);
+
+            const writeStream = fs.createWriteStream(filePath);
+            req.pipe(writeStream);
+
+            writeStream.on('finish', async () => {
+                try {
+                    const stats = await fs.promises.stat(filePath);
+                    const metadata = {
+                        _id: id,
+                        assetPath: filePath,
+                        collection: collection,
+                        size: stats.size,
+                        createdAt: new Date(),
+                        mimeType: req.headers['content-type'] || 'application/octet-stream'
+                    };
+                    await storeInMongo('asset_metadata', metadata);
+                    res.status(201).send({ message: 'Asset stored successfully', id: id, size: stats.size });
+                } catch (dbError: any) {
+                    console.error(`Failed to store metadata for asset ${id}:`, dbError);
+                    await fs.promises.unlink(filePath).catch(e => console.error(`Failed to cleanup asset file ${filePath} after metadata write failure:`, e));
+                    res.status(500).send({ error: 'Failed to store asset metadata' });
+                }
+            });
+
+            writeStream.on('error', (err) => {
+                console.error(`Error writing asset stream for ${id}:`, err);
+                res.status(500).send({ error: 'Failed to write asset to disk' });
+            });
+
+        } catch (error: any) {
+            console.error(`Error preparing to store large asset ${id}:`, error);
+            res.status(500).send({ error: 'Failed to prepare asset storage location' });
+        }
+    }
+
+    private async loadLargeAsset(req: express.Request, res: express.Response) {
+        const { collection, id } = req.params;
+        const assetDir = path.join(LARGE_ASSET_PATH, collection);
+        const filePath = path.join(assetDir, id);
+
+        try {
+            // Check if the file exists
+            await fs.promises.access(filePath, fs.constants.F_OK);
+
+            // Optional: Load metadata to set Content-Type header
+            try {
+                const metadata = await loadFromMongo('asset_metadata', { _id: id });
+                if (metadata && metadata.mimeType) {
+                    res.setHeader('Content-Type', metadata.mimeType);
+                }
+            } catch (metaError) {
+                console.warn(`Could not load metadata for asset ${id}, using default content-type. Error:`, metaError);
+            }
+
+            const readStream = fs.createReadStream(filePath);
+            readStream.pipe(res);
+
+            readStream.on('error', (err) => {
+                console.error(`Error streaming asset ${id} to response:`, err);
+                res.end();
+            });
+
+        } catch (error: any) {
+            if (error.code === 'ENOENT') {
+                res.status(404).send({ error: 'Asset not found' });
+            } else {
+                console.error(`Error preparing to load large asset ${id}:`, error);
+                res.status(500).send({ error: 'Failed to load asset' });
+            }
+        }
     }
 
     private async storeData(req: express.Request, res: express.Response) {

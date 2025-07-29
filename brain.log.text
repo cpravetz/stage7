@@ -1,0 +1,1806 @@
+2025-07-28 15:26:54.318 | RSA private key for plugin signing not found (this is normal for most services)
+2025-07-28 15:26:55.058 | Loaded RSA public key for plugin verification
+2025-07-28 15:26:57.878 | Attempting to connect to RabbitMQ (attempt 1/20)...
+2025-07-28 15:26:57.878 | Using RabbitMQ URL: amqp://stage7:stage7password@rabbitmq:5672
+2025-07-28 15:26:57.878 | Attempting to connect to RabbitMQ host: rabbitmq
+2025-07-28 15:26:57.878 | Connecting to RabbitMQ at amqp://stage7:stage7password@rabbitmq:5672
+2025-07-28 15:26:57.878 | Attempting to register with Consul (attempt 1/10)...
+2025-07-28 15:26:57.878 | Using Consul URL: consul:8500
+2025-07-28 15:26:58.128 | Brain service listening at http://0.0.0.0:5070
+2025-07-28 15:26:58.128 | [shouldBypassAuth] Bypassing auth for auth path: /v1/agent/service/register (matched /register)
+2025-07-28 15:26:58.487 | Anthropic Service created, ApiKey starts sk-ant
+2025-07-28 15:26:58.488 | Loaded service: AntService
+2025-07-28 15:26:58.501 | GG Gemini Service created, ApiKey starts AIzaSy
+2025-07-28 15:26:58.501 | Loaded service: GGService
+2025-07-28 15:26:58.564 | Groq Service created, ApiKey starts gsk_m0
+2025-07-28 15:26:58.564 | GroqService initialized with API key: Set (length: 56)
+2025-07-28 15:26:58.564 | Loaded service: groq
+2025-07-28 15:26:58.567 | Huggingface Service created with API key: Set (length: 37)
+2025-07-28 15:26:58.578 | Loaded service: HFService
+2025-07-28 15:26:58.581 | Mistral Service created, ApiKey starts AhDwC8
+2025-07-28 15:26:58.597 | Loaded service: MistralService
+2025-07-28 15:26:58.652 | OpenAI Service created, ApiKey starts sk-LaE
+2025-07-28 15:26:58.652 | Loaded service: OAService
+2025-07-28 15:26:58.665 | OpenRouter Service created, ApiKey starts sk-or-
+2025-07-28 15:26:58.665 | Loaded service: ORService
+2025-07-28 15:26:58.758 | Openweb Service created, ApiKey starts eyJhbG
+2025-07-28 15:26:58.758 | Using default OpenWebUI URL: https://knllm.dusdusdusd.com
+2025-07-28 15:26:58.758 | Loaded service: OWService
+2025-07-28 15:26:58.758 | modelManager Loaded 8 services.
+2025-07-28 15:26:58.844 | Loaded interface: anthropic
+2025-07-28 15:26:58.893 | Loaded interface: gemini
+2025-07-28 15:27:06.607 | Loaded interface: groq
+2025-07-28 15:27:06.731 | Loaded interface: huggingface
+2025-07-28 15:27:06.786 | Loaded interface: mistral
+2025-07-28 15:27:06.847 | Loaded interface: openai
+2025-07-28 15:27:06.847 | Loaded interface: openrouter
+2025-07-28 15:27:06.861 | OpenWebUIInterface initialized with DEFAULT_TIMEOUT: 300000ms
+2025-07-28 15:27:06.861 | Loaded interface: openwebui
+2025-07-28 15:27:06.861 | modelManager Loaded 8 interfaces.
+2025-07-28 15:27:07.061 | Loaded model: hf/meta-llama/llama-3.2-3b-instruct
+2025-07-28 15:27:07.115 | Loaded model: suno/bark
+2025-07-28 15:27:07.115 | Loaded model: anthropic/claude-3-haiku-20240307
+2025-07-28 15:27:07.130 | Loaded model: anthropic/claude-3-haiku-20240307
+2025-07-28 15:27:07.130 | Loaded model: anthropic/claude-2
+2025-07-28 15:27:07.134 | Loaded model: codellama/CodeLlama-34b-Instruct-hf
+2025-07-28 15:27:07.145 | Loaded model: THUDM/cogvlm-chat-hf
+2025-07-28 15:27:07.166 | Loaded model: openai/dall-e-2
+2025-07-28 15:27:07.182 | Loaded model: openai/dall-e-3
+2025-07-28 15:27:07.192 | Loaded model: deepseek-ai/DeepSeek-R1
+2025-07-28 15:27:07.213 | Loaded model: or/cognitivecomputations/dolphin3.0-mistral-24b:free
+2025-07-28 15:27:07.224 | Loaded model: openai/whisper-large-v3
+2025-07-28 15:27:07.454 | Loaded model: openai/gpt-4.1-nano
+2025-07-28 15:27:07.471 | Loaded model: openai/gpt-4-vision-preview
+2025-07-28 15:27:07.500 | Loaded model: nousresearch/hermes-3-llama-3.1-405b
+2025-07-28 15:27:07.500 | Loaded model: or/moonshotai/kimi-k2:free
+2025-07-28 15:27:07.517 | KNLLMModel initialized with OpenWebUI interface
+2025-07-28 15:27:07.517 | Loaded model: openweb/knownow
+2025-07-28 15:27:07.518 | Loaded model: liquid/lfm-40b
+2025-07-28 15:27:07.556 | Loaded model: meta-llama/llama-3.2-11b-vision-instruct
+2025-07-28 15:27:07.571 | GroqService availability check: Available
+2025-07-28 15:27:07.577 | GroqService ready state: Ready
+2025-07-28 15:27:07.577 | GroqService is available and ready to use.
+2025-07-28 15:27:07.577 | Loaded model: groq/llama-4
+2025-07-28 15:27:07.602 | Loaded model: meta-llama/Llama-2-70b-chat-hf
+2025-07-28 15:27:07.662 | Loaded model: liuhaotian/llava-v1.5-13b
+2025-07-28 15:27:07.662 | Loaded model: microsoft/Phi-3.5-vision-instruct
+2025-07-28 15:27:07.670 | MistralService availability check: Available
+2025-07-28 15:27:07.686 | MistralService is available and ready to use.
+2025-07-28 15:27:07.687 | Loaded model: mistral/mistral-small-latest
+2025-07-28 15:27:07.715 | Loaded model: mistralai/Mistral-Nemo-Instruct-2407
+2025-07-28 15:27:07.732 | Loaded model: facebook/musicgen-large
+2025-07-28 15:27:07.756 | Loaded model: or/deepseek-ai/DeepSeek-R1:free
+2025-07-28 15:27:07.945 | MistralService availability check: Available
+2025-07-28 15:27:07.945 | MistralService is available and ready to use.
+2025-07-28 15:27:07.945 | Loaded model: mistral/pixtral-12B-2409
+2025-07-28 15:27:08.028 | Loaded model: facebook/seamless-m4t-large
+2025-07-28 15:27:08.028 | Loaded model: stabilityai/stable-diffusion-xl-base-1.0
+2025-07-28 15:27:08.055 | Loaded model: bigcode/starcoder
+2025-07-28 15:27:08.055 | Loaded model: openai/tts
+2025-07-28 15:27:08.086 | Loaded model: openai/whisper-large-v3
+2025-07-28 15:27:08.221 | Loaded model: openai/whisper
+2025-07-28 15:27:08.221 | modelManager Loaded 32 models.
+2025-07-28 15:27:08.401 | No response from security manager: timeout of 5000ms exceeded
+2025-07-28 15:27:08.476 | [AuthenticatedAxios] Request uxdrs1nh8o: Error getting token: Error: Authentication service unavailable: timeout of 5000ms exceeded
+2025-07-28 15:27:08.476 |     at ServiceTokenManager.getToken (/usr/src/app/shared/dist/security/ServiceTokenManager.js:252:19)
+2025-07-28 15:27:08.476 |     at async /usr/src/app/shared/dist/http/createAuthenticatedAxios.js:167:31
+2025-07-28 15:27:08.476 |     at async Axios.request (/usr/src/app/node_modules/axios/dist/node/axios.cjs:4312:14)
+2025-07-28 15:27:08.476 |     at async ServiceDiscovery.discoverService (/usr/src/app/shared/dist/discovery/serviceDiscovery.js:105:30)
+2025-07-28 15:27:08.476 |     at async Brain.discoverLibrarianService (/usr/src/app/services/brain/dist/Brain.js:377:29)
+2025-07-28 15:27:08.476 |     at async Brain.restorePerformanceDataFromLibrarian (/usr/src/app/services/brain/dist/Brain.js:475:9)
+2025-07-28 15:27:08.768 | [shouldBypassAuth] Bypassing auth for auth path: /registerComponent (matched /register)
+2025-07-28 15:27:08.878 | Created ServiceTokenManager for Brain
+2025-07-28 15:27:09.081 | Brain registered successfully with PostOffice
+2025-07-28 15:27:09.115 | Service Brain registered with Consul
+2025-07-28 15:27:09.115 | Successfully registered Brain with Consul
+2025-07-28 15:27:09.214 | [Brain] Attempting to restore model performance data from Librarian...
+2025-07-28 15:27:10.188 | [Brain] Successfully restored 38 model performance records from Librarian
+2025-07-28 15:27:18.718 | Connected to RabbitMQ
+2025-07-28 15:27:18.731 | Channel created successfully
+2025-07-28 15:27:18.734 | RabbitMQ channel ready
+2025-07-28 15:27:18.835 | Connection test successful - RabbitMQ connection is stable
+2025-07-28 15:27:18.835 | Creating queue: brain-Brain
+2025-07-28 15:27:18.875 | Binding queue to exchange: stage7
+2025-07-28 15:27:18.940 | Successfully connected to RabbitMQ and set up queues/bindings
+2025-07-28 15:38:07.185 | [Brain Chat] Request 629fdd70-970f-4ec7-844d-5152fb9114c0 received
+2025-07-28 15:38:07.186 | [Brain Chat] Detected request requiring a JSON plan, ensuring JSON response format
+2025-07-28 15:38:07.186 | Selecting model for optimization: accuracy, conversationType: TextToCode
+2025-07-28 15:38:07.186 | **** CACHE MISS **** No cached result for key: accuracy-TextToCode
+2025-07-28 15:38:07.186 | Cache miss or expired. Selecting model from scratch.
+2025-07-28 15:38:07.186 | Total models loaded: 32
+2025-07-28 15:38:07.187 | Model anthropic/claude-3-haiku-20240307 is blacklisted for conversation type TextToCode
+2025-07-28 15:38:07.187 | Model anthropic/claude-2 is blacklisted for conversation type TextToCode
+2025-07-28 15:38:07.187 | Model codellama/CodeLlama-34b-Instruct-hf is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:38:07.187 | Model deepseek-ai/DeepSeek-R1 is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:38:07.187 | Model or/cognitivecomputations/dolphin3.0-mistral-24b:free is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:38:07.187 | Model openai/gpt-4.1-nano is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:38:07.187 | Model openai/gpt-4-vision-preview is blacklisted for conversation type TextToCode
+2025-07-28 15:38:07.187 | Model or/moonshotai/kimi-k2:free is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:38:07.187 | Model openweb/knownow is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:38:07.187 | GroqService availability check: Available
+2025-07-28 15:38:07.187 | GroqService ready state: Ready
+2025-07-28 15:38:07.187 | GroqService is available and ready to use.
+2025-07-28 15:38:07.187 | Model groq/llama-4 is blacklisted for conversation type TextToCode
+2025-07-28 15:38:07.187 | Model meta-llama/Llama-2-70b-chat-hf is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:38:07.187 | MistralService availability check: Available
+2025-07-28 15:38:07.187 | MistralService is available and ready to use.
+2025-07-28 15:38:07.187 | Model mistral/mistral-small-latest is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:38:07.187 | Model mistralai/Mistral-Nemo-Instruct-2407 is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:38:07.187 | Model or/deepseek-ai/DeepSeek-R1:free is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:38:07.187 | Model bigcode/starcoder is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:38:07.188 | Model codellama/CodeLlama-34b-Instruct-hf score calculation: base=88, adjusted=88, reliability=0, final=88
+2025-07-28 15:38:07.188 | Model deepseek-ai/DeepSeek-R1 score calculation: base=88, adjusted=88, reliability=0, final=88
+2025-07-28 15:38:07.188 | Model or/cognitivecomputations/dolphin3.0-mistral-24b:free score calculation: base=75, adjusted=75, reliability=0, final=75
+2025-07-28 15:38:07.188 | Model openai/gpt-4.1-nano score calculation: base=52, adjusted=77.92273402674591, reliability=29.940564635958395, final=107.86329866270431
+2025-07-28 15:38:07.188 | Model or/moonshotai/kimi-k2:free score calculation: base=75, adjusted=75, reliability=0, final=75
+2025-07-28 15:38:07.188 | Model openweb/knownow score calculation: base=85, adjusted=85, reliability=0, final=85
+2025-07-28 15:38:07.188 | Model meta-llama/Llama-2-70b-chat-hf score calculation: base=88, adjusted=88, reliability=0, final=88
+2025-07-28 15:38:07.188 | Model mistral/mistral-small-latest score calculation: base=85, adjusted=85, reliability=0, final=85
+2025-07-28 15:38:07.188 | Model mistralai/Mistral-Nemo-Instruct-2407 score calculation: base=80, adjusted=80, reliability=0, final=80
+2025-07-28 15:38:07.188 | Model or/deepseek-ai/DeepSeek-R1:free score calculation: base=88, adjusted=88, reliability=0, final=88
+2025-07-28 15:38:07.188 | Model bigcode/starcoder score calculation: base=85, adjusted=85, reliability=0, final=85
+2025-07-28 15:38:07.189 | Using score-based model selection. Top model: openai/gpt-4.1-nano
+2025-07-28 15:38:07.189 | Selected model openai/gpt-4.1-nano for accuracy optimization and conversation type TextToCode
+2025-07-28 15:38:07.189 | [Brain Chat] Attempt 1: Using model gpt-4.1-nano-2025-04-14
+2025-07-28 15:38:07.189 | [ModelManager] Tracking model request: b234b209-3d79-4865-9e45-635df887459a for model openai/gpt-4.1-nano, conversation type TextToCode
+2025-07-28 15:38:07.189 | [ModelManager] Active requests count: 1
+2025-07-28 15:38:07.190 | [Brain Chat] Using model gpt-4.1-nano-2025-04-14 for request b234b209-3d79-4865-9e45-635df887459a
+2025-07-28 15:38:07.190 | Starting trimMessages
+2025-07-28 15:38:26.631 | [baseInterface] Ensuring JSON response
+2025-07-28 15:38:26.631 | [baseInterface] Original response: {
+2025-07-28 15:38:26.631 |   "type": "PLAN",
+2025-07-28 15:38:26.631 |   "plan": [
+2025-07-28 15:38:26.631 |     {
+2025-07-28 15:38:26.631 |       "number": 1,
+2025-07-28 15:38:26.631 |       "actionVerb": "ASK_USER_QUESTION",
+2025-07-28 15:38:26.631 |       "inputs": {
+2025-07-28 15:38:26.631 |         "question": {
+2025-07-28 15:38:26.631 |           "value": "Please upload your resume file for analysis.",
+2025-07-28 15:38:26.631 |           "answerType": {
+2025-07-28 15:38:26.631 |             "value": "file",
+2025-07-28 15:38:26.631 |             "valueType": "string"
+2025-07-28 15:38:26.631 |           }
+2025-07-28 15:38:26.631 |         }
+2025-07-28 15:38:26.631 |       },
+2025-07-28 15:38:26.631 |       "description": "Prompt the user to upload their resume file so I can analyze their professional background and skills.",
+2025-07-28 15:38:26.631 |       "outputs": {
+2025-07-28 15:38:26.631 |         "resumeFileId": "File ID for the uploaded resume"
+2025-07-28 15:38:26.631 |       },
+2025-07-28 15:38:26.631 |       "dependencies": {},
+2025-07-28 15:38:26.631 |       "recommendedRole": "coordinator"
+2025-07-28 15:38:26.631 |     },
+2025-07-28 15:38:26.631 |     {
+2025-07-28 15:38:26.631 |       "number": 2,
+2025-07-28 15:38:26.631 |       "actionVerb": "FILE_OPERATION",
+2025-07-28 15:38:26.631 |       "inputs": {
+2025-07-28 15:38:26.631 |         "fileId": {
+2025-07-28 15:38:26.631 |           "outputName": "resumeFileId",
+2025-07-28 15:38:26.631 |           "valueType": "string"
+2025-07-28 15:38:26.631 |         },
+2025-07-28 15:38:26.631 |         "operation": {
+2025-07-28 15:38:26.631 |           "value": "read",
+2025-07-28 15:38:26.631 |           "valueType": "string"
+2025-07-28 15:38:26.631 |         }
+2025-07-28 15:38:26.631 |       },
+2025-07-28 15:38:26.631 |       "description": "Read the uploaded resume file to extract relevant details such as skills, experience, and contact information.",
+2025-07-28 15:38:26.631 |       "outputs": {
+2025-07-28 15:38:26.631 |         "resumeContent": "Content of the resume for parsing"
+2025-07-28 15:38:26.631 |       },
+2025-07-28 15:38:26.631 |       "dependencies": {
+2025-07-28 15:38:26.631 |         "resumeContent": 1
+2025-07-28 15:38:26.631 |       },
+2025-07-28 15:38:26.631 |       "recommendedRole": "researcher"
+2025-07-28 15:38:26.631 |     },
+2025-07-28 15:38:26.631 |     {
+2025-07-28 15:38:26.631 |       "number": 3,
+2025-07-28 15:38:26.631 |       "actionVerb": "ASK_USER_QUESTION",
+2025-07-28 15:38:26.631 |       "inputs": {
+2025-07-28 15:38:26.631 |         "question": {
+2025-07-28 15:38:26.631 |           "value": "Please confirm your LinkedIn profile URL.",
+2025-07-28 15:38:26.631 |           "answerType": {
+2025-07-28 15:38:26.631 |             "value": "string",
+2025-07-28 15:38:26.631 |             "valueType": "string"
+2025-07-28 15:38:26.631 |           }
+2025-07-28 15:38:26.631 |         }
+2025-07-28 15:38:26.631 |       },
+2025-07-28 15:38:26.631 |       "description": "Ask the user to confirm or provide their LinkedIn profile URL to fetch and analyze their online professional presence.",
+2025-07-28 15:38:26.631 |       "outputs": {
+2025-07-28 15:38:26.631 |         "linkedinUrl": "User's LinkedIn profile URL"
+2025-07-28 15:38:26.631 |       },
+2025-07-28 15:38:26.631 |       "dependencies": {},
+2025-07-28 15:38:26.631 |       "recommendedRole": "coordinator"
+2025-07-28 15:38:26.631 |     },
+2025-07-28 15:38:26.631 |     {
+2025-07-28 15:38:26.631 |       "number": 4,
+2025-07-28 15:38:26.631 |       "actionVerb": "SCRAPE",
+2025-07-28 15:38:26.631 |       "inputs": {
+2025-07-28 15:38:26.631 |         "url": {
+2025-07-28 15:38:26.631 |           "outputName": "linkedinUrl",
+2025-07-28 15:38:26.631 |           "valueType": "string"
+2025-07-28 15:38:26.631 |         }
+2025-07-28 15:38:26.631 |       },
+2025-07-28 15:38:26.631 |       "description": "Scrape the LinkedIn profile to gather current professional information, endorsements, network, and activity.",
+2025-07-28 15:38:26.631 |       "outputs": {
+2025-07-28 15:38:26.631 |         "linkedinData": "Structured data extracted from LinkedIn profile"
+2025-07-28 15:38:26.631 |       },
+2025-07-28 15:38:26.631 |       "dependencies": {
+2025-07-28 15:38:26.631 |         "linkedinData": 3
+2025-07-28 15:38:26.631 |       },
+2025-07-28 15:38:26.631 |       "recommendedRole": "researcher"
+2025-07-28 15:38:26.631 |     },
+2025-07-28 15:38:26.631 |     {
+2025-07-28 15:38:26.631 |       "number": 5,
+2025-07-28 15:38:26.631 |       "actionVerb": "ASK_USER_QUESTION",
+2025-07-28 15:38:26.631 |       "inputs": {
+2025-07-28 15:38:26.631 |         "question": {
+2025-07-28 15:38:26.631 |           "value": "Please provide the URL of your blog at www.pravetz.net for interests and themes analysis.",
+2025-07-28 15:38:26.631 |           "answerType": {
+2025-07-28 15:38:26.631 |             "value": "string",
+2025-07-28 15:38:26.631 |             "valueType": "string"
+2025-07-28 15:38:26.631 |           }
+2025-07-28 15:38:26.631 |         }
+2025-07-28 15:38:26.631 |       },
+2025-07-28 15:38:26.631 |       "description": "Obtain the URL of your blog to analyze your professional interests and themes relevant to potential job roles.",
+2025-07-28 15:38:26.631 |       "outputs": {
+2025-07-28 15:38:26.631 |         "blogUrl": "Your blog URL"
+2025-07-28 15:38:26.631 |       },
+2025-07-28 15:38:26.631 |       "dependencies": {},
+2025-07-28 15:38:26.631 |       "recommendedRole": "coordinator"
+2025-07-28 15:38:26.631 |     },
+2025-07-28 15:38:26.631 |     {
+2025-07-28 15:38:26.631 |       "number": 6,
+2025-07-28 15:38:26.631 |       "actionVerb": "SCRAPE",
+2025-07-28 15:38:26.631 |       "inputs": {
+2025-07-28 15:38:26.631 |         "url": {
+2025-07-28 15:38:26.631 |           "outputName": "blogUrl",
+2025-07-28 15:38:26.631 |           "valueType": "string"
+2025-07-28 15:38:26.631 |         }
+2025-07-28 15:38:26.631 |       },
+2025-07-28 15:38:26.631 |       "description": "Scrape your blog to extract your expressed interests, projects, and themes that can inform suitable job roles.",
+2025-07-28 15:38:26.631 |       "outputs": {
+2025-07-28 15:38:26.631 |         "blogContent": "Structured data or summarized interests from blog"
+2025-07-28 15:38:26.631 |       },
+2025-07-28 15:38:26.631 |       "dependencies": {
+2025-07-28 15:38:26.631 |         "blogContent": 5
+2025-07-28 15:38:26.631 |       },
+2025-07-28 15:38:26.631 |       "recommendedRole": "researcher"
+2025-07-28 15:38:26.631 |     },
+2025-07-28 15:38:26.631 |     {
+2025-07-28 15:38:26.631 |       "number": 7,
+2025-07-28 15:38:26.631 |       "actionVerb": "ACCOMPLISH",
+2025-07-28 15:38:26.631 |       "inputs": {
+2025-07-28 15:38:26.631 |         "goal": {
+2025-07-28 15:38:26.631 |           "value": "Identify suitable job roles based on resume, LinkedIn profile, and blog interests.",
+2025-07-28 15:38:26.631 |           "valueType": "string"
+2025-07-28 15:38:26.631 |         }
+2025-07-28 15:38:26.631 |       },
+2025-07-28 15:38:26.631 |       "description": "Analyze collected data to determine professional interests, skills, and experience to recommend targeted job categories and roles.",
+2025-07-28 15:38:26.631 |       "outputs": {
+2025-07-28 15:38:26.631 |         "targetJobProfiles": "List of recommended job roles and industries"
+2025-07-28 15:38:26.631 |       },
+2025-07-28 15:38:26.631 |       "dependencies": {
+2025-07-28 15:38:26.631 |         "targetJobProfiles": 2,
+2025-07-28 15:38:26.631 |         "targetJobProfiles": 4,
+2025-07-28 15:38:26.631 |         "targetJobProfiles": 6
+2025-07-28 15:38:26.631 |       },
+2025-07-28 15:38:26.631 |       "recommendedRole": "domain_expert"
+2025-07-28 15:38:26.631 |     },
+2025-07-28 15:38:26.631 |     {
+2025-07-28 15:38:26.631 |       "number": 8,
+2025-07-28 15:38:26.631 |       "actionVerb": "SEARCH",
+2025-07-28 15:38:26.631 |       "inputs": {
+2025-07-28 15:38:26.631 |         "query": {
+2025-07-28 15:38:26.631 |           "outputName": "targetJobProfiles",
+2025-07-28 15:38:26.631 |           "valueType": "string"
+2025-07-28 15:38:26.631 |         }
+2025-07-28 15:38:26.631 |       },
+2025-07-28 15:38:26.631 |       "description": "Search for published job postings matching the identified target roles and industries to compile application opportunities.",
+2025-07-28 15:38:26.631 |       "outputs": {
+2025-07-28 15:38:26.631 |         "publishedJobs": "List of relevant current job postings"
+2025-07-28 15:38:26.631 |       },
+2025-07-28 15:38:26.631 |       "dependencies": {
+2025-07-28 15:38:26.631 |         "publishedJobs": 7
+2025-07-28 15:38:26.631 |       },
+2025-07-28 15:38:26.631 |       "recommendedRole": "researcher"
+2025-07-28 15:38:26.631 |     },
+2025-07-28 15:38:26.631 |     {
+2025-07-28 15:38:26.631 |       "number": 9,
+2025-07-28 15:38:26.631 |       "actionVerb": "ACCOMPLISH",
+2025-07-28 15:38:26.631 |       "inputs": {
+2025-07-28 15:38:26.631 |         "goal": {
+2025-07-28 15:38:26.631 |           "value": "Create customized resumes and cover letters for each relevant job posting.",
+2025-07-28 15:38:26.631 |           "valueType": "string"
+2025-07-28 15:38:26.631 |         }
+2025-07-28 15:38:26.631 |       },
+2025-07-28 15:38:26.631 |       "description": "Develop tailored resumes and cover letters for each application based on the target roles and job descriptions, highlighting relevant skills and experience.",
+2025-07-28 15:38:26.631 |       "outputs": {
+2025-07-28 15:38:26.631 |         "applications": "Set of tailored application materials for each job"
+2025-07-28 15:38:26.631 |       },
+2025-07-28 15:38:26.631 |       "dependencies": {
+2025-07-28 15:38:26.631 |         "applications": 8
+2025-07-28 15:38:26.631 |       },
+2025-07-28 15:38:26.631 |       "recommendedRole": "writer"
+2025-07-28 15:38:26.631 |     },
+2025-07-28 15:38:26.631 |     {
+2025-07-28 15:38:26.631 |       "number": 10,
+2025-07-28 15:38:26.631 |       "actionVerb": "APPLY",
+2025-07-28 15:38:26.631 |       "inputs": {
+2025-07-28 15:38:26.631 |         "applications": {
+2025-07-28 15:38:26.631 |           "outputName": "applications",
+2025-07-28 15:38:26.631 |           "valueType": "array"
+2025-07-28 15:38:26.631 |         }
+2025-07-28 15:38:26.631 |       },
+2025-07-28 15:38:26.631 |       "description": "Submit applications to the published job postings using the customized resumes and cover letters.",
+2025-07-28 15:38:26.631 |       "outputs": {
+2025-07-28 15:38:26.631 |         "applicationStatus": "Summary of application submissions and responses"
+2025-07-28 15:38:26.631 |       },
+2025-07-28 15:38:26.631 |       "dependencies": {
+2025-07-28 15:38:26.631 |         "applicationStatus": 9
+2025-07-28 15:38:26.631 |       },
+2025-07-28 15:38:26.631 |       "recommendedRole": "executor"
+2025-07-28 15:38:26.631 |     },
+2025-07-28 15:38:26.631 |     {
+2025-07-28 15:38:26.631 |       "number": 11,
+2025-07-28 15:38:26.631 |       "actionVerb": "SEARCH",
+2025-07-28 15:38:26.631 |       "inputs": {
+2025-07-28 15:38:26.631 |         "query": {
+2025-07-28 15:38:26.631 |           "value": "unpublished job opportunities, networking contacts, and insider job leads in targeted industries",
+2025-07-28 15:38:26.631 |           "valueType": "string"
+2025-07-28 15:38:26.631 |         }
+2025-07-28 15:38:26.631 |       },
+2025-07-28 15:38:26.631 |       "description": "Search for unpublished job opportunities, industry contacts, and networking leads to discover hidden or unposted job openings.",
+2025-07-28 15:38:26.631 |       "outputs": {
+2025-07-28 15:38:26.631 |         "unpublishedOpportunities": "List of potential contacts and unpublished job leads"
+2025-07-28 15:38:26.631 |       },
+2025-07-28 15:38:26.631 |       "dependencies": {},
+2025-07-28 15:38:26.631 |       "recommendedRole": "researcher"
+2025-07-28 15:38:26.631 |     },
+2025-07-28 15:38:26.631 |     {
+2025-07-28 15:38:26.631 |       "number": 12,
+2025-07-28 15:38:26.631 |       "actionVerb": "ACCOMPLISH",
+2025-07-28 15:38:26.631 |       "inputs": {
+2025-07-28 15:38:26.631 |         "goal": {
+2025-07-28 15:38:26.631 |           "value": "Identify key contacts and organizations to reach out for informational interviews and referrals.",
+2025-07-28 15:38:26.631 |           "valueType": "string"
+2025-07-28 15:38:26.631 |         }
+2025-07-28 15:38:26.631 |       },
+2025-07-28 15:38:26.631 |       "description": "Based on industry and target roles, compile a list of people and organizations to contact for informational interviews, referrals, and unpublished opportunities.",
+2025-07-28 15:38:26.631 |       "outputs": {
+2025-07-28 15:38:26.631 |         "contactsList": "List of potential contacts with contact info and organization details"
+2025-07-28 15:38:26.631 |       },
+2025-07-28 15:38:26.631 |       "dependencies": {
+2025-07-28 15:38:26.631 |         "contactsList": 11
+2025-07-28 15:38:26.631 |       },
+2025-07-28 15:38:26.631 |       "recommendedRole": "researcher"
+2025-07-28 15:38:26.631 |     },
+2025-07-28 15:38:26.631 |     {
+2025-07-28 15:38:26.631 |       "number": 13,
+2025-07-28 15:38:26.631 |       "actionVerb": "DRAFT",
+2025-07-28 15:38:26.631 |       "inputs": {
+2025-07-28 15:38:26.631 |         "message": {
+2025-07-28 15:38:26.631 |           "value": "Draft personalized outreach messages to contacts and organizations identified for informational interviews and referrals.",
+2025-07-28 15:38:26.631 |           "valueType": "string"
+2025-07-28 15:38:26.631 |         }
+2025-07-28 15:38:26.631 |       },
+2025-07-28 15:38:26.631 |       "description": "Create tailored messages to reach out to contacts for informational interviews, referrals, and networking in targeted industries.",
+2025-07-28 15:38:26.631 |       "outputs": {
+2025-07-28 15:38:26.631 |         "messages": "Set of draft outreach messages for each contact"
+2025-07-28 15:38:26.631 |       },
+2025-07-28 15:38:26.631 |       "dependencies": {
+2025-07-28 15:38:26.631 |         "messages": 12
+2025-07-28 15:38:26.631 |       },
+2025-07-28 15:38:26.631 |       "recommendedRole": "writer"
+2025-07-28 15:38:26.631 |     },
+2025-07-28 15:38:26.631 |     {
+2025-07-28 15:38:26.631 |       "number": 14,
+2025-07-28 15:38:26.631 |       "actionVerb": "APPLY",
+2025-07-28 15:38:26.631 |       "inputs": {
+2025-07-28 15:38:26.631 |         "applications": {
+2025-07-28 15:38:26.631 |           "outputName": "applications",
+2025-07-28 15:38:26.631 |           "valueType": "array"
+2025-07-28 15:38:26.631 |         }
+2025-07-28 15:38:26.631 |       },
+2025-07-28 15:38:26.631 |       "description": "Continuously monitor the internet for new job postings matching target roles, and update applications accordingly.",
+2025-07-28 15:38:26.631 |       "outputs": {
+2025-07-28 15:38:26.631 |         "futureMonitoringPlan": "Plan for ongoing job search and networking"
+2025-07-28 15:38:26.631 |       },
+2025-07-28 15:38:26.631 |       "dependencies": {
+2025-07-28 15:38:26.631 |         "futureMonitoringPlan": 9
+2025-07-28 15:38:26.631 |       },
+2025-07-28 15:38:26.631 |       "recommendedRole": "coordinator"
+2025-07-28 15:38:26.631 |     }
+2025-07-28 15:38:26.631 |   ]
+2025-07-28 15:38:26.631 | }
+2025-07-28 15:38:26.631 | [baseInterface] Response is valid JSON after cleaning.
+2025-07-28 15:38:26.631 | [ModelManager] Tracking model response for request b234b209-3d79-4865-9e45-635df887459a, success: true, token count: 0, isRetry: undefined
+2025-07-28 15:38:26.631 | [ModelManager] Found active request for model openai/gpt-4.1-nano, conversation type TextToCode
+2025-07-28 15:39:02.019 | [Brain Chat] Request 3fe7c1a8-17ab-4356-85ae-0714fe1751a6 received
+2025-07-28 15:39:02.019 | [Brain Chat] Detected request requiring a JSON plan, ensuring JSON response format
+2025-07-28 15:39:02.019 | Selecting model for optimization: accuracy, conversationType: TextToCode
+2025-07-28 15:39:02.019 | **** CACHE HIT **** Using cached model selection result: openai/gpt-4.1-nano
+2025-07-28 15:39:02.019 | Cache age: 54 seconds
+2025-07-28 15:39:02.019 | [Brain Chat] Attempt 1: Using model gpt-4.1-nano-2025-04-14
+2025-07-28 15:39:02.019 | [ModelManager] Tracking model request: bbfd9c5a-123b-4c33-8f6d-eca4f3122edb for model openai/gpt-4.1-nano, conversation type TextToCode
+2025-07-28 15:39:02.019 | [ModelManager] Active requests count: 2
+2025-07-28 15:39:02.019 | [Brain Chat] Using model gpt-4.1-nano-2025-04-14 for request bbfd9c5a-123b-4c33-8f6d-eca4f3122edb
+2025-07-28 15:39:02.019 | Starting trimMessages
+2025-07-28 15:39:41.239 | [baseInterface] Ensuring JSON response
+2025-07-28 15:39:41.240 | [baseInterface] Original response: {
+2025-07-28 15:39:41.240 |   "type": "PLAN",
+2025-07-28 15:39:41.240 |   "plan": [
+2025-07-28 15:39:41.240 |     {
+2025-07-28 15:39:41.240 |       "number": 1,
+2025-07-28 15:39:41.240 |       "actionVerb": "ASK_USER_QUESTION",
+2025-07-28 15:39:41.240 |       "inputs": {
+2025-07-28 15:39:41.240 |         "question": {
+2025-07-28 15:39:41.240 |           "value": "Please upload your resume file so I can extract relevant details such as skills, experience, and contact information.",
+2025-07-28 15:39:41.240 |           "answerType": {"value": "string", "valueType": "string"}
+2025-07-28 15:39:41.240 |         },
+2025-07-28 15:39:41.240 |         "answerType": {"value": "file", "valueType": "string"}
+2025-07-28 15:39:41.240 |       },
+2025-07-28 15:39:41.240 |       "description": "Prompt the user to upload their resume file for extraction of relevant details necessary for job research and planning.",
+2025-07-28 15:39:41.240 |       "outputs": {
+2025-07-28 15:39:41.240 |         "fileId": "ID of the uploaded resume file"
+2025-07-28 15:39:41.240 |       },
+2025-07-28 15:39:41.240 |       "dependencies": {},
+2025-07-28 15:39:41.240 |       "recommendedRole": "ASK_USER_QUESTION"
+2025-07-28 15:39:41.240 |     },
+2025-07-28 15:39:41.240 |     {
+2025-07-28 15:39:41.240 |       "number": 2,
+2025-07-28 15:39:41.240 |       "actionVerb": "FILE_OPERATION",
+2025-07-28 15:39:41.240 |       "inputs": {
+2025-07-28 15:39:41.240 |         "operation": {"value": "read", "valueType": "string"},
+2025-07-28 15:39:41.240 |         "fileId": {"outputName": "fileId", "valueType": "string"}
+2025-07-28 15:39:41.240 |       },
+2025-07-28 15:39:41.240 |       "description": "Read the uploaded resume file to extract relevant details such as skills, experience, and contact information, which will inform subsequent job search and networking steps.",
+2025-07-28 15:39:41.240 |       "outputs": {
+2025-07-28 15:39:41.240 |         "resumeText": "Text content of the uploaded resume"
+2025-07-28 15:39:41.240 |       },
+2025-07-28 15:39:41.240 |       "dependencies": {
+2025-07-28 15:39:41.240 |         "fileId": 1
+2025-07-28 15:39:41.240 |       },
+2025-07-28 15:39:41.240 |       "recommendedRole": "executor"
+2025-07-28 15:39:41.240 |     },
+2025-07-28 15:39:41.240 |     {
+2025-07-28 15:39:41.240 |       "number": 3,
+2025-07-28 15:39:41.240 |       "actionVerb": "SCRAPE",
+2025-07-28 15:39:41.240 |       "inputs": {
+2025-07-28 15:39:41.240 |         "url": {"value": "https://www.linkedin.com/in/chrispravetz", "valueType": "string"}
+2025-07-28 15:39:41.240 |       },
+2025-07-28 15:39:41.240 |       "description": "Scrape the LinkedIn profile to gather additional details about professional interests, endorsements, and network connections to enhance job targeting.",
+2025-07-28 15:39:41.240 |       "outputs": {
+2025-07-28 15:39:41.240 |         "linkedinProfileData": "Structured data from the LinkedIn profile"
+2025-07-28 15:39:41.240 |       },
+2025-07-28 15:39:41.240 |       "dependencies": {},
+2025-07-28 15:39:41.240 |       "recommendedRole": "researcher"
+2025-07-28 15:39:41.240 |     },
+2025-07-28 15:39:41.240 |     {
+2025-07-28 15:39:41.240 |       "number": 4,
+2025-07-28 15:39:41.240 |       "actionVerb": "SCRAPE",
+2025-07-28 15:39:41.240 |       "inputs": {
+2025-07-28 15:39:41.240 |         "url": {"value": "https://www.pravetz.net", "valueType": "string"}
+2025-07-28 15:39:41.240 |       },
+2025-07-28 15:39:41.240 |       "description": "Access the blog to identify the user's professional interests and priorities, aiding in refining job search criteria and crafting personalized outreach messages.",
+2025-07-28 15:39:41.240 |       "outputs": {
+2025-07-28 15:39:41.240 |         "blogContent": "Text content of the blog highlighting professional interests"
+2025-07-28 15:39:41.240 |       },
+2025-07-28 15:39:41.240 |       "dependencies": {},
+2025-07-28 15:39:41.240 |       "recommendedRole": "researcher"
+2025-07-28 15:39:41.240 |     },
+2025-07-28 15:39:41.240 |     {
+2025-07-28 15:39:41.240 |       "number": 5,
+2025-07-28 15:39:41.240 |       "actionVerb": "DELEGATE",
+2025-07-28 15:39:41.240 |       "inputs": {
+2025-07-28 15:39:41.240 |         "goal": {
+2025-07-28 15:39:41.240 |           "value": "Analyze the resume, LinkedIn profile, and blog content to identify suitable job roles, organizations, and networking opportunities.",
+2025-07-28 15:39:41.240 |           "valueType": "string"
+2025-07-28 15:39:41.240 |         }
+2025-07-28 15:39:41.240 |       },
+2025-07-28 15:39:41.240 |       "description": "Create a sub-agent to synthesize the gathered data and generate a tailored job search strategy, including target roles, organizations, and contact lists.",
+2025-07-28 15:39:41.240 |       "outputs": {
+2025-07-28 15:39:41.240 |         "jobStrategy": "Detailed plan for targeting published and unpublished job opportunities, including preferred roles, sectors, and outreach approach"
+2025-07-28 15:39:41.240 |       },
+2025-07-28 15:39:41.240 |       "dependencies": {
+2025-07-28 15:39:41.240 |         "resumeText": 2,
+2025-07-28 15:39:41.240 |         "linkedinProfileData": 3,
+2025-07-28 15:39:41.240 |         "blogContent": 4
+2025-07-28 15:39:41.240 |       },
+2025-07-28 15:39:41.240 |       "recommendedRole": "coordinator"
+2025-07-28 15:39:41.240 |     },
+2025-07-28 15:39:41.240 |     {
+2025-07-28 15:39:41.240 |       "number": 6,
+2025-07-28 15:39:41.240 |       "actionVerb": "ACCOMPLISH",
+2025-07-28 15:39:41.240 |       "inputs": {
+2025-07-28 15:39:41.240 |         "goal": {
+2025-07-28 15:39:41.240 |           "value": "Identify current job postings that match the targeted roles and organizations from the strategy, including unpublished opportunities via networking.",
+2025-07-28 15:39:41.240 |           "valueType": "string"
+2025-07-28 15:39:41.240 |         }
+2025-07-28 15:39:41.240 |       },
+2025-07-28 15:39:41.240 |       "description": "Search various job boards, company career pages, and professional networks to compile a list of relevant posted jobs and unpublished opportunities.",
+2025-07-28 15:39:41.240 |       "outputs": {
+2025-07-28 15:39:41.240 |         "jobListings": "List of relevant job postings and opportunities"
+2025-07-28 15:39:41.240 |       },
+2025-07-28 15:39:41.240 |       "dependencies": {
+2025-07-28 15:39:41.240 |         "jobStrategy": 5
+2025-07-28 15:39:41.240 |       },
+2025-07-28 15:39:41.240 |       "recommendedRole": "researcher"
+2025-07-28 15:39:41.240 |     },
+2025-07-28 15:39:41.240 |     {
+2025-07-28 15:39:41.240 |       "number": 7,
+2025-07-28 15:39:41.240 |       "actionVerb": "ACCOMPLISH",
+2025-07-28 15:39:41.240 |       "inputs": {
+2025-07-28 15:39:41.240 |         "goal": {
+2025-07-28 15:39:41.240 |           "value": "Create customized resumes and cover letters for each identified job opportunity, tailored to the role and organization.",
+2025-07-28 15:39:41.240 |           "valueType": "string"
+2025-07-28 15:39:41.240 |         }
+2025-07-28 15:39:41.240 |       },
+2025-07-28 15:39:41.240 |       "description": "Develop personalized application materials for each target job, ensuring alignment with the role requirements and highlighting relevant skills and experiences.",
+2025-07-28 15:39:41.240 |       "outputs": {
+2025-07-28 15:39:41.240 |         "applicationMaterials": "Set of tailored resumes and cover letters"
+2025-07-28 15:39:41.240 |       },
+2025-07-28 15:39:41.240 |       "dependencies": {
+2025-07-28 15:39:41.240 |         "jobListings": 6
+2025-07-28 15:39:41.240 |       },
+2025-07-28 15:39:41.240 |       "recommendedRole": "creator"
+2025-07-28 15:39:41.240 |     },
+2025-07-28 15:39:41.240 |     {
+2025-07-28 15:39:41.240 |       "number": 8,
+2025-07-28 15:39:41.240 |       "actionVerb": "ACCOMPLISH",
+2025-07-28 15:39:41.240 |       "inputs": {
+2025-07-28 15:39:41.240 |         "goal": {
+2025-07-28 15:39:41.240 |           "value": "Draft outreach messages and network contact templates to engage with potential employers and professional contacts identified from the LinkedIn profile and blog interests.",
+2025-07-28 15:39:41.240 |           "valueType": "string"
+2025-07-28 15:39:41.240 |         }
+2025-07-28 15:39:41.240 |       },
+2025-07-28 15:39:41.240 |       "description": "Prepare personalized messages for reaching out to contacts and organizations to explore unpublished opportunities and expand the professional network.",
+2025-07-28 15:39:41.240 |       "outputs": {
+2025-07-28 15:39:41.240 |         "draftMessages": "Collection of draft outreach messages and connection requests"
+2025-07-28 15:39:41.240 |       },
+2025-07-28 15:39:41.240 |       "dependencies": {
+2025-07-28 15:39:41.240 |         "linkedinProfileData": 3,
+2025-07-28 15:39:41.240 |         "blogContent": 4
+2025-07-28 15:39:41.240 |       },
+2025-07-28 15:39:41.240 |       "recommendedRole": "creative"
+2025-07-28 15:39:41.240 |     },
+2025-07-28 15:39:41.240 |     {
+2025-07-28 15:39:41.240 |       "number": 9,
+2025-07-28 15:39:41.240 |       "actionVerb": "ACCOMPLISH",
+2025-07-28 15:39:41.240 |       "inputs": {
+2025-07-28 15:39:41.240 |         "goal": {
+2025-07-28 15:39:41.240 |           "value": "Set up a monitoring system to track new job postings matching the target criteria across relevant job boards, company pages, and social networks.",
+2025-07-28 15:39:41.240 |           "valueType": "string"
+2025-07-28 15:39:41.240 |         }
+2025-07-28 15:39:41.240 |       },
+2025-07-28 15:39:41.240 |       "description": "Implement alerts, RSS feeds, or web scraping routines to continuously monitor for new opportunities aligned with the user's interests and strategy.",
+2025-07-28 15:39:41.240 |       "outputs": {
+2025-07-28 15:39:41.240 |         "monitoringSetup": "Automated system for ongoing job post monitoring"
+2025-07-28 15:39:41.240 |       },
+2025-07-28 15:39:41.240 |       "dependencies": {
+2025-07-28 15:39:41.240 |         "jobStrategy": 5
+2025-07-28 15:39:41.240 |       },
+2025-07-28 15:39:41.240 |       "recommendedRole": "coordinator"
+2025-07-28 15:39:41.240 |     }
+2025-07-28 15:39:41.240 |   ]
+2025-07-28 15:39:41.240 | }
+2025-07-28 15:39:41.240 | [baseInterface] Response is valid JSON after cleaning.
+2025-07-28 15:39:41.240 | [ModelManager] Tracking model response for request bbfd9c5a-123b-4c33-8f6d-eca4f3122edb, success: true, token count: 0, isRetry: undefined
+2025-07-28 15:39:41.240 | [ModelManager] Found active request for model openai/gpt-4.1-nano, conversation type TextToCode
+2025-07-28 15:39:42.533 | [Brain Chat] Request ebb448ab-9e8a-4c05-93e8-11a000e4ad86 received
+2025-07-28 15:39:42.533 | [Brain Chat] Detected request requiring a JSON plan, ensuring JSON response format
+2025-07-28 15:39:42.533 | Selecting model for optimization: accuracy, conversationType: TextToCode
+2025-07-28 15:39:42.533 | **** CACHE MISS **** No cached result for key: accuracy-TextToCode
+2025-07-28 15:39:42.533 | Cache miss or expired. Selecting model from scratch.
+2025-07-28 15:39:42.533 | Total models loaded: 32
+2025-07-28 15:39:42.533 | Model anthropic/claude-3-haiku-20240307 is blacklisted for conversation type TextToCode
+2025-07-28 15:39:42.533 | Model anthropic/claude-2 is blacklisted for conversation type TextToCode
+2025-07-28 15:39:42.533 | Model codellama/CodeLlama-34b-Instruct-hf is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:39:42.533 | Model deepseek-ai/DeepSeek-R1 is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:39:42.533 | Model or/cognitivecomputations/dolphin3.0-mistral-24b:free is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:39:42.533 | Model openai/gpt-4.1-nano is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:39:42.533 | Model openai/gpt-4-vision-preview is blacklisted for conversation type TextToCode
+2025-07-28 15:39:42.533 | Model or/moonshotai/kimi-k2:free is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:39:42.533 | Model openweb/knownow is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:39:42.533 | GroqService availability check: Available
+2025-07-28 15:39:42.533 | GroqService ready state: Ready
+2025-07-28 15:39:42.533 | GroqService is available and ready to use.
+2025-07-28 15:39:42.533 | Model groq/llama-4 is blacklisted for conversation type TextToCode
+2025-07-28 15:39:42.533 | Model meta-llama/Llama-2-70b-chat-hf is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:39:42.533 | MistralService availability check: Available
+2025-07-28 15:39:42.533 | MistralService is available and ready to use.
+2025-07-28 15:39:42.533 | Model mistral/mistral-small-latest is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:39:42.533 | Model mistralai/Mistral-Nemo-Instruct-2407 is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:39:42.533 | Model or/deepseek-ai/DeepSeek-R1:free is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:39:42.533 | Model bigcode/starcoder is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:39:42.533 | Model codellama/CodeLlama-34b-Instruct-hf score calculation: base=88, adjusted=88, reliability=0, final=88
+2025-07-28 15:39:42.533 | Model deepseek-ai/DeepSeek-R1 score calculation: base=88, adjusted=88, reliability=0, final=88
+2025-07-28 15:39:42.533 | Model or/cognitivecomputations/dolphin3.0-mistral-24b:free score calculation: base=75, adjusted=75, reliability=0, final=75
+2025-07-28 15:39:42.533 | Model openai/gpt-4.1-nano score calculation: base=52, adjusted=77.92296296296297, reliability=29.94074074074074, final=107.8637037037037
+2025-07-28 15:39:42.534 | Model or/moonshotai/kimi-k2:free score calculation: base=75, adjusted=75, reliability=0, final=75
+2025-07-28 15:39:42.534 | Model openweb/knownow score calculation: base=85, adjusted=85, reliability=0, final=85
+2025-07-28 15:39:42.534 | Model meta-llama/Llama-2-70b-chat-hf score calculation: base=88, adjusted=88, reliability=0, final=88
+2025-07-28 15:39:42.534 | Model mistral/mistral-small-latest score calculation: base=85, adjusted=85, reliability=0, final=85
+2025-07-28 15:39:42.534 | Model mistralai/Mistral-Nemo-Instruct-2407 score calculation: base=80, adjusted=80, reliability=0, final=80
+2025-07-28 15:39:42.534 | Model or/deepseek-ai/DeepSeek-R1:free score calculation: base=88, adjusted=88, reliability=0, final=88
+2025-07-28 15:39:42.534 | Model bigcode/starcoder score calculation: base=85, adjusted=85, reliability=0, final=85
+2025-07-28 15:39:42.534 | Using score-based model selection. Top model: openai/gpt-4.1-nano
+2025-07-28 15:39:42.534 | Selected model openai/gpt-4.1-nano for accuracy optimization and conversation type TextToCode
+2025-07-28 15:39:42.534 | [Brain Chat] Attempt 1: Using model gpt-4.1-nano-2025-04-14
+2025-07-28 15:39:42.535 | [ModelManager] Tracking model request: daf77125-55a0-41d2-a68c-db6d223d62be for model openai/gpt-4.1-nano, conversation type TextToCode
+2025-07-28 15:39:42.535 | [ModelManager] Active requests count: 3
+2025-07-28 15:39:42.535 | [Brain Chat] Using model gpt-4.1-nano-2025-04-14 for request daf77125-55a0-41d2-a68c-db6d223d62be
+2025-07-28 15:39:42.535 | Starting trimMessages
+2025-07-28 15:40:01.192 | [baseInterface] Ensuring JSON response
+2025-07-28 15:40:01.192 | [baseInterface] Original response: {
+2025-07-28 15:40:01.192 |   "type": "PLAN",
+2025-07-28 15:40:01.192 |   "plan": [
+2025-07-28 15:40:01.192 |     {
+2025-07-28 15:40:01.192 |       "number": 1,
+2025-07-28 15:40:01.192 |       "actionVerb": "ASK_USER_QUESTION",
+2025-07-28 15:40:01.193 |       "inputs": {
+2025-07-28 15:40:01.193 |         "question": {
+2025-07-28 15:40:01.193 |           "value": "Please upload your current LinkedIn profile data or provide a way to access it securely (e.g., export or download).",
+2025-07-28 15:40:01.193 |           "answerType": {
+2025-07-28 15:40:01.193 |             "value": "file",
+2025-07-28 15:40:01.193 |             "valueType": "string"
+2025-07-28 15:40:01.193 |           }
+2025-07-28 15:40:01.193 |         }
+2025-07-28 15:40:01.193 |       },
+2025-07-28 15:40:01.193 |       "description": "Request the user to upload a file containing the latest LinkedIn profile data or credentials to access it securely, since scraping via URL returned status 400 and direct scraping failed.",
+2025-07-28 15:40:01.193 |       "outputs": {
+2025-07-28 15:40:01.193 |         "fileId": "uploaded_linkedin_profile"
+2025-07-28 15:40:01.193 |       },
+2025-07-28 15:40:01.193 |       "dependencies": {},
+2025-07-28 15:40:01.193 |       "recommendedRole": "coordinator"
+2025-07-28 15:40:01.193 |     },
+2025-07-28 15:40:01.193 |     {
+2025-07-28 15:40:01.193 |       "number": 2,
+2025-07-28 15:40:01.193 |       "actionVerb": "FILE_OPERATION",
+2025-07-28 15:40:01.193 |       "inputs": {
+2025-07-28 15:40:01.193 |         "operation": {
+2025-07-28 15:40:01.193 |           "value": "read",
+2025-07-28 15:40:01.193 |           "valueType": "string"
+2025-07-28 15:40:01.193 |         },
+2025-07-28 15:40:01.193 |         "fileId": {
+2025-07-28 15:40:01.193 |           "outputName": "uploaded_linkedin_profile",
+2025-07-28 15:40:01.193 |           "valueType": "string"
+2025-07-28 15:40:01.193 |         }
+2025-07-28 15:40:01.193 |       },
+2025-07-28 15:40:01.193 |       "description": "Read the uploaded LinkedIn profile data to extract current professional information, endorsements, network, and activity details for analysis.",
+2025-07-28 15:40:01.193 |       "outputs": {
+2025-07-28 15:40:01.193 |         "profileData": "Parsed LinkedIn profile information"
+2025-07-28 15:40:01.193 |       },
+2025-07-28 15:40:01.193 |       "dependencies": {
+2025-07-28 15:40:01.193 |         "uploaded_linkedin_profile": 1
+2025-07-28 15:40:01.193 |       },
+2025-07-28 15:40:01.193 |       "recommendedRole": "executor"
+2025-07-28 15:40:01.193 |     },
+2025-07-28 15:40:01.193 |     {
+2025-07-28 15:40:01.193 |       "number": 3,
+2025-07-28 15:40:01.193 |       "actionVerb": "SCRAPE",
+2025-07-28 15:40:01.193 |       "inputs": {
+2025-07-28 15:40:01.193 |         "url": {
+2025-07-28 15:40:01.193 |           "value": "https://www.linkedin.com/in/chrispravetz",
+2025-07-28 15:40:01.193 |           "valueType": "string"
+2025-07-28 15:40:01.193 |         }
+2025-07-28 15:40:01.193 |       },
+2025-07-28 15:40:01.193 |       "description": "Attempt to scrape the LinkedIn profile page directly, but since previous request failed with status 400, this step may be skipped or used as supplementary data collection if access is possible.",
+2025-07-28 15:40:01.193 |       "outputs": {
+2025-07-28 15:40:01.193 |         "scrapedProfile": "Web-scraped profile content"
+2025-07-28 15:40:01.193 |       },
+2025-07-28 15:40:01.193 |       "dependencies": {},
+2025-07-28 15:40:01.193 |       "recommendedRole": "researcher"
+2025-07-28 15:40:01.193 |     },
+2025-07-28 15:40:01.193 |     {
+2025-07-28 15:40:01.193 |       "number": 4,
+2025-07-28 15:40:01.193 |       "actionVerb": "DELEGATE",
+2025-07-28 15:40:01.193 |       "inputs": {
+2025-07-28 15:40:01.193 |         "goal": {
+2025-07-28 15:40:01.193 |           "value": "Analyze the profile data and scraped content to determine current professional status, skills, endorsements, and network for job targeting.",
+2025-07-28 15:40:01.193 |           "valueType": "string"
+2025-07-28 15:40:01.193 |         }
+2025-07-28 15:40:01.193 |       },
+2025-07-28 15:40:01.193 |       "description": "Create a sub-agent to analyze the profile data and scraped content to identify key professional details and update the profile summary accordingly.",
+2025-07-28 15:40:01.193 |       "outputs": {
+2025-07-28 15:40:01.193 |         "profileAnalysis": "Detailed professional profile analysis"
+2025-07-28 15:40:01.193 |       },
+2025-07-28 15:40:01.193 |       "dependencies": {
+2025-07-28 15:40:01.193 |         "profileData": 2,
+2025-07-28 15:40:01.193 |         "scrapedProfile": 3
+2025-07-28 15:40:01.193 |       },
+2025-07-28 15:40:01.193 |       "recommendedRole": "coordinator"
+2025-07-28 15:40:01.193 |     },
+2025-07-28 15:40:01.193 |     {
+2025-07-28 15:40:01.193 |       "number": 5,
+2025-07-28 15:40:01.193 |       "actionVerb": "ACCOMPLISH",
+2025-07-28 15:40:01.193 |       "inputs": {
+2025-07-28 15:40:01.193 |         "goal": {
+2025-07-28 15:40:01.193 |           "value": "Develop a tailored job search plan based on profile analysis, including identifying potential roles, organizations, contacts, and job postings.",
+2025-07-28 15:40:01.193 |           "valueType": "string"
+2025-07-28 15:40:01.193 |         }
+2025-07-28 15:40:01.193 |       },
+2025-07-28 15:40:01.193 |       "description": "Create a detailed plan to find suitable job opportunities both published and unpublished, utilizing the analyzed profile information, professional interests, and network.",
+2025-07-28 15:40:01.193 |       "outputs": {
+2025-07-28 15:40:01.193 |         "jobSearchPlan": "Comprehensive job search strategy with target roles, organizations, contacts, and monitoring methods"
+2025-07-28 15:40:01.193 |       },
+2025-07-28 15:40:01.193 |       "dependencies": {
+2025-07-28 15:40:01.193 |         "profileAnalysis": 4
+2025-07-28 15:40:01.193 |       },
+2025-07-28 15:40:01.193 |       "recommendedRole": "coordinator"
+2025-07-28 15:40:01.193 |     },
+2025-07-28 15:40:01.193 |     {
+2025-07-28 15:40:01.193 |       "number": 6,
+2025-07-28 15:40:01.193 |       "actionVerb": "ASK_USER_QUESTION",
+2025-07-28 15:40:01.193 |       "inputs": {
+2025-07-28 15:40:01.193 |         "question": {
+2025-07-28 15:40:01.193 |           "value": "Would you like assistance in drafting messages to contacts or organizations identified in the plan?",
+2025-07-28 15:40:01.193 |           "answerType": {
+2025-07-28 15:40:01.193 |             "value": "string",
+2025-07-28 15:40:01.193 |             "valueType": "string"
+2025-07-28 15:40:01.193 |           }
+2025-07-28 15:40:01.193 |         }
+2025-07-28 15:40:01.193 |       },
+2025-07-28 15:40:01.193 |       "description": "Request user input on whether to proceed with drafting outreach messages for contacts or organizations identified in the job search plan.",
+2025-07-28 15:40:01.193 |       "outputs": {
+2025-07-28 15:40:01.193 |         "userResponse": "User decision on outreach drafting"
+2025-07-28 15:40:01.193 |       },
+2025-07-28 15:40:01.193 |       "dependencies": {
+2025-07-28 15:40:01.193 |         "jobSearchPlan": 5
+2025-07-28 15:40:01.193 |       },
+2025-07-28 15:40:01.193 |       "recommendedRole": "coordinator"
+2025-07-28 15:40:01.193 |     },
+2025-07-28 15:40:01.193 |     {
+2025-07-28 15:40:01.193 |       "number": 7,
+2025-07-28 15:40:01.193 |       "actionVerb": "ACCOMPLISH",
+2025-07-28 15:40:01.193 |       "inputs": {
+2025-07-28 15:40:01.193 |         "goal": {
+2025-07-28 15:40:01.193 |           "value": "Create customized resumes and cover letters for targeted job postings identified in the plan, and establish a monitoring system for new matching opportunities.",
+2025-07-28 15:40:01.193 |           "valueType": "string"
+2025-07-28 15:40:01.193 |         }
+2025-07-28 15:40:01.193 |       },
+2025-07-28 15:40:01.193 |       "description": "Develop tailored resumes and cover letters for each target job and set up alerts or monitoring tools to track new relevant postings.",
+2025-07-28 15:40:01.193 |       "outputs": {
+2025-07-28 15:40:01.193 |         "applicationMaterials": "Customized resumes and cover letters with monitoring setup"
+2025-07-28 15:40:01.193 |       },
+2025-07-28 15:40:01.193 |       "dependencies": {
+2025-07-28 15:40:01.193 |         "jobSearchPlan": 5
+2025-07-28 15:40:01.193 |       },
+2025-07-28 15:40:01.193 |       "recommendedRole": "executor"
+2025-07-28 15:40:01.193 |     }
+2025-07-28 15:40:01.193 |   ]
+2025-07-28 15:40:01.193 | }
+2025-07-28 15:40:01.193 | [baseInterface] Response is valid JSON after cleaning.
+2025-07-28 15:40:01.193 | [ModelManager] Tracking model response for request daf77125-55a0-41d2-a68c-db6d223d62be, success: true, token count: 0, isRetry: undefined
+2025-07-28 15:40:01.193 | [ModelManager] Found active request for model openai/gpt-4.1-nano, conversation type TextToCode
+2025-07-28 15:40:03.640 | [Brain Chat] Request f304606d-2354-42dd-86d0-a9aa577a08ca received
+2025-07-28 15:40:03.640 | [Brain Chat] Detected request requiring a JSON plan, ensuring JSON response format
+2025-07-28 15:40:03.640 | Selecting model for optimization: accuracy, conversationType: TextToCode
+2025-07-28 15:40:03.640 | **** CACHE HIT **** Using cached model selection result: openai/gpt-4.1-nano
+2025-07-28 15:40:03.640 | Cache age: 21 seconds
+2025-07-28 15:40:03.640 | [Brain Chat] Attempt 1: Using model gpt-4.1-nano-2025-04-14
+2025-07-28 15:40:03.640 | [ModelManager] Tracking model request: d6b102b3-8e40-4972-a005-b749e80cb2e0 for model openai/gpt-4.1-nano, conversation type TextToCode
+2025-07-28 15:40:03.640 | [ModelManager] Active requests count: 4
+2025-07-28 15:40:03.640 | [Brain Chat] Using model gpt-4.1-nano-2025-04-14 for request d6b102b3-8e40-4972-a005-b749e80cb2e0
+2025-07-28 15:40:03.640 | Starting trimMessages
+2025-07-28 15:40:11.729 | [baseInterface] Ensuring JSON response
+2025-07-28 15:40:11.730 | [baseInterface] Original response: {
+2025-07-28 15:40:11.730 |   "type": "PLAN",
+2025-07-28 15:40:11.730 |   "plan": [
+2025-07-28 15:40:11.730 |     {
+2025-07-28 15:40:11.730 |       "number": 1,
+2025-07-28 15:40:11.730 |       "actionVerb": "ASK_USER_QUESTION",
+2025-07-28 15:40:11.730 |       "inputs": {
+2025-07-28 15:40:11.730 |         "question": {
+2025-07-28 15:40:11.730 |           "value": "Please upload a copy of your current resume file.",
+2025-07-28 15:40:11.730 |           "answerType": {
+2025-07-28 15:40:11.730 |             "value": "file",
+2025-07-28 15:40:11.730 |             "valueType": "string"
+2025-07-28 15:40:11.730 |           }
+2025-07-28 15:40:11.730 |         }
+2025-07-28 15:40:11.730 |       },
+2025-07-28 15:40:11.730 |       "description": "Request the user to upload their latest resume document so I can analyze it to identify skills, experience, and potential job targets.",
+2025-07-28 15:40:11.730 |       "outputs": {
+2025-07-28 15:40:11.730 |         "resumeFileId": "ID of uploaded resume file"
+2025-07-28 15:40:11.730 |       },
+2025-07-28 15:40:11.730 |       "dependencies": {},
+2025-07-28 15:40:11.730 |       "recommendedRole": "researcher"
+2025-07-28 15:40:11.730 |     },
+2025-07-28 15:40:11.730 |     {
+2025-07-28 15:40:11.730 |       "number": 2,
+2025-07-28 15:40:11.730 |       "actionVerb": "FILE_OPERATION",
+2025-07-28 15:40:11.730 |       "inputs": {
+2025-07-28 15:40:11.730 |         "operation": {
+2025-07-28 15:40:11.730 |           "value": "read",
+2025-07-28 15:40:11.730 |           "valueType": "string"
+2025-07-28 15:40:11.730 |         },
+2025-07-28 15:40:11.730 |         "fileId": {
+2025-07-28 15:40:11.730 |           "outputName": "resumeFileId",
+2025-07-28 15:40:11.730 |           "valueType": "string"
+2025-07-28 15:40:11.730 |         }
+2025-07-28 15:40:11.730 |       },
+2025-07-28 15:40:11.730 |       "description": "Read the uploaded resume file to extract relevant content such as skills, work history, and qualifications.",
+2025-07-28 15:40:11.730 |       "outputs": {
+2025-07-28 15:40:11.730 |         "resumeContent": "Extracted text content from the resume."
+2025-07-28 15:40:11.730 |       },
+2025-07-28 15:40:11.730 |       "dependencies": {
+2025-07-28 15:40:11.730 |         "resumeContent": 1
+2025-07-28 15:40:11.730 |       },
+2025-07-28 15:40:11.730 |       "recommendedRole": "researcher"
+2025-07-28 15:40:11.730 |     },
+2025-07-28 15:40:11.730 |     {
+2025-07-28 15:40:11.730 |       "number": 3,
+2025-07-28 15:40:11.730 |       "actionVerb": "SCRAPE",
+2025-07-28 15:40:11.730 |       "inputs": {
+2025-07-28 15:40:11.730 |         "url": {
+2025-07-28 15:40:11.730 |           "value": "https://www.linkedin.com/in/chrispravetz",
+2025-07-28 15:40:11.730 |           "valueType": "string"
+2025-07-28 15:40:11.730 |         }
+2025-07-28 15:40:11.730 |       },
+2025-07-28 15:40:11.730 |       "description": "Scrape the LinkedIn profile page to gather additional professional interests, endorsements, and activity that can inform suitable job roles.",
+2025-07-28 15:40:11.730 |       "outputs": {
+2025-07-28 15:40:11.730 |         "linkedinProfileData": "HTML or structured data of LinkedIn profile"
+2025-07-28 15:40:11.730 |       },
+2025-07-28 15:40:11.730 |       "dependencies": {},
+2025-07-28 15:40:11.730 |       "recommendedRole": "researcher"
+2025-07-28 15:40:11.730 |     },
+2025-07-28 15:40:11.730 |     {
+2025-07-28 15:40:11.730 |       "number": 4,
+2025-07-28 15:40:11.730 |       "actionVerb": "TEXT_ANALYSIS",
+2025-07-28 15:40:11.730 |       "inputs": {
+2025-07-28 15:40:11.730 |         "text": {
+2025-07-28 15:40:11.730 |           "outputName": "resumeContent",
+2025-07-28 15:40:11.730 |           "valueType": "string"
+2025-07-28 15:40:11.730 |         }
+2025-07-28 15:40:11.730 |       },
+2025-07-28 15:40:11.730 |       "description": "Analyze the resume text to extract key skills, areas of expertise, and potential job interests.",
+2025-07-28 15:40:11.730 |       "outputs": {
+2025-07-28 15:40:11.730 |         "skillsSummary": "Summary of skills and interests derived from resume."
+2025-07-28 15:40:11.730 |       },
+2025-07-28 15:40:11.730 |       "dependencies": {
+2025-07-28 15:40:11.730 |         "skillsSummary": 2
+2025-07-28 15:40:11.730 |       },
+2025-07-28 15:40:11.730 |       "recommendedRole": "domain_expert"
+2025-07-28 15:40:11.730 |     },
+2025-07-28 15:40:11.730 |     {
+2025-07-28 15:40:11.730 |       "number": 5,
+2025-07-28 15:40:11.730 |       "actionVerb": "TEXT_ANALYSIS",
+2025-07-28 15:40:11.730 |       "inputs": {
+2025-07-28 15:40:11.730 |         "text": {
+2025-07-28 15:40:11.730 |           "outputName": "linkedinProfileData",
+2025-07-28 15:40:11.730 |           "valueType": "string"
+2025-07-28 15:40:11.730 |         }
+2025-07-28 15:40:11.730 |       },
+2025-07-28 15:40:11.730 |       "description": "Analyze the LinkedIn profile data to identify professional interests, projects, and themes that align with potential job roles.",
+2025-07-28 15:40:11.730 |       "outputs": {
+2025-07-28 15:40:11.730 |         "linkedinInterests": "Summary of interests and themes from LinkedIn profile."
+2025-07-28 15:40:11.730 |       },
+2025-07-28 15:40:11.730 |       "dependencies": {
+2025-07-28 15:40:11.730 |         "linkedinInterests": 3
+2025-07-28 15:40:11.730 |       },
+2025-07-28 15:40:11.730 |       "recommendedRole": "domain_expert"
+2025-07-28 15:40:11.730 |     },
+2025-07-28 15:40:11.730 |     {
+2025-07-28 15:40:11.730 |       "number": 6,
+2025-07-28 15:40:11.730 |       "actionVerb": "ACCOMPLISH",
+2025-07-28 15:40:11.730 |       "inputs": {
+2025-07-28 15:40:11.730 |         "goal": {
+2025-07-28 15:40:11.730 |           "value": "Identify suitable job roles based on resume and LinkedIn profile analysis and create a targeted job search plan.",
+2025-07-28 15:40:11.730 |           "valueType": "string"
+2025-07-28 15:40:11.730 |         }
+2025-07-28 15:40:11.730 |       },
+2025-07-28 15:40:11.730 |       "description": "Combine insights from resume and LinkedIn analysis to formulate a list of suitable job roles, including skills required, target industries, and potential employers. Develop a plan to search for both published and unpublished opportunities, including contact lists and draft outreach messages.",
+2025-07-28 15:40:11.730 |       "outputs": {
+2025-07-28 15:40:11.730 |         "jobRolesPlan": "Detailed plan for job search including targeted roles, contacts, and outreach strategies."
+2025-07-28 15:40:11.730 |       },
+2025-07-28 15:40:11.730 |       "dependencies": {
+2025-07-28 15:40:11.730 |         "skillsSummary": 4,
+2025-07-28 15:40:11.730 |         "linkedinInterests": 5
+2025-07-28 15:40:11.730 |       },
+2025-07-28 15:40:11.730 |       "recommendedRole": "coordinator"
+2025-07-28 15:40:11.730 |     }
+2025-07-28 15:40:11.730 |   ]
+2025-07-28 15:40:11.730 | }
+2025-07-28 15:40:11.730 | [baseInterface] Response is valid JSON after cleaning.
+2025-07-28 15:40:11.730 | [ModelManager] Tracking model response for request d6b102b3-8e40-4972-a005-b749e80cb2e0, success: true, token count: 0, isRetry: undefined
+2025-07-28 15:40:11.730 | [ModelManager] Found active request for model openai/gpt-4.1-nano, conversation type TextToCode
+2025-07-28 15:40:13.017 | [Brain Chat] Request 3f17f30f-384e-4c69-ad48-c1d2b12e5149 received
+2025-07-28 15:40:13.017 | [Brain Chat] Detected request requiring a JSON plan, ensuring JSON response format
+2025-07-28 15:40:13.017 | Selecting model for optimization: accuracy, conversationType: TextToCode
+2025-07-28 15:40:13.017 | **** CACHE HIT **** Using cached model selection result: openai/gpt-4.1-nano
+2025-07-28 15:40:13.017 | Cache age: 30 seconds
+2025-07-28 15:40:13.017 | [Brain Chat] Attempt 1: Using model gpt-4.1-nano-2025-04-14
+2025-07-28 15:40:13.017 | [ModelManager] Tracking model request: ec03c298-221f-42fe-9e7f-d27c9978d7e3 for model openai/gpt-4.1-nano, conversation type TextToCode
+2025-07-28 15:40:13.017 | [ModelManager] Active requests count: 5
+2025-07-28 15:40:13.017 | [Brain Chat] Using model gpt-4.1-nano-2025-04-14 for request ec03c298-221f-42fe-9e7f-d27c9978d7e3
+2025-07-28 15:40:13.017 | Starting trimMessages
+2025-07-28 15:40:39.519 | [baseInterface] Ensuring JSON response
+2025-07-28 15:40:39.519 | [baseInterface] Original response: {
+2025-07-28 15:40:39.519 |   "type": "PLAN",
+2025-07-28 15:40:39.519 |   "plan": [
+2025-07-28 15:40:39.519 |     {
+2025-07-28 15:40:39.519 |       "number": 1,
+2025-07-28 15:40:39.519 |       "actionVerb": "ASK_USER_QUESTION",
+2025-07-28 15:40:39.519 |       "inputs": {
+2025-07-28 15:40:39.519 |         "question": {
+2025-07-28 15:40:39.519 |           "value": "Please upload your current resume file for analysis.",
+2025-07-28 15:40:39.519 |           "answerType": {
+2025-07-28 15:40:39.519 |             "value": "file",
+2025-07-28 15:40:39.519 |             "valueType": "string"
+2025-07-28 15:40:39.519 |           }
+2025-07-28 15:40:39.519 |         }
+2025-07-28 15:40:39.519 |       },
+2025-07-28 15:40:39.519 |       "description": "Request the user to upload their resume file to analyze skills, experience, and tailor job search strategies accordingly.",
+2025-07-28 15:40:39.519 |       "outputs": {
+2025-07-28 15:40:39.519 |         "resumeFile": "Uploaded resume file ID for processing"
+2025-07-28 15:40:39.519 |       },
+2025-07-28 15:40:39.519 |       "dependencies": {},
+2025-07-28 15:40:39.519 |       "recommendedRole": "executor"
+2025-07-28 15:40:39.519 |     },
+2025-07-28 15:40:39.519 |     {
+2025-07-28 15:40:39.519 |       "number": 2,
+2025-07-28 15:40:39.519 |       "actionVerb": "FILE_OPERATION",
+2025-07-28 15:40:39.519 |       "inputs": {
+2025-07-28 15:40:39.519 |         "operation": {
+2025-07-28 15:40:39.519 |           "value": "read",
+2025-07-28 15:40:39.519 |           "valueType": "string"
+2025-07-28 15:40:39.519 |         },
+2025-07-28 15:40:39.519 |         "fileId": {
+2025-07-28 15:40:39.519 |           "outputName": "resumeFile",
+2025-07-28 15:40:39.519 |           "valueType": "string"
+2025-07-28 15:40:39.519 |         }
+2025-07-28 15:40:39.519 |       },
+2025-07-28 15:40:39.519 |       "description": "Read the uploaded resume file to extract relevant skills, experience, and keywords for targeted job search and networking.",
+2025-07-28 15:40:39.519 |       "outputs": {
+2025-07-28 15:40:39.519 |         "resumeContent": "Content of the uploaded resume"
+2025-07-28 15:40:39.519 |       },
+2025-07-28 15:40:39.519 |       "dependencies": {
+2025-07-28 15:40:39.519 |         "resumeContent": 1
+2025-07-28 15:40:39.519 |       },
+2025-07-28 15:40:39.519 |       "recommendedRole": "executor"
+2025-07-28 15:40:39.519 |     },
+2025-07-28 15:40:39.519 |     {
+2025-07-28 15:40:39.519 |       "number": 3,
+2025-07-28 15:40:39.519 |       "actionVerb": "ASK_USER_QUESTION",
+2025-07-28 15:40:39.519 |       "inputs": {
+2025-07-28 15:40:39.519 |         "question": {
+2025-07-28 15:40:39.519 |           "value": "Please provide your LinkedIn profile URL for profile analysis and contact identification.",
+2025-07-28 15:40:39.519 |           "answerType": {
+2025-07-28 15:40:39.519 |             "value": "string",
+2025-07-28 15:40:39.519 |             "valueType": "string"
+2025-07-28 15:40:39.519 |           }
+2025-07-28 15:40:39.519 |         }
+2025-07-28 15:40:39.519 |       },
+2025-07-28 15:40:39.519 |       "description": "Request the user to provide their LinkedIn profile URL to analyze professional background and identify potential contacts and job opportunities.",
+2025-07-28 15:40:39.519 |       "outputs": {
+2025-07-28 15:40:39.519 |         "linkedinURL": "User's LinkedIn profile URL"
+2025-07-28 15:40:39.519 |       },
+2025-07-28 15:40:39.519 |       "dependencies": {},
+2025-07-28 15:40:39.519 |       "recommendedRole": "executor"
+2025-07-28 15:40:39.519 |     },
+2025-07-28 15:40:39.519 |     {
+2025-07-28 15:40:39.519 |       "number": 4,
+2025-07-28 15:40:39.519 |       "actionVerb": "SCRAPE",
+2025-07-28 15:40:39.519 |       "inputs": {
+2025-07-28 15:40:39.519 |         "url": {
+2025-07-28 15:40:39.519 |           "outputName": "linkedinURL",
+2025-07-28 15:40:39.519 |           "valueType": "string"
+2025-07-28 15:40:39.519 |         }
+2025-07-28 15:40:39.519 |       },
+2025-07-28 15:40:39.519 |       "description": "Scrape the LinkedIn profile to extract current position, skills, and potential contacts relevant to the user's career interests.",
+2025-07-28 15:40:39.519 |       "outputs": {
+2025-07-28 15:40:39.519 |         "linkedinProfileData": "Structured data from LinkedIn profile"
+2025-07-28 15:40:39.519 |       },
+2025-07-28 15:40:39.519 |       "dependencies": {
+2025-07-28 15:40:39.519 |         "linkedinProfileData": 3
+2025-07-28 15:40:39.519 |       },
+2025-07-28 15:40:39.519 |       "recommendedRole": "researcher"
+2025-07-28 15:40:39.519 |     },
+2025-07-28 15:40:39.519 |     {
+2025-07-28 15:40:39.519 |       "number": 5,
+2025-07-28 15:40:39.519 |       "actionVerb": "ASK_USER_QUESTION",
+2025-07-28 15:40:39.519 |       "inputs": {
+2025-07-28 15:40:39.519 |         "question": {
+2025-07-28 15:40:39.519 |           "value": "Please specify your major professional interests or areas you'd like to focus on (e.g., software engineering, data science).",
+2025-07-28 15:40:39.519 |           "answerType": {
+2025-07-28 15:40:39.519 |             "value": "string",
+2025-07-28 15:40:39.519 |             "valueType": "string"
+2025-07-28 15:40:39.519 |           }
+2025-07-28 15:40:39.519 |         }
+2025-07-28 15:40:39.519 |       },
+2025-07-28 15:40:39.519 |       "description": "Gather user-defined professional interests to refine job search and networking efforts.",
+2025-07-28 15:40:39.519 |       "outputs": {
+2025-07-28 15:40:39.519 |         "interests": "User's specified professional interests"
+2025-07-28 15:40:39.519 |       },
+2025-07-28 15:40:39.519 |       "dependencies": {},
+2025-07-28 15:40:39.519 |       "recommendedRole": "coordinator"
+2025-07-28 15:40:39.519 |     },
+2025-07-28 15:40:39.519 |     {
+2025-07-28 15:40:39.519 |       "number": 6,
+2025-07-28 15:40:39.519 |       "actionVerb": "SEARCH",
+2025-07-28 15:40:39.519 |       "inputs": {
+2025-07-28 15:40:39.519 |         "query": {
+2025-07-28 15:40:39.519 |           "value": "Unpublished job opportunities, industry contacts, and networking leads in the user's specified interests.",
+2025-07-28 15:40:39.519 |           "valueType": "string"
+2025-07-28 15:40:39.519 |         }
+2025-07-28 15:40:39.519 |       },
+2025-07-28 15:40:39.519 |       "description": "Perform a search to identify hidden or unposted job opportunities, relevant industry contacts, and networking leads based on user interests and profile data.",
+2025-07-28 15:40:39.519 |       "outputs": {
+2025-07-28 15:40:39.519 |         "searchResults": "List of relevant job postings, contacts, and leads"
+2025-07-28 15:40:39.519 |       },
+2025-07-28 15:40:39.519 |       "dependencies": {
+2025-07-28 15:40:39.519 |         "searchResults": 5
+2025-07-28 15:40:39.519 |       },
+2025-07-28 15:40:39.519 |       "recommendedRole": "researcher"
+2025-07-28 15:40:39.519 |     },
+2025-07-28 15:40:39.519 |     {
+2025-07-28 15:40:39.519 |       "number": 7,
+2025-07-28 15:40:39.519 |       "actionVerb": "SCRAPE",
+2025-07-28 15:40:39.519 |       "inputs": {
+2025-07-28 15:40:39.519 |         "url": {
+2025-07-28 15:40:39.519 |           "value": "https://www.linkedin.com/search/results/people/",
+2025-07-28 15:40:39.519 |           "valueType": "string"
+2025-07-28 15:40:39.519 |         }
+2025-07-28 15:40:39.519 |       },
+2025-07-28 15:40:39.519 |       "description": "Scrape LinkedIn search results to find potential industry contacts matching user interests.",
+2025-07-28 15:40:39.519 |       "outputs": {
+2025-07-28 15:40:39.519 |         "contactsData": "Structured list of potential contacts"
+2025-07-28 15:40:39.519 |       },
+2025-07-28 15:40:39.520 |       "dependencies": {
+2025-07-28 15:40:39.520 |         "contactsData": 7
+2025-07-28 15:40:39.520 |       },
+2025-07-28 15:40:39.520 |       "recommendedRole": "researcher"
+2025-07-28 15:40:39.520 |     },
+2025-07-28 15:40:39.520 |     {
+2025-07-28 15:40:39.520 |       "number": 8,
+2025-07-28 15:40:39.520 |       "actionVerb": "CREATE",
+2025-07-28 15:40:39.520 |       "inputs": {
+2025-07-28 15:40:39.520 |         "content": {
+2025-07-28 15:40:39.520 |           "value": "Draft personalized messages for outreach to identified contacts.",
+2025-07-28 15:40:39.520 |           "valueType": "string"
+2025-07-28 15:40:39.520 |         }
+2025-07-28 15:40:39.520 |       },
+2025-07-28 15:40:39.520 |       "description": "Generate draft messages for contacting industry contacts and networking leads identified from LinkedIn scraping.",
+2025-07-28 15:40:39.520 |       "outputs": {
+2025-07-28 15:40:39.520 |         "draftMessages": "Prepared outreach messages"
+2025-07-28 15:40:39.520 |       },
+2025-07-28 15:40:39.520 |       "dependencies": {
+2025-07-28 15:40:39.520 |         "draftMessages": 8
+2025-07-28 15:40:39.520 |       },
+2025-07-28 15:40:39.520 |       "recommendedRole": "creative"
+2025-07-28 15:40:39.520 |     },
+2025-07-28 15:40:39.520 |     {
+2025-07-28 15:40:39.520 |       "number": 9,
+2025-07-28 15:40:39.520 |       "actionVerb": "FILE_OPERATION",
+2025-07-28 15:40:39.520 |       "inputs": {
+2025-07-28 15:40:39.520 |         "operation": {
+2025-07-28 15:40:39.520 |           "value": "write",
+2025-07-28 15:40:39.520 |           "valueType": "string"
+2025-07-28 15:40:39.520 |         },
+2025-07-28 15:40:39.520 |         "path": {
+2025-07-28 15:40:39.520 |           "value": "networking_messages.txt",
+2025-07-28 15:40:39.520 |           "valueType": "string"
+2025-07-28 15:40:39.520 |         },
+2025-07-28 15:40:39.520 |         "content": {
+2025-07-28 15:40:39.520 |           "outputName": "draftMessages",
+2025-07-28 15:40:39.520 |           "valueType": "string"
+2025-07-28 15:40:39.520 |         }
+2025-07-28 15:40:39.520 |       },
+2025-07-28 15:40:39.520 |       "description": "Save the drafted outreach messages to a file for easy access and future use.",
+2025-07-28 15:40:39.520 |       "outputs": {
+2025-07-28 15:40:39.520 |         "messagesFile": "Path to saved messages file"
+2025-07-28 15:40:39.520 |       },
+2025-07-28 15:40:39.520 |       "dependencies": {
+2025-07-28 15:40:39.520 |         "messagesFile": 9
+2025-07-28 15:40:39.520 |       },
+2025-07-28 15:40:39.520 |       "recommendedRole": "executor"
+2025-07-28 15:40:39.520 |     },
+2025-07-28 15:40:39.520 |     {
+2025-07-28 15:40:39.520 |       "number": 10,
+2025-07-28 15:40:39.520 |       "actionVerb": "SEARCH",
+2025-07-28 15:40:39.520 |       "inputs": {
+2025-07-28 15:40:39.520 |         "query": {
+2025-07-28 15:40:39.520 |           "value": "Recent job postings matching user's interests and profile.",
+2025-07-28 15:40:39.520 |           "valueType": "string"
+2025-07-28 15:40:39.520 |         }
+2025-07-28 15:40:39.520 |       },
+2025-07-28 15:40:39.520 |       "description": "Search for published job openings that align with the user's skills, experience, and interests to complement unposted opportunities.",
+2025-07-28 15:40:39.520 |       "outputs": {
+2025-07-28 15:40:39.520 |         "jobPostings": "List of relevant published job opportunities"
+2025-07-28 15:40:39.520 |       },
+2025-07-28 15:40:39.520 |       "dependencies": {
+2025-07-28 15:40:39.520 |         "jobPostings": 6
+2025-07-28 15:40:39.520 |       },
+2025-07-28 15:40:39.520 |       "recommendedRole": "researcher"
+2025-07-28 15:40:39.520 |     },
+2025-07-28 15:40:39.520 |     {
+2025-07-28 15:40:39.520 |       "number": 11,
+2025-07-28 15:40:39.520 |       "actionVerb": "CREATE",
+2025-07-28 15:40:39.520 |       "inputs": {
+2025-07-28 15:40:39.520 |         "content": {
+2025-07-28 15:40:39.520 |           "value": "Customize resumes and cover letters for the identified published jobs.",
+2025-07-28 15:40:39.520 |           "valueType": "string"
+2025-07-28 15:40:39.520 |         }
+2025-07-28 15:40:39.520 |       },
+2025-07-28 15:40:39.520 |       "description": "Generate tailored resumes and cover letters for each published job opportunity identified in previous step.",
+2025-07-28 15:40:39.520 |       "outputs": {
+2025-07-28 15:40:39.520 |         "customizedApplications": "Prepared application documents for each job"
+2025-07-28 15:40:39.520 |       },
+2025-07-28 15:40:39.520 |       "dependencies": {
+2025-07-28 15:40:39.520 |         "customizedApplications": 11
+2025-07-28 15:40:39.520 |       },
+2025-07-28 15:40:39.520 |       "recommendedRole": "creative"
+2025-07-28 15:40:39.520 |     },
+2025-07-28 15:40:39.520 |     {
+2025-07-28 15:40:39.520 |       "number": 12,
+2025-07-28 15:40:39.520 |       "actionVerb": "FILE_OPERATION",
+2025-07-28 15:40:39.520 |       "inputs": {
+2025-07-28 15:40:39.520 |         "operation": {
+2025-07-28 15:40:39.520 |           "value": "write",
+2025-07-28 15:40:39.520 |           "valueType": "string"
+2025-07-28 15:40:39.520 |         },
+2025-07-28 15:40:39.520 |         "path": {
+2025-07-28 15:40:39.520 |           "value": "applications_package.zip",
+2025-07-28 15:40:39.520 |           "valueType": "string"
+2025-07-28 15:40:39.520 |         },
+2025-07-28 15:40:39.520 |         "content": {
+2025-07-28 15:40:39.520 |           "outputName": "customizedApplications",
+2025-07-28 15:40:39.520 |           "valueType": "string"
+2025-07-28 15:40:39.520 |         }
+2025-07-28 15:40:39.520 |       },
+2025-07-28 15:40:39.520 |       "description": "Package all customized resumes and cover letters into a file for submission or further review.",
+2025-07-28 15:40:39.520 |       "outputs": {
+2025-07-28 15:40:39.520 |         "applicationsPackage": "Path to the packaged applications"
+2025-07-28 15:40:39.520 |       },
+2025-07-28 15:40:39.520 |       "dependencies": {
+2025-07-28 15:40:39.520 |         "applicationsPackage": 12
+2025-07-28 15:40:39.520 |       },
+2025-07-28 15:40:39.520 |       "recommendedRole": "executor"
+2025-07-28 15:40:39.520 |     },
+2025-07-28 15:40:39.520 |     {
+2025-07-28 15:40:39.520 |       "number": 13,
+2025-07-28 15:40:39.520 |       "actionVerb": "ASK_USER_QUESTION",
+2025-07-28 15:40:39.520 |       "inputs": {
+2025-07-28 15:40:39.520 |         "question": {
+2025-07-28 15:40:39.520 |           "value": "Would you like to set up automated internet monitoring for new job postings matching your interests? (Yes/No)",
+2025-07-28 15:40:39.520 |           "answerType": {
+2025-07-28 15:40:39.520 |             "value": "string",
+2025-07-28 15:40:39.520 |             "valueType": "string"
+2025-07-28 15:40:39.520 |           }
+2025-07-28 15:40:39.520 |         }
+2025-07-28 15:40:39.520 |       },
+2025-07-28 15:40:39.520 |       "description": "Request user input on establishing ongoing monitoring for new relevant job postings to keep the search active.",
+2025-07-28 15:40:39.520 |       "outputs": {
+2025-07-28 15:40:39.520 |         "monitoringPreference": "User's preference for ongoing monitoring"
+2025-07-28 15:40:39.520 |       },
+2025-07-28 15:40:39.520 |       "dependencies": {},
+2025-07-28 15:40:39.520 |       "recommendedRole": "coordinator"
+2025-07-28 15:40:39.520 |     },
+2025-07-28 15:40:39.520 |     {
+2025-07-28 15:40:39.520 |       "number": 14,
+2025-07-28 15:40:39.520 |       "actionVerb": "IF_THEN",
+2025-07-28 15:40:39.520 |       "inputs": {
+2025-07-28 15:40:39.520 |         "condition": {
+2025-07-28 15:40:39.520 |           "inputName": "monitoringPreference",
+2025-07-28 15:40:39.520 |           "value": "Yes"
+2025-07-28 15:40:39.520 |         }
+2025-07-28 15:40:39.520 |       },
+2025-07-28 15:40:39.520 |       "trueSteps": [
+2025-07-28 15:40:39.520 |         {
+2025-07-28 15:40:39.520 |           "number": 14.1,
+2025-07-28 15:40:39.520 |           "actionVerb": "SCRAPE",
+2025-07-28 15:40:39.520 |           "inputs": {
+2025-07-28 15:40:39.520 |             "url": {
+2025-07-28 15:40:39.520 |               "value": "https://www.jobmonitoringservice.com/setup",
+2025-07-28 15:40:39.520 |               "valueType": "string"
+2025-07-28 15:40:39.520 |             }
+2025-07-28 15:40:39.520 |           },
+2025-07-28 15:40:39.520 |           "description": "Set up an automated job monitoring service for future alerts based on user interests.",
+2025-07-28 15:40:39.520 |           "outputs": {
+2025-07-28 15:40:39.520 |             "monitoringSetup": "Details of the monitoring setup"
+2025-07-28 15:40:39.520 |           },
+2025-07-28 15:40:39.520 |           "dependencies": {},
+2025-07-28 15:40:39.520 |           "recommendedRole": "executor"
+2025-07-28 15:40:39.520 |         }
+2025-07-28 15:40:39.520 |       ],
+2025-07-28 15:40:39.520 |       "falseSteps": [
+2025-07-28 15:40:39.520 |         {
+2025-07-28 15:40:39.520 |           "number": 14.2,
+2025-07-28 15:40:39.520 |           "actionVerb": "CHAT",
+2025-07-28 15:40:39.520 |           "inputs": {
+2025-07-28 15:40:39.520 |             "conversation": {
+2025-07-28 15:40:39.520 |               "value": "You chose not to set up automated monitoring. Keep an eye on relevant job boards and LinkedIn for new opportunities.",
+2025-07-28 15:40:39.520 |               "valueType": "string"
+2025-07-28 15:40:39.520 |             }
+2025-07-28 15:40:39.520 |           },
+2025-07-28 15:40:39.520 |           "description": "Acknowledge user's choice and advise on manual ongoing job search activities.",
+2025-07-28 15:40:39.520 |           "outputs": {
+2025-07-28 15:40:39.520 |             "advice": "Manual monitoring instructions provided"
+2025-07-28 15:40:39.520 |           },
+2025-07-28 15:40:39.520 |           "dependencies": {},
+2025-07-28 15:40:39.520 |           "recommendedRole": "coordinator"
+2025-07-28 15:40:39.520 |         }
+2025-07-28 15:40:39.520 |       ],
+2025-07-28 15:40:39.520 |       "description": "Branch based on whether the user wants ongoing job monitoring setup or prefers manual search."
+2025-07-28 15:40:39.520 |     }
+2025-07-28 15:40:39.520 |   ]
+2025-07-28 15:40:39.520 | }
+2025-07-28 15:40:39.520 | [baseInterface] Response is valid JSON after cleaning.
+2025-07-28 15:40:39.520 | [ModelManager] Tracking model response for request ec03c298-221f-42fe-9e7f-d27c9978d7e3, success: true, token count: 0, isRetry: undefined
+2025-07-28 15:40:39.520 | [ModelManager] Found active request for model openai/gpt-4.1-nano, conversation type TextToCode
+2025-07-28 15:40:45.100 | [Brain Chat] Request 946e053e-3efc-4254-bcb2-fb14235bdd73 received
+2025-07-28 15:40:45.100 | Selecting model for optimization: accuracy, conversationType: TextToText
+2025-07-28 15:40:45.100 | **** CACHE MISS **** No cached result for key: accuracy-TextToText
+2025-07-28 15:40:45.100 | Cache miss or expired. Selecting model from scratch.
+2025-07-28 15:40:45.100 | Total models loaded: 32
+2025-07-28 15:40:45.100 | Model hf/meta-llama/llama-3.2-3b-instruct is blacklisted for conversation type TextToText
+2025-07-28 15:40:45.100 | Model anthropic/claude-3-haiku-20240307 is blacklisted for conversation type TextToText
+2025-07-28 15:40:45.100 | Model anthropic/claude-2 is NOT blacklisted for conversation type TextToText
+2025-07-28 15:40:45.100 | Model or/cognitivecomputations/dolphin3.0-mistral-24b:free is NOT blacklisted for conversation type TextToText
+2025-07-28 15:40:45.100 | Model openai/gpt-4.1-nano is NOT blacklisted for conversation type TextToText
+2025-07-28 15:40:45.100 | Model openai/gpt-4-vision-preview is blacklisted for conversation type TextToText
+2025-07-28 15:40:45.100 | Model nousresearch/hermes-3-llama-3.1-405b is NOT blacklisted for conversation type TextToText
+2025-07-28 15:40:45.100 | Model or/moonshotai/kimi-k2:free is NOT blacklisted for conversation type TextToText
+2025-07-28 15:40:45.100 | Model openweb/knownow is NOT blacklisted for conversation type TextToText
+2025-07-28 15:40:45.100 | Model liquid/lfm-40b is NOT blacklisted for conversation type TextToText
+2025-07-28 15:40:45.100 | GroqService availability check: Available
+2025-07-28 15:40:45.100 | GroqService ready state: Ready
+2025-07-28 15:40:45.100 | GroqService is available and ready to use.
+2025-07-28 15:40:45.100 | Model groq/llama-4 is NOT blacklisted for conversation type TextToText
+2025-07-28 15:40:45.100 | Model meta-llama/Llama-2-70b-chat-hf is blacklisted for conversation type TextToText
+2025-07-28 15:40:45.100 | MistralService availability check: Available
+2025-07-28 15:40:45.100 | MistralService is available and ready to use.
+2025-07-28 15:40:45.100 | Model mistral/mistral-small-latest is NOT blacklisted for conversation type TextToText
+2025-07-28 15:40:45.100 | Model mistralai/Mistral-Nemo-Instruct-2407 is NOT blacklisted for conversation type TextToText
+2025-07-28 15:40:45.100 | Model or/deepseek-ai/DeepSeek-R1:free is NOT blacklisted for conversation type TextToText
+2025-07-28 15:40:45.101 | Model anthropic/claude-2 score calculation: base=95, adjusted=105.47092043039557, reliability=-50, final=55.470920430395566
+2025-07-28 15:40:45.101 | Model or/cognitivecomputations/dolphin3.0-mistral-24b:free score calculation: base=75, adjusted=87.63707611643451, reliability=-50, final=37.637076116434514
+2025-07-28 15:40:45.101 | Model openai/gpt-4.1-nano score calculation: base=55, adjusted=82.38922817047818, reliability=29.91943866943867, final=112.30866683991684
+2025-07-28 15:40:45.101 | Model nousresearch/hermes-3-llama-3.1-405b score calculation: base=80, adjusted=87.91513195567644, reliability=-50, final=37.91513195567644
+2025-07-28 15:40:45.101 | Model or/moonshotai/kimi-k2:free score calculation: base=75, adjusted=86.91470092988726, reliability=-50, final=36.91470092988726
+2025-07-28 15:40:45.101 | Model openweb/knownow score calculation: base=85, adjusted=89.06726768377254, reliability=-48.08599167822469, final=40.981276005547855
+2025-07-28 15:40:45.101 | Model liquid/lfm-40b score calculation: base=75, adjusted=85.4435506854251, reliability=-50, final=35.443550685425095
+2025-07-28 15:40:45.101 | Model groq/llama-4 score calculation: base=95, adjusted=110.46360120828862, reliability=-50, final=60.46360120828862
+2025-07-28 15:40:45.101 | Model mistral/mistral-small-latest score calculation: base=85, adjusted=134.13982845108927, reliability=29.991154735070047, final=164.1309831861593
+2025-07-28 15:40:45.101 | Model mistralai/Mistral-Nemo-Instruct-2407 score calculation: base=80, adjusted=94.18414189233204, reliability=-50, final=44.184141892332036
+2025-07-28 15:40:45.101 | Model or/deepseek-ai/DeepSeek-R1:free score calculation: base=0, adjusted=0, reliability=-50, final=-50
+2025-07-28 15:40:45.102 | Using score-based model selection. Top model: mistral/mistral-small-latest
+2025-07-28 15:40:45.102 | Selected model mistral/mistral-small-latest for accuracy optimization and conversation type TextToText
+2025-07-28 15:40:45.102 | MistralService availability check: Available
+2025-07-28 15:40:45.102 | MistralService is available and ready to use.
+2025-07-28 15:40:45.102 | [Brain Chat] Attempt 1: Using model mistral-small-latest
+2025-07-28 15:40:45.102 | [ModelManager] Tracking model request: 2d83d489-b315-4f2e-a0e4-d88021f88d82 for model mistral/mistral-small-latest, conversation type TextToText
+2025-07-28 15:40:45.102 | [ModelManager] Active requests count: 6
+2025-07-28 15:40:45.102 | [Brain Chat] Using model mistral-small-latest for request 2d83d489-b315-4f2e-a0e4-d88021f88d82
+2025-07-28 15:40:45.102 | MistralService availability check: Available
+2025-07-28 15:40:45.102 | MistralService is available and ready to use.
+2025-07-28 15:40:45.102 | Sending request to Mistral at https://api.mistral.ai/v1/chat/completions
+2025-07-28 15:40:48.987 | [ModelManager] Tracking model response for request 2d83d489-b315-4f2e-a0e4-d88021f88d82, success: true, token count: 0, isRetry: undefined
+2025-07-28 15:40:48.987 | [ModelManager] Found active request for model mistral/mistral-small-latest, conversation type TextToText
+2025-07-28 15:41:10.179 | [Brain Chat] Request be350405-849a-417c-b245-3e2e19e418ab received
+2025-07-28 15:41:10.179 | [Brain Chat] Detected request requiring a JSON plan, ensuring JSON response format
+2025-07-28 15:41:10.179 | Selecting model for optimization: accuracy, conversationType: TextToCode
+2025-07-28 15:41:10.179 | **** CACHE MISS **** No cached result for key: accuracy-TextToCode
+2025-07-28 15:41:10.179 | Cache miss or expired. Selecting model from scratch.
+2025-07-28 15:41:10.179 | Total models loaded: 32
+2025-07-28 15:41:10.179 | Model anthropic/claude-3-haiku-20240307 is blacklisted for conversation type TextToCode
+2025-07-28 15:41:10.179 | Model anthropic/claude-2 is blacklisted for conversation type TextToCode
+2025-07-28 15:41:10.179 | Model codellama/CodeLlama-34b-Instruct-hf is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:41:10.179 | Model deepseek-ai/DeepSeek-R1 is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:41:10.179 | Model or/cognitivecomputations/dolphin3.0-mistral-24b:free is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:41:10.179 | Model openai/gpt-4.1-nano is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:41:10.179 | Model openai/gpt-4-vision-preview is blacklisted for conversation type TextToCode
+2025-07-28 15:41:10.179 | Model or/moonshotai/kimi-k2:free is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:41:10.179 | Model openweb/knownow is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:41:10.179 | GroqService availability check: Available
+2025-07-28 15:41:10.179 | GroqService ready state: Ready
+2025-07-28 15:41:10.179 | GroqService is available and ready to use.
+2025-07-28 15:41:10.180 | Model groq/llama-4 is blacklisted for conversation type TextToCode
+2025-07-28 15:41:10.180 | Model meta-llama/Llama-2-70b-chat-hf is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:41:10.180 | MistralService availability check: Available
+2025-07-28 15:41:10.180 | MistralService is available and ready to use.
+2025-07-28 15:41:10.180 | Model mistral/mistral-small-latest is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:41:10.180 | Model mistralai/Mistral-Nemo-Instruct-2407 is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:41:10.180 | Model or/deepseek-ai/DeepSeek-R1:free is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:41:10.180 | Model bigcode/starcoder is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:41:10.180 | Model codellama/CodeLlama-34b-Instruct-hf score calculation: base=88, adjusted=88, reliability=0, final=88
+2025-07-28 15:41:10.180 | Model deepseek-ai/DeepSeek-R1 score calculation: base=88, adjusted=88, reliability=0, final=88
+2025-07-28 15:41:10.180 | Model or/cognitivecomputations/dolphin3.0-mistral-24b:free score calculation: base=75, adjusted=75, reliability=0, final=75
+2025-07-28 15:41:10.180 | Model openai/gpt-4.1-nano score calculation: base=52, adjusted=77.92330383480827, reliability=29.941002949852507, final=107.86430678466077
+2025-07-28 15:41:10.180 | Model or/moonshotai/kimi-k2:free score calculation: base=75, adjusted=75, reliability=0, final=75
+2025-07-28 15:41:10.180 | Model openweb/knownow score calculation: base=85, adjusted=85, reliability=0, final=85
+2025-07-28 15:41:10.180 | Model meta-llama/Llama-2-70b-chat-hf score calculation: base=88, adjusted=88, reliability=0, final=88
+2025-07-28 15:41:10.180 | Model mistral/mistral-small-latest score calculation: base=85, adjusted=85, reliability=0, final=85
+2025-07-28 15:41:10.180 | Model mistralai/Mistral-Nemo-Instruct-2407 score calculation: base=80, adjusted=80, reliability=0, final=80
+2025-07-28 15:41:10.180 | Model or/deepseek-ai/DeepSeek-R1:free score calculation: base=88, adjusted=88, reliability=0, final=88
+2025-07-28 15:41:10.181 | Model bigcode/starcoder score calculation: base=85, adjusted=85, reliability=0, final=85
+2025-07-28 15:41:10.181 | Using score-based model selection. Top model: openai/gpt-4.1-nano
+2025-07-28 15:41:10.181 | Selected model openai/gpt-4.1-nano for accuracy optimization and conversation type TextToCode
+2025-07-28 15:41:10.181 | [Brain Chat] Attempt 1: Using model gpt-4.1-nano-2025-04-14
+2025-07-28 15:41:10.181 | [ModelManager] Tracking model request: 61900c6c-d9b0-469b-99ab-4aaa2460d109 for model openai/gpt-4.1-nano, conversation type TextToCode
+2025-07-28 15:41:10.181 | [ModelManager] Active requests count: 7
+2025-07-28 15:41:10.181 | [Brain Chat] Using model gpt-4.1-nano-2025-04-14 for request 61900c6c-d9b0-469b-99ab-4aaa2460d109
+2025-07-28 15:41:10.181 | Starting trimMessages
+2025-07-28 15:41:23.328 | [baseInterface] Ensuring JSON response
+2025-07-28 15:41:23.329 | [baseInterface] Original response: {
+2025-07-28 15:41:23.329 |   "type": "PLAN",
+2025-07-28 15:41:23.329 |   "plan": [
+2025-07-28 15:41:23.329 |     {
+2025-07-28 15:41:23.329 |       "number": 1,
+2025-07-28 15:41:23.329 |       "actionVerb": "ASK_USER_QUESTION",
+2025-07-28 15:41:23.329 |       "inputs": {
+2025-07-28 15:41:23.329 |         "question": {
+2025-07-28 15:41:23.329 |           "value": "Please upload the LinkedIn profile and blog interests data file.",
+2025-07-28 15:41:23.329 |           "answerType": {
+2025-07-28 15:41:23.329 |             "value": "file",
+2025-07-28 15:41:23.329 |             "valueType": "string"
+2025-07-28 15:41:23.329 |           }
+2025-07-28 15:41:23.329 |         }
+2025-07-28 15:41:23.329 |       },
+2025-07-28 15:41:23.329 |       "description": "Prompt the user to upload the file containing LinkedIn profile and blog interests to extract potential contacts and areas of interest.",
+2025-07-28 15:41:23.329 |       "outputs": {
+2025-07-28 15:41:23.329 |         "fileId": "uploadedFileId"
+2025-07-28 15:41:23.329 |       },
+2025-07-28 15:41:23.329 |       "dependencies": {},
+2025-07-28 15:41:23.329 |       "recommendedRole": "coordinator"
+2025-07-28 15:41:23.329 |     },
+2025-07-28 15:41:23.329 |     {
+2025-07-28 15:41:23.329 |       "number": 2,
+2025-07-28 15:41:23.329 |       "actionVerb": "FILE_OPERATION",
+2025-07-28 15:41:23.329 |       "inputs": {
+2025-07-28 15:41:23.329 |         "operation": {
+2025-07-28 15:41:23.329 |           "value": "read",
+2025-07-28 15:41:23.329 |           "valueType": "string"
+2025-07-28 15:41:23.329 |         },
+2025-07-28 15:41:23.329 |         "fileId": {
+2025-07-28 15:41:23.329 |           "outputName": "uploadedFileId",
+2025-07-28 15:41:23.329 |           "valueType": "string"
+2025-07-28 15:41:23.329 |         }
+2025-07-28 15:41:23.329 |       },
+2025-07-28 15:41:23.329 |       "description": "Read the uploaded data file to extract potential contacts and interests from LinkedIn profile and blog data.",
+2025-07-28 15:41:23.329 |       "outputs": {
+2025-07-28 15:41:23.329 |         "content": "Content of the uploaded file, including profiles and interests"
+2025-07-28 15:41:23.329 |       },
+2025-07-28 15:41:23.329 |       "dependencies": {
+2025-07-28 15:41:23.329 |         "content": 1
+2025-07-28 15:41:23.329 |       },
+2025-07-28 15:41:23.329 |       "recommendedRole": "researcher"
+2025-07-28 15:41:23.329 |     },
+2025-07-28 15:41:23.329 |     {
+2025-07-28 15:41:23.329 |       "number": 3,
+2025-07-28 15:41:23.329 |       "actionVerb": "SCRAPE",
+2025-07-28 15:41:23.329 |       "inputs": {
+2025-07-28 15:41:23.329 |         "url": {
+2025-07-28 15:41:23.329 |           "value": "https://www.linkedin.com/in/target-profile",
+2025-07-28 15:41:23.329 |           "valueType": "string"
+2025-07-28 15:41:23.329 |         }
+2025-07-28 15:41:23.329 |       },
+2025-07-28 15:41:23.329 |       "description": "Scrape the LinkedIn profile page for additional details about potential employers and contacts.",
+2025-07-28 15:41:23.329 |       "outputs": {
+2025-07-28 15:41:23.329 |         "profileData": "Detailed information from LinkedIn profile"
+2025-07-28 15:41:23.329 |       },
+2025-07-28 15:41:23.329 |       "dependencies": {},
+2025-07-28 15:41:23.329 |       "recommendedRole": "researcher"
+2025-07-28 15:41:23.329 |     },
+2025-07-28 15:41:23.329 |     {
+2025-07-28 15:41:23.329 |       "number": 4,
+2025-07-28 15:41:23.329 |       "actionVerb": "SCRAPE",
+2025-07-28 15:41:23.329 |       "inputs": {
+2025-07-28 15:41:23.329 |         "url": {
+2025-07-28 15:41:23.329 |           "value": "https://blogsite.com/interests",
+2025-07-28 15:41:23.329 |           "valueType": "string"
+2025-07-28 15:41:23.329 |         }
+2025-07-28 15:41:23.329 |       },
+2025-07-28 15:41:23.329 |       "description": "Scrape blog interests and topics to identify relevant areas for outreach and content personalization.",
+2025-07-28 15:41:23.329 |       "outputs": {
+2025-07-28 15:41:23.329 |         "blogInterests": "List of relevant interests and topics from the blog"
+2025-07-28 15:41:23.329 |       },
+2025-07-28 15:41:23.329 |       "dependencies": {},
+2025-07-28 15:41:23.329 |       "recommendedRole": "researcher"
+2025-07-28 15:41:23.329 |     },
+2025-07-28 15:41:23.329 |     {
+2025-07-28 15:41:23.329 |       "number": 5,
+2025-07-28 15:41:23.329 |       "actionVerb": "GENERATE",
+2025-07-28 15:41:23.329 |       "inputs": {
+2025-07-28 15:41:23.329 |         "prompt": {
+2025-07-28 15:41:23.329 |           "value": "Draft professional outreach messages to engage potential employers and contacts based on profile data and interests.",
+2025-07-28 15:41:23.329 |           "valueType": "string"
+2025-07-28 15:41:23.329 |         }
+2025-07-28 15:41:23.329 |       },
+2025-07-28 15:41:23.329 |       "description": "Generate tailored outreach message templates for networking with potential employers and professional contacts.",
+2025-07-28 15:41:23.329 |       "outputs": {
+2025-07-28 15:41:23.329 |         "outreachMessages": "Drafted outreach messages and network contact templates"
+2025-07-28 15:41:23.329 |       },
+2025-07-28 15:41:23.329 |       "dependencies": {
+2025-07-28 15:41:23.329 |         "profileData": 3,
+2025-07-28 15:41:23.329 |         "blogInterests": 4
+2025-07-28 15:41:23.329 |       },
+2025-07-28 15:41:23.329 |       "recommendedRole": "creative"
+2025-07-28 15:41:23.329 |     }
+2025-07-28 15:41:23.329 |   ]
+2025-07-28 15:41:23.329 | }
+2025-07-28 15:41:23.329 | [baseInterface] Response is valid JSON after cleaning.
+2025-07-28 15:41:23.329 | [ModelManager] Tracking model response for request 61900c6c-d9b0-469b-99ab-4aaa2460d109, success: true, token count: 0, isRetry: undefined
+2025-07-28 15:41:23.329 | [ModelManager] Found active request for model openai/gpt-4.1-nano, conversation type TextToCode
+2025-07-28 15:42:41.664 | [Brain Chat] Request e098a637-0101-4bf1-a176-d914c8cfb0db received
+2025-07-28 15:42:41.665 | [Brain Chat] Detected request requiring a JSON plan, ensuring JSON response format
+2025-07-28 15:42:41.665 | Selecting model for optimization: accuracy, conversationType: TextToCode
+2025-07-28 15:42:41.665 | **** CACHE MISS **** No cached result for key: accuracy-TextToCode
+2025-07-28 15:42:41.665 | Cache miss or expired. Selecting model from scratch.
+2025-07-28 15:42:41.665 | Total models loaded: 32
+2025-07-28 15:42:41.665 | Model anthropic/claude-3-haiku-20240307 is blacklisted for conversation type TextToCode
+2025-07-28 15:42:41.665 | Model anthropic/claude-2 is blacklisted for conversation type TextToCode
+2025-07-28 15:42:41.665 | Model codellama/CodeLlama-34b-Instruct-hf is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:42:41.665 | Model deepseek-ai/DeepSeek-R1 is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:42:41.665 | Model or/cognitivecomputations/dolphin3.0-mistral-24b:free is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:42:41.665 | Model openai/gpt-4.1-nano is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:42:41.665 | Model openai/gpt-4-vision-preview is blacklisted for conversation type TextToCode
+2025-07-28 15:42:41.665 | Model or/moonshotai/kimi-k2:free is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:42:41.665 | Model openweb/knownow is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:42:41.665 | GroqService availability check: Available
+2025-07-28 15:42:41.665 | GroqService ready state: Ready
+2025-07-28 15:42:41.665 | GroqService is available and ready to use.
+2025-07-28 15:42:41.665 | Model groq/llama-4 is blacklisted for conversation type TextToCode
+2025-07-28 15:42:41.665 | Model meta-llama/Llama-2-70b-chat-hf is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:42:41.665 | MistralService availability check: Available
+2025-07-28 15:42:41.665 | MistralService is available and ready to use.
+2025-07-28 15:42:41.665 | Model mistral/mistral-small-latest is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:42:41.666 | Model mistralai/Mistral-Nemo-Instruct-2407 is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:42:41.666 | Model or/deepseek-ai/DeepSeek-R1:free is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:42:41.666 | Model bigcode/starcoder is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:42:41.666 | Model codellama/CodeLlama-34b-Instruct-hf score calculation: base=88, adjusted=88, reliability=0, final=88
+2025-07-28 15:42:41.666 | Model deepseek-ai/DeepSeek-R1 score calculation: base=88, adjusted=88, reliability=0, final=88
+2025-07-28 15:42:41.666 | Model or/cognitivecomputations/dolphin3.0-mistral-24b:free score calculation: base=75, adjusted=75, reliability=0, final=75
+2025-07-28 15:42:41.667 | Model openai/gpt-4.1-nano score calculation: base=52, adjusted=77.92341678939617, reliability=29.941089837997055, final=107.86450662739323
+2025-07-28 15:42:41.667 | Model or/moonshotai/kimi-k2:free score calculation: base=75, adjusted=75, reliability=0, final=75
+2025-07-28 15:42:41.667 | Model openweb/knownow score calculation: base=85, adjusted=85, reliability=0, final=85
+2025-07-28 15:42:41.667 | Model meta-llama/Llama-2-70b-chat-hf score calculation: base=88, adjusted=88, reliability=0, final=88
+2025-07-28 15:42:41.667 | Model mistral/mistral-small-latest score calculation: base=85, adjusted=85, reliability=0, final=85
+2025-07-28 15:42:41.667 | Model mistralai/Mistral-Nemo-Instruct-2407 score calculation: base=80, adjusted=80, reliability=0, final=80
+2025-07-28 15:42:41.667 | Model or/deepseek-ai/DeepSeek-R1:free score calculation: base=88, adjusted=88, reliability=0, final=88
+2025-07-28 15:42:41.667 | Model bigcode/starcoder score calculation: base=85, adjusted=85, reliability=0, final=85
+2025-07-28 15:42:41.667 | Using score-based model selection. Top model: openai/gpt-4.1-nano
+2025-07-28 15:42:41.667 | Selected model openai/gpt-4.1-nano for accuracy optimization and conversation type TextToCode
+2025-07-28 15:42:41.667 | [Brain Chat] Attempt 1: Using model gpt-4.1-nano-2025-04-14
+2025-07-28 15:42:41.667 | [ModelManager] Tracking model request: 713d353c-f13d-4f46-8eb8-4984d347d344 for model openai/gpt-4.1-nano, conversation type TextToCode
+2025-07-28 15:42:41.667 | [ModelManager] Active requests count: 8
+2025-07-28 15:42:41.667 | [Brain Chat] Using model gpt-4.1-nano-2025-04-14 for request 713d353c-f13d-4f46-8eb8-4984d347d344
+2025-07-28 15:42:41.667 | Starting trimMessages
+2025-07-28 15:42:57.295 | [baseInterface] Ensuring JSON response
+2025-07-28 15:42:57.295 | [baseInterface] Original response: {"type": "PLAN", "plan": [
+2025-07-28 15:42:57.295 |   {
+2025-07-28 15:42:57.295 |     "number": 1,
+2025-07-28 15:42:57.296 |     "actionVerb": "ASK_USER_QUESTION",
+2025-07-28 15:42:57.296 |     "inputs": {
+2025-07-28 15:42:57.296 |       "question": {
+2025-07-28 15:42:57.296 |         "value": "Please upload your resume file so I can extract relevant details such as skills, experience, and contact information.",
+2025-07-28 15:42:57.296 |         "answerType": {"value": "string", "valueType": "string"}
+2025-07-28 15:42:57.296 |       }
+2025-07-28 15:42:57.296 |     },
+2025-07-28 15:42:57.296 |     "description": "Request the user to upload their resume file to enable extraction of key professional details needed for job search planning.",
+2025-07-28 15:42:57.296 |     "outputs": {
+2025-07-28 15:42:57.296 |       "fileId": "ID of uploaded resume file"
+2025-07-28 15:42:57.296 |     },
+2025-07-28 15:42:57.296 |     "dependencies": {},
+2025-07-28 15:42:57.296 |     "recommendedRole": "coordinator"
+2025-07-28 15:42:57.296 |   },
+2025-07-28 15:42:57.296 |   {
+2025-07-28 15:42:57.296 |     "number": 2,
+2025-07-28 15:42:57.296 |     "actionVerb": "FILE_OPERATION",
+2025-07-28 15:42:57.296 |     "inputs": {
+2025-07-28 15:42:57.296 |       "operation": {
+2025-07-28 15:42:57.296 |         "value": "read",
+2025-07-28 15:42:57.296 |         "valueType": "string"
+2025-07-28 15:42:57.296 |       },
+2025-07-28 15:42:57.296 |       "fileId": {
+2025-07-28 15:42:57.296 |         "outputName": "fileId",
+2025-07-28 15:42:57.296 |         "valueType": "string"
+2025-07-28 15:42:57.296 |       }
+2025-07-28 15:42:57.296 |     },
+2025-07-28 15:42:57.296 |     "description": "Read the uploaded resume file using the provided fileId to extract relevant details such as skills, experience, and contact information, avoiding previous server errors.",
+2025-07-28 15:42:57.296 |     "outputs": {
+2025-07-28 15:42:57.296 |       "resumeContent": "Content of the resume file as text"
+2025-07-28 15:42:57.296 |     },
+2025-07-28 15:42:57.296 |     "dependencies": {
+2025-07-28 15:42:57.296 |       "fileId": 1
+2025-07-28 15:42:57.296 |     },
+2025-07-28 15:42:57.296 |     "recommendedRole": "executor"
+2025-07-28 15:42:57.296 |   },
+2025-07-28 15:42:57.296 |   {
+2025-07-28 15:42:57.296 |     "number": 3,
+2025-07-28 15:42:57.296 |     "actionVerb": "TEXT_ANALYSIS",
+2025-07-28 15:42:57.296 |     "inputs": {
+2025-07-28 15:42:57.296 |       "text": {
+2025-07-28 15:42:57.296 |         "outputName": "resumeContent",
+2025-07-28 15:42:57.296 |         "valueType": "string"
+2025-07-28 15:42:57.296 |       }
+2025-07-28 15:42:57.296 |     },
+2025-07-28 15:42:57.296 |     "description": "Analyze the resume content to extract structured data on skills, experience, and contact info, ensuring accurate parsing despite previous errors.",
+2025-07-28 15:42:57.296 |     "outputs": {
+2025-07-28 15:42:57.296 |       "skills": "List of skills extracted from resume",
+2025-07-28 15:42:57.296 |       "experience": "Summary of professional experience",
+2025-07-28 15:42:57.296 |       "contactInfo": "Contact information details"
+2025-07-28 15:42:57.296 |     },
+2025-07-28 15:42:57.296 |     "dependencies": {
+2025-07-28 15:42:57.296 |       "resumeContent": 2
+2025-07-28 15:42:57.296 |     },
+2025-07-28 15:42:57.296 |     "recommendedRole": "domain_expert"
+2025-07-28 15:42:57.296 |   },
+2025-07-28 15:42:57.296 |   {
+2025-07-28 15:42:57.296 |     "number": 4,
+2025-07-28 15:42:57.296 |     "actionVerb": "SCRAPE",
+2025-07-28 15:42:57.296 |     "inputs": {
+2025-07-28 15:42:57.296 |       "url": {
+2025-07-28 15:42:57.296 |         "value": "https://www.pravetz.net",
+2025-07-28 15:42:57.296 |         "valueType": "string"
+2025-07-28 15:42:57.296 |       }
+2025-07-28 15:42:57.296 |     },
+2025-07-28 15:42:57.296 |     "description": "Scrape the user's blog at www.pravetz.net to extract expressed professional interests and thematic content to inform job targeting, avoiding previous 400 errors.",
+2025-07-28 15:42:57.296 |     "outputs": {
+2025-07-28 15:42:57.296 |       "blogInterests": "Text content of interests and themes from the blog"
+2025-07-28 15:42:57.296 |     },
+2025-07-28 15:42:57.296 |     "dependencies": {},
+2025-07-28 15:42:57.296 |     "recommendedRole": "researcher"
+2025-07-28 15:42:57.296 |   },
+2025-07-28 15:42:57.296 |   {
+2025-07-28 15:42:57.296 |     "number": 5,
+2025-07-28 15:42:57.296 |     "actionVerb": "ASK_USER_QUESTION",
+2025-07-28 15:42:57.296 |     "inputs": {
+2025-07-28 15:42:57.296 |       "question": {
+2025-07-28 15:42:57.296 |         "value": "Please confirm if you'd like me to proceed with this plan or provide additional instructions.",
+2025-07-28 15:42:57.296 |         "answerType": {"value": "string", "valueType": "string"}
+2025-07-28 15:42:57.296 |       }
+2025-07-28 15:42:57.296 |     },
+2025-07-28 15:42:57.296 |     "description": "Seek user confirmation or further instructions before proceeding with the comprehensive plan to identify suitable jobs, contacts, and monitoring strategies.",
+2025-07-28 15:42:57.296 |     "outputs": {},
+2025-07-28 15:42:57.296 |     "dependencies": {},
+2025-07-28 15:42:57.296 |     "recommendedRole": "coordinator"
+2025-07-28 15:42:57.296 |   }
+2025-07-28 15:42:57.296 | ]}
+2025-07-28 15:42:57.296 | [baseInterface] Response is valid JSON after cleaning.
+2025-07-28 15:42:57.296 | [ModelManager] Tracking model response for request 713d353c-f13d-4f46-8eb8-4984d347d344, success: true, token count: 0, isRetry: undefined
+2025-07-28 15:42:57.296 | [ModelManager] Found active request for model openai/gpt-4.1-nano, conversation type TextToCode
+2025-07-28 15:43:14.313 | [Brain Chat] Request 6912a577-99b0-4a7d-b888-6253ba2aea5a received
+2025-07-28 15:43:14.313 | [Brain Chat] Detected request requiring a JSON plan, ensuring JSON response format
+2025-07-28 15:43:14.313 | Selecting model for optimization: accuracy, conversationType: TextToCode
+2025-07-28 15:43:14.313 | **** CACHE HIT **** Using cached model selection result: openai/gpt-4.1-nano
+2025-07-28 15:43:14.313 | Cache age: 32 seconds
+2025-07-28 15:43:14.313 | [Brain Chat] Attempt 1: Using model gpt-4.1-nano-2025-04-14
+2025-07-28 15:43:14.313 | [ModelManager] Tracking model request: 8e706fb0-75a4-4ddf-815f-55a0457130de for model openai/gpt-4.1-nano, conversation type TextToCode
+2025-07-28 15:43:14.313 | [ModelManager] Active requests count: 9
+2025-07-28 15:43:14.313 | [Brain Chat] Using model gpt-4.1-nano-2025-04-14 for request 8e706fb0-75a4-4ddf-815f-55a0457130de
+2025-07-28 15:43:14.313 | Starting trimMessages
+2025-07-28 15:43:26.053 | [baseInterface] Ensuring JSON response
+2025-07-28 15:43:26.053 | [baseInterface] Original response: {
+2025-07-28 15:43:26.053 |   "type": "PLAN",
+2025-07-28 15:43:26.053 |   "plan": [
+2025-07-28 15:43:26.053 |     {
+2025-07-28 15:43:26.053 |       "number": 1,
+2025-07-28 15:43:26.053 |       "actionVerb": "ASK_USER_QUESTION",
+2025-07-28 15:43:26.054 |       "inputs": {
+2025-07-28 15:43:26.054 |         "question": {
+2025-07-28 15:43:26.054 |           "value": "Please upload the raw inputs or data objects needed to create tailored outreach message templates for networking with potential employers and professional contacts.",
+2025-07-28 15:43:26.054 |           "answerType": {"value": "string", "valueType": "string"}
+2025-07-28 15:43:26.054 |         },
+2025-07-28 15:43:26.054 |         "answerType": {"value": "file", "valueType": "string"}
+2025-07-28 15:43:26.054 |       },
+2025-07-28 15:43:26.054 |       "description": "Prompt the user to upload the data or input objects that contain information about the target contacts, industry, personal details, or other relevant data needed to generate customized outreach messages.",
+2025-07-28 15:43:26.054 |       "outputs": {
+2025-07-28 15:43:26.054 |         "fileId": "uploadedDataFile"
+2025-07-28 15:43:26.054 |       },
+2025-07-28 15:43:26.054 |       "dependencies": {},
+2025-07-28 15:43:26.054 |       "recommendedRole": "coordinator"
+2025-07-28 15:43:26.054 |     },
+2025-07-28 15:43:26.054 |     {
+2025-07-28 15:43:26.054 |       "number": 2,
+2025-07-28 15:43:26.054 |       "actionVerb": "FILE_OPERATION",
+2025-07-28 15:43:26.054 |       "inputs": {
+2025-07-28 15:43:26.054 |         "operation": {"value": "read", "valueType": "string"},
+2025-07-28 15:43:26.054 |         "fileId": {"outputName": "uploadedDataFile", "valueType": "string"}
+2025-07-28 15:43:26.054 |       },
+2025-07-28 15:43:26.054 |       "description": "Read the uploaded data file containing the inputs necessary to generate tailored outreach message templates.",
+2025-07-28 15:43:26.054 |       "outputs": {
+2025-07-28 15:43:26.054 |         "dataContent": "The content of the uploaded file, parsed as text or JSON as needed"
+2025-07-28 15:43:26.054 |       },
+2025-07-28 15:43:26.054 |       "dependencies": {
+2025-07-28 15:43:26.054 |         "uploadedDataFile": 1
+2025-07-28 15:43:26.054 |       },
+2025-07-28 15:43:26.054 |       "recommendedRole": "researcher"
+2025-07-28 15:43:26.054 |     },
+2025-07-28 15:43:26.054 |     {
+2025-07-28 15:43:26.054 |       "number": 3,
+2025-07-28 15:43:26.054 |       "actionVerb": "THINK",
+2025-07-28 15:43:26.054 |       "inputs": {
+2025-07-28 15:43:26.054 |         "prompt": {
+2025-07-28 15:43:26.054 |           "value": "Using the data content from previous step, craft multiple tailored outreach message templates suitable for networking with potential employers and professional contacts, ensuring personalization and relevance based on the provided data.",
+2025-07-28 15:43:26.054 |           "answerType": {"value": "string", "valueType": "string"}
+2025-07-28 15:43:26.054 |         }
+2025-07-28 15:43:26.054 |       },
+2025-07-28 15:43:26.054 |       "description": "Generate customized outreach message templates based on the provided input data, ensuring they are professional, engaging, and tailored to the target audience.",
+2025-07-28 15:43:26.054 |       "outputs": {
+2025-07-28 15:43:26.054 |         "templates": "A set of tailored outreach message templates"
+2025-07-28 15:43:26.054 |       },
+2025-07-28 15:43:26.054 |       "dependencies": {
+2025-07-28 15:43:26.054 |         "dataContent": 2
+2025-07-28 15:43:26.054 |       },
+2025-07-28 15:43:26.054 |       "recommendedRole": "creative"
+2025-07-28 15:43:26.054 |     }
+2025-07-28 15:43:26.054 |   ]
+2025-07-28 15:43:26.054 | }
+2025-07-28 15:43:26.054 | [baseInterface] Response is valid JSON after cleaning.
+2025-07-28 15:43:26.054 | [ModelManager] Tracking model response for request 8e706fb0-75a4-4ddf-815f-55a0457130de, success: true, token count: 0, isRetry: undefined
+2025-07-28 15:43:26.054 | [ModelManager] Found active request for model openai/gpt-4.1-nano, conversation type TextToCode
+2025-07-28 15:43:28.720 | [Brain Chat] Request 0cd7e2e7-e466-447f-a5d0-3be6d867eb85 received
+2025-07-28 15:43:28.720 | [Brain Chat] Detected request requiring a JSON plan, ensuring JSON response format
+2025-07-28 15:43:28.720 | Selecting model for optimization: accuracy, conversationType: TextToCode
+2025-07-28 15:43:28.720 | **** CACHE HIT **** Using cached model selection result: openai/gpt-4.1-nano
+2025-07-28 15:43:28.720 | Cache age: 47 seconds
+2025-07-28 15:43:28.720 | [Brain Chat] Attempt 1: Using model gpt-4.1-nano-2025-04-14
+2025-07-28 15:43:28.720 | [ModelManager] Tracking model request: 1123b235-c09a-4652-bb29-13885ca4460f for model openai/gpt-4.1-nano, conversation type TextToCode
+2025-07-28 15:43:28.720 | [ModelManager] Active requests count: 10
+2025-07-28 15:43:28.720 | [Brain Chat] Using model gpt-4.1-nano-2025-04-14 for request 1123b235-c09a-4652-bb29-13885ca4460f
+2025-07-28 15:43:28.720 | Starting trimMessages
+2025-07-28 15:43:35.799 | [baseInterface] Ensuring JSON response
+2025-07-28 15:43:35.799 | [baseInterface] Original response: {"type": "PLAN", "plan": [{"number": 1, "actionVerb": "ASK_USER_QUESTION", "inputs": {"question": {"value": "Please upload the file containing the input data for generating outreach message templates.", "answerType": {"value": "string", "valueType": "string"}}}, "description": "Prompt user to upload the data file with input information for generating tailored outreach message templates.", "outputs": {"fileId": "User uploaded input data file ID."}, "dependencies": {}, "recommendedRole": "coordinator"}, {"number": 2, "actionVerb": "FILE_OPERATION", "inputs": {"operation": {"value": "read", "valueType": "string"}, "fileId": {"outputName": "fileId", "valueType": "string"}}, "description": "Read the uploaded input data file to extract the necessary data for template generation.", "outputs": {"inputData": "Parsed content of the input data file."}, "dependencies": {"inputData": 1}, "recommendedRole": "executor"}, {"number": 3, "actionVerb": "THINK", "inputs": {"prompt": {"value": "Using the input data from step 2, develop tailored outreach message templates for networking with potential employers and professional contacts. The templates should be personalized, professional, and adaptable for various industries and roles, ensuring they effectively introduce the sender, express interest, and request a follow-up."}, "description": "Generate customized outreach message templates based on the input data, focusing on personalization and professionalism for effective networking.", "outputs": {"templates": "A set of personalized outreach message templates."}, "dependencies": {"templates": 2}, "recommendedRole": "creative"}]}
+2025-07-28 15:43:35.799 | [baseInterface] Initial JSON parse failed, attempting basic cleaning...
+2025-07-28 15:43:35.800 | [baseInterface] Attempting JSON repair...
+2025-07-28 15:43:35.802 | [baseInterface] Starting JSON repair on text length: 1637
+2025-07-28 15:43:35.804 | [baseInterface] JSON repair completed, new length: 1637
+2025-07-28 15:43:35.805 | [baseInterface] JSON repair failed: Expected ',' or '}' after property value in JSON at position 1635
+2025-07-28 15:43:35.805 | [baseInterface] Attempting content extraction...
+2025-07-28 15:43:35.805 | [baseInterface] Attempting to extract JSON from text...
+2025-07-28 15:43:35.806 | [baseInterface] Found 1 potential complete responses
+2025-07-28 15:43:35.806 | [baseInterface] Failed to parse potential response: Expected ',' or '}' after property value in JSON at position 259
+2025-07-28 15:43:35.806 | [baseInterface] No complete responses found, trying general JSON extraction...
+2025-07-28 15:43:35.806 | [baseInterface] Extracted JSON (fallback)
+2025-07-28 15:43:35.806 | [ModelManager] Tracking model response for request 1123b235-c09a-4652-bb29-13885ca4460f, success: true, token count: 0, isRetry: undefined
+2025-07-28 15:43:35.806 | [ModelManager] Found active request for model openai/gpt-4.1-nano, conversation type TextToCode
+2025-07-28 15:43:35.820 | [Brain Chat] Request d823441a-07df-4909-9569-91325858090e received
+2025-07-28 15:43:35.821 | [Brain Chat] Detected request requiring a JSON plan, ensuring JSON response format
+2025-07-28 15:43:35.821 | Selecting model for optimization: accuracy, conversationType: TextToCode
+2025-07-28 15:43:35.821 | **** CACHE HIT **** Using cached model selection result: openai/gpt-4.1-nano
+2025-07-28 15:43:35.821 | Cache age: 54 seconds
+2025-07-28 15:43:35.821 | [Brain Chat] Attempt 1: Using model gpt-4.1-nano-2025-04-14
+2025-07-28 15:43:35.821 | [ModelManager] Tracking model request: 3a5cb1cb-cdfd-4c06-8e8a-f2d02ddd7731 for model openai/gpt-4.1-nano, conversation type TextToCode
+2025-07-28 15:43:35.821 | [ModelManager] Active requests count: 11
+2025-07-28 15:43:35.821 | [Brain Chat] Using model gpt-4.1-nano-2025-04-14 for request 3a5cb1cb-cdfd-4c06-8e8a-f2d02ddd7731
+2025-07-28 15:43:35.821 | Starting trimMessages
+2025-07-28 15:43:44.342 | [baseInterface] Ensuring JSON response
+2025-07-28 15:43:44.342 | [baseInterface] Original response: {"type": "PLAN", "plan": [{"number": 1, "actionVerb": "ASK_USER_QUESTION", "inputs": {"question": {"value": "Please upload the context data object for generating tailored outreach message templates.", "answerType": {"value": "file", "valueType": "string"}}}, "description": "Prompt the user to upload the input data object that contains relevant information for generating message templates.", "outputs": {"fileId": "Uploaded context data file ID"}, "dependencies": {}, "recommendedRole": "coordinator"}, {"number": 2, "actionVerb": "FILE_OPERATION", "inputs": {"operation": {"value": "read", "valueType": "string"}, "fileId": {"outputName": "Uploaded context data file ID", "valueType": "string"}}}, "description": "Read the uploaded context data object to extract necessary information for message template creation.", "outputs": {"contextData": "Contents of the uploaded context data object"}, "dependencies": {"contextData": 1}, "recommendedRole": "executor"}, {"number": 3, "actionVerb": "THINK", "inputs": {"prompt": {"value": "Based on the provided context data, generate tailored outreach message templates for networking with potential employers and professional contacts. The templates should be professional, personalized, and adaptable to different scenarios.", "valueType": "string"}}, "description": "Use an LLM to generate customized outreach message templates based on the context data obtained from the previous step.", "outputs": {"messageTemplates": "A set of tailored outreach message templates"}, "dependencies": {"messageTemplates": 2}, "recommendedRole": "creative"}]}
+2025-07-28 15:43:44.342 | [baseInterface] Initial JSON parse failed, attempting basic cleaning...
+2025-07-28 15:43:44.343 | [baseInterface] Attempting JSON repair...
+2025-07-28 15:43:44.343 | [baseInterface] Starting JSON repair on text length: 1591
+2025-07-28 15:43:44.343 | [baseInterface] JSON repair completed, new length: 1591
+2025-07-28 15:43:44.343 | [baseInterface] JSON repair failed: Expected ',' or ']' after array element in JSON at position 714
+2025-07-28 15:43:44.343 | [baseInterface] Attempting content extraction...
+2025-07-28 15:43:44.343 | [baseInterface] Attempting to extract JSON from text...
+2025-07-28 15:43:44.343 | [baseInterface] Found 1 potential complete responses
+2025-07-28 15:43:44.343 | [baseInterface] Failed to parse potential response: Expected ',' or '}' after property value in JSON at position 255
+2025-07-28 15:43:44.343 | [baseInterface] No complete responses found, trying general JSON extraction...
+2025-07-28 15:43:44.343 | [baseInterface] Extracted JSON (fallback)
+2025-07-28 15:43:44.343 | [ModelManager] Tracking model response for request 3a5cb1cb-cdfd-4c06-8e8a-f2d02ddd7731, success: true, token count: 0, isRetry: undefined
+2025-07-28 15:43:44.343 | [ModelManager] Found active request for model openai/gpt-4.1-nano, conversation type TextToCode
+2025-07-28 15:43:44.348 | [Brain Chat] Request 22283efb-85b3-49b6-b830-50ef02614df0 received
+2025-07-28 15:43:44.348 | [Brain Chat] Detected request requiring a JSON plan, ensuring JSON response format
+2025-07-28 15:43:44.348 | Selecting model for optimization: accuracy, conversationType: TextToCode
+2025-07-28 15:43:44.348 | **** CACHE MISS **** No cached result for key: accuracy-TextToCode
+2025-07-28 15:43:44.348 | Cache miss or expired. Selecting model from scratch.
+2025-07-28 15:43:44.348 | Total models loaded: 32
+2025-07-28 15:43:44.348 | Model anthropic/claude-3-haiku-20240307 is blacklisted for conversation type TextToCode
+2025-07-28 15:43:44.348 | Model anthropic/claude-2 is blacklisted for conversation type TextToCode
+2025-07-28 15:43:44.348 | Model codellama/CodeLlama-34b-Instruct-hf is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:43:44.348 | Model deepseek-ai/DeepSeek-R1 is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:43:44.348 | Model or/cognitivecomputations/dolphin3.0-mistral-24b:free is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:43:44.348 | Model openai/gpt-4.1-nano is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:43:44.348 | Model openai/gpt-4-vision-preview is blacklisted for conversation type TextToCode
+2025-07-28 15:43:44.348 | Model or/moonshotai/kimi-k2:free is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:43:44.348 | Model openweb/knownow is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:43:44.348 | GroqService availability check: Available
+2025-07-28 15:43:44.348 | GroqService ready state: Ready
+2025-07-28 15:43:44.348 | GroqService is available and ready to use.
+2025-07-28 15:43:44.348 | Model groq/llama-4 is blacklisted for conversation type TextToCode
+2025-07-28 15:43:44.348 | Model meta-llama/Llama-2-70b-chat-hf is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:43:44.348 | MistralService availability check: Available
+2025-07-28 15:43:44.348 | MistralService is available and ready to use.
+2025-07-28 15:43:44.348 | Model mistral/mistral-small-latest is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:43:44.348 | Model mistralai/Mistral-Nemo-Instruct-2407 is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:43:44.348 | Model or/deepseek-ai/DeepSeek-R1:free is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:43:44.348 | Model bigcode/starcoder is NOT blacklisted for conversation type TextToCode
+2025-07-28 15:43:44.348 | Model codellama/CodeLlama-34b-Instruct-hf score calculation: base=88, adjusted=88, reliability=0, final=88
+2025-07-28 15:43:44.348 | Model deepseek-ai/DeepSeek-R1 score calculation: base=88, adjusted=88, reliability=0, final=88
+2025-07-28 15:43:44.348 | Model or/cognitivecomputations/dolphin3.0-mistral-24b:free score calculation: base=75, adjusted=75, reliability=0, final=75
+2025-07-28 15:43:44.348 | Model openai/gpt-4.1-nano score calculation: base=52, adjusted=77.92386530014642, reliability=29.94143484626647, final=107.86530014641289
+2025-07-28 15:43:44.348 | Model or/moonshotai/kimi-k2:free score calculation: base=75, adjusted=75, reliability=0, final=75
+2025-07-28 15:43:44.348 | Model openweb/knownow score calculation: base=85, adjusted=85, reliability=0, final=85
+2025-07-28 15:43:44.348 | Model meta-llama/Llama-2-70b-chat-hf score calculation: base=88, adjusted=88, reliability=0, final=88
+2025-07-28 15:43:44.348 | Model mistral/mistral-small-latest score calculation: base=85, adjusted=85, reliability=0, final=85
+2025-07-28 15:43:44.348 | Model mistralai/Mistral-Nemo-Instruct-2407 score calculation: base=80, adjusted=80, reliability=0, final=80
+2025-07-28 15:43:44.348 | Model or/deepseek-ai/DeepSeek-R1:free score calculation: base=88, adjusted=88, reliability=0, final=88
+2025-07-28 15:43:44.348 | Model bigcode/starcoder score calculation: base=85, adjusted=85, reliability=0, final=85
+2025-07-28 15:43:44.348 | Using score-based model selection. Top model: openai/gpt-4.1-nano
+2025-07-28 15:43:44.348 | Selected model openai/gpt-4.1-nano for accuracy optimization and conversation type TextToCode
+2025-07-28 15:43:44.348 | [Brain Chat] Attempt 1: Using model gpt-4.1-nano-2025-04-14
+2025-07-28 15:43:44.348 | [ModelManager] Tracking model request: a7da0bcf-4bf5-40fc-984f-1b0fb76d99af for model openai/gpt-4.1-nano, conversation type TextToCode
+2025-07-28 15:43:44.348 | [ModelManager] Active requests count: 12
+2025-07-28 15:43:44.348 | [Brain Chat] Using model gpt-4.1-nano-2025-04-14 for request a7da0bcf-4bf5-40fc-984f-1b0fb76d99af
+2025-07-28 15:43:44.348 | Starting trimMessages
+2025-07-28 15:43:55.096 | [baseInterface] Ensuring JSON response
+2025-07-28 15:43:55.096 | [baseInterface] Original response: {
+2025-07-28 15:43:55.096 |   "type": "PLAN",
+2025-07-28 15:43:55.096 |   "plan": [
+2025-07-28 15:43:55.096 |     {
+2025-07-28 15:43:55.096 |       "number": 1,
+2025-07-28 15:43:55.096 |       "actionVerb": "ASK_USER_QUESTION",
+2025-07-28 15:43:55.096 |       "inputs": {
+2025-07-28 15:43:55.096 |         "question": {
+2025-07-28 15:43:55.096 |           "value": "Please upload the inputs object containing details for generating tailored outreach message templates.",
+2025-07-28 15:43:55.096 |           "answerType": {
+2025-07-28 15:43:55.096 |             "value": "string",
+2025-07-28 15:43:55.096 |             "valueType": "string"
+2025-07-28 15:43:55.096 |           }
+2025-07-28 15:43:55.096 |         },
+2025-07-28 15:43:55.096 |         "answerType": {
+2025-07-28 15:43:55.096 |           "value": "file",
+2025-07-28 15:43:55.096 |           "valueType": "string"
+2025-07-28 15:43:55.096 |         }
+2025-07-28 15:43:55.096 |       },
+2025-07-28 15:43:55.096 |       "description": "Prompt the user to upload the data object with inputs necessary for generating outreach message templates.",
+2025-07-28 15:43:55.096 |       "outputs": {
+2025-07-28 15:43:55.096 |         "fileId": "Stores the uploaded file containing inputs for message generation."
+2025-07-28 15:43:55.096 |       },
+2025-07-28 15:43:55.096 |       "dependencies": {},
+2025-07-28 15:43:55.096 |       "recommendedRole": "coordinator"
+2025-07-28 15:43:55.096 |     },
+2025-07-28 15:43:55.096 |     {
+2025-07-28 15:43:55.096 |       "number": 2,
+2025-07-28 15:43:55.096 |       "actionVerb": "FILE_OPERATION",
+2025-07-28 15:43:55.096 |       "inputs": {
+2025-07-28 15:43:55.096 |         "operation": {
+2025-07-28 15:43:55.096 |           "value": "read",
+2025-07-28 15:43:55.096 |           "valueType": "string"
+2025-07-28 15:43:55.096 |         },
+2025-07-28 15:43:55.096 |         "fileId": {
+2025-07-28 15:43:55.096 |           "outputName": "fileId",
+2025-07-28 15:43:55.096 |           "valueType": "string"
+2025-07-28 15:43:55.096 |         }
+2025-07-28 15:43:55.096 |       },
+2025-07-28 15:43:55.096 |       "description": "Read the uploaded file to extract the inputs object which contains data for generating message templates.",
+2025-07-28 15:43:55.096 |       "outputs": {
+2025-07-28 15:43:55.096 |         "inputsData": "Extracted JSON object with all input details necessary for message template creation."
+2025-07-28 15:43:55.096 |       },
+2025-07-28 15:43:55.096 |       "dependencies": {
+2025-07-28 15:43:55.096 |         "inputsData": 1
+2025-07-28 15:43:55.096 |       },
+2025-07-28 15:43:55.096 |       "recommendedRole": "executor"
+2025-07-28 15:43:55.096 |     },
+2025-07-28 15:43:55.096 |     {
+2025-07-28 15:43:55.096 |       "number": 3,
+2025-07-28 15:43:55.096 |       "actionVerb": "THINK",
+2025-07-28 15:43:55.096 |       "inputs": {
+2025-07-28 15:43:55.096 |         "prompt": {
+2025-07-28 15:43:55.096 |           "value": "Using the provided inputs, generate tailored outreach message templates for networking with potential employers and professional contacts. The inputs include details such as target industry, recipient's role, personalizations, and goals. Create diverse templates that can be customized further.",
+2025-07-28 15:43:55.096 |           "valueType": "string"
+2025-07-28 15:43:55.096 |         }
+2025-07-28 15:43:55.096 |       },
+2025-07-28 15:43:55.096 |       "description": "Use the language model to craft multiple personalized outreach message templates based on the inputs extracted from the uploaded data.",
+2025-07-28 15:43:55.096 |       "outputs": {
+2025-07-28 15:43:55.096 |         "messageTemplates": "A set of tailored outreach message templates ready for review and customization."
+2025-07-28 15:43:55.096 |       },
+2025-07-28 15:43:55.096 |       "dependencies": {
+2025-07-28 15:43:55.096 |         "inputsData": 2
+2025-07-28 15:43:55.096 |       },
+2025-07-28 15:43:55.096 |       "recommendedRole": "creative"
+2025-07-28 15:43:55.096 |     }
+2025-07-28 15:43:55.096 |   ]
+2025-07-28 15:43:55.096 | }
+2025-07-28 15:43:55.096 | [baseInterface] Response is valid JSON after cleaning.
+2025-07-28 15:43:55.097 | [ModelManager] Tracking model response for request a7da0bcf-4bf5-40fc-984f-1b0fb76d99af, success: true, token count: 0, isRetry: undefined
+2025-07-28 15:43:55.097 | [ModelManager] Found active request for model openai/gpt-4.1-nano, conversation type TextToCode
+2025-07-28 15:44:00.993 | [Brain Chat] Request 9c12f2b2-7ab7-4be7-83f8-dfa4a42bb216 received
+2025-07-28 15:44:00.993 | [Brain Chat] Detected request requiring a JSON plan, ensuring JSON response format
+2025-07-28 15:44:00.993 | Selecting model for optimization: accuracy, conversationType: TextToCode
+2025-07-28 15:44:00.993 | **** CACHE HIT **** Using cached model selection result: openai/gpt-4.1-nano
+2025-07-28 15:44:00.993 | Cache age: 16 seconds
+2025-07-28 15:44:00.993 | [Brain Chat] Attempt 1: Using model gpt-4.1-nano-2025-04-14
+2025-07-28 15:44:00.993 | [ModelManager] Tracking model request: 749cc64b-9d27-46b3-8a96-56f35b8d980c for model openai/gpt-4.1-nano, conversation type TextToCode
+2025-07-28 15:44:00.993 | [ModelManager] Active requests count: 13
+2025-07-28 15:44:00.993 | [Brain Chat] Using model gpt-4.1-nano-2025-04-14 for request 749cc64b-9d27-46b3-8a96-56f35b8d980c
+2025-07-28 15:44:00.993 | Starting trimMessages

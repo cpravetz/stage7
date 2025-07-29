@@ -118,7 +118,7 @@ logger = logging.getLogger(__name__)
 class AccomplishPlugin:
     def __init__(self):
         self.max_retries = 3
-        self.timeout = 60  # Increased from 30 to 60 seconds for Brain calls
+        self.timeout = 90  # Increased to 90 seconds for Brain calls
         
     def execute(self, inputs_str: str) -> str:
         """Main execution method"""
@@ -257,7 +257,12 @@ Where <array_of_steps> must comply with this JSON schema:
 
 {schema}
 
-CRITICAL: Plan must match the schema precisely
+CRITICAL: You have the following tools available. You MUST use the exact 'actionVerb' and the exact input 'name' as defined in the JSON schema for each tool. Do NOT invent new input names.
+
+--- AVAILABLE TOOLS SCHEMA ---
+{available_plugins}
+--- END AVAILABLE TOOLS SCHEMA ---
+
 
 Available plugins: {available_plugins}
 
@@ -317,27 +322,30 @@ FINAL REMINDER: Your response must start with {{ and end with }}. No other text 
         
         for attempt in range(self.max_retries):
             try:
-                # Step 3: Send prompt to Brain
-                response = self._call_brain(prompt, brain_token, brain_url)
-                
-                # Step 4: Confirm response type
-                response_type = self._identify_response_type(response)
-                
-                # Step 5: Validate schema
-                validation_result = self._validate_response_schema(response, response_type)
+                try:
+                    # Step 3: Send prompt to Brain
+                    response = self._call_brain(prompt, brain_token, brain_url)
+                    
+                    # Step 4: Confirm response type
+                    response_type = self._identify_response_type(response)
+                    
+                    # Step 5: Validate schema
+                    validation_result = self._validate_response_schema(response, response_type)
 
-                if validation_result['valid']:
-                    # Step 6: Return valid response
-                    return response
-                
-                # Step 7: Try to fix error
-                fixed_response = self._try_fix_error(response, validation_result['error'])
-                if fixed_response:
-                    return fixed_response
-                
-                # Step 8: Ask Brain to fix it
-                prompt = self._create_repair_prompt(response, validation_result['error'])
-                logger.warning(f"Attempt {attempt + 1}: Asking Brain to fix error: {validation_result['error']}")
+                    if validation_result['valid']:
+                        # Step 6: Return valid response
+                        return response
+                    
+                    # Step 7: Try to fix error
+                    fixed_response = self._try_fix_error(response, validation_result['error'])
+                    if fixed_response:
+                        return fixed_response
+                    
+                    # Step 8: Ask Brain to fix it
+                    prompt = self._create_repair_prompt(response, validation_result['error'])
+                    logger.warning(f"Attempt {attempt + 1}: Asking Brain to fix error: {validation_result['error']}")
+                except requests.exceptions.RequestException as http_error:
+                    raise Exception(f"HTTP Error calling Brain: {http_error}")
                 
             except Exception as e:
                 logger.error(f"Attempt {attempt + 1} failed: {e}")
