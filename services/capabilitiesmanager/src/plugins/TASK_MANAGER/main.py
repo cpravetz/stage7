@@ -1,3 +1,71 @@
+# --- Robust wrapper for deduplication, temp dir hygiene, and error escalation ---
+import tempfile
+import shutil
+import hashlib
+
+# Error handler integration (for unexpected/code errors only)
+def send_to_errorhandler(error, context=None):
+    try:
+        import requests
+        errorhandler_url = os.environ.get('ERRORHANDLER_URL', 'errorhandler:5090')
+        payload = {
+            'error': str(error),
+            'context': context or ''
+        }
+        requests.post(f'http://{errorhandler_url}/analyze', json=payload, timeout=10)
+    except Exception as e:
+        print(f"Failed to send error to errorhandler: {e}")
+
+_seen_hashes = set()
+
+def robust_execute_plugin(inputs):
+    temp_dir = None
+    try:
+        # Deduplication: hash the inputs
+        hash_input = json.dumps(inputs, sort_keys=True)
+        input_hash = hashlib.sha256(hash_input.encode()).hexdigest()
+        if input_hash in _seen_hashes:
+            return [
+                {
+                    "success": False,
+                    "name": "error",
+                    "resultType": "error",
+                    "resultDescription": "Duplicate input detected. This input combination has already failed. Aborting to prevent infinite loop.",
+                    "error": "Duplicate input detected."
+                }
+            ]
+        _seen_hashes.add(input_hash)
+
+        # Temp directory hygiene
+        temp_dir = tempfile.mkdtemp(prefix="task_manager_")
+        os.environ["TASK_MANAGER_TEMP_DIR"] = temp_dir
+
+        # Call the original plugin logic
+        result = execute_plugin(inputs)
+
+        # Strict output validation: must be a list of PluginOutput or dicts
+        if not isinstance(result, list) or not result:
+            raise ValueError("Output schema validation failed: must be a non-empty list.")
+
+        return result
+    except Exception as e:
+        # Only escalate to errorhandler for unexpected/code errors
+        send_to_errorhandler(e, context=json.dumps(inputs))
+        return [
+            {
+                "success": False,
+                "name": "error",
+                "resultType": "error",
+                "resultDescription": f"Error: {str(e)}",
+                "error": str(e)
+            }
+        ]
+    finally:
+        if temp_dir and os.path.exists(temp_dir):
+            try:
+                shutil.rmtree(temp_dir)
+            except Exception as cleanup_err:
+                print(f"Failed to clean up temp dir {temp_dir}: {cleanup_err}")
 #!/usr/bin/env python3
 """
 TASK_MANAGER Plugin for Stage7

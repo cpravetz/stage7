@@ -7,12 +7,16 @@ import { User } from '../models/User';
 import { TokenType } from '../models/Token';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { MongoUserRepository } from '../repositories/MongoUserRepository';
+import { MongoTokenRepository } from '../repositories/MongoTokenRepository';
+import { MongoTokenBlacklistRepository } from '../repositories/MongoTokenBlacklistRepository';
 
 // Initialize repositories
 const userRepository = new MongoUserRepository();
+const tokenRepository = new MongoTokenRepository();
+const tokenBlacklistRepository = new MongoTokenBlacklistRepository();
 
 // Initialize services
-const tokenService = new TokenService({}, null, null, userRepository);
+const tokenService = new TokenService({}, tokenRepository, tokenBlacklistRepository, userRepository);
 const authenticationService = new AuthenticationService(tokenService);
 const authorizationService = new AuthorizationService();
 

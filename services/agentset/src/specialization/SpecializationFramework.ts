@@ -2,8 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { Agent } from '../agents/Agent';
 import { AgentStatus } from '../utils/agentStatus';
-import { AgentRole, PredefinedRoles } from './AgentRole';
-import { AuthenticatedApiClient } from '@cktmcs/shared';
+import { AgentRole, PredefinedRoles, AuthenticatedApiClient } from '@cktmcs/shared';
 
 
 
@@ -23,7 +22,7 @@ export interface AgentSpecialization {
   roleId: string;
   assignedAt: string;
   performanceByTask: Map<string, TaskPerformanceMetrics>;
-  customizations?: {
+    customizations?: {
     capabilities?: string[];
     responsibilities?: string[];
     knowledgeDomains?: string[];
@@ -56,7 +55,7 @@ export interface KnowledgeDomain {
 export class SpecializationFramework {
   private roles: Map<string, AgentRole> = new Map();
   private specializations: Map<string, AgentSpecialization> = new Map();
-  private knowledgeDomains: Map<string, KnowledgeDomain> = new Map();
+    private knowledgeDomains: Map<string, KnowledgeDomain> = new Map();
   private agents: Map<string, Agent>;
   private librarianUrl: string;
   private brainUrl: string;
@@ -79,7 +78,7 @@ export class SpecializationFramework {
     // Create authenticated API client
     this.authenticatedApi = new AuthenticatedApiClient(tempEntity);
 
-    // Initialize predefined roles
+        // Initialize predefined roles
     for (const [id, role] of Object.entries(PredefinedRoles)) {
       this.roles.set(role.id.toLowerCase(), role);
     }
@@ -91,7 +90,7 @@ export class SpecializationFramework {
     this.loadKnowledgeDomains();
   }
 
-  /**
+    /**
    * Load specializations from persistent storage
    */
   private async loadSpecializations(): Promise<void> {
@@ -110,7 +109,7 @@ export class SpecializationFramework {
         const specializations = Array.isArray(document) ? document : (document.data || document);
 
         if (Array.isArray(specializations)) {
-          for (const specialization of specializations) {
+            for (const specialization of specializations) {
             if (specialization && specialization.agentId) {
               this.specializations.set(specialization.agentId, specialization);
             }
@@ -584,7 +583,7 @@ export class SpecializationFramework {
     let prompt = specialization.customizations?.systemPrompt || role.systemPrompt;
 
     // Add task-specific instructions
-    prompt += `\n\nCurrent Task: ${taskDescription}\n\n`;
+        prompt += `\n\nCurrent Task: ${taskDescription}\n\n`;
     
     // Add relevant knowledge domains
     const relevantDomains = (specialization.customizations?.knowledgeDomains || role.knowledgeDomains)

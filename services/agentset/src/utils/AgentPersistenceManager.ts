@@ -32,7 +32,7 @@ export class AgentPersistenceManager {
         authenticatedApi?: any
     ) {
         this.librarianUrl = librarianUrl;
-        this.securityManagerUrl = process.env.SECURITY_MANAGER_URL || 'securitymanager:5010';
+        this.securityManagerUrl = process.env.SECURITYMANAGER_URL || 'securitymanager:5010';
 
         // If authenticatedApi is provided, use it, otherwise create a new one
         if (authenticatedApi) {

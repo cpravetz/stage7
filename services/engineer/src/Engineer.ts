@@ -235,7 +235,8 @@ export class Engineer extends BaseEntity {
 
             const response = await this.authenticatedApi.post(`http://${this.brainUrl}/chat`, {
                 exchanges: [{ role: 'user', content: engineeringPrompt }],
-                optimization: 'accuracy' // Consider other optimization strategies if needed
+                optimization: 'accuracy',
+                responseType: 'json'
             });
             
             // It's crucial that the Brain returns a JSON string that can be parsed.
@@ -364,7 +365,8 @@ Context: ${contextString}`;
 
             const response = await this.authenticatedApi.post(`http://${this.brainUrl}/chat`, {
                 exchanges: [{ role: 'user', content: containerPrompt }],
-                optimization: 'accuracy'
+                optimization: 'accuracy',
+                responseType: 'json'
             });
             const responseText = response.data.result || response.data.response || '';
             const pluginStructure = JSON.parse(responseText);
@@ -524,7 +526,8 @@ Context: ${contextString}`;
         try {
             const response = await this.authenticatedApi.post(`http://${this.brainUrl}/chat`, {
                 exchanges: [{ role: 'user', content: prompt }],
-                optimization: 'accuracy'
+                optimization: 'accuracy',
+                responseType: 'text'
             });
             return response.data.result || response.data.response || ''; // Adjust based on Brain response
         } catch (error) {

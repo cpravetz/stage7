@@ -112,7 +112,7 @@ function shouldBypassAuth(path: string): boolean {
  */
 export function createAuthenticatedAxios(
   optionsOrServiceId: AuthenticatedAxiosOptions | string,
-  securityManagerUrl: string = process.env.SECURITY_MANAGER_URL || 'securitymanager:5010',
+  securityManagerUrl: string = process.env.SECURITYMANAGER_URL || 'securitymanager:5010',
   clientSecret: string = process.env.CLIENT_SECRET || 'stage7AuthSecret'
 ): AxiosInstance {
   // Handle both new options object and legacy parameters
@@ -132,7 +132,7 @@ export function createAuthenticatedAxios(
 
   const {
     serviceId,
-    securityManagerUrl: securityUrl = process.env.SECURITY_MANAGER_URL || 'securitymanager:5010',
+    securityManagerUrl: securityUrl = process.env.SECURITYMANAGER_URL || 'securitymanager:5010',
     clientSecret: secret = process.env.CLIENT_SECRET || 'stage7AuthSecret',
     enableRetry = true,
     maxRetries = MAX_RETRIES,

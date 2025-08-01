@@ -63,7 +63,7 @@ export class ConflictResolution {
     this.brainUrl = brainUrl;
 
     // Initialize token manager for service-to-service authentication
-    const securityManagerUrl = process.env.SECURITY_MANAGER_URL || 'securitymanager:5010';
+    const securityManagerUrl = process.env.SECURITYMANAGER_URL || 'securitymanager:5010';
     const serviceId = 'ConflictResolution';
     const serviceSecret = process.env.CLIENT_SECRET || 'stage7AuthSecret';
     this.tokenManager = ServiceTokenManager.getInstance(
@@ -459,7 +459,8 @@ export class ConflictResolution {
             content: `Please help resolve the following conflict:\n\nDescription: ${conflict.description}\n\nConflicting data: ${JSON.stringify(conflict.conflictingData, null, 2)}\n\nVotes and explanations:\n${votesWithExplanations.map(v => `- Agent ${v.agentId}: ${JSON.stringify(v.vote)}\n  Explanation: ${v.explanation}`).join('\n\n')}\n\nPlease provide a JSON response with a "resolution" and "explanation".`
           }
         ],
-        optimization: 'accuracy'
+        optimization: 'accuracy',
+        responseType: 'text'
       }, {
         headers: {
           'Content-Type': 'application/json',

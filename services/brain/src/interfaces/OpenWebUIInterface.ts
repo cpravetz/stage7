@@ -12,7 +12,7 @@ export class OpenWebUIInterface extends BaseInterface {
         console.log(`OpenWebUIInterface initialized with DEFAULT_TIMEOUT: ${this.DEFAULT_TIMEOUT}ms`);
     }
 
-    async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number } = {}): Promise<string> {
+    async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string, responseType?: string } = {}): Promise<string> {
         try {
             if (!service || !service.isAvailable()) {
                 throw new Error('OpenWebUI service is not available');
@@ -29,9 +29,18 @@ export class OpenWebUIInterface extends BaseInterface {
             console.log(`OpenWebUI API key available: ${apiKey ? 'Yes' : 'No'}`);
             console.log(`Using timeout of ${this.DEFAULT_TIMEOUT}ms for OpenWebUI request`);
 
+            // If responseType is 'json', prepend a system prompt to enforce JSON output
+            let contentParts = messages;
+            if (options.responseType === 'json') {
+                contentParts = [
+                    { role: 'system', content: 'You must respond with valid JSON only. No explanations, no markdown, no code blocks - just pure JSON starting with { and ending with }.' },
+                    ...messages
+                ];
+            }
+
             // Format messages for OpenWebUI API
             // Ensure all messages have valid content (not undefined or null)
-            const formattedMessages = messages.map(msg => ({
+            const formattedMessages = contentParts.map(msg => ({
                 role: msg.role,
                 content: msg.content || '' // Ensure content is never undefined or null
             }));
@@ -41,7 +50,7 @@ export class OpenWebUIInterface extends BaseInterface {
 
             // Prepare request body
             const body = JSON.stringify({
-                model: 'knownow', // Default model name
+                model: options.modelName,
                 messages: formattedMessages,
                 // Optional parameters
                 temperature: options.temperature || 0.3,
@@ -106,11 +115,7 @@ export class OpenWebUIInterface extends BaseInterface {
                     const content = data.choices[0].message.content;
                     console.log(`OpenWebUI response content length: ${content.length} characters`);
                     // --- Ensure JSON if required ---
-                    let requireJson = false;
-                    if (formattedMessages && formattedMessages.length > 0 && formattedMessages[0].content &&
-                        (formattedMessages[0].content.includes('JSON') || formattedMessages[0].content.includes('json'))) {
-                        requireJson = true;
-                    }
+                    let requireJson = options.responseType === 'json' ? true : false;
                     if (requireJson) {
                         return this.ensureJsonResponse(content, true);
                     }
@@ -145,7 +150,9 @@ export class OpenWebUIInterface extends BaseInterface {
         if (convertParams.prompt) {
             return this.chat(service, [{ role: 'user', content: convertParams.prompt }], {
                 temperature: convertParams.temperature,
-                max_length: convertParams.max_length
+                max_length: convertParams.max_length,
+                modelName: convertParams.modelName,
+                responseType: convertParams.responseType
             });
         }
 

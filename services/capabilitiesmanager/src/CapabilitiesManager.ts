@@ -419,7 +419,7 @@ export class CapabilitiesManager extends BaseEntity {
         try {
             // Redirect 'ACCOMPLISH' to executeAccomplishPlugin
             if (step.actionVerb === 'ACCOMPLISH' && step.inputValues) {
-                const accomplishResultArray = await this.executeAccomplishPlugin(step.inputValues.get('goal')?.value || '', trace_id);
+                const accomplishResultArray = await this.executeAccomplishPlugin(step.inputValues.get('goal')?.value || '', trace_id, 'goal');
                 res.status(200).send(MapSerializer.transformForSerialization(accomplishResultArray));
                 return;
             }
@@ -739,7 +739,6 @@ export class CapabilitiesManager extends BaseEntity {
                     args: { token: brainToken }
                 });
             }
-
             const executionContext: ExecutionContext = {
                 inputValues: executionInputs,
                 environment,
@@ -1345,10 +1344,19 @@ export class CapabilitiesManager extends BaseEntity {
     private async handleUnknownVerb(step: Step, trace_id: string): Promise<PluginOutput[]> {
         const source_component = "CapabilitiesManager.handleUnknownVerb";
         try {
-            const context = ` ${step.description || ''} The following inputs are available:  ${MapSerializer.transformForSerialization(step.inputValues)}`;
-            const goal = `Determine the best way to complete the step \"${step.actionVerb}\"  with the following context: ${context} by defining a plan for converting the inputs to the outputs, generating an answer from the inputs, or recommending a new plugin for handling the actionVerb. Respond with a plan, a plugin request, or a literal result. Do not use the actionVerb ${step.actionVerb}. Use THINK with a 'prompt' input to use an LLM.`;
+            // Create structured novel verb information instead of a string goal
+            const novelVerbInfo = {
+                verb: step.actionVerb,
+                description: step.description || `Execute the action: ${step.actionVerb}`,
+                context: step.description || '',
+                inputValues: MapSerializer.transformForSerialization(step.inputValues),
+                outputs: step.outputs ? MapSerializer.transformForSerialization(step.outputs) : {},
+                stepId: step.id,
+                stepNo: step.stepNo
+            };
 
-            const accomplishResultArray = await this.executeAccomplishPlugin(goal, trace_id);
+            // Pass the structured information to the ACCOMPLISH plugin
+            const accomplishResultArray = await this.executeAccomplishPluginForNovelVerb(novelVerbInfo, trace_id);
             console.log(`[handleUnknownVerb] plugin result:`, accomplishResultArray);
             if (!accomplishResultArray[0].success) {
                 return accomplishResultArray;
@@ -1437,7 +1445,7 @@ export class CapabilitiesManager extends BaseEntity {
         }
     }
 
-    private async executeAccomplishPlugin(goal: string, trace_id: string): Promise<PluginOutput[]> {
+    private async executeAccomplishPlugin(goal: string, trace_id: string, callType: string = 'goal'): Promise<PluginOutput[]> {
         const source_component = "CapabilitiesManager.executeAccomplishPlugin";
         let availablePluginsStr = ""; // Initialize
         try {            
@@ -1462,7 +1470,7 @@ export class CapabilitiesManager extends BaseEntity {
             console.log(`[${trace_id}] ${source_component}: Plugins string for ACCOMPLISH: ${availablePluginsStr.substring(0,100)}...`);
 
             const accomplishInputs : Map<string, InputValue> = new Map([
-                ['goal', { inputName: 'goal', value: goal, valueType: PluginParameterType.STRING, args: {} }],
+                [callType, { inputName: callType, value: goal, valueType: PluginParameterType.STRING, args: {} }],
                 ['available_plugins', { inputName: 'available_plugins', value: availablePluginsStr, valueType: PluginParameterType.STRING, args: {} }]
             ]);
 
@@ -1500,6 +1508,80 @@ export class CapabilitiesManager extends BaseEntity {
                 original_error: error,
                 trace_id_param: trace_id,
                 contextual_info: {goal_length: goal.length}
+            });
+        }
+    }
+
+    private async executeAccomplishPluginForNovelVerb(novelVerbInfo: any, trace_id: string): Promise<PluginOutput[]> {
+        const source_component = "CapabilitiesManager.executeAccomplishPluginForNovelVerb";
+        try {
+            // Fetch available plugins for context
+            const allPlugins = await this.pluginRegistry.list();
+            const manifestPromises = allPlugins.map(p =>
+                this.pluginRegistry.fetchOne(p.id, p.version, p.repository.type)
+                    .catch(e => {
+                        console.warn(`[${trace_id}] Failed to fetch manifest for ${p.id} v${p.version}: ${e.message}`);
+                        return null;
+                    })
+            );
+            const manifests = (await Promise.all(manifestPromises)).filter((m): m is PluginManifest => m !== null);
+
+            const leanManifests = manifests.map(m => ({
+                actionVerb: m.verb,
+                description: m.description,
+                inputs: (m.inputDefinitions || []).map(i => ({ name: i.name, description: i.description, type: i.type, required: i.required }))
+            }));
+            const availablePluginsStr = JSON.stringify(leanManifests, null, 2);
+
+            // Create inputs specifically for novel verb handling
+            const accomplishInputs: Map<string, InputValue> = new Map([
+                ['novel_actionVerb', {
+                    inputName: 'novel_actionVerb',
+                    value: novelVerbInfo,
+                    valueType: PluginParameterType.OBJECT,
+                    args: {}
+                }],
+                ['available_plugins', {
+                    inputName: 'available_plugins',
+                    value: availablePluginsStr,
+                    valueType: PluginParameterType.STRING,
+                    args: {}
+                }]
+            ]);
+
+            const accomplishPluginManifest = await this.pluginRegistry.fetchOneByVerb('ACCOMPLISH');
+            if (!accomplishPluginManifest) {
+                throw generateStructuredError({
+                    error_code: GlobalErrorCodes.ACCOMPLISH_PLUGIN_MANIFEST_NOT_FOUND,
+                    severity: ErrorSeverity.CRITICAL,
+                    message: "ACCOMPLISH plugin manifest not found.",
+                    trace_id_param: trace_id,
+                    source_component
+                });
+            }
+
+            const manifestForExecution: PluginManifest = {
+                ...accomplishPluginManifest,
+                repository: {
+                    type: 'local' as any,
+                    url: '',
+                    dependencies: {}
+                }
+            };
+            const { pluginRootPath, effectiveManifest } = await this.pluginRegistry.preparePluginForExecution(manifestForExecution);
+            return await this.executePlugin(effectiveManifest, accomplishInputs, pluginRootPath, trace_id);
+        } catch (error: any) {
+            if (error.error_id && error.trace_id) {
+                throw error;
+            }
+            throw generateStructuredError({
+                error_code: GlobalErrorCodes.ACCOMPLISH_PLUGIN_EXECUTION_FAILED,
+                severity: ErrorSeverity.ERROR,
+                message: `Novel verb ACCOMPLISH plugin execution failed: ${error.message}`,
+                source_component,
+                original_error: error,
+                trace_id_param: trace_id,
+                contextual_info: { verb: novelVerbInfo.verb }
             });
         }
     }

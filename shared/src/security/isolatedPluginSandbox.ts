@@ -10,7 +10,7 @@ const ALWAYS_ALLOWED_ENV_VARS = [
   'BRAIN_URL',      // Brain service URL
   'LIBRARIAN_URL',  // Librarian service URL
   'POSTOFFICE_URL', // PostOffice service URL
-  'SECURITY_MANAGER_URL', // SecurityManager service URL
+  'SECURITYMANAGER_URL', // SecurityManager service URL
   'CLIENT_SECRET'   // Service client secret
 ];
 

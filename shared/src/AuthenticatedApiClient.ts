@@ -9,7 +9,7 @@ export class AuthenticatedApiClient {
   private api: AxiosInstance;
 
   constructor(private baseEntity: IBaseEntity) {
-    const securityManagerUrl = process.env.SECURITY_MANAGER_URL || 'securitymanager:5010';
+    const securityManagerUrl = process.env.SECURITYMANAGER_URL || 'securitymanager:5010';
     const componentType = this.baseEntity.componentType;
     const clientSecret = process.env.CLIENT_SECRET || 'stage7AuthSecret';
 

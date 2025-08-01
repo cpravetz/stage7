@@ -154,7 +154,6 @@ export class AuthorizationService {
             // Save user
             await updateUser(userId, user);
         } catch (error) {
-            analyzeError(error as Error);
             throw error;
         }
     }
@@ -169,7 +168,7 @@ export class AuthorizationService {
             // Get user
             const user = await findUserById(userId);
             if (!user) {
-                throw new Error(`User not found: ${userId}`);
+                return;
             }
 
             // Check if user has the role
@@ -185,7 +184,6 @@ export class AuthorizationService {
             // Save user
             await updateUser(userId, user);
         } catch (error) {
-            analyzeError(error as Error);
             throw error;
         }
     }

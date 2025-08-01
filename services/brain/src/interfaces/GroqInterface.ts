@@ -22,7 +22,7 @@ export class GroqInterface extends BaseInterface {
     }
 
     convertTextToText = async (args: ConvertParamsType): Promise<string> => {
-        const { service, prompt, modelName } = args;
+        const { service, prompt, modelName, responseType } = args;
 
         if (!prompt) {
             console.log('GroqInterface: No prompt provided for text-to-text conversion');
@@ -39,10 +39,10 @@ export class GroqInterface extends BaseInterface {
 
         console.log('GroqInterface: Calling chat method from convertTextToText');
         // Don't use this.chat directly, use the chat method of this instance
-        return this.chat(service, formattedMessages, { modelName: modelName });
+        return this.chat(service, formattedMessages, { modelName: modelName, responseType: responseType} );
     }
 
-    chat = async (service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string, response_format?: any }): Promise<string> => {
+    chat = async (service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string, responseType:string, response_format?: any }): Promise<string> => {
         console.log('GroqInterface: chat method called directly');
         try {
             if (!service || !service.isAvailable() || !service.apiKey) {
@@ -96,26 +96,20 @@ export class GroqInterface extends BaseInterface {
                 console.log(`GroqInterface: First message is very long (${formattedMessages[0].content.length} chars), it might be truncated by the API`);
             }
 
-            // Check if we need to request a JSON response
             const requestOptions: any = {
                 model: modelName,
                 messages: formattedMessages,
                 temperature: options.temperature || 0.7,
                 max_tokens: options.max_length || 6000,
-                stream: false
+                stream: false,
+                response_type: options.responseType || 'text'
             };
 
             // Add response_format if specified in options
             if (options.response_format) {
                 console.log(`GroqInterface: Setting response_format to ${JSON.stringify(options.response_format)}`);
                 requestOptions.response_format = options.response_format;
-            } /*else if (messages && messages.length > 0 && messages[0].content &&
-                      (messages[0].content.includes('JSON') || messages[0].content.includes('json'))) {
-                // If the message content mentions JSON, set response_format to JSON
-                console.log('GroqInterface: JSON format detected in message, setting response_format to JSON');
-                requestOptions.response_format = { type: 'json_object' };
-            }*/
-
+            }
             // Log the full request for debugging
             console.log(`GroqInterface: Full request options: ${JSON.stringify(requestOptions, (key, value) => {
                 // Truncate long message content for readability
@@ -139,12 +133,7 @@ export class GroqInterface extends BaseInterface {
                 const content = completion.choices[0].message.content || '';
 
                 // --- Ensure JSON if required ---
-                let requireJson = false;
-                if (options.modelName && options.modelName.toLowerCase().includes('code')) requireJson = true;
-                if (messages && messages.length > 0 && messages[0].content &&
-                    (messages[0].content.includes('JSON') || messages[0].content.includes('json'))) {
-                    requireJson = true;
-                }
+                let requireJson = options.responseType === 'json' ? true : false;
                 if (requireJson) {
                     return this.ensureJsonResponse(content, true);
                 }

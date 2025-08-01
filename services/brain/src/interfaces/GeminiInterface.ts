@@ -64,13 +64,13 @@ export class GeminiInterface extends BaseInterface {
     }
 
     async convertTextToText(args: ConvertParamsType): Promise<string> {
-        const { service, prompt, modelName } = args;
+        const { service, prompt, modelName, responseType } = args;
         if (!service) {
             throw new Error('GeminiInterface: No service provided for text-to-text conversion');
         }
 
         const messages: ExchangeType = [{ role: 'user', content: prompt || '' }];
-        return this.chat(service, messages, { modelName });
+        return this.chat(service, messages, { modelName, responseType} );
     }
 
     async convertImageToText(args: ConvertParamsType): Promise<string> {
@@ -214,7 +214,7 @@ export class GeminiInterface extends BaseInterface {
         }
     }
 
-    async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string }): Promise<string> {
+    async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string, responseType:string }): Promise<string> {
         try {
             if (!service || !service.isAvailable() || !service.apiKey) {
                 throw new Error('Gemini service is not available or API key is missing');
@@ -226,7 +226,6 @@ export class GeminiInterface extends BaseInterface {
             // Try to get model info
             try {
                 console.log('Trying to get Gemini model info...');
-                // We can't list models directly, but we can try a known model
                 genAI.getGenerativeModel({ model: 'gemini-1.5-pro' });
                 console.log('Successfully created model instance for gemini-1.5-pro');
             } catch (err) {
@@ -237,13 +236,21 @@ export class GeminiInterface extends BaseInterface {
             // Strip the 'google/' prefix if present
             let modelName = options.modelName || 'gemini-1.5-pro';
             if (modelName.startsWith('google/')) {
-                modelName = modelName.substring(7); // Remove 'google/' prefix
+                modelName = modelName.substring(7);
             }
 
             console.log(`Using Gemini model: ${modelName}`);
 
+            // If responseType is 'json', prepend a system prompt to enforce JSON output
+            let contentParts = messages;
+            if (options.responseType === 'json') {
+                contentParts = [
+                    { role: 'system', content: 'You must respond with valid JSON only. No explanations, no markdown, no code blocks - just pure JSON starting with { and ending with }.' },
+                    ...messages
+                ];
+            }
+
             // Create the model instance
-            // Note: The Google Generative AI client uses v1 by default
             const model = genAI.getGenerativeModel({
                 model: modelName,
                 generationConfig: {
@@ -255,9 +262,9 @@ export class GeminiInterface extends BaseInterface {
             });
 
             // Format messages for Gemini API
-            const formattedMessages = messages.map(msg => {
+            const formattedMessages = contentParts.map(msg => {
                 return {
-                    role: msg.role === 'user' ? 'user' : 'model',
+                    role: msg.role === 'user' ? 'user' : (msg.role === 'system' ? 'system' : 'model'),
                     parts: [{ text: msg.content || '' }]
                 };
             });
@@ -265,43 +272,27 @@ export class GeminiInterface extends BaseInterface {
             console.log(`Sending request to Gemini with model ${modelName}`);
 
             // For single message, use generateContent
-            if (messages.length === 1) {
-                const prompt = messages[0].content || '';
+            if (formattedMessages.length === 1) {
+                const prompt = formattedMessages[0].parts[0].text || '';
                 const result = await model.generateContent(prompt);
                 const response = result.response;
-                // --- Ensure JSON if required ---
-                let requireJson = false;
-                if (modelName.toLowerCase().includes('code')) requireJson = true;
-                if (messages && messages.length > 0 && messages[0].content &&
-                    (messages[0].content.includes('JSON') || messages[0].content.includes('json'))) {
-                    requireJson = true;
-                }
+                let requireJson = options.responseType === 'json' ? true : false;
                 if (requireJson) {
                     return this.ensureJsonResponse(response.text(), true);
                 }
                 return response.text();
-            }
-            // For chat conversations, use startChat and sendMessage
-            else {
-                // Create a chat session
+            } else {
+                // For chat conversations, use startChat and sendMessage
                 const chat = model.startChat({
-                    history: formattedMessages.slice(0, -1), // All messages except the last one
+                    history: formattedMessages.slice(0, -1),
                     generationConfig: {
                         temperature: options.temperature || 0.7,
                         maxOutputTokens: options.max_length || 2048,
                     },
                 });
-
-                // Send the last message
-                const lastMessage = messages[messages.length - 1].content || '';
+                const lastMessage = formattedMessages[formattedMessages.length - 1].parts[0].text || '';
                 const result = await chat.sendMessage(lastMessage);
-                // --- Ensure JSON if required ---
-                let requireJson = false;
-                if (modelName.toLowerCase().includes('code')) requireJson = true;
-                if (messages && messages.length > 0 && messages[0].content &&
-                    (messages[0].content.includes('JSON') || messages[0].content.includes('json'))) {
-                    requireJson = true;
-                }
+                let requireJson = options.responseType === 'json' ? true : false;
                 if (requireJson) {
                     return this.ensureJsonResponse(result.response.text(), true);
                 }
@@ -309,7 +300,7 @@ export class GeminiInterface extends BaseInterface {
             }
         } catch (error) {
             console.error('Error generating response from Gemini:', error instanceof Error ? error.message : error);
-            throw error; // Rethrow to allow the Brain to handle the error
+            throw error;
         }
     }
 

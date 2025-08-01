@@ -3,23 +3,6 @@
 CHAT Plugin - Manages interactive chat sessions with the user.
 """
 
-import sys
-import json
-import requests
-import os
-import time
-import logging
-
-# Set up logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
-
-# Environment Variables & Constants
-POSTOFFICE_URL = os.getenv('POSTOFFICE_URL', 'http://postoffice:5020')
-SECURITY_MANAGER_URL = os.getenv('SECURITY_MANAGER_URL', 'http://securitymanager:5010')
-CLIENT_SECRET = os.getenv('CLIENT_SECRET')
-PLUGIN_CLIENT_ID = "CapabilitiesManager"
-
 def get_auth_token():
     """Gets or refreshes the auth token from the Security Manager."""
     if not CLIENT_SECRET:
@@ -27,9 +10,9 @@ def get_auth_token():
         raise Exception("Plugin is not configured with a client secret.")
 
     try:
-        logger.info(f"Requesting auth token from {SECURITY_MANAGER_URL}")
+        logger.info(f"Requesting auth token from {SECURITYMANAGER_URL}")
         response = requests.post(
-            f"{SECURITY_MANAGER_URL}/auth/service",
+            f"{SECURITYMANAGER_URL}/auth/service",
             json={"componentType": PLUGIN_CLIENT_ID, "clientSecret": CLIENT_SECRET},
             timeout=15
         )
@@ -78,6 +61,112 @@ def ASK_USER_QUESTION(prompt: str) -> str:
     response_url = f"{POSTOFFICE_URL}/getUserInputResponse/{request_id}"
     max_wait_seconds = 300  # 5 minutes timeout
     poll_interval_seconds = 2
+import sys
+import json
+import requests
+import os
+import time
+import logging
+import tempfile
+import shutil
+import hashlib
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Error handler integration
+def send_to_errorhandler(error, context=None):
+    try:
+        import requests
+        errorhandler_url = os.environ.get('ERRORHANDLER_URL', 'errorhandler:5090')
+        payload = {
+            'error': str(error),
+            'context': context or ''
+        }
+        requests.post(f'http://{errorhandler_url}/analyze', json=payload, timeout=10)
+    except Exception as e:
+        print(f"Failed to send error to errorhandler: {e}")
+
+seen_hashes = set()
+
+# Environment Variables & Constants
+POSTOFFICE_URL = os.getenv('POSTOFFICE_URL', 'http://postoffice:5020')
+SECURITYMANAGER_URL = os.getenv('SECURITYMANAGER_URL', 'http://securitymanager:5010')
+CLIENT_SECRET = os.getenv('CLIENT_SECRET')
+PLUGIN_CLIENT_ID = "CapabilitiesManager"
+
+def robust_ask_user_question(prompt: str) -> str:
+    temp_dir = None
+    try:
+        # Deduplication: hash the prompt
+        hash_input = json.dumps({'prompt': prompt}, sort_keys=True)
+        input_hash = hashlib.sha256(hash_input.encode()).hexdigest()
+        if input_hash in seen_hashes:
+            raise Exception("Duplicate prompt detected. This prompt has already failed. Aborting to prevent infinite loop.")
+        seen_hashes.add(input_hash)
+
+        # Temp directory hygiene
+        temp_dir = tempfile.mkdtemp(prefix="chat_plugin_")
+        os.environ["CHAT_PLUGIN_TEMP_DIR"] = temp_dir
+
+        token = get_auth_token()
+        headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
+
+        # 1. Send the request to PostOffice to ask the user a question
+        request_id = None
+        try:
+            logger.info(f"Sending user input request to {POSTOFFICE_URL}")
+            request_data = {"question": prompt, "answerType": "text"}
+            response = requests.post(
+                f"{POSTOFFICE_URL}/sendUserInputRequest",
+                json=request_data,
+                headers=headers,
+                timeout=15
+            )
+            response.raise_for_status()
+            response_data = response.json()
+            request_id = response_data.get('request_id')
+            if not request_id:
+                logger.error("PostOffice did not return a request_id.")
+                raise Exception("PostOffice did not return a request_id")
+            logger.info(f"User input request sent. request_id: {request_id}")
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error sending user input request to PostOffice: {e}")
+            raise Exception(f"Error sending user input request: {e}")
+
+        # 2. Poll PostOffice for the user's response
+        response_url = f"{POSTOFFICE_URL}/getUserInputResponse/{request_id}"
+        max_wait_seconds = 300  # 5 minutes timeout
+        poll_interval_seconds = 2
+        waited = 0
+        while waited < max_wait_seconds:
+            try:
+                poll_response = requests.get(response_url, headers=headers, timeout=10)
+                if poll_response.status_code == 200:
+                    poll_data = poll_response.json()
+                    if poll_data.get('status') == 'completed':
+                        answer = poll_data.get('answer', '')
+                        # Strict output schema validation
+                        if not isinstance(answer, str):
+                            raise ValueError("Answer must be a string.")
+                        return answer
+                elif poll_response.status_code == 404:
+                    pass  # Not ready yet
+            except Exception as poll_err:
+                logger.warning(f"Polling error: {poll_err}")
+            time.sleep(poll_interval_seconds)
+            waited += poll_interval_seconds
+        raise Exception("Timed out waiting for user response.")
+    except Exception as e:
+        send_to_errorhandler(e, context=prompt)
+        return "ERROR: " + str(e)
+    finally:
+        if temp_dir and os.path.exists(temp_dir):
+            try:
+                shutil.rmtree(temp_dir)
+            except Exception as cleanup_err:
+                print(f"Failed to clean up temp dir {temp_dir}: {cleanup_err}")
     start_time = time.time()
 
     logger.info(f"Polling for response at {response_url}")

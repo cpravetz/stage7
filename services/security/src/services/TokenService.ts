@@ -2,7 +2,6 @@ import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
 import { User } from '../models/User';
 import { Token, TokenType, TokenPayload, TokenConfig, DEFAULT_TOKEN_CONFIG } from '../models/Token';
-import { analyzeError } from '@cktmcs/errorhandler';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -150,7 +149,6 @@ export class TokenService {
 
             return tokenRecord;
         } catch (error) {
-            analyzeError(error as Error);
             throw error;
         }
     }
@@ -196,7 +194,6 @@ export class TokenService {
 
             return payload;
         } catch (error) {
-            analyzeError(error as Error);
             throw error;
         }
     }
@@ -237,7 +234,6 @@ export class TokenService {
                 });
             }
         } catch (error) {
-            analyzeError(error as Error);
             throw error;
         }
     }
@@ -270,7 +266,6 @@ export class TokenService {
                 await this.revokeToken(token.id, reason);
             }
         } catch (error) {
-            analyzeError(error as Error);
             throw error;
         }
     }
@@ -328,7 +323,6 @@ export class TokenService {
         try {
             return jwt.decode(token) as TokenPayload;
         } catch (error) {
-            analyzeError(error as Error);
             return null;
         }
     }
@@ -352,7 +346,6 @@ export class TokenService {
 
             return { accessToken, refreshToken };
         } catch (error) {
-            analyzeError(error as Error);
             throw error;
         }
     }
@@ -366,7 +359,6 @@ export class TokenService {
         try {
             return this.generateToken(user, TokenType.VERIFICATION);
         } catch (error) {
-            analyzeError(error as Error);
             throw error;
         }
     }
@@ -380,7 +372,6 @@ export class TokenService {
         try {
             return this.generateToken(user, TokenType.PASSWORD_RESET);
         } catch (error) {
-            analyzeError(error as Error);
             throw error;
         }
     }
@@ -395,7 +386,6 @@ export class TokenService {
         try {
             return this.generateToken(user, TokenType.API, clientInfo);
         } catch (error) {
-            analyzeError(error as Error);
             throw error;
         }
     }

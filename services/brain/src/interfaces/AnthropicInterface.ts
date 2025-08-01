@@ -20,7 +20,7 @@ export class AnthropicInterface extends BaseInterface {
         });        
     }
 
-    async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string, timeout?: number }): Promise<string> {
+    async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string, timeout?: number, responseType?: string }): Promise<string> {
         const max_tokens = options.max_length || 4000;
         const trimmedMessages = this.trimMessages(messages, max_tokens);
     
@@ -63,12 +63,7 @@ export class AnthropicInterface extends BaseInterface {
             }
 
             // --- Ensure JSON if required ---
-            let requireJson = false;
-            if (options.modelName && options.modelName.toLowerCase().includes('code')) requireJson = true;
-            if (messages && messages.length > 0 && messages[0].content &&
-                (messages[0].content.includes('JSON') || messages[0].content.includes('json'))) {
-                requireJson = true;
-            }
+            let requireJson = options.responseType === 'json' ? true : false;
             if (requireJson) {
                 return this.ensureJsonResponse(fullResponse, true);
             }
@@ -93,28 +88,22 @@ export class AnthropicInterface extends BaseInterface {
     }
 
     async convertTextToText(args: ConvertParamsType): Promise<string> {
-        const { service, prompt, modelName } = args;
+        const { service, prompt, modelName, responseType } = args;
         if (!service) {
             throw new Error('AnthropicInterface: No service provided for text-to-text conversion');
         }
         const messages = [{ role: 'user', content: prompt || '' }];
-        return this.chat(service, messages, { modelName: modelName });
+        return this.chat(service, messages, { modelName: modelName, responseType: responseType });
     }
 
     async convertTextToCode(args: ConvertParamsType): Promise<string> {
-        const { service, prompt, modelName } = args;
+        const { service, prompt, modelName, responseType } = args;
         if (!service) {
             throw new Error('AnthropicInterface: No service provided for text-to-code conversion');
         }
 
         // Check if this is a JSON request based on prompt content
-        const isJsonRequest = prompt && (
-            prompt.includes('JSON') ||
-            prompt.includes('json') ||
-            prompt.includes('{"type":') ||
-            prompt.includes('must start with {') ||
-            prompt.includes('return a JSON object')
-        );
+        const isJsonRequest = responseType === 'json';
 
         const systemMessage = isJsonRequest
             ? 'You are a JSON generation assistant. You must respond with valid JSON only. No explanations, no markdown, no code blocks - just pure JSON starting with { and ending with }.'

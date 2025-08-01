@@ -34,7 +34,7 @@ class AgentSetManager {
     constructor(
         maxAgentsPerSet: number = 250,
         postOfficeUrl: string = 'postoffice:5020',
-        securityManagerUrl: string = process.env.SECURITY_MANAGER_URL || 'securitymanager:5010',
+        securityManagerUrl: string = process.env.SECURITYMANAGER_URL || 'securitymanager:5010',
         public authenticatedApi?: any // Optional authenticatedApi from TrafficManager
     ) {
         this.maxAgentsPerSet = maxAgentsPerSet;

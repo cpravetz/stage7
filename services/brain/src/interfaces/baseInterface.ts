@@ -6,6 +6,7 @@ export type ConvertParamsType = {
     prompt?: string;
     modelName?: string;
     [key: string]: any;
+    contentType: string;
 };
 
 /**
@@ -26,7 +27,7 @@ export abstract class BaseInterface {
         this.converters = new Map(); // Initialize converters map
     }
 
-    abstract chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number }): Promise<string>;
+    abstract chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, responseType?: string }): Promise<string>;
 
     abstract convert(service: BaseService, conversionType: LLMConversationType, convertParams: ConvertParamsType): Promise<any>;
 
@@ -230,86 +231,6 @@ export abstract class BaseInterface {
         console.log('[baseInterface] No valid JSON found in text');
         return null;
     }
-
-    /**
-     * Generic JSON cleaning - removes markdown blocks, fixes common JSON issues
-     * Does NOT handle domain-specific schema validation
-     */
-    /*
-    private cleanJsonResponse(response: string): string {
-        console.debug("Starting cleanJsonResponse")
-        let cleaned = response.trim();
-
-        // Remove all characters before the first '[' or '{' (whichever comes first)
-        // and after the last ']' or '}' (whichever comes last)
-        const firstBraceIndex = cleaned.indexOf('{');
-        const firstBracketIndex = cleaned.indexOf('[');
-        let startIndex = -1;
-        if (firstBraceIndex === -1) {
-            startIndex = firstBracketIndex;
-        } else if (firstBracketIndex === -1) {
-            startIndex = firstBraceIndex;
-        } else {
-            startIndex = Math.min(firstBraceIndex, firstBracketIndex);
-        }
-
-           const lastBraceIndex = cleaned.lastIndexOf('}');
-        const lastBracketIndex = cleaned.lastIndexOf(']');
-        let endIndex = -1;
-        if (lastBraceIndex === -1) {
-            endIndex = lastBracketIndex;
-        } else if (lastBracketIndex === -1) {
-            endIndex = lastBraceIndex;
-        } else {
-            endIndex = Math.max(lastBraceIndex, lastBracketIndex);
-        }
-
-        if (startIndex !== -1 && endIndex !== -1 && endIndex >= startIndex) {
-            cleaned = cleaned.substring(startIndex, endIndex + 1);
-        }
-
-        console.debug("After trim and substring", cleaned)
-
-        // Apply common JSON fixes
-        const commonFixes = [
-            // Enhanced trailing comma removal
-            (s: string) => s.replace(/,\s*([\]\}])/g, '$1'),
-            // Fix single quotes to double quotes (more careful with content)
-            (s: string) => s.replace(/'([^']*)':/g, '"$1":'),
-            // Remove single-line comments
-            (s: string) => s.replace(/\/\/.*$/gm, ''),
-            // Remove multi-line comments
-            (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, ''),
-            // Add quotes to unquoted keys - improved pattern
-            (s: string) => s.replace(/(?<!")(\b[a-zA-Z_][a-zA-Z0-9_]*\b)(?=\s*:)/g, '"$1"'),
-            // Fix missing commas between key-value pairs
-            (s: string) => s.replace(/("\s*:\s*(?:true|false|null|"[^"]*"|-?[\d\.]+(?:e[+-]?\d+)?)\s*)\n(\s*")/gi, '$1,\n$2'),
-            // Fix key"":""value typos
-            (s: string) => s.replace(/("\s*":)":"\s*([^"]*")/g, '$1"$2"'),
-            // Fix unescaped newlines in strings
-            (s: string) => s.replace(/\\n(?!(t|r|b|f|\\|'|"))/g, '\n'),
-            // Fix missing commas between array elements
-            (s: string) => s.replace(/(\})\s*\n\s*(\{)/g, '$1,\n$2'),
-            // Fix missing commas between object properties on same line
-            (s: string) => s.replace(/("\s*:\s*"(?:[^"\\]|\\.)*"\s+)(")/g, '$1, $2'),
-        ];
-
-        const applyFixes = (s: string): string => {
-            return commonFixes.reduce((acc, fix) => fix(acc), s);
-        };
-
-        cleaned = applyFixes(cleaned);
-
-        // Try to extract JSON from malformed text if direct parsing fails
-        try {
-            JSON.parse(cleaned);
-            return cleaned; // Already valid
-        } catch (e) {
-            console.log(`[BaseInterface] Failed Parsing ${cleaned}`);
-            return cleaned; // Return best effort
-        }
-    }
-    */
 
     protected trimMessages(messages: ExchangeType, maxTokens: number): ExchangeType {
         console.debug("Starting trimMessages")

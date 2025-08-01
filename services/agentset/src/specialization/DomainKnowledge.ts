@@ -337,7 +337,8 @@ export class DomainKnowledge {
             content: `Task Description: ${taskDescription}\n\nKnowledge Items:\n${items.map((item, index) => `${index + 1}. ${item.title}: ${item.content.substring(0, 100)}...`).join('\n')}\n\nPlease return the indices of the relevant knowledge items as a comma-separated list (e.g., "1,3,5"). If none are relevant, return "none".`
           }
         ],
-        optimization: 'accuracy'
+        optimization: 'accuracy',
+        responseType: 'text'
       });
 
       // Parse LLM response
@@ -413,7 +414,8 @@ export class DomainKnowledge {
             content: `Domain: ${this.domains.get(domainId)?.name}\n\nContent:\n${content.substring(0, 10000)}\n\nPlease extract knowledge items from this content and format them as JSON objects with title, content, and tags properties. Return the items as a JSON array.`
           }
         ],
-        optimization: 'accuracy'
+        optimization: 'accuracy',
+        responseType: 'text'
       });
 
       // Parse LLM response

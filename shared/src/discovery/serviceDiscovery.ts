@@ -14,7 +14,7 @@ export class ServiceDiscovery {
 
   constructor(consulUrl: string = process.env.CONSUL_URL || 'consul:8500') {
     this.consulUrl = consulUrl;
-    this.securityManagerUrl = process.env.SECURITY_MANAGER_URL || 'securitymanager:5010';
+    this.securityManagerUrl = process.env.SECURITYMANAGER_URL || 'securitymanager:5010';
 
     // Create authenticated API client
     this.authenticatedApi = createAuthenticatedAxios(

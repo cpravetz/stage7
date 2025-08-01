@@ -13,7 +13,7 @@ import { MessageType } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { Step, StepStatus, createFromPlan } from './Step';
 import { StateManager } from '../utils/StateManager';
-import { classifyStepError } from '../utils/ErrorClassifier';
+import { classifyStepError, StepErrorType } from '../utils/ErrorClassifier';
 import { CollaborationMessage, CollaborationMessageType, ConflictResolution as ConflictResolutionData, ConflictResolutionResponse, TaskDelegationRequest, TaskResult, KnowledgeSharing, ConflictResolutionRequest } from '../collaboration/CollaborationProtocol';
 
 
@@ -51,8 +51,16 @@ export class Agent extends BaseEntity {
         this.agentSetUrl = config.agentSetUrl;
         this.status = AgentStatus.INITIALIZING;
         this.dependencies = config.dependencies || [];
-        if (config.missionContext) {
+        // Initialize missionContext. Prefer the explicit context, but fall back to the 'goal' input.
+        // This is critical for the replanFromFailure loop to have the original goal.
+        if (config.missionContext && config.missionContext.trim() !== '') {
             this.missionContext = config.missionContext;
+        } else if (this.inputValues?.has('goal')) {
+            const goalInput = this.inputValues.get('goal');
+            if (goalInput?.value && typeof goalInput.value === 'string') {
+                this.missionContext = goalInput.value;
+                console.log(`[Agent Constructor] Initialized missionContext from 'goal' input for agent ${this.id}.`);
+            }
         }
         // Handle role and roleCustomizations if they exist in the config
         if ('role' in config && typeof config.role === 'string') {
@@ -111,6 +119,9 @@ export class Agent extends BaseEntity {
     }
 
     private async runUntilDone() {
+        // Send initial status update to TrafficManager
+        await this.notifyTrafficManager();
+
         while (this.status !== AgentStatus.COMPLETED &&
                this.status !== AgentStatus.ERROR &&
                this.status !== AgentStatus.ABORTED) {
@@ -191,8 +202,6 @@ Please consider this context and the available plugins when planning and executi
             }
             // Removed "Agent is starting..." logs from here. It's now in the constructor's then block.
 
-            // Send initial status update to TrafficManager
-            await this.notifyTrafficManager();
 
             while (this.status === AgentStatus.RUNNING &&
                    this.steps.some(step => step.status === StepStatus.PENDING || step.status === StepStatus.RUNNING)) {
@@ -734,8 +743,7 @@ Please consider this context and the available plugins when planning and executi
             exchanges: [...this.conversation, { role: 'user', content: prompt }], // Combine history with current prompt
             optimization: optimization,
             ConversationType: ConversationType,
-            // Optionally include missionContext directly if not already in openingInstruction
-            // missionContext: this.missionContext
+            responseType: 'text'
         };
         console.log(`[Agent ${this.id}] useBrainForReasoning: Sending exchanges to Brain:`, JSON.stringify(reasoningInput.exchanges, null, 2));
 
@@ -839,10 +847,14 @@ Please consider this context and the available plugins when planning and executi
 
             //console.log('Agent: Executing serialized action with CapabilitiesManager:', payload);
 
-            // Add timeout and abort signal to the request
+            // Add extended timeout for CapabilitiesManager calls, especially for ACCOMPLISH actions
+            // that may need to call Brain service with long model retry timeouts
+            const timeout = step.actionVerb === 'ACCOMPLISH' ? 1500000 : 300000; // 25 minutes for ACCOMPLISH, 5 minutes for others
+
             const response = await this.authenticatedApi.post(
                 `http://${this.capabilitiesManagerUrl}/executeAction`,
-                payload
+                payload,
+                { timeout }
             );
 
             return MapSerializer.transformFromSerialization(response.data);
@@ -1824,44 +1836,30 @@ Please consider this context and the available plugins when planning and executi
 
     private async handleStepFailure(step: Step, error: Error): Promise<void> {
         step.lastError = error;
-        const errorType = classifyStepError(error);
+        const errorType = classifyStepError(step.lastError);
 
-        if (errorType === 'transient' && step.retryCount < step.maxRetries) {
+        if (errorType === StepErrorType.TRANSIENT && step.retryCount < step.maxRetries) {
             step.retryCount++;
             step.status = StepStatus.PENDING;
-            console.log(`Step ${step.id} failed with transient error. Retrying (${step.retryCount}/${step.maxRetries})...`);
+            this.say(`Step ${step.actionVerb} failed with a temporary error. Retrying...`);
             await this.logEvent({
                 eventType: 'step_retry',
                 agentId: this.id,
                 stepId: step.id,
                 retryCount: step.retryCount,
                 maxRetries: step.maxRetries,
-                error: error.message,
+                error: step.lastError.message,
                 timestamp: new Date().toISOString()
             });
         } else {
+            // Permanent failure
             step.status = StepStatus.ERROR;
-            this.propagateFailure(step.id);
+            this.say(`Step ${step.actionVerb} failed permanently. Attempting to create a new plan to recover.`);
+
+            // Intelligent Replanning
             await this.replanFromFailure(step);
         }
         await this.notifyTrafficManager();
-    }
-
-    private propagateFailure(failedStepId: string): void {
-        const failedStepIndex = this.steps.findIndex(s => s.id === failedStepId);
-        if (failedStepIndex === -1) return;
-
-        for (let i = failedStepIndex + 1; i < this.steps.length; i++) {
-            const currentStep = this.steps[i];
-            const dependsOnFailedStep = currentStep.dependencies.some(dep => {
-                const sourceStep = this.steps.find(s => s.id === dep.sourceStepId);
-                return sourceStep && (sourceStep.status === StepStatus.ERROR || sourceStep.id === failedStepId);
-            });
-
-            if (dependsOnFailedStep) {
-                currentStep.status = StepStatus.ERROR;
-            }
-        }
     }
 
     private async getCompletedWorkProductsSummary(): Promise<string> {
@@ -1870,23 +1868,61 @@ Please consider this context and the available plugins when planning and executi
             if (step.status === StepStatus.COMPLETED && step.result) {
                 summary += `Step ${step.stepNo}: ${step.actionVerb}\n`;
                 for (const output of step.result) {
-                    summary += `  - ${output.name}: ${output.resultDescription}\n`;
+                    if (output.resultType !== PluginParameterType.PLAN) {
+                        summary += `  - ${output.name}: ${output.resultDescription}\n`;
+                    }
                 }
             }
         }
         return summary;
     }
 
-    private async replanFromFailure(failedStep: Step): Promise<void> {
-        const workProductsSummary = await this.getCompletedWorkProductsSummary();
-        const recoveryGoal = `
-Original Mission Goal: ${this.missionContext}
-Failed Step: ${failedStep.actionVerb} - ${failedStep.description}
-Error: ${failedStep.lastError.message}
-Completed Work Products:
-${workProductsSummary}
+    private static replannedSteps: WeakSet<Step> = new WeakSet();
 
-Create a new plan to achieve the original goal, avoiding the previous error.
+    private async replanFromFailure(failedStep: Step): Promise<void> {
+        // Enhanced loop detection - check for multiple failures of the same action verb
+        const failedVerb = failedStep.actionVerb;
+        const recentFailures = this.steps.filter(s =>
+            s.actionVerb === failedVerb &&
+            s.status === StepStatus.ERROR &&
+            s.id !== failedStep.id
+        );
+
+        if (Agent.replannedSteps.has(failedStep) || recentFailures.length >= 2) {
+            console.warn(`[Agent ${this.id}] Multiple failures detected for action verb '${failedVerb}'. Aborting further replanning to prevent loop.`);
+            this.status = AgentStatus.ERROR;
+            this.say(`Multiple failures for action verb '${failedVerb}'. This suggests a fundamental issue that cannot be resolved through replanning. Mission aborted.`);
+            return;
+        }
+        Agent.replannedSteps.add(failedStep);
+
+        const errorMsg = failedStep.lastError?.message || 'Unknown error';
+        const workProductsSummary = await this.getCompletedWorkProductsSummary();
+
+        // Smarter recovery strategy based on error type
+        if (/novel.*verb|unknown.*verb|not.*supported/i.test(errorMsg)) {
+            // For novel verb failures, try to break down the task differently
+            await this.handleNovelVerbFailure(failedStep, errorMsg);
+            return;
+        }
+
+        if (/schema|validation|parse|malformed/i.test(errorMsg)) {
+            // For schema failures, the issue is likely in the ACCOMPLISH plugin itself
+            console.error(`[Agent ${this.id}] Schema validation failure suggests a bug in the ACCOMPLISH plugin. Error: ${errorMsg}`);
+            this.status = AgentStatus.ERROR;
+            this.say(`Schema validation failure in planning system. This requires system-level debugging. Mission aborted.`);
+            return;
+        }
+
+        // For other errors, create a focused recovery plan
+        const recoveryGoal = `
+**Recovery Task:** The step "${failedStep.actionVerb}" failed with error: "${errorMsg}"
+
+**Original Mission:** ${this.missionContext}
+
+**Completed Work:** ${workProductsSummary}
+
+**Instructions:** Create a simple, alternative approach to accomplish what the failed step was trying to do. Use only basic, well-known action verbs like SEARCH, SCRAPE, RUN_CODE, TEXT_ANALYSIS, and THINK. Do not repeat the failed approach.
         `;
 
         const recoveryStep = new Step({
@@ -1895,10 +1931,45 @@ Create a new plan to achieve the original goal, avoiding the previous error.
             inputValues: new Map([
                 ['goal', { inputName: 'goal', value: recoveryGoal, valueType: PluginParameterType.STRING, args: {} }]
             ]),
-            description: 'Recover from permanent failure',
+            description: `Recovery plan for failed step: ${failedStep.actionVerb}`,
             persistenceManager: this.agentPersistenceManager
         });
 
         this.steps.push(recoveryStep);
+        await this.logEvent({ eventType: 'step_created', ...recoveryStep.toJSON() });
+        console.log(`[Agent ${this.id}] Created focused recovery step ${recoveryStep.id} for failed step ${failedStep.actionVerb}.`);
+    }
+
+    private async handleNovelVerbFailure(failedStep: Step, errorMsg: string): Promise<void> {
+        console.log(`[Agent ${this.id}] Handling novel verb failure for: ${failedStep.actionVerb}`);
+
+        // Instead of creating another ACCOMPLISH step, try to break down the task manually
+        const taskBreakdownGoal = `
+**Task:** Break down the action "${failedStep.actionVerb}" into 2-3 simple, concrete steps.
+
+**Context:** ${failedStep.description || 'No additional context provided'}
+
+**Available Inputs:** ${JSON.stringify(Array.from(failedStep.inputValues?.keys() || []))}
+
+**Instructions:**
+1. Use only basic action verbs: SEARCH, SCRAPE, RUN_CODE, TEXT_ANALYSIS, THINK
+2. Each step should be specific and actionable
+3. Focus on the core objective of "${failedStep.actionVerb}"
+4. Return a simple plan with 2-3 steps maximum
+        `;
+
+        const breakdownStep = new Step({
+            actionVerb: 'THINK',
+            stepNo: this.steps.length + 1,
+            inputValues: new Map([
+                ['prompt', { inputName: 'prompt', value: taskBreakdownGoal, valueType: PluginParameterType.STRING, args: {} }]
+            ]),
+            description: `Manual breakdown of failed novel verb: ${failedStep.actionVerb}`,
+            persistenceManager: this.agentPersistenceManager
+        });
+
+        this.steps.push(breakdownStep);
+        await this.logEvent({ eventType: 'step_created', ...breakdownStep.toJSON() });
+        console.log(`[Agent ${this.id}] Created manual breakdown step ${breakdownStep.id} for novel verb failure.`);
     }
 }

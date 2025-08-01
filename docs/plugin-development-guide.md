@@ -298,7 +298,7 @@ import requests
 import os
 
 def get_auth_token():
-    security_manager_url = os.getenv('SECURITY_MANAGER_URL', 'securitymanager:5010')
+    security_manager_url = os.getenv('SECURITYMANAGER_URL', 'securitymanager:5010')
     response = requests.post(
         f"http://{security_manager_url}/generateToken",
         json={

@@ -172,7 +172,6 @@ export class AuthenticationService {
 
             return { user, accessToken, refreshToken };
         } catch (error) {
-            analyzeError(error as Error);
             throw error;
         }
     }

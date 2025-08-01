@@ -27,7 +27,7 @@ export class ConfigManager {
         // Create authenticated API client
         this.authenticatedApi = createAuthenticatedAxios(
             'CapabilitiesManagerConfig',
-            process.env.SECURITY_MANAGER_URL || 'securitymanager:5010',
+            process.env.SECURITYMANAGER_URL || 'securitymanager:5010',
             process.env.CLIENT_SECRET || 'stage7AuthSecret'
         );
     }

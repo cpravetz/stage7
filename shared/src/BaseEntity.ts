@@ -32,7 +32,7 @@ export class BaseEntity implements IBaseEntity {
   protected mqClient: MessageQueueClient | null = null;
   protected serviceDiscovery: ServiceDiscovery | null = null;
   protected tokenManager: ServiceTokenManager | null = null;
-  protected securityManagerUrl: string = process.env.SECURITY_MANAGER_URL || 'securitymanager:5010';
+  protected securityManagerUrl: string = process.env.SECURITYMANAGER_URL || 'securitymanager:5010';
 
   constructor(id: string, componentType: string, urlBase: string, port: string, skipPostOfficeRegistration: boolean = false) {
     this.id = id;

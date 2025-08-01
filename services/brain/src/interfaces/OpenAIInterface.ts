@@ -1,7 +1,7 @@
 import { BaseInterface, ConvertParamsType } from './baseInterface';
 import { LLMConversationType } from '@cktmcs/shared';
 import OpenAI from 'openai';
-import { ChatCompletionMessageParam } from 'openai/resources/chat';
+import { ChatCompletionMessageParam, ChatCompletion, ChatCompletionChunk } from 'openai/resources/chat';
 import { BaseService, ExchangeType } from '../services/baseService';
 import fs from 'fs';
 import { ImageEditParams, ImageGenerateParams } from 'openai/resources';
@@ -45,33 +45,71 @@ export class OpenAIInterface extends BaseInterface {
         });
     }
 
-    async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string }): Promise<string> {
+    async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string, responseType:string }): Promise<string> {
         const max_length = options.max_length || 4000;
         const temperature = options.temperature || 0.7;
         const trimmedMessages = this.trimMessages(messages, max_length);
+
+        // Type guard to check if an object is AsyncIterable
+        function isAsyncIterable(obj: any): obj is AsyncIterable<ChatCompletionChunk> {
+            return obj && typeof obj[Symbol.asyncIterator] === 'function';
+        }
+
         try {
             const openAiApiClient = new OpenAI({ apiKey: service.apiKey });
-            const stream = await openAiApiClient.chat.completions.create({
+            const requestOptions: any = {
                 model: options.modelName || 'gpt-4',
                 messages: trimmedMessages as ChatCompletionMessageParam[],
                 temperature,
                 max_tokens: max_length,
                 stream: true
-            });
-    
+            };
+            // If responseType is 'json', set response_format and prepend system prompt
+            if (options.responseType === 'json') {
+                requestOptions.response_format = { type: 'json_object' };
+                if (Array.isArray(requestOptions.messages)) {
+                    requestOptions.messages.unshift({ role: 'system', content: 'You must respond with valid JSON only. No explanations, no markdown, no code blocks - just pure JSON starting with { and ending with }.' });
+                }
+            }
             let fullResponse = '';
-            for await (const chunk of stream) {
-                const content = chunk.choices[0]?.delta?.content || '';
-                fullResponse += content;
+            // Try streaming first, fallback to non-streaming if not supported
+            let streamOrResponse: ChatCompletion | AsyncIterable<ChatCompletionChunk>;
+            try {
+                streamOrResponse = await openAiApiClient.chat.completions.create(requestOptions);
+                if (isAsyncIterable(streamOrResponse)) {
+                    // Streaming response
+                    for await (const chunk of streamOrResponse) {
+                        let content = '';
+                        if (chunk && Array.isArray(chunk.choices) && chunk.choices[0]) {
+                            const choice = chunk.choices[0];
+                            if ('delta' in choice && choice.delta && typeof choice.delta === 'object' && 'content' in choice.delta) {
+                                content = typeof choice.delta.content === 'string' ? choice.delta.content : '';
+                            } else if ('message' in choice && choice.message && typeof choice.message === 'object' && 'content' in choice.message) {
+                                content = typeof choice.message.content === 'string' ? choice.message.content : '';
+                            }
+                        }
+                        fullResponse += content;
+                    }
+                } else {
+                    // Non-streaming response
+                    if (streamOrResponse && Array.isArray(streamOrResponse.choices) && streamOrResponse.choices[0]) {
+                        const choice = streamOrResponse.choices[0];
+                        if ('message' in choice && choice.message && typeof choice.message === 'object' && 'content' in choice.message) {
+                            fullResponse = typeof choice.message.content === 'string' ? choice.message.content : '';
+                        }
+                    }
+                }
+            } catch (streamErr) {
+                // If streaming fails, try non-streaming
+                requestOptions.stream = false;
+                const response = await openAiApiClient.chat.completions.create(requestOptions);
+                if (response.choices && response.choices[0] && response.choices[0].message && response.choices[0].message.content) {
+                    fullResponse = response.choices[0].message.content;
+                }
             }
-    
+
             // --- Ensure JSON if required ---
-            let requireJson = false;
-            if (options.modelName && options.modelName.toLowerCase().includes('code')) requireJson = true;
-            if (messages && messages.length > 0 && messages[0].content &&
-                (messages[0].content.includes('JSON') || messages[0].content.includes('json'))) {
-                requireJson = true;
-            }
+            let requireJson = options.responseType === 'json' ? true : false;
             if (requireJson) {
                 return this.ensureJsonResponse(fullResponse, true);
             }

@@ -9,15 +9,15 @@ interface Props {
 const ConversationHistory: React.FC<Props> = ({ history }) => {
   const historyContainerRef = useRef<HTMLDivElement>(null);
   const shouldScrollToBottomRef = useRef(true);
-
+  
   // Before the DOM updates, check if the user is scrolled to the bottom.
   // If they are not, we won't auto-scroll on the next update.
+  const prevHistoryLengthRef = React.useRef(history.length);
   useLayoutEffect(() => {
     const element = historyContainerRef.current;
     if (element) {
-      // If the history is empty, it's likely a temporary state during a refresh.
-      // Don't update our scroll decision, to prevent jumping when the real data arrives.
-      if (history.length === 0) {
+      // Only update scroll decision if history length changed
+      if (history.length === 0 || history.length === prevHistoryLengthRef.current) {
         return;
       }
 
@@ -25,14 +25,20 @@ const ConversationHistory: React.FC<Props> = ({ history }) => {
       const isAtBottom = element.scrollHeight - element.clientHeight <= element.scrollTop + scrollThreshold;
       shouldScrollToBottomRef.current = isAtBottom;
     }
+    prevHistoryLengthRef.current = history.length;
   }, [history]);
 
   // After the DOM updates with new history, scroll to the bottom if needed.
   useEffect(() => {
     const element = historyContainerRef.current;
-    if (element && shouldScrollToBottomRef.current) {
+    if (
+      element &&
+      shouldScrollToBottomRef.current &&
+      history.length > prevHistoryLengthRef.current
+    ) {
       element.scrollTop = element.scrollHeight;
     }
+    prevHistoryLengthRef.current = history.length;
   }, [history]);
 
   const theme = useTheme();

@@ -21,7 +21,7 @@ export class MongoUserRepository {
      */
     constructor(
         mongoUrl: string = process.env.MONGO_URL || 'mongodb://mongo:27017',
-        dbName: string = 'stage7',
+        dbName: string = 'librarianDB',
         collectionName: string = 'users'
     ) {
         this.client = new MongoClient(mongoUrl);

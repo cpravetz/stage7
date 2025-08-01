@@ -10,7 +10,7 @@ export class MistralInterface extends BaseInterface {
         super('mistral');
     }
 
-    async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string } = {}): Promise<string> {
+    async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string, responseType?: string   } = {}): Promise<string> {
         try {
             if (!service || !service.isAvailable()) {
                 throw new Error('Mistral service is not available');
@@ -23,23 +23,35 @@ export class MistralInterface extends BaseInterface {
                 throw new Error('Mistral service configuration is incomplete');
             }
 
+            // If responseType is 'json', prepend a system prompt to enforce JSON output
+            let contentParts = messages;
+            if (options.responseType === 'json') {
+                contentParts = [
+                    { role: 'system', content: 'You must respond with valid JSON only. No explanations, no markdown, no code blocks - just pure JSON starting with { and ending with }.' },
+                    ...messages
+                ];
+            }
+
             // Format messages for Mistral API
-            const formattedMessages = messages.map(msg => ({
+            const formattedMessages = contentParts.map(msg => ({
                 role: msg.role,
                 content: msg.content || ''
             }));
 
             console.log(`Sending request to Mistral at ${apiUrl}/chat/completions`);
 
+            const requestBody = {
+                model: options.modelName || 'mistral-small-latest',
+                messages: formattedMessages,
+                temperature: options.temperature || 0.7,
+                max_tokens: options.max_length || 8192,
+                top_p: 0.95
+            };
+            console.log('Mistral Request Body:', JSON.stringify(requestBody, null, 2)); // Log the request body
+
             const response = await axios.post(
                 `${apiUrl}/chat/completions`,
-                {
-                    model: options.modelName || 'mistral-small-latest',
-                    messages: formattedMessages,
-                    temperature: options.temperature || 0.7,
-                    max_tokens: options.max_length || 2048,
-                    top_p: 0.95
-                },
+                requestBody,
                 {
                     headers: {
                         'Authorization': `Bearer ${apiKey}`,
@@ -51,12 +63,7 @@ export class MistralInterface extends BaseInterface {
             if (response.data && response.data.choices && response.data.choices.length > 0) {
                 let content = response.data.choices[0].message.content;
                 // --- Ensure JSON if required ---
-                let requireJson = false;
-                if (options.modelName && options.modelName.toLowerCase().includes('code')) requireJson = true;
-                if (messages && messages.length > 0 && messages[0].content &&
-                    (messages[0].content.includes('JSON') || messages[0].content.includes('json'))) {
-                    requireJson = true;
-                }
+                let requireJson = options.responseType === 'json' ? true : false;
                 if (requireJson) {
                     return this.ensureJsonResponse(content, true);
                 }
@@ -82,7 +89,8 @@ export class MistralInterface extends BaseInterface {
             return this.chat(service, [{ role: 'user', content: convertParams.prompt }], {
                 temperature: convertParams.temperature,
                 max_length: convertParams.max_length,
-                modelName: convertParams.modelName
+                modelName: convertParams.modelName,
+                responseType: convertParams.responseType
             });
         }
 
@@ -91,7 +99,7 @@ export class MistralInterface extends BaseInterface {
             return this.chat(service, convertParams.messages, {
                 temperature: convertParams.temperature,
                 max_length: convertParams.max_length,
-                modelName: convertParams.modelName
+                modelName: convertParams.modelName, responseType: convertParams.responseType,
             });
         }
 

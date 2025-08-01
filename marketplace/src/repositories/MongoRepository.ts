@@ -11,7 +11,7 @@ export class MongoRepository implements PluginRepository {
     constructor(config: RepositoryConfig) {
         this.librarianUrl = config.url || process.env.LIBRARIAN_URL || 'librarian:5040';
         this.collection = config.options?.collection || 'plugins';
-        this.securityManagerUrl = process.env.SECURITY_MANAGER_URL || 'securitymanager:5010';
+        this.securityManagerUrl = process.env.SECURITYMANAGER_URL || 'securitymanager:5010';
 
         // Create authenticated API client
         this.authenticatedApi = createAuthenticatedAxios(

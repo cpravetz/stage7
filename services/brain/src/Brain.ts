@@ -16,6 +16,7 @@ interface Thread {
     optimization?: OptimizationType;
     optionals?: Record<string, any>;
     conversationType?: LLMConversationType;
+    responseType?: string;
 }
 
 const app = express();
@@ -24,6 +25,13 @@ const port = process.env.PORT || 5070;
 export class Brain extends BaseEntity {
     private modelManager: ModelManager;
     private llmCalls: number = 0;
+    private modelFailureCounts: { 
+        [key: string]: { 
+            timeout: number;
+            json: number;
+            other: number;
+        } 
+    } = {};
 
     private librarianUrl: string | null = null;
     private performanceDataSyncInterval: NodeJS.Timeout | null = null;
@@ -143,6 +151,9 @@ export class Brain extends BaseEntity {
         });
     }
 
+    // Track consecutive timeouts/system errors for each model
+    private modelTimeoutCounts: Record<string, number> = {};
+
     async generate(req: express.Request, res: express.Response) {
         const maxRetries = 3;
         const modelName = req.body.modelName;
@@ -152,6 +163,7 @@ export class Brain extends BaseEntity {
 
         let attempt = 0;
         let lastError: string = '';
+        let lastModelName: string | null = null;
 
         while (attempt < maxRetries) {
             attempt++;
@@ -174,6 +186,8 @@ export class Brain extends BaseEntity {
                     }
                 }
 
+                lastModelName = selectedModel.name;
+
                 // Prepare parameters for this model
                 const modelConvertParams = { ...convertParams };
                 modelConvertParams.max_length = modelConvertParams.max_length ?
@@ -192,6 +206,11 @@ export class Brain extends BaseEntity {
                 // Track successful response
                 this.modelManager.trackModelResponse(trackingRequestId, result || '', 0, true);
 
+                // Reset timeout count on success
+                if (selectedModel.name in this.modelTimeoutCounts) {
+                    this.modelTimeoutCounts[selectedModel.name] = 0;
+                }
+
                 res.json({ result: result, mimeType: 'text/plain' });
                 return; // Success!
 
@@ -204,6 +223,22 @@ export class Brain extends BaseEntity {
                 if (selectedModel && trackingRequestId) {
                     console.log(`[Brain Generate] Tracking failure for model ${selectedModel.name}`);
                     this.modelManager.trackModelResponse(trackingRequestId, '', 0, false, errorMessage);
+                }
+
+                // Blacklist model after 3 consecutive timeouts/system errors
+                if (selectedModel && selectedModel.name) {
+                    const isTimeout = /timeout|system_error/i.test(errorMessage);
+                    if (isTimeout) {
+                        this.modelTimeoutCounts[selectedModel.name] = (this.modelTimeoutCounts[selectedModel.name] || 0) + 1;
+                        if (this.modelTimeoutCounts[selectedModel.name] >= 3) {
+                            console.warn(`[Brain Generate] Blacklisting model ${selectedModel.name} after 3 consecutive timeouts/system errors.`);
+                            this.modelManager.blacklistModel(selectedModel.name, new Date(Date.now() + 3600 * 1000));
+                            this.modelTimeoutCounts[selectedModel.name] = 0;
+                        }
+                    } else {
+                        // Reset count for non-timeout errors
+                        this.modelTimeoutCounts[selectedModel.name] = 0;
+                    }
                 }
 
                 // Continue to next attempt unless this was the last one
@@ -227,6 +262,7 @@ export class Brain extends BaseEntity {
 
         let attempt = 0;
         let lastError: string = '';
+        let lastModelName: string | null = null;
 
         while (attempt < maxRetries) {
             attempt++;
@@ -249,6 +285,8 @@ export class Brain extends BaseEntity {
                     continue;
                 }
 
+                lastModelName = selectedModel.name;
+
                 console.log(`[Brain Chat] Attempt ${attempt}: Using model ${selectedModel.modelName}`);
 
                 // Track the model request
@@ -256,6 +294,12 @@ export class Brain extends BaseEntity {
                 trackingRequestId = this.modelManager.trackModelRequest(selectedModel.name, thread.conversationType || LLMConversationType.TextToText, prompt);
 
                 await this._chatWithModel(selectedModel, thread, res, trackingRequestId);
+
+                // Reset timeout count on success
+                if (selectedModel.name in this.modelTimeoutCounts) {
+                    this.modelTimeoutCounts[selectedModel.name] = 0;
+                }
+
                 return; // Success!
 
             } catch (error) {
@@ -269,7 +313,40 @@ export class Brain extends BaseEntity {
                     this.modelManager.trackModelResponse(trackingRequestId, '', 0, false, errorMessage);
                 }
 
-                // Continue to next attempt unless this was the last one
+                // Handle model failures and blacklisting
+                if (selectedModel && selectedModel.name) {
+                    const isTimeout = /timeout|system_error/i.test(errorMessage);
+                    const isJsonError = /json|parse|invalid format/i.test(errorMessage);
+                    
+                    // Track failures by type
+                    if (!this.modelFailureCounts[selectedModel.name]) {
+                        this.modelFailureCounts[selectedModel.name] = { timeout: 0, json: 0, other: 0 };
+                    }
+                    
+                    if (isTimeout) {
+                        this.modelFailureCounts[selectedModel.name].timeout++;
+                    } else if (isJsonError) {
+                        this.modelFailureCounts[selectedModel.name].json++;
+                    } else {
+                        this.modelFailureCounts[selectedModel.name].other++;
+                    }
+
+                    const counts = this.modelFailureCounts[selectedModel.name];
+                    const totalFailures = counts.timeout + counts.json + counts.other;
+                    
+                    // Blacklist criteria:
+                    // - 3 consecutive timeouts
+                    // - 2 consecutive JSON parsing failures
+                    // - 5 total failures of any type
+                    if (counts.timeout >= 3 || counts.json >= 2 || totalFailures >= 5) {
+                        console.warn(`[Brain Chat] Blacklisting model ${selectedModel.name} due to repeated failures:`,
+                            `Timeouts: ${counts.timeout}, JSON errors: ${counts.json}, Other: ${counts.other}`);
+                        this.modelManager.blacklistModel(selectedModel.name, new Date(Date.now() + 3600 * 1000));
+                        this.modelFailureCounts[selectedModel.name] = { timeout: 0, json: 0, other: 0 };
+                    }
+                }
+
+                // Continue to next attempt if there are more retries available
                 if (attempt < maxRetries) {
                     console.log(`[Brain Chat] Attempting retry ${attempt + 1}/${maxRetries}`);
                 }
@@ -285,13 +362,15 @@ export class Brain extends BaseEntity {
         this.llmCalls++;
         console.log(`[Brain Chat] Using model ${selectedModel.modelName} for request ${requestId}`);
 
-        const modelResponse = await selectedModel.llminterface.chat(
+        let modelResponse = await selectedModel.llminterface.chat(
             selectedModel.service,
             thread.exchanges,
             {
                 max_length: thread.max_length || selectedModel.tokenLimit,
                 temperature: thread.temperature || 0.7,
-                modelName: selectedModel.modelName
+                modelName: selectedModel.modelName,
+                responseType: thread.responseType || 'text',
+                ...thread.optionals
             }
         );
 
@@ -616,7 +695,8 @@ export class Brain extends BaseEntity {
                 max_length: body.max_length,
                 temperature: body.temperature,
                 ...body.optionals
-            }
+            },
+            responseType: body.responseType || 'text'
         };
 
         // A more robust check for any request that requires a JSON plan, like those from ACCOMPLISH

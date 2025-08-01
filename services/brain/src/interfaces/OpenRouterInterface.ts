@@ -33,13 +33,13 @@ export class OpenRouterInterface extends BaseInterface {
     }
 
     async convertTextToText(args: ConvertParamsType): Promise<string> {
-        const { service, prompt, modelName } = args;
+        const { service, prompt, modelName, responseType } = args;
         if (!service) {
             throw new Error('OpenRouterInterface: No service provided for text-to-text conversion');
         }
 
         const messages: ExchangeType = [{ role: 'user', content: prompt || '' }];
-        return this.chat(service, messages, { modelName });
+        return this.chat(service, messages, { modelName, responseType });
     }
 
     async convertImageToText(args: ConvertParamsType): Promise<string> {
@@ -72,19 +72,13 @@ export class OpenRouterInterface extends BaseInterface {
     }
 
     async convertTextToCode(args: ConvertParamsType): Promise<string> {
-        const { service, prompt, modelName } = args;
+        const { service, prompt, modelName, responseType } = args;
         if (!service) {
             throw new Error('OpenRouterInterface: No service provided for text-to-code conversion');
         }
 
         // Check if this is a JSON request based on prompt content
-        const isJsonRequest = prompt && (
-            prompt.includes('JSON') ||
-            prompt.includes('json') ||
-            prompt.includes('{"type":') ||
-            prompt.includes('must start with {') ||
-            prompt.includes('return a JSON object')
-        );
+        const isJsonRequest = responseType === 'json';
 
         const systemMessage = isJsonRequest
             ? 'You are a JSON generation assistant. You must respond with valid JSON only. No explanations, no markdown, no code blocks - just pure JSON starting with { and ending with }.'
@@ -94,11 +88,11 @@ export class OpenRouterInterface extends BaseInterface {
             { role: 'system', content: systemMessage },
             { role: 'user', content: prompt || '' }
         ];
-        return this.chat(service, messages, { modelName });
+        return this.chat(service, messages, { modelName, responseType });
     }
 
     async convertTextToImage(args: ConvertParamsType): Promise<string> {
-        const { service, prompt, modelName } = args;
+        const { service, prompt, modelName, responseType } = args;
         if (!service) {
             throw new Error('OpenRouterInterface: No service provided for text-to-image conversion');
         }
@@ -106,6 +100,7 @@ export class OpenRouterInterface extends BaseInterface {
             model: modelName || 'dall-e-2',
             messages: [{ role: 'user', content: prompt }],
             size: args.size || '1024x1024',
+            responseType: responseType
         })
         return this.chatCompletion(service, body);
     }
@@ -122,35 +117,38 @@ export class OpenRouterInterface extends BaseInterface {
           return result.json();
     }
 
-    async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string }): Promise<string> {
+    async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string, responseType?: string }): Promise<string> {
         const max_length = options.max_length || 4000;
         const temperature = options.temperature || 0.7;
-        const trimmedMessages = this.trimMessages(messages, max_length);
+        let trimmedMessages = this.trimMessages(messages, max_length);
 
-        // Don't catch errors here - let them propagate to the Brain service
-        // so it can properly track the failure and blacklist the model
-        const openRouterApiClient = new OpenAI({ apiKey: service.apiKey, baseURL: service.apiUrl });
-        const stream = await openRouterApiClient.chat.completions.create({
+        const requestOptions: any = {
             model: options.modelName || 'gpt-4',
             messages: trimmedMessages as ChatCompletionMessageParam[],
             temperature,
             max_tokens: max_length,
-            stream: true,
-        });
+            stream: false, // Always use non-streaming for compatibility
+        };
+        // If responseType is 'json', set response_format and prepend system prompt
+        if (options.responseType === 'json') {
+            requestOptions.response_format = { type: 'json_object' };
+            if (Array.isArray(requestOptions.messages)) {
+                requestOptions.messages.unshift({ role: 'system', content: 'You must respond with valid JSON only. No explanations, no markdown, no code blocks - just pure JSON starting with { and ending with }.' });
+            }
+        }
+
+        // so it can properly track the failure and blacklist the model
+        const openRouterApiClient = new OpenAI({ apiKey: service.apiKey, baseURL: service.apiUrl });
+        const stream = await openRouterApiClient.chat.completions.create(requestOptions);
 
         let fullResponse = '';
-        for await (const chunk of stream) {
-            const content = chunk.choices[0]?.delta?.content || '';
-            fullResponse += content;
+        const response = await openRouterApiClient.chat.completions.create(requestOptions);
+        if (response.choices && response.choices[0] && response.choices[0].message && response.choices[0].message.content) {
+            fullResponse = response.choices[0].message.content;
         }
 
         // --- Ensure JSON if required ---
-        let requireJson = false;
-        if (options.modelName && options.modelName.toLowerCase().includes('code')) requireJson = true;
-        if (messages && messages.length > 0 && messages[0].content &&
-            (messages[0].content.includes('JSON') || messages[0].content.includes('json'))) {
-            requireJson = true;
-        }
+        let requireJson = options.responseType === 'json' ? true : false;
         if (requireJson) {
             return this.ensureJsonResponse(fullResponse, true);
         }

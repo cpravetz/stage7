@@ -67,7 +67,6 @@ export class LocalRepository implements PluginRepository {
                 const manifest = JSON.parse(manifestContent) as PluginManifest;
                 // Defensive: check id matches
                 if (manifest.id === id) {
-                    console.log(`LocalRepository.fetch: Cache hit for id '${id}' at ${cachedPath}`);
                     return manifest;
                 }
             } catch (e) {

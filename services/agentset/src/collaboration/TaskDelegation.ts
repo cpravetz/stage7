@@ -60,7 +60,7 @@ export class TaskDelegation {
     this.trafficManagerUrl = trafficManagerUrl;
 
     // Initialize token manager for service-to-service authentication
-    const securityManagerUrl = process.env.SECURITY_MANAGER_URL || 'securitymanager:5010';
+    const securityManagerUrl = process.env.SECURITYMANAGER_URL || 'securitymanager:5010';
     const serviceId = 'TaskDelegation';
     const serviceSecret = process.env.CLIENT_SECRET || 'stage7AuthSecret';
     this.tokenManager = ServiceTokenManager.getInstance(

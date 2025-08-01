@@ -125,7 +125,7 @@ export class HuggingfaceInterface extends BaseInterface {
         HuggingfaceInterface.modelsBlacklistedUntilNextMonth = true;
     }
 
-    async getChatCompletion(inference: HfInference, messages: Array<{ role: string, content: string }>, options: { max_length?: number, temperature?: number, modelName?: string }): Promise<string> {
+    async getChatCompletion(inference: HfInference, messages: Array<{ role: string, content: string }>, options: { max_length?: number, temperature?: number, modelName?: string, timeout?: number }): Promise<string> {
         try {
             let response: string = "";
             for await (const chunk of inference.chatCompletionStream({
@@ -160,7 +160,7 @@ export class HuggingfaceInterface extends BaseInterface {
 
     // Removed unused isResponseComplete method
 
-    async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string, timeout?: number }): Promise<string> {
+    async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string, timeout?: number, responseType?: string }): Promise<string> {
         try {
             const MODEL_MAX_TOKENS = 4096;
             const SAFETY_MARGIN = 200;
@@ -224,12 +224,7 @@ export class HuggingfaceInterface extends BaseInterface {
                 }
 
                 // --- Ensure JSON if required ---
-                let requireJson = false;
-                if (options.modelName && options.modelName.toLowerCase().includes('code')) requireJson = true;
-                if (trimmedMessages && trimmedMessages.length > 0 && trimmedMessages[0].content &&
-                    (trimmedMessages[0].content.includes('JSON') || trimmedMessages[0].content.includes('json'))) {
-                    requireJson = true;
-                }
+                let requireJson =  options.responseType === 'json' ? true : false;
                 if (requireJson) {
                     return this.ensureJsonResponse(out, true);
                 }

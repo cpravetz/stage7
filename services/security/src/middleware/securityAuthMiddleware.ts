@@ -250,8 +250,16 @@ async function checkMfaCompleted(userId: string, token: string): Promise<boolean
     try {
         const { TokenService } = require('../services/TokenService');
         const { TokenType } = require('../models/Token');
+        const { MongoUserRepository } = require('../repositories/MongoUserRepository');
+        const { MongoTokenRepository } = require('../repositories/MongoTokenRepository');
+        const { MongoTokenBlacklistRepository } = require('../repositories/MongoTokenBlacklistRepository');
 
-        const tokenService = new TokenService();
+        // Initialize repositories with correct database
+        const userRepository = new MongoUserRepository();
+        const tokenRepository = new MongoTokenRepository();
+        const tokenBlacklistRepository = new MongoTokenBlacklistRepository();
+
+        const tokenService = new TokenService({}, tokenRepository, tokenBlacklistRepository, userRepository);
         const payload = await tokenService.verifyToken(token, TokenType.ACCESS);
 
         // Check if the token was issued after MFA verification

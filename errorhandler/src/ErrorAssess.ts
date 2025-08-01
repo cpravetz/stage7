@@ -8,7 +8,7 @@ let processingError: boolean = false;
 const analyzedErrors: Set<string> = new Set();
 
 // Initialize token manager for service-to-service authentication
-const securityManagerUrl = process.env.SECURITY_MANAGER_URL || 'securitymanager:5010';
+const securityManagerUrl = process.env.SECURITYMANAGER_URL || 'securitymanager:5010';
 const serviceId = 'ErrorHandler';
 const serviceSecret = process.env.CLIENT_SECRET || 'stage7AuthSecret';
 const tokenManager = ServiceTokenManager.getInstance(
@@ -163,7 +163,8 @@ export const analyzeError = async (error: Error) => {
     // Send the error information to the Brain for analysis with timeout
     const response = await axios.post(`http://${brainUrl}/chat`, {
         exchanges: conversation,
-        optimization: 'accuracy'
+        optimization: 'accuracy',
+        responseType: 'text',
     }, {
         timeout: 60000, // 30 second timeout
         headers: {

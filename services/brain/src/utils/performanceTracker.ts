@@ -263,6 +263,37 @@ export class ModelPerformanceTracker {
   }
 
   /**
+   * Classify an error to determine blacklisting strategy.
+   * @param error The error message string.
+   * @returns The type of error.
+   */
+  private classifyError(error?: string): 'FATAL' | 'RETRYABLE' | 'UNKNOWN' {
+    if (!error) return 'UNKNOWN';
+    const lowerError = error.toLowerCase();
+
+    // Fatal errors that suggest the model/service is down, misconfigured, or unresponsive
+    const fatalPatterns = [
+      'timeout', 'timed out', 'econnreset', 'econnrefused', 'enotfound',
+      'network error', '500', '502', '503', '504', '429', '401', '403'
+    ];
+    if (fatalPatterns.some(p => lowerError.includes(p))) {
+      return 'FATAL';
+    }
+
+    // Errors that might be fixed by retrying or changing the prompt (e.g., a flawed response)
+    const retryablePatterns = [
+      'invalid json', 'malformed json', 'json parse error', 'syntax error', '400'
+    ];
+    if (retryablePatterns.some(p => lowerError.includes(p))) {
+      return 'RETRYABLE';
+    }
+
+    // Default to unknown for errors that don't fit the other categories
+    return 'UNKNOWN';
+  }
+
+
+  /**
    * Update metrics for a model
    * @param requestData Request data
    */
@@ -331,30 +362,29 @@ export class ModelPerformanceTracker {
         console.log(`[PerformanceTracker] Failure reason: ${error}`);
       }
 
-      // Blacklist model if it has too many consecutive failures
-      // Blacklist duration increases with more failures
-      // Huggingface and Anthropic models are blacklisted more aggressively
+      const errorType = this.classifyError(error);
+      let blacklistThreshold: number;
+
+      switch (errorType) {
+        case 'FATAL':
+          blacklistThreshold = 1; // Immediate blacklisting for fatal/unresponsive errors
+          console.log(`[PerformanceTracker] Fatal error detected for ${modelName} (${error}), using immediate blacklisting.`);
+          break;
+        case 'RETRYABLE':
+          blacklistThreshold = 3; // Higher threshold for fixable/flawed response errors
+          console.log(`[PerformanceTracker] Retryable error detected for ${modelName}, using threshold ${blacklistThreshold}.`);
+          break;
+        default: // UNKNOWN
+          blacklistThreshold = 2; // Middle-ground for unknown errors
+          console.log(`[PerformanceTracker] Unknown error type for ${modelName}, using threshold ${blacklistThreshold}.`);
+          break;
+      }
+
+      // Special handling for less reliable models like Huggingface
       const isHuggingfaceModel = modelName.toLowerCase().includes('huggingface') || modelName.toLowerCase().includes('hf/');
-      const isAnthropicModel = modelName.toLowerCase().includes('anthropic') || modelName.toLowerCase().includes('claude');
-
-      // Generic approach: Any LLM error should trigger immediate blacklisting
-      // Only exclude user input errors (like malformed JSON) from immediate blacklisting
-      const isUserInputError = error && (
-        error.toLowerCase().includes('invalid json') ||
-        error.toLowerCase().includes('malformed json') ||
-        error.toLowerCase().includes('json parse error') ||
-        error.toLowerCase().includes('syntax error')
-      );
-
-      let blacklistThreshold = 1; // Default to immediate blacklisting for any LLM error
-
-      if (isUserInputError) {
-        // User input errors should use normal consecutive failure threshold
-        blacklistThreshold = (isHuggingfaceModel || isAnthropicModel) ? 2 : 3;
-        console.log(`[PerformanceTracker] User input error detected for ${modelName}, using normal threshold ${blacklistThreshold}`);
-      } else {
-        // Any other error (connection, configuration, decommissioned model, etc.) gets immediate blacklisting
-        console.log(`[PerformanceTracker] LLM error detected for ${modelName} (${error}), using immediate blacklisting`);
+      if (isHuggingfaceModel && errorType !== 'FATAL') {
+        blacklistThreshold = 2; // More aggressive for Huggingface on non-fatal errors
+        console.log(`[PerformanceTracker] Adjusting threshold for Huggingface model to ${blacklistThreshold}.`);
       }
 
       if (metrics.consecutiveFailures >= blacklistThreshold) {
