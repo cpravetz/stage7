@@ -8,6 +8,7 @@ export class GPT4Model extends BaseModel {
             [LLMConversationType.TextToCode, { costScore: 65, accuracyScore: 52, creativityScore: 50, speedScore: 83 }],
             [LLMConversationType.CodeToText, { costScore: 65, accuracyScore: 53, creativityScore: 51, speedScore: 84 }],
             [LLMConversationType.ImageToText, { costScore: 70, accuracyScore: 50, creativityScore: 58, speedScore: 82 }],
+            [LLMConversationType.TextToJSON, { costScore: 65, accuracyScore: 52, creativityScore: 50, speedScore: 83 }],
         ]);
 
         super({
@@ -21,7 +22,8 @@ export class GPT4Model extends BaseModel {
                 LLMConversationType.TextToCode,
                 LLMConversationType.CodeToText,
                 LLMConversationType.ImageToText,
-                LLMConversationType.TextToText
+                LLMConversationType.TextToText,
+                LLMConversationType.TextToJSON
             ]
         });
     }

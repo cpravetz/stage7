@@ -372,13 +372,23 @@ def main():
             key, value_dict = item
 
             if isinstance(value_dict, dict) and 'value' in value_dict:
-                inputs[key] = InputValue(value_dict['value'], value_dict.get('args', {}))
+                inputs[key] = InputValue(
+                    inputName=key,
+                    value=value_dict['value'],
+                    valueType=value_dict.get('valueType', 'string'),
+                    args=value_dict.get('args', {})
+                )
             else:
                 # This case might occur if a non-standard InputValue structure is sent,
                 # or if the value is simple (though CapabilitiesManager usually sends the full structure).
                 # For robustness, we'll still wrap it, but this path is less expected for typical inputs.
                 print(f"DEBUG_SEARCH_PYTHON: main: Value for key '{key}' is not a standard InputValue dict, wrapping directly: {value_dict}", file=sys.stderr)
-                inputs[key] = InputValue(value_dict)
+                inputs[key] = InputValue(
+                    inputName=key,
+                    value=value_dict,
+                    valueType='string',
+                    args={}
+                )
 
         inputs_for_logging = {k: (v.input_value if isinstance(v, InputValue) else v) for k, v in inputs.items()}
         # This log is already covered by the DEBUG_SEARCH_PYTHON one below, but kept for compatibility with existing logs if any

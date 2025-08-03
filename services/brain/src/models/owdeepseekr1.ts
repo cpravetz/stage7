@@ -1,7 +1,7 @@
 import { BaseModel, ModelScore } from './baseModel';
 import { LLMConversationType } from '@cktmcs/shared';
 
-export class KNLLMModel extends BaseModel {
+export class OWDeepModel extends BaseModel {
     constructor() {
         const scoresByConversationType = new Map<LLMConversationType, ModelScore>([
             // Use reasonable scores for fair comparison with other models
@@ -9,6 +9,7 @@ export class KNLLMModel extends BaseModel {
             [LLMConversationType.TextToCode, { costScore: 100, accuracyScore: 85, creativityScore: 85, speedScore: 70 }],
             [LLMConversationType.CodeToText, { costScore: 100, accuracyScore: 85, creativityScore: 85, speedScore: 70 }],
             [LLMConversationType.ImageToText, { costScore: 100, accuracyScore: 85, creativityScore: 85, speedScore: 70 }],
+            [LLMConversationType.TextToJSON, { costScore: 100, accuracyScore: 90, creativityScore: 70, speedScore: 70 }],
         ]);
 
         super({
@@ -22,7 +23,8 @@ export class KNLLMModel extends BaseModel {
                 LLMConversationType.TextToCode,
                 LLMConversationType.CodeToText,
                 LLMConversationType.ImageToText,
-                LLMConversationType.TextToText
+                LLMConversationType.TextToText,
+                LLMConversationType.TextToJSON
             ]
         });
 
@@ -30,5 +32,5 @@ export class KNLLMModel extends BaseModel {
     }
 }
 
-const aiModel = new KNLLMModel();
+const aiModel = new OWDeepModel();
 export default aiModel;

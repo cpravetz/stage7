@@ -21,6 +21,12 @@ export class GPT4oModel extends BaseModel {
                 accuracyScore: 92,
                 creativityScore: 90,
                 speedScore: 82
+            }],
+            [LLMConversationType.TextToJSON, {
+                costScore: 65,
+                accuracyScore: 92,
+                creativityScore: 90,
+                speedScore: 82
             }]
         ]);
 
@@ -31,7 +37,7 @@ export class GPT4oModel extends BaseModel {
             serviceName: "OIMLService",
             tokenLimit: 128000, 
             scoresByConversationType: scoresByConversationType,
-            contentConversation: [LLMConversationType.TextToText, LLMConversationType.TextToCode, LLMConversationType.CodeToText]
+            contentConversation: [LLMConversationType.TextToText, LLMConversationType.TextToCode, LLMConversationType.CodeToText, LLMConversationType.TextToJSON]
         });
     }
 }

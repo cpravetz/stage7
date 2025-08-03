@@ -21,6 +21,12 @@ export class KimiK2Model extends BaseModel {
                 accuracyScore: 75,  
                 creativityScore: 40,  
                 speedScore: 50  
+            }],
+            [LLMConversationType.TextToJSON, {
+                costScore: 100,  
+                accuracyScore: 75,  
+                creativityScore: 40,  
+                speedScore: 50  
             }]
         ]);
 
@@ -31,7 +37,7 @@ export class KimiK2Model extends BaseModel {
             serviceName: "ORService",
             tokenLimit: 66000, // Adjust this value if you know the exact token limit for Claude 2
             scoresByConversationType: scoresByConversationType,
-            contentConversation: [LLMConversationType.TextToCode, LLMConversationType.CodeToText, LLMConversationType.TextToText]
+            contentConversation: [LLMConversationType.TextToCode, LLMConversationType.CodeToText, LLMConversationType.TextToText, LLMConversationType.TextToJSON]
         });
     }
 }

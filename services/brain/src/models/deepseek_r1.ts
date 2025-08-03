@@ -15,6 +15,12 @@ export class DeepSeekR1Model extends BaseModel {
                 accuracyScore: 88,
                 creativityScore: 85,
                 speedScore: 90
+            }],
+            [LLMConversationType.TextToJSON, {
+                costScore: 95,
+                accuracyScore: 88,
+                creativityScore: 85,
+                speedScore: 90
             }]
         ]);
 
@@ -25,7 +31,7 @@ export class DeepSeekR1Model extends BaseModel {
             serviceName: "HFService",
             tokenLimit: 8192, // Adjust this value if needed
             scoresByConversationType: scoresByConversationType,
-            contentConversation: [LLMConversationType.CodeToText, LLMConversationType.TextToCode]
+            contentConversation: [LLMConversationType.CodeToText, LLMConversationType.TextToCode, LLMConversationType.TextToJSON]
         });
     }
 }

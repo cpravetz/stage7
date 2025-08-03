@@ -9,6 +9,8 @@ export class KNLLMModel extends BaseModel {
             [LLMConversationType.TextToCode, { costScore: 100, accuracyScore: 85, creativityScore: 85, speedScore: 70 }],
             [LLMConversationType.CodeToText, { costScore: 100, accuracyScore: 85, creativityScore: 85, speedScore: 70 }],
             [LLMConversationType.ImageToText, { costScore: 100, accuracyScore: 85, creativityScore: 85, speedScore: 70 }],
+            // Enable TextToJSON with lower accuracy score but still functional
+            [LLMConversationType.TextToJSON, { costScore: 100, accuracyScore: 75, creativityScore: 75, speedScore: 70 }],
         ]);
 
         super({
@@ -22,7 +24,8 @@ export class KNLLMModel extends BaseModel {
                 LLMConversationType.TextToCode,
                 LLMConversationType.CodeToText,
                 LLMConversationType.ImageToText,
-                LLMConversationType.TextToText
+                LLMConversationType.TextToText,
+                LLMConversationType.TextToJSON  // Enable TextToJSON with JSON repair handling
             ]
         });
 

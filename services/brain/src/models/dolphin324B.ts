@@ -21,6 +21,12 @@ export class Dolphin324BModel extends BaseModel {
                 accuracyScore: 75,  
                 creativityScore: 40,  
                 speedScore: 50  
+            }],
+            [LLMConversationType.TextToJSON, {
+                costScore: 100,  
+                accuracyScore: 75,  
+                creativityScore: 40,  
+                speedScore: 50  
             }]
         ]);
 
@@ -31,7 +37,7 @@ export class Dolphin324BModel extends BaseModel {
             serviceName: "ORService",
             tokenLimit: 32000, 
             scoresByConversationType: scoresByConversationType,
-            contentConversation: [LLMConversationType.TextToCode, LLMConversationType.CodeToText, LLMConversationType.TextToText]
+            contentConversation: [LLMConversationType.TextToCode, LLMConversationType.CodeToText, LLMConversationType.TextToText, LLMConversationType.TextToJSON]
         });
     }
 }

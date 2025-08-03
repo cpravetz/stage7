@@ -21,6 +21,12 @@ export class Llama270bModel extends BaseModel {
                 accuracyScore: 88,
                 creativityScore: 85,
                 speedScore: 88
+            }],
+            [LLMConversationType.TextToJSON, {
+                costScore: 85,
+                accuracyScore: 88,
+                creativityScore: 85,
+                speedScore: 88
             }]
         ]);
 
@@ -31,7 +37,7 @@ export class Llama270bModel extends BaseModel {
             serviceName: "HFService",
             tokenLimit: 4096, // Adjust this value if needed
             scoresByConversationType: scoresByConversationType,
-            contentConversation: [LLMConversationType.TextToCode, LLMConversationType.CodeToText, LLMConversationType.TextToText]
+            contentConversation: [LLMConversationType.TextToCode, LLMConversationType.CodeToText, LLMConversationType.TextToText, LLMConversationType.TextToJSON]
         });
     }
 }

@@ -15,6 +15,12 @@ export class MistralSmallModel extends BaseModel {
                 accuracyScore: 85,
                 creativityScore: 80,
                 speedScore: 95
+            }],
+            [LLMConversationType.TextToJSON, {
+                costScore: 90,
+                accuracyScore: 85,
+                creativityScore: 80,
+                speedScore: 95
             }]
         ]);
 
@@ -25,7 +31,7 @@ export class MistralSmallModel extends BaseModel {
             serviceName: "MistralService",
             tokenLimit: 32768,
             scoresByConversationType: scoresByConversationType,
-            contentConversation: [LLMConversationType.TextToText, LLMConversationType.TextToCode]
+            contentConversation: [LLMConversationType.TextToText, LLMConversationType.TextToCode, LLMConversationType.TextToJSON]
         });
     }
 }

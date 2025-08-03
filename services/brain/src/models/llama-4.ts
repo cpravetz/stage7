@@ -15,6 +15,12 @@ export class Llama4Model extends BaseModel {
                 accuracyScore: 95,
                 creativityScore: 95,
                 speedScore: 95
+            }],
+            [LLMConversationType.TextToJSON, {
+                costScore: 95,
+                accuracyScore: 95,
+                creativityScore: 95,
+                speedScore: 95
             }]
         ]);
 
@@ -25,7 +31,7 @@ export class Llama4Model extends BaseModel {
             serviceName: "groq",
             tokenLimit: 30000, // Llama 4 has a large context window
             scoresByConversationType: scoresByConversationType,
-            contentConversation: [LLMConversationType.TextToText, LLMConversationType.TextToCode]
+            contentConversation: [LLMConversationType.TextToText, LLMConversationType.TextToCode, LLMConversationType.TextToJSON]
         });
     }
 }

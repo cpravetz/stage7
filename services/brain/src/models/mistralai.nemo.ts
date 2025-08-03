@@ -15,6 +15,12 @@ export class HFNemoModel extends BaseModel {
                 accuracyScore: 80,
                 creativityScore: 80,
                 speedScore: 80
+            }],
+            [LLMConversationType.TextToJSON, {
+                costScore: 100,
+                accuracyScore: 80,
+                creativityScore: 80,
+                speedScore: 80
             }]
         ]);
 
@@ -25,7 +31,7 @@ export class HFNemoModel extends BaseModel {
             serviceName: "HFService",
             tokenLimit: 8192, // Adjust this value if needed
             scoresByConversationType: scoresByConversationType,
-            contentConversation: [LLMConversationType.TextToText, LLMConversationType.TextToCode]
+            contentConversation: [LLMConversationType.TextToText, LLMConversationType.TextToCode, LLMConversationType.TextToJSON]
         });
     }
 }

@@ -101,8 +101,8 @@ export class GroqInterface extends BaseInterface {
                 messages: formattedMessages,
                 temperature: options.temperature || 0.7,
                 max_tokens: options.max_length || 6000,
-                stream: false,
-                response_type: options.responseType || 'text'
+                stream: false
+                // NOTE: response_type is not supported by Groq API, removed to prevent 400 errors
             };
 
             // Add response_format if specified in options

@@ -15,6 +15,12 @@ export class ClaudeHaikuModel extends BaseModel {
                 accuracyScore: 90,
                 creativityScore: 90,
                 speedScore: 80
+            }],
+            [LLMConversationType.TextToJSON, {
+                costScore: 20,
+                accuracyScore: 90,
+                creativityScore: 90,
+                speedScore: 80
             }]
         ]);
 
@@ -25,7 +31,7 @@ export class ClaudeHaikuModel extends BaseModel {
             serviceName: "AntService",
             tokenLimit: 200000, // Adjust this value if you know the exact token limit for Claude Haiku
             scoresByConversationType: scoresByConversationType,
-            contentConversation: [LLMConversationType.TextToText, LLMConversationType.TextToCode]
+            contentConversation: [LLMConversationType.TextToText, LLMConversationType.TextToCode, LLMConversationType.TextToJSON]
         });
     }
 }

@@ -30,6 +30,11 @@ export class OWService extends BaseService {
     isAvailable(): boolean {
         const available = !!this.apiKey && !!this.apiUrl && this.apiKey !== 'default-key';
 
+        console.log(`OWService availability check:`);
+        console.log(`  - apiKey: ${this.apiKey ? `"${this.apiKey.substring(0, 10)}..."` : 'undefined'}`);
+        console.log(`  - apiUrl: ${this.apiUrl}`);
+        console.log(`  - available: ${available}`);
+
         return available;
     }
 }

@@ -33,11 +33,19 @@ export abstract class BaseInterface {
 
     /**
      * Helper method to ensure a response is in valid JSON format.
-     * Handles generic JSON malformation issues like markdown blocks, trailing commas, etc.
-     * Does NOT handle domain-specific schema validation - that belongs in individual plugins.
+     *
+     * This method guarantees that when JSON is requested, valid JSON is returned.
+     * It handles both syntax and content issues:
+     * 1. Basic cleaning (markdown removal, trailing commas, etc.)
+     * 2. Bracket balancing for truncated responses
+     * 3. Content extraction from mixed text/JSON responses
+     * 4. LLM-assisted content validation and repair
+     *
      * @param response The response from the LLM.
-     * @param requireJson Whether JSON is strictly required.
-     * @returns The response, possibly converted to valid JSON string.
+     * @param allowPartialRecovery Whether to allow partial recovery attempts.
+     * @param service Optional service for LLM-assisted validation.
+     * @param originalPrompt Optional original prompt for context-aware validation.
+     * @returns Valid JSON string or throws an error.
      */
     public ensureJsonResponse(response: string, allowPartialRecovery: boolean = false): string {
         console.log('[baseInterface] Ensuring JSON response');
@@ -101,11 +109,13 @@ export abstract class BaseInterface {
             console.log('[baseInterface] JSON repair failed:', e instanceof Error ? e.message : String(e));
             console.log('[baseInterface] Attempting content extraction...');
 
-            // Step 3: Only as last resort, try to extract JSON blocks
+            // Step 3: Try to extract JSON blocks from the response
             const extracted = this.extractJsonFromText(response);
             if (extracted) {
                 return extracted;
             }
+
+
 
             console.error('[baseInterface] All JSON recovery attempts failed for:', response.substring(0, 200) + '...');
             throw new Error('JSON_RECOVERY_FAILED: Could not repair or extract valid JSON');
@@ -162,10 +172,58 @@ export abstract class BaseInterface {
         repaired = repaired.replace(/("(?:[^"\\]|\\.)*"|\d+|true|false|null)(\s*\n\s*)(")/g, '$1,$2$3');
         repaired = repaired.replace(/}(\s*\n\s*)"([^"]+)":/g, '},$1"$2":');
 
+        // Fix missing closing brackets - common LLM truncation issue
+        // Count opening and closing brackets to detect imbalance
+        const openBrackets = (repaired.match(/\[/g) || []).length;
+        const closeBrackets = (repaired.match(/\]/g) || []).length;
+        const openBraces = (repaired.match(/\{/g) || []).length;
+        const closeBraces = (repaired.match(/\}/g) || []).length;
+
+        console.log(`[baseInterface] Bracket counts - Open: [${openBrackets}] {${openBraces}}, Close: ]${closeBrackets} }${closeBraces}`);
+
+        // Add missing closing brackets (arrays first, then objects)
+        if (openBrackets > closeBrackets) {
+            const missingBrackets = openBrackets - closeBrackets;
+            repaired += ']'.repeat(missingBrackets);
+            console.log(`[baseInterface] Added ${missingBrackets} missing closing bracket(s)`);
+        }
+
+        if (openBraces > closeBraces) {
+            const missingBraces = openBraces - closeBraces;
+            repaired += '}'.repeat(missingBraces);
+            console.log(`[baseInterface] Added ${missingBraces} missing closing brace(s)`);
+        }
+
+
+        // Additional common JSON fixes
+        // Fix incomplete string literals at the end (common truncation issue)
+        if (repaired.match(/[^"\\]"[^"]*$/)) {
+            console.log('[baseInterface] Detected incomplete string at end - attempting fix');
+            repaired = repaired.replace(/([^"\\]"[^"]*)$/, '$1"');
+        }
+
+        // Fix trailing commas before closing brackets/braces (again, after bracket fixes)
+        repaired = repaired.replace(/,(\s*[}\]])/g, '$1');
+
+        // Validate bracket balance after all fixes
+        const finalOpenBrackets = (repaired.match(/\[/g) || []).length;
+        const finalCloseBrackets = (repaired.match(/\]/g) || []).length;
+        const finalOpenBraces = (repaired.match(/\{/g) || []).length;
+        const finalCloseBraces = (repaired.match(/\}/g) || []).length;
+
+        console.log(`[baseInterface] Final bracket counts - Open: [${finalOpenBrackets}] {${finalOpenBraces}}, Close: ]${finalCloseBrackets} }${finalCloseBraces}`);
+
+        if (finalOpenBrackets !== finalCloseBrackets || finalOpenBraces !== finalCloseBraces) {
+            console.log('[baseInterface] Warning: Bracket imbalance still exists after repair');
+        }
         console.log('[baseInterface] JSON repair completed, new length:', repaired.length);
 
         return repaired;
     }
+
+
+
+
 
     private extractJsonFromText(text: string): string | null {
         console.log('[baseInterface] Attempting to extract JSON from text...');

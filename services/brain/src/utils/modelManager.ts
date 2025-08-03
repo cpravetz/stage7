@@ -96,6 +96,28 @@ export class ModelManager {
     selectModel(optimization: OptimizationType, conversationType: LLMConversationType): BaseModel | null {
         console.log(`Selecting model for optimization: ${optimization}, conversationType: ${conversationType}`);
 
+        // Special handling for TextToJSON - if no models are available due to blacklisting, reset blacklist
+        if (conversationType === LLMConversationType.TextToJSON) {
+            const allTextToJsonModels = Array.from(this.models.values())
+                .filter(model => model.contentConversation.includes(conversationType));
+
+            const availableTextToJsonModels = allTextToJsonModels.filter(model => {
+                const interfaceInstance = interfaceManager.getInterface(model.interfaceName);
+                const service = serviceManager.getService(model.serviceName);
+                return interfaceInstance && service && service.isAvailable();
+            });
+
+            const nonBlacklistedModels = availableTextToJsonModels.filter(model =>
+                !this.performanceTracker.isModelBlacklisted(model.name, conversationType)
+            );
+
+            if (availableTextToJsonModels.length > 0 && nonBlacklistedModels.length === 0) {
+                console.log(`All TextToJSON models are blacklisted. Resetting all blacklists...`);
+                this.performanceTracker.resetAllBlacklists();
+                this.clearModelSelectionCache(); // Clear cache to force re-selection
+            }
+        }
+
         // Check cache first, but only if the cached model is not blacklisted
         const cacheKey = `${optimization}-${conversationType}`;
         const cachedResult = this.modelSelectionCache.get(cacheKey);
@@ -158,6 +180,23 @@ export class ModelManager {
 
         if (availableModels.length === 0) {
             console.log(`No available models found for conversation type ${conversationType}`);
+            console.log(`Total models checked: ${this.models.size}`);
+
+            // Debug: Show why each model was filtered out
+            Array.from(this.models.values()).forEach(model => {
+                const supportsConversation = model.contentConversation.includes(conversationType);
+                const interfaceInstance = interfaceManager.getInterface(model.interfaceName);
+                const service = serviceManager.getService(model.serviceName);
+                const serviceAvailable = service ? service.isAvailable() : false;
+                const isBlacklisted = this.performanceTracker.isModelBlacklisted(model.name, conversationType);
+
+                console.log(`Model ${model.name}:`);
+                console.log(`  - Supports ${conversationType}: ${supportsConversation}`);
+                console.log(`  - Interface available: ${!!interfaceInstance}`);
+                console.log(`  - Service available: ${serviceAvailable}`);
+                console.log(`  - Blacklisted: ${isBlacklisted}`);
+            });
+
             return null;
         }
 

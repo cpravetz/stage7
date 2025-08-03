@@ -905,6 +905,40 @@ export class Step {
                         continue;
                     }
 
+                    // Validate input completeness - must have either 'value' or 'outputName'
+                    const hasValue = inputDef.value !== undefined && inputDef.value !== null;
+                    const hasOutputName = inputDef.outputName !== undefined && inputDef.outputName !== null && inputDef.outputName !== '';
+
+                    if (!hasValue && !hasOutputName) {
+                        console.error(`[createFromPlan] 🚨 MALFORMED INPUT DETECTED: '${inputName}' in step '${task.actionVerb}' (step ${idx + 1})`);
+                        console.error(`[createFromPlan] Input definition:`, JSON.stringify(inputDef, null, 2));
+                        console.error(`[createFromPlan] This input is missing both 'value' and 'outputName' properties - this will cause step execution to fail!`);
+
+                        // For malformed inputs, provide a reasonable default based on valueType
+                        let defaultValue: any = '';
+                        if (inputDef.valueType) {
+                            switch (inputDef.valueType.toLowerCase()) {
+                                case 'object':
+                                    defaultValue = {};
+                                    break;
+                                case 'array':
+                                    defaultValue = [];
+                                    break;
+                                case 'number':
+                                    defaultValue = 0;
+                                    break;
+                                case 'boolean':
+                                    defaultValue = false;
+                                    break;
+                                default:
+                                    defaultValue = `[PLACEHOLDER_${inputName.toUpperCase()}]`;
+                            }
+                        }
+
+                        console.warn(`[createFromPlan] 🔧 AUTO-FIXING: Setting '${inputName}' = "${defaultValue}" (type: ${typeof defaultValue})`);
+                        inputDef.value = defaultValue;
+                    }
+
                     const reference: InputReference = {
                         inputName: inputName,
                         value: inputDef.value,

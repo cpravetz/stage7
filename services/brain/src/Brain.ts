@@ -189,7 +189,8 @@ export class Brain extends BaseEntity {
                 lastModelName = selectedModel.name;
 
                 // Prepare parameters for this model
-                const modelConvertParams = { ...convertParams };
+                const filteredConvertParams = this.filterInternalParameters(convertParams || {});
+                const modelConvertParams = { ...filteredConvertParams };
                 modelConvertParams.max_length = modelConvertParams.max_length ?
                     Math.min(modelConvertParams.max_length, selectedModel.tokenLimit) :
                     selectedModel.tokenLimit;
@@ -362,6 +363,9 @@ export class Brain extends BaseEntity {
         this.llmCalls++;
         console.log(`[Brain Chat] Using model ${selectedModel.modelName} for request ${requestId}`);
 
+        // Filter out internal parameters that shouldn't be passed to external APIs
+        const filteredOptionals = this.filterInternalParameters(thread.optionals || {});
+
         let modelResponse = await selectedModel.llminterface.chat(
             selectedModel.service,
             thread.exchanges,
@@ -370,7 +374,7 @@ export class Brain extends BaseEntity {
                 temperature: thread.temperature || 0.7,
                 modelName: selectedModel.modelName,
                 responseType: thread.responseType || 'text',
-                ...thread.optionals
+                ...filteredOptionals
             }
         );
 
@@ -590,7 +594,7 @@ export class Brain extends BaseEntity {
             }
 
             // Get rankings for different conversation types and metrics
-            const conversationTypes = [LLMConversationType.TextToText, LLMConversationType.TextToCode, LLMConversationType.ImageToText];
+            const conversationTypes = [LLMConversationType.TextToText, LLMConversationType.TextToCode, LLMConversationType.ImageToText, LLMConversationType.TextToJSON];
             const metrics = ['successRate', 'averageLatency', 'overall'];
 
             const rankings: Record<string, Record<string, any[]>> = {};
@@ -686,9 +690,13 @@ export class Brain extends BaseEntity {
 
     private createThreadFromRequest(req: express.Request): Thread {
         const body = req.body;
-        
+
+        console.log('[Brain Debug] Request body:', JSON.stringify(body, null, 2));
+        console.log('[Brain Debug] body.exchanges:', body.exchanges);
+        console.log('[Brain Debug] body.messages:', body.messages);
+
         const thread: Thread = {
-            exchanges: body.exchanges || [],
+            exchanges: body.exchanges || body.messages || [],
             optimization: body.optimization || 'accuracy',
             conversationType: body.ConversationType || body.conversationType || LLMConversationType.TextToText,
             optionals: {
@@ -698,6 +706,13 @@ export class Brain extends BaseEntity {
             },
             responseType: body.responseType || 'text'
         };
+
+        console.log('[Brain Debug] Final thread.exchanges:', JSON.stringify(thread.exchanges, null, 2));
+        console.log('[Brain Debug] Final thread object:', JSON.stringify({
+            optimization: thread.optimization,
+            conversationType: thread.conversationType,
+            responseType: thread.responseType
+        }, null, 2));
 
         // A more robust check for any request that requires a JSON plan, like those from ACCOMPLISH
         const requiresJsonPlan = thread.exchanges.length > 0 &&
@@ -720,6 +735,27 @@ export class Brain extends BaseEntity {
         }
 
         return thread;
+    }
+
+    private filterInternalParameters(optionals: any): any {
+        // List of parameters that are for internal use only and shouldn't be passed to external APIs
+        const internalParams = [
+            'response_format',  // OpenAI-specific parameter that causes errors in other APIs
+            'response_type',    // Internal parameter that causes errors in Groq and other APIs
+            'conversationType', // Internal parameter for model selection
+            'optimization',     // Internal parameter for model selection
+            'optionals'         // Recursive parameter
+            // NOTE: responseType is handled separately by interfaces to force JSON responses
+        ];
+
+        const filtered: any = {};
+        for (const [key, value] of Object.entries(optionals)) {
+            if (!internalParams.includes(key)) {
+                filtered[key] = value;
+            }
+        }
+
+        return filtered;
     }
 }
 

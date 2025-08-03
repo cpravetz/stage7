@@ -7,6 +7,7 @@ const scoresByConversationType = new Map<LLMConversationType, ModelScore>([
     [LLMConversationType.TextToText, { costScore: 90, accuracyScore: 105, creativityScore: 105, speedScore: 105 }],
     [LLMConversationType.TextToCode, { costScore: 90, accuracyScore: 105, creativityScore: 105, speedScore: 105 }],
     [LLMConversationType.CodeToText, { costScore: 90, accuracyScore: 105, creativityScore: 105, speedScore: 105 }],
+    [LLMConversationType.TextToJSON, { costScore: 90, accuracyScore: 105, creativityScore: 105, speedScore: 105 }]
 ]);
 
 const geminiModel = new BaseModel({
@@ -20,6 +21,7 @@ const geminiModel = new BaseModel({
         LLMConversationType.TextToText,
         LLMConversationType.TextToCode,
         LLMConversationType.CodeToText,
+        LLMConversationType.TextToJSON
     ]
 });
 

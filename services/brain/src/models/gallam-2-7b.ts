@@ -15,6 +15,12 @@ export class GLlama3Model extends BaseModel {
                 accuracyScore: 100,
                 creativityScore: 80,
                 speedScore: 80
+            }],
+            [LLMConversationType.TextToJSON, {
+                costScore: 100,
+                accuracyScore: 100,
+                creativityScore: 80,
+                speedScore: 80
             }]
         ]);
 
@@ -25,7 +31,7 @@ export class GLlama3Model extends BaseModel {
             serviceName: "GroqService",
             tokenLimit: 4096, // Adjust this value if needed
             scoresByConversationType: scoresByConversationType,
-            contentConversation: [LLMConversationType.TextToText, LLMConversationType.TextToCode]
+            contentConversation: [LLMConversationType.TextToText, LLMConversationType.TextToCode, LLMConversationType.TextToJSON]
         });
     }
 }

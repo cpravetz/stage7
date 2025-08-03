@@ -9,11 +9,12 @@ export class KNLLMModel extends BaseModel {
             [LLMConversationType.TextToCode, { costScore: 100, accuracyScore: 85, creativityScore: 85, speedScore: 70 }],
             [LLMConversationType.CodeToText, { costScore: 100, accuracyScore: 85, creativityScore: 85, speedScore: 70 }],
             [LLMConversationType.ImageToText, { costScore: 100, accuracyScore: 85, creativityScore: 85, speedScore: 70 }],
+            [LLMConversationType.TextToJSON, { costScore: 100, accuracyScore: 85, creativityScore: 85, speedScore: 70 }],
         ]);
 
         super({
-            name: "openweb/gemma3n:latest",
-            modelName: "gemma3n:latest", // This is the model name that will be sent to the OpenWebUI API
+            name: "openweb/gemma3n",
+            modelName: "gemma3n", // This is the model name that will be sent to the OpenWebUI API
             interfaceName: "openwebui", // Must match the interface name in OpenWebUIInterface.ts
             serviceName: "OWService", // Must match the service name in OWService.ts
             tokenLimit: 32000,
@@ -22,7 +23,8 @@ export class KNLLMModel extends BaseModel {
                 LLMConversationType.TextToCode,
                 LLMConversationType.CodeToText,
                 LLMConversationType.ImageToText,
-                LLMConversationType.TextToText
+                LLMConversationType.TextToText,
+                LLMConversationType.TextToJSON
             ]
         });
 

@@ -358,9 +358,19 @@ def main():
         inputs = {}
         for key, value in inputs_map.items():
             if isinstance(value, dict) and 'value' in value:
-                inputs[key] = InputValue(value['value'], value.get('args', {}))
+                inputs[key] = InputValue(
+                    inputName=key,
+                    value=value['value'],
+                    valueType=value.get('valueType', 'string'),
+                    args=value.get('args', {})
+                )
             else:
-                inputs[key] = InputValue(value)
+                inputs[key] = InputValue(
+                    inputName=key,
+                    value=value,
+                    valueType='string',
+                    args={}
+                )
 
         # Execute the plugin
         outputs = execute_plugin(inputs)

@@ -44,4 +44,5 @@ export enum LLMConversationType {
     VideoToVideo = 'VideoToVideo',
     TextToCode = 'TextToCode',
     CodeToText = 'CodeToText',
+    TextToJSON = 'TextToJSON',
 }
