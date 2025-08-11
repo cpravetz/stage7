@@ -559,7 +559,7 @@ Please consider this context and the available plugins when planning and executi
                 }
             }
 
-            this.sendMessage(MessageType.WORK_PRODUCT_UPDATE, 'user', {
+            const workProductPayload = {
                 id: stepId,
                 type: type,
                 scope: scope,
@@ -568,8 +568,12 @@ Please consider this context and the available plugins when planning and executi
                 stepId: stepId,
                 missionId: this.missionId,
                 mimeType: data[0]?.mimeType || 'text/plain',
-                fileName: data[0]?.fileName
-            });
+                fileName: data[0]?.fileName,
+                workproduct: data[0]?.result
+            };
+            console.log('[Agent.ts] WORK_PRODUCT_UPDATE payload:', JSON.stringify(workProductPayload, null, 2));
+
+            this.sendMessage(MessageType.WORK_PRODUCT_UPDATE, 'user', workProductPayload);
         } catch (error) { analyzeError(error as Error);
             console.error('Error saving work product:', error instanceof Error ? error.message : error);
         }
@@ -869,7 +873,9 @@ Please consider this context and the available plugins when planning and executi
                 await this.saveAgentState();
             }
 
-            await this.cleanupFailedStep(step);
+            // Pass the specific error to handleStepFailure
+            const stepError = error instanceof Error ? error : new Error(`Unknown error occurred ${error}`);
+            await this.handleStepFailure(step, stepError);
 
             return [{
                 success: false,
@@ -877,7 +883,7 @@ Please consider this context and the available plugins when planning and executi
                 resultType: PluginParameterType.ERROR,
                 resultDescription: 'Error in executeActionWithCapabilitiesManager',
                 result: null,
-                error: error instanceof Error ? error.message : `Unknown error occurred ${error}`
+                error: stepError.message
             }];
         }
     }
@@ -1837,6 +1843,37 @@ Please consider this context and the available plugins when planning and executi
     private async handleStepFailure(step: Step, error: Error): Promise<void> {
         step.lastError = error;
         const errorType = classifyStepError(step.lastError);
+
+        // New logic to handle specific error types from CapabilitiesManager
+        if (error.name === 'StepInputError') {
+            step.status = StepStatus.ERROR;
+            this.say(`Step ${step.actionVerb} failed due to invalid input data. The step will be skipped and the mission will continue.`);
+            await this.logEvent({
+                eventType: 'step_skipped_invalid_input',
+                agentId: this.id,
+                stepId: step.id,
+                error: step.lastError.message,
+                timestamp: new Date().toISOString()
+            });
+            // No replan, just move on
+            return;
+        }
+
+        if (error.name === 'PluginExecutionError' && step.retryCount < step.maxRetries) {
+            step.retryCount++;
+            step.status = StepStatus.PENDING;
+            this.say(`Step ${step.actionVerb} failed during execution. Retrying...`);
+            await this.logEvent({
+                eventType: 'step_retry_execution_error',
+                agentId: this.id,
+                stepId: step.id,
+                retryCount: step.retryCount,
+                maxRetries: step.maxRetries,
+                error: step.lastError.message,
+                timestamp: new Date().toISOString()
+            });
+            return; // Return to allow the retry
+        }
 
         if (errorType === StepErrorType.TRANSIENT && step.retryCount < step.maxRetries) {
             step.retryCount++;

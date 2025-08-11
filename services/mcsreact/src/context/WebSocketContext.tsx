@@ -28,7 +28,7 @@ interface WebSocketContextType {
   activeMissionName: string | null;
   activeMissionId: string | null;
   isPaused: boolean;
-  workProducts: { type: 'Interim' | 'Final' | 'Plan', name: string, url: string }[];
+  workProducts: { type: 'Interim' | 'Final' | 'Plan', name: string, url: string, workproduct: any }[];
   sharedFiles: MissionFile[];
   agentDetails: any[];
   missionStatus: any;
@@ -60,7 +60,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [activeMissionName, setActiveMissionName] = useState<string | null>(null);
   const [activeMissionId, setActiveMissionId] = useState<string | null>(null);
   const [isPaused, setIsPaused] = useState<boolean>(false);
-  const [workProducts, setWorkProducts] = useState<{ type: 'Interim' | 'Final' | 'Plan', name: string, url: string }[]>([]);
+  const [workProducts, setWorkProducts] = useState<{ type: 'Interim' | 'Final' | 'Plan', name: string, url: string, workproduct: any }[]>([]);
   const [sharedFiles, setSharedFiles] = useState<MissionFile[]>([]);
   const [agentDetails, setAgentDetails] = useState<any[]>([]);
   const [missionStatus, setMissionStatus] = useState<any>(null);
@@ -135,10 +135,12 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         setCurrentQuestion({ guid: data.content.questionGuid, sender: data.sender, content: data.content.question, choices: data.content.choices, asker: data.content.asker });
         break;
       case MessageType.WORK_PRODUCT_UPDATE:
+        console.log('[WebSocketContext.tsx] WORK_PRODUCT_UPDATE received:', data.content);
         setWorkProducts(prev => [...prev, {
           type: data.content.type,
           name: data.content.name,
-          url: `${API_BASE_URL}/librarian/retrieve/${data.content.id}`
+          url: `${API_BASE_URL}/librarian/retrieve/${data.content.id}`,
+          workproduct: data.content.workproduct // Make sure to pass the workproduct data
         }]);
         break;
       case MessageType.STATISTICS:
@@ -266,10 +268,6 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     ws.current.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        console.log('Received WebSocket message:', data);
-
-        // Log the full message for debugging
-        console.log('Full message data:', JSON.stringify(data, null, 2));
 
         if (data.type === 'CONNECTION_CONFIRMED') {
           console.log('Connection confirmed by server');

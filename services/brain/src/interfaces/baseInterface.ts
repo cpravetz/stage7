@@ -151,6 +151,18 @@ export abstract class BaseInterface {
         // Fix trailing commas (handle multi-line)
         repaired = repaired.replace(/,(\s*[}\]])/g, '$1');
 
+        // Fix set notation to proper JSON objects (e.g., {"key"} -> {"key": "key"})
+        // Handle single item sets first
+        repaired = repaired.replace(/{\s*"([^"]+)"\s*}/g, '{"$1": "$1"}');
+        
+        // Handle multi-item sets with variable number of items
+        repaired = repaired.replace(/{\s*"([^"]+)"(?:\s*,\s*"([^"]+)")*\s*}/g, (match, ...args) => {
+            const items = args.slice(0, -2).filter(Boolean); // Remove regex match metadata
+            const obj: { [key: string]: string } = {};
+            items.forEach(item => obj[item] = item);
+            return JSON.stringify(obj);
+        });
+
         // Fix unquoted keys (simple cases) - handle multi-line
         repaired = repaired.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":');
 

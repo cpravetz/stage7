@@ -4,7 +4,6 @@ import OpenAI from 'openai';
 import { ChatCompletionMessageParam } from 'openai/resources/chat';
 import { BaseService, ExchangeType } from '../services/baseService';
 import fs from 'fs';
-import { Stream } from 'openai/streaming';
 
 export class OpenRouterInterface extends BaseInterface {
     interfaceName = 'openrouter';
@@ -29,6 +28,11 @@ export class OpenRouterInterface extends BaseInterface {
             conversationType: LLMConversationType.TextToCode,
             requiredParams: ['service', 'prompt'],
             converter: this.convertTextToCode,
+        });
+        this.converters.set(LLMConversationType.TextToJSON, {
+            conversationType: LLMConversationType.TextToJSON,
+            requiredParams: ['service', 'prompt'],
+            converter: this.convertTextToJSON,
         });
     }
 
@@ -91,6 +95,25 @@ export class OpenRouterInterface extends BaseInterface {
         return this.chat(service, messages, { modelName, responseType });
     }
 
+    async convertTextToJSON(args: ConvertParamsType): Promise<string> {
+        const { service, prompt, modelName } = args;
+        if (!service) {
+            throw new Error('OpenRouterInterface: No service provided for text-to-JSON conversion');
+        }
+
+        const systemMessage = 'You are a JSON generation assistant. You must respond with valid JSON only. No explanations, no markdown, no code blocks - just pure JSON starting with { or [ and ending with } or ].';
+
+        const messages: ExchangeType = [
+            { role: 'system', content: systemMessage },
+            { role: 'user', content: prompt || '' }
+        ];
+
+        const response = await this.chat(service, messages, { modelName, responseType: 'json' });
+
+        // Always apply JSON cleanup for TextToJSON conversion type
+        return this.ensureJsonResponse(response, true);
+    }
+
     async convertTextToImage(args: ConvertParamsType): Promise<string> {
         const { service, prompt, modelName, responseType } = args;
         if (!service) {
@@ -139,7 +162,6 @@ export class OpenRouterInterface extends BaseInterface {
 
         // so it can properly track the failure and blacklist the model
         const openRouterApiClient = new OpenAI({ apiKey: service.apiKey, baseURL: service.apiUrl });
-        const stream = await openRouterApiClient.chat.completions.create(requestOptions);
 
         let fullResponse = '';
         const response = await openRouterApiClient.chat.completions.create(requestOptions);

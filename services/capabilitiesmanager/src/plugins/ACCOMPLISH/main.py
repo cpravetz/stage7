@@ -94,7 +94,7 @@ def call_brain(prompt: str, inputs: Dict[str, Any], response_type: str = "json")
             conversation_type = "TextToJSON"
             system_message = (
                 "You are a planning assistant. Generate actionable plans as JSON arrays. "
-                "Each step must have: number, actionVerb, description, inputs, outputs, dependencies. "
+                "Each step must match the provided schema precisely"
                 "Return ONLY valid JSON, no other text."
             )
         else:
@@ -236,7 +236,7 @@ PLAN_STEP_SCHEMA = {
         },
         "recommendedRole": {
             "type": "string",
-            "description": "Suggested role type for the agent executing this step"
+            "description": "Suggested role type for the agent executing this step. Allowed values are Coordinator, Researcher, Coder, Creative, Critic, Executor, and Domain Expert "
         }
     },
     "required": ["number", "actionVerb", "inputs", "description", "outputs", "dependencies"],
@@ -420,22 +420,40 @@ Return your prose plan:"""
         
         schema_json = json.dumps(PLAN_STEP_SCHEMA, indent=2)
         
-        prompt = f"""Convert this prose plan into a JSON array that conforms to the schema:
+        prompt = f"""You are an expert system for converting prose plans into structured JSON according to a strict schema.
 
-ORIGINAL GOAL: {goal}
+**1. THE GOAL:**
+---
+{goal}
+---
 
-PROSE PLAN:
+**2. THE PROSE PLAN:**
+---
 {prose_plan}
+---
 
-SCHEMA:
+**3. THE JSON SCHEMA:**
+---
 {schema_json}
+---
 
-REQUIREMENTS:
-1. Each input must have either 'value' OR 'outputName' plus 'valueType'
-2. Use goal-specific values (not "example" or "template")
-3. Dependencies format: {{"outputName": stepNumber}}
+**4. YOUR TASK:**
+Follow these steps to create the final JSON output:
 
-CRITICAL: Return ONLY valid JSON. NO markdown, NO code blocks, NO extra text, NO formatting.
+**STEP A: Internal Analysis & Self-Correction (Your Internal Monologue)**
+1.  **Analyze:** Read the Goal and Prose Plan to fully understand the user's intent and the required sequence of actions.
+2.  **Verify Schema:** Carefully study the JSON SCHEMA. Your output must follow it perfectly.
+3.  **Check Dependencies:** For each step, ensure its `dependencies` correctly reference `outputs` from previous steps. The data flow must be logical.
+4.  **Validate Inputs:** Ensure every input for each step has either a static `value` or a dynamic `outputName` reference from a prior step.
+5.  **Final Check:** Before generating the output, perform a final mental check to ensure the entire JSON structure is valid and compliant with the schema.
+
+**STEP B: Generate Final JSON (Your Final Output)**
+After your internal analysis and self-correction is complete, provide ONLY the final, valid JSON array.
+
+**CRITICAL REQUIREMENTS:**
+- **JSON ONLY:** Your entire response MUST be a single, valid JSON array.
+- **NO EXTRA TEXT:** Do NOT include explanations, comments, or markdown like ` ```json `.
+- **STRICT COMPLIANCE:** Adhere strictly to the provided schema and the logical plan.
 
 Return ONLY the JSON array:"""
 

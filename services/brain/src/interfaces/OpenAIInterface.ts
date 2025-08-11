@@ -43,6 +43,11 @@ export class OpenAIInterface extends BaseInterface {
             requiredParams: ['service', 'prompt'],
             converter: this.convertTextToText,
         });
+        this.converters.set(LLMConversationType.TextToJSON, {
+            conversationType: LLMConversationType.TextToJSON,
+            requiredParams: ['service', 'prompt'],
+            converter: this.convertTextToJSON,
+        });
     }
 
     async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string, responseType:string }): Promise<string> {
@@ -256,7 +261,54 @@ export class OpenAIInterface extends BaseInterface {
             }
         }
     }
-        
+
+    async convertTextToJSON(args: ConvertParamsType): Promise<string> {
+        const { service, prompt, modelName } = args;
+        if (!service) {
+            throw new Error('OpenAIInterface: No service provided for text-to-JSON conversion');
+        }
+
+        const systemMessage = 'You are a JSON generation assistant. You must respond with valid JSON only. No explanations, no markdown, no code blocks - just pure JSON starting with { or [ and ending with } or ].';
+
+        try {
+            const openAiApiClient = new OpenAI({ apiKey: service.apiKey });
+            const response = await openAiApiClient.chat.completions.create({
+                model: modelName || 'gpt-4',
+                messages: [
+                    { role: 'system', content: systemMessage },
+                    { role: 'user', content: prompt || '' }
+                ],
+                temperature: 0.3,
+                max_tokens: args.max_length || 2000,
+                response_format: { type: 'json_object' }
+            });
+
+            if (!response.choices[0].message?.content) {
+                throw new Error('OpenAI returned empty response');
+            }
+
+            const rawResponse = response.choices[0].message.content;
+
+            // Always apply JSON cleanup for TextToJSON conversion type
+            return this.ensureJsonResponse(rawResponse, true);
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            console.error(`OpenAI Interface: Error generating JSON with ${service.serviceName}:`, errorMessage);
+
+            // Throw descriptive error instead of returning empty string
+            if (errorMessage.includes('ECONNREFUSED') || errorMessage.includes('ENOTFOUND') ||
+                errorMessage.includes('timeout') || errorMessage.includes('network')) {
+                throw new Error(`OpenAI connection error: ${errorMessage}`);
+            } else if (errorMessage.includes('401') || errorMessage.includes('403')) {
+                throw new Error(`OpenAI authentication error: ${errorMessage}`);
+            } else if (errorMessage.includes('404')) {
+                throw new Error(`OpenAI model not found: ${errorMessage}`);
+            } else {
+                throw new Error(`OpenAI API error: ${errorMessage}`);
+            }
+        }
+    }
+
     async convertImageToImage(args: ConvertParamsType): Promise<any> {
         const { service, image, prompt, modelName } = args;
         try {

@@ -1,6 +1,32 @@
-import { InputValue, PluginDefinition, MapSerializer } from '@cktmcs/shared';
+import { InputValue, PluginDefinition, MapSerializer, PluginParameterType } from '@cktmcs/shared';
 import { PluginRegistry } from './pluginRegistry';
+import { v4 as uuidv4 } from 'uuid';
+import { createAuthenticatedAxios } from '@cktmcs/shared';
 
+// Simple in-memory cache for transformed inputs
+const transformCache = new Map<string, Map<string, InputValue>>();
+
+function getTypeDefaultValue(type: PluginParameterType): any {
+    switch (type) {
+        case PluginParameterType.OBJECT:
+            return {};
+        case PluginParameterType.ARRAY:
+            return [];
+        case PluginParameterType.STRING:
+            return '';
+        case PluginParameterType.NUMBER:
+            return 0;
+        case PluginParameterType.BOOLEAN:
+            return false;
+        default:
+            return null;
+    }
+}
+
+interface EnhancedInputValue extends InputValue {
+    validationType?: string;
+    originalName?: string;
+}
 
 export const validateInputType = async (value: any, expectedType: string): Promise<boolean> => {
     switch (expectedType.toLowerCase()) {
@@ -13,11 +39,9 @@ export const validateInputType = async (value: any, expectedType: string): Promi
         case 'array':
             return Array.isArray(value);
         case 'object':
-            // Handle object validation - accept actual objects or valid JSON strings
             if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
                 return true;
             }
-            // If it's a string, try to parse it as JSON
             if (typeof value === 'string') {
                 try {
                     const parsed = JSON.parse(value);
@@ -32,157 +56,282 @@ export const validateInputType = async (value: any, expectedType: string): Promi
     }
 }
 
+async function transformInputsWithBrain(
+    plugin: PluginDefinition,
+    providedInputs: Map<string, InputValue>,
+    trace_id: string
+): Promise<Map<string, InputValue>> {
+    const source_component = "validator.transformInputsWithBrain";
+    const cacheKey = `${plugin.verb}:${JSON.stringify(Array.from(providedInputs.entries()))}`;
 
-export const validateAndStandardizeInputs = async (plugin: PluginDefinition, inputs: Map<string, InputValue>):
-    Promise<{ success: boolean; inputs?: Map<string, InputValue>; error?: string }> => {
-        console.log('validateAndStandardizeInputs: Called for plugin:', plugin.verb, 'version:', plugin.version);
-        console.log('validateAndStandardizeInputs: Raw inputs received (serialized):', MapSerializer.transformForSerialization(inputs));
-        const validInputs = new Map<string, InputValue>();
-        try {
-            // Ensure inputDefinitions exists and is iterable
-            const inputDefinitions = plugin.inputDefinitions || [];
-            if (!Array.isArray(inputDefinitions)) {
-                console.error('validateAndStandardizeInputs: plugin.inputDefinitions is not an array:', typeof inputDefinitions, inputDefinitions);
-                return { success: false, error: `Plugin ${plugin.verb} has invalid inputDefinitions: expected array, got ${typeof inputDefinitions}` };
-            }
-
-            for (const inputDef of inputDefinitions) {
-                const inputName = inputDef.name;
-                let input = inputs.get(inputName);
-
-                if (!input) {
-                    // Look for case-insensitive match
-                    for (const [key, value] of inputs) {
-                        if (key.toLowerCase() === inputName.toLowerCase()) {
-                            input = value;
-                            break;
-                        }
-                    }
-                }
-
-                // If input is missing, try to provide a default value
-                if (!input) {
-                    let defaultValue: any = undefined;
-
-                    // First check if explicit defaultValue is defined
-                    if (inputDef.defaultValue !== undefined) {
-                        defaultValue = inputDef.defaultValue;
-                        console.log(`validateAndStandardizeInputs: Using explicit defaultValue for '${inputName}' in plugin '${plugin.verb}'.`);
-                    }
-                    // For optional inputs without explicit defaults, provide reasonable type-based defaults
-                    else if (!inputDef.required) {
-                        switch (inputDef.type.toLowerCase()) {
-                            case 'object':
-                                defaultValue = {};
-                                break;
-                            case 'array':
-                                defaultValue = [];
-                                break;
-                            case 'string':
-                                defaultValue = '';
-                                break;
-                            case 'number':
-                                defaultValue = 0;
-                                break;
-                            case 'boolean':
-                                defaultValue = false;
-                                break;
-                            default:
-                                defaultValue = null;
-                        }
-                        console.log(`validateAndStandardizeInputs: Using type-based default (${defaultValue}) for optional input '${inputName}' in plugin '${plugin.verb}'.`);
-                    }
-
-                    if (defaultValue !== undefined) {
-                        input = {
-                            inputName,
-                            value: defaultValue,
-                            valueType: inputDef.type,
-                            args: {}
-                        };
-                    }
-                }
-
-                // Handle required inputs
-                if (inputDef.required) {
-                    let missingOrInvalid = false;
-                    let reason = "";
-
-                    if (!input) {
-                        missingOrInvalid = true;
-                        reason = `Missing required input \"${inputName}\" for plugin \"${plugin.verb}\" and no defaultValue provided.`;
-                    } else if (input.value === null || input.value === undefined) {
-                        missingOrInvalid = true;
-                        reason = `Required input \"${inputName}\" for plugin \"${plugin.verb}\" must not be null or undefined.`;
-                    } else if (inputDef.type === 'string' && String(input.value).trim() === '') {
-                        missingOrInvalid = true;
-                        reason = `Required string input \"${inputName}\" for plugin \"${plugin.verb}\" must not be empty or whitespace-only.`;
-                    }
-
-                    if (missingOrInvalid) {
-                        console.error(`validateAndStandardizeInputs: Validation Error for plugin \"${plugin.verb}\", input \"${inputName}\": ${reason}`);
-                        return {
-                            success: false,
-                            error: reason
-                        };
-                    }
-                }
-
-                // Validate input type if present
-                if (input && inputDef.type) {
-                    const isValid = await validateInputType(input.value, inputDef.type);
-                    if (!isValid) {
-                        return {
-                            success: false,
-                            error: `Invalid type for input \"${inputName}\". Expected ${inputDef.type}`
-                        };
-                    }
-
-                    // Parse JSON strings for object types
-                    if (inputDef.type.toLowerCase() === 'object' && typeof input.value === 'string') {
-                        try {
-                            input.value = JSON.parse(input.value);
-                        } catch (error) {
-                            // This shouldn't happen since validation passed, but just in case
-                            return {
-                                success: false,
-                                error: `Invalid JSON string for object input \"${inputName}\"`
-                            };
-                        }
-                    }
-                }
-
-                if (input) {
-                    validInputs.set(inputName, input);
-                }
-            }
-
-            console.log(`validateAndStandardizeInputs: Successfully validated and standardized inputs for ${plugin.verb} (serialized):`, MapSerializer.transformForSerialization(validInputs));
-            if (plugin.verb === 'SEARCH' && validInputs.has('searchTerm')) {
-              const searchInput = validInputs.get('searchTerm');
-              // Log the entire InputValues object for searchTerm
-              console.log(`validateAndStandardizeInputs: For SEARCH, the full 'searchTerm' InputValues object is: ${JSON.stringify(searchInput)}`);
-              if (searchInput) {
-                // Log the inputValue and its type specifically
-                console.log(`validateAndStandardizeInputs: For SEARCH, direct inputValue of 'searchTerm' is: "${searchInput.value}"`);
-                console.log(`validateAndStandardizeInputs: For SEARCH, typeof searchTerm inputValue is: ${typeof searchInput.value}`);
-              } else {
-                console.log("validateAndStandardizeInputs: For SEARCH, validInputs.get('searchTerm') returned undefined/null even though validInputs.has('searchTerm') was true.");
-              }
-            }
-            return { success: true, inputs: validInputs };
-        } catch (error) {
-            return {
-                success: false,
-                error: `Input validation error: ${error instanceof Error ? error.message : String(error)}`
-            };
-        }
+    if (transformCache.has(cacheKey)) {
+        console.log(`[${trace_id}] ${source_component}: Using cached transformed inputs for ${plugin.verb}`);
+        return transformCache.get(cacheKey)!;
     }
 
-/**
- * Generic plan validation that can be used by any plugin
- * Validates plan structure, action verbs, and input references
- */
+    try {
+        const authenticatedApi = createAuthenticatedAxios(
+            'Validator',
+            process.env.BRAIN_URL || 'brain:5070',
+            process.env.CLIENT_SECRET || 'stage7AuthSecret'
+        );
+        const requiredInputs = plugin.inputDefinitions?.filter(def => def.required).map(def => def.name) || [];
+        const prompt = `
+            You are an expert at transforming inputs for a plugin.
+            Given the following plugin definition and the provided inputs, transform them to match the required input definitions.
+            You must return a valid JSON object with the transformed inputs.
+
+            Plugin: ${plugin.verb}
+            Description: ${plugin.description}
+            Required Inputs: ${requiredInputs.join(', ')}
+            
+            Input Definitions:
+            ${JSON.stringify(plugin.inputDefinitions, null, 2)}
+
+            Provided Inputs:
+            ${JSON.stringify(Object.fromEntries(providedInputs), null, 2)}
+
+            Return ONLY the transformed JSON object with the correct input names and types.
+            DO NOT include any explanation or markdown formatting.
+        `;
+
+        // First try the new format
+        try {
+            const response = await authenticatedApi.post(
+                `http://${process.env.BRAIN_URL || 'brain:5070'}/chat`,
+                {
+                    messages: [
+                        {
+                            role: 'system',
+                            content: 'You are an input transformation expert. Return ONLY valid JSON.'
+                        },
+                        {
+                            role: 'user',
+                            content: prompt
+                        }
+                    ],
+                    conversationType: "TextToJSON",
+                    temperature: 0.1
+                }
+            );
+
+            if (!response.data || typeof response.data !== 'object') {
+                throw new Error('Invalid response format from Brain service');
+            }
+
+            let result: string;
+            if (typeof response.data.result === 'string') {
+                result = response.data.result;
+            } else if (response.data.result && typeof response.data.result === 'object') {
+                result = JSON.stringify(response.data.result);
+            } else {
+                throw new Error('Brain response missing result field');
+            }
+
+            // Clean up and parse the result
+            let cleanResult = result.trim();
+            if (cleanResult.startsWith('```json')) {
+                const match = cleanResult.match(/```json\n([\s\S]*?)```/);
+                if (match) cleanResult = match[1].trim();
+            }
+
+            try {
+                const parsedResponse = JSON.parse(cleanResult);
+                const transformedInputsMap = new Map<string, InputValue>();
+
+                // Validate and transform each input
+                for (const key in parsedResponse) {
+                    const inputDef = plugin.inputDefinitions?.find(def => def.name === key);
+                    const value = parsedResponse[key];
+                    const valueType = inputDef?.type || PluginParameterType.ANY;
+
+                    // Validate the transformed value against the expected type
+                    const isValid = await validateInputType(value, valueType);
+                    if (!isValid) {
+                        console.warn(`[${trace_id}] ${source_component}: Transformed value for ${key} doesn't match expected type ${valueType}`);
+                        continue;
+                    }
+
+                    transformedInputsMap.set(key, {
+                        inputName: key,
+                        value: value,
+                        valueType: valueType,
+                        args: inputDef?.args || {}
+                    });
+                }
+
+                // Verify all required inputs are present
+                const missingRequired = requiredInputs.filter(input => !transformedInputsMap.has(input));
+                if (missingRequired.length > 0) {
+                    throw new Error(`Missing required inputs after transformation: ${missingRequired.join(', ')}`);
+                }
+
+                transformCache.set(cacheKey, transformedInputsMap);
+                return transformedInputsMap;
+
+            } catch (parseError: any) {
+                throw new Error(`Failed to parse Brain response: ${parseError?.message || 'Unknown parse error'}`);
+            }
+        } catch (error: any) {
+            console.error(`[${trace_id}] ${source_component}: Error during input transformation: ${error?.message || 'Unknown error'}`);
+            throw new Error(`Input transformation failed: ${error?.message || 'Unknown error'}`);
+        }
+
+    } catch (error) {
+        console.error(`[${trace_id}] ${source_component}: Brain transformation failed:`, error);
+        throw error;
+    }
+}
+
+export const validateAndStandardizeInputs = async (plugin: PluginDefinition, inputs: Map<string, InputValue>):
+    Promise<{ success: boolean; inputs?: Map<string, EnhancedInputValue>; error?: string }> => {
+    const trace_id = `validate-${uuidv4().substring(0,8)}`;
+    console.log(`[${trace_id}] validateAndStandardizeInputs: Called for plugin:`, plugin.verb, 'version:', plugin.version);
+
+    const performValidation = async (
+        inputsToValidate: Map<string, InputValue>
+    ): Promise<{ success: boolean; inputs?: Map<string, EnhancedInputValue>; error?: string }> => {
+        const inputDefinitions = plugin.inputDefinitions || [];
+        const standardizedInputs = new Map<string, EnhancedInputValue>();
+        const processedInputs = new Map(inputsToValidate);
+
+        // Standardize keys to match definition case and handle simple pluralization
+        for (const inputDef of inputDefinitions) {
+            const inputName = inputDef.name;
+            const inputKey = Array.from(processedInputs.keys()).find(key => {
+                const lowerKey = key.toLowerCase();
+                const lowerInputName = inputName.toLowerCase();
+                return (
+                    lowerKey === lowerInputName ||
+                    lowerKey === lowerInputName + 's' ||
+                    lowerKey + 's' === lowerInputName
+                );
+            });
+
+            if (inputKey && inputKey !== inputName) {
+                const value = processedInputs.get(inputKey)!;
+                processedInputs.delete(inputKey);
+                processedInputs.set(inputName, value);
+            }
+        }
+
+        for (const inputDef of inputDefinitions) {
+            const inputName = inputDef.name;
+            let input = processedInputs.get(inputName);
+
+            if (!input && inputDef.defaultValue !== undefined) {
+                input = {
+                    inputName,
+                    value: inputDef.defaultValue,
+                    valueType: inputDef.type,
+                    args: {}
+                };
+            }
+
+            if (!input && inputDef.required) {
+                return {
+                    success: false,
+                    error: `Missing required input: ${inputName}`
+                };
+            }
+
+            if (input) {
+                const type = input.valueType || inputDef.type;
+                const typeValidation = await validateInputType(input.value, type);
+                if (!typeValidation) {
+                    return {
+                        success: false,
+                        error: `Invalid type for input ${inputName}: expected ${type}, got ${typeof input.value}`
+                    };
+                }
+
+                if (type === PluginParameterType.OBJECT && typeof input.value === 'string') {
+                    try {
+                        input.value = JSON.parse(input.value);
+                    } catch {
+                        return {
+                            success: false,
+                            error: `Invalid JSON string for object input "${inputName}"`
+                        };
+                    }
+                }
+
+                standardizedInputs.set(inputName, {
+                    ...input,
+                    validationType: type,
+                    originalName: inputName
+                });
+            }
+        }
+
+        // Add any non-defined inputs to the output as well
+        for (const [inputName, input] of processedInputs.entries()) {
+            if (!standardizedInputs.has(inputName)) {
+                standardizedInputs.set(inputName, {
+                    ...input,
+                    validationType: input.valueType || PluginParameterType.ANY,
+                    originalName: inputName
+                });
+            }
+        }
+
+        return { success: true, inputs: standardizedInputs };
+    };
+
+    try {
+        const inputDefinitions = plugin.inputDefinitions || [];
+        if (!Array.isArray(inputDefinitions)) {
+            console.error(`[${trace_id}] validateAndStandardizeInputs: plugin.inputDefinitions is not an array`);
+            return { success: false, error: `Plugin ${plugin.verb} has invalid inputDefinitions` };
+        }
+
+        // First validation attempt
+        let validationResult = await performValidation(inputs);
+        if (validationResult.success) {
+            console.log(`[${trace_id}] validateAndStandardizeInputs: Initial validation successful for ${plugin.verb}`);
+            console.log(`[${trace_id}] validateAndStandardizeInputs: Results for ${plugin.verb}:`, {
+                pluginVerb: plugin.verb,
+                pluginVersion: plugin.version,
+                original: Array.from(inputs.keys()),
+                validated: Array.from(validationResult.inputs!.keys())
+            });
+            return validationResult;
+        }
+
+        console.log(`[${trace_id}] validateAndStandardizeInputs: Initial validation failed for ${plugin.verb}. Error: ${validationResult.error}. Attempting Brain transformation.`);
+
+        // If simple validation fails, try to transform with Brain
+        const transformedInputs = await transformInputsWithBrain(plugin, inputs, trace_id);
+
+        // Second validation attempt on transformed inputs
+        let secondValidationResult = await performValidation(transformedInputs);
+        if (secondValidationResult.success) {
+            console.log(`[${trace_id}] validateAndStandardizeInputs: Validation successful after Brain transformation for ${plugin.verb}`);
+            console.log(`[${trace_id}] validateAndStandardizeInputs: Results for ${plugin.verb}:`, {
+                pluginVerb: plugin.verb,
+                pluginVersion: plugin.version,
+                original: Array.from(inputs.keys()),
+                validated: Array.from(secondValidationResult.inputs!.keys())
+            });
+            // TODO: Cache the successful transformation rule
+            return secondValidationResult;
+        }
+
+        console.error(`[${trace_id}] validateAndStandardizeInputs: Validation failed even after Brain transformation for ${plugin.verb}. Error: ${secondValidationResult.error}`);
+        return {
+            success: false,
+            error: `Input validation failed for ${plugin.verb} after attempting transformation: ${secondValidationResult.error}`
+        };
+
+    } catch (error) {
+        console.error(`[${trace_id}] validateAndStandardizeInputs Error:`, error);
+        return {
+            success: false,
+            error: `Input validation error: ${error instanceof Error ? error.message : String(error)}`
+        };
+    }
+}
+
 export const validatePlanStructure = async (planData: any[], pluginRegistry: PluginRegistry): Promise<{ success: boolean; error?: string; errorType?: string; stepNumber?: number }> => {
     if (!Array.isArray(planData) || planData.length === 0) {
         return {
@@ -192,10 +341,8 @@ export const validatePlanStructure = async (planData: any[], pluginRegistry: Plu
         };
     }
 
-    // Get available plugins from registry
     const availablePlugins = new Set<string>();
     try {
-        // Access the verbIndex to get all available verbs
         const verbIndex = (pluginRegistry as any).verbIndex;
         if (verbIndex && verbIndex instanceof Map) {
             for (const verb of verbIndex.keys()) {
@@ -204,14 +351,12 @@ export const validatePlanStructure = async (planData: any[], pluginRegistry: Plu
         }
     } catch (error) {
         console.warn('validatePlanStructure: Could not fetch plugins from registry:', error);
-        // Continue validation without plugin verification if registry is unavailable
     }
 
     for (let i = 0; i < planData.length; i++) {
         const step = planData[i];
         const stepNumber = i + 1;
 
-        // Check required fields
         const requiredFields = ['actionVerb', 'description'];
         for (const field of requiredFields) {
             if (!step[field]) {
@@ -224,7 +369,6 @@ export const validatePlanStructure = async (planData: any[], pluginRegistry: Plu
             }
         }
 
-        // Validate actionVerb is a known plugin (if we have plugin data)
         const actionVerb = step.actionVerb;
         if (availablePlugins.size > 0 && !availablePlugins.has(actionVerb)) {
             return {
@@ -235,13 +379,11 @@ export const validatePlanStructure = async (planData: any[], pluginRegistry: Plu
             };
         }
 
-        // Validate input references format
         if (step.inputReferences && typeof step.inputReferences === 'object') {
             for (const [inputName, inputRef] of Object.entries(step.inputReferences)) {
                 if (inputRef && typeof inputRef === 'object' && 'value' in inputRef) {
                     const value = (inputRef as any).value;
-                    // Check for malformed dictionary strings
-                    if (typeof value === 'string' && value.startsWith("{'") && value.endsWith("'}")) {
+                    if (typeof value === 'string' && value.startsWith("{''") && value.endsWith("''}")) {
                         return {
                             success: false,
                             error: `Step ${stepNumber} input '${inputName}' has malformed dictionary string: ${value}`,
@@ -253,7 +395,6 @@ export const validatePlanStructure = async (planData: any[], pluginRegistry: Plu
             }
         }
 
-        // Validate IF_THEN structure
         if (step.actionVerb === 'IF_THEN') {
             const inputs = step.inputs || {};
             if (!inputs.condition) {
@@ -265,7 +406,6 @@ export const validatePlanStructure = async (planData: any[], pluginRegistry: Plu
                 };
             }
 
-            // Validate trueSteps and falseSteps are arrays if present
             if (inputs.trueSteps && !Array.isArray(inputs.trueSteps.value)) {
                 return {
                     success: false,
@@ -285,7 +425,6 @@ export const validatePlanStructure = async (planData: any[], pluginRegistry: Plu
             }
         }
 
-        // Validate FILE_OPERATION structure
         if (step.actionVerb === 'FILE_OPERATION') {
             const inputs = step.inputs || {};
             if (!inputs.operation) {
@@ -319,7 +458,6 @@ export const validatePlanStructure = async (planData: any[], pluginRegistry: Plu
             }
         }
 
-        // Validate dependencies reference previous steps only
         if (step.dependencies && typeof step.dependencies === 'object') {
             for (const [outputName, depStep] of Object.entries(step.dependencies)) {
                 let depStepNumber: number;

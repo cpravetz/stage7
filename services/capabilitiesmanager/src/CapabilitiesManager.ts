@@ -11,6 +11,25 @@ import { validatePluginPermissions, hasDangerousPermissions } from '@cktmcs/shar
 import { promisify } from 'util';
 import { exec as execCallback, spawn } from 'child_process';
 import { generateStructuredError, ErrorSeverity, GlobalErrorCodes, StructuredError } from './utils/errorReporter';
+
+// Custom Error Classes for more specific error handling
+class StepInputError extends Error {
+    public context: any;
+    constructor(message: string, context?: any) {
+        super(message);
+        this.name = 'StepInputError';
+        this.context = context;
+    }
+}
+
+class PluginExecutionError extends Error {
+    public context: any;
+    constructor(message: string, context?: any) {
+        super(message);
+        this.name = 'PluginExecutionError';
+        this.context = context;
+    }
+}
 import { ConfigManager } from './utils/configManager';
 import { PluginRegistry } from './utils/pluginRegistry';
 import { PluginContextManager } from './utils/PluginContextManager';
@@ -39,6 +58,19 @@ interface ExecutionContext {
     trace_id: string;
 }
 
+interface BrainTransformation {
+    target: string;
+    confidence: number;
+    explanation?: string;
+}
+
+interface BrainTransformationResponse {
+    transformations: {
+        [key: string]: string | BrainTransformation;
+    };
+    suggestions?: string[];
+}
+
 export class CapabilitiesManager extends BaseEntity {
     private librarianUrl: string = process.env.LIBRARIAN_URL || 'librarian:5040';
     private server: any;
@@ -60,6 +92,8 @@ export class CapabilitiesManager extends BaseEntity {
     private failedPluginLookups: Map<string, number> = new Map(); // actionVerb -> last failure timestamp
     private static readonly PLUGIN_LOOKUP_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
 
+    // Cache for input transformations: missionId -> { actionVerb -> { originalInput -> transformedInput } }
+    private inputTransformationCache: Map<string, Map<string, Map<string, string>>> = new Map();
 
     constructor() {
         super('CapabilitiesManager', 'CapabilitiesManager', `capabilitiesmanager`, process.env.PORT || '5060');
@@ -402,6 +436,10 @@ export class CapabilitiesManager extends BaseEntity {
     private async executeActionVerb(req: express.Request, res: express.Response) {
         const trace_id = (req as any).trace_id || uuidv4();
         const source_component = "CapabilitiesManager.executeActionVerb";
+        console.log(`[${trace_id}] ${source_component}: Received request for action execution`, {
+            actionVerb: req.body.actionVerb,
+            inputKeys: Object.keys(req.body.inputValues || {})
+        });
         const step = { ...req.body, inputValues: MapSerializer.transformFromSerialization(req.body.inputValues || {}) } as Step;
 
         if (!step.actionVerb || typeof step.actionVerb !== 'string') {
@@ -467,18 +505,13 @@ export class CapabilitiesManager extends BaseEntity {
                     // Standard code-based plugin execution
                     const pluginDefinition = manifest as PluginDefinition; // Assuming PluginManifest is compatible enough
 
-                    // Add optional inputs automatically before validation
-                    const enhancedInputs = this.addOptionalInputsToStep(step, pluginDefinition);
-
-                    const validatedInputs = await validateAndStandardizeInputs(pluginDefinition, enhancedInputs);
+                    step.inputValues = step.inputValues || new Map<string, InputValue>();
+                    const validatedInputs = await validateAndStandardizeInputs(pluginDefinition, step.inputValues);
                     if (!validatedInputs.success || !validatedInputs.inputs) {
-                        throw generateStructuredError({
-                            error_code: GlobalErrorCodes.INPUT_VALIDATION_FAILED,
-                            severity: ErrorSeverity.ERROR,
-                            message: validatedInputs.error || "Input validation failed for plugin.",
-                            source_component,
-                            contextual_info: { plugin_id: pluginDefinition.id, version: pluginDefinition.version, verb: pluginDefinition.verb },
-                            trace_id_param: trace_id
+                        throw new StepInputError(validatedInputs.error || "Input validation failed for plugin.", {
+                            plugin_id: pluginDefinition.id,
+                            version: pluginDefinition.version,
+                            verb: pluginDefinition.verb
                         });
                     }
                     // preparePluginForExecution expects PluginManifest, which DefinitionManifest extends
@@ -623,9 +656,10 @@ export class CapabilitiesManager extends BaseEntity {
         actualPluginRootPath: string,
         trace_id: string
     ): Promise<PluginOutput[]> {
-        if (pluginToExecute.verb === 'SEARCH') {
-            console.log(`[${trace_id}] CapabilitiesManager.executePlugin: Inputs for SEARCH plugin execution:`, MapSerializer.transformForSerialization(inputsForPlugin));
-        }
+        console.log(`[${trace_id}] CapabilitiesManager.executePlugin: Inputs for ${pluginToExecute.id} plugin execution:`);
+        inputsForPlugin.forEach((input, key) => {
+            console.log(`  ${key}: (${input.valueType}) `);
+        });
         const source_component = "CapabilitiesManager.executePlugin";
         console.log(`[${trace_id}] ${source_component}: Executing plugin ${pluginToExecute.id} v${pluginToExecute.version} (${pluginToExecute.verb}) at ${actualPluginRootPath}`);
 
@@ -654,14 +688,12 @@ export class CapabilitiesManager extends BaseEntity {
             const tokenManager = this.getTokenManager();
             token = await tokenManager.getToken();
 
-            if (pluginToExecute.verb === 'ACCOMPLISH') {
-                const brainTokenManager = new ServiceTokenManager(
-                    `http://${this.securityManagerUrl}`,
-                    'Brain',
-                    process.env.CLIENT_SECRET || 'stage7AuthSecret'
-                );
-                brainToken = await brainTokenManager.getToken();
-            }
+            const brainTokenManager = new ServiceTokenManager(
+                `http://${this.securityManagerUrl}`,
+                'Brain',
+                process.env.CLIENT_SECRET || 'stage7AuthSecret'
+            );
+            brainToken = await brainTokenManager.getToken();
 
             const currentEnv = { ...process.env };
             if (token) currentEnv.CM_AUTH_TOKEN = token;
@@ -672,6 +704,12 @@ export class CapabilitiesManager extends BaseEntity {
                 credentials: configSet ?? []
             };
 
+            // log the env variable names
+            console.log('ENV variables include:');
+            Object.keys(currentEnv).forEach(key => {
+                console.log(`  ${key}`);
+            });
+            
             // Add missionId and service URLs to inputsForPlugin if not already present
             if (!inputsForPlugin.has('missionId')) {
                 const missionIdEnv = process.env.MISSION_ID || null;
@@ -727,6 +765,30 @@ export class CapabilitiesManager extends BaseEntity {
                     args: { token: brainToken }
                 });
             }
+            if (process.env.LANGSEARCH_API_KEY) {
+                executionInputs.set('__langsearch_api_key', {
+                    inputName: '__langsearch_api_key',
+                    value: process.env.LANGSEARCH_API_KEY,
+                    valueType: PluginParameterType.STRING,
+                    args: {}
+                });
+            }
+            if (process.env.LANGSEARCH_API_KEY) {
+                executionInputs.set('__langsearch_api_key', {
+                    inputName: '__langsearch_api_key',
+                    value: process.env.LANGSEARCH_API_KEY,
+                    valueType: PluginParameterType.STRING,
+                    args: {}
+                });
+            }
+            if (process.env.LANGSEARCH_API_KEY) {
+                executionInputs.set('__langsearch_api_key', {
+                    inputName: '__langsearch_api_key',
+                    value: process.env.LANGSEARCH_API_KEY,
+                    valueType: PluginParameterType.STRING,
+                    args: {}
+                });
+            }
             const executionContext: ExecutionContext = {
                 inputValues: executionInputs,
                 environment,
@@ -737,20 +799,26 @@ export class CapabilitiesManager extends BaseEntity {
 
             if (pluginToExecute.language === 'javascript') {
                 try {
-                    return await executePluginInSandbox(
+                    const result = await executePluginInSandbox(
                         executionContext.pluginDefinition,
                         Array.from(executionContext.inputValues.values()),
                         executionContext.environment
                     );
+                    console.log(`[${trace_id}] ${source_component}: Workproduct from JS plugin:`, JSON.stringify(result, null, 2));
+                    return result;
                 } catch (sandboxError: any) {
                     console.error(`[${trace_id}] ${source_component}: Sandbox execution failed for ${pluginToExecute.id} v${pluginToExecute.version}, falling back to direct: ${sandboxError.message}`);
                     sandboxError.trace_id = trace_id;
                     throw sandboxError;
                 }
             } else if (pluginToExecute.language === 'python') {
-                return this.executePythonPlugin(executionContext);
+                const result = await this.executePythonPlugin(executionContext);
+                console.log(`[${trace_id}] ${source_component}: Workproduct from Python plugin:`, JSON.stringify(result, null, 2));
+                return result;
             } else if (pluginToExecute.language === 'container') {
-                return this.executeContainerPlugin(executionContext);
+                const result = await this.executeContainerPlugin(executionContext);
+                console.log(`[${trace_id}] ${source_component}: Workproduct from Container plugin:`, JSON.stringify(result, null, 2));
+                return result;
             }
 
             throw generateStructuredError({
@@ -763,24 +831,15 @@ export class CapabilitiesManager extends BaseEntity {
             });
 
         } catch (error: any) {
-            if (error.error_id && error.trace_id) {
-                return createPluginOutputError(error);
+            if (error instanceof StepInputError || error instanceof PluginExecutionError) {
+                throw error;
             }
-
-            const sError = generateStructuredError({
-                error_code: GlobalErrorCodes.CAPABILITIES_MANAGER_PLUGIN_EXECUTION_FAILED,
-                severity: ErrorSeverity.ERROR,
-                message: `Execution failed for plugin ${pluginToExecute?.id || 'unknown'} v${pluginToExecute?.version || 'unknown'}: ${error.message}`,
-                source_component,
-                original_error: error,
-                contextual_info: {
-                    plugin_id: pluginToExecute?.id,
-                    verb: pluginToExecute?.verb,
-                    version: pluginToExecute?.version
-                },
-                trace_id_param: trace_id
+            throw new PluginExecutionError(`Execution failed for plugin ${pluginToExecute?.id || 'unknown'} v${pluginToExecute?.version || 'unknown'}: ${error.message}`, {
+                plugin_id: pluginToExecute?.id,
+                verb: pluginToExecute?.verb,
+                version: pluginToExecute?.version,
+                original_error: error.stack
             });
-            return createPluginOutputError(sError);
         }
     }
 
@@ -1338,7 +1397,7 @@ export class CapabilitiesManager extends BaseEntity {
             const novelVerbInfo = {
                 verb: step.actionVerb,
                 description: step.description || `Execute the action: ${step.actionVerb}`,
-                context: step.description || '',
+                context: `The user wants to perform the action '${step.actionVerb}'. The step is described as: '${step.description}'. The available inputs are: ${JSON.stringify(Array.from(step.inputValues?.keys()||[]))}. The expected outputs are: ${JSON.stringify(step.outputs)}`,
                 inputValues: step.inputValues ? MapSerializer.transformForSerialization(step.inputValues) : {},
                 outputs: step.outputs ? MapSerializer.transformForSerialization(step.outputs) : {},
                 stepId: step.id,
@@ -2040,65 +2099,6 @@ export class CapabilitiesManager extends BaseEntity {
             resultDescription: sError.message_human_readable,
             error: sError.message_human_readable,
         };
-    }
-
-    /**
-     * Automatically adds optional inputs (as defined in the plugin manifest) to a step's inputs
-     * if they are not already present. This ensures all optional inputs are available during execution.
-     */
-    private addOptionalInputsToStep(step: Step, pluginDefinition: PluginDefinition): Map<string, InputValue> {
-        const enhancedInputs = new Map<string, InputValue>(step.inputValues || new Map());
-
-        // Iterate through all input definitions in the plugin
-        for (const inputDef of pluginDefinition.inputDefinitions || []) {
-            // Skip if input is already present
-            if (enhancedInputs.has(inputDef.name)) {
-                continue;
-            }
-
-            // Skip required inputs - they should be provided by the step
-            if (inputDef.required) {
-                continue;
-            }
-
-            // Add optional input with appropriate default value
-            let defaultValue: any = undefined;
-
-            // Use explicit default if provided
-            if (inputDef.defaultValue !== undefined) {
-                defaultValue = inputDef.defaultValue;
-            } else {
-                // Provide type-based defaults for optional inputs
-                switch (inputDef.type?.toLowerCase()) {
-                    case 'object':
-                        defaultValue = {};
-                        break;
-                    case 'array':
-                        defaultValue = [];
-                        break;
-                    case 'string':
-                        defaultValue = '';
-                        break;
-                    case 'number':
-                        defaultValue = 0;
-                        break;
-                    case 'boolean':
-                        defaultValue = false;
-                        break;
-                    default:
-                        defaultValue = null;
-                }
-            }
-
-            enhancedInputs.set(inputDef.name, {
-                inputName: inputDef.name,
-                value: defaultValue,
-                valueType: inputDef.type || 'string',
-                args: {}
-            });
-        }
-
-        return enhancedInputs;
     }
 
 }

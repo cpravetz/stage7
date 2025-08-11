@@ -19,6 +19,11 @@ export class GroqInterface extends BaseInterface {
             requiredParams: ['service', 'prompt'],
             converter: this.convertTextToText,
         });
+        this.converters.set(LLMConversationType.TextToJSON, {
+            conversationType: LLMConversationType.TextToJSON,
+            requiredParams: ['service', 'prompt'],
+            converter: this.convertTextToJSON,
+        });
     }
 
     convertTextToText = async (args: ConvertParamsType): Promise<string> => {
@@ -40,6 +45,35 @@ export class GroqInterface extends BaseInterface {
         console.log('GroqInterface: Calling chat method from convertTextToText');
         // Don't use this.chat directly, use the chat method of this instance
         return this.chat(service, formattedMessages, { modelName: modelName, responseType: responseType} );
+    }
+
+    convertTextToJSON = async (args: ConvertParamsType): Promise<string> => {
+        const { service, prompt, modelName } = args;
+
+        if (!prompt) {
+            console.log('GroqInterface: No prompt provided for text-to-JSON conversion');
+            return Promise.resolve('');
+        }
+
+        if (!service) {
+            console.log('GroqInterface: No service provided for text-to-JSON conversion');
+            return Promise.resolve('');
+        }
+
+        console.log(`GroqInterface: Converting text-to-JSON with prompt: ${prompt.substring(0, 50)}...`);
+
+        const systemMessage = 'You are a JSON generation assistant. You must respond with valid JSON only. No explanations, no markdown, no code blocks - just pure JSON starting with { or [ and ending with } or ].';
+
+        const formattedMessages: ExchangeType = [
+            { role: 'system', content: systemMessage },
+            { role: 'user', content: prompt }
+        ];
+
+        console.log('GroqInterface: Calling chat method from convertTextToJSON');
+        const response = await this.chat(service, formattedMessages, { modelName: modelName, responseType: 'json'} );
+
+        // Always apply JSON cleanup for TextToJSON conversion type
+        return this.ensureJsonResponse(response, true);
     }
 
     chat = async (service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string, responseType:string, response_format?: any }): Promise<string> => {
@@ -133,7 +167,7 @@ export class GroqInterface extends BaseInterface {
                 const content = completion.choices[0].message.content || '';
 
                 // --- Ensure JSON if required ---
-                let requireJson = options.responseType === 'json' ? true : false;
+                const requireJson = (options.response_format?.type === 'json_object') || options.responseType === 'json';
                 if (requireJson) {
                     return this.ensureJsonResponse(content, true);
                 }

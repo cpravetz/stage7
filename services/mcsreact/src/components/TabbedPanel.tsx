@@ -15,6 +15,7 @@ interface WorkProduct {
   type: 'Interim' | 'Final' | 'Plan';
   name: string;
   url: string;
+  workproduct: any;
 }
 
 interface TabbedPanelProps {

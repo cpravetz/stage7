@@ -185,7 +185,8 @@ export class InputResolver {
             const response = await axios.post(`${this.brainUrl}/chat`, {
                 messages: [{ role: 'user', content: prompt }],
                 conversationType: 'TextToText',
-                temperature: 0.1
+                temperature: 0.1,
+                responseType: 'text',
             }, {
                 timeout: 30000, // 30 second timeout
                 headers: {

@@ -52,6 +52,11 @@ export class HuggingfaceInterface extends BaseInterface {
             requiredParams: ['service', 'image'],
             converter: this.convertImageToText,
         });
+        this.converters.set(LLMConversationType.TextToJSON, {
+            conversationType: LLMConversationType.TextToJSON,
+            requiredParams: ['service', 'prompt'],
+            converter: this.convertTextToJSON,
+        });
     }
 
     /**
@@ -324,6 +329,25 @@ export class HuggingfaceInterface extends BaseInterface {
             }
             return `Error: ${errorMessage}`;
         }
+    }
+
+    async convertTextToJSON(args: ConvertParamsType): Promise<string> {
+        const { service, prompt, modelName } = args;
+        if (!service) {
+            throw new Error('HuggingfaceInterface: No service provided for text-to-JSON conversion');
+        }
+
+        const systemMessage = 'You are a JSON generation assistant. You must respond with valid JSON only. No explanations, no markdown, no code blocks - just pure JSON starting with { or [ and ending with } or ].';
+
+        const messages: ExchangeType = [
+            { role: 'system', content: systemMessage },
+            { role: 'user', content: prompt || '' }
+        ];
+
+        const response = await this.chat(service, messages, { modelName, responseType: 'json' });
+
+        // Always apply JSON cleanup for TextToJSON conversion type
+        return this.ensureJsonResponse(response, true);
     }
 
     async convertTextToImage(args: ConvertParamsType): Promise<Blob| undefined> {

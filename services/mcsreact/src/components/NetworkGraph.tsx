@@ -173,19 +173,21 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics }) =
                     }
                     const stepStatusBorderColor = getStepStatusBorderColor(step.status);
                     const fontColor = getContrastYIQ(agentColor);
-                    newNodes.add({
-                        id: step.id,
-                        label: `${step.verb}\n(${step.status.toUpperCase()})`,
-                        color: {
-                            background: agentColor,
-                            border: stepStatusBorderColor,
-                            highlight: { background: agentColor, border: stepStatusBorderColor },
-                            hover: { background: agentColor, border: '#FFC107' }
-                        },
-                        borderWidth: 3,
-                        group: agent.agentId,
-                        font: { color: fontColor }
-                    });
+                    if (!newNodes.get(step.id)) {
+                        newNodes.add({
+                            id: step.id,
+                            label: `${step.verb}\n(${step.status.toUpperCase()})`,
+                            color: {
+                                background: agentColor,
+                                border: stepStatusBorderColor,
+                                highlight: { background: agentColor, border: stepStatusBorderColor },
+                                hover: { background: agentColor, border: '#FFC107' }
+                            },
+                            borderWidth: 3,
+                            group: agent.agentId,
+                            font: { color: fontColor }
+                        });
+                    }
                 });
             });
         }

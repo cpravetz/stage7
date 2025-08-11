@@ -7,7 +7,8 @@ import { PluginParameterType,
     ActionVerbTask,
     ExecutionContext as PlanExecutionContext,
     PlanTemplate,
-    OutputType } from '@cktmcs/shared'; // Added ActionVerbTask and OutputType
+    OutputType,
+    PredefinedRoles } from '@cktmcs/shared'; // Added ActionVerbTask and OutputType
 import { MapSerializer } from '@cktmcs/shared';
 import { MessageType } from '@cktmcs/shared'; // Ensured MessageType is here, assuming it's separate or also from shared index
 import { AgentPersistenceManager } from '../utils/AgentPersistenceManager';
@@ -81,21 +82,20 @@ export class Step {
         this.retryCount = 0;
         this.maxRetries = params.maxRetries || 3;
         this.lastError = null;
-        
-        // Validate recommendedRole
-        if (this.recommendedRole && !/^[a-zA-Z0-9_-]+$/.test(this.recommendedRole)) {
-            console.warn(`[Step Constructor] Invalid characters in recommendedRole: '${this.recommendedRole}'. Defaulting to undefined.`);
-            // Only log if persistenceManager is available
-            if (this.persistenceManager) {
-                this.logEvent({
-                    eventType: 'step_validation_warning',
-                    stepId: this.id,
-                    message: `Invalid recommendedRole '${this.recommendedRole}' sanitized.`,
-                    originalValue: this.recommendedRole,
-                    timestamp: new Date().toISOString()
-                });
+
+        // Validate and standardize recommendedRole
+        if (this.recommendedRole) {
+            const roleKey = Object.keys(PredefinedRoles).find(key => 
+                PredefinedRoles[key].id.toLowerCase() === this.recommendedRole!.toLowerCase() || 
+                PredefinedRoles[key].name.toLowerCase() === this.recommendedRole!.toLowerCase()
+            );
+
+            if (roleKey) {
+                this.recommendedRole = PredefinedRoles[roleKey].id;
+            } else {
+                console.warn(`[Step Constructor] Invalid or unknown recommendedRole: '${this.recommendedRole}'. Setting to undefined.`);
+                this.recommendedRole = undefined;
             }
-            this.recommendedRole = undefined;
         }
 
         this.persistenceManager = params.persistenceManager;

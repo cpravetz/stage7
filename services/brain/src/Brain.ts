@@ -40,7 +40,6 @@ export class Brain extends BaseEntity {
         super('Brain', 'Brain', `brain`, process.env.PORT || '5020');
         this.modelManager = modelManagerInstance;
 
-        // Override the triggerImmediateDatabaseSync method to trigger immediate sync
         this.modelManager.triggerImmediateDatabaseSync = () => {
             console.log('[Brain] Immediate database sync triggered by blacklist change');
             this.syncPerformanceDataToLibrarian();
@@ -48,46 +47,36 @@ export class Brain extends BaseEntity {
 
         this.init();
 
-        // On startup, restore metrics from Librarian
         this.restorePerformanceDataFromLibrarian().then(() => {
-            // Start periodic sync of performance data to Librarian
             this.setupPerformanceDataSync();
         });
     }
 
     init() {
-        // Middleware
         app.use(bodyParser.json());
 
-        // Use the BaseEntity verifyToken method for authentication
         app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
-            // Skip authentication for health endpoint, chat endpoint, and feedback endpoint
             if (req.path === '/health' || req.path === '/chat' || req.path === '/feedback') {
                 return next();
             }
-
-            // Use the BaseEntity verifyToken method
             this.verifyToken(req, res, next);
         });
 
-        // Add health check endpoint
         app.get('/health', (_req: express.Request, res: express.Response) => {
             res.json({ status: 'ok', message: 'Brain service is running' });
         });
 
-        // Global error handler
         app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
             console.error('Express error in Brain:', err instanceof Error ? err.message : String(err));
             analyzeError(err as Error);
             res.status(501).json({ error: 'Internal server error' });
         });
 
-        // API endpoint for processThread
         app.post('/chat', async (req: express.Request, res: express.Response, next: express.NextFunction) => {
             try {
                 await this.chat(req, res);
             } catch (error) {
-                next(error); // Pass errors to the global error handler
+                next(error);
             }
         });
 
@@ -95,22 +84,19 @@ export class Brain extends BaseEntity {
             try {
                 await this.generate(req, res);
             } catch (error) {
-                next(error); // Pass errors to the global error handler
+                next(error);
             }
         });
 
-        //API endpoint to report LLMCall total
         app.get('/getLLMCalls', (_req: express.Request, res: express.Response) => {
             res.json({ llmCalls: this.llmCalls });
         });
 
-        // API endpoint to get available models
         app.get('/models', (_req: express.Request, res: express.Response) => {
             const models = this.getAvailableModels();
             res.json({ models });
         });
 
-        // API endpoint to reset all blacklisted models
         app.post('/performance/reset-blacklists', (_req: express.Request, res: express.Response) => {
             try {
                 this.modelManager.resetAllBlacklists();
@@ -121,7 +107,6 @@ export class Brain extends BaseEntity {
             }
         });
 
-        // API endpoint for receiving feedback on model performance
         app.post('/feedback', async (req: express.Request, res: express.Response) => {
             try {
                 await this.handleFeedback(req, res);
@@ -131,18 +116,15 @@ export class Brain extends BaseEntity {
             }
         });
 
-        // Start the server
         app.listen(Number(port), '0.0.0.0', () => {
             console.log(`Brain service listening at http://0.0.0.0:${port}`);
         });
 
-        // Handle uncaught exceptions
         process.on('uncaughtException', (error) => {
             console.error('Uncaught Exception:', error);
             analyzeError(error);
         });
 
-        // Handle unhandled promise rejections
         process.on('unhandledRejection', (reason, promise) => {
             console.error('Unhandled Rejection at:', promise, 'reason:', reason);
             if (reason instanceof Error) {
@@ -151,7 +133,6 @@ export class Brain extends BaseEntity {
         });
     }
 
-    // Track consecutive timeouts/system errors for each model
     private modelTimeoutCounts: Record<string, number> = {};
 
     async generate(req: express.Request, res: express.Response) {
@@ -171,7 +152,6 @@ export class Brain extends BaseEntity {
             let trackingRequestId: string = '';
 
             try {
-                // Select model for this attempt
                 selectedModel = modelName && attempt === 1 ?
                     this.modelManager.getModel(modelName) :
                     this.modelManager.selectModel(optimization, conversationType);
@@ -182,20 +162,18 @@ export class Brain extends BaseEntity {
                         lastError = 'No suitable model found';
                         continue;
                     } else {
-                        break; // No more models available
+                        break;
                     }
                 }
 
                 lastModelName = selectedModel.name;
 
-                // Prepare parameters for this model
                 const filteredConvertParams = this.filterInternalParameters(convertParams || {});
                 const modelConvertParams = { ...filteredConvertParams };
                 modelConvertParams.max_length = modelConvertParams.max_length ?
                     Math.min(modelConvertParams.max_length, selectedModel.tokenLimit) :
                     selectedModel.tokenLimit;
 
-                // Track the model request
                 const prompt = JSON.stringify(modelConvertParams);
                 trackingRequestId = this.modelManager.trackModelRequest(selectedModel.name, conversationType, prompt);
 
@@ -204,29 +182,25 @@ export class Brain extends BaseEntity {
 
                 const result = await selectedModel.llminterface?.convert(selectedModel.service, conversationType, modelConvertParams);
 
-                // Track successful response
                 this.modelManager.trackModelResponse(trackingRequestId, result || '', 0, true);
 
-                // Reset timeout count on success
                 if (selectedModel.name in this.modelTimeoutCounts) {
                     this.modelTimeoutCounts[selectedModel.name] = 0;
                 }
 
                 res.json({ result: result, mimeType: 'text/plain' });
-                return; // Success!
+                return;
 
             } catch (error) {
                 const errorMessage = error instanceof Error ? error.message : String(error);
                 lastError = errorMessage;
                 console.error(`[Brain Generate] Attempt ${attempt} failed with model ${selectedModel?.modelName || 'unknown'}: ${errorMessage}`);
 
-                // Track failed response
                 if (selectedModel && trackingRequestId) {
                     console.log(`[Brain Generate] Tracking failure for model ${selectedModel.name}`);
                     this.modelManager.trackModelResponse(trackingRequestId, '', 0, false, errorMessage);
                 }
 
-                // Blacklist model after 3 consecutive timeouts/system errors
                 if (selectedModel && selectedModel.name) {
                     const isTimeout = /timeout|system_error/i.test(errorMessage);
                     if (isTimeout) {
@@ -237,19 +211,16 @@ export class Brain extends BaseEntity {
                             this.modelTimeoutCounts[selectedModel.name] = 0;
                         }
                     } else {
-                        // Reset count for non-timeout errors
                         this.modelTimeoutCounts[selectedModel.name] = 0;
                     }
                 }
 
-                // Continue to next attempt unless this was the last one
                 if (attempt < maxRetries) {
                     console.log(`[Brain Generate] Attempting retry ${attempt + 1}/${maxRetries}`);
                 }
             }
         }
 
-        // All attempts failed
         console.error(`[Brain Generate] All ${maxRetries} attempts failed. Last error: ${lastError}`);
         res.status(500).json({ error: `All model attempts failed. Last error: ${lastError}` });
     }
@@ -271,7 +242,6 @@ export class Brain extends BaseEntity {
             let trackingRequestId: string = '';
 
             try {
-                // Select model for this attempt
                 selectedModel = this.modelManager.selectModel(
                     thread.optimization || 'accuracy',
                     thread.conversationType || LLMConversationType.TextToText
@@ -281,7 +251,7 @@ export class Brain extends BaseEntity {
                     lastError = `No suitable model found for ${thread.optimization}/${thread.conversationType}`;
                     console.log(`[Brain Chat] Attempt ${attempt}: ${lastError}`);
                     if (attempt === maxRetries) {
-                        break; // No more attempts, will return error
+                        break;
                     }
                     continue;
                 }
@@ -290,36 +260,31 @@ export class Brain extends BaseEntity {
 
                 console.log(`[Brain Chat] Attempt ${attempt}: Using model ${selectedModel.modelName}`);
 
-                // Track the model request
                 const prompt = thread.exchanges.map((e: any) => e.content).join(' ');
                 trackingRequestId = this.modelManager.trackModelRequest(selectedModel.name, thread.conversationType || LLMConversationType.TextToText, prompt);
 
                 await this._chatWithModel(selectedModel, thread, res, trackingRequestId);
 
-                // Reset timeout count on success
                 if (selectedModel.name in this.modelTimeoutCounts) {
                     this.modelTimeoutCounts[selectedModel.name] = 0;
                 }
 
-                return; // Success!
+                return;
 
             } catch (error) {
                 const errorMessage = error instanceof Error ? error.message : String(error);
                 lastError = errorMessage;
                 console.error(`[Brain Chat] Attempt ${attempt} failed with model ${selectedModel?.modelName || 'unknown'}: ${errorMessage}`);
 
-                // Track failed response
                 if (selectedModel && trackingRequestId) {
                     console.log(`[Brain Chat] Tracking failure for model ${selectedModel.name}`);
                     this.modelManager.trackModelResponse(trackingRequestId, '', 0, false, errorMessage);
                 }
 
-                // Handle model failures and blacklisting
                 if (selectedModel && selectedModel.name) {
                     const isTimeout = /timeout|system_error/i.test(errorMessage);
                     const isJsonError = /json|parse|invalid format/i.test(errorMessage);
                     
-                    // Track failures by type
                     if (!this.modelFailureCounts[selectedModel.name]) {
                         this.modelFailureCounts[selectedModel.name] = { timeout: 0, json: 0, other: 0 };
                     }
@@ -335,26 +300,19 @@ export class Brain extends BaseEntity {
                     const counts = this.modelFailureCounts[selectedModel.name];
                     const totalFailures = counts.timeout + counts.json + counts.other;
                     
-                    // Blacklist criteria:
-                    // - 3 consecutive timeouts
-                    // - 2 consecutive JSON parsing failures
-                    // - 5 total failures of any type
                     if (counts.timeout >= 3 || counts.json >= 2 || totalFailures >= 5) {
-                        console.warn(`[Brain Chat] Blacklisting model ${selectedModel.name} due to repeated failures:`,
-                            `Timeouts: ${counts.timeout}, JSON errors: ${counts.json}, Other: ${counts.other}`);
+                        console.warn(`[Brain Chat] Blacklisting model ${selectedModel.name} due to repeated failures:`, `Timeouts: ${counts.timeout}, JSON errors: ${counts.json}, Other: ${counts.other}`);
                         this.modelManager.blacklistModel(selectedModel.name, new Date(Date.now() + 3600 * 1000));
                         this.modelFailureCounts[selectedModel.name] = { timeout: 0, json: 0, other: 0 };
                     }
                 }
 
-                // Continue to next attempt if there are more retries available
                 if (attempt < maxRetries) {
                     console.log(`[Brain Chat] Attempting retry ${attempt + 1}/${maxRetries}`);
                 }
             }
         }
 
-        // All attempts failed
         console.error(`[Brain Chat] All ${maxRetries} attempts failed. Last error: ${lastError}`);
         res.status(500).json({ error: `All model attempts failed. Last error: ${lastError}` });
     }
@@ -363,7 +321,6 @@ export class Brain extends BaseEntity {
         this.llmCalls++;
         console.log(`[Brain Chat] Using model ${selectedModel.modelName} for request ${requestId}`);
 
-        // Filter out internal parameters that shouldn't be passed to external APIs
         const filteredOptionals = this.filterInternalParameters(thread.optionals || {});
 
         let modelResponse = await selectedModel.llminterface.chat(
@@ -383,15 +340,13 @@ export class Brain extends BaseEntity {
             throw new Error(modelResponse || 'Model returned empty response');
         }
 
-        // Track successful response with token count if available
         let tokenCount = 0;
         if (typeof modelResponse === 'object' && modelResponse && 'usage' in modelResponse) {
             tokenCount = (modelResponse as any).usage?.total_tokens || 0;
         }
         this.modelManager.trackModelResponse(requestId, typeof modelResponse === 'string' ? modelResponse : JSON.stringify(modelResponse), tokenCount, true);
 
-        // AWARENESS IMPLEMENTATION: Add confidence score to response
-        let confidence = 0.9; // Default confidence
+        let confidence = 0.9;
         let finalResponse = modelResponse;
         if (typeof modelResponse === 'object' && modelResponse && 'confidence' in modelResponse) {
             confidence = (modelResponse as any).confidence;
@@ -406,18 +361,10 @@ export class Brain extends BaseEntity {
         });
     }
 
-    /**
-     * Get a list of all available models.
-     */
     getAvailableModels(): string[] {
         return this.modelManager.getAvailableModels();
     }
 
-    /**
-     * Handle feedback on model performance from plugins
-     * @param req Request
-     * @param res Response
-     */
     private async handleFeedback(req: express.Request, res: express.Response): Promise<void> {
         try {
             const { type, success, quality_score, plan_steps, attempt_number, error_type, feedback_scores } = req.body;
@@ -425,24 +372,18 @@ export class Brain extends BaseEntity {
             console.log(`[Brain] Received feedback: type=${type}, success=${success}, quality=${quality_score}, attempts=${attempt_number}`);
 
             if (type === 'plan_generation_feedback') {
-                // Find the most recent model request for this conversation
-                // This is a simplified approach - in production you might want to track request IDs
                 const activeRequests = this.modelManager.getActiveRequestsCount();
 
                 if (feedback_scores && typeof feedback_scores === 'object') {
-                    // Update model performance based on feedback
-                    // We'll use a heuristic to identify the model that was used
                     const availableModels = this.getAvailableModels();
 
                     if (availableModels.length > 0) {
-                        // For now, update the first available model's performance
-                        // In a more sophisticated implementation, you'd track which model was actually used
                         const modelName = availableModels[0];
 
                         console.log(`[Brain] Updating performance feedback for model: ${modelName}`);
                         this.modelManager.updateModelPerformanceFromEvaluation(
                             modelName,
-                            LLMConversationType.TextToCode, // Assume plan generation uses text/code conversation type
+                            LLMConversationType.TextToCode,
                             feedback_scores
                         );
                     }
@@ -463,12 +404,6 @@ export class Brain extends BaseEntity {
         }
     }
 
-    /**
-     * Skip authentication for certain endpoints
-     * @param req Request
-     * @param res Response
-     * @param next Next function
-     */
     private skipAuth(req: express.Request, _res: express.Response, next: express.NextFunction): void {
         console.log('[Brain] Skipping authentication for endpoint:', req.path);
         next();
@@ -484,57 +419,41 @@ export class Brain extends BaseEntity {
             return 'text/html';
         }
 
-        // Check if the response is JSON
         try {
-            // Look for JSON structure - more permissive check
             const trimmed = response.trim();
             if ((trimmed.startsWith('{') && trimmed.endsWith('}')) ||
                 (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
-                // Try to parse it to confirm it's valid JSON
                 try {
                     JSON.parse(trimmed);
                     console.log('[determineMimeType] Detected valid JSON response, setting MIME type to application/json');
                     return 'application/json';
                 } catch (parseError) {
                     console.log('[determineMimeType] Response looks like JSON but failed to parse:', parseError instanceof Error ? parseError.message : String(parseError));
-                    // Continue to check for code blocks
                 }
             }
         } catch (e) {
-            // Not valid JSON, continue with text/plain
             console.log('[determineMimeType] Response is not valid JSON, using text/plain');
         }
 
-        // Log the first 100 characters of the response for debugging
         console.log(`[determineMimeType] Response preview (first 100 chars): ${response.substring(0, 100)}${response.length > 100 ? '...' : ''}`);
 
         return 'text/plain';
     }
 
-    /**
-     * Set up periodic sync of performance data to Librarian
-     */
     private setupPerformanceDataSync() {
-        // First, try to discover the Librarian service
         this.discoverLibrarianService();
 
-        // Set up interval to sync performance data every 5 minutes
         this.performanceDataSyncInterval = setInterval(() => {
             this.syncPerformanceDataToLibrarian();
-        }, 5 * 60 * 1000); // 5 minutes
+        }, 5 * 60 * 1000);
 
-        // Also sync immediately on startup
         setTimeout(() => {
             this.syncPerformanceDataToLibrarian();
-        }, 10000); // Wait 10 seconds after startup to give Librarian time to be available
+        }, 10000);
     }
 
-    /**
-     * Discover the Librarian service URL
-     */
     private async discoverLibrarianService() {
         try {
-            // Try to discover using service discovery
             if (this.serviceDiscovery) {
                 const url = await this.serviceDiscovery.discoverService('Librarian');
                 if (url) {
@@ -542,7 +461,6 @@ export class Brain extends BaseEntity {
                     return;
                 }
             }
-            // Fall back to environment variable
             const envUrl = process.env.LIBRARIAN_URL || 'librarian:5040';
             if (envUrl) {
                 this.librarianUrl = envUrl;
@@ -554,12 +472,8 @@ export class Brain extends BaseEntity {
         }
     }
 
-    /**
-     * Sync performance data to Librarian
-     */
     private async syncPerformanceDataToLibrarian() {
         try {
-            // If we don't have a Librarian URL yet, try to discover it
             if (!this.librarianUrl) {
                 await this.discoverLibrarianService();
                 if (!this.librarianUrl) {
@@ -568,32 +482,25 @@ export class Brain extends BaseEntity {
                 }
             }
 
-            // Get all models with name and contentConversation
             const allModels = Array.from(this.modelManager.getAllModels().values()).map(model => ({
                 name: model.name,
                 contentConversation: model.contentConversation
             }));
 
-            // Get performance data for all models (including unused)
             const performanceData = this.modelManager.performanceTracker.getAllPerformanceData(allModels);
 
-            // Check if we have any performance data to sync
             if (performanceData.length === 0) {
-
-                // Check if we have any blacklisted models that should be in the performance data
                 const blacklistedModels = this.modelManager.getBlacklistedModels();
                 if (blacklistedModels.length > 0) {
                     console.log(`[Brain] Found ${blacklistedModels.length} blacklisted models but no performance data. This is inconsistent.`);
                     console.log('[Brain] Blacklisted models:', JSON.stringify(blacklistedModels, null, 2));
                 }
 
-                // Check active requests
                 console.log(`[Brain] Current active model requests: ${this.modelManager.getActiveRequestsCount()}`);
 
                 return;
             }
 
-            // Get rankings for different conversation types and metrics
             const conversationTypes = [LLMConversationType.TextToText, LLMConversationType.TextToCode, LLMConversationType.ImageToText, LLMConversationType.TextToJSON];
             const metrics = ['successRate', 'averageLatency', 'overall'];
 
@@ -610,14 +517,12 @@ export class Brain extends BaseEntity {
                 }
             }
 
-            // Prepare data for Librarian
             const modelPerformanceData = {
                 performanceData,
                 rankings,
                 timestamp: new Date().toISOString()
             };
 
-            // Store in Librarian using authenticatedApi to ensure proper authorization
             try {
                 const response = await this.authenticatedApi.post(`http://${this.librarianUrl}/storeData`, {
                     id: 'model-performance-data',
@@ -625,13 +530,11 @@ export class Brain extends BaseEntity {
                     storageType: 'mongo',
                     collection: 'mcsdata'
                 });
-                // After successful save, update in-memory tracker with latest data
                 this.modelManager.performanceTracker.setAllPerformanceData(performanceData);
             } catch (apiError) {
                 console.error('[Brain] API error syncing performance data to Librarian:',
                     apiError instanceof Error ? apiError.message : String(apiError));
 
-                // Log more details about the error
                 if (apiError instanceof Error && (apiError as any).response) {
                     const errorResponse = (apiError as any).response;
                     console.error(`[Brain] API error status: ${errorResponse.status}`);
@@ -640,15 +543,10 @@ export class Brain extends BaseEntity {
             }
         } catch (error) {
             console.error('[Brain] Error syncing performance data to Librarian:', error instanceof Error ? error.message : String(error));
-
-            // Log the error but continue operation
             console.log('[Brain] Will retry syncing performance data on next scheduled interval');
         }
     }
 
-    /**
-     * Restore performance metrics from Librarian on startup
-     */
     private async restorePerformanceDataFromLibrarian() {
         await this.discoverLibrarianService();
         if (!this.librarianUrl) {
@@ -659,7 +557,6 @@ export class Brain extends BaseEntity {
         try {
             console.log('[Brain] Attempting to restore model performance data from Librarian...');
 
-            // Add timeout and retry logic for Librarian connection
             const response = await Promise.race([
                 this.authenticatedApi.get(`http://${this.librarianUrl}/loadData/model-performance-data`, {
                     params: { collection: 'mcsdata', storageType: 'mongo' }
@@ -683,8 +580,6 @@ export class Brain extends BaseEntity {
         } catch (err) {
             const errorMessage = err instanceof Error ? err.message : String(err);
             console.warn(`[Brain] Could not restore performance data from Librarian (${errorMessage}), continuing with default model scores`);
-            // Continue without performance data - the system will work with default scores
-            // This is not a critical error, just means we start fresh
         }
     }
 
@@ -714,7 +609,6 @@ export class Brain extends BaseEntity {
             responseType: thread.responseType
         }, null, 2));
 
-        // A more robust check for any request that requires a JSON plan, like those from ACCOMPLISH
         const requiresJsonPlan = thread.exchanges.length > 0 &&
             thread.exchanges[0].content &&
             (thread.exchanges[0].content.includes('For PLAN responses, return a JSON object with this exact structure:') ||
@@ -738,14 +632,12 @@ export class Brain extends BaseEntity {
     }
 
     private filterInternalParameters(optionals: any): any {
-        // List of parameters that are for internal use only and shouldn't be passed to external APIs
         const internalParams = [
-            'response_format',  // OpenAI-specific parameter that causes errors in other APIs
-            'response_type',    // Internal parameter that causes errors in Groq and other APIs
-            'conversationType', // Internal parameter for model selection
-            'optimization',     // Internal parameter for model selection
-            'optionals'         // Recursive parameter
-            // NOTE: responseType is handled separately by interfaces to force JSON responses
+            'response_format',
+            'response_type',
+            'conversationType',
+            'optimization',
+            'optionals'
         ];
 
         const filtered: any = {};

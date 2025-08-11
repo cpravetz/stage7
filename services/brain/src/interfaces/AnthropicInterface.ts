@@ -17,7 +17,12 @@ export class AnthropicInterface extends BaseInterface {
             conversationType: LLMConversationType.TextToCode,
             requiredParams: ['service', 'prompt'],
             converter: this.convertTextToCode,
-        });        
+        });
+        this.converters.set(LLMConversationType.TextToJSON, {
+            conversationType: LLMConversationType.TextToJSON,
+            requiredParams: ['service', 'prompt'],
+            converter: this.convertTextToJSON,
+        });
     }
 
     async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string, timeout?: number, responseType?: string }): Promise<string> {
@@ -114,6 +119,25 @@ export class AnthropicInterface extends BaseInterface {
             { role: 'user', content: prompt || ''}
         ];
         return this.chat(service, messages, { modelName: modelName });
+    }
+
+    async convertTextToJSON(args: ConvertParamsType): Promise<string> {
+        const { service, prompt, modelName } = args;
+        if (!service) {
+            throw new Error('AnthropicInterface: No service provided for text-to-JSON conversion');
+        }
+
+        const systemMessage = 'You are a JSON generation assistant. You must respond with valid JSON only. No explanations, no markdown, no code blocks - just pure JSON starting with { or [ and ending with } or ].';
+
+        const messages = [
+            { role: 'system', content: systemMessage },
+            { role: 'user', content: prompt || ''}
+        ];
+
+        const response = await this.chat(service, messages, { modelName: modelName, responseType: 'json' });
+
+        // Always apply JSON cleanup for TextToJSON conversion type
+        return this.ensureJsonResponse(response, true);
     }
 
     async convert(service: BaseService, conversionType: LLMConversationType, convertParams: ConvertParamsType): Promise<any> {

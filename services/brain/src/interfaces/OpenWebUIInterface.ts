@@ -141,27 +141,53 @@ export class OpenWebUIInterface extends BaseInterface {
     }
 
     async convert(service: BaseService, conversionType: LLMConversationType, convertParams: any): Promise<any> {
-        // OpenWebUI only supports text-to-text conversion
-        if (conversionType !== LLMConversationType.TextToText) {
+        // OpenWebUI supports text-to-text and text-to-JSON conversion
+        if (conversionType !== LLMConversationType.TextToText && conversionType !== LLMConversationType.TextToJSON) {
             throw new Error(`Conversion type ${conversionType} not supported by OpenWebUI interface`);
+        }
+
+        let messages: ExchangeType = [];
+
+        // Handle TextToJSON with special system message
+        if (conversionType === LLMConversationType.TextToJSON) {
+            const systemMessage = 'You are a JSON generation assistant. You must respond with valid JSON only. No explanations, no markdown, no code blocks - just pure JSON starting with { or [ and ending with } or ].';
+            messages.push({ role: 'system', content: systemMessage });
         }
 
         // If we have a prompt, use it to create a simple message
         if (convertParams.prompt) {
-            return this.chat(service, [{ role: 'user', content: convertParams.prompt }], {
+            messages.push({ role: 'user', content: convertParams.prompt });
+
+            const response = await this.chat(service, messages, {
                 temperature: convertParams.temperature,
                 max_length: convertParams.max_length,
                 modelName: convertParams.modelName,
-                responseType: convertParams.responseType
+                responseType: conversionType === LLMConversationType.TextToJSON ? 'json' : convertParams.responseType
             });
+
+            // Apply JSON cleanup for TextToJSON conversion type
+            if (conversionType === LLMConversationType.TextToJSON) {
+                return this.ensureJsonResponse(response, true);
+            }
+
+            return response;
         }
 
         // If we have messages, use them directly
         if (convertParams.messages) {
-            return this.chat(service, convertParams.messages, {
+            const allMessages = [...messages, ...convertParams.messages];
+            const response = await this.chat(service, allMessages, {
                 temperature: convertParams.temperature,
-                max_length: convertParams.max_length
+                max_length: convertParams.max_length,
+                responseType: conversionType === LLMConversationType.TextToJSON ? 'json' : convertParams.responseType
             });
+
+            // Apply JSON cleanup for TextToJSON conversion type
+            if (conversionType === LLMConversationType.TextToJSON) {
+                return this.ensureJsonResponse(response, true);
+            }
+
+            return response;
         }
 
         throw new Error('No prompt or messages provided for OpenWebUI conversion');

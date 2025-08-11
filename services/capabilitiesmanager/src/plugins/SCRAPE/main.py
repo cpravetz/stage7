@@ -230,6 +230,7 @@ class ScrapePlugin:
 
         return config
 
+    @staticmethod
     def convert_to_full_url(partial_url, default_scheme='https', context_url=None):
         """
         Advanced URL converter with additional features.
@@ -245,9 +246,14 @@ class ScrapePlugin:
         if not partial_url:
             raise ValueError("URL cannot be empty")
     
-        # Strip whitespace
+        # Strip whitespace and clean up duplicated schemes
         url = partial_url.strip()
-    
+        while url.lower().startswith(('http://http://', 'https://https://', 'http://https://', 'https://http://')):
+            if url.lower().startswith('http://'):
+                url = url[7:]
+            elif url.lower().startswith('https://'):
+                url = url[8:]
+
         # Case 1: Already has a scheme
         if url.startswith(('https://', 'http://', 'ftp://', 'ftps://')):
             return url
@@ -280,7 +286,7 @@ class ScrapePlugin:
         """Execute the SCRAPE plugin"""
         try:
             # Extract URL using the helper
-            url_input = self._get_input_value(inputs_map, 'url')
+            url_input = self._get_input_value(inputs_map, 'url') or self._get_input_value(inputs_map, 'websites')
 
             if not url_input:
                 return [{
@@ -292,32 +298,38 @@ class ScrapePlugin:
                     "error": "No URL provided to SCRAPE plugin"
                 }]
 
-            # Validate and convert URL
-            full_url = self.convert_to_full_url(url_input, 'https')
-            if not full_url:
-                return [{
-                    "success": False,
-                    "name": "error",
-                    "resultType": PluginParameterType.ERROR,
-                    "resultDescription": f"Invalid URL: {url_input}",
-                    "result": None,
-                    "error": f"Invalid URL: {url_input}"
-                }]
+            urls_to_scrape = []
+            if isinstance(url_input, str):
+                urls_to_scrape.append(url_input)
+            elif isinstance(url_input, list):
+                urls_to_scrape.extend(url_input)
 
-            # Parse configuration
-            config = self.parse_config(inputs_map)
-            # Fetch HTML content
-            html = self.fetch_html(full_url)
-            
-            # Scrape content
-            scraped_data = self.scrape_content(html, config)
+            all_scraped_data = []
+            for url in urls_to_scrape:
+                try:
+                    # Validate and convert URL
+                    full_url = self.convert_to_full_url(url, 'https')
+                    if not full_url:
+                        logger.warning(f"Invalid URL: {url}")
+                        continue
+
+                    # Parse configuration
+                    config = self.parse_config(inputs_map)
+                    # Fetch HTML content
+                    html = self.fetch_html(full_url)
+                    
+                    # Scrape content
+                    scraped_data = self.scrape_content(html, config)
+                    all_scraped_data.extend(scraped_data)
+                except Exception as e:
+                    logger.error(f"Failed to scrape {url}: {e}")
 
             return [{
                 "success": True,
                 "name": "content",
                 "resultType": PluginParameterType.ARRAY,
-                "resultDescription": f"Scraped content from {full_url}",
-                "result": scraped_data,
+                "resultDescription": f"Scraped content from {len(urls_to_scrape)} URL(s)",
+                "result": all_scraped_data,
                 "mimeType": "application/json"
             }]
 

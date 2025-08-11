@@ -1,12 +1,10 @@
 import express from 'express';
 import { Agent } from './agents/Agent';
 import { MapSerializer, BaseEntity, createAuthenticatedAxios, PluginParameterType, OutputType } from '@cktmcs/shared';
-import { v4 as uuidv4 } from 'uuid';
 import { AgentSetStatistics, InputValue } from '@cktmcs/shared';
 import { AgentPersistenceManager } from './utils/AgentPersistenceManager';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { setInterval } from 'timers';
-import { AgentLifecycleManager } from './lifecycle/AgentLifecycleManager';
 import { CollaborationManager } from './collaboration/CollaborationManager';
 import { SpecializationFramework } from './specialization/SpecializationFramework';
 import { DomainKnowledge } from './specialization/DomainKnowledge';
@@ -24,7 +22,6 @@ export class AgentSet extends BaseEntity {
 
 
     // Agent systems
-    private lifecycleManager: AgentLifecycleManager;
     private collaborationManager: CollaborationManager;
     private specializationFramework: SpecializationFramework;
     private domainKnowledge: DomainKnowledge;
@@ -42,7 +39,6 @@ export class AgentSet extends BaseEntity {
         this.persistenceManager = new AgentPersistenceManager(this.librarianUrl, this.authenticatedApi);
 
         // Initialize agent systems
-        this.lifecycleManager = new AgentLifecycleManager(this.persistenceManager, this.trafficManagerUrl);
         this.taskDelegation = new TaskDelegation(this.agents, this.trafficManagerUrl);
         this.conflictResolution = new ConflictResolution(this.agents, this.trafficManagerUrl, this.brainUrl);
         this.collaborationManager = new CollaborationManager(
@@ -156,151 +152,6 @@ export class AgentSet extends BaseEntity {
 
         // Abort mission agents (mission-wide)
         this.app.post('/abortAgents', this.abortMissionAgents.bind(this));
-
-        // ===== Agent Lifecycle Management Endpoints =====
-
-        // Pause an agent
-        this.app.post('/agent/:agentId/pause', async (req: express.Request, res: express.Response): Promise<void> => {
-            try {
-                const { agentId } = req.params;
-                await this.lifecycleManager.pauseAgent(agentId);
-                res.status(200).send({ message: `Agent ${agentId} paused` });
-            } catch (error) {
-                analyzeError(error as Error);
-                if (!res.headersSent) {
-                    res.status(500).send({ error: error instanceof Error ? error.message : String(error) });
-                }
-            }
-        });
-
-        // Resume an agent
-        this.app.post('/agent/:agentId/resume', async (req: express.Request, res: express.Response): Promise<void> => {
-            try {
-                const { agentId } = req.params;
-                await this.lifecycleManager.resumeAgent(agentId);
-                res.status(200).send({ message: `Agent ${agentId} resumed` });
-            } catch (error) {
-                analyzeError(error as Error);
-                if (!res.headersSent) {
-                    res.status(500).send({ error: error instanceof Error ? error.message : String(error) });
-                }
-            }
-        });
-
-        // Create a checkpoint for an agent
-        this.app.post('/agent/:agentId/checkpoint', async (req: express.Request, res: express.Response): Promise<void> => {
-            try {
-                const { agentId } = req.params;
-                await this.lifecycleManager.createCheckpoint(agentId);
-                res.status(200).send({ message: `Checkpoint created for agent ${agentId}` });
-            } catch (error) {
-                analyzeError(error as Error);
-                if (!res.headersSent) {
-                    res.status(500).send({ error: error instanceof Error ? error.message : String(error) });
-                }
-            }
-        });
-
-        // Create a new version of an agent
-        this.app.post('/agent/:agentId/version', async (req: express.Request, res: express.Response): Promise<void> => {
-            try {
-                const { agentId } = req.params;
-                const { description, changes } = req.body;
-                const version = await this.lifecycleManager.createVersion(agentId, description, changes);
-                res.status(200).send({ version });
-            } catch (error) {
-                analyzeError(error as Error);
-                if (!res.headersSent) {
-                    res.status(500).send({ error: error instanceof Error ? error.message : String(error) });
-                }
-            }
-        });
-
-        // Restore an agent to a specific version
-        this.app.post('/agent/:agentId/restore/:version', async (req: express.Request, res: express.Response): Promise<void> => {
-            try {
-                const { agentId, version } = req.params;
-                await this.lifecycleManager.restoreVersion(agentId, version);
-                res.status(200).send({ message: `Agent ${agentId} restored to version ${version}` });
-            } catch (error) {
-                analyzeError(error as Error);
-                if (!res.headersSent) {
-                    res.status(500).send({ error: error instanceof Error ? error.message : String(error) });
-                }
-            }
-        });
-
-        // Migrate an agent to another agent set
-        this.app.post('/agent/:agentId/migrate', async (req: express.Request, res: express.Response): Promise<void> => {
-            try {
-                const { agentId } = req.params;
-                const { targetAgentSetUrl } = req.body;
-                await this.lifecycleManager.migrateAgent(agentId, targetAgentSetUrl);
-                res.status(200).send({ message: `Agent ${agentId} migrated to ${targetAgentSetUrl}` });
-            } catch (error) {
-                analyzeError(error as Error);
-                if (!res.headersSent) {
-                    res.status(500).send({ error: error instanceof Error ? error.message : String(error) });
-                }
-            }
-        });
-
-        // Get lifecycle events for an agent
-        this.app.get('/agent/:agentId/lifecycle/events', (req: express.Request, res: express.Response): void => {
-            try {
-                const { agentId } = req.params;
-                const events = this.lifecycleManager.getLifecycleEvents(agentId);
-                res.status(200).send({ events });
-            } catch (error) {
-                analyzeError(error as Error);
-                if (!res.headersSent) {
-                    res.status(500).send({ error: error instanceof Error ? error.message : String(error) });
-                }
-            }
-        });
-
-        // Get versions for an agent
-        this.app.get('/agent/:agentId/versions', (req: express.Request, res: express.Response): void => {
-            try {
-                const { agentId } = req.params;
-                const versions = this.lifecycleManager.getAgentVersions(agentId);
-                res.status(200).send({ versions });
-            } catch (error) {
-                analyzeError(error as Error);
-                if (!res.headersSent) {
-                    res.status(500).send({ error: error instanceof Error ? error.message : String(error) });
-                }
-            }
-        });
-
-        // Get diagnostics for an agent
-        this.app.get('/agent/:agentId/diagnostics', (req: express.Request, res: express.Response): void => {
-            try {
-                const { agentId } = req.params;
-                const diagnostics = this.lifecycleManager.getAgentDiagnostics(agentId);
-                res.status(200).send({ diagnostics });
-            } catch (error) {
-                analyzeError(error as Error);
-                if (!res.headersSent) {
-                    res.status(500).send({ error: error instanceof Error ? error.message : String(error) });
-                }
-            }
-        });
-
-        // Get all agent diagnostics
-        this.app.get('/diagnostics', (_req: express.Request, res: express.Response): void => {
-            try {
-                const diagnostics = this.lifecycleManager.getAllAgentDiagnostics();
-                res.status(200).send({ diagnostics });
-            } catch (error) {
-                analyzeError(error as Error);
-                if (!res.headersSent) {
-                    res.status(500).send({ error: error instanceof Error ? error.message : String(error) });
-                }
-            }
-        });
-
-        // ===== Agent Collaboration Endpoints =====
 
         // Delegate a task to an agent
         this.app.post('/delegateTask', async (req: express.Request, res: express.Response): Promise<void> => {
@@ -702,8 +553,7 @@ export class AgentSet extends BaseEntity {
 
         if (agent) {
             // this.agents.delete(agentId);
-            this.lifecycleManager.unregisterAgent(agentId); // Unregister from lifecycle manager
-            console.log(`Agent ${agentId} removed from AgentSet and unregistered from LifecycleManager due to status: ${status}. Current agent count: ${this.agents.size}`);
+            //console.log(`Agent ${agentId} removed from AgentSet and unregistered from LifecycleManager due to status: ${status}. Current agent count: ${this.agents.size}`);
 
             // Potentially notify TrafficManager to update its counts, if AgentSet is authoritative for agent existence.
             // For now, TrafficManager counts will be stale until it tries to interact with a removed agent or a separate cleanup for TM is implemented.
@@ -792,9 +642,6 @@ export class AgentSet extends BaseEntity {
         const newAgent = new Agent(agentConfig);
         this.agents.set(newAgent.id, newAgent);
 
-        // Register agent with lifecycle manager
-        this.lifecycleManager.registerAgent(newAgent);
-
         // Set up automatic checkpointing
         newAgent.setupCheckpointing(15); // Checkpoint every 15 minutes
 
@@ -879,9 +726,6 @@ export class AgentSet extends BaseEntity {
 
             const newAgent = new Agent(agentConfig);
             this.agents.set(newAgent.id, newAgent);
-
-            // Register agent with lifecycle manager
-            this.lifecycleManager.registerAgent(newAgent);
 
             // Set up automatic checkpointing
             newAgent.setupCheckpointing(15); // Checkpoint every 15 minutes
