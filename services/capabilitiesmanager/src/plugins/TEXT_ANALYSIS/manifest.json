@@ -49,7 +49,7 @@
       "description": "Summary of the analysis results"
     }
   ],
-  "inputGuidance": "IMPORTANT: Use 'text' for content to analyze and 'analysisType' for analysis type",
+  "inputGuidance": "IMPORTANT: You must use 'text' for content to analyze and 'analysisType' for analysis type",
   "language": "python",
   "entryPoint": {
     "main": "main.py",

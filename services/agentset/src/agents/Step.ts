@@ -653,7 +653,7 @@ export class Step {
             actionVerb: 'ACCOMPLISH',
             stepNo: this.stepNo,
             inputReferences: new Map(),
-            inputValues: new Map([
+            inputValues: new Map([...this.inputValues.entries(),
                 ['goal', {
                     inputName: 'goal',
                     value: goal,

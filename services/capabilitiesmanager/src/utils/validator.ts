@@ -197,6 +197,17 @@ export const validateAndStandardizeInputs = async (plugin: PluginDefinition, inp
         const standardizedInputs = new Map<string, EnhancedInputValue>();
         const processedInputs = new Map(inputsToValidate);
 
+        // --- START: Specific remediation for TEXT_ANALYSIS ---
+        if (plugin.verb === 'TEXT_ANALYSIS') {
+            const textDataInput = processedInputs.get('textData');
+            if (textDataInput && !processedInputs.has('text')) {
+                processedInputs.set('text', textDataInput);
+                processedInputs.delete('textData');
+                console.log(`[${trace_id}] validateAndStandardizeInputs: Remapped 'textData' to 'text' for TEXT_ANALYSIS plugin.`);
+            }
+        }
+        // --- END: Specific remediation for TEXT_ANALYSIS ---
+
         // Standardize keys to match definition case and handle simple pluralization
         for (const inputDef of inputDefinitions) {
             const inputName = inputDef.name;

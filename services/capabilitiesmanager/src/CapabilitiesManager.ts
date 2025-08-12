@@ -395,7 +395,11 @@ export class CapabilitiesManager extends BaseEntity {
             actionVerb: req.body.actionVerb,
             inputKeys: Object.keys(req.body.inputValues || {})
         });
-        const step = { ...req.body, inputValues: MapSerializer.transformFromSerialization(req.body.inputValues || {}) } as Step;
+        const step = {
+    ...req.body,
+    inputValues: MapSerializer.transformFromSerialization(req.body.inputValues || {}),
+    outputs: MapSerializer.transformFromSerialization(req.body.outputs || {}) // Add this line
+} as Step;
 
         if (!step.actionVerb || typeof step.actionVerb !== 'string') {
             const sError = generateStructuredError({
@@ -412,7 +416,7 @@ export class CapabilitiesManager extends BaseEntity {
         try {
             // Redirect 'ACCOMPLISH' to executeAccomplishPlugin
             if (step.actionVerb === 'ACCOMPLISH' && step.inputValues) {
-                const accomplishResultArray = await this.executeAccomplishPlugin(step.inputValues.get('goal')?.value || '', trace_id, 'goal');
+                const accomplishResultArray = await this.executeAccomplishPlugin(step.inputValues, trace_id);
                 res.status(200).send(MapSerializer.transformForSerialization(accomplishResultArray));
                 return;
             }
@@ -721,7 +725,7 @@ export class CapabilitiesManager extends BaseEntity {
         }
     }
 
-    private async executeAccomplishPlugin(goal: string, trace_id: string, callType: string = 'goal'): Promise<PluginOutput[]> {
+    private async executeAccomplishPlugin(inputs: Map<string, InputValue>, trace_id: string): Promise<PluginOutput[]> {
         const source_component = "CapabilitiesManager.executeAccomplishPlugin";
         let availablePluginsStr = ""; // Initialize
         try {            
@@ -745,10 +749,8 @@ export class CapabilitiesManager extends BaseEntity {
             availablePluginsStr = JSON.stringify(leanManifests, null, 2);
             console.log(`[${trace_id}] ${source_component}: Plugins string for ACCOMPLISH: ${truncate(availablePluginsStr)}...`);
 
-            const accomplishInputs : Map<string, InputValue> = new Map([
-                [callType, { inputName: callType, value: goal, valueType: PluginParameterType.STRING, args: {} }],
-                ['available_plugins', { inputName: 'available_plugins', value: availablePluginsStr, valueType: PluginParameterType.STRING, args: {} }]
-            ]);
+            const accomplishInputs : Map<string, InputValue> = new Map(inputs); // Start with all provided inputs
+            accomplishInputs.set('available_plugins', { inputName: 'available_plugins', value: availablePluginsStr, valueType: PluginParameterType.STRING, args: {} });
 
             const accomplishPluginManifest = await this.pluginRegistry.fetchOneByVerb('ACCOMPLISH');
             if (!accomplishPluginManifest) {
@@ -782,8 +784,7 @@ export class CapabilitiesManager extends BaseEntity {
                 message: `Core ACCOMPLISH plugin execution failed: ${error.message}`,
                 source_component,
                 original_error: error,
-                trace_id_param: trace_id,
-                contextual_info: {goal_length: goal.length}
+                trace_id_param: trace_id
             });
         }
     }
@@ -810,20 +811,25 @@ export class CapabilitiesManager extends BaseEntity {
             const availablePluginsStr = JSON.stringify(leanManifests, null, 2);
 
             // Create inputs specifically for novel verb handling
-            const accomplishInputs: Map<string, InputValue> = new Map([
-                ['novel_actionVerb', {
-                    inputName: 'novel_actionVerb',
-                    value: novelVerbInfo,
-                    valueType: PluginParameterType.OBJECT,
-                    args: {}
-                }],
-                ['available_plugins', {
-                    inputName: 'available_plugins',
-                    value: availablePluginsStr,
-                    valueType: PluginParameterType.STRING,
-                    args: {}
-                }]
-            ]);
+            const accomplishInputs: Map<string, InputValue> = new Map();
+            // Merge novelVerbInfo.inputValues with top-level inputs
+            if (novelVerbInfo.inputValues) {
+                for (const [key, value] of Object.entries(novelVerbInfo.inputValues)) {
+                    accomplishInputs.set(key, value as InputValue);
+                }
+            }
+            accomplishInputs.set('novel_actionVerb', {
+                inputName: 'novel_actionVerb',
+                value: novelVerbInfo,
+                valueType: PluginParameterType.OBJECT,
+                args: {}
+            });
+            accomplishInputs.set('available_plugins', {
+                inputName: 'available_plugins',
+                value: availablePluginsStr,
+                valueType: PluginParameterType.STRING,
+                args: {}
+            });
 
             const accomplishPluginManifest = await this.pluginRegistry.fetchOneByVerb('ACCOMPLISH');
             if (!accomplishPluginManifest) {

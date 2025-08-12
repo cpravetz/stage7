@@ -92,6 +92,13 @@ export const AVAILABLE_PERMISSIONS: Permission[] = [
     description: 'Access process environment variables',
     dangerous: false
   },
+  {
+    category: PermissionCategory.PROCESS,
+    name: 'docker.run',
+    level: PermissionLevel.EXECUTE,
+    description: 'Run Docker containers',
+    dangerous: true
+  },
   
   // Environment permissions
   {
