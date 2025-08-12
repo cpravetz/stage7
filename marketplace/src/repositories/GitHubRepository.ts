@@ -27,6 +27,11 @@ export class GitHubRepository implements PluginRepository {
     private baseContentUrl: string;
     private pluginsDir: string; // Path within the repo where plugins are stored, e.g., "plugins"
     private isEnabled: boolean;
+    private circuitState: 'CLOSED' | 'OPEN' | 'HALF_OPEN' = 'CLOSED';
+    private failureCount = 0;
+    private lastFailureTime = 0;
+    private readonly failureThreshold = 3;
+    private readonly openTimeout = 300000; // 5 minutes
 
     constructor(config: RepositoryConfig) {
         this.isEnabled = process.env.ENABLE_GITHUB === 'true';
@@ -129,6 +134,14 @@ export class GitHubRepository implements PluginRepository {
 
 
     private async makeGitHubRequest(method: string, url: string, data?: any, params?: any, attempt: number = 1): Promise<AxiosResponse> {
+        if (this.circuitState === 'OPEN') {
+            if (Date.now() - this.lastFailureTime > this.openTimeout) {
+                this.circuitState = 'HALF_OPEN';
+            } else {
+                return Promise.reject(new Error('Circuit is open. GitHub repository is temporarily unavailable.'));
+            }
+        }
+
         if (!this.isEnabled) {
             const errorMsg = 'GitHub access is disabled by configuration.';
             console.warn(`GitHubRepository: ${errorMsg}`);
@@ -155,8 +168,17 @@ export class GitHubRepository implements PluginRepository {
                     'User-Agent': 'CktmcsPluginMarketplace'
                 }
             });
+            this.failureCount = 0;
+            this.circuitState = 'CLOSED';
             return response;
         } catch (error: unknown) {
+            this.failureCount++;
+            this.lastFailureTime = Date.now();
+            if (this.circuitState === 'HALF_OPEN' || this.failureCount >= this.failureThreshold) {
+                this.circuitState = 'OPEN';
+                console.error(`Circuit is now OPEN for GitHubRepository.`);
+            }
+
             if (axios.isAxiosError(error) && error.response) {
                 const { status, data: responseData } = error.response;
                 const retryableStatuses = [429, 500, 502, 503, 504];

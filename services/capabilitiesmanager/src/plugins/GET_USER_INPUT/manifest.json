@@ -3,6 +3,7 @@
   "verb": "ASK_USER_QUESTION",
   "description": "Requests input from the user",
   "explanation": "This plugin sends a question to the user and returns their response",
+  "inputGuidance": "Inputs for this plugin must include 'question'.",
   "inputDefinitions": [
     {
       "name": "question",

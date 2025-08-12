@@ -18,11 +18,11 @@ def send_to_errorhandler(error, context=None):
 
 _seen_hashes = set()
 
-def robust_execute_plugin(inputs):
+def robust_execute_plugin(script_parameters):
     temp_dir = None
     try:
-        # Deduplication: hash the inputs
-        hash_input = json.dumps(inputs, sort_keys=True)
+        # Deduplication: hash the script_parameters
+        hash_input = json.dumps(script_parameters, sort_keys=True)
         input_hash = hashlib.sha256(hash_input.encode()).hexdigest()
         if input_hash in _seen_hashes:
             return [
@@ -41,7 +41,7 @@ def robust_execute_plugin(inputs):
         os.environ["TEXT_ANALYSIS_TEMP_DIR"] = temp_dir
 
         # Call the original plugin logic
-        result = execute_plugin(inputs)
+        result = execute_plugin(script_parameters)
 
         # Strict output validation: must be a list or dict
         if not isinstance(result, (list, dict)):
@@ -50,7 +50,7 @@ def robust_execute_plugin(inputs):
         return result
     except Exception as e:
         # Only escalate to errorhandler for unexpected/code errors
-        send_to_errorhandler(e, context=json.dumps(inputs))
+        send_to_errorhandler(e, context=json.dumps(script_parameters))
         return [
             {
                 "success": False,
@@ -199,7 +199,7 @@ def extract_keywords(text: str, top_n: int = 10) -> List[Dict[str, Any]]:
         List of keyword dictionaries with word and frequency
     """
     # Convert to lowercase and remove punctuation
-    clean_text = re.sub(r'[^\w\s]', '', text.lower())
+    clean_text = re.sub(r'[\w\s]', '', text.lower())
     
     # Split into words
     words = clean_text.split()
@@ -278,33 +278,33 @@ def basic_sentiment_analysis(text: str) -> Dict[str, Any]:
     }
 
 
-def execute_plugin(inputs: Dict[str, InputValue]) -> List[PluginOutput]:
+def execute_plugin(script_parameters: Dict[str, InputValue]) -> List[PluginOutput]:
     """
     Main plugin execution function for TEXT_ANALYSIS plugin
     
     Args:
-        inputs: Dictionary of input parameters
+        script_parameters: Dictionary of input parameters
         
     Returns:
         List of PluginOutput objects
     """
     try:
         # Get text input
-        text_input = inputs.get('text')
+        text_input = script_parameters.get('text')
         if not text_input:
             return [create_error_output("error", "Missing required input: text")]
         
-        text = text_input.input_value
+        text = text_input.value
         if not text or not isinstance(text, str):
             return [create_error_output("error", "Text must be a non-empty string")]
         
         # Get analysis type (optional)
-        analysis_type_input = inputs.get('analysis_type')
-        analysis_type = analysis_type_input.input_value if analysis_type_input else 'all'
+        analysis_type_input = script_parameters.get('analysis_type')
+        analysis_type = analysis_type_input.value if analysis_type_input else 'all'
         
         # Get keyword count (optional)
-        keyword_count_input = inputs.get('keyword_count')
-        keyword_count = keyword_count_input.input_value if keyword_count_input else 10
+        keyword_count_input = script_parameters.get('keyword_count')
+        keyword_count = keyword_count_input.value if keyword_count_input else 10
         if not isinstance(keyword_count, int) or keyword_count < 1:
             keyword_count = 10
         
@@ -355,17 +355,17 @@ def main():
         inputs_map = {item[0]: item[1] for item in inputs_list}
 
         # Convert to InputValue objects for compatibility
-        inputs = {}
+        script_parameters = {}
         for key, value in inputs_map.items():
             if isinstance(value, dict) and 'value' in value:
-                inputs[key] = InputValue(
+                script_parameters[key] = InputValue(
                     inputName=key,
                     value=value['value'],
                     valueType=value.get('valueType', 'string'),
                     args=value.get('args', {})
                 )
             else:
-                inputs[key] = InputValue(
+                script_parameters[key] = InputValue(
                     inputName=key,
                     value=value,
                     valueType='string',
@@ -373,7 +373,7 @@ def main():
                 )
 
         # Execute the plugin
-        outputs = execute_plugin(inputs)
+        outputs = execute_plugin(script_parameters)
 
         # Convert outputs to dictionaries and print as JSON
         output_dicts = [output.to_dict() for output in outputs]

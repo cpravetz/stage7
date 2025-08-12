@@ -37,6 +37,7 @@
       "description": "Array of scraped content"
     }
   ],
+  "inputGuidance": "IMPORTANT: Use 'url' for web addresses, NOT 'website' or 'link'",
   "language": "python",
   "entryPoint": {
     "main": "main.py",

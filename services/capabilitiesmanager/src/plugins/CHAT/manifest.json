@@ -26,6 +26,7 @@
       "path": "./"
     }
   },
+  "inputGuidance":"You must include an input named 'message' in your inputs.",
   "api": {
     "type": "openapi",
     "url": "file://openapi.json"

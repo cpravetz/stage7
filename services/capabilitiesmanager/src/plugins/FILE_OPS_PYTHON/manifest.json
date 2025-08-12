@@ -3,6 +3,7 @@
   "verb": "FILE_OPERATION",
   "description": "Provides services for file operations: read, write, append",
   "explanation": "This plugin takes a path and optional content and executes the selected operation. Python version with enhanced security and error handling.",
+  "inputGuidance": "FILE_OPERATION requires 'path' or 'fileId' and 'operation' inputs.",
   "inputDefinitions": [
     {
       "name": "path",

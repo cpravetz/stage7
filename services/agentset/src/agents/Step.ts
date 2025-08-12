@@ -45,6 +45,7 @@ export class Step {
     inputValues: Map<string, InputValue>; 
     description?: string;
     dependencies: StepDependency[];
+    outputs: Map<string, string>;
     status: StepStatus;
     result?: PluginOutput[];
     timeout?: number;
@@ -64,6 +65,7 @@ export class Step {
         inputValues?: Map<string, InputValue>,
         description?: string,
         dependencies?: StepDependency[],
+        outputs?: Map<string, string>,
         status?: StepStatus,
         recommendedRole?: string,
         persistenceManager: AgentPersistenceManager,
@@ -76,6 +78,7 @@ export class Step {
         this.inputValues = params.inputValues || new Map();
         this.description = params.description;
         this.dependencies = params.dependencies || [];
+        this.outputs = params.outputs || new Map();
         this.status = params.status || StepStatus.PENDING;
         this.recommendedRole = params.recommendedRole;
         this.persistenceManager = params.persistenceManager;
@@ -110,6 +113,7 @@ export class Step {
                 inputValues:MapSerializer.transformForSerialization(this.inputValues),
                 inputReferences: MapSerializer.transformForSerialization(this.inputReferences),
                 dependencies: this.dependencies,
+                outputs: MapSerializer.transformForSerialization(this.outputs),
                 status: this.status,
                 description: this.description,
                 recommendedRole: this.recommendedRole,
@@ -787,6 +791,7 @@ export class Step {
             inputValues: MapSerializer.transformForSerialization(this.inputValues),
             description: this.description,
             dependencies: MapSerializer.transformForSerialization(this.dependencies),
+            outputs: MapSerializer.transformForSerialization(this.outputs),
             status: this.status,
             result: this.result,
             recommendedRole: this.recommendedRole,
@@ -994,11 +999,6 @@ export class Step {
             if (task.actionVerb === 'EXECUTE') {
                 task.actionVerb = 'ACCOMPLISH';
             }
-
-            // Validate action verb using the plugin validator
-            // Note: We don't await here to keep the function synchronous for now
-            // Plugin validation is handled by CapabilitiesManager at execution time
-            // No need for early validation warnings as they can be confusing
 
             const step = new Step({
                 id: task.id!,

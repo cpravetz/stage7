@@ -3,6 +3,7 @@
   "verb": "DATA_TOOLKIT",
   "description": "A set of tools for processing and manipulating structured data formats like JSON, CSV, and SQL.",
   "explanation": "This plugin provides commands to parse, query, and transform data from various sources, which is a critical capability for data analysis, reporting, and many other complex tasks.",
+  "inputGuidance": "Inputs for this plugin must include 'operation'.",
   "inputDefinitions": [
     {
       "name": "operation",

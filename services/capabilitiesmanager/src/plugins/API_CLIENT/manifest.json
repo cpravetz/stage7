@@ -35,6 +35,8 @@
       "description": "Authentication details (e.g., API key, bearer token)."
     }
   ],
+  "inputGuidance":"Required inputs inlcude 'method' and 'url.",
+    
   "outputDefinitions": [
     {
       "name": "status_code",

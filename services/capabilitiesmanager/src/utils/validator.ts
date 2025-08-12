@@ -59,7 +59,8 @@ export const validateInputType = async (value: any, expectedType: string): Promi
 async function transformInputsWithBrain(
     plugin: PluginDefinition,
     providedInputs: Map<string, InputValue>,
-    trace_id: string
+    trace_id: string,
+    errorMessage?: string
 ): Promise<Map<string, InputValue>> {
     const source_component = "validator.transformInputsWithBrain";
     const cacheKey = `${plugin.verb}:${JSON.stringify(Array.from(providedInputs.entries()))}`;
@@ -80,6 +81,7 @@ async function transformInputsWithBrain(
             You are an expert at transforming inputs for a plugin.
             Given the following plugin definition and the provided inputs, transform them to match the required input definitions.
             You must return a valid JSON object with the transformed inputs.
+            ${errorMessage ? `The previous attempt failed with this error: ${errorMessage}. Please correct it.` : ''}
 
             Plugin: ${plugin.verb}
             Description: ${plugin.description}
@@ -245,6 +247,26 @@ export const validateAndStandardizeInputs = async (plugin: PluginDefinition, inp
                     };
                 }
 
+                if (inputDef.required) {
+                    const value = input.value;
+                    let isEmpty = false;
+                    if (value === null || value === undefined) {
+                        isEmpty = true;
+                    } else if (typeof value === 'string' && value.trim() === '') {
+                        isEmpty = true;
+                    } else if (Array.isArray(value) && value.length === 0) {
+                        isEmpty = true;
+                    } else if (typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 0) {
+                        isEmpty = true;
+                    }
+                    if (isEmpty) {
+                        return {
+                            success: false,
+                            error: `Missing value for required input: ${inputName}`
+                        };
+                    }
+                }
+
                 if (type === PluginParameterType.OBJECT && typeof input.value === 'string') {
                     try {
                         input.value = JSON.parse(input.value);
@@ -285,42 +307,43 @@ export const validateAndStandardizeInputs = async (plugin: PluginDefinition, inp
             return { success: false, error: `Plugin ${plugin.verb} has invalid inputDefinitions` };
         }
 
-        // First validation attempt
-        let validationResult = await performValidation(inputs);
-        if (validationResult.success) {
-            console.log(`[${trace_id}] validateAndStandardizeInputs: Initial validation successful for ${plugin.verb}`);
-            console.log(`[${trace_id}] validateAndStandardizeInputs: Results for ${plugin.verb}:`, {
-                pluginVerb: plugin.verb,
-                pluginVersion: plugin.version,
-                original: Array.from(inputs.keys()),
-                validated: Array.from(validationResult.inputs!.keys())
-            });
-            return validationResult;
+        const MAX_ATTEMPTS = 3;
+        let currentInputs = new Map(inputs);
+        let lastError: string | undefined;
+
+        for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+            const validationResult = await performValidation(currentInputs);
+
+            if (validationResult.success) {
+                console.log(`[${trace_id}] validateAndStandardizeInputs: Validation successful for ${plugin.verb} on attempt ${attempt}`);
+                console.log(`[${trace_id}] validateAndStandardizeInputs: Results for ${plugin.verb}:`, {
+                    pluginVerb: plugin.verb,
+                    pluginVersion: plugin.version,
+                    original: Array.from(inputs.keys()),
+                    validated: Array.from(validationResult.inputs!.keys())
+                });
+                return validationResult;
+            }
+
+            lastError = validationResult.error;
+            console.log(`[${trace_id}] validateAndStandardizeInputs: Attempt ${attempt} failed for ${plugin.verb}. Error: ${lastError}. Attempting Brain transformation.`);
+
+            if (attempt < MAX_ATTEMPTS) {
+                try {
+                    currentInputs = await transformInputsWithBrain(plugin, currentInputs, trace_id, lastError);
+                } catch (transformError: any) {
+                    lastError = transformError.message;
+                    console.error(`[${trace_id}] Brain transformation failed: ${lastError}`);
+                    // Break the loop if transform fails, as we can't proceed
+                    break;
+                }
+            }
         }
 
-        console.log(`[${trace_id}] validateAndStandardizeInputs: Initial validation failed for ${plugin.verb}. Error: ${validationResult.error}. Attempting Brain transformation.`);
-
-        // If simple validation fails, try to transform with Brain
-        const transformedInputs = await transformInputsWithBrain(plugin, inputs, trace_id);
-
-        // Second validation attempt on transformed inputs
-        let secondValidationResult = await performValidation(transformedInputs);
-        if (secondValidationResult.success) {
-            console.log(`[${trace_id}] validateAndStandardizeInputs: Validation successful after Brain transformation for ${plugin.verb}`);
-            console.log(`[${trace_id}] validateAndStandardizeInputs: Results for ${plugin.verb}:`, {
-                pluginVerb: plugin.verb,
-                pluginVersion: plugin.version,
-                original: Array.from(inputs.keys()),
-                validated: Array.from(secondValidationResult.inputs!.keys())
-            });
-            // TODO: Cache the successful transformation rule
-            return secondValidationResult;
-        }
-
-        console.error(`[${trace_id}] validateAndStandardizeInputs: Validation failed even after Brain transformation for ${plugin.verb}. Error: ${secondValidationResult.error}`);
+        console.error(`[${trace_id}] validateAndStandardizeInputs: Validation failed after ${MAX_ATTEMPTS} attempts for ${plugin.verb}. Final error: ${lastError}`);
         return {
             success: false,
-            error: `Input validation failed for ${plugin.verb} after attempting transformation: ${secondValidationResult.error}`
+            error: `Input validation failed for ${plugin.verb} after ${MAX_ATTEMPTS} attempts: ${lastError}`
         };
 
     } catch (error) {

@@ -19,6 +19,7 @@
       "description": "Array of search results, each containing a title and URL"
     }
   ],
+  "inputGuidance": "IMPORTANT: Use 'searchTerm' for search queries, NOT 'keywords', 'query', or 'terms'",
   "language": "python",
   "entryPoint": {
     "main": "main.py",

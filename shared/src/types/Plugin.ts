@@ -180,7 +180,9 @@ export interface PluginOutput {
     error?: string,
     mimeType?: string,
     fileName?: string, // Optional suggested filename for the result
-    console?: any[]
+    trace_id?: string, // Optional trace ID for tracking the output
+    console?: any[],
+    context?: any
 }
 
 // For environmentType, ensure ConfigItem is also defined or imported if it's distinct

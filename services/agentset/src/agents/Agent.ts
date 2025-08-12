@@ -1989,10 +1989,9 @@ Please consider this context and the available plugins when planning and executi
 **Available Inputs:** ${JSON.stringify(Array.from(failedStep.inputValues?.keys() || []))}
 
 **Instructions:**
-1. Use only basic action verbs: SEARCH, SCRAPE, RUN_CODE, TEXT_ANALYSIS, THINK
-2. Each step should be specific and actionable
-3. Focus on the core objective of "${failedStep.actionVerb}"
-4. Return a simple plan with 2-3 steps maximum
+1. Each step should be specific and actionable
+2. Focus on the core objective of "${failedStep.actionVerb}"
+3. Return a simple plan with 2-3 steps maximum
         `;
 
         const breakdownStep = new Step({

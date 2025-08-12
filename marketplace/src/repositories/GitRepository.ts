@@ -31,7 +31,7 @@ export class GitRepository implements PluginRepository {
         }
     
         const git: SimpleGit = simpleGit();
-        const tempDir = path.join(process.cwd(), 'temp', `plugin-${manifest.id}`);
+        const tempDir = path.join(process.cwd(), 'temp', `plugin-git-${manifest.id}`);
         
         try {
             // Create temp directory
@@ -239,6 +239,8 @@ export class GitRepository implements PluginRepository {
         const locators: PluginLocator[] = [];
 
         try {
+            // Proactively clean up temp directory before starting
+            await fs.rm(tempDir, { recursive: true, force: true });
             // Clone repository
             await fs.mkdir(tempDir, { recursive: true });
             await git.clone(this.authenticatedUrl, tempDir);

@@ -3,6 +3,7 @@
   "verb": "WEATHER",
   "description": "Fetches current weather information for a specified location",
   "explanation": "This plugin uses the OpenWeatherMap API to retrieve current weather conditions, temperature, humidity, and other meteorological data for any city or location worldwide.",
+  "inputGuidance": "Inputs for this plugin must include 'location'.",
   "inputDefinitions": [
     {
       "name": "location",

@@ -37,6 +37,7 @@
       "description": "The exit code of the execution process."
     }
   ],
+  "inputGuidance": "IMPORTANT: Use 'code' for code to execute and 'language' for programming language",
   "language": "python",
   "entryPoint": {
     "main": "main.py",

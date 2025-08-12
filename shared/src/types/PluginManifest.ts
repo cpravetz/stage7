@@ -28,6 +28,7 @@ export interface PluginManifest {
     explanation?: PluginDefinition['explanation'];
     inputDefinitions: PluginParameter[];
     outputDefinitions: PluginParameter[];
+    inputGuidance?: string;
 
     packageSource?: PluginPackage;
     entryPoint?: EntryPointType;

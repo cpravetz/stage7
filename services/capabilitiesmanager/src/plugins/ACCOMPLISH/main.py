@@ -205,11 +205,9 @@ PLAN_STEP_SCHEMA = {
                     {"required": ["outputName"]}
                 ],
                 "additionalProperties": False,
-                "description": {
-                    "type": "string",
-                    "description": "Thorough description of what this step does and context needed to understand it"
-                },
+                "description": "Thorough description of what this step does and context needed to understand it"
             },
+            "additionalProperties": False,
         },
         "outputs": {
             "type": "object",
@@ -271,55 +269,32 @@ class RobustMissionPlanner:
 
         return json.dumps([plugin_output], indent=2)
 
-    def _enhance_inputs_with_plugin_guidance(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
-        """Enhance inputs with plugin-specific guidance for better input mapping"""
-        enhanced_inputs = inputs.copy()
+    def _create_detailed_plugin_guidance(self, inputs: Dict[str, Any]) -> str:
+        """Create a detailed list of available plugins with input specs and descriptions."""
         available_plugins = inputs.get('availablePlugins', [])
-
-        # Add input mapping guidance for common plugins
-        plugin_guidance = []
-        for plugin in available_plugins:
-            action_verb = plugin.get('actionVerb', '')
-            enhanced_plugin = plugin.copy()
-
-            if action_verb == 'SCRAPE':
-                enhanced_plugin['inputGuidance'] = 'IMPORTANT: Use "url" for web addresses, NOT "website" or "link"'
-            elif action_verb == 'SEARCH':
-                enhanced_plugin['inputGuidance'] = 'IMPORTANT: Use "searchTerm" for search queries, NOT "keywords", "query", or "terms"'
-            elif action_verb == 'TEXT_ANALYSIS':
-                enhanced_plugin['inputGuidance'] = 'IMPORTANT: Use "text" for content to analyze and "analysisType" for analysis type'
-            elif action_verb == 'RUN_CODE':
-                enhanced_plugin['inputGuidance'] = 'IMPORTANT: Use "code" for code to execute and "language" for programming language'
-
-            plugin_guidance.append(enhanced_plugin)
-
-        enhanced_inputs['availablePlugins'] = plugin_guidance
-        return enhanced_inputs
-
-    def _create_plugin_summary(self, available_plugins: List[Dict[str, Any]]) -> str:
-        """Create a concise summary of available plugins for Brain context"""
         if not available_plugins:
-            return "No plugins available"
+            return "No plugins are available for use in the plan."
 
-        summary_lines = []
-        for plugin in available_plugins[:15]:  # Limit to prevent context overflow
+        guidance_lines = ["Available Plugins & Input Specifications:"]
+        for plugin in available_plugins:
             action_verb = plugin.get('actionVerb', 'UNKNOWN')
-            description = plugin.get('description', '')
+            description = plugin.get('description', 'No description available.')
+            input_definitions = plugin.get('inputDefinitions', [])
+            input_guidance = plugin.get('inputGuidance', '')
 
-            # Extract key input parameters
-            inputs = plugin.get('inputDefinitions', [])
-            key_inputs = [inp.get('name', '') for inp in inputs[:3]]  # First 3 inputs
-            input_summary = ', '.join(key_inputs) if key_inputs else 'none'
-
-            # Truncate description
-            short_desc = description[:60] + '...' if len(description) > 60 else description
-
-            summary_lines.append(f"• {action_verb}: {short_desc} (inputs: {input_summary})")
-
-        if len(available_plugins) > 15:
-            summary_lines.append(f"... and {len(available_plugins) - 15} more plugins")
-
-        return '\n'.join(summary_lines)
+            guidance_lines.append(f"\nPlugin: {action_verb}")
+            guidance_lines.append(f"  Description: {description}")
+            if input_definitions:
+                guidance_lines.append("  Inputs:")
+                for input_def in input_definitions:
+                    input_name = input_def.get('name', 'UNKNOWN')
+                    input_desc = input_def.get('description', 'No description.')
+                    value_type = input_def.get('valueType', 'any')
+                    guidance_lines.append(f"    - {input_name} (type: {value_type}): {input_desc}")
+            else:
+                guidance_lines.append("  Inputs: None required.")
+            guidance_lines.append(f"{input_guidance}")
+        return "\n".join(guidance_lines)
 
     def _add_input_resolution_guidance(self, goal: str, inputs: Dict[str, Any]) -> str:
         """Add guidance for resolving missing inputs using Brain or previous steps"""
@@ -346,7 +321,6 @@ CRITICAL INPUT RESOLUTION RULES:
    - Use dependencies format: {{"outputName": stepNumber}}
    - Ensure step numbers are correct and sequential
 
-GOAL: {goal}
 """
         return guidance
 
@@ -355,18 +329,15 @@ GOAL: {goal}
         progress.checkpoint("planning_start")
         logger.info(f"🎯 Creating plan for goal: {goal[:100]}...")
 
-        # Enhance available plugins with input mapping guidance
-        enhanced_inputs = self._enhance_inputs_with_plugin_guidance(inputs)
-
         for llm_attempt in range(self.max_llm_switches + 1):
             logger.info(f"🤖 LLM attempt {llm_attempt + 1}/{self.max_llm_switches + 1}")
 
             try:
                 # Phase 1: Get well-thought prose plan
-                prose_plan = self._get_prose_plan(goal, enhanced_inputs)
+                prose_plan = self._get_prose_plan(goal, inputs)
 
                 # Phase 2: Convert to structured JSON
-                structured_plan = self._convert_to_structured_plan(prose_plan, goal, enhanced_inputs)
+                structured_plan = self._convert_to_structured_plan(prose_plan, goal, inputs)
                 
                 # Phase 3: Validate and repair if needed
                 validated_plan = self._validate_and_repair_plan(structured_plan, goal, inputs)
@@ -384,23 +355,24 @@ GOAL: {goal}
     
     def _get_prose_plan(self, goal: str, inputs: Dict[str, Any]) -> str:
         """Phase 1: Get a well-thought prose plan from LLM"""
-        input_guidance = self._add_input_resolution_guidance(goal, inputs)
 
+        plugin_guidance = self._create_detailed_plugin_guidance(inputs)
+        
         prompt = f"""You are an expert strategic planner. Create a comprehensive, well-thought plan to accomplish this goal:
 
 GOAL: {goal}
 
-{input_guidance}
+{plugin_guidance}
 
 Write a detailed prose plan (3-5 paragraphs) that thoroughly explains:
 - The strategic approach you would take
 - The key phases or areas of work
 - The specific actions and research needed
+- How LLMs can be used in this effort
 - How the pieces fit together
 - Why this approach will achieve the goal
 
 Be specific, actionable, and comprehensive. Think deeply about THIS specific goal.
-REMEMBER: Only use action verbs that exist in the available plugins list above.
 
 IMPORTANT: Return ONLY plain text. NO markdown formatting, NO code blocks, NO special formatting.
 
@@ -417,7 +389,7 @@ Return your prose plan:"""
     
     def _convert_to_structured_plan(self, prose_plan: str, goal: str, inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Phase 2: Convert prose plan to structured JSON"""
-        
+        plugin_guidance = self._create_detailed_plugin_guidance(inputs)
         schema_json = json.dumps(PLAN_STEP_SCHEMA, indent=2)
         
         prompt = f"""You are an expert system for converting prose plans into structured JSON according to a strict schema.
@@ -443,9 +415,10 @@ Follow these steps to create the final JSON output:
 **STEP A: Internal Analysis & Self-Correction (Your Internal Monologue)**
 1.  **Analyze:** Read the Goal and Prose Plan to fully understand the user's intent and the required sequence of actions.
 2.  **Verify Schema:** Carefully study the JSON SCHEMA. Your output must follow it perfectly.
-3.  **Check Dependencies:** For each step, ensure its `dependencies` correctly reference `outputs` from previous steps. The data flow must be logical.
-4.  **Validate Inputs:** Ensure every input for each step has either a static `value` or a dynamic `outputName` reference from a prior step.
-5.  **Final Check:** Before generating the output, perform a final mental check to ensure the entire JSON structure is valid and compliant with the schema.
+3.  **Restate the Plan as Explicit Steps:**  Identify a list of steps that will be taken to achieve the Goal. Each Step should be a clear, actionable task with one or more outputs.
+4.  **Check Dependencies:** For each step, ensure its `dependencies` correctly reference `outputs` from previous steps. The data flow must be logical.
+5.  **Validate Inputs:** Ensure every input for each step has either a static `value` or a dynamic `outputName` reference from a prior step.
+6.  **Final Check:** Before generating the output, perform a final check to ensure the entire JSON structure is valid and fully compliant with the schema.
 
 **STEP B: Generate Final JSON (Your Final Output)**
 After your internal analysis and self-correction is complete, provide ONLY the final, valid JSON array.
@@ -455,7 +428,8 @@ After your internal analysis and self-correction is complete, provide ONLY the f
 - **NO EXTRA TEXT:** Do NOT include explanations, comments, or markdown like ` ```json `.
 - **STRICT COMPLIANCE:** Adhere strictly to the provided schema and the logical plan.
 
-Return ONLY the JSON array:"""
+{plugin_guidance}
+"""
 
         logger.info("🔧 Phase 2: Converting to structured JSON...")
 
@@ -547,6 +521,12 @@ Return ONLY the JSON array:"""
                     if not isinstance(input_def, dict):
                         errors.append(f"Step {step_num}: Input '{input_name}' must be an object")
                         continue
+
+                    # Check for unknown properties
+                    allowed_properties = ['value', 'outputName', 'valueType', 'args']
+                    for prop in input_def:
+                        if prop not in allowed_properties:
+                            errors.append(f"Step {step_num}: Input '{input_name}' has unknown property '{prop}'")
                     
                     if 'valueType' not in input_def:
                         errors.append(f"Step {step_num}: Input '{input_name}' missing 'valueType'")
@@ -652,31 +632,45 @@ class NovelVerbHandler:
 
     def _extract_verb_info(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         """Extract verb information from inputs"""
-        if 'novel_actionVerb' in inputs and isinstance(inputs['novel_actionVerb'], dict):
+        if 'novel_actionVerb' in inputs:
             novel_verb_data = inputs['novel_actionVerb']
 
-            if 'value' in novel_verb_data and isinstance(novel_verb_data['value'], dict):
-                # Structured format from CapabilitiesManager
-                verb_info = novel_verb_data['value']
-                return {
-                    "id": verb_info.get('id', 'novel_plugin'),
-                    "verb": verb_info.get('verb', 'NOVEL_VERB'),
-                    "description": verb_info.get('description', ''),
-                    "context": verb_info.get('context', ''),
-                    "inputValues": verb_info.get('inputValues', {}),
-                    "outputs": verb_info.get('outputs', {}),
-                }
+            # Ensure novel_verb_data is a dictionary if it's a list of lists
+            if isinstance(novel_verb_data, list):
+                temp_dict = {}
+                for item in novel_verb_data:
+                    if isinstance(item, list) and len(item) == 2:
+                        temp_dict[item[0]] = item[1]
+                    else:
+                        logger.warning(f"Skipping invalid item in novel_actionVerb list: {item}")
+                novel_verb_data = temp_dict
+            
+            # Now novel_verb_data should be a dictionary or already was
+            if isinstance(novel_verb_data, dict):
+                if 'value' in novel_verb_data and isinstance(novel_verb_data['value'], dict):
+                    # Structured format from CapabilitiesManager
+                    verb_info = novel_verb_data['value']
+                    return {
+                        "id": verb_info.get('id', 'novel_plugin'),
+                        "verb": verb_info.get('verb', 'NOVEL_VERB'),
+                        "description": verb_info.get('description', ''),
+                        "context": verb_info.get('context', ''),
+                        "inputValues": verb_info.get('inputValues', {}),
+                        "outputs": verb_info.get('outputs', {}),
+                    }
+                else:
+                    # Legacy string format or direct string value
+                    goal_text = novel_verb_data.get('value', '') if isinstance(novel_verb_data, dict) else novel_verb_data
+                    return {
+                        "id": "novel_plugin",
+                        "verb": "NOVEL_VERB",
+                        "description": str(goal_text), # Ensure it's a string
+                        "context": str(goal_text),    # Ensure it's a string
+                        "inputValues": {},
+                        "outputs": {}
+                    }
             else:
-                # Legacy string format
-                goal_text = novel_verb_data.get('value', '')
-                return {
-                    "id": "novel_plugin",
-                    "verb": "NOVEL_VERB",
-                    "description": goal_text,
-                    "context": goal_text,
-                    "inputValues": {},
-                    "outputs": {}
-                }
+                logger.warning(f"novel_actionVerb is neither a dict nor a list: {type(novel_verb_data)}")
 
         # Fallback
         return {
@@ -688,31 +682,32 @@ class NovelVerbHandler:
             "outputs": {}
         }
 
-    def _create_plugin_summary(self, available_plugins: List[Dict[str, Any]]) -> str:
-        """Create a concise summary of available plugins for Brain context"""
+    def _create_detailed_plugin_guidance(self, inputs: Dict[str, Any]) -> str:
+        """Create a detailed list of available plugins with input specs and descriptions."""
+        available_plugins = inputs.get('availablePlugins', [])
         if not available_plugins:
-            return "No plugins available"
+            return "No plugins are available for use in the plan."
 
-        summary_lines = []
-        for plugin in available_plugins[:15]:  # Limit to prevent context overflow
+        guidance_lines = ["Available Plugins & Input Specifications:"]
+        for plugin in available_plugins:
             action_verb = plugin.get('actionVerb', 'UNKNOWN')
-            description = plugin.get('description', '')
+            description = plugin.get('description', 'No description available.')
+            input_definitions = plugin.get('inputDefinitions', [])
 
-            # Extract key input parameters
-            inputs = plugin.get('inputDefinitions', [])
-            key_inputs = [inp.get('name', '') for inp in inputs[:3]]  # First 3 inputs
-            input_summary = ', '.join(key_inputs) if key_inputs else 'none'
+            guidance_lines.append(f"\nPlugin: {action_verb}")
+            guidance_lines.append(f"  Description: {description}")
+            if input_definitions:
+                guidance_lines.append("  Inputs:")
+                for input_def in input_definitions:
+                    input_name = input_def.get('name', 'UNKNOWN')
+                    input_desc = input_def.get('description', 'No description.')
+                    value_type = input_def.get('valueType', 'any')
+                    guidance_lines.append(f"    - {input_name} (type: {value_type}): {input_desc}")
+            else:
+                guidance_lines.append("  Inputs: None required.")
 
-            # Truncate description
-            short_desc = description[:60] + '...' if len(description) > 60 else description
-
-            summary_lines.append(f"• {action_verb}: {short_desc} (inputs: {input_summary})")
-
-        if len(available_plugins) > 15:
-            summary_lines.append(f"... and {len(available_plugins) - 15} more plugins")
-
-        return '\n'.join(summary_lines)
-
+        return "\n".join(guidance_lines)
+    
     def _ask_brain_for_verb_handling(self, verb_info: Dict[str, Any], inputs: Dict[str, Any]) -> str:
         """Ask Brain how to handle the novel verb"""
         verb = verb_info['verb']
@@ -720,8 +715,7 @@ class NovelVerbHandler:
         context = verb_info.get('context', description)
 
         # Get available plugins summary
-        available_plugins = inputs.get('availablePlugins', [])
-        plugin_summary = self._create_plugin_summary(available_plugins)
+        plugin_summary = self._create_detailed_plugin_guidance(inputs)
 
         prompt = f"""You are an expert system analyst. A user wants to use a novel action verb "{verb}" that is not currently supported.
 

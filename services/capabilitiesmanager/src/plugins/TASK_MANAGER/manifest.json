@@ -3,6 +3,7 @@
   "verb": "TASK_MANAGER",
   "description": "A plugin for self-planning, creating, and managing tasks and subtasks.",
   "explanation": "This plugin allows an agent to break down a large goal into a series of smaller, manageable steps and track their status.",
+  "inputGuidance": "Inputs for this plugin must include 'goal'.",
   "inputDefinitions": [
     {
       "name": "goal",

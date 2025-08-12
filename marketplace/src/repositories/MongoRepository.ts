@@ -1,34 +1,68 @@
 import { PluginManifest, PluginRepository, RepositoryConfig, PluginLocator, createAuthenticatedAxios, compareVersions } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
+import { AxiosInstance } from 'axios';
 
 export class MongoRepository implements PluginRepository {
     type: 'mongo' = 'mongo';
     private librarianUrl: string;
     private collection: string;
-    private authenticatedApi: any;
+    private authenticatedApi: AxiosInstance;
     private securityManagerUrl: string;
+    private circuitState: 'CLOSED' | 'OPEN' | 'HALF_OPEN' = 'CLOSED';
+    private failureCount = 0;
+    private lastFailureTime = 0;
+    private readonly failureThreshold = 3;
+    private readonly openTimeout = 300000; // 5 minutes
 
     constructor(config: RepositoryConfig) {
         this.librarianUrl = config.url || process.env.LIBRARIAN_URL || 'librarian:5040';
         this.collection = config.options?.collection || 'plugins';
         this.securityManagerUrl = process.env.SECURITYMANAGER_URL || 'securitymanager:5010';
 
+        if (!this.librarianUrl.startsWith('http')) {
+            this.librarianUrl = `http://${this.librarianUrl}`;
+        }
+
         // Create authenticated API client
-        this.authenticatedApi = createAuthenticatedAxios(
-            'MarketplaceMongoRepository',
-            this.securityManagerUrl,
-            process.env.CLIENT_SECRET || 'stage7AuthSecret'
-        );
+        this.authenticatedApi = createAuthenticatedAxios({
+            serviceId: 'MarketplaceMongoRepository',
+            securityManagerUrl: this.librarianUrl,
+            clientSecret: process.env.CLIENT_SECRET || 'stage7AuthSecret'
+    });
+    }
+
+    private async makeRequest<T>(request: () => Promise<T>): Promise<T> {
+        if (this.circuitState === 'OPEN') {
+            if (Date.now() - this.lastFailureTime > this.openTimeout) {
+                this.circuitState = 'HALF_OPEN';
+            } else {
+                throw new Error('Circuit is open. Librarian service is temporarily unavailable.');
+            }
+        }
+
+        try {
+            const response = await request();
+            this.failureCount = 0;
+            this.circuitState = 'CLOSED';
+            return response;
+        } catch (error) {
+            this.failureCount++;
+            this.lastFailureTime = Date.now();
+            if (this.circuitState === 'HALF_OPEN' || this.failureCount >= this.failureThreshold) {
+                this.circuitState = 'OPEN';
+                console.error(`Circuit is now OPEN for MongoRepository.`);
+            }
+            throw error;
+        }
     }
 
     async store(manifest: PluginManifest): Promise<void> {
         try {
-            await this.authenticatedApi.post(`http://${this.librarianUrl}/storeData`, {
-                id: manifest.id,
+            await this.makeRequest(() => this.authenticatedApi.post(`${this.librarianUrl}/storeData`, {
                 data: manifest,
                 collection: this.collection,
                 storageType: 'mongo'
-            });
+            }));
         } catch (error) {
             analyzeError(error as Error);
             throw new Error(`Failed to publish plugin to MongoDB: ${error instanceof Error ? error.message : String(error)}`);
@@ -39,21 +73,21 @@ export class MongoRepository implements PluginRepository {
         try {
             if (version) {
                 // Fetch specific version
-                const response = await this.authenticatedApi.post(`http://${this.librarianUrl}/searchData`, {
+                const response = await this.makeRequest(() => this.authenticatedApi.post(`${this.librarianUrl}/searchData`, {
                     collection: this.collection,
                     query: { id, version },
                     options: { limit: 1 }
-                });
+                }));
                 if (response.data && response.data.data && response.data.data.length > 0) {
                     return response.data.data[0] as PluginManifest;
                 }
                 return undefined;
             } else {
                 // Fetch all versions for the ID and return the latest
-                const response = await this.authenticatedApi.post(`http://${this.librarianUrl}/searchData`, {
+                const response = await this.makeRequest(() => this.authenticatedApi.post(`${this.librarianUrl}/searchData`, {
                     collection: this.collection,
                     query: { id }
-                });
+                }));
                 if (response.data && response.data.data && response.data.data.length > 0) {
                     const manifests = response.data.data as PluginManifest[];
                     if (manifests.length === 0) return undefined;
@@ -77,12 +111,12 @@ export class MongoRepository implements PluginRepository {
                 query.version = version;
             }
 
-            const response = await this.authenticatedApi.post(`http://${this.librarianUrl}/searchData`, {
+            const response = await this.makeRequest(() => this.authenticatedApi.post(`${this.librarianUrl}/searchData`, {
                 collection: this.collection,
                 query: query,
                 // No limit if specific version is requested, otherwise sort and pick latest
                 options: version ? { limit: 1 } : {} 
-            });
+            }));
 
             if (response.data && response.data.data && response.data.data.length > 0) {
                 const manifests = response.data.data as PluginManifest[];
@@ -106,10 +140,10 @@ export class MongoRepository implements PluginRepository {
 
     async fetchAllVersions(id: string): Promise<PluginManifest[] | undefined> {
         try {
-            const response = await this.authenticatedApi.post(`http://${this.librarianUrl}/searchData`, {
+            const response = await this.makeRequest(() => this.authenticatedApi.post(`${this.librarianUrl}/searchData`, {
                 collection: this.collection,
                 query: { id }
-            });
+            }));
 
             if (response.data && response.data.data && response.data.data.length > 0) {
                 const manifests = response.data.data as PluginManifest[];
@@ -152,23 +186,23 @@ export class MongoRepository implements PluginRepository {
                 // To delete a specific version, the librarian API would need to support delete by query.
                 // Let's assume for now that `deleteData` is enhanced or we use a workaround.
                 // A more robust solution would be for librarian to support deletion by query:
-                await this.authenticatedApi.post(`http://${this.librarianUrl}/deleteData`, { // Assuming a /deleteData that accepts a query
+                await this.makeRequest(() => this.authenticatedApi.post(`${this.librarianUrl}/deleteData`, { // Assuming a /deleteData that accepts a query
                     collection: this.collection,
                     query: { id, version },
                     storageType: 'mongo',
                     multiple: false // Ensure only one is deleted if somehow multiple match (should not happen for id+version)
-                });
+                }));
                 console.log(`Attempted to delete plugin ID '${id}' version '${version}'.`);
 
             } else {
                 // Delete all versions for the ID
                 // Again, assuming librarian can delete based on a query for all documents with this plugin ID.
-                await this.authenticatedApi.post(`http://${this.librarianUrl}/deleteData`, { // Assuming a /deleteData that accepts a query
+                await this.makeRequest(() => this.authenticatedApi.post(`${this.librarianUrl}/deleteData`, { // Assuming a /deleteData that accepts a query
                     collection: this.collection,
                     query: { id },
                     storageType: 'mongo',
                     multiple: true
-                });
+                }));
                 console.log(`Attempted to delete all versions of plugin ID '${id}'.`);
             }
         } catch (error) {
@@ -179,14 +213,14 @@ export class MongoRepository implements PluginRepository {
 
     async list(): Promise<PluginLocator[]> {
         try {
-            const response = await this.authenticatedApi.post(`http://${this.librarianUrl}/searchData`, {
+            const response = await this.makeRequest(() => this.authenticatedApi.post(`${this.librarianUrl}/searchData`, {
                 collection: this.collection,
                 query: {}, // Fetch all documents
                 options: {
                     // Project necessary fields for PluginLocator
                     projection: { id: 1, verb: 1, version: 1, repositoryType: '$type', name: 1, description: 1 }
                 }
-            });
+            }));
 
             if (response.data && response.data.data) {
                 // Map the manifest data to PluginLocator
