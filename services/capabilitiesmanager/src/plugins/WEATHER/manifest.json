@@ -1,0 +1,108 @@
+{
+  "id": "plugin-WEATHER",
+  "verb": "WEATHER",
+  "description": "Fetches current weather information for a specified location",
+  "explanation": "This plugin uses the OpenWeatherMap API to retrieve current weather conditions, temperature, humidity, and other meteorological data for any city or location worldwide.",
+  "inputGuidance": "Inputs for this plugin must include 'location'.",
+  "inputDefinitions": [
+    {
+      "name": "location",
+      "required": true,
+      "type": "string",
+      "description": "City name, state/country (e.g., 'London,UK' or 'New York,NY,US')"
+    },
+    {
+      "name": "api_key",
+      "required": false,
+      "type": "string",
+      "description": "OpenWeatherMap API key (optional if OPENWEATHER_API_KEY environment variable is set)"
+    }
+  ],
+  "outputDefinitions": [
+    {
+      "name": "weather_data",
+      "required": true,
+      "type": "object",
+      "description": "Detailed weather information including temperature, humidity, pressure, wind, etc."
+    },
+    {
+      "name": "summary",
+      "required": true,
+      "type": "string",
+      "description": "Human-readable weather summary"
+    }
+  ],
+  "language": "python",
+  "entryPoint": {
+    "main": "main.py",
+    "packageSource": {
+      "type": "local",
+      "path": "./",
+      "requirements": "requirements.txt"
+    }
+  },
+  "security": {
+    "permissions": [
+      "net.fetch"
+    ],
+    "sandboxOptions": {
+      "allowEval": false,
+      "timeout": 15000,
+      "memory": 67108864,
+      "allowedModules": [
+        "json",
+        "sys",
+        "os",
+        "typing",
+        "requests",
+        "urllib3"
+      ],
+      "allowedAPIs": [
+        "print"
+      ]
+    },
+    "trust": {
+      "publisher": "stage7-examples",
+      "signature": null
+    }
+  },
+  "version": "1.0.0",
+  "metadata": {
+    "author": "Stage7 Development Team",
+    "tags": [
+      "weather",
+      "api",
+      "meteorology",
+      "openweathermap"
+    ],
+    "category": "utility",
+    "license": "MIT",
+    "documentation": "README.md"
+  },
+  "configuration": [
+    {
+      "name": "api_key",
+      "type": "string",
+      "description": "OpenWeatherMap API key",
+      "defaultValue": "",
+      "required": false,
+      "sensitive": true
+    },
+    {
+      "name": "timeout",
+      "type": "number",
+      "description": "API request timeout in milliseconds",
+      "defaultValue": 15000,
+      "required": false
+    },
+    {
+      "name": "units",
+      "type": "string",
+      "description": "Temperature units (metric, imperial, kelvin)",
+      "defaultValue": "metric",
+      "required": false
+    }
+  ],
+  "createdAt": "2024-12-01T00:00:00Z",
+  "updatedAt": "2024-12-01T00:00:00Z"
+}

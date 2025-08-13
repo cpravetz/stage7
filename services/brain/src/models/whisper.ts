@@ -1,5 +1,5 @@
 import { BaseModel, ModelScore } from './baseModel';
-import { LLMConversationType } from '../interfaces/baseInterface';
+import { LLMConversationType } from '@cktmcs/shared';
 
 export class WhisperModel extends BaseModel {
     constructor() {
@@ -16,7 +16,7 @@ export class WhisperModel extends BaseModel {
             name: "openai/whisper",
             modelName: "whisper-1",
             interfaceName: "openai",
-            serviceName: "OAIService",
+            serviceName: "OAService",
             tokenLimit: 25000, // Adjust this value based on the actual audio length limit
             scoresByConversationType: scoresByConversationType,
             contentConversation: [LLMConversationType.AudioToText]

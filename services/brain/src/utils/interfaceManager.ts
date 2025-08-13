@@ -16,7 +16,6 @@ export class InterfaceManager {
 
         try {
             const files = await fs.readdir(interfaceDirectory);
-            console.log('Files in interface directory',interfaceDirectory,': ', files);
             for (const file of files) {
                 // Skip non-TS or non-JS files
                 if (!file.endsWith('.ts') && !file.endsWith('.js')) {
@@ -49,6 +48,14 @@ export class InterfaceManager {
             console.error('Interface name is undefined in getInterface');
             return undefined;
         }
+    }
+
+    /**
+     * Get all interfaces
+     * @returns Map of all interfaces
+     */
+    getAllInterfaces(): Map<string, BaseInterface> {
+        return this.interfaces;
     }
 }
 

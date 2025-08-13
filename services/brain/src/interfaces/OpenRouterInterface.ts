@@ -1,16 +1,15 @@
-import { BaseInterface, LLMConversationType, ConvertParamsType } from './baseInterface';
+import { BaseInterface, ConvertParamsType } from './baseInterface';
+import { LLMConversationType } from '@cktmcs/shared';
 import OpenAI from 'openai';
 import { ChatCompletionMessageParam } from 'openai/resources/chat';
-import { analyzeError } from '@cktmcs/errorhandler';
 import { BaseService, ExchangeType } from '../services/baseService';
 import fs from 'fs';
-import { Stream } from 'openai/streaming';
 
 export class OpenRouterInterface extends BaseInterface {
     interfaceName = 'openrouter';
 
     constructor() {
-        super();
+        super('openrouter');
         this.converters.set(LLMConversationType.TextToImage, {
             conversationType: LLMConversationType.TextToImage,
             requiredParams: ['service','prompt'],
@@ -29,17 +28,30 @@ export class OpenRouterInterface extends BaseInterface {
             conversationType: LLMConversationType.TextToCode,
             requiredParams: ['service', 'prompt'],
             converter: this.convertTextToCode,
-        });        
+        });
+        this.converters.set(LLMConversationType.TextToJSON, {
+            conversationType: LLMConversationType.TextToJSON,
+            requiredParams: ['service', 'prompt'],
+            converter: this.convertTextToJSON,
+        });
     }
 
     async convertTextToText(args: ConvertParamsType): Promise<string> {
-        const { service, prompt, modelName } = args;
+        const { service, prompt, modelName, responseType } = args;
+        if (!service) {
+            throw new Error('OpenRouterInterface: No service provided for text-to-text conversion');
+        }
+
         const messages: ExchangeType = [{ role: 'user', content: prompt || '' }];
-        return this.chat(service, messages, { modelName });
+        return this.chat(service, messages, { modelName, responseType });
     }
 
     async convertImageToText(args: ConvertParamsType): Promise<string> {
         const { service, image, prompt, modelName } = args;
+        if (!service) {
+            throw new Error('OpenRouterInterface: No service provided for image-to-text conversion');
+        }
+
         if (!image || !prompt) {
             console.log('No image file provided');
             return '';
@@ -64,20 +76,54 @@ export class OpenRouterInterface extends BaseInterface {
     }
 
     async convertTextToCode(args: ConvertParamsType): Promise<string> {
-        const { service, prompt, modelName } = args;
+        const { service, prompt, modelName, responseType } = args;
+        if (!service) {
+            throw new Error('OpenRouterInterface: No service provided for text-to-code conversion');
+        }
+
+        // Check if this is a JSON request based on prompt content
+        const isJsonRequest = responseType === 'json';
+
+        const systemMessage = isJsonRequest
+            ? 'You are a JSON generation assistant. You must respond with valid JSON only. No explanations, no markdown, no code blocks - just pure JSON starting with { and ending with }.'
+            : 'You are a code generation assistant. Provide only code without explanations.';
+
         const messages: ExchangeType = [
-            { role: 'system', content: 'You are a code generation assistant. Provide only code without explanations.' },
+            { role: 'system', content: systemMessage },
             { role: 'user', content: prompt || '' }
         ];
-        return this.chat(service, messages, { modelName });
+        return this.chat(service, messages, { modelName, responseType });
     }
-    
-    async convertTextToImage(args: ConvertParamsType): Promise<string> {
+
+    async convertTextToJSON(args: ConvertParamsType): Promise<string> {
         const { service, prompt, modelName } = args;
+        if (!service) {
+            throw new Error('OpenRouterInterface: No service provided for text-to-JSON conversion');
+        }
+
+        const systemMessage = 'You are a JSON generation assistant. You must respond with valid JSON only. No explanations, no markdown, no code blocks - just pure JSON starting with { or [ and ending with } or ].';
+
+        const messages: ExchangeType = [
+            { role: 'system', content: systemMessage },
+            { role: 'user', content: prompt || '' }
+        ];
+
+        const response = await this.chat(service, messages, { modelName, responseType: 'json' });
+
+        // Always apply JSON cleanup for TextToJSON conversion type
+        return this.ensureJsonResponse(response, true);
+    }
+
+    async convertTextToImage(args: ConvertParamsType): Promise<string> {
+        const { service, prompt, modelName, responseType } = args;
+        if (!service) {
+            throw new Error('OpenRouterInterface: No service provided for text-to-image conversion');
+        }
         const body = JSON.stringify({
             model: modelName || 'dall-e-2',
             messages: [{ role: 'user', content: prompt }],
             size: args.size || '1024x1024',
+            responseType: responseType
         })
         return this.chatCompletion(service, body);
     }
@@ -94,34 +140,43 @@ export class OpenRouterInterface extends BaseInterface {
           return result.json();
     }
 
-    async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string }): Promise<string> {
+    async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string, responseType?: string }): Promise<string> {
         const max_length = options.max_length || 4000;
         const temperature = options.temperature || 0.7;
-        const trimmedMessages = this.trimMessages(messages, max_length);
-    
-        try {
-            const openRouterApiClient = new OpenAI({ apiKey: service.apiKey, baseURL: service.apiUrl });
-            const stream = await openRouterApiClient.chat.completions.create({
-                model: options.modelName || 'gpt-4',
-                messages: trimmedMessages as ChatCompletionMessageParam[],
-                temperature,
-                max_tokens: max_length,
-                stream: true,
-            });
-    
-            let fullResponse = '';
-            for await (const chunk of stream) {
-                const content = chunk.choices[0]?.delta?.content || '';
-                fullResponse += content;
+        let trimmedMessages = this.trimMessages(messages, max_length);
+
+        const requestOptions: any = {
+            model: options.modelName || 'gpt-4',
+            messages: trimmedMessages as ChatCompletionMessageParam[],
+            temperature,
+            max_tokens: max_length,
+            stream: false, // Always use non-streaming for compatibility
+        };
+        // If responseType is 'json', set response_format and prepend system prompt
+        if (options.responseType === 'json') {
+            requestOptions.response_format = { type: 'json_object' };
+            if (Array.isArray(requestOptions.messages)) {
+                requestOptions.messages.unshift({ role: 'system', content: 'You must respond with valid JSON only. No explanations, no markdown, no code blocks - just pure JSON starting with { and ending with }.' });
             }
-    
-   
-            return fullResponse || '';
-        } catch (error) {
-            console.error('Error generating response from OpenRouter:', error instanceof Error ? error.message : error);
-            analyzeError(error as Error);
-            return '';
         }
+
+        // so it can properly track the failure and blacklist the model
+        const openRouterApiClient = new OpenAI({ apiKey: service.apiKey, baseURL: service.apiUrl });
+
+        let fullResponse = '';
+        const response = await openRouterApiClient.chat.completions.create(requestOptions);
+        if (response.choices && response.choices[0] && response.choices[0].message && response.choices[0].message.content) {
+            fullResponse = response.choices[0].message.content;
+        }
+        console.log(`OpenRouterInterface: Received response with content: ${fullResponse.substring(0, 140)}... (truncated)`);
+
+        // --- Ensure JSON if required ---
+        let requireJson = options.responseType === 'json' ? true : false;
+        if (requireJson) {
+            return this.ensureJsonResponse(fullResponse, true);
+        }
+
+        return fullResponse || '';
     }
 
     async convert(service: BaseService, conversionType: LLMConversationType, convertParams: ConvertParamsType): Promise<any> {
@@ -132,7 +187,7 @@ export class OpenRouterInterface extends BaseInterface {
         }
         const requiredParams = converter.requiredParams;
         convertParams.service = service;
-        const missingParams = requiredParams.filter(param => !(param in convertParams));
+        const missingParams = requiredParams.filter((param: any) => !(param in convertParams));
         if (missingParams.length > 0) {
             console.log(`Missing required parameters: ${missingParams.join(', ')}`);
             return undefined;

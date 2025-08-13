@@ -1,0 +1,65 @@
+{
+  "id": "plugin-SCRAPE",
+  "verb": "SCRAPE",
+  "description": "Scrapes content from a given URL",
+  "explanation": "This plugin takes a URL and optional configuration to scrape specific content from a web page",
+  "inputDefinitions": [
+    {
+      "name": "url",
+      "required": true,
+      "type": "string",
+      "description": "The URL to scrape content from"
+    },
+    {
+      "name": "selector",
+      "required": false,
+      "type": "string",
+      "description": "CSS selector to target specific elements (optional)"
+    },
+    {
+      "name": "attribute",
+      "required": false,
+      "type": "string",
+      "description": "Attribute to extract from the selected elements (optional)"
+    },
+    {
+      "name": "limit",
+      "required": false,
+      "type": "number",
+      "description": "Maximum number of results to return (optional)"
+    }
+  ],
+  "outputDefinitions": [
+    {
+      "name": "content",
+      "required": false,
+      "type": "array",
+      "description": "Array of scraped content"
+    }
+  ],
+  "inputGuidance": "IMPORTANT: Use 'url' for web addresses, NOT 'website' or 'link'",
+  "language": "python",
+  "entryPoint": {
+    "main": "main.py",
+    "packageSource": {
+      "type": "local",
+      "path": "./",
+      "requirements": "requirements.txt"
+    }
+  },
+  "repository": {
+    "type": "local"
+  },
+  "security": {
+    "permissions": [],
+    "sandboxOptions": {},
+    "trust": {
+      "signature": "1v8qYLEKhIRhUnWubKeAv96AaOjVAePDNdFY07ZAWwr6ufp9AI4NQTdpsYGoSo6nAf2dJpQ9QbOYtThcsWyMnGE00tuSGyq6zzPrdMMxGub5OMHIICAYdfnpTT0yisj45OUrb/sUkSrjeCsDZFKg5iSiS5IUbhcoZnQr9xFqXpIurXX9kNLiBttmG8thw9WQtAVIpGW/bGncNKRGMd3r/IOSH/R0rl+Y9bgXWdIGtkOC9vMVKHIVPbVtpskAEHT9Rx9v40KKDT6r2EZfY7P22DVNq81s8nQaabXw2W71euqatzXaVND1snHmmZLka4Lx2cUxN4KUTIw/z+epVZ1jKw=="
+    }
+  },
+  "distribution": {
+    "downloads": 0,
+    "rating": 0
+  },
+  "version": "1.0.0"
+}

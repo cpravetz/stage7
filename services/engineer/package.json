@@ -2,19 +2,21 @@
     "name": "@cktmcs/engineer",
     "version": "1.0.0",
     "description": "Central message routing component for the system",
-    "main": "src/Engineer.ts",
+    "main": "dist/Engineer.ts",
     "scripts": {
         "start": "ts-node src/Engineer.ts",
         "build": "tsc",
         "test": "jest"
     },
     "dependencies": {
-        "@cktmcs/shared": "file:../../shared",
         "@cktmcs/errorhandler": "file:../../errorhandler",
-        "axios": "^1.7.7",
+        "@cktmcs/marketplace": "file:../../marketplace",
+        "@cktmcs/shared": "file:../../shared",
+        "axios": "^1.8.4",
         "body-parser": "^1.19.0",
-        "express": "^4.18.2",
-        "ws": "^8.18.0"
+        "express": "^4.21.1",
+        "simple-git": "^3.27.0",
+        "ws": "^8.18.2"
     },
     "devDependencies": {
         "@types/express": "^5.0.0",

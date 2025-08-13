@@ -1,0 +1,118 @@
+{
+  "id": "plugin-TEXT_ANALYSIS",
+  "verb": "TEXT_ANALYSIS",
+  "description": "Performs comprehensive text analysis including statistics, keywords, and sentiment",
+  "explanation": "This plugin analyzes text content to extract statistics (word count, sentence count, etc.), identify keywords, and perform basic sentiment analysis. It can perform all analyses or specific types based on input parameters.",
+  "inputDefinitions": [
+    {
+      "name": "text",
+      "required": true,
+      "type": "string",
+      "description": "The text content to analyze"
+    },
+    {
+      "name": "analysis_type",
+      "required": false,
+      "type": "string",
+      "description": "Type of analysis to perform: 'all', 'statistics', 'keywords', or 'sentiment' (default: 'all')"
+    },
+    {
+      "name": "keyword_count",
+      "required": false,
+      "type": "number",
+      "description": "Number of top keywords to extract (default: 10)"
+    }
+  ],
+  "outputDefinitions": [
+    {
+      "name": "statistics",
+      "required": false,
+      "type": "object",
+      "description": "Text statistics including word count, character count, sentence count, etc."
+    },
+    {
+      "name": "keywords",
+      "required": false,
+      "type": "array",
+      "description": "Array of top keywords with their frequencies"
+    },
+    {
+      "name": "sentiment",
+      "required": false,
+      "type": "object",
+      "description": "Sentiment analysis results including label, score, and confidence"
+    },
+    {
+      "name": "summary",
+      "required": false,
+      "type": "string",
+      "description": "Summary of the analysis results"
+    }
+  ],
+  "inputGuidance": "IMPORTANT: You must use 'text' for content to analyze and 'analysisType' for analysis type",
+  "language": "python",
+  "entryPoint": {
+    "main": "main.py",
+    "packageSource": {
+      "type": "local",
+      "path": "./",
+      "requirements": "requirements.txt"
+    }
+  },
+  "security": {
+    "permissions": [],
+    "sandboxOptions": {
+      "allowEval": false,
+      "timeout": 30000,
+      "memory": 134217728,
+      "allowedModules": [
+        "json",
+        "sys",
+        "os",
+        "typing",
+        "re",
+        "collections"
+      ],
+      "allowedAPIs": [
+        "print"
+      ]
+    },
+    "trust": {
+      "publisher": "stage7-examples",
+      "signature": null
+    }
+  },
+  "version": "1.0.0",
+  "metadata": {
+    "author": "Stage7 Development Team",
+    "tags": [
+      "text",
+      "analysis",
+      "nlp",
+      "sentiment",
+      "keywords",
+      "statistics"
+    ],
+    "category": "analysis",
+    "license": "MIT",
+    "documentation": "README.md"
+  },
+  "configuration": [
+    {
+      "name": "timeout",
+      "type": "number",
+      "description": "Plugin execution timeout in milliseconds",
+      "defaultValue": 30000,
+      "required": false
+    },
+    {
+      "name": "max_keywords",
+      "type": "number",
+      "description": "Maximum number of keywords to extract",
+      "defaultValue": 50,
+      "required": false
+    }
+  ],
+  "createdAt": "2024-12-01T00:00:00Z",
+  "updatedAt": "2024-12-01T00:00:00Z"
+}

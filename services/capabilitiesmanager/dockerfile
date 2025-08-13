@@ -1,8 +1,11 @@
-# Use an official Node.js runtime as the base image
+# Use an official Node.js runtime with Python support as the base image
 FROM node:20-alpine
 
-# Install Python and pip
-RUN apk add --no-cache python3 py3-pip
+# Install Python and pip for Python plugin support
+RUN apk add --no-cache python3 py3-pip python3-dev build-base git
+
+# Create symbolic link for python command
+RUN ln -sf python3 /usr/bin/python
 
 # Set the working directory in the container
 WORKDIR /usr/src/app
@@ -11,6 +14,7 @@ WORKDIR /usr/src/app
 COPY package*.json ./
 COPY shared/package*.json ./shared/
 COPY errorhandler/package*.json ./errorhandler/
+COPY marketplace/package*.json ./marketplace/
 COPY services/capabilitiesmanager/package*.json ./services/capabilitiesmanager/
 
 # Install the application dependencies
@@ -19,25 +23,26 @@ RUN npm install
 # Copy the application code to the working directory
 COPY shared ./shared
 COPY errorhandler ./errorhandler
+COPY marketplace ./marketplace
 COPY services/capabilitiesmanager ./services/capabilitiesmanager
 
-# Ensure plugins directory exists and copy plugins
-RUN mkdir -p ./services/capabilitiesmanager/src/plugins 
-COPY services/capabilitiesmanager/src/plugins ./services/capabilitiesmanager/src/plugins
-
-# Ensure utils directory exists and copy utils
-RUN mkdir -p ./services/capabilitiesmanager/src/utils 
-COPY services/capabilitiesmanager/src/utils ./services/capabilitiesmanager/src/utils
+# Copy Python plugin framework files
+COPY templates ./templates
+COPY examples ./examples
+COPY tools ./tools
 
 # Build the TypeScript code
-RUN npm run build --workspace=shared
-RUN npm run build --workspace=errorhandler
+RUN cd shared && npm run build
+RUN cd errorhandler && npm run build
+RUN cd marketplace && npm run build
 RUN npm run build --workspace=services/capabilitiesmanager
 
-# List contents of dist directory
-RUN ls -R /usr/src/app/services/capabilitiesmanager/dist
+# Copy the local plugins from the source 'src/plugins' to the build output 'dist/plugins'
+# The source path is relative to the build context root (/usr/src/app)
+COPY services/capabilitiesmanager/src/plugins ./services/capabilitiesmanager/dist/plugins/
 
-RUN find ./services/capabilitiesmanager/src/plugins -name "plugin.js" -exec cp {} ./services/capabilitiesmanager/dist/plugins \;
+# Make Python CLI tool executable
+RUN chmod +x tools/python-plugin-cli.py
 
 # Set the working directory to the service
 WORKDIR /usr/src/app/services/capabilitiesmanager
@@ -46,4 +51,4 @@ WORKDIR /usr/src/app/services/capabilitiesmanager
 EXPOSE 5060
 
 # Define the command to run the application
-CMD ["node", "--experimental-specifier-resolution=node", "dist/CapabilitiesManager.js"]
+CMD ["node", "--experimental-vm-modules", "dist/index.js"]

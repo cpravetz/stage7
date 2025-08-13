@@ -1,5 +1,5 @@
 import { BaseModel, ModelScore } from './baseModel';
-import { LLMConversationType } from '../interfaces/baseInterface';
+import { LLMConversationType } from '@cktmcs/shared';
 
 export class StarCoderModel extends BaseModel {
     constructor() {
@@ -15,6 +15,12 @@ export class StarCoderModel extends BaseModel {
                 accuracyScore: 85,
                 creativityScore: 82,
                 speedScore: 88
+            }],
+            [LLMConversationType.TextToJSON, {
+                costScore: 90,
+                accuracyScore: 85,
+                creativityScore: 82,
+                speedScore: 88
             }]
         ]);
 
@@ -25,7 +31,7 @@ export class StarCoderModel extends BaseModel {
             serviceName: "HFService",
             tokenLimit: 8192, // Adjust this value if needed
             scoresByConversationType: scoresByConversationType,
-            contentConversation: [LLMConversationType.CodeToText, LLMConversationType.TextToCode]
+            contentConversation: [LLMConversationType.CodeToText, LLMConversationType.TextToCode, LLMConversationType.TextToJSON]
         });
     }
 }

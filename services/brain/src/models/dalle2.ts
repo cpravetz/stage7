@@ -1,5 +1,5 @@
 import { BaseModel, ModelScore } from './baseModel';
-import { LLMConversationType } from '../interfaces/baseInterface';
+import { LLMConversationType } from '@cktmcs/shared';
 
 export class DALLE2Model extends BaseModel {
     constructor() {
@@ -22,8 +22,8 @@ export class DALLE2Model extends BaseModel {
             name: "openai/dall-e-2",
             modelName: "dall-e-2",
             interfaceName: "openai",
-            serviceName: "OAIService",
-            tokenLimit: 1000, // Adjust as needed
+            serviceName: "OAService",
+            tokenLimit: 4096, // Adjust as needed
             scoresByConversationType: scoresByConversationType,
             contentConversation: [LLMConversationType.TextToImage, LLMConversationType.ImageToImage]
         });

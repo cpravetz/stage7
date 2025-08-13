@@ -1,0 +1,93 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "ASK_USER_QUESTION Plugin",
+    "version": "1.0.0",
+    "description": "A plugin to request input from the user."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:5000"
+    }
+  ],
+  "paths": {
+    "/execute": {
+      "post": {
+        "summary": "Request user input",
+        "description": "Requests input from the user by posing a question and optionally providing a list of choices.",
+        "operationId": "requestUserInput",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "question": {
+                    "type": "string",
+                    "description": "The question to ask the user."
+                  },
+                  "choices": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "A list of choices for the user to select from."
+                  },
+                  "answerType": {
+                    "type": "string",
+                    "description": "The expected type of answer, e.g., 'text', 'number'.",
+                    "default": "text"
+                  }
+                },
+                "required": ["question"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "User input request sent successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "resultType": {
+                      "type": "string"
+                    },
+                    "resultDescription": {
+                      "type": "string"
+                    },
+                    "result": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "request_id": {
+                      "type": "string"
+                    },
+                    "mimeType": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request - Missing required parameters."
+          },
+          "500": {
+            "description": "Internal Server Error - Failed to process the request."
+          }
+        }
+      }
+    }
+  }
+}

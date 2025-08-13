@@ -9,20 +9,23 @@
         "test": "jest"
     },
     "dependencies": {
-        "@cktmcs/shared": "file:../../shared",
         "@cktmcs/errorhandler": "file:../../errorhandler",
-        "axios": "^1.7.7",
+        "@cktmcs/shared": "file:../../shared",
+        "axios": "^1.8.4",
         "body-parser": "^1.19.0",
         "cors": "^2.8.5",
-        "express": "^4.18.2",
+        "express": "^4.21.1",
+        "express-rate-limit": "^7.5.0",
         "jsonwebtoken": "^9.0.2",
+        "multer": "^2.0.2",
         "uuid": "^10.0.0",
-        "ws": "^8.18.0"
+        "ws": "^8.18.2"
     },
     "devDependencies": {
         "@types/cors": "^2.8.17",
         "@types/express": "^5.0.0",
         "@types/jest": "^29.5.14",
+        "@types/multer": "^2.0.0",
         "@types/supertest": "^6.0.2",
         "@types/uuid": "^10.0.0",
         "@types/ws": "^8.5.12",
@@ -40,5 +43,4 @@
         "glob": "^10.4.5",
         "inflight": "^2.0.0"
     }
-    
 }

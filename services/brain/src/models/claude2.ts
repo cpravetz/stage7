@@ -1,5 +1,5 @@
 import { BaseModel, ModelScore } from './baseModel';
-import { LLMConversationType } from '../interfaces/baseInterface';
+import { LLMConversationType } from '@cktmcs/shared';
 
 export class Claude2Model extends BaseModel {
     constructor() {
@@ -21,6 +21,12 @@ export class Claude2Model extends BaseModel {
                 accuracyScore: 95,
                 creativityScore: 90,
                 speedScore: 85
+            }],
+            [LLMConversationType.TextToJSON, {
+                costScore: 70,
+                accuracyScore: 95,
+                creativityScore: 90,
+                speedScore: 85
             }]
         ]);
 
@@ -31,7 +37,7 @@ export class Claude2Model extends BaseModel {
             serviceName: "ORService",
             tokenLimit: 100000, // Adjust this value if you know the exact token limit for Claude 2
             scoresByConversationType: scoresByConversationType,
-            contentConversation: [LLMConversationType.TextToCode, LLMConversationType.CodeToText, LLMConversationType.TextToText]
+            contentConversation: [LLMConversationType.TextToCode, LLMConversationType.CodeToText, LLMConversationType.TextToText, LLMConversationType.TextToJSON]
         });
     }
 }

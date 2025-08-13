@@ -1,45 +1,43 @@
-# Build stage
-FROM node:20-alpine as build
+# ---- Stage 1: Build ----
+# Use an official Node.js runtime as the base image for the build stage.
+FROM node:20-alpine AS builder
 
-# Set the working directory
+# Set the working directory inside the container
 WORKDIR /app
 
-# Copy package.json and package-lock.json to the working directory
-COPY package*.json ./
-COPY shared/package*.json ./shared/
-COPY services/mcsreact/package*.json ./services/mcsreact/
+# Copy package.json and package-lock.json
+COPY services/mcsreact/package*.json ./
 
 # Install dependencies
-RUN npm install
-RUN npm install --prefix shared
-RUN npm install --prefix services/mcsreact
+RUN npm install --legacy-peer-deps
 
-# Copy the rest of the code
-COPY shared ./shared
-COPY services/mcsreact ./services/mcsreact
-
-# Build the shared package
-WORKDIR /app/shared
-RUN npm run build
-
-# Build the React app
-WORKDIR /app/services/mcsreact
-RUN npm run build
+# Copy the rest of the application source code
+COPY services/mcsreact/src ./src
+COPY services/mcsreact/public ./public
+COPY services/mcsreact/tsconfig.json ./
+COPY services/mcsreact/webpack.config.js ./
 
 # Set environment variables
 ENV NODE_ENV=production
 ENV REACT_APP_API_BASE_URL=http://localhost:5020
 ENV REACT_APP_WS_URL=ws://localhost:5020
+ENV CI=false
 
-# Serve stage
-FROM nginx:alpine
+# Build the React application
+RUN npm run build
 
-# Copy the build output to replace the default nginx contents
-COPY --from=build /app/services/mcsreact/build /usr/share/nginx/html
+# ---- Stage 2: Serve ----
+# Use a lightweight Nginx image for the final stage
+FROM nginx:stable-alpine
 
-# Expose port 80
+# Copy the built static files from the 'builder' stage to the Nginx html directory
+COPY --from=builder /app/build /usr/share/nginx/html
+
+# Copy a custom Nginx configuration file for SPA routing
+COPY services/mcsreact/nginx.conf /etc/nginx/conf.d/default.conf
+
+# Expose port 80 (the default HTTP port Nginx listens on)
 EXPOSE 80
 
-
-# Start the application
+# Command to run Nginx in the foreground when the container starts
 CMD ["nginx", "-g", "daemon off;"]

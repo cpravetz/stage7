@@ -1,0 +1,69 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "TRANSFORM Plugin API",
+    "version": "1.0.0",
+    "description": "API for performing general data transformations using code snippets."
+  },
+  "paths": {
+    "/execute_transform": {
+      "post": {
+        "summary": "Execute a code snippet for data transformation",
+        "operationId": "execute_transform",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "script": {
+                    "type": "string",
+                    "description": "The code snippet to execute for transformation. Should return the result."
+                  },
+                  "language": {
+                    "type": "string",
+                    "description": "The programming language of the code snippet.",
+                    "enum": ["python", "javascript"]
+                  },
+                  "inputs": {
+                    "type": "object",
+                    "description": "A JSON object containing key-value pairs to be passed as variables to the script.",
+                    "additionalProperties": true
+                  }
+                },
+                "required": ["script", "language"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Transformation executed successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "result": {
+                      "type": "string",
+                      "description": "The result of the script execution."
+                    },
+                    "stdout": {
+                      "type": "string",
+                      "description": "The standard output from the code execution."
+                    },
+                    "stderr": {
+                      "type": "string",
+                      "description": "The standard error from the code execution."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

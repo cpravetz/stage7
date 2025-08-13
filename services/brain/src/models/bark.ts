@@ -1,5 +1,5 @@
 import { BaseModel, ModelScore } from './baseModel';
-import { LLMConversationType } from '../interfaces/baseInterface';
+import { LLMConversationType } from '@cktmcs/shared';
 
 export class BarkModel extends BaseModel {
     constructor() {
@@ -17,7 +17,7 @@ export class BarkModel extends BaseModel {
             modelName: "suno/bark",
             interfaceName: "huggingface",
             serviceName: "HFService",
-            tokenLimit: 1000, // You may need to adjust this based on the actual model's limit
+            tokenLimit: 4096,
             scoresByConversationType: scoresByConversationType,
             contentConversation: [LLMConversationType.TextToAudio]
         });

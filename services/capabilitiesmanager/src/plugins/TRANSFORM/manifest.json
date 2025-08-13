@@ -1,0 +1,52 @@
+{
+    "id":"plugin-TRANSFORM",
+    "verb":"TRANSFORM",
+    "description": "A plugin for performing general data transformations using code snippets.",
+    "explanation": "This plugin executes a provided Python code snippet to transform input data.",
+    "repository":{"type":"local"},
+    "inputDefinitions":[
+        {
+            "name": "script",
+            "required": true,
+            "type": "string",
+            "description": "The Python code snippet to execute for transformation. The code should define a function named 'transform_data' that accepts 'input_data' and returns the transformed data."
+        },
+        {
+            "name": "script_parameters",
+            "required": true,
+            "type": "object",
+            "description": "The input data (JSON object) to be transformed by the code snippet."
+        }
+    ],
+    "outputDefinitions":[
+        {
+            "name": "transform_result",
+            "required": true,
+            "type": "string",
+            "description": "The transformed output data (JSON object) after executing the code snippet."
+        }
+    ],
+    "language":"python",
+    "entryPoint":{
+      "main":"main.py",
+      "function": "execute_transformation",
+      "packageSource":{"type":"local","path":"./",
+      "requirements":"requirements.txt"}
+    },
+    "security":{
+      "permissions":[],
+      "sandboxOptions":{},
+      "trust":{"signature":""}
+    },
+    "distribution":{
+      "downloads":0,
+      "rating":0
+    },
+    "version":"1.0.0",
+    "metadata": {
+        "author": "Stage7 Development Team",
+        "tags": ["data", "transform", "code", "utility"],
+        "category": "data-processing",
+        "license": "MIT"
+    }
+}

@@ -1,5 +1,6 @@
 import { BaseService, ExchangeType } from '../services/baseService';
-import { BaseInterface, LLMConversationType, ConvertParamsType } from '../interfaces/baseInterface';
+import { BaseInterface, ConvertParamsType } from '../interfaces/baseInterface';
+import { LLMConversationType } from '@cktmcs/shared';
 
 export interface ModelScore {
     costScore: number;
@@ -26,7 +27,7 @@ export class BaseModel {
             serviceName: string,
             tokenLimit: number,
             scoresByConversationType: Map<LLMConversationType, ModelScore>,
-            contentConversation: LLMConversationType[] }) 
+            contentConversation: LLMConversationType[] })
     {
         this.name = options.name;
         this.modelName = options.modelName;
@@ -70,11 +71,12 @@ export class BaseModel {
         return this.getScore(conversationType).speedScore;
     }
 
-    chat(messages: ExchangeType, options: { max_length?: number, temperature?: number }): Promise<string> {
+    chat(messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string, timeout?: number, response_format?: any, [key: string]: any }): Promise<string> {
         if (!this.llminterface || !this.service) {
             console.log(`No interface or service set for model ${this.name} `);
             return Promise.resolve('');
         }
+        options.modelName = options.modelName || this.modelName;
         return this.llminterface.chat(this.service, messages, options);
     }
     convert(conversationType: LLMConversationType, convertParams: ConvertParamsType): Promise<any> {
@@ -96,6 +98,24 @@ export class BaseModel {
     }
 
     isAvailable(): boolean {
-        return (this.service?.isAvailable() && this.modelName !== '') || false;
+        // First check if the service is available and the model name is valid
+        if (!this.service?.isAvailable() || this.modelName === '') {
+            return false;
+        }
+
+        // Check if this is a Huggingface model and if there's a global blacklist
+        if (this.name.toLowerCase().includes('hf/') || this.name.toLowerCase().includes('huggingface')) {
+            const globalBlacklistUntil = (global as any).huggingfaceBlacklistedUntil;
+            if (globalBlacklistUntil) {
+                const blacklistDate = new Date(globalBlacklistUntil);
+                const now = new Date();
+                if (now < blacklistDate) {
+                    console.log(`Huggingface model ${this.name} is globally blacklisted until ${blacklistDate.toISOString()}`);
+                    return false;
+                }
+            }
+        }
+
+        return true;
     }
 }

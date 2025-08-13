@@ -1,6 +1,7 @@
 # Logs
 logs
 *.log
+*.txt
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -129,3 +130,17 @@ dist
 .yarn/install-state.gz
 .pnp.*
 .todo.txt
+.qodo
+
+# Private keys and sensitive files
+*.pem
+*.key
+*private*
+
+# Specific sensitive directories
+services/security/keys/**
+shared/keys/**
+
+# Allow public keys to be committed
+!*public*.pem
+!*public*.key

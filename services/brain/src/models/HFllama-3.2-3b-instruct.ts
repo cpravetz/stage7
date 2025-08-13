@@ -1,5 +1,5 @@
 import { BaseModel, ModelScore } from './baseModel';
-import { LLMConversationType } from '../interfaces/baseInterface';
+import { LLMConversationType } from '@cktmcs/shared';
 
 export class HFLlamaModel extends BaseModel {
     constructor() {
@@ -9,11 +9,17 @@ export class HFLlamaModel extends BaseModel {
                 accuracyScore: 100,
                 creativityScore: 80,
                 speedScore: 80
-            }]
+            }],
+            [LLMConversationType.TextToText, {
+                costScore: 100,
+                accuracyScore: 100,
+                creativityScore: 80,
+                speedScore: 80
+            }]        
         ]);
 
         super({
-            name: "hf/meta-lamma/llama-3.2-3b-instruct",
+            name: "hf/meta-llama/llama-3.2-3b-instruct",
             modelName: "meta-llama/llama-3.2-3b-instruct",
             interfaceName: "huggingface",
             serviceName: "HFService",

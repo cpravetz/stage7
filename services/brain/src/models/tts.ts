@@ -1,5 +1,5 @@
 import { BaseModel, ModelScore } from './baseModel';
-import { LLMConversationType } from '../interfaces/baseInterface';
+import { LLMConversationType } from '@cktmcs/shared';
 
 export class TTSModel extends BaseModel {
     constructor() {
@@ -16,7 +16,7 @@ export class TTSModel extends BaseModel {
             name: "openai/tts",
             modelName: "tts-1",
             interfaceName: "openai",
-            serviceName: "OAIService",
+            serviceName: "OAService",
             tokenLimit: 4096, // Adjust this value based on the actual token limit for the TTS model
             scoresByConversationType: scoresByConversationType,
             contentConversation: [LLMConversationType.TextToAudio]

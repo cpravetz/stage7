@@ -1,0 +1,22 @@
+{
+  "name": "@cktmcs/marketplace",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "clean": "rimraf dist",
+    "build": "npm run clean && tsc"
+  },
+  "dependencies": {
+    "@cktmcs/shared": "file:../shared",
+    "axios": "^1.8.4"
+  },
+  "devDependencies": {
+    "@types/uuid": "^10.0.0",
+    "typescript": "5.6.3"
+  },
+  "overrides": {
+    "glob": "^10.4.5",
+    "inflight": "^2.0.0"
+  }
+}

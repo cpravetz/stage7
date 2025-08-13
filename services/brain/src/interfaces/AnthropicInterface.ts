@@ -1,13 +1,13 @@
 import axios, { AxiosError } from 'axios';
-import { BaseInterface, LLMConversationType, ConvertParamsType } from './baseInterface';
-import { analyzeError } from '@cktmcs/errorhandler';
+import { BaseInterface, ConvertParamsType } from './baseInterface';
+import { LLMConversationType } from '@cktmcs/shared';
 import { BaseService, ExchangeType } from '../services/baseService';
 
 export class AnthropicInterface extends BaseInterface {
     interfaceName = 'anthropic';
     
     constructor() {
-        super();
+        super('anthropic');
         this.converters.set(LLMConversationType.TextToText, {
             conversationType: LLMConversationType.TextToText,
             requiredParams: ['service', 'prompt'],
@@ -17,10 +17,15 @@ export class AnthropicInterface extends BaseInterface {
             conversationType: LLMConversationType.TextToCode,
             requiredParams: ['service', 'prompt'],
             converter: this.convertTextToCode,
-        });        
+        });
+        this.converters.set(LLMConversationType.TextToJSON, {
+            conversationType: LLMConversationType.TextToJSON,
+            requiredParams: ['service', 'prompt'],
+            converter: this.convertTextToJSON,
+        });
     }
 
-    async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, model?: string }): Promise<string> {
+    async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string, timeout?: number, responseType?: string }): Promise<string> {
         const max_tokens = options.max_length || 4000;
         const trimmedMessages = this.trimMessages(messages, max_tokens);
     
@@ -28,11 +33,12 @@ export class AnthropicInterface extends BaseInterface {
             const response = await axios.post(
                 service.apiUrl,
                 {
-                    model: options?.model || 'claude-3-haiku-20240307',
+                    model: options?.modelName || 'claude-3-haiku-20240307',
                     max_tokens: max_tokens,
                     temperature: options?.temperature ?? 0.7,
                     messages: trimmedMessages,
                     stream: true,
+                    timeout: options?.timeout || 60000, // 60 seconds
                 },
                 {
                     headers: {
@@ -60,41 +66,90 @@ export class AnthropicInterface extends BaseInterface {
             if (!fullResponse) {
                 console.log('No content in Anthropic response');
             }
+            console.log(`AnthropicInterface: Received response with content: ${fullResponse.substring(0, 140)}... (truncated)`);
+            // --- Ensure JSON if required ---
+            let requireJson = options.responseType === 'json' ? true : false;
+            if (requireJson) {
+                return this.ensureJsonResponse(fullResponse, true);
+            }
     
             return fullResponse || '';
         } catch (error) {
-            console.error('Error generating response from Anthropic:', error instanceof Error ? error.message : error);
-            analyzeError(error as Error);
-            return '';
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            console.error('Error generating response from Anthropic:', errorMessage);
+
+            // Instead of returning empty string, throw a more descriptive error
+            if (errorMessage.includes('ECONNREFUSED') || errorMessage.includes('ENOTFOUND') ||
+                errorMessage.includes('timeout') || errorMessage.includes('network')) {
+                throw new Error(`Anthropic connection error: ${errorMessage}`);
+            } else if (errorMessage.includes('401') || errorMessage.includes('403')) {
+                throw new Error(`Anthropic authentication error: ${errorMessage}`);
+            } else if (errorMessage.includes('429')) {
+                throw new Error(`Anthropic rate limit error: ${errorMessage}`);
+            } else {
+                throw new Error(`Anthropic API error: ${errorMessage}`);
+            }
         }
     }
 
     async convertTextToText(args: ConvertParamsType): Promise<string> {
-        const { service, prompt, modelName } = args;
+        const { service, prompt, modelName, responseType } = args;
+        if (!service) {
+            throw new Error('AnthropicInterface: No service provided for text-to-text conversion');
+        }
         const messages = [{ role: 'user', content: prompt || '' }];
-        return this.chat(service, messages, { model: modelName });
+        return this.chat(service, messages, { modelName: modelName, responseType: responseType });
     }
 
     async convertTextToCode(args: ConvertParamsType): Promise<string> {
-        const { service, prompt, modelName } = args;
+        const { service, prompt, modelName, responseType } = args;
+        if (!service) {
+            throw new Error('AnthropicInterface: No service provided for text-to-code conversion');
+        }
+
+        // Check if this is a JSON request based on prompt content
+        const isJsonRequest = responseType === 'json';
+
+        const systemMessage = isJsonRequest
+            ? 'You are a JSON generation assistant. You must respond with valid JSON only. No explanations, no markdown, no code blocks - just pure JSON starting with { and ending with }.'
+            : 'You are a code generation assistant. Provide only code without explanations.';
+
         const messages = [
-            { role: 'system', content: 'You are a code generation assistant. Provide only code without explanations.' },
+            { role: 'system', content: systemMessage },
             { role: 'user', content: prompt || ''}
         ];
-        return this.chat(service, messages, { model: modelName });
+        return this.chat(service, messages, { modelName: modelName });
+    }
+
+    async convertTextToJSON(args: ConvertParamsType): Promise<string> {
+        const { service, prompt, modelName } = args;
+        if (!service) {
+            throw new Error('AnthropicInterface: No service provided for text-to-JSON conversion');
+        }
+
+        const systemMessage = 'You are a JSON generation assistant. You must respond with valid JSON only. No explanations, no markdown, no code blocks - just pure JSON starting with { or [ and ending with } or ].';
+
+        const messages = [
+            { role: 'system', content: systemMessage },
+            { role: 'user', content: prompt || ''}
+        ];
+
+        const response = await this.chat(service, messages, { modelName: modelName, responseType: 'json' });
+
+        // Always apply JSON cleanup for TextToJSON conversion type
+        return this.ensureJsonResponse(response, true);
     }
 
     async convert(service: BaseService, conversionType: LLMConversationType, convertParams: ConvertParamsType): Promise<any> {
         const converter = this.converters.get(conversionType);
         if (!converter) {
-            return '';
+            throw new Error(`Conversion type ${conversionType} not supported by Anthropic interface`);
         }
         const requiredParams = converter.requiredParams;
         convertParams.service = service;
-        const missingParams = requiredParams.filter(param => !(param in convertParams));
+        const missingParams = requiredParams.filter((param:any) => !(param in convertParams));
         if (missingParams.length > 0) {
-            console.log(`Missing required parameters: ${missingParams.join(', ')}`);
-            return '';
+            throw new Error(`Missing required parameters for Anthropic conversion: ${missingParams.join(', ')}`);
         }
         return converter.converter(convertParams);
     }

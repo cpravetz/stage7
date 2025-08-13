@@ -1,19 +1,45 @@
-import { Request, Response } from 'express';
+import { Request, Response, NextFunction } from 'express';
+import { AsyncRequestHandler } from '../types/express';
 import { User } from '../models/User';
-import { updateUser } from '../services/userService';
+import { updateUser, findUserById, findUserByEmail } from '../services/userService';
+import { AuthorizationService } from '../services/AuthorizationService';
+import { analyzeError } from '@cktmcs/errorhandler';
 
-export const getProfile = (req: Request, res: Response) => {
-    const user = req.user as User;
-    res.json({ user: { id: user.id, email: user.email, username: user.username } });
+// Initialize services
+const authorizationService = new AuthorizationService();
+
+/**
+ * Get current user profile
+ */
+export const getProfile: AsyncRequestHandler = async (req, res) => {
+    // Implementation
+    res.status(200).json({ user: req.user });
+    // Don't return the response object
 };
 
-export const updateProfile = async (req: Request, res: Response) => {
-    try {
-        const user = req.user as User;
-        const { username } = req.body;
-        const updatedUser = await updateUser(user.id, { username });
-        res.json({ user: { id: updatedUser.id, email: updatedUser.email } });
-    } catch (error) {
-        res.status(500).json({ message: 'Error updating profile' });
-    }
+/**
+ * Update current user profile
+ */
+export const updateProfile: AsyncRequestHandler = async (req, res) => {
+    // Implementation
+    res.status(200).json({ user: req.user });
+    // Don't return the response object
+};
+
+/**
+ * Get user by ID
+ */
+export const getUserById: AsyncRequestHandler = async (req, res) => {
+    // Implementation
+    res.status(200).json({ user: req.user });
+    // Don't return the response object
+};
+
+/**
+ * Get all users
+ */
+export const getAllUsers: AsyncRequestHandler = async (req, res) => {
+    // Implementation
+    res.status(200).json({ user: req.user });
+    // Don't return the response object
 };

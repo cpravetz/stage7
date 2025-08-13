@@ -1,0 +1,89 @@
+{
+  "template": {
+    "id": "web-research-and-summarize",
+    "name": "Web Research and Summarize",
+    "description": "Research a topic online and create a summary",
+    "version": "1.0.0",
+    "inputs": [
+      {
+        "name": "topic",
+        "type": "STRING",
+        "description": "Research topic",
+        "required": true
+      },
+      {
+        "name": "max_sources",
+        "type": "NUMBER",
+        "description": "Maximum number of sources to research",
+        "required": false,
+        "default": 5
+      }
+    ],
+    "outputs": [
+      {
+        "name": "summary",
+        "type": "STRING",
+        "description": "Generated summary text"
+      },
+      {
+        "name": "key_points",
+        "type": "ARRAY",
+        "description": "List of key points extracted"
+      },
+      {
+        "name": "source_count",
+        "type": "NUMBER",
+        "description": "Number of sources found"
+      }
+    ],
+    "tasks": [
+      {
+        "id": "search",
+        "actionVerb": "WEB_SEARCH",
+        "description": "Search the web for information about the topic",
+        "inputs": {
+          "query": "{{inputs.topic}}",
+          "max_results": "{{inputs.max_sources}}"
+        },
+        "outputs": [
+          {
+            "name": "results",
+            "type": "ARRAY",
+            "description": "Search results from web"
+          },
+          {
+            "name": "source_count",
+            "type": "NUMBER",
+            "description": "Number of sources found"
+          }
+        ]
+      },
+      {
+        "id": "summarize",
+        "actionVerb": "THINK",
+        "description": "Analyze and summarize the search results",
+        "inputs": {
+          "prompt": "Please analyze and summarize the following search results about {{inputs.topic}}. Extract key points and create a comprehensive summary: {{tasks.search.outputs.results}}"
+        },
+        "outputs": [
+          {
+            "name": "summary",
+            "type": "STRING",
+            "description": "Generated summary text"
+          },
+          {
+            "name": "key_points",
+            "type": "ARRAY",
+            "description": "List of key points extracted"
+          }
+        ],
+        "dependsOn": ["search"]
+      }
+    ]
+  },
+  "metadata": {
+    "author": "Stage7 System",
+    "tags": ["research", "web", "summarization"],
+    "category": "research"
+  }
+}

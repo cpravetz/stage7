@@ -1,0 +1,119 @@
+{
+  "id": "plugin-FILE_OPS_PYTHON",
+  "verb": "FILE_OPERATION",
+  "description": "Provides services for file operations: read, write, append",
+  "explanation": "This plugin takes a path and optional content and executes the selected operation. Python version with enhanced security and error handling.",
+  "inputGuidance": "FILE_OPERATION requires 'path' or 'fileId' and 'operation' inputs.",
+  "inputDefinitions": [
+    {
+      "name": "path",
+      "required": false,
+      "type": "string",
+      "description": "The path for the filename to read, write, or append content (relative paths only for security)"
+    },
+    {
+      "name": "fileId",
+      "required": false,
+      "type": "string",
+      "description": "File ID from MissionFile system (alternative to path). When provided, the file will be read from the Librarian service using this ID."
+    },
+    {
+      "name": "operation",
+      "required": true,
+      "type": "string",
+      "description": "Operation to perform: 'read', 'write', or 'append'"
+    },
+    {
+      "name": "content",
+      "required": false,
+      "type": "string",
+      "description": "For write and append operations, the content to write or append"
+    }
+  ],
+  "outputDefinitions": [
+    {
+      "name": "result",
+      "required": true,
+      "type": "any",
+      "description": "Content for read operations, null for write/append operations"
+    }
+  ],
+  "language": "python",
+  "entryPoint": {
+    "main": "main.py",
+    "function": "execute_plugin"
+  },
+  "repository": {
+    "type": "local"
+  },
+  "security": {
+    "permissions": [
+      "fs.read",
+      "fs.write"
+    ],
+    "sandboxOptions": {
+      "allowEval": false,
+      "timeout": 30000,
+      "memory": 134217728,
+      "allowedModules": [
+        "json",
+        "sys",
+        "os",
+        "typing",
+        "pathlib"
+      ],
+      "allowedAPIs": [
+        "print",
+        "open"
+      ],
+      "fileSystemAccess": {
+        "allowAbsolutePaths": false,
+        "allowPathTraversal": false,
+        "allowedExtensions": [".txt", ".json", ".md", ".csv", ".log"],
+        "maxFileSize": 10485760
+      }
+    },
+    "trust": {
+      "publisher": "stage7-core",
+      "signature": null
+    }
+  },
+  "version": "2.0.0",
+  "metadata": {
+    "author": "Stage7 Development Team",
+    "tags": [
+      "file",
+      "io",
+      "read",
+      "write",
+      "append"
+    ],
+    "category": "utility",
+    "license": "MIT",
+    "documentation": "README.md",
+    "migrated_from": "javascript",
+    "migration_date": "2024-12-01"
+  },
+  "configuration": [
+    {
+      "name": "timeout",
+      "type": "number",
+      "description": "File operation timeout in milliseconds",
+      "defaultValue": 30000,
+      "required": false
+    },
+    {
+      "name": "max_file_size",
+      "type": "number",
+      "description": "Maximum file size in bytes",
+      "defaultValue": 10485760,
+      "required": false
+    }
+  ],
+  "distribution": {
+    "downloads": 0,
+    "rating": 0
+  },
+  "createdAt": "2024-12-01T00:00:00Z",
+  "updatedAt": "2024-12-01T00:00:00Z"
+}

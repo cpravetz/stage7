@@ -1,112 +1,531 @@
 import express from 'express';
 import { Agent } from './agents/Agent';
-import { AgentStatus } from './utils/agentStatus';
-import { MapSerializer, BaseEntity } from '@cktmcs/shared';
-import { v4 as uuidv4 } from 'uuid';
-import { AgentConfig } from './agents/Agent';
-import axios from 'axios';
-import { AgentSetStatistics, AgentStatistics, PluginInput } from '@cktmcs/shared';
+import { MapSerializer, BaseEntity, createAuthenticatedAxios, PluginParameterType, OutputType } from '@cktmcs/shared';
+import { AgentSetStatistics, InputValue } from '@cktmcs/shared';
 import { AgentPersistenceManager } from './utils/AgentPersistenceManager';
 import { analyzeError } from '@cktmcs/errorhandler';
-
-
-const app = express();
-
+import { setInterval } from 'timers';
+import { CollaborationManager } from './collaboration/CollaborationManager';
+import { SpecializationFramework } from './specialization/SpecializationFramework';
+import { DomainKnowledge } from './specialization/DomainKnowledge';
+import { TaskDelegation } from './collaboration/TaskDelegation';
+import { ConflictResolution } from './collaboration/ConflictResolution';
 
 export class AgentSet extends BaseEntity {
     agents: Map<string, Agent> = new Map(); // Store agents by their ID
-    maxAgents: number = 10; // Example limit for agents in this set
-    persistenceManager: AgentPersistenceManager = new AgentPersistenceManager();
+    maxAgents: number = 250; // Example limit for agents in this set
+    persistenceManager: AgentPersistenceManager;
+    private trafficManagerUrl: string = process.env.TRAFFICMANAGER_URL || 'trafficmanager:5080';
+    private librarianUrl: string = process.env.LIBRARIAN_URL || 'librarian:5040';
+    private brainUrl: string = process.env.BRAIN_URL || 'brain:5070';
+    private app: express.Application;
+
+
+    // Agent systems
+    private collaborationManager: CollaborationManager;
+    private specializationFramework: SpecializationFramework;
+    private domainKnowledge: DomainKnowledge;
+    private taskDelegation: TaskDelegation;
+    private conflictResolution: ConflictResolution;
 
     constructor() {
-        super(uuidv4(), 'AgentSet', process.env.HOST || 'agentset', process.env.PORT || '9000');
+        // Use a fixed ID for the AgentSet to avoid multiple registrations
+        super('primary-agentset', 'AgentSet', process.env.HOST || 'agentset', process.env.PORT || '5100');
+
+        // Initialize Express app
+        this.app = express();
+
+        // Initialize persistence manager with authenticated API
+        this.persistenceManager = new AgentPersistenceManager(this.librarianUrl, this.authenticatedApi);
+
+        // Initialize agent systems
+        this.taskDelegation = new TaskDelegation(this.agents, this.trafficManagerUrl);
+        this.conflictResolution = new ConflictResolution(this.agents, this.trafficManagerUrl, this.brainUrl);
+        this.collaborationManager = new CollaborationManager(
+            this,
+            this.taskDelegation,
+            this.conflictResolution
+        );
+        this.specializationFramework = new SpecializationFramework(this.agents, this.librarianUrl, this.brainUrl);
+        const knowledgeDomainsArray = this.specializationFramework.getAllKnowledgeDomains();
+        const knowledgeDomainsMap = new Map(knowledgeDomainsArray.map(domain => [domain.id, domain]));
+        this.domainKnowledge = new DomainKnowledge(knowledgeDomainsMap, this.librarianUrl, this.brainUrl);
+
+        // Initialize authenticated API client
+        this.authenticatedApi = createAuthenticatedAxios({
+            serviceId: 'AgentSet',
+            securityManagerUrl: this.librarianUrl,
+            clientSecret: process.env.CLIENT_SECRET || 'defaultSecret',
+        });
+
         this.initializeServer();
+
+        // Set up garbage collection
+        setInterval(() => {
+            if (global.gc) {
+                global.gc();
+            }
+        }, 5 * 60 * 1000);
+
+        // Log that we're using a fixed ID
+        console.log(`AgentSet initialized with fixed ID: primary-agentset`);
     }
 
 
     // Initialize Express server to manage agent lifecycle
-    private initializeServer() {
-        app.use(express.json());
+    private initializeServer(): void {
+        this.app.get('/health', (req: express.Request, res: express.Response): void => {
+            res.status(200).json({
+                status: 'healthy',
+                timestamp: new Date().toISOString(),
+                message: 'AgentSet service is healthy',
+                agentCount: this.agents.size
+            });
+        });
 
-        app.post('/message', (req, res) => this.handleMessage(req, res));
+        this.app.get('/ready', (req: express.Request, res: express.Response): void => {
+            res.status(200).json({
+                ready: true,
+                timestamp: new Date().toISOString(),
+                message: 'AgentSet service is ready',
+                registeredWithPostOffice: this.registeredWithPostOffice
+            });
+        });
+
+        // Apply JSON parsing middleware
+        this.app.use(express.json());
+
+        // Apply authentication middleware to all routes
+        // The BaseEntity.verifyToken method already handles skipping authentication for health check endpoints
+        this.app.use((req: express.Request, res: express.Response, next: express.NextFunction) => this.verifyToken(req, res, next));
+
+        this.app.post('/message', this.handleMessage.bind(this));
 
         // Add a new agent to the set
-        app.post('/addAgent', (req, res) => this.addAgent(req, res));
+        this.app.post('/addAgent', this.addAgent.bind(this));
 
-        app.post('/agent/:agentId/message', (req, res) => this.handleAgentMessage(req, res));
-        
-        app.get('/agent/:agentId/output', (req, res) => this.getAgentOutput(req, res));
-
-        // Pause mission agents
-        app.post('/pauseAgents', async (req, res) => {
-            const { missionId } = req.body;
-            console.log(`Agentset Pausing agents for mission ${missionId}`);
-            const agents = Array.from(this.agents.values()).filter(agent => agent.getMissionId() === missionId);
-            console.log(`Agentset Pausing ${agents.length}agents for mission ${missionId}`);
-            for (const agent of agents) {
-                await agent.pause();
+        // Endpoint for agents to notify of their terminal state for removal
+        this.app.post('/removeAgent', async (req: express.Request, res: express.Response, next: express.NextFunction): Promise<void> => {
+            const { agentId, status } = req.body;
+            if (!agentId || !status) {
+                res.status(400).send({ error: 'agentId and status are required for removal' });
+                return;
             }
-            res.status(200).send({ message: 'All agents paused' });
-        });
-
-        // Resume mission agents
-        app.post('/resumeAgents', async (req, res) => {
-            const { missionId } = req.body;
-            console.log(`Agentset Resuming agents for mission ${missionId}`);
-            const agents = Array.from(this.agents.values()).filter(agent => agent.getMissionId() === missionId);
-            for (const agent of agents) {
-                await agent.resume();
-            }
-            res.status(200).send({ message: 'All agents resumed' });
-        });
-
-        app.post('/resumeAgent', async (req, res) => {
-            const { agentId } = req.body;
-            console.log(`Agentset Resuming agent ${agentId}`);
-            const agent = this.agents.get(agentId);
-            if (agent) {
-                await agent.resume();
-                res.status(200).send({ message: `Agent resumed` });
-            } else {
-                res.status(404).send({ error: 'Agent not found' });
-            }
-        });
-
-        // Abort mission agents
-        app.post('/abortAgent', async (req, res) => {
-            const { agentId } = req.body;
-            console.log(`Agentset Aborting agent ${agentId}`);
-            const agent = this.agents.get(agentId);
-            if (agent) {
-                await agent.abort();
-                res.status(200).send({ message: `Agent aborted` });
-            } else {
-                res.status(404).send({ error: 'Agent not found' });
-            }
-        });
-
-        app.get('/statistics/:missionId', (req, res) => { this.getAgentStatistics(req, res) });
-        app.post('/updateFromAgent', (req, res) => { this.updateFromAgent(req, res) });
-        app.get('/agent/:agentId/output', async (req, res) => {
-            const { agentId } = req.params;
-            const agent = this.agents.get(agentId);
-
-            if (!agent) {
-                res.status(404).send({ error: `Agent with id ${agentId} not found` });
-            }
-            else {
-                try {
-                    const output = await agent.getOutput();
-                    res.status(200).send({ output });
-                } catch (error) { analyzeError(error as Error);
-                    console.error(`Error fetching output for agent ${agentId}:`, error instanceof Error ? error.message : error);
-                    res.status(500).send({ error: `Failed to fetch output for agent ${agentId}` });
+            try {
+                await this.removeAgentFromSet(agentId, status);
+                res.status(200).send({ message: `Agent ${agentId} processed for removal with status ${status}.` });
+            } catch (error) {
+                analyzeError(error as Error);
+                if (next) {
+                    next(error);
+                } else if (!res.headersSent) {
+                    res.status(500).send({ error: `Error processing agent ${agentId} for removal: ${error instanceof Error ? error.message : String(error)}` });
                 }
             }
         });
 
+        this.app.post('/agent/:agentId/message', this.handleAgentMessage.bind(this));
 
-        app.post('/saveAgent', async (req, res) => {
+        this.app.get('/agent/:agentId', this.getAgent.bind(this));
+
+        this.app.get('/agent/:agentId/output', this.getAgentOutput.bind(this));
+
+        // Pause mission agents
+        this.app.post('/pauseAgents', async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+            const { missionId } = req.body;
+            if (!missionId) {
+                res.status(400).send({ error: 'missionId is required' });
+            }
+            try {
+                console.log(`Agentset Pausing agents for mission ${missionId}`);
+                const agents = Array.from(this.agents.values()).filter(agent => agent.getMissionId() === missionId);
+                console.log(`Agentset Pausing ${agents.length} agents for mission ${missionId}`);
+                for (const agent of agents) {
+                    await agent.pause();
+                }
+                res.status(200).send({ message: `All ${agents.length} agents for mission ${missionId} paused` });
+            } catch (error) {
+                analyzeError(error as Error);
+                if (next) next(error); else res.status(500).send({error: "Error pausing agents"});
+            }
+        });
+
+        // Abort mission agents (mission-wide)
+        this.app.post('/abortAgents', this.abortMissionAgents.bind(this));
+
+        // Delegate a task to an agent
+        this.app.post('/delegateTask', async (req: express.Request, res: express.Response): Promise<void> => {
+            try {
+                const { delegatorId, recipientId, request } = req.body;
+                const response = await this.collaborationManager.getTaskDelegation().delegateTask(delegatorId, recipientId, request);
+                res.status(200).send(response);
+            } catch (error) {
+                analyzeError(error as Error);
+                if (!res.headersSent) {
+                    res.status(500).send({ error: error instanceof Error ? error.message : String(error) });
+                }
+            }
+        });
+
+        // Update task status
+       this.app.post('/taskUpdate', async (req: express.Request, res: express.Response): Promise<void> => {
+            try {
+                const { taskId, status, result, error } = req.body;
+                await this.collaborationManager.getTaskDelegation().updateTaskStatus(taskId, status, result, error);
+                res.status(200).send({ message: `Task ${taskId} updated` });
+            } catch (error) {
+                analyzeError(error as Error);
+                if (!res.headersSent) {
+                    res.status(500).send({ error: error instanceof Error ? error.message : String(error) });
+                }
+            }
+        });
+
+        // Submit a vote for a conflict
+       this.app.post('/conflictVote', async (req: express.Request, res: express.Response): Promise<void> => {
+            try {
+                const { conflictId, agentId, vote, explanation } = req.body;
+                await this.collaborationManager.getConflictResolution().submitVote(conflictId, agentId, vote, explanation);
+                res.status(200).send({ message: `Vote submitted for conflict ${conflictId}` });
+            } catch (error) {
+                analyzeError(error as Error);
+                if (!res.headersSent) {
+                    res.status(500).send({ error: error instanceof Error ? error.message : String(error) });
+                }
+            }
+        });
+
+        // Resolve a conflict
+       this.app.post('/resolveConflict', async (req: express.Request, res: express.Response): Promise<void> => {
+            try {
+                const { conflictId } = req.body;
+                await this.collaborationManager.getConflictResolution().resolveConflict(conflictId);
+                res.status(200).send({ message: `Conflict ${conflictId} resolved` });
+            } catch (error) {
+                analyzeError(error as Error);
+                if (!res.headersSent) {
+                    res.status(500).send({ error: error instanceof Error ? error.message : String(error) });
+                }
+            }
+        });
+
+        // Get conflicts involving an agent
+       this.app.get('/agent/:agentId/conflicts', (req: express.Request, res: express.Response): void => {
+            try {
+                const { agentId } = req.params;
+                const conflicts = this.collaborationManager.getConflictResolution().getConflictsInvolvingAgent(agentId);
+                res.status(200).send({ conflicts });
+            } catch (error) {
+                analyzeError(error as Error);
+                if (!res.headersSent) {
+                    res.status(500).send({ error: error instanceof Error ? error.message : String(error) });
+                }
+            }
+        });
+
+        // Get unresolved conflicts
+        this.app.get('/conflicts/unresolved', (req: express.Request, res: express.Response): void => {
+            try {
+                const conflicts = this.collaborationManager.getConflictResolution().getUnresolvedConflicts();
+                res.status(200).send({ conflicts });
+            } catch (error) {
+                analyzeError(error as Error);
+                if (!res.headersSent) {
+                    res.status(500).send({ error: error instanceof Error ? error.message : String(error) });
+                }
+            }
+        });
+
+        // ===== Agent Specialization Endpoints =====
+
+        // Assign a role to an agent
+       this.app.post('/agent/:agentId/role', async (req: express.Request, res: express.Response): Promise<void> => {
+            try {
+                const { agentId } = req.params;
+                const { roleId, customizations } = req.body;
+                const specialization = await this.specializationFramework.assignRole(agentId, roleId, customizations);
+                res.status(200).send({ specialization });
+            } catch (error) {
+                analyzeError(error as Error);
+                if (!res.headersSent) {
+                    res.status(500).send({ error: error instanceof Error ? error.message : String(error) });
+                }
+            }
+        });
+
+        // Get agent specialization
+       this.app.get('/agent/:agentId/specialization', (req: express.Request, res: express.Response): void => {
+            try {
+                const { agentId } = req.params;
+                const specialization = this.specializationFramework.getAgentSpecialization(agentId);
+                res.status(200).send({ specialization });
+            } catch (error) {
+                analyzeError(error as Error);
+                if (!res.headersSent) {
+                    res.status(500).send({ error: error instanceof Error ? error.message : String(error) });
+                }
+            }
+        });
+
+        // Get agents with a specific role
+       this.app.get('/role/:roleId/agents', (req: express.Request, res: express.Response): void => {
+            try {
+                const { roleId } = req.params;
+                const agents = this.specializationFramework.getAgentsWithRole(roleId);
+                res.status(200).send({ agents });
+            } catch (error) {
+                analyzeError(error as Error);
+                if (!res.headersSent) {
+                    res.status(500).send({ error: error instanceof Error ? error.message : String(error) });
+                }
+            }
+        });
+
+        // Get all roles
+       this.app.get('/roles', (_req, res): void => {
+            try {
+                const roles = this.specializationFramework.getAllRoles();
+                res.status(200).send({ roles });
+            } catch (error) {
+                analyzeError(error as Error);
+                if (!res.headersSent) {
+                    res.status(500).send({ error: error instanceof Error ? error.message : String(error) });
+                }
+            }
+        });
+
+        // Create a new role
+       this.app.post('/roles', (req: express.Request, res: express.Response): void => {
+            try {
+                const role = this.specializationFramework.createRole(req.body);
+                res.status(200).send({ role });
+            } catch (error) {
+                analyzeError(error as Error);
+                if (!res.headersSent) {
+                    res.status(500).send({ error: error instanceof Error ? error.message : String(error) });
+                }
+            }
+        });
+
+        // Find the best agent for a task
+       this.app.post('/findBestAgent', (req: express.Request, res: express.Response): void => {
+            try {
+                const { roleId, knowledgeDomains, missionId } = req.body;
+                const agentId = this.specializationFramework.findBestAgentForTask(roleId, knowledgeDomains, missionId);
+                res.status(200).send({ agentId });
+            } catch (error) {
+                analyzeError(error as Error);
+                if (!res.headersSent) {
+                    res.status(500).send({ error: error instanceof Error ? error.message : String(error) });
+                }
+            }
+        });
+
+        // Find an agent with a specific role
+       this.app.post('/findAgentWithRole', (req: express.Request, res: express.Response): void => {
+            try {
+                const { roleId, missionId } = req.body;
+                const agentId = this.specializationFramework.findBestAgentForTask(roleId, '', missionId);
+
+                if (agentId) {
+                    res.status(200).send({ agentId });
+                } else {
+                    // No agent with the role exists - return null to let current agent handle the task
+                    res.status(200).send({ agentId: null });
+                }
+            } catch (error) {
+                analyzeError(error as Error);
+                if (!res.headersSent) {
+                    res.status(500).send({ error: error instanceof Error ? error.message : String(error) });
+                }
+            }
+        });
+
+        // Generate a specialized system prompt for an agent
+       this.app.post('/agent/:agentId/prompt', async (req: express.Request, res: express.Response): Promise<void> => {
+            try {
+                const { agentId } = req.params;
+                const { taskDescription } = req.body;
+                const prompt = await this.specializationFramework.generateSpecializedPrompt(agentId, taskDescription);
+                res.status(200).send({ prompt });
+            } catch (error) {
+                analyzeError(error as Error);
+                if (!res.headersSent) {
+                    res.status(500).send({ error: error instanceof Error ? error.message : String(error) });
+                }
+            }
+        });
+
+        // Get all knowledge domains
+       this.app.get('/knowledgeDomains', (_req, res): void => {
+            try {
+                const domains = this.specializationFramework.getAllKnowledgeDomains();
+                res.status(200).send({ domains });
+            } catch (error) {
+                analyzeError(error as Error);
+                if (!res.headersSent) {
+                    res.status(500).send({ error: error instanceof Error ? error.message : String(error) });
+                }
+            }
+        });
+
+        // Create a knowledge domain
+       this.app.post('/knowledgeDomains', async (req: express.Request, res: express.Response): Promise<void> => {
+            try {
+                const domain = await this.specializationFramework.createKnowledgeDomain(req.body);
+                res.status(200).send({ domain });
+            } catch (error) {
+                analyzeError(error as Error);
+                if (!res.headersSent) {
+                    res.status(500).send({ error: error instanceof Error ? error.message : String(error) });
+                }
+            }
+        });
+
+        // Add a knowledge item
+       this.app.post('/knowledgeItems', async (req: express.Request, res: express.Response): Promise<void> => {
+            try {
+                const item = await this.domainKnowledge.addKnowledgeItem(req.body);
+                res.status(200).send({ item });
+            } catch (error) {
+                analyzeError(error as Error);
+                if (!res.headersSent) {
+                    res.status(500).send({ error: error instanceof Error ? error.message : String(error) });
+                }
+            }
+        });
+
+        // Query knowledge items
+       this.app.post('/knowledgeItems/query', (req: express.Request, res: express.Response): void => {
+            try {
+                const items = this.domainKnowledge.queryKnowledgeItems(req.body);
+                res.status(200).send({ items });
+            } catch (error) {
+                analyzeError(error as Error);
+                if (!res.headersSent) {
+                    res.status(500).send({ error: error instanceof Error ? error.message : String(error) });
+                }
+            }
+        });
+
+        // Generate domain-specific context for a task
+       this.app.post('/domainContext', async (req: express.Request, res: express.Response): Promise<void> => {
+            try {
+                const { domainIds, taskDescription } = req.body;
+                const context = await this.domainKnowledge.generateDomainContext(domainIds, taskDescription);
+                res.status(200).send({ context });
+            } catch (error) {
+                analyzeError(error as Error);
+                if (!res.headersSent) {
+                    res.status(500).send({ error: error instanceof Error ? error.message : String(error) });
+                }
+            }
+        });
+
+        // Import knowledge from external source
+       this.app.post('/importKnowledge', async (req: express.Request, res: express.Response): Promise<void> => {
+            try {
+                const { domainId, source, format } = req.body;
+                const items = await this.domainKnowledge.importKnowledge(domainId, source, format);
+                res.status(200).send({ items });
+            } catch (error) {
+                analyzeError(error as Error);
+                if (!res.headersSent) {
+                    res.status(500).send({ error: error instanceof Error ? error.message : String(error) });
+                }
+            }
+        });
+
+        // Handle collaboration messages from other agent sets
+       this.app.post('/collaboration/message', async (req: express.Request, res: express.Response): Promise<void> => {
+            try {
+                const message = req.body;
+                await this.collaborationManager.handleMessage(message);
+                res.status(200).send({ message: 'Collaboration message processed successfully' });
+            } catch (error) {
+                analyzeError(error as Error);
+                if (!res.headersSent) {
+                    res.status(500).send({ error: error instanceof Error ? error.message : String(error) });
+                }
+            }
+        });
+
+        // Resume mission agents
+       this.app.post('/resumeAgents', async (req: express.Request, res: express.Response): Promise<void> => {
+            const { missionId } = req.body;
+            if (!missionId) { // Added check
+                res.status(400).send({ error: 'missionId is required' });
+                return;
+            }
+            try {
+                console.log(`Agentset Resuming agents for mission ${missionId}`);
+                const agents = Array.from(this.agents.values()).filter(agent => agent.getMissionId() === missionId);
+                for (const agent of agents) {
+                    await agent.resume();
+                }
+                res.status(200).send({ message: 'All agents resumed' });
+            } catch (error) {
+                analyzeError(error as Error);
+                if (!res.headersSent) {
+                    res.status(500).send({ error: 'Error resuming agents' });
+                }
+            }
+        });
+
+       this.app.post('/resumeAgent', async (req: express.Request, res: express.Response): Promise<void> => {
+            const { agentId } = req.body;
+            if (!agentId) { // Added check
+                res.status(400).send({ error: 'agentId is required' });
+                return;
+            }
+            console.log(`Agentset Resuming agent ${agentId}`);
+            const agent = this.agents.get(agentId);
+            if (agent) {
+                try { // Added try-catch
+                    await agent.resume();
+                    res.status(200).send({ message: `Agent resumed` });
+                } catch (error) {
+                    analyzeError(error as Error);
+                    if (!res.headersSent) {
+                        res.status(500).send({ error: `Error resuming agent ${agentId}`});
+                    }
+                }
+            } else {
+                res.status(404).send({ error: 'Agent not found' });
+            }
+        });
+
+        // Abort individual agent
+       this.app.post('/abortAgent', async (req: express.Request, res: express.Response): Promise<void> => {
+            const { agentId } = req.body;
+             if (!agentId) { // Added check
+                res.status(400).send({ error: 'agentId is required' });
+                return;
+            }
+            console.log(`Agentset Aborting agent ${agentId}`);
+            const agent = this.agents.get(agentId);
+            if (agent) {
+                try { // Added try-catch
+                    await agent.abort();
+                    res.status(200).send({ message: `Agent aborted` });
+                } catch (error) {
+                    analyzeError(error as Error);
+                    if (!res.headersSent) {
+                        res.status(500).send({ error: `Error aborting agent ${agentId}`});
+                    }
+                }
+            } else {
+                res.status(404).send({ error: 'Agent not found' });
+            }
+        });
+
+       this.app.get('/statistics/:missionId', this.getAgentStatistics.bind(this));
+       this.app.post('/updateFromAgent', this.updateFromAgent.bind(this));
+
+       // Endpoint to get details for a specific step
+       this.app.get('/agent/step/:stepId', this.getStepDetailsHandler.bind(this));
+
+       this.app.post('/saveAgent', async (req: express.Request, res: express.Response) => {
             const { agentId } = req.body;
             try {
                 const agent = this.agents.get(agentId);
@@ -114,7 +533,7 @@ export class AgentSet extends BaseEntity {
                     res.status(404).send({ error: 'Agent not found' });
                     return;
                 }
-                await this.persistenceManager.saveAgent(agent);
+                await agent.saveAgentState();
                 res.status(200).send({ message: 'Agent saved successfully', agentId: agent.id });
             } catch (error) { analyzeError(error as Error);
                 console.error('Error saving agent:', error instanceof Error ? error.message : error);
@@ -122,49 +541,228 @@ export class AgentSet extends BaseEntity {
             }
         });
 
-        app.listen(this.port, () => {
+        this.app.listen(this.port, () => {
             console.log(`AgentSet application running on ${this.url}`);
         });
 
     }
 
-    private async addAgent(req: express.Request, res: express.Response) {
-        const { agentId, actionVerb, inputs, missionId, missionContext } = MapSerializer.transformFromSerialization(req.body);
-        let inputsMap: Map<string, PluginInput>;
-        
-        if (inputs instanceof Map) {
-            inputsMap = inputs;
+    private async removeAgentFromSet(agentId: string, status: string): Promise<void> {
+        console.log(`Attempting to remove agent ${agentId} with status ${status} from AgentSet.`);
+        const agent = this.agents.get(agentId);
+
+        if (agent) {
+            // this.agents.delete(agentId);
+            //console.log(`Agent ${agentId} removed from AgentSet and unregistered from LifecycleManager due to status: ${status}. Current agent count: ${this.agents.size}`);
+
+            // Potentially notify TrafficManager to update its counts, if AgentSet is authoritative for agent existence.
+            // For now, TrafficManager counts will be stale until it tries to interact with a removed agent or a separate cleanup for TM is implemented.
+
         } else {
-            inputsMap = new Map();
-            for (const [key, value] of Object.entries(inputs)) {
-                if (typeof value === 'object' && value !== null && 'inputValue' in value) {
-                    inputsMap.set(key, value as PluginInput);
-                } else {
-                    inputsMap.set(key, {
-                        inputName: key,
-                        inputValue: value,
-                        args: { [key]: value }
-                    });
+            console.warn(`Agent ${agentId} not found in AgentSet during removal attempt. Status was: ${status}.`);
+        }
+    }
+
+    private async abortMissionAgents(req: express.Request, res: express.Response): Promise<void> {
+        const { missionId } = req.body;
+
+        if (!missionId) {
+            res.status(400).send({ error: 'missionId is required to abort agents.' });
+            return;
+        }
+
+        console.log(`AgentSet: Received request to abort all agents for mission ${missionId}.`);
+        let abortedCount = 0;
+        const promises: Promise<void>[] = [];
+
+        try {
+            for (const agent of this.agents.values()) {
+                if (agent.getMissionId() === missionId) {
+                    console.log(`AgentSet: Aborting agent ${agent.id} for mission ${missionId}.`);
+                    promises.push(agent.abort()); // agent.abort() is async and will notify for removal
+                    abortedCount++;
+                }
+            }
+
+            await Promise.allSettled(promises); // Wait for all abort operations to settle
+
+            console.log(`AgentSet: ${abortedCount} agents targeted for abort for mission ${missionId}. Agent-initiated removal will follow.`);
+            res.status(200).send({ message: `${abortedCount} agents for mission ${missionId} have been signaled to abort.` });
+
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error(`AgentSet: Error during mission-wide abort for ${missionId}:`, error instanceof Error ? error.message : String(error));
+            if (!res.headersSent) {
+                res.status(500).send({ error: `Failed to abort agents for mission ${missionId}.` });
+            }
+        }
+    }
+
+    private async addAgent(req: express.Request, res: express.Response): Promise<void> {
+        const { agentId, actionVerb, inputs, missionId, missionContext, roleId, roleCustomizations } = req.body;
+        console.log('Adding agent with req.body', req.body);
+        console.log('Adding agent with inputs', inputs);
+        let inputsMap: Map<string, InputValue>;
+
+        if (inputs?._type === 'Map') {
+            inputsMap = MapSerializer.transformFromSerialization(inputs);
+        } else {
+            if (inputs instanceof Map) {
+                inputsMap = inputs;
+            } else if (inputs === undefined || inputs === null) {
+                inputsMap = new Map();
+            } else {
+                inputsMap = new Map();
+                for (const [key, value] of Object.entries(inputs)) {
+                    if (typeof value === 'object' && value !== null && 'value' in value) {
+                        inputsMap.set(key, value as InputValue);
+                    } else {
+                        inputsMap.set(key, {
+                            inputName: key,
+                            value: value,
+                            valueType: PluginParameterType.ANY,
+                            args: { [key]: value }
+                        });
+                    }
                 }
             }
         }
-        console.log(`addAgent inputs:`, inputsMap);
-        const agentConfig = { 
-            actionVerb, 
-            inputs: inputsMap, 
-            missionId, 
+        console.log(`addAgent provided inputs:`, inputs);
+        console.log(`addAgent inputsMap:`, inputsMap);
+        const agentConfig = {
+            actionVerb,
+            inputValues: inputsMap,
+            missionId,
             missionContext,
-            id: agentId, 
+            id: agentId,
             postOfficeUrl: this.postOfficeUrl,
-            agentSetUrl: this.url
+            agentSetUrl: this.url,
+            role: roleId
         };
         const newAgent = new Agent(agentConfig);
         this.agents.set(newAgent.id, newAgent);
 
+        // Set up automatic checkpointing
+        newAgent.setupCheckpointing(15); // Checkpoint every 15 minutes
+
+        // Assign default role based on action verb if no role is specified
+        if (!roleId) {
+            const defaultRoleId = this.determineDefaultRole(actionVerb);
+            if (defaultRoleId) {
+                try {
+                    await this.specializationFramework.assignRole(newAgent.id, defaultRoleId);
+                    console.log(`Assigned default role ${defaultRoleId} to agent ${newAgent.id}`);
+                } catch (error) {
+                    console.error(`Error assigning default role to agent ${newAgent.id}:`, error);
+                }
+            }
+        } else {
+            // Assign specified role
+            try {
+                await this.specializationFramework.assignRole(newAgent.id, roleId, roleCustomizations);
+                console.log(`Assigned role ${roleId} to agent ${newAgent.id}`);
+            } catch (error) {
+                console.error(`Error assigning role to agent ${newAgent.id}:`, error);
+            }
+        }
+
         res.status(200).send({ message: 'Agent added', agentId: newAgent.id });
     }
 
-    private async handleAgentMessage(req: express.Request, res: express.Response) {
+    // Add a new agent with a configuration object
+    private async addAgentWithConfig(config: any): Promise<string> { // Not a route handler, signature is fine
+        try {
+            const { agentId, actionVerb, inputs, missionId, missionContext, roleId, roleCustomizations } = config;
+
+            if (!agentId || !actionVerb) {
+                throw new Error('Missing required parameters');
+            }
+
+            if (this.agents.size >= this.maxAgents) {
+                throw new Error('Maximum number of agents reached');
+            }
+
+            if (this.agents.has(agentId)) {
+                throw new Error('Agent with this ID already exists');
+            }
+
+            let inputsMap: Map<string, InputValue>;
+
+            if (inputs?._type === 'Map') {
+                inputsMap = MapSerializer.transformFromSerialization(inputs);
+            } else {
+                if (inputs instanceof Map) {
+                    inputsMap = inputs;
+                } else if (inputs === undefined || inputs === null) {
+                    inputsMap = new Map();
+                } else {
+                    inputsMap = new Map();
+                    for (const [key, value] of Object.entries(inputs)) {
+                        if (typeof value === 'object' && value !== null && 'value' in value) {
+                            inputsMap.set(key, value as InputValue);
+                        } else {
+                            inputsMap.set(key, {
+                                inputName: key,
+                                value: value,
+                                valueType: PluginParameterType.ANY,
+                                args: { [key]: value }
+                            });
+                        }
+                    }
+                }
+            }
+
+            // Create a new agent
+            const agentConfig = {
+                actionVerb,
+                inputValues: inputsMap,
+                missionId,
+                missionContext,
+                id: agentId,
+                postOfficeUrl: this.postOfficeUrl,
+                agentSetUrl: this.url,
+                role: roleId
+            };
+
+            const newAgent = new Agent(agentConfig);
+            this.agents.set(newAgent.id, newAgent);
+
+            // Set up automatic checkpointing
+            newAgent.setupCheckpointing(15); // Checkpoint every 15 minutes
+
+            // If a role is specified, assign it to the agent
+            if (roleId) {
+                try {
+                    await this.specializationFramework.assignRole(agentId, roleId, roleCustomizations);
+                    console.log(`Assigned role ${roleId} to agent ${agentId}`);
+                } catch (error) {
+                    console.error(`Failed to assign role ${roleId} to agent ${agentId}:`, error);
+                    // Continue anyway, don't fail the agent creation
+                }
+            } else {
+                // Assign default role based on action verb
+                const defaultRoleId = this.determineDefaultRole(actionVerb);
+                if (defaultRoleId) {
+                    try {
+                        await this.specializationFramework.assignRole(newAgent.id, defaultRoleId);
+                        console.log(`Assigned default role ${defaultRoleId} to agent ${newAgent.id}`);
+                    } catch (error) {
+                        console.error(`Error assigning default role to agent ${newAgent.id}:`, error);
+                    }
+                }
+            }
+
+            // Start the agent
+            newAgent.start();
+
+            return agentId;
+        } catch (error) {
+            analyzeError(error as Error);
+            throw error;
+        }
+    }
+
+    private async handleAgentMessage(req: express.Request, res: express.Response): Promise<void> {
         const { agentId } = req.params;
         const message = req.body;
         const agent = this.agents.get(agentId);
@@ -174,15 +772,40 @@ export class AgentSet extends BaseEntity {
                 await agent.handleMessage(message);
                 res.status(200).send({ status: 'Message delivered to agent' });
             } catch (error) { analyzeError(error as Error);
-                console.error(`Error delivering message to agent ${agentId}:`, error instanceof Error ? error.message : error);
-                res.status(500).send({ error: 'Failed to deliver message to agent' });
+                console.error('Error delivering message to agent %s:', agentId, error instanceof Error ? error.message : error);
+                if (!res.headersSent) {
+                    res.status(500).send({ error: 'Failed to deliver message to agent' });
+                }
             }
         } else {
-            res.status(404).send({ error: 'Agent not found' });
+            if (!res.headersSent) {
+                res.status(404).send({ error: 'Agent not found' });
+            }
         }
     }
 
-    private async getAgentOutput(req: express.Request, res: express.Response) {
+    private async getAgent(req: express.Request, res: express.Response): Promise<void> {
+        const { agentId } = req.params;
+        const agent = this.agents.get(agentId);
+
+        if (!agent) {
+            res.status(404).send({ error: `Agent with id ${agentId} not found` });
+            return;
+        }
+        else {
+            try {
+                const agentState = await agent.getAgentState();
+                res.status(200).send(agentState);
+            } catch (error) { analyzeError(error as Error);
+                console.error('Error fetching agent state for agent %s:', agentId, error instanceof Error ? error.message : error);
+                if (!res.headersSent) {
+                    res.status(500).send({ error: `Failed to fetch agent state for agent ${agentId}` });
+                }
+            }
+        }
+    }
+
+    private async getAgentOutput(req: express.Request, res: express.Response): Promise<void> {
         const { agentId } = req.params;
         const agent = this.agents.get(agentId);
 
@@ -191,86 +814,274 @@ export class AgentSet extends BaseEntity {
                 const output = await agent.getOutput();
                 res.status(200).send(output);
             } catch (error) { analyzeError(error as Error);
-                console.error(`Error fetching output for agent ${agentId}:`, error instanceof Error ? error.message : error);
-                res.status(500).send({ error: 'Failed to fetch agent output' });
+                console.error('Error fetching output for agent %s:', agentId, error instanceof Error ? error.message : error);
+                if (!res.headersSent) {
+                    res.status(500).send({ error: 'Failed to fetch agent output' });
+                }
             }
         } else {
-            res.status(404).send({ error: 'Agent not found' });
+            if (!res.headersSent) {
+                res.status(404).send({ error: 'Agent not found' });
+            }
         }
     }
 
-    private async handleMessage(req: express.Request, res: express.Response) {
+    private async handleMessage(req: express.Request, res: express.Response): Promise<void> {
         const message = req.body;
         await super.handleBaseMessage(message);
 
         if (message.forAgent) {
           const agentId = message.forAgent;
           const agent = this.agents.get(agentId);
-    
+
           if (agent) {
             try {
-              await agent.handleMessage(message);
-              res.status(200).send({ status: 'Message delivered to agent' });
+                await agent.handleMessage(message);
+                res.status(200).send({ status: 'Message delivered to agent' });
             } catch (error) { analyzeError(error as Error);
-              console.error(`Error delivering message to agent ${agentId}:`, error instanceof Error ? error.message : error);
-              res.status(500).send({ error: 'Failed to deliver message to agent' });
+                console.error('Error delivering message to agent %s:', agentId, error instanceof Error ? error.message : error);
+                if (!res.headersSent) {
+                    res.status(500).send({ error: 'Failed to deliver message to agent' });
+                }
             }
           } else {
-            res.status(404).send({ error: `Agent ${agentId} not found in this AgentSet` });
+            if (!res.headersSent) {
+                res.status(404).send({ error: `Agent ${agentId} not found in this AgentSet` });
+            }
           }
         } else {
-            const { missionId } = req.body.content.missionId;
-            const agents = Array.from(this.agents.values()).filter(agent => agent.getMissionId() === missionId);
-            for (const agent of agents) {
-                await agent.handleMessage(message);
+            // This branch previously had an issue: req.body.content.missionId;
+            // Assuming this was meant to be message.content.missionId or similar structure from typical messages.
+            // For safety, adding a check.
+            let missionId;
+            if (message.content && message.content.missionId) {
+                missionId = message.content.missionId;
+            } else if (message.missionId) { // Fallback if missionId is top-level in message
+                missionId = message.missionId;
+            }
+
+            if (missionId) {
+                const agents = Array.from(this.agents.values()).filter(agent => agent.getMissionId() === missionId);
+                for (const agent of agents) {
+                    // This part is tricky, if multiple agents, can't send multiple res.send
+                    // This looks like it should be a message distribution, not an HTTP response per agent.
+                    // Assuming the original intent was to process for all, and then send one response.
+                    await agent.handleMessage(message);
+                }
             }
 
           // Handle messages for the AgentSet itself
-          console.log('Processing message in AgentSet');
-          res.status(200).send({ status: 'Message received and processed by AgentSet' });
+          console.log('Processing message in AgentSet (broadcast or general)');
+          if (!res.headersSent) {
+            res.status(200).send({ status: 'Message received and processed by AgentSet for relevant agents or self' });
+          }
         }
     }
 
-    private async getAgentStatistics(req: express.Request, res: express.Response) {
+    private async getAgentStatistics(req: express.Request, res: express.Response): Promise<void> {
         const { missionId } = req.params;
         if (!missionId) {
             console.log(`AgentSet:Missing missionId parameter`);
-            return res.status(400).send('Missing missionId parameter');
+            res.status(400).send('Missing missionId parameter');
+            return;
         }
-    
+
         let stats  : AgentSetStatistics = {
             agentsByStatus: new Map(),
-            agentsCount: 0
+            agentsCount: 0,
+            agentValuesCount: this.agents.size
         };
 
-        for (const agent of this.agents.values()) {
-            if (agent.getMissionId() === missionId) {
-                const status = agent.getStatus();
-                const agentStats = await agent.getStatistics();
-                if (!stats.agentsByStatus.has(status)) {
-                    // If the status doesn't exist in the Map, create a new array with this agent's stats
-                    stats.agentsByStatus.set(status, [agentStats]);
-                } else {
-                    // If the status already exists, append this agent's stats to the existing array
-                    stats.agentsByStatus.get(status)!.push(agentStats);
+        try {
+            // Build a global step map for all agents in this mission
+            const globalStepMap: Map<string, { agentId: string, step: any }> = new Map();
+            for (const agent of this.agents.values()) {
+                if (agent.getMissionId() === missionId) {
+                    for (const step of agent.steps) {
+                        globalStepMap.set(step.id, { agentId: agent.id, step });
+                    }
                 }
-                stats.agentsCount++;
+            }
+            const allStepsForMission = Array.from(globalStepMap.values()).map(entry => entry.step);
+            for (const agent of this.agents.values()) {
+                if (agent.getMissionId() === missionId) {
+                    const status = agent.getStatus();
+                    // Pass the globalStepMap to getStatistics
+                    const agentStats = await agent.getStatistics(globalStepMap, allStepsForMission);
+                    if (!stats.agentsByStatus.has(status)) {
+                        stats.agentsByStatus.set(status, [agentStats]);
+                    } else {
+                        stats.agentsByStatus.get(status)!.push(agentStats);
+                    }
+                    stats.agentsCount++;
+                }
+            }
+            const serializedStats = {
+                agentsByStatus: MapSerializer.transformForSerialization(stats.agentsByStatus),
+                agentsCount: stats.agentsCount,
+                agentValuesCount: stats.agentValuesCount
+            };
+            res.status(200).send(serializedStats);
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error(`Error in getAgentStatistics for mission ${missionId}:`, error);
+            if (!res.headersSent) {
+                res.status(500).send({ error: `Failed to get statistics for mission ${missionId}` });
             }
         }
-        const serializedStats = MapSerializer.transformForSerialization(stats);
-        res.status(200).json(serializedStats);
-        }
+    }
 
-        private updateFromAgent(req: express.Request, res: express.Response) {
-            const { agentId, status } = req.body;
+        private async updateFromAgent(req: express.Request, res: express.Response): Promise<void> {
+            const { agentId, status, statistics } = req.body;
+            console.log(`AgentSet received update from agent ${agentId} with status ${status}`);
+
             const agent = this.agents.get(agentId);
             if (agent) {
-                this.persistenceManager.saveAgent(agent);
-                res.status(200).send({ message: 'Agent updated' });
+                try {
+                    await agent.saveAgentState();
+                    if (statistics) {
+                        await this.authenticatedApi.post(`http://${this.trafficManagerUrl}/agentStatisticsUpdate`, {
+                            agentId,
+                            status,
+                            statistics,
+                            timestamp: new Date().toISOString()
+                        });
+                    }
+                    res.status(200).send({ message: 'Agent updated' });
+                } catch (error) {
+                    analyzeError(error as Error);
+                    console.error(`Error in updateFromAgent for agent ${agentId}:`, error);
+                    if (!res.headersSent) {
+                        res.status(500).send({ error: `Failed to update agent ${agentId}` });
+                    }
+                }
             } else {
-                res.status(201).send({ error: 'Agent not found' });
+                console.warn(`Agent ${agentId} not found in this AgentSet`);
+                if (!res.headersSent) {
+                    res.status(404).send({ error: 'Agent not found' });
+                }
             }
         }
+
+    private async getStepDetailsHandler(req: express.Request, res: express.Response): Promise<void> {
+        const { stepId } = req.params;
+        if (!stepId) {
+            res.status(400).send({ error: 'stepId is required' });
+            return;
+        }
+
+        try {
+            const stepDetails = await this.getStepDetails(stepId);
+            if (!stepDetails) {
+                res.status(404).send({ error: `Step with id ${stepId} not found` });
+                return;
+            }
+            res.status(200).send(stepDetails);
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error(`Error fetching step details for step ${stepId}:`, error instanceof Error ? error.message : String(error));
+            if (!res.headersSent) {
+                res.status(500).send({ error: `Failed to fetch step details for step ${stepId}` });
+            }
+        }
+    }
+
+    private async getStepDetails(stepId: string): Promise<any | null> {
+        for (const agent of this.agents.values()) {
+            const step = agent.steps.find(s => s.id === stepId);
+            if (step) {
+                // Assuming the 'step' object already contains all necessary details
+                // If not, you might need to fetch additional info from the agent or step object
+                return {
+                    verb: step.actionVerb,
+                    description: step.description,
+                    status: step.status,
+                    dependencies: step.dependencies,
+                    inputReferences: MapSerializer.transformForSerialization(step.inputReferences),
+                    inputValues: MapSerializer.transformForSerialization(step.inputValues),
+                    results: step.result, 
+                    agentId: agent.id, // Optionally include agentId for context
+                };
+            }
+        }
+        return null; // Step not found
+    }
+
+    /**
+     * Forward a collaboration message to remote agent sets or external systems.
+     * This is called by CollaborationManager when a message is not for a local agent.
+     */
+    async forwardCollaborationMessage(message: any): Promise<void> {
+        // TODO: Implement actual remote forwarding logic (e.g., via HTTP, MQ, etc.)
+        console.log('Forwarding collaboration message remotely:', message);
+    }
+
+    /**
+     * Determine default role based on action verb
+     * @param actionVerb Action verb
+     * @returns Role ID or undefined if no matching role
+     */
+    private determineDefaultRole(actionVerb: string): string | undefined {
+        // Map common action verbs to roles
+        const actionVerbToRoleMap: Record<string, string> = {
+            'research': 'researcher',
+            'analyze': 'researcher',
+            'investigate': 'researcher',
+            'search': 'researcher',
+            'find': 'researcher',
+
+            'code' : 'coder',
+            
+            'create': 'creative',
+            'generate': 'creative',
+            'design': 'creative',
+            'write': 'creative',
+            'compose': 'creative',
+
+            'evaluate': 'critic',
+            'review': 'critic',
+            'assess': 'critic',
+            'critique': 'critic',
+            'judge': 'critic',
+
+            'execute': 'executor',
+            'implement': 'executor',
+            'perform': 'executor',
+            'run': 'executor',
+            'do': 'executor',
+            'accomplish': 'executor',
+
+            'coordinate': 'coordinator',
+            'manage': 'coordinator',
+            'organize': 'coordinator',
+            'plan': 'coordinator',
+            'direct': 'coordinator',
+
+            'advise': 'domain_expert',
+            'consult': 'domain_expert',
+            'explain': 'domain_expert',
+            'teach': 'domain_expert',
+            'guide': 'domain_expert'
+        };
+
+        // Convert action verb to lowercase and remove any non-alphanumeric characters
+        const normalizedVerb = actionVerb ? actionVerb.toLowerCase().replace(/[^a-z0-9]/g, '') : 'accomplish';
+
+        // Check for exact match
+        if (actionVerbToRoleMap[normalizedVerb]) {
+            return actionVerbToRoleMap[normalizedVerb];
+        }
+
+        // Check for partial match
+        for (const [verb, role] of Object.entries(actionVerbToRoleMap)) {
+            if (normalizedVerb.includes(verb) || verb.includes(normalizedVerb)) {
+                return role;
+            }
+        }
+
+        // Default to executor if no match found
+        return 'executor';
+    }
 }
 
 new AgentSet(); // Start the AgentSet application

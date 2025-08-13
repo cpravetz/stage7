@@ -1,0 +1,72 @@
+{
+  "id": "plugin-CODE_EXECUTOR",
+  "verb": "RUN_CODE",
+  "description": "Executes code snippets in a sandboxed environment.",
+  "explanation": "This plugin takes a code snippet and a language, and executes it in a secure, isolated Docker container. It returns the standard output, standard error, and exit code.",
+  "inputDefinitions": [
+    {
+      "name": "language",
+      "required": true,
+      "type": "string",
+      "description": "The programming language of the code snippet. Supported: 'python', 'javascript'."
+    },
+    {
+      "name": "code",
+      "required": true,
+      "type": "string",
+      "description": "The code snippet to execute."
+    }
+  ],
+  "outputDefinitions": [
+    {
+      "name": "stdout",
+      "required": true,
+      "type": "string",
+      "description": "The standard output from the code execution."
+    },
+    {
+      "name": "stderr",
+      "required": true,
+      "type": "string",
+      "description": "The standard error from the code execution."
+    },
+    {
+      "name": "exit_code",
+      "required": true,
+      "type": "number",
+      "description": "The exit code of the execution process."
+    }
+  ],
+  "inputGuidance": "IMPORTANT: Use 'code' for code to execute and 'language' for programming language",
+  "language": "python",
+  "entryPoint": {
+    "main": "main.py",
+    "function": "execute_plugin"
+  },
+  "repository": {
+    "type": "local"
+  },
+  "security": {
+    "permissions": [
+      "docker.run"
+    ],
+    "sandboxOptions": {
+      "allowEval": false,
+      "timeout": 60000,
+      "memory": 268435456,
+      "allowedModules": [
+        "json",
+        "sys",
+        "os",
+        "docker"
+      ]
+    }
+  },
+  "version": "1.0.0",
+  "metadata": {
+    "author": "Stage7 Development Team",
+    "tags": ["code", "execution", "sandbox", "python", "javascript"],
+    "category": "utility",
+    "license": "MIT"
+  }
+}

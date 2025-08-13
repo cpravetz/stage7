@@ -1,7 +1,7 @@
 import { CapabilitiesManager } from '../src/CapabilitiesManager';
 import axios from 'axios';
 import express from 'express';
-import { MapSerializer, PluginInput, PluginParameterType } from '@cktmcs/shared';
+import { MapSerializer, InputValue,PluginParameterType } from '@cktmcs/shared';
 
 jest.mock('axios');
 jest.mock('express');
@@ -54,7 +54,7 @@ describe('CapabilitiesManager', () => {
         body: MapSerializer.transformForSerialization({
           step: {
             actionVerb: 'TEST_VERB',
-            inputs: new Map<string, PluginInput>(),
+            inputs: new Map<string, InputValue>(),
           },
         }),
       } as express.Request;
@@ -92,7 +92,7 @@ describe('CapabilitiesManager', () => {
         body: MapSerializer.transformForSerialization({
           step: {
             actionVerb: 'UNKNOWN_VERB',
-            inputs: new Map<string, PluginInput>(),
+            inputs: new Map<string, InputValue>(),
           },
         }),
       } as express.Request;
@@ -124,7 +124,7 @@ describe('CapabilitiesManager', () => {
     it('should attempt to create a new plugin for unknown verbs', async () => {
       const mockStep = {
         actionVerb: 'NEW_VERB',
-        inputs: new Map<string, PluginInput>(),
+        inputValues: new Map<string, InputValue>(),
       };
 
       jest.spyOn(capabilitiesManager as any, 'requestEngineerForPlugin').mockResolvedValue({

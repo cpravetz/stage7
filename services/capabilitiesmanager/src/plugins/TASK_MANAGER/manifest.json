@@ -1,0 +1,118 @@
+{
+  "id": "plugin-TASK_MANAGER",
+  "verb": "TASK_MANAGER",
+  "description": "A plugin for self-planning, creating, and managing tasks and subtasks.",
+  "explanation": "This plugin allows an agent to break down a large goal into a series of smaller, manageable steps and track their status.",
+  "inputGuidance": "Inputs for this plugin must include 'goal'.",
+  "inputDefinitions": [
+    {
+      "name": "goal",
+      "required": true,
+      "type": "string",
+      "description": "The goal or description for the task to be created or managed"
+    },
+    {
+      "name": "command",
+      "required": false,
+      "type": "string",
+      "description": "The command to execute: create_task, create_subtask, update_task_status, get_task_list"
+    },
+    {
+      "name": "parent_task_id",
+      "required": false,
+      "type": "string",
+      "description": "The ID of the parent task when creating subtasks"
+    },
+    {
+      "name": "task_id",
+      "required": false,
+      "type": "string",
+      "description": "The ID of the task to update when changing status"
+    },
+    {
+      "name": "status",
+      "required": false,
+      "type": "string",
+      "description": "The new status for the task: pending, in_progress, completed, failed"
+    }
+  ],
+  "outputDefinitions": [
+    {
+      "name": "task_created",
+      "required": false,
+      "type": "object",
+      "description": "Result of task creation with task_id"
+    },
+    {
+      "name": "subtask_created",
+      "required": false,
+      "type": "object",
+      "description": "Result of subtask creation with subtask_id"
+    },
+    {
+      "name": "status_updated",
+      "required": false,
+      "type": "object",
+      "description": "Confirmation of status update"
+    },
+    {
+      "name": "task_list",
+      "required": false,
+      "type": "object",
+      "description": "Complete list of tasks and subtasks"
+    }
+  ],
+  "language": "python",
+  "entryPoint": {
+    "main": "main.py",
+    "packageSource": {
+      "type": "local",
+      "path": "./",
+      "requirements": "requirements.txt"
+    }
+  },
+  "security": {
+    "permissions": [
+      "librarian.read",
+      "librarian.write",
+      "net.fetch"
+    ],
+    "sandboxOptions": {
+      "allowEval": false,
+      "timeout": 30000,
+      "memory": 67108864,
+      "allowedModules": [
+        "json",
+        "sys",
+        "os",
+        "typing",
+        "requests",
+        "uuid",
+        "time",
+        "random",
+        "string"
+      ],
+      "allowedAPIs": [
+        "print"
+      ]
+    },
+    "trust": {
+      "publisher": "stage7-core",
+      "signature": null
+    }
+  },
+  "version": "1.0.0",
+  "metadata": {
+    "author": "Stage7 Development Team",
+    "tags": [
+      "task",
+      "planning",
+      "management",
+      "subtask"
+    ],
+    "category": "agent",
+    "license": "MIT"
+  },
+  "createdAt": "2024-12-01T00:00:00Z",
+  "updatedAt": "2025-07-20T00:00:00Z"
+}

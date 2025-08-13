@@ -5,5 +5,7 @@ export enum AgentStatus {
     COMPLETED = 'completed',
     ABORTED = 'aborted',
     ERROR = 'error',
-    PENDING = "pending"
+    PENDING = "pending",
+    PLANNING = "planning",
+    UNKNOWN = 'unknown' // Added this line
 }
