@@ -1,23 +1,8 @@
 import { v4 as uuidv4 } from 'uuid';
-import { PluginParameterType,
-    PluginOutput,
-    InputReference,
-    InputValue,
-    StepDependency,
-    ActionVerbTask,
-    ExecutionContext as PlanExecutionContext,
-    PlanTemplate,
-    OutputType,
-    PredefinedRoles } from '@cktmcs/shared'; // Added ActionVerbTask and OutputType
+import { PluginParameterType, PluginOutput, InputReference, InputValue, StepDependency, ActionVerbTask, ExecutionContext as PlanExecutionContext, PlanTemplate, OutputType, PredefinedRoles } from '@cktmcs/shared'; // Added ActionVerbTask and OutputType
 import { MapSerializer } from '@cktmcs/shared';
 import { MessageType } from '@cktmcs/shared'; // Ensured MessageType is here, assuming it's separate or also from shared index
 import { AgentPersistenceManager } from '../utils/AgentPersistenceManager';
-
-// Plugin validation removed - the system is designed to handle unknown actionVerbs dynamically
-// through the CapabilitiesManager's fallback to ACCOMPLISH plugin
-
-
-
 
 export enum StepStatus {
     PENDING = 'pending',
@@ -154,8 +139,8 @@ export class Step {
             if (sourceStep?.result) {
                 const outputValue = sourceStep.result.find(r => r.name === dep.outputName)?.result;
                 if (outputValue !== undefined) {
-                    this.inputValues.set(dep.outputName, {
-                        inputName: dep.outputName,
+                    this.inputValues.set(dep.inputName, {
+                        inputName: dep.inputName,
                         value: outputValue,
                         valueType: PluginParameterType.STRING, // Assuming STRING, adjust as necessary
                         args: {}
@@ -436,7 +421,7 @@ export class Step {
 
         const stepsToExecute = result ? trueSteps : falseSteps;
         if (stepsToExecute) {
-            const newSteps = createFromPlan(stepsToExecute, this.stepNo + 1, this.persistenceManager);
+            const newSteps = createFromPlan(stepsToExecute, this.stepNo + 1, this.persistenceManager, this);
             // Add these steps to the agent's step queue
             return [{
                 success: true,
@@ -455,7 +440,7 @@ export class Step {
         const newSteps: Step[] = [];
 
         for (let i = 0; i < count; i++) {
-            const iterationSteps = createFromPlan(steps, this.stepNo + 1 + (i * steps.length), this.persistenceManager);
+            const iterationSteps = createFromPlan(steps, this.stepNo + 1 + (i * steps.length), this.persistenceManager, this);
             newSteps.push(...iterationSteps);
         }
 
@@ -471,7 +456,7 @@ export class Step {
     private async handleTimeout(): Promise<PluginOutput[]> {
         const timeoutMs = this.inputValues.get('timeout')?.value as number;
         const steps = this.inputValues.get('steps')?.value as ActionVerbTask[];
-        const newSteps = createFromPlan(steps, this.stepNo + 1, this.persistenceManager);
+        const newSteps = createFromPlan(steps, this.stepNo + 1, this.persistenceManager, this);
 
         newSteps.forEach(step => {
             step.timeout = timeoutMs;
@@ -527,7 +512,7 @@ export class Step {
         newSteps.push(checkStep);
 
         // Create steps for first potential iteration
-        const iterationSteps = createFromPlan(steps, this.stepNo + 2, this.persistenceManager);
+        const iterationSteps = createFromPlan(steps, this.stepNo + 2, this.persistenceManager, this);
 
         // Add dependency on condition check for all first iteration steps
         iterationSteps.forEach(step => {
@@ -590,7 +575,7 @@ export class Step {
         const newSteps: Step[] = [];
 
         // Create first iteration steps (UNTIL executes at least once)
-        const iterationSteps = createFromPlan(steps, this.stepNo + 1, this.persistenceManager);
+        const iterationSteps = createFromPlan(steps, this.stepNo + 1, this.persistenceManager, this);
         newSteps.push(...iterationSteps);
 
         // Add condition check step after first iteration
@@ -865,153 +850,109 @@ export class Step {
     export function createFromPlan(
         plan: ActionVerbTask[],
         startingStepNo: number,
-        persistenceManager: AgentPersistenceManager
+        persistenceManager: AgentPersistenceManager,
+        parentStep?: Step
     ): Step[] {
-        // Extend ActionVerbTask locally to include number and outputs for conversion
-        type PlanTask = ActionVerbTask & { number?: number; outputs?: Record<string, any>; id?: string; };
-        const planTasks = plan as PlanTask[];
-        const stepNumberToUUID: Record<number, string> = {};
-        const outputNameToUUID: Record<string, string> = {};
-        // Also map 'step_1', 'step_2', ... to UUIDs for compatibility
-        const stepLabelToUUID: Record<string, string> = {};
-        planTasks.forEach((task, idx) => {
-            const uuid = uuidv4();
-            task.id = uuid;
-            const stepNum = task.number || idx + 1;
-            stepNumberToUUID[stepNum] = uuid;
-            stepLabelToUUID[`step_${stepNum}`] = uuid;
-        });
-        // First pass: register outputs and ASK_USER_QUESTION steps
-        planTasks.forEach((task, idx) => {
-            const stepUUID = task.id!;
-            // Register outputs
-            if (task.outputs) {
-                Object.keys(task.outputs).forEach(outputName => {
-                    outputNameToUUID[outputName] = stepUUID;
-                });
-            }
-            // Register outputs (for LLM plans that use this key)
-            if ((task as any).outputs) {
-                Object.keys((task as any).outputs).forEach(outputName => {
-                    outputNameToUUID[outputName] = stepUUID;
-                });
-            }
-        });
-        // Second pass: create steps and resolve dependencies
-        return planTasks.map((task, idx) => {
-            const inputReferences = new Map<string, InputReference>();
+    // Extend ActionVerbTask locally to include number and outputs for conversion
+    type PlanTask = ActionVerbTask & { number?: number; outputs?: Record<string, any>; id?: string; };
+    const planTasks = plan as PlanTask[];
+    const stepNumberToUUID: Record<number, string> = {};
 
-            // Handle both 'inputs' (from ACCOMPLISH plugin) and 'inputReferences' (from other sources)
-            const inputSource = (task as any).inputs || task.inputReferences;
-            if (inputSource) {
-                for (const [inputName, inputDef] of Object.entries(inputSource as Record<string, any>)) {
-                    if (typeof inputDef !== 'object' || inputDef === null) {
-                        console.warn(`[createFromPlan] Skipping invalid input definition for '${inputName}' in task '${task.actionVerb}'.`);
-                        continue;
-                    }
+    planTasks.forEach((task, idx) => {
+        const uuid = uuidv4();
+        task.id = uuid;
+        const stepNum = task.number || idx + 1;
+        stepNumberToUUID[stepNum] = uuid;
+    });
 
-                    // Validate input completeness - must have either 'value' or 'outputName'
-                    const hasValue = inputDef.value !== undefined && inputDef.value !== null;
-                    const hasOutputName = inputDef.outputName !== undefined && inputDef.outputName !== null && inputDef.outputName !== '';
+    return planTasks.map((task, idx) => {
+        const dependencies: StepDependency[] = [];
+        const inputReferences = new Map<string, InputReference>();
+        const inputValues = new Map<string, InputValue>();
 
-                    if (!hasValue && !hasOutputName) {
-                        console.error(`[createFromPlan] 🚨 MALFORMED INPUT DETECTED: '${inputName}' in step '${task.actionVerb}' (step ${idx + 1})`);
-                        console.error(`[createFromPlan] Input definition:`, JSON.stringify(inputDef, null, 2));
-                        console.error(`[createFromPlan] This input is missing both 'value' and 'outputName' properties - this will cause step execution to fail!`);
+        const inputSource = (task as any).inputs || task.inputReferences;
+        if (inputSource) {
+            for (const [inputName, inputDef] of Object.entries(inputSource as Record<string, any>)) {
+                if (typeof inputDef !== 'object' || inputDef === null) {
+                    console.warn(`[createFromPlan] Skipping invalid input definition for '${inputName}' in task '${task.actionVerb}'.`);
+                    continue;
+                }
 
-                        // For malformed inputs, provide a reasonable default based on valueType
-                        let defaultValue: any = '';
-                        if (inputDef.valueType) {
-                            switch (inputDef.valueType.toLowerCase()) {
-                                case 'object':
-                                    defaultValue = {};
-                                    break;
-                                case 'array':
-                                    defaultValue = [];
-                                    break;
-                                case 'number':
-                                    defaultValue = 0;
-                                    break;
-                                case 'boolean':
-                                    defaultValue = false;
-                                    break;
-                                default:
-                                    defaultValue = `[PLACEHOLDER_${inputName.toUpperCase()}]`;
-                            }
-                        }
+                const hasValue = inputDef.value !== undefined && inputDef.value !== null;
+                const hasOutputName = inputDef.outputName !== undefined && inputDef.outputName !== null && inputDef.outputName !== '';
+                const hasSourceStep = inputDef.sourceStep !== undefined && inputDef.sourceStep !== null;
 
-                        console.warn(`[createFromPlan] 🔧 AUTO-FIXING: Setting '${inputName}' = "${defaultValue}" (type: ${typeof defaultValue})`);
-                        inputDef.value = defaultValue;
-                    }
-
-                    const reference: InputReference = {
+                if (hasValue) {
+                    inputValues.set(inputName, {
                         inputName: inputName,
                         value: inputDef.value,
-                        outputName: inputDef.outputName,
                         valueType: inputDef.valueType,
                         args: inputDef.args,
-                    };
-                    inputReferences.set(inputName, reference);
-                }
-            }
-
-            const dependencies: StepDependency[] = [];
-            if (task.dependencies && typeof task.dependencies === 'object' && !Array.isArray(task.dependencies)) {
-                Object.entries(task.dependencies).forEach(([dependencyOutputName, sourceStepNo]) => {
-                    if (typeof sourceStepNo !== 'number' || sourceStepNo < 1) {
-                        throw new Error(`[createFromPlan] Invalid step number for dependency '${dependencyOutputName}': ${sourceStepNo}`);
-                    }
-                    const sourceStepId = stepNumberToUUID[sourceStepNo];
-                    if (!sourceStepId) {
-                        throw new Error(`[createFromPlan] Cannot resolve dependency for step ${task.actionVerb} (stepNo ${startingStepNo + idx}): outputName=${dependencyOutputName}, sourceStepNo=${sourceStepNo}`);
-                    }
-
-                    // Find the corresponding inputName in inputReferences that expects this output.
-                    let dependencyInputName: string | undefined;
-                    for (const [inputName, inputRef] of inputReferences.entries()) {
-                        if (inputRef.outputName === dependencyOutputName) {
-                            dependencyInputName = inputName;
-                            break;
+                    });
+                } else if (hasOutputName && hasSourceStep) {
+                    if (inputDef.sourceStep === 0 && parentStep) {
+                        // When sourceStep is 0, the new step should have the same dependency as the current step
+                        parentStep.dependencies.forEach(dep => {
+                            dependencies.push({
+                                outputName: dep.outputName,
+                                sourceStepId: dep.sourceStepId,
+                                inputName: inputName
+                            });
+                        });
+                    } else {
+                        const sourceStepId = stepNumberToUUID[inputDef.sourceStep];
+                        if (sourceStepId) {
+                            dependencies.push({
+                                outputName: inputDef.outputName,
+                                sourceStepId,
+                                inputName: inputName
+                            });
+                        } else {
+                            console.error(`[createFromPlan] 🚨 Unresolved sourceStep ${inputDef.sourceStep} for input '${inputName}' in step '${task.actionVerb}'`);
                         }
                     }
+                } else {
+                    console.error(`[createFromPlan] 🚨 MALFORMED INPUT DETECTED: '${inputName}' in step '${task.actionVerb}' (step ${idx + 1})`);
+                    console.error(`[createFromPlan] Input definition:`, JSON.stringify(inputDef, null, 2));
+                }
 
-                    // If dependencyInputName is not found in inputReferences, add it
-                    if (!dependencyInputName) {
-                        dependencyInputName = dependencyOutputName;
-                        // Add a new InputReference for this missing dependency
-                        inputReferences.set(dependencyInputName, {
-                            inputName: dependencyInputName,
-                            outputName: dependencyOutputName,
-                            value: undefined,
-                            valueType: PluginParameterType.ANY,
-                            args: undefined
-                        });
-                    }
-
-                    dependencies.push({
-                        outputName: dependencyOutputName,
-                        sourceStepId,
-                        inputName: dependencyInputName // Now guaranteed to be in inputReferences
-                    });
-                });
+                const reference: InputReference = {
+                    inputName: inputName,
+                    value: inputDef.value,
+                    outputName: inputDef.outputName,
+                    valueType: inputDef.valueType,
+                    args: inputDef.args,
+                };
+                inputReferences.set(inputName, reference);
             }
+        }
 
-            if (task.actionVerb === 'EXECUTE') {
-                task.actionVerb = 'ACCOMPLISH';
-            }
-
-            const step = new Step({
-                id: task.id!,
-                actionVerb: task.actionVerb,
-                stepNo: startingStepNo + idx,
-                description: task.description,
-                dependencies: dependencies,
-                inputReferences: inputReferences,
-                inputValues: new Map<string, InputValue>(),
-                recommendedRole: task.recommendedRole,
-                persistenceManager: persistenceManager
+        // Inherit dependencies from parent step, avoiding duplicates for the same input name
+        if (parentStep) {
+            const subPlanInputNames = new Set(dependencies.map(d => d.inputName));
+            parentStep.dependencies.forEach(parentDep => {
+                if (!subPlanInputNames.has(parentDep.inputName)) {
+                    dependencies.push(parentDep);
+                }
             });
-            // console.log(`[Step.createFromPlan] Created step.actionVerb: '${step.actionVerb}', Step ID: ${step.id}, Dependencies: ${JSON.stringify(dependencies)}`);
-            return step;
+        }
+
+        if (task.actionVerb === 'EXECUTE') {
+            task.actionVerb = 'ACCOMPLISH';
+        }
+
+        const step = new Step({
+            id: task.id!,
+            actionVerb: task.actionVerb,
+            stepNo: startingStepNo + idx,
+            description: task.description,
+            dependencies: dependencies,
+            inputReferences: inputReferences,
+            inputValues: inputValues,
+            outputs: task.outputs ? new Map(Object.entries(task.outputs)) : undefined,
+            recommendedRole: task.recommendedRole,
+            persistenceManager: persistenceManager
         });
-    }
+        return step;
+    });
+}

@@ -79,22 +79,28 @@ async function transformInputsWithBrain(
         const requiredInputs = plugin.inputDefinitions?.filter(def => def.required).map(def => def.name) || [];
         const prompt = `
             You are an expert at transforming inputs for a plugin.
-            Given the following plugin definition and the provided inputs, transform them to match the required input definitions.
-            You must return a valid JSON object with the transformed inputs.
+            Your task is to map the 'Inputs Provided' to the 'Inputs Required' based on the plugin's definition.
+            You must return a valid JSON object with the transformed inputs, ensuring all required inputs are present and correctly typed.
             ${errorMessage ? `The previous attempt failed with this error: ${errorMessage}. Please correct it.` : ''}
 
-            Plugin: ${plugin.verb}
+            --- Plugin Definition ---
+            Plugin Name: ${plugin.verb}
             Description: ${plugin.description}
-            Required Inputs: ${requiredInputs.join(', ')}
-            
-            Input Definitions:
+            All Input Definitions:
             ${JSON.stringify(plugin.inputDefinitions, null, 2)}
 
-            Provided Inputs:
+            --- Input Mapping Task ---
+            Inputs Provided (from the user/previous steps):
             ${JSON.stringify(Object.fromEntries(providedInputs), null, 2)}
 
-            Return ONLY the transformed JSON object with the correct input names and types.
-            DO NOT include any explanation or markdown formatting.
+            Inputs Required (by the plugin, based on 'required: true' in definitions):
+            ${requiredInputs.length > 0 ? requiredInputs.join(', ') : 'None explicitly required, but consider common sense defaults.'}
+
+            Your Goal: Create a JSON object where keys are the 'Inputs Required' names and values are the corresponding transformed values from 'Inputs Provided'.
+            If a required input is not directly available in 'Inputs Provided', infer it from the context or use a reasonable default if applicable.
+
+            Return ONLY the transformed JSON object.
+            DO NOT include any explanation, markdown formatting, or extra text.
         `;
 
         // First try the new format
@@ -194,8 +200,8 @@ export const validateAndStandardizeInputs = async (plugin: PluginDefinition, inp
         inputsToValidate: Map<string, InputValue>
     ): Promise<{ success: boolean; inputs?: Map<string, EnhancedInputValue>; error?: string }> => {
         const inputDefinitions = plugin.inputDefinitions || [];
-        const standardizedInputs = new Map<string, EnhancedInputValue>();
-        const processedInputs = new Map(inputsToValidate);
+        let standardizedInputs = new Map<string, EnhancedInputValue>(); // Changed to let
+        let processedInputs = new Map(inputsToValidate); // Changed to let
 
         // --- START: Specific remediation for TEXT_ANALYSIS ---
         if (plugin.verb === 'TEXT_ANALYSIS') {
@@ -208,7 +214,8 @@ export const validateAndStandardizeInputs = async (plugin: PluginDefinition, inp
         }
         // --- END: Specific remediation for TEXT_ANALYSIS ---
 
-        // Standardize keys to match definition case and handle simple pluralization
+        // First pass: Standardize keys to match definition case and handle simple pluralization
+        // This loop populates standardizedInputs with initially matched inputs
         for (const inputDef of inputDefinitions) {
             const inputName = inputDef.name;
             const inputKey = Array.from(processedInputs.keys()).find(key => {
@@ -216,30 +223,65 @@ export const validateAndStandardizeInputs = async (plugin: PluginDefinition, inp
                 const lowerInputName = inputName.toLowerCase();
                 return (
                     lowerKey === lowerInputName ||
-                    lowerKey === lowerInputName + 's' ||
-                    lowerKey + 's' === lowerInputName
+                    lowerKey === lowerInputName + 's' || // e.g., 'terms' -> 'term'
+                    (lowerInputName.endsWith('s') && lowerKey + 's' === lowerInputName) // e.g., 'term' -> 'terms'
                 );
             });
 
-            if (inputKey && inputKey !== inputName) {
+            if (inputKey) { // If a match is found (either exact or pluralized)
                 const value = processedInputs.get(inputKey)!;
-                processedInputs.delete(inputKey);
-                processedInputs.set(inputName, value);
-            }
-        }
-
-        for (const inputDef of inputDefinitions) {
-            const inputName = inputDef.name;
-            let input = processedInputs.get(inputName);
-
-            if (!input && inputDef.defaultValue !== undefined) {
-                input = {
+                standardizedInputs.set(inputName, { // Use the canonical inputName from definition
+                    ...value,
+                    inputName: inputName, // Ensure inputName in value object is correct
+                    validationType: inputDef.type,
+                    originalName: inputKey // Keep original name for debugging if needed
+                });
+                processedInputs.delete(inputKey); // Remove from processedInputs as it's now handled
+            } else if (inputDef.defaultValue !== undefined) {
+                standardizedInputs.set(inputName, {
                     inputName,
                     value: inputDef.defaultValue,
                     valueType: inputDef.type,
                     args: {}
-                };
+                });
             }
+        }
+
+        // Identify truly missing required inputs and unmatched provided inputs after first pass
+        const missingRequiredInputs = inputDefinitions.filter(def => def.required && !standardizedInputs.has(def.name));
+        const unmatchedProvidedInputs = Array.from(processedInputs.entries()); // These are inputs not matched to any definition
+
+        // --- START: Single Missing Input / Single Unmatched Provided Input Heuristic ---
+        if (missingRequiredInputs.length === 1 && unmatchedProvidedInputs.length === 1) {
+            const missingInputDef = missingRequiredInputs[0];
+            const [unmatchedKey, unmatchedValue] = unmatchedProvidedInputs[0];
+
+            console.log(`[${trace_id}] validateAndStandardizeInputs: Applying single missing/unmatched heuristic.`);
+            console.log(`[${trace_id}] Missing: ${missingInputDef.name}, Unmatched: ${unmatchedKey}`);
+
+            // Automatically rename the unmatched input to the missing required input's name
+            standardizedInputs.set(missingInputDef.name, {
+                ...unmatchedValue,
+                inputName: missingInputDef.name,
+                validationType: missingInputDef.type,
+                originalName: unmatchedKey
+            });
+            processedInputs.delete(unmatchedKey); // Remove from processedInputs as it's now handled
+            
+            // Re-evaluate missing required inputs after this heuristic
+            missingRequiredInputs.length = 0; // Clear the array
+            inputDefinitions.forEach(def => {
+                if (def.required && !standardizedInputs.has(def.name)) {
+                    missingRequiredInputs.push(def);
+                }
+            });
+        }
+        // --- END: Single Missing Input / Single Unmatched Provided Input Heuristic ---
+
+        // Final validation pass for required inputs and type checking
+        for (const inputDef of inputDefinitions) {
+            const inputName = inputDef.name;
+            let input = standardizedInputs.get(inputName); // Get from standardizedInputs now
 
             if (!input && inputDef.required) {
                 return {
@@ -288,18 +330,13 @@ export const validateAndStandardizeInputs = async (plugin: PluginDefinition, inp
                         };
                     }
                 }
-
-                standardizedInputs.set(inputName, {
-                    ...input,
-                    validationType: type,
-                    originalName: inputName
-                });
+                // No need to set standardizedInputs here, it's already populated
             }
         }
 
-        // Add any non-defined inputs to the output as well
+        // Add any remaining processedInputs (those not defined in manifest) to standardizedInputs
         for (const [inputName, input] of processedInputs.entries()) {
-            if (!standardizedInputs.has(inputName)) {
+            if (!standardizedInputs.has(inputName)) { // Ensure it wasn't added by heuristic
                 standardizedInputs.set(inputName, {
                     ...input,
                     validationType: input.valueType || PluginParameterType.ANY,

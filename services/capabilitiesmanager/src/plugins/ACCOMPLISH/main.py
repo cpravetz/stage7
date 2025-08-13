@@ -154,6 +154,11 @@ PLAN_STEP_SCHEMA = {
                         "type": "string",
                         "description": "Reference to an output from a previous step at the same level or higher"
                     },
+                    "sourceStep": {
+                        "type": "integer",
+                        "minimum": 0, # Allow 0 for parent step
+                        "description": "The step number that produces the output for this input. Use 0 to refer to an input from the parent step."
+                    },
                     "valueType": {
                         "type": "string",
                         "enum": ["string", "number", "boolean", "array", "object", "plan", "plugin", "any"],
@@ -167,12 +172,12 @@ PLAN_STEP_SCHEMA = {
                 "required": ["valueType"],
                 "oneOf": [
                     {"required": ["value"]},
-                    {"required": ["outputName"]
-                }],
+                    {"required": ["outputName", "sourceStep"]}
+                ],
                 "additionalProperties": False,
                 "description": "Thorough description of what this step does and context needed to understand it"
             },
-            "additionalProperties": False
+            "additionalProperties": False,
         },
         "outputs": {
             "type": "object",
@@ -185,24 +190,12 @@ PLAN_STEP_SCHEMA = {
             "additionalProperties": False,
             "description": "Expected outputs from this step, for control flow, should match the final outputs of the sub-plan(s)"
         },
-        "dependencies": {
-            "type": "object",
-            "patternProperties": {
-                "^[a-zA-Z][a-zA-Z0-9_]*$": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "description": "Step number that produces the output for the input with this name"
-                }
-            },
-            "additionalProperties": False,
-            "description": "Object mapping outputNames to the step number that produces each. Only one source per outputName. Format: {{outputName: stepNumber, ...}}"
-        },
         "recommendedRole": {
             "type": "string",
             "description": "Suggested role type for the agent executing this step. Allowed values are Coordinator, Researcher, Coder, Creative, Critic, Executor, and Domain Expert "
         }
     },
-    "required": ["number", "actionVerb", "inputs", "description", "outputs", "dependencies"],
+    "required": ["number", "actionVerb", "inputs", "description", "outputs"],
     "additionalProperties": False
     }
 }
@@ -278,13 +271,9 @@ CRITICAL INPUT RESOLUTION RULES:
    - Provide specific search terms like "open source agentic platforms 2024"
 
 4. For missing inputs:
-   - Reference outputs from previous steps using "outputName"
+   - Reference outputs from previous steps using "outputName" and "sourceStep"
    - Use the Brain to help determine inputs from context
    - Provide concrete values, not placeholders
-
-5. Input dependencies:
-   - Use dependencies format: {{"outputName": stepNumber}}
-   - Ensure step numbers are correct and sequential
 
 """
         return guidance
@@ -322,12 +311,16 @@ CRITICAL INPUT RESOLUTION RULES:
         """Phase 1: Get a well-thought prose plan from LLM"""
 
         plugin_guidance = self._create_detailed_plugin_guidance(inputs)
+        context = inputs.get('context', {}).get('value', '')
         
         prompt = f"""You are an expert strategic planner. Create a comprehensive, well-thought plan to accomplish this goal:
 
 GOAL: {goal}
 
 {plugin_guidance}
+
+CONTEXT:
+{context}
 
 Write a detailed prose plan (3-5 paragraphs) that thoroughly explains:
 - The strategic approach you would take
@@ -355,6 +348,7 @@ Return your prose plan:"""
     def _convert_to_structured_plan(self, prose_plan: str, goal: str, inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Phase 2: Convert prose plan to structured JSON"""
         plugin_guidance = self._create_detailed_plugin_guidance(inputs)
+        input_resolution_guidance = self._add_input_resolution_guidance(goal, inputs)
         schema_json = json.dumps(PLAN_STEP_SCHEMA, indent=2)
         
         prompt = f"""You are an expert system for converting prose plans into structured JSON according to a strict schema.
@@ -381,8 +375,8 @@ Follow these steps to create the final JSON output:
 1.  **Analyze:** Read the Goal and Prose Plan to fully understand the user's intent and the required sequence of actions.
 2.  **Verify Schema:** Carefully study the JSON SCHEMA. Your output must follow it perfectly.
 3.  **Restate the Plan as Explicit Steps:**  Identify a list of steps that will be taken to achieve the Goal. Each Step should be a clear, actionable task with one or more outputs.
-4.  **Check Dependencies:** For each step, ensure its `dependencies` correctly reference `outputs` from previous steps. The data flow must be logical.
-5.  **Validate Inputs:** Ensure every input for each step has either a static `value` or a dynamic `outputName` reference from a prior step.
+4.  **Check Dependencies:** For each step, ensure its `inputs` that depend on previous steps correctly reference the `outputName` and `sourceStep`.
+5.  **Validate Inputs:** Ensure every input for each step has either a static `value` or a dynamic `outputName` and `sourceStep` reference from a prior step.
 6.  **Final Check:** Before generating the output, perform a final check to ensure the entire JSON structure is valid and fully compliant with the schema.
 
 **STEP B: Generate Final JSON (Your Final Output)**
@@ -395,11 +389,12 @@ After your internal analysis and self-correction is complete, provide ONLY the f
 
 **CRITICAL DEPENDENCY RULES:**
 - **Multi-step plans are essential:** Break down complex goals into multiple, sequential steps.
-- **Dependencies are crucial for flow:** Every step that uses an output from a previous step MUST declare that dependency in its `dependencies` object.
-- **Format:** {{ "dependencies": {{"inputName": "sourceStepNumber"}}}} where `inputName` is the name of the input in the current step that receives the output, and `sourceStepNumber` is the `number` of the step that produces that output.
-- **Example:** If Step 2 needs `research_results` from Step 1, and Step 1 outputs {{ "research_results": "..." }}, then Step 2's inputs might have {{ "query": {{"outputName": "research_results", "valueType": "string"}}}} and its dependencies would be {{ "dependencies": {{"query": 1}} }}.
+- **Dependencies are crucial for flow:** Every step that uses an output from a previous step MUST declare that dependency in its `inputs` object using `outputName` and `sourceStep`.
+- **Use `sourceStep: 0` to refer to an input from the parent step.**
+- **Example:** If Step 2 needs `research_results` from Step 1, and Step 1 outputs `{{ "research_results": "..." }}`, then Step 2's inputs would be `{{ "research": {{"outputName": "research_results", "sourceStep": 1, "valueType": "string"}} }}`.
 
 {plugin_guidance}
+{input_resolution_guidance}
 """
 
         logger.info("🔧 Phase 2: Converting to structured JSON...")
@@ -449,7 +444,8 @@ After your internal analysis and self-correction is complete, provide ONLY the f
     def _validate_plan(self, plan: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Validate plan structure and completeness"""
         errors = []
-        
+        logger.info(f"Validating plan: {plan}")
+
         if not isinstance(plan, list) or len(plan) == 0:
             return {'valid': False, 'errors': ['Plan must be a non-empty array']}
         
@@ -468,7 +464,7 @@ After your internal analysis and self-correction is complete, provide ONLY the f
             step_num = step.get('number', i + 1)
             
             # Check required fields
-            required_fields = ['number', 'actionVerb', 'inputs', 'description', 'outputs', 'dependencies']
+            required_fields = ['number', 'actionVerb', 'inputs', 'description', 'outputs']
             for field in required_fields:
                 if field not in step:
                     errors.append(f"Step {step_num}: Missing required field '{field}'")
@@ -481,7 +477,7 @@ After your internal analysis and self-correction is complete, provide ONLY the f
                         continue
 
                     # Check for unknown properties
-                    allowed_properties = ['value', 'outputName', 'valueType', 'args']
+                    allowed_properties = ['value', 'outputName', 'sourceStep', 'valueType', 'args']
                     for prop in input_def:
                         if prop not in allowed_properties:
                             errors.append(f"Step {step_num}: Input '{input_name}' has unknown property '{prop}'")
@@ -491,33 +487,27 @@ After your internal analysis and self-correction is complete, provide ONLY the f
                     
                     has_value = 'value' in input_def
                     has_output_name = 'outputName' in input_def
-                    
-                    if not has_value and not has_output_name:
-                        errors.append(f"Step {step_num}: Input '{input_name}' missing both 'value' and 'outputName'")
+                    has_source_step = 'sourceStep' in input_def
 
-            # Validate dependencies structure and correctness
-            if 'dependencies' in step and isinstance(step['dependencies'], dict):
-                for dep_input_name, source_step_num in step['dependencies'].items():
-                    if not isinstance(source_step_num, int) or source_step_num < 1:
-                        errors.append(f"Step {step_num}: Dependency for '{dep_input_name}' has invalid source step number: {source_step_num}")
-                        continue
-                    
-                    if source_step_num >= step_num:
-                        errors.append(f"Step {step_num}: Dependency for '{dep_input_name}' refers to future or same step: {source_step_num}")
+                    if not has_value and not (has_output_name and has_source_step):
+                        errors.append(f"Step {step_num}: Input '{input_name}' must have either 'value' or both 'outputName' and 'sourceStep'")
 
-                    if source_step_num not in step_numbers:
-                        errors.append(f"Step {step_num}: Dependency for '{dep_input_name}' refers to non-existent step: {source_step_num}")
-                        continue
-                    
-                    # Check if the outputName exists in the source step's outputs
-                    # The dependency input name is assumed to be the output name from the source step
-                    if dep_input_name not in step_outputs.get(source_step_num, set()):
-                        errors.append(f"Step {step_num}: Dependency '{dep_input_name}' not found in outputs of source step {source_step_num}")
-            else:
-                if 'dependencies' in step and not isinstance(step['dependencies'], dict):
-                    errors.append(f"Step {step_num}: 'dependencies' field must be an object.")
-                elif 'dependencies' not in step: # This case is already covered by required_fields check
-                    pass
+                    if has_output_name and has_source_step:
+                        source_step_num = input_def['sourceStep']
+                        if not isinstance(source_step_num, int) or source_step_num < 0: # Allow 0
+                            errors.append(f"Step {step_num}: Input '{input_name}' has invalid source step number: {source_step_num}")
+                            continue
+                        
+                        if source_step_num > 0: # only validate for steps in the current plan
+                            if source_step_num >= step_num:
+                                errors.append(f"Step {step_num}: Input '{input_name}' refers to future or same step: {source_step_num}")
+
+                            if source_step_num not in step_numbers:
+                                errors.append(f"Step {step_num}: Input '{input_name}' refers to non-existent step: {source_step_num}")
+                                continue
+                            
+                            if input_def['outputName'] not in step_outputs.get(source_step_num, set()):
+                                errors.append(f"Step {step_num}: Input '{input_name}' refers to non-existent output '{input_def['outputName']}' in source step {source_step_num}")
         
         return {'valid': len(errors) == 0, 'errors': errors}
     
@@ -685,22 +675,19 @@ CONTEXT: {context}
 AVAILABLE PLUGINS:
 {plugin_summary}
 
-Determine the best approach:
-
-1. **Create Plan**: Break down into steps (can use existing plugins OR novel verbs)
-2. **Direct Answer**: Provide answer directly if no execution needed
-3. **Plugin Definition**: Create new plugin only if truly novel functionality required
+Determine the best approach by creating a plan. The plan should be a JSON array of steps.
+- Each step must have "number", "actionVerb", "inputs", "description", and "outputs".
+- Use existing plugins from the list when possible.
+- For inputs that come from the original step's context (the "CONTEXT" field above), use `{{"outputName": "input_name_from_parent", "sourceStep": 0, "valueType": "string"}}`.
+- For inputs that come from a previous step in *this* plan, use the step number, e.g., `{{"outputName": "output_from_step_1", "sourceStep": 1, "valueType": "string"}}`.
 
 CRITICAL: Respond with ONLY valid JSON. NO markdown, NO code blocks, NO extra text.
 
-For a plan (most common - can include novel verbs):
-{{"plan": [{{"actionVerb": "research", "description": "...", "inputs": {{}}, "outputs": {{}}}}, {{"actionVerb": "SEARCH", "description": "...", "inputs": {{}}, "outputs": {{}}}}]}}
-
-For a direct answer:
-{{"direct_answer": {{"result_name": "result_value"}}}}
-
-For a plugin definition:
-{{"plugin": {{"id": "plugin_name", "description": "...", "actionVerb": "{verb}", "inputDefinitions": [], "outputDefinitions": []}}}}
+Example of a valid plan:
+{{"plan": [
+    {{"number": 1, "actionVerb": "SEARCH", "description": "Find relevant information using an input from the parent context.", "inputs": {{"searchTerm": {{"outputName": "search_term_from_parent", "sourceStep": 0, "valueType": "string"}}}}, "outputs": {{"search_results": "The results of the search"}}, "recommendedRole": "Researcher"}},
+    {{"number": 2, "actionVerb": "TEXT_ANALYSIS", "description": "Analyze the search results from step 1.", "inputs": {{"text": {{"outputName": "search_results", "sourceStep": 1, "valueType": "string"}}}}, "outputs": {{"analysis": "The analysis of the results"}}, "recommendedRole": "Researcher"}}
+]}}
 
 JSON only:"""
 
