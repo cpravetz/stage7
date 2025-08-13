@@ -590,7 +590,7 @@ export class Brain extends BaseEntity {
                 temperature: body.temperature,
                 ...body.optionals
             },
-            responseType: body.responseType || 'text'
+            responseType: body.responseType || (body.conversationType === LLMConversationType.TextToJSON) ? 'json' : 'text'
         };
 
         console.log('[Brain Debug] Final thread object:', JSON.stringify({

@@ -711,7 +711,7 @@ Please consider this context and the available plugins when planning and executi
         }
 
         const optimization = (inputs.get('optimization')?.value as string) || 'accuracy';
-        const ConversationType = (inputs.get('ConversationType')?.value as LLMConversationType) || LLMConversationType.TextToText;
+        const conversationType = (inputs.get('conversationType')?.value as LLMConversationType) || LLMConversationType.TextToText;
 
         const validOptimizations = ['cost', 'accuracy', 'creativity', 'speed', 'continuity'];
         const validConversationTypes = [
@@ -732,21 +732,21 @@ Please consider this context and the available plugins when planning and executi
             }];
         }
 
-        if (!validConversationTypes.includes(ConversationType)) {
+        if (!validConversationTypes.includes(conversationType)) {
             return [{
                 success: false,
                 name: 'error',
                 resultType: PluginParameterType.ERROR,
                 resultDescription: 'Error in useBrainForReasoning',
                 result: null,
-                error: `Invalid ConversationType: ${ConversationType}. Must be one of ${validConversationTypes.join(', ')}`
+                error: `Invalid ConversationType: ${conversationType}. Must be one of ${validConversationTypes.join(', ')}`
             }];
         }
 
         const reasoningInput = {
             exchanges: [...this.conversation, { role: 'user', content: prompt }], // Combine history with current prompt
             optimization: optimization,
-            ConversationType: ConversationType,
+            conversationType: conversationType,
             responseType: 'text'
         };
         console.log(`[Agent ${this.id}] useBrainForReasoning: Sending exchanges to Brain:`, JSON.stringify(reasoningInput.exchanges, null, 2));
@@ -764,7 +764,7 @@ Please consider this context and the available plugins when planning and executi
                 let resultType: PluginParameterType;
                 let parsedResult = brainResponse;
 
-                if (ConversationType === LLMConversationType.TextToCode && mimeType === 'application/json') {
+                if (conversationType === LLMConversationType.TextToCode && mimeType === 'application/json') {
                     try {
                         parsedResult = JSON.parse(brainResponse);
                         resultType = PluginParameterType.PLAN;
@@ -783,7 +783,7 @@ Please consider this context and the available plugins when planning and executi
                     name: 'answer',
                     resultType: resultType,
                     result: parsedResult,
-                    resultDescription: `Brain reasoning output (${ConversationType})`,
+                    resultDescription: `Brain reasoning output (${conversationType})`,
                     mimeType: mimeType
                 }];
             }

@@ -43,7 +43,7 @@ describe('Brain', () => {
           exchanges: [{ role: 'user', message: 'Hello' }],
           optimization: 'speed',
           optionals: { max_length: 100, temperature: 0.7 },
-          ConversationType: LLMConversationType.TextToText,
+          conversationType: LLMConversationType.TextToText,
         },
       } as express.Request;
       const mockRes = {

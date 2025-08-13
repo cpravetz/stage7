@@ -891,14 +891,32 @@ export class Step {
                     });
                 } else if (hasOutputName && hasSourceStep) {
                     if (inputDef.sourceStep === 0 && parentStep) {
-                        // When sourceStep is 0, the new step should have the same dependency as the current step
-                        parentStep.dependencies.forEach(dep => {
-                            dependencies.push({
-                                outputName: dep.outputName,
-                                sourceStepId: dep.sourceStepId,
-                                inputName: inputName
+                        // For sourceStep 0, directly populate inputValues from parentStep's inputValues
+                        // Attempt to resolve sourceStep 0 input from parentStep's inputValues
+                        let parentInputValue = parentStep.inputValues.get(inputDef.outputName);
+
+                        if (!parentInputValue) {
+                            // Fuzzy match: Iterate through parent's inputs and check for partial or case-insensitive match
+                            for (const [parentKey, parentValue] of parentStep.inputValues.entries()) {
+                                if (parentKey.toLowerCase().includes(inputDef.outputName.toLowerCase()) ||
+                                    inputDef.outputName.toLowerCase().includes(parentKey.toLowerCase())) {
+                                    parentInputValue = parentValue;
+                                    console.warn(`[createFromPlan] ⚠️ Fuzzy matched parent input '${parentKey}' for '${inputDef.outputName}' in step '${task.actionVerb}'`);
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (parentInputValue) {
+                            inputValues.set(inputName, {
+                                inputName: inputName,
+                                value: parentInputValue.value,
+                                valueType: parentInputValue.valueType,
+                                args: parentInputValue.args || {}
                             });
-                        });
+                        } else {
+                            console.error(`[createFromPlan] 🚨 Unresolved sourceStep 0: Parent input '${inputDef.outputName}' not found for input '${inputName}' in step '${task.actionVerb}'. This may lead to validation errors.`);
+                        }
                     } else {
                         const sourceStepId = stepNumberToUUID[inputDef.sourceStep];
                         if (sourceStepId) {

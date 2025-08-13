@@ -70,41 +70,47 @@ async function transformInputsWithBrain(
         return transformCache.get(cacheKey)!;
     }
 
-    try {
-        const authenticatedApi = createAuthenticatedAxios(
-            'Validator',
-            process.env.BRAIN_URL || 'brain:5070',
-            process.env.CLIENT_SECRET || 'stage7AuthSecret'
-        );
-        const requiredInputs = plugin.inputDefinitions?.filter(def => def.required).map(def => def.name) || [];
-        const prompt = `
-            You are an expert at transforming inputs for a plugin.
-            Your task is to map the 'Inputs Provided' to the 'Inputs Required' based on the plugin's definition.
-            You must return a valid JSON object with the transformed inputs, ensuring all required inputs are present and correctly typed.
-            ${errorMessage ? `The previous attempt failed with this error: ${errorMessage}. Please correct it.` : ''}
+    const MAX_BRAIN_ATTEMPTS = 2; // Allow one retry for JSON parsing issues
+    let lastBrainError: string | undefined;
 
-            --- Plugin Definition ---
-            Plugin Name: ${plugin.verb}
-            Description: ${plugin.description}
-            All Input Definitions:
-            ${JSON.stringify(plugin.inputDefinitions, null, 2)}
-
-            --- Input Mapping Task ---
-            Inputs Provided (from the user/previous steps):
-            ${JSON.stringify(Object.fromEntries(providedInputs), null, 2)}
-
-            Inputs Required (by the plugin, based on 'required: true' in definitions):
-            ${requiredInputs.length > 0 ? requiredInputs.join(', ') : 'None explicitly required, but consider common sense defaults.'}
-
-            Your Goal: Create a JSON object where keys are the 'Inputs Required' names and values are the corresponding transformed values from 'Inputs Provided'.
-            If a required input is not directly available in 'Inputs Provided', infer it from the context or use a reasonable default if applicable.
-
-            Return ONLY the transformed JSON object.
-            DO NOT include any explanation, markdown formatting, or extra text.
-        `;
-
-        // First try the new format
+    for (let attempt = 1; attempt <= MAX_BRAIN_ATTEMPTS; attempt++) {
         try {
+            const authenticatedApi = createAuthenticatedAxios(
+                'Validator',
+                process.env.BRAIN_URL || 'brain:5070',
+                process.env.CLIENT_SECRET || 'stage7AuthSecret'
+            );
+            const requiredInputs = plugin.inputDefinitions?.filter(def => def.required).map(def => def.name) || [];
+            
+            let prompt = `
+                You are an expert at transforming inputs for a plugin.
+                Your task is to map the 'Inputs Provided' to the 'Inputs Required' based on the plugin's definition.
+                You must return a valid JSON object with the transformed inputs, ensuring all required inputs are present and correctly typed.
+                ${errorMessage ? `The previous attempt failed with this error: ${errorMessage}. Please correct it.` : ''}
+
+                --- Plugin Definition ---
+                Plugin Name: ${plugin.verb}
+                Description: ${plugin.description}
+                All Input Definitions:
+                ${JSON.stringify(plugin.inputDefinitions, null, 2)}
+
+                --- Input Mapping Task ---
+                Inputs Provided (from the user/previous steps):
+                ${JSON.stringify(Object.fromEntries(providedInputs), null, 2)}
+
+                Inputs Required (by the plugin, based on 'required: true' in definitions):
+                ${requiredInputs.length > 0 ? requiredInputs.join(', ') : 'None explicitly required, but consider common sense defaults.'}
+
+                Your Goal: Create a JSON object where keys are the input names and values are the corresponding transformed values from 'Inputs Provided'.
+                This object MUST include every required input.
+                If a required input is NOT present in 'Inputs Provided' and you cannot derive a sensible value, provide a reasonable default based on its 'valueType'.
+                For example, if 'valueType' is 'string', use an empty string ""; if 'number', use 0; if 'boolean', use false; if 'object', use {}; if 'array', use [].
+                If no sensible default can be determined, explicitly set the value to null.
+
+                Return ONLY the transformed JSON object.
+                DO NOT include any explanation, markdown formatting, or extra text.
+            `;
+
             const response = await authenticatedApi.post(
                 `http://${process.env.BRAIN_URL || 'brain:5070'}/chat`,
                 {
@@ -137,58 +143,57 @@ async function transformInputsWithBrain(
             }
 
             // Clean up and parse the result
+            // Log raw Brain response for debugging
+            console.log(`[${trace_id}] ${source_component}: Raw Brain response: ${result.substring(0, 500)}...`);
+
             let cleanResult = result.trim();
             if (cleanResult.startsWith('```json')) {
                 const match = cleanResult.match(/```json\n([\s\S]*?)```/);
                 if (match) cleanResult = match[1].trim();
             }
 
-            try {
-                const parsedResponse = JSON.parse(cleanResult);
-                const transformedInputsMap = new Map<string, InputValue>();
+            const parsedResponse = JSON.parse(cleanResult);
+            const transformedInputsMap = new Map<string, InputValue>();
 
-                // Validate and transform each input
-                for (const key in parsedResponse) {
-                    const inputDef = plugin.inputDefinitions?.find(def => def.name === key);
-                    const value = parsedResponse[key];
-                    const valueType = inputDef?.type || PluginParameterType.ANY;
+            // Validate and transform each input
+            for (const key in parsedResponse) {
+                const inputDef = plugin.inputDefinitions?.find(def => def.name === key);
+                const value = parsedResponse[key];
+                const valueType = inputDef?.type || PluginParameterType.ANY;
 
-                    // Validate the transformed value against the expected type
-                    const isValid = await validateInputType(value, valueType);
-                    if (!isValid) {
-                        console.warn(`[${trace_id}] ${source_component}: Transformed value for ${key} doesn't match expected type ${valueType}`);
-                        continue;
-                    }
-
-                    transformedInputsMap.set(key, {
-                        inputName: key,
-                        value: value,
-                        valueType: valueType,
-                        args: inputDef?.args || {}
-                    });
+                // Validate the transformed value against the expected type
+                const isValid = await validateInputType(value, valueType);
+                if (!isValid) {
+                    console.warn(`[${trace_id}] ${source_component}: Transformed value for ${key} doesn't match expected type ${valueType}`);
+                    continue;
                 }
 
-                // Verify all required inputs are present
-                const missingRequired = requiredInputs.filter(input => !transformedInputsMap.has(input));
-                if (missingRequired.length > 0) {
-                    throw new Error(`Missing required inputs after transformation: ${missingRequired.join(', ')}`);
-                }
-
-                transformCache.set(cacheKey, transformedInputsMap);
-                return transformedInputsMap;
-
-            } catch (parseError: any) {
-                throw new Error(`Failed to parse Brain response: ${parseError?.message || 'Unknown parse error'}`);
+                transformedInputsMap.set(key, {
+                    inputName: key,
+                    value: value,
+                    valueType: valueType,
+                    args: inputDef?.args || {}
+                });
             }
-        } catch (error: any) {
-            console.error(`[${trace_id}] ${source_component}: Error during input transformation: ${error?.message || 'Unknown error'}`);
-            throw new Error(`Input transformation failed: ${error?.message || 'Unknown error'}`);
-        }
 
-    } catch (error) {
-        console.error(`[${trace_id}] ${source_component}: Brain transformation failed:`, error);
-        throw error;
+            // Verify all required inputs are present
+            const missingRequired = requiredInputs.filter(input => !transformedInputsMap.has(input));
+            if (missingRequired.length > 0) {
+                throw new Error(`Missing required inputs after transformation: ${missingRequired.join(', ')}`);
+            }
+
+            transformCache.set(cacheKey, transformedInputsMap);
+            return transformedInputsMap;
+
+        } catch (error: any) {
+            lastBrainError = error?.message || 'Unknown error';
+            console.error(`[${trace_id}] ${source_component}: Brain transformation attempt ${attempt} failed: ${lastBrainError}`);
+            if (attempt === MAX_BRAIN_ATTEMPTS) {
+                throw new Error(`Input transformation failed after ${MAX_BRAIN_ATTEMPTS} Brain attempts: ${lastBrainError}`);
+            }
+        }
     }
+    throw new Error(`Input transformation failed after ${MAX_BRAIN_ATTEMPTS} Brain attempts: No valid response received.`);
 }
 
 export const validateAndStandardizeInputs = async (plugin: PluginDefinition, inputs: Map<string, InputValue>):

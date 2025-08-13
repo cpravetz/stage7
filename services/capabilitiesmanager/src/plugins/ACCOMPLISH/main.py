@@ -254,29 +254,6 @@ class RobustMissionPlanner:
             guidance_lines.append(f"{input_guidance}")
         return "\n".join(guidance_lines)
 
-    def _add_input_resolution_guidance(self, goal: str, inputs: Dict[str, Any]) -> str:
-        """Add guidance for resolving missing inputs using Brain or previous steps"""
-        guidance = f"""
-CRITICAL INPUT RESOLUTION RULES:
-
-1. ONLY use action verbs that exist in the available plugins: {', '.join([p.get('actionVerb', '') for p in inputs.get('availablePlugins', [])])}
-
-2. For SCRAPE steps:
-   - ALWAYS provide "url" input with actual web addresses
-   - Use specific URLs like "https://github.com/trending" or "https://news.ycombinator.com"
-   - If you need to find URLs, create a SEARCH step first
-
-3. For SEARCH steps:
-   - ALWAYS use "searchTerm" (not "keywords" or "query")
-   - Provide specific search terms like "open source agentic platforms 2024"
-
-4. For missing inputs:
-   - Reference outputs from previous steps using "outputName" and "sourceStep"
-   - Use the Brain to help determine inputs from context
-   - Provide concrete values, not placeholders
-
-"""
-        return guidance
 
     def create_plan(self, goal: str, inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Create a robust plan using LLM-driven approach with retries"""
@@ -332,9 +309,8 @@ Write a detailed prose plan (3-5 paragraphs) that thoroughly explains:
 
 Be specific, actionable, and comprehensive. Think deeply about THIS specific goal.
 
-IMPORTANT: Return ONLY plain text. NO markdown formatting, NO code blocks, NO special formatting.
-
-Return your prose plan:"""
+IMPORTANT: Return ONLY plain text for the plan. NO markdown formatting, NO code blocks, NO special formatting.
+"""
 
         logger.info("🧠 Phase 1: Requesting prose plan from LLM...")
         response = call_brain(prompt, inputs, "text")
@@ -348,7 +324,6 @@ Return your prose plan:"""
     def _convert_to_structured_plan(self, prose_plan: str, goal: str, inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Phase 2: Convert prose plan to structured JSON"""
         plugin_guidance = self._create_detailed_plugin_guidance(inputs)
-        input_resolution_guidance = self._add_input_resolution_guidance(goal, inputs)
         schema_json = json.dumps(PLAN_STEP_SCHEMA, indent=2)
         
         prompt = f"""You are an expert system for converting prose plans into structured JSON according to a strict schema.
@@ -380,7 +355,7 @@ Follow these steps to create the final JSON output:
 6.  **Final Check:** Before generating the output, perform a final check to ensure the entire JSON structure is valid and fully compliant with the schema.
 
 **STEP B: Generate Final JSON (Your Final Output)**
-After your internal analysis and self-correction is complete, provide ONLY the final, valid JSON array.
+After your internal analysis and self-correction is complete, provide ONLY the final, valid JSON array of steps.
 
 **CRITICAL REQUIREMENTS:**
 - **JSON ONLY:** Your entire response MUST be a single, valid JSON array.
@@ -394,7 +369,6 @@ After your internal analysis and self-correction is complete, provide ONLY the f
 - **Example:** If Step 2 needs `research_results` from Step 1, and Step 1 outputs `{{ "research_results": "..." }}`, then Step 2's inputs would be `{{ "research": {{"outputName": "research_results", "sourceStep": 1, "valueType": "string"}} }}`.
 
 {plugin_guidance}
-{input_resolution_guidance}
 """
 
         logger.info("🔧 Phase 2: Converting to structured JSON...")
@@ -672,12 +646,14 @@ VERB: {verb}
 DESCRIPTION: {description}
 CONTEXT: {context}
 
+PARENT STEP INPUTS: {' '.join(inputs.keys())}
+
 AVAILABLE PLUGINS:
 {plugin_summary}
 
 Determine the best approach by creating a plan. The plan should be a JSON array of steps.
 - Each step must have "number", "actionVerb", "inputs", "description", and "outputs".
-- Use existing plugins from the list when possible.
+- Inputs must come fron the parent step or a preceeding step.
 - For inputs that come from the original step's context (the "CONTEXT" field above), use `{{"outputName": "input_name_from_parent", "sourceStep": 0, "valueType": "string"}}`.
 - For inputs that come from a previous step in *this* plan, use the step number, e.g., `{{"outputName": "output_from_step_1", "sourceStep": 1, "valueType": "string"}}`.
 
@@ -731,6 +707,8 @@ JSON only:"""
             data = json.loads(cleaned_response)
 
             if "plan" in data:
+                # Save the generated plan to Librarian
+                self._save_plan_to_librarian(verb_info['verb'], data["plan"], inputs)
                 # Plan provided - most common case
                 return json.dumps([{
                     "success": True,
@@ -786,6 +764,36 @@ JSON only:"""
                 "result": brain_response,
                 "mimeType": "text/plain"
             }])
+
+    def _save_plan_to_librarian(self, verb: str, plan_data: List[Dict[str, Any]], inputs: Dict[str, Any]):
+        """Saves the generated plan to the Librarian service."""
+        try:
+            auth_token = get_auth_token(inputs)
+            librarian_url = inputs.get('librarian_url', {}).get('value', 'librarian:5040')
+            
+            payload = {
+                "key": verb,
+                "data": plan_data
+            }
+            headers = {
+                'Content-Type': 'application/json',
+                'Authorization': f'Bearer {auth_token}'
+            }
+            
+            logger.info(f"Attempting to save plan for verb '{verb}' to Librarian at: http://{librarian_url}/saveData/{verb}")
+            response = requests.post(
+                f"http://{librarian_url}/saveData/{verb}",
+                json=payload,
+                headers=headers,
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                logger.info(f"Successfully saved plan for verb '{verb}' to Librarian.")
+            else:
+                logger.error(f"Failed to save plan for verb '{verb}' to Librarian: {response.status_code} - {response.text}")
+        except Exception as e:
+            logger.error(f"Error saving plan for verb '{verb}' to Librarian: {e}")
 
 class AccomplishOrchestrator:
     """Main orchestrator for ACCOMPLISH plugin"""

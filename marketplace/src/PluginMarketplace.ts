@@ -388,8 +388,8 @@ export class PluginMarketplace {
         const lines: string[] = [];
         // Add internal verbs (hardcoded for now, could be made dynamic)
         lines.push(`- DELEGATE: create independent sub-agents for major autonomous work streams. ONLY use for truly independent goals that require separate agent management. Do NOT use for simple task breakdown or sub-plans - use ACCOMPLISH instead.`);
-        lines.push('- THINK: - uses LLMs attached to the system in order to respond to a prompt provided by the Step from inputs build from text and step outputs. (required input: prompt) (optional inputs: optimization (cost|accuracy|creativity|speed|continuity), ConversationType) accuracy is the default optimization');
-        lines.push('- GENERATE: - uses LLM services to generate content from a prompt or other content. Services include image creation, audio transcription, image editing, etc. (required input: ConversationType) (optional inputs: modelName, optimization, prompt, file, audio, video, image...)');
+        lines.push('- THINK: - uses LLMs attached to the system in order to respond to a prompt provided by the Step from inputs build from text and step outputs. (required input: prompt) (optional inputs: optimization (cost|accuracy|creativity|speed|continuity), conversationType) accuracy is the default optimization');
+        lines.push('- GENERATE: - uses LLM services to generate content from a prompt or other content. Services include image creation, audio transcription, image editing, etc. (required input: conversationType) (optional inputs: modelName, optimization, prompt, file, audio, video, image...)');
         lines.push('- IF_THEN: - Conditional branching based on a condition (required inputs: condition: {"inputName": "value"}, trueSteps[], falseSteps[])');
         lines.push('- WHILE: - Repeat steps while a condition is true (required inputs: condition: {"inputName": "value"}, steps[])');
         lines.push('- UNTIL: - Repeat steps until a condition becomes true (required inputs: condition: {"inputName": "value"}, steps[])');

@@ -423,78 +423,83 @@ export class CapabilitiesManager extends BaseEntity {
             // Query PluginRegistry for the handler for this actionVerb
             // The handlerResult.handler will be a PluginManifest (or DefinitionManifest)
             const handlerResult = await this.getHandlerForActionVerb(step.actionVerb, trace_id);
-            console.log(`[${trace_id}] ${source_component}: Handler result for verb '${step.actionVerb}':`, handlerResult ? { type: handlerResult.type, lang: handlerResult.handler?.language, id: handlerResult.handler?.id } : null);
+            console.log(`[${trace_id}] ${source_component}: Handler result for verb '${step.actionVerb}':`, handlerResult ? { type: handlerResult.type, handlerType: handlerResult.handler?.language || handlerResult.handler?.type, id: handlerResult.handler?.id || handlerResult.handler?.verb } : null);
 
-            if (handlerResult && handlerResult.handler) {
-                const manifest = handlerResult.handler; // Could be DefinitionManifest
-                console.log(`[${trace_id}] ${source_component}: Found handler for '${step.actionVerb}'. Language: '${manifest.language}', ID: '${manifest.id}'. Attempting direct execution.`);
+            if (handlerResult) {
+                const { type, handler } = handlerResult;
 
-                if (manifest.language === DefinitionType.OPENAPI) {
-                    const definitionManifest = manifest as DefinitionManifest;
-                    if (definitionManifest.toolDefinition && (definitionManifest.toolDefinition as OpenAPITool).specUrl) {
-                        console.log(`[${trace_id}] ${source_component}: Executing '${step.actionVerb}' as OpenAPI tool.`);
-                    const result = await this.pluginExecutor.executeOpenAPITool(definitionManifest.toolDefinition as OpenAPITool, step, trace_id);
+                if (type === 'plugin') {
+                    const manifest = handler; // Could be DefinitionManifest or PluginManifest
+                    console.log(`[${trace_id}] ${source_component}: Found plugin handler for '${step.actionVerb}'. Language: '${manifest.language}', ID: '${manifest.id}'. Attempting direct execution.`);
+
+                    if (manifest.language === DefinitionType.OPENAPI) {
+                        const definitionManifest = manifest as DefinitionManifest;
+                        if (definitionManifest.toolDefinition && (definitionManifest.toolDefinition as OpenAPITool).specUrl) {
+                            console.log(`[${trace_id}] ${source_component}: Executing '${step.actionVerb}' as OpenAPI tool.`);
+                            const result = await this.pluginExecutor.executeOpenAPITool(definitionManifest.toolDefinition as OpenAPITool, step, trace_id);
+                            res.status(200).send(MapSerializer.transformForSerialization(result));
+                            return;
+                        } else {
+                            throw generateStructuredError({
+                                error_code: GlobalErrorCodes.CAPABILITIES_MANAGER_INVALID_HANDLER_DEF,
+                                severity: ErrorSeverity.ERROR,
+                                message: `OpenAPI manifest for verb '${step.actionVerb}' is missing toolDefinition.`,
+                                trace_id_param: trace_id, source_component
+                            });
+                        }
+                    } else if (manifest.language === DefinitionType.MCP) {
+                        const definitionManifest = manifest as DefinitionManifest;
+                        if (definitionManifest.toolDefinition && (definitionManifest.toolDefinition as MCPTool).actionMappings) {
+                            console.log(`[${trace_id}] ${source_component}: Executing '${step.actionVerb}' as MCP tool.`);
+                            const result = await this.pluginExecutor.executeMCPTool(definitionManifest.toolDefinition as MCPTool, step, trace_id);
+                            res.status(200).send(MapSerializer.transformForSerialization(result));
+                            return;
+                        } else {
+                            throw generateStructuredError({
+                                error_code: GlobalErrorCodes.CAPABILITIES_MANAGER_INVALID_HANDLER_DEF,
+                                severity: ErrorSeverity.ERROR,
+                                message: `MCP manifest for verb '${step.actionVerb}' is missing toolDefinition.`, 
+                                trace_id_param: trace_id, source_component
+                            });
+                        }
+                    } else if (manifest.language === 'javascript' || manifest.language === 'python' || manifest.language === 'container') {
+                        console.log(`[${trace_id}] ${source_component}: Executing '${step.actionVerb}' as ${manifest.language} plugin.`);
+                        // Standard code-based plugin execution
+                        const pluginDefinition = manifest as PluginDefinition; // Assuming PluginManifest is compatible enough
+
+                        step.inputValues = step.inputValues || new Map<string, InputValue>();
+                        const validatedInputs = await validateAndStandardizeInputs(pluginDefinition, step.inputValues);
+                        if (!validatedInputs.success || !validatedInputs.inputs) {
+                            throw generateStructuredError({
+                                error_code: GlobalErrorCodes.INPUT_VALIDATION_FAILED,
+                                severity: ErrorSeverity.ERROR,
+                                message: validatedInputs.error || "Input validation failed for plugin.",
+                                source_component,
+                                trace_id_param: trace_id,
+                                contextual_info: {
+                                    plugin_id: pluginDefinition.id,
+                                    version: pluginDefinition.version,
+                                    verb: pluginDefinition.verb
+                                }
+                            });
+                        }
+                        // preparePluginForExecution expects PluginManifest, which DefinitionManifest extends
+                        const { pluginRootPath, effectiveManifest } = await this.pluginRegistry.preparePluginForExecution(manifest);
+                        const result = await this.pluginExecutor.execute(effectiveManifest, validatedInputs.inputs, pluginRootPath, trace_id);
                         res.status(200).send(MapSerializer.transformForSerialization(result));
                         return;
                     } else {
-                         throw generateStructuredError({
-                            error_code: GlobalErrorCodes.CAPABILITIES_MANAGER_INVALID_HANDLER_DEF,
-                            severity: ErrorSeverity.ERROR,
-                            message: `OpenAPI manifest for verb '${step.actionVerb}' is missing toolDefinition.`,
-                            trace_id_param: trace_id, source_component
-                        });
+                        console.warn(`[${trace_id}] ${source_component}: Unknown handler language/type '${manifest.language}' for verb '${step.actionVerb}'. Falling back.`);
                     }
-                } else if (manifest.language === DefinitionType.MCP) {
-                    const definitionManifest = manifest as DefinitionManifest;
-                     if (definitionManifest.toolDefinition && (definitionManifest.toolDefinition as MCPTool).actionMappings) {
-                        console.log(`[${trace_id}] ${source_component}: Executing '${step.actionVerb}' as MCP tool.`);
-                    const result = await this.pluginExecutor.executeMCPTool(definitionManifest.toolDefinition as MCPTool, step, trace_id);
-                        res.status(200).send(MapSerializer.transformForSerialization(result));
-                        return;
-                    } else {
-                         throw generateStructuredError({
-                            error_code: GlobalErrorCodes.CAPABILITIES_MANAGER_INVALID_HANDLER_DEF,
-                            severity: ErrorSeverity.ERROR,
-                            message: `MCP manifest for verb '${step.actionVerb}' is missing toolDefinition.`,
-                            trace_id_param: trace_id, source_component
-                        });
-                    }
-                } else if (manifest.language === 'javascript' || manifest.language === 'python' || manifest.language === 'container') {
-                    console.log(`[${trace_id}] ${source_component}: Executing '${step.actionVerb}' as ${manifest.language} plugin.`);
-                    // Standard code-based plugin execution
-                    const pluginDefinition = manifest as PluginDefinition; // Assuming PluginManifest is compatible enough
-
-                    step.inputValues = step.inputValues || new Map<string, InputValue>();
-                    const validatedInputs = await validateAndStandardizeInputs(pluginDefinition, step.inputValues);
-                    if (!validatedInputs.success || !validatedInputs.inputs) {
-                        throw generateStructuredError({
-                            error_code: GlobalErrorCodes.INPUT_VALIDATION_FAILED,
-                            severity: ErrorSeverity.ERROR,
-                            message: validatedInputs.error || "Input validation failed for plugin.",
-                            source_component,
-                            trace_id_param: trace_id,
-                            contextual_info: {
-                                plugin_id: pluginDefinition.id,
-                                version: pluginDefinition.version,
-                                verb: pluginDefinition.verb
-                            }
-                        });
-                    }
-                    // preparePluginForExecution expects PluginManifest, which DefinitionManifest extends
-                    const { pluginRootPath, effectiveManifest } = await this.pluginRegistry.preparePluginForExecution(manifest);
-                    const result = await this.pluginExecutor.execute(effectiveManifest, validatedInputs.inputs, pluginRootPath, trace_id);
-                    res.status(200).send(MapSerializer.transformForSerialization(result));
+                } else if (type === 'cachedPlan') {
+                    console.log(`[${trace_id}] ${source_component}: Found cached plan for '${step.actionVerb}'. Returning plan.`);
+                    // The handler is the cached plan itself (an array of PluginOutput)
+                    res.status(200).send(MapSerializer.transformForSerialization(handler));
                     return;
-                } else {
-                    console.warn(`[${trace_id}] ${source_component}: Unknown handler language/type '${manifest.language}' for verb '${step.actionVerb}'. Falling back.`);
                 }
             }
 
-            const cachedPlanArray = await this.checkCachedPlan(step.actionVerb);
-            if (cachedPlanArray && cachedPlanArray.length > 0) {
-                res.status(200).send(MapSerializer.transformForSerialization(cachedPlanArray));
-                return;
-            }
+            // If no handler (plugin or cached plan) is found, handle as unknown verb
             const resultUnknownVerb = await this.handleUnknownVerb(step, trace_id);
             res.status(200).send(MapSerializer.transformForSerialization(resultUnknownVerb));
         } catch (error: any) {
@@ -594,24 +599,23 @@ export class CapabilitiesManager extends BaseEntity {
     private async getHandlerForActionVerb(actionVerb: string, trace_id: string): Promise<{ type: string, handler: any } | null> {
         const source_component = "CapabilitiesManager.getHandlerForActionVerb";
         try {
+            // 1. Try to find a registered plugin (code-based, OpenAPI, MCP)
             const plugin = await this.pluginRegistry.fetchOneByVerb(actionVerb);
             if (plugin) {
+                // The 'type' here is generic 'plugin', specific type (openapi, mcp) determined by language later in executeActionVerb.
                 return { type: 'plugin', handler: plugin };
             }
 
-            // If plugin is found by pluginRegistry, it could be a code plugin, openapi tool, or mcp tool.
-            // The type differentiation will happen based on plugin.language in executeActionVerb.
-            if (plugin) {
-                 // The 'type' here is generic 'plugin' now, specific type (openapi, mcp) determined by language later.
-                return { type: 'plugin', handler: plugin };
+            // 2. If no plugin, try to find a cached plan template in Librarian
+            const cachedPlan = await this.checkCachedPlan(actionVerb);
+            if (cachedPlan) {
+                return { type: 'cachedPlan', handler: cachedPlan };
             }
-
-            // TODO: Add PlanTemplate lookup here if they are also to be channelled via PluginRegistry.
-            // For now, PlanTemplates are not dynamically looked up as primary handlers in this function if not via pluginRegistry.
 
             return null;
         } catch (error: any) {
             console.error(`[${trace_id}] ${source_component}: Error resolving handler for actionVerb '${actionVerb}':`, error.message);
+            // Do not rethrow, return null to indicate no handler found
             return null;
         }
     }
