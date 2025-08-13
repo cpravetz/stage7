@@ -47,17 +47,29 @@ export const TabbedPanel: React.FC<TabbedPanelProps> = ({
 
   const TabPanel = (props: TabPanelProps) => {
     const { children, value, index, ...other } = props;
+    const isActive = value === index;
 
     return (
       <div
         role="tabpanel"
-        hidden={value !== index}
+        hidden={!isActive} // Use hidden for accessibility, but rely on style for visual hiding
         id={`tabpanel-${index}`}
         aria-labelledby={`tab-${index}`}
-        style={{ height: '100%', display: value === index ? 'flex' : 'none', flexDirection: 'column' }}
+        // Change display: 'none' to position: 'absolute' and opacity: 0 for inactive tabs
+        style={{
+          height: '100%',
+          width: '100%', // Ensure it takes full width when active
+          position: isActive ? 'relative' : 'absolute', // Use relative when active, absolute when inactive
+          opacity: isActive ? 1 : 0,
+          pointerEvents: isActive ? 'auto' : 'none', // Disable interactions for inactive tabs
+          overflow: 'hidden', // Keep overflow hidden for the panel itself
+          flexDirection: 'column', // Keep flex direction
+          top: 0, // Position at top
+          left: 0, // Position at left
+        }}
         {...other}
       >
-        <Box sx={{ height: '100%', p: 1, flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
+        <Box key={index} sx={{ height: '100%', p: 1, flexGrow: 1, display: 'flex', flexDirection: 'column' }}> 
           {children}
         </Box>
       </div>
