@@ -113,7 +113,8 @@ export class OpenWebUIInterface extends BaseInterface {
                 // Extract the response content
                 if (data && data.choices && data.choices.length > 0 && data.choices[0].message && data.choices[0].message.content) {
                     const content = data.choices[0].message.content;
-                    console.log(`OpenWebUI response content length: ${content.length} characters`);
+                    console.log(`OpenWebUI: Received response with content: ${content.substring(0, 140)}... (truncated)`);
+
                     // --- Ensure JSON if required ---
                     let requireJson = options.responseType === 'json' ? true : false;
                     if (requireJson) {

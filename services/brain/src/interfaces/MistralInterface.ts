@@ -62,6 +62,7 @@ export class MistralInterface extends BaseInterface {
 
             if (response.data && response.data.choices && response.data.choices.length > 0) {
                 let content = response.data.choices[0].message.content;
+
                 // --- Ensure JSON if required ---
                 let requireJson = options.responseType === 'json' ? true : false;
                 if (requireJson) {

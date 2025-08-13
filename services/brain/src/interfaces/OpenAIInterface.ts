@@ -112,7 +112,7 @@ export class OpenAIInterface extends BaseInterface {
                     fullResponse = response.choices[0].message.content;
                 }
             }
-
+            console.log(`OpenAIInterface: Received response with content: ${fullResponse.substring(0, 140)}... (truncated)`);
             // --- Ensure JSON if required ---
             let requireJson = options.responseType === 'json' ? true : false;
             if (requireJson) {

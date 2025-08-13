@@ -66,7 +66,7 @@ export class AnthropicInterface extends BaseInterface {
             if (!fullResponse) {
                 console.log('No content in Anthropic response');
             }
-
+            console.log(`AnthropicInterface: Received response with content: ${fullResponse.substring(0, 140)}... (truncated)`);
             // --- Ensure JSON if required ---
             let requireJson = options.responseType === 'json' ? true : false;
             if (requireJson) {

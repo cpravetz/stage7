@@ -30,41 +30,6 @@ class ProgressTracker:
 
 progress = ProgressTracker()
 
-def repair_json(text: str) -> str:
-    """Simple JSON repair function to fix common JSON formatting issues"""
-    if not text.strip():
-        return "[]"
-
-    # Remove any text before the first [ or {
-    text = text.strip()
-    start_idx = -1
-    for i, char in enumerate(text):
-        if char in '[{':
-            start_idx = i
-            break
-
-    if start_idx > 0:
-        text = text[start_idx:]
-    elif start_idx == -1:
-        # No JSON structure found, wrap in array
-        return f'[{text}]' if text else "[]"
-
-    # Remove any text after the last ] or }
-    end_idx = -1
-    for i in range(len(text) - 1, -1, -1):
-        if text[i] in ']}':
-            end_idx = i
-            break
-
-    if end_idx != -1 and end_idx < len(text) - 1:
-        text = text[:end_idx + 1]
-
-    # Fix common JSON issues
-    text = re.sub(r',\s*([}\]])', r'\1', text)  # Remove trailing commas
-    text = re.sub(r'([{,]\s*)(\w+):', r'\1"\2":', text)  # Quote unquoted keys
-
-    return text
-
 class AccomplishError(Exception):
     """Custom exception for ACCOMPLISH plugin errors"""
     def __init__(self, message: str, error_type: str = "general_error"):
@@ -202,12 +167,12 @@ PLAN_STEP_SCHEMA = {
                 "required": ["valueType"],
                 "oneOf": [
                     {"required": ["value"]},
-                    {"required": ["outputName"]}
-                ],
+                    {"required": ["outputName"]
+                }],
                 "additionalProperties": False,
                 "description": "Thorough description of what this step does and context needed to understand it"
             },
-            "additionalProperties": False,
+            "additionalProperties": False
         },
         "outputs": {
             "type": "object",
@@ -428,49 +393,31 @@ After your internal analysis and self-correction is complete, provide ONLY the f
 - **NO EXTRA TEXT:** Do NOT include explanations, comments, or markdown like ` ```json `.
 - **STRICT COMPLIANCE:** Adhere strictly to the provided schema and the logical plan.
 
+**CRITICAL DEPENDENCY RULES:**
+- **Multi-step plans are essential:** Break down complex goals into multiple, sequential steps.
+- **Dependencies are crucial for flow:** Every step that uses an output from a previous step MUST declare that dependency in its `dependencies` object.
+- **Format:** {{ "dependencies": {{"inputName": "sourceStepNumber"}}}} where `inputName` is the name of the input in the current step that receives the output, and `sourceStepNumber` is the `number` of the step that produces that output.
+- **Example:** If Step 2 needs `research_results` from Step 1, and Step 1 outputs {{ "research_results": "..." }}, then Step 2's inputs might have {{ "query": {{"outputName": "research_results", "valueType": "string"}}}} and its dependencies would be {{ "dependencies": {{"query": 1}} }}.
+
 {plugin_guidance}
 """
 
         logger.info("🔧 Phase 2: Converting to structured JSON...")
 
-        # Try up to 3 times with JSON repair
         max_attempts = 3
         for attempt in range(max_attempts):
             try:
                 response = call_brain(prompt, inputs, "json")
-
-                # First try parsing as-is
-                try:
-                    plan = json.loads(response)
-                    if not isinstance(plan, list):
-                        raise ValueError("Response is not a JSON array")
-
-                    logger.info(f"✅ Converted to structured plan with {len(plan)} steps")
-                    return plan
-
-                except json.JSONDecodeError as e:
-                    logger.warning(f"JSON parsing failed on attempt {attempt + 1}: {e}")
-
-                    # Try to repair the JSON
-                    if attempt < max_attempts - 1:  # Don't repair on last attempt
-                        logger.info("🔧 Attempting JSON repair...")
-                        repaired_response = repair_json(response)
-
-                        try:
-                            plan = json.loads(repaired_response)
-                            if not isinstance(plan, list):
-                                raise ValueError("Repaired response is not a JSON array")
-
-                            logger.info(f"✅ JSON repair successful! Converted to plan with {len(plan)} steps")
-                            return plan
-
-                        except json.JSONDecodeError as repair_error:
-                            logger.warning(f"JSON repair failed: {repair_error}")
-                            continue  # Try again with new LLM call
-                    else:
-                        # Last attempt failed
-                        raise AccomplishError(f"Failed to parse structured plan JSON after {max_attempts} attempts: {e}", "json_parse_error")
-
+                plan = json.loads(response)
+                if not isinstance(plan, list):
+                    raise ValueError("Response is not a JSON array")
+                return plan
+            except (json.JSONDecodeError, ValueError) as e:
+                logger.warning(f"JSON parsing failed on attempt {attempt + 1}: {e}")
+                if attempt < max_attempts - 1:
+                    continue
+                else:
+                    raise AccomplishError(f"Failed to parse structured plan JSON after {max_attempts} attempts: {e}", "json_parse_error")
             except Exception as e:
                 if attempt == max_attempts - 1:
                     raise AccomplishError(f"Brain call failed after {max_attempts} attempts: {e}", "brain_call_error")
@@ -506,11 +453,22 @@ After your internal analysis and self-correction is complete, provide ONLY the f
         if not isinstance(plan, list) or len(plan) == 0:
             return {'valid': False, 'errors': ['Plan must be a non-empty array']}
         
+        # Collect all step numbers and their outputs for cross-referencing
+        step_numbers = set()
+        step_outputs: Dict[int, Set[str]] = {}
+        for i, step in enumerate(plan):
+            step_num = step.get('number', i + 1)
+            step_numbers.add(step_num)
+            if 'outputs' in step and isinstance(step['outputs'], dict):
+                step_outputs[step_num] = set(step['outputs'].keys())
+            else:
+                step_outputs[step_num] = set()
+
         for i, step in enumerate(plan):
             step_num = step.get('number', i + 1)
             
             # Check required fields
-            required_fields = ['number', 'actionVerb', 'description', 'inputs', 'outputs', 'dependencies']
+            required_fields = ['number', 'actionVerb', 'inputs', 'description', 'outputs', 'dependencies']
             for field in required_fields:
                 if field not in step:
                     errors.append(f"Step {step_num}: Missing required field '{field}'")
@@ -536,6 +494,30 @@ After your internal analysis and self-correction is complete, provide ONLY the f
                     
                     if not has_value and not has_output_name:
                         errors.append(f"Step {step_num}: Input '{input_name}' missing both 'value' and 'outputName'")
+
+            # Validate dependencies structure and correctness
+            if 'dependencies' in step and isinstance(step['dependencies'], dict):
+                for dep_input_name, source_step_num in step['dependencies'].items():
+                    if not isinstance(source_step_num, int) or source_step_num < 1:
+                        errors.append(f"Step {step_num}: Dependency for '{dep_input_name}' has invalid source step number: {source_step_num}")
+                        continue
+                    
+                    if source_step_num >= step_num:
+                        errors.append(f"Step {step_num}: Dependency for '{dep_input_name}' refers to future or same step: {source_step_num}")
+
+                    if source_step_num not in step_numbers:
+                        errors.append(f"Step {step_num}: Dependency for '{dep_input_name}' refers to non-existent step: {source_step_num}")
+                        continue
+                    
+                    # Check if the outputName exists in the source step's outputs
+                    # The dependency input name is assumed to be the output name from the source step
+                    if dep_input_name not in step_outputs.get(source_step_num, set()):
+                        errors.append(f"Step {step_num}: Dependency '{dep_input_name}' not found in outputs of source step {source_step_num}")
+            else:
+                if 'dependencies' in step and not isinstance(step['dependencies'], dict):
+                    errors.append(f"Step {step_num}: 'dependencies' field must be an object.")
+                elif 'dependencies' not in step: # This case is already covered by required_fields check
+                    pass
         
         return {'valid': len(errors) == 0, 'errors': errors}
     
@@ -560,43 +542,20 @@ Return the corrected JSON plan:"""
 
         logger.info(f"🔧 Asking LLM to repair {len(errors)} validation errors...")
 
-        # Try up to 2 times with JSON repair for validation fixes
         max_attempts = 2
         for attempt in range(max_attempts):
             try:
                 response = call_brain(prompt, inputs, "json")
-
-                # First try parsing as-is
-                try:
-                    repaired_plan = json.loads(response)
-                    if not isinstance(repaired_plan, list):
-                        raise ValueError("Repaired response is not a JSON array")
-
-                    logger.info(f"✅ LLM returned repaired plan with {len(repaired_plan)} steps")
-                    return repaired_plan
-
-                except json.JSONDecodeError as e:
-                    logger.warning(f"LLM repair JSON parsing failed on attempt {attempt + 1}: {e}")
-
-                    # Try to repair the JSON
-                    if attempt < max_attempts - 1:
-                        logger.info("🔧 Attempting JSON repair on LLM repair response...")
-                        repaired_response = repair_json(response)
-
-                        try:
-                            repaired_plan = json.loads(repaired_response)
-                            if not isinstance(repaired_plan, list):
-                                raise ValueError("Double-repaired response is not a JSON array")
-
-                            logger.info(f"✅ Double JSON repair successful! Plan with {len(repaired_plan)} steps")
-                            return repaired_plan
-
-                        except json.JSONDecodeError as repair_error:
-                            logger.warning(f"Double JSON repair failed: {repair_error}")
-                            continue
-                    else:
-                        raise AccomplishError(f"LLM repair produced invalid JSON after {max_attempts} attempts: {e}", "repair_error")
-
+                repaired_plan = json.loads(response)
+                if not isinstance(repaired_plan, list):
+                    raise ValueError("Repaired response is not a JSON array")
+                return repaired_plan
+            except (json.JSONDecodeError, ValueError) as e:
+                logger.warning(f"LLM repair JSON parsing failed on attempt {attempt + 1}: {e}")
+                if attempt < max_attempts - 1:
+                    continue
+                else:
+                    raise AccomplishError(f"LLM repair produced invalid JSON after {max_attempts} attempts: {e}", "repair_error")
             except Exception as e:
                 if attempt == max_attempts - 1:
                     raise AccomplishError(f"LLM repair call failed after {max_attempts} attempts: {e}", "repair_call_error")
@@ -656,7 +615,7 @@ class NovelVerbHandler:
                         "description": verb_info.get('description', ''),
                         "context": verb_info.get('context', ''),
                         "inputValues": verb_info.get('inputValues', {}),
-                        "outputs": verb_info.get('outputs', {}),
+                        "outputs": {},
                     }
                 else:
                     # Legacy string format or direct string value

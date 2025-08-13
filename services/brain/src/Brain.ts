@@ -136,7 +136,7 @@ export class Brain extends BaseEntity {
     private modelTimeoutCounts: Record<string, number> = {};
 
     async generate(req: express.Request, res: express.Response) {
-        const maxRetries = 3;
+        const maxRetries = 5;
         const modelName = req.body.modelName;
         const optimization = req.body.optimization;
         const conversationType = req.body.conversationType;
@@ -404,11 +404,6 @@ export class Brain extends BaseEntity {
         }
     }
 
-    private skipAuth(req: express.Request, _res: express.Response, next: express.NextFunction): void {
-        console.log('[Brain] Skipping authentication for endpoint:', req.path);
-        next();
-    }
-
     private determineMimeType(response: string): string {
         if (!response || typeof response !== 'string') {
             console.log('Invalid response type in determineMimeType:', typeof response);
@@ -586,10 +581,6 @@ export class Brain extends BaseEntity {
     private createThreadFromRequest(req: express.Request): Thread {
         const body = req.body;
 
-        console.log('[Brain Debug] Request body:', JSON.stringify(body, null, 2));
-        console.log('[Brain Debug] body.exchanges:', body.exchanges);
-        console.log('[Brain Debug] body.messages:', body.messages);
-
         const thread: Thread = {
             exchanges: body.exchanges || body.messages || [],
             optimization: body.optimization || 'accuracy',
@@ -602,7 +593,6 @@ export class Brain extends BaseEntity {
             responseType: body.responseType || 'text'
         };
 
-        console.log('[Brain Debug] Final thread.exchanges:', JSON.stringify(thread.exchanges, null, 2));
         console.log('[Brain Debug] Final thread object:', JSON.stringify({
             optimization: thread.optimization,
             conversationType: thread.conversationType,

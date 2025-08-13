@@ -316,11 +316,13 @@ export class GeminiInterface extends BaseInterface {
                 });
                 const lastMessage = formattedMessages[formattedMessages.length - 1].parts[0].text || '';
                 const result = await chat.sendMessage(lastMessage);
+                const fullResponse = result.response.text();
+                console.log(`GeminiInterface: Received response with content: ${fullResponse.substring(0, 140)}... (truncated)`);
                 let requireJson = options.responseType === 'json' ? true : false;
                 if (requireJson) {
-                    return this.ensureJsonResponse(result.response.text(), true);
+                    return this.ensureJsonResponse(fullResponse, true);
                 }
-                return result.response.text();
+                return fullResponse;
             }
         } catch (error) {
             console.error('Error generating response from Gemini:', error instanceof Error ? error.message : error);

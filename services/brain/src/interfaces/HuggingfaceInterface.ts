@@ -227,7 +227,7 @@ export class HuggingfaceInterface extends BaseInterface {
                         out += newContent;
                     }
                 }
-
+                console.log(`HuggingfaceInterface: Received response with content: ${out.substring(0, 140)}... (truncated)`);
                 // --- Ensure JSON if required ---
                 let requireJson =  options.responseType === 'json' ? true : false;
                 if (requireJson) {
@@ -415,9 +415,15 @@ export class HuggingfaceInterface extends BaseInterface {
                 return '';
             }
             const audioBuffer = fs.readFileSync(audio);
+            // Convert Node.js Buffer to ArrayBuffer for compatibility
+            const audioArrayBuffer = audioBuffer.buffer.slice(
+                audioBuffer.byteOffset,
+                audioBuffer.byteOffset + audioBuffer.byteLength
+            );
+
             const response = await inference.automaticSpeechRecognition({
                 model: modelName || 'facebook/wav2vec2-large-960h-lv60-self',
-                data: audioBuffer,
+                data: audioArrayBuffer,
             });
             return response.text;
         } catch (error) {
@@ -447,9 +453,15 @@ export class HuggingfaceInterface extends BaseInterface {
                 return '';
             }
             const imageBuffer = fs.readFileSync(image);
+            // Convert Node.js Buffer to ArrayBuffer for compatibility
+            const imageArrayBuffer = imageBuffer.buffer.slice(
+                imageBuffer.byteOffset,
+                imageBuffer.byteOffset + imageBuffer.byteLength
+            );
+
             const response = await inference.imageToText({
                 model: modelName || 'nlpconnect/vit-gpt2-image-captioning',
-                data: imageBuffer,
+                data: imageArrayBuffer,
             });
             return response.generated_text;
         } catch (error) {

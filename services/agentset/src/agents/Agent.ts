@@ -1953,7 +1953,7 @@ Please consider this context and the available plugins when planning and executi
 
         // For other errors, create a focused recovery plan
         const recoveryGoal = `
-**Recovery Task:** The step "${failedStep.actionVerb}" failed with error: "${errorMsg}"
+**Recovery Task:** The step "${failedStep.actionVerb}" failed.
 
 **Original Mission:** ${this.missionContext}
 

@@ -67,7 +67,7 @@ export abstract class BaseInterface {
         }
 
         // Remove markdown code blocks
-        cleanedResponse = cleanedResponse.replace(/^```(?:json)?\s*\n?/gm, '').replace(/\n?```\s*$/gm, '');
+        cleanedResponse = cleanedResponse.replace(/```(?:json)?/g, '');
 
         // Remove comments
         cleanedResponse = cleanedResponse.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
@@ -211,7 +211,7 @@ export abstract class BaseInterface {
         // Fix incomplete string literals at the end (common truncation issue)
         if (repaired.match(/[^"\\]"[^"]*$/)) {
             console.log('[baseInterface] Detected incomplete string at end - attempting fix');
-            repaired = repaired.replace(/([^"\\]"[^"]*)$/, '$1"');
+            repaired = repaired.replace(/([^"]\\"[^"]*)$/, '$1"');
         }
 
         // Fix trailing commas before closing brackets/braces (again, after bracket fixes)
@@ -274,9 +274,9 @@ export abstract class BaseInterface {
         console.log('[baseInterface] No complete responses found, trying general JSON extraction...');
         const generalPatterns = [
             // Match complete objects with proper nesting
-            /\{(?:[^{}]|{(?:[^{}]|{[^{}]*})*})*\}/g,
+            /\{(?:[^{}]|\{(?:[^{}]|\{[^{}]*})*})*\}/g,
             // Match complete arrays with proper nesting
-            /\[(?:[^\[\]]|\[(?:[^\[\]]|\[[^\[\]]*\])*\])*\]/g
+            /\[(?:[^[\]]|\[(?:[^[\]]|\[[^[\]]*\])*\])*\]/g
         ];
 
         for (const pattern of generalPatterns) {
@@ -340,4 +340,3 @@ export abstract class BaseInterface {
         return trimmedMessages.length > 0 ? trimmedMessages : [messages[messages.length - 1]];
     }
 }
-

@@ -108,7 +108,7 @@ export class GroqInterface extends BaseInterface {
                 const content = msg.content || (msg as any).message || '';
 
                 // Log the message structure for debugging
-                console.log(`GroqInterface: Message structure: ${JSON.stringify(msg, null, 2)}`);
+                //console.log(`GroqInterface: Message structure: ${JSON.stringify(msg, null, 2)}`);
 
                 return {
                     role: msg.role === 'user' ? 'user' : 'assistant',
@@ -117,13 +117,14 @@ export class GroqInterface extends BaseInterface {
             });
 
             // Log the formatted messages
-            console.log(`GroqInterface: Formatted messages: ${JSON.stringify(formattedMessages, (key, value) => {
+            /*console.log(`GroqInterface: Formatted messages: ${JSON.stringify(formattedMessages, (key, value) => {
                 // Truncate long content for readability
                 if (key === 'content' && typeof value === 'string' && value.length > 200) {
                     return value.substring(0, 200) + '... (truncated)';
                 }
                 return value;
             }, 2)}`);
+            */
 
             // Check if the first message is very long and might need to be truncated
             if (formattedMessages.length > 0 && typeof formattedMessages[0].content === 'string' && formattedMessages[0].content.length > 10000) {
@@ -153,19 +154,13 @@ export class GroqInterface extends BaseInterface {
                 return value;
             }, 2)}`);
 
-            // Log the first 500 characters of the first message content for debugging
-            if (messages && messages.length > 0 && messages[0].content) {
-                const content = messages[0].content;
-                console.log(`GroqInterface: First message content preview: ${content.substring(0, 500)}${content.length > 500 ? '... (truncated)' : ''}`);
-            }
-
             // Create the completion
             const completion = await groqClient.chat.completions.create(requestOptions);
 
             // Return the response
             if (completion.choices && completion.choices.length > 0) {
                 const content = completion.choices[0].message.content || '';
-
+                console.log(`GroqInterface: Received response with content: ${content.substring(0, 140)}... (truncated)`);
                 // --- Ensure JSON if required ---
                 const requireJson = (options.response_format?.type === 'json_object') || options.responseType === 'json';
                 if (requireJson) {

@@ -13,11 +13,11 @@ export class KNLLMModel extends BaseModel {
         ]);
 
         super({
-            name: "openweb/codewriter",
-            modelName: "codewriter",
+            name: "openweb/codeqwen",
+            modelName: "codeqwen",
             interfaceName: "openwebui", // Must match the interface name in OpenWebUIInterface.ts
             serviceName: "OWService", // Must match the service name in OWService.ts
-            tokenLimit: 128000,
+            tokenLimit: 64000,
             scoresByConversationType: scoresByConversationType,
             contentConversation: [
                 LLMConversationType.TextToCode,

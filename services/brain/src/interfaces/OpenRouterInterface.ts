@@ -168,6 +168,7 @@ export class OpenRouterInterface extends BaseInterface {
         if (response.choices && response.choices[0] && response.choices[0].message && response.choices[0].message.content) {
             fullResponse = response.choices[0].message.content;
         }
+        console.log(`OpenRouterInterface: Received response with content: ${fullResponse.substring(0, 140)}... (truncated)`);
 
         // --- Ensure JSON if required ---
         let requireJson = options.responseType === 'json' ? true : false;
