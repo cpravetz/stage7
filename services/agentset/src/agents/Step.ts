@@ -9,7 +9,8 @@ export enum StepStatus {
     RUNNING = 'running',
     COMPLETED = 'completed',
     ERROR = 'error',
-    PAUSED = 'paused' // Assuming PAUSED is a valid status based on other discussions
+    PAUSED = 'paused',
+    CANCELLED = 'cancelled'
 }
 
 export interface StepModification {
@@ -851,7 +852,8 @@ export class Step {
         plan: ActionVerbTask[],
         startingStepNo: number,
         persistenceManager: AgentPersistenceManager,
-        parentStep?: Step
+        parentStep?: Step,
+        agentContext?: any
     ): Step[] {
     // Extend ActionVerbTask locally to include number and outputs for conversion
     type PlanTask = ActionVerbTask & { number?: number; outputs?: Record<string, any>; id?: string; };
@@ -890,32 +892,39 @@ export class Step {
                         args: inputDef.args,
                     });
                 } else if (hasOutputName && hasSourceStep) {
-                    if (inputDef.sourceStep === 0 && parentStep) {
-                        // For sourceStep 0, directly populate inputValues from parentStep's inputValues
-                        // Attempt to resolve sourceStep 0 input from parentStep's inputValues
-                        let parentInputValue = parentStep.inputValues.get(inputDef.outputName);
+                    if (inputDef.sourceStep === 0) {
+                        let resolvedValue: any;
+                        let resolvedValueType: PluginParameterType = inputDef.valueType;
 
-                        if (!parentInputValue) {
-                            // Fuzzy match: Iterate through parent's inputs and check for partial or case-insensitive match
-                            for (const [parentKey, parentValue] of parentStep.inputValues.entries()) {
-                                if (parentKey.toLowerCase().includes(inputDef.outputName.toLowerCase()) ||
-                                    inputDef.outputName.toLowerCase().includes(parentKey.toLowerCase())) {
-                                    parentInputValue = parentValue;
-                                    console.warn(`[createFromPlan] ⚠️ Fuzzy matched parent input '${parentKey}' for '${inputDef.outputName}' in step '${task.actionVerb}'`);
-                                    break;
-                                }
-                            }
+                        // 1. Try to resolve from parentStep inputs
+                        if (parentStep && parentStep.inputValues.has(inputDef.outputName)) {
+                            const parentInputValue = parentStep.inputValues.get(inputDef.outputName);
+                            resolvedValue = parentInputValue?.value;
+                            resolvedValueType = parentInputValue?.valueType || inputDef.valueType;
+                        }
+                        // 2. If not found, try to resolve from agentContext (global)
+                        else if (agentContext && agentContext[inputDef.outputName]) {
+                            resolvedValue = agentContext[inputDef.outputName];
                         }
 
-                        if (parentInputValue) {
+                        if (resolvedValue !== undefined) {
                             inputValues.set(inputName, {
                                 inputName: inputName,
-                                value: parentInputValue.value,
-                                valueType: parentInputValue.valueType,
-                                args: parentInputValue.args || {}
+                                value: resolvedValue,
+                                valueType: resolvedValueType,
+                                args: {}
                             });
                         } else {
-                            console.error(`[createFromPlan] 🚨 Unresolved sourceStep 0: Parent input '${inputDef.outputName}' not found for input '${inputName}' in step '${task.actionVerb}'. This may lead to validation errors.`);
+                            // Fallback to creating a dependency on the parent step if it exists
+                            if (parentStep) {
+                                dependencies.push({
+                                    outputName: inputDef.outputName,
+                                    sourceStepId: parentStep.id,
+                                    inputName: inputName
+                                });
+                            } else {
+                                console.error(`[createFromPlan] 🚨 Unresolved sourceStep 0: Input '${inputDef.outputName}' not found for step '${task.actionVerb}'.`);
+                            }
                         }
                     } else {
                         const sourceStepId = stepNumberToUUID[inputDef.sourceStep];

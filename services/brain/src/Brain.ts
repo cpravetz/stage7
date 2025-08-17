@@ -170,9 +170,8 @@ export class Brain extends BaseEntity {
 
                 const filteredConvertParams = this.filterInternalParameters(convertParams || {});
                 const modelConvertParams = { ...filteredConvertParams };
-                modelConvertParams.max_length = modelConvertParams.max_length ?
-                    Math.min(modelConvertParams.max_length, selectedModel.tokenLimit) :
-                    selectedModel.tokenLimit;
+                modelConvertParams.max_length = selectedModel.tokenLimit || modelConvertParams.max_length ?
+                    Math.min(modelConvertParams.max_length, 8192) : 8192;
 
                 const prompt = JSON.stringify(modelConvertParams);
                 trackingRequestId = this.modelManager.trackModelRequest(selectedModel.name, conversationType, prompt);
@@ -281,8 +280,14 @@ export class Brain extends BaseEntity {
                     this.modelManager.trackModelResponse(trackingRequestId, '', 0, false, errorMessage);
                 }
 
-                if (selectedModel && selectedModel.name) {
-                    const isTimeout = /timeout|system_error/i.test(errorMessage);
+                // Check if this is a JSON error and if we should attempt a repair
+                if (thread.conversationType === LLMConversationType.TextToJSON && /json/i.test(errorMessage) && attempt < maxRetries) {
+                    console.log(`[Brain Chat] JSON error detected. Attempting to repair with a new model.`);
+                    // Modify the thread to include the repair instructions
+                    const lastExchange = thread.exchanges[thread.exchanges.length - 1];
+                    lastExchange.content = `The previous model failed to produce valid JSON. Please fix the following output to be a single, valid JSON object. Do not include any explanations, markdown, or code blocks - just the raw JSON object.\n\nBROKEN OUTPUT:\n${lastError.replace('JSON_RECOVERY_FAILED: Could not repair or extract valid JSON from: ', '')}`;
+                } else if (selectedModel && selectedModel.name) {
+                    const isTimeout = /timeout|system_error|connection error/i.test(errorMessage);
                     const isJsonError = /json|parse|invalid format/i.test(errorMessage);
                     
                     if (!this.modelFailureCounts[selectedModel.name]) {
@@ -300,15 +305,18 @@ export class Brain extends BaseEntity {
                     const counts = this.modelFailureCounts[selectedModel.name];
                     const totalFailures = counts.timeout + counts.json + counts.other;
                     
-                    if (counts.timeout >= 3 || counts.json >= 2 || totalFailures >= 5) {
+                    // More aggressive blacklisting for specific, repeated failures
+                    if (counts.timeout >= 2 || counts.json >= 3 || totalFailures >= 5) {
                         console.warn(`[Brain Chat] Blacklisting model ${selectedModel.name} due to repeated failures:`, `Timeouts: ${counts.timeout}, JSON errors: ${counts.json}, Other: ${counts.other}`);
-                        this.modelManager.blacklistModel(selectedModel.name, new Date(Date.now() + 3600 * 1000));
+                        this.modelManager.blacklistModel(selectedModel.name, new Date(Date.now() + 15 * 60 * 1000)); // Blacklist for 15 minutes
+                        // Reset counts after blacklisting
                         this.modelFailureCounts[selectedModel.name] = { timeout: 0, json: 0, other: 0 };
                     }
                 }
 
                 if (attempt < maxRetries) {
-                    console.log(`[Brain Chat] Attempting retry ${attempt + 1}/${maxRetries}`);
+                    console.log(`[Brain Chat] Clearing model selection cache and retrying...`);
+                    this.modelManager.clearModelSelectionCache();
                 }
             }
         }

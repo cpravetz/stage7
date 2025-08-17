@@ -22,7 +22,7 @@ import { AppThemeProvider } from './theme/AppThemeProvider';
 
 import { SecurityClient } from './SecurityClient';
 import { useSnackbar } from 'notistack';
-import { useWebSocket } from './context/WebSocketContext';
+import { useWebSocket, useMission, useData } from './context/WebSocketContext';
 import { useAuth } from './context/AuthContext';
 import { API_BASE_URL } from './config';
 import './App.css';
@@ -32,17 +32,9 @@ const MainApp: React.FC = () => {
   const [showSavedMissions, setShowSavedMissions] = useState<boolean>(false);
   const securityClient = SecurityClient.getInstance(API_BASE_URL);
 
-  // Use the WebSocketContext for shared state across routes
+  // Use the split contexts for shared state across routes
   const {
     conversationHistory,
-    activeMission,
-    activeMissionName,
-    activeMissionId,
-    isPaused,
-    workProducts,
-    sharedFiles,
-    statistics,
-    agentStatistics,
     sendMessage: contextSendMessage,
     handleControlAction: contextHandleControlAction,
     handleLoadMission: contextHandleLoadMission,
@@ -50,12 +42,25 @@ const MainApp: React.FC = () => {
     setPendingUserInput
   } = useWebSocket();
 
+  const {
+    activeMission,
+    activeMissionName,
+    activeMissionId,
+    isPaused
+  } = useMission();
+
+  const {
+    workProducts,
+    sharedFiles,
+    statistics,
+    agentStatistics
+  } = useData();
+
   // Responsive layout state
   const [drawerOpen, setDrawerOpen] = useState<boolean>(false);
   const { enqueueSnackbar } = useSnackbar();
 
   const ws = useRef<WebSocket | null>(null);
-
 
   const handleLogin = async (email: string, password: string) => {
     try {

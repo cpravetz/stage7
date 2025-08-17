@@ -44,6 +44,7 @@ export class CapabilitiesManager extends BaseEntity {
 
     // Cache for input transformations: missionId -> { actionVerb -> { originalInput -> transformedInput } }
     private inputTransformationCache: Map<string, Map<string, Map<string, string>>> = new Map();
+    private planCache: Map<string, PluginOutput[]> = new Map();
 
     constructor() {
         super('CapabilitiesManager', 'CapabilitiesManager', `capabilitiesmanager`, process.env.PORT || '5060');
@@ -700,6 +701,9 @@ export class CapabilitiesManager extends BaseEntity {
                 // This logic depends on the Agent's plan management, so here we just return the new plan
                 // The Agent or caller should handle inserting these steps and resetting dependencies accordingly
 
+                // Cache the newly generated plan
+                this.planCache.set(step.actionVerb, newPlanSteps);
+
                 // Return the new plan as PluginOutput[]
                 return [{
                     success: true,
@@ -875,6 +879,12 @@ export class CapabilitiesManager extends BaseEntity {
     private async checkCachedPlan(actionVerb: string): Promise<PluginOutput[] | null> {
         const trace_id = uuidv4();
         const source_component = "CapabilitiesManager.checkCachedPlan";
+        // 1. Check in-memory cache first
+        if (this.planCache.has(actionVerb)) {
+            console.log(`[${trace_id}] ${source_component}: Found cached plan for verb '${actionVerb}' in memory.`);
+            return this.planCache.get(actionVerb) || null;
+        }
+
         try {
             const response = await this.authenticatedApi.get(`http://${this.librarianUrl}/loadData/${actionVerb}`, {
                 params: { collection: 'actionPlans', storageType: 'mongo' }
@@ -882,7 +892,9 @@ export class CapabilitiesManager extends BaseEntity {
 
             if (response.data?.data) {
                 console.log(`[${trace_id}] ${source_component}: Found cached plan for verb: ${actionVerb}`);
-                return response.data.data as PluginOutput[];
+                const plan = response.data.data as PluginOutput[];
+                this.planCache.set(actionVerb, plan); // Store in memory cache
+                return plan;
             }
             return null;
         } catch (error:any) {

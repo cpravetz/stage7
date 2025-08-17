@@ -1,8 +1,8 @@
-import React, { useEffect, useRef, useMemo } from 'react';
+import React, { useEffect, useRef, useMemo, useCallback } from 'react';
 import { Network } from 'vis-network';
 import { DataSet } from 'vis-data';
 import { Edge, Node, Options } from 'vis-network';
-import { MapSerializer, AgentStatistics } from '../shared-browser'; // Assuming AgentStatistics is correctly defined
+import { MapSerializer, AgentStatistics } from '../shared-browser';
 import './NetworkGraph.css';
 import './step-overview-fullscreen.css';
 import { API_BASE_URL } from '../config';
@@ -10,27 +10,26 @@ import { SecurityClient } from '../SecurityClient';
 
 interface NetworkGraphProps {
     agentStatistics: Map<string, Array<AgentStatistics>> | any;
+    zoom: number;
+    setZoom: (zoom: number) => void;
+    pan: { x: number, y: number };
+    setPan: (pan: { x: number, y: number }) => void;
 }
 
-// getStatusColor will now return a border color or be part of the label,
-// as the main node background will be dictated by the agent's color.
-// Let's make it return a distinct border color for clarity.
 const getStepStatusBorderColor = (status: string): string => {
     switch (status.toLowerCase()) {
-        case 'pending': return '#FFD700'; // Gold
-        case 'running': return '#1E90FF'; // DodgerBlue
-        case 'completed': return '#32CD32'; // LimeGreen
-        case 'error': return '#FF0000'; // Red
-        case 'failed': return '#FF0000'; // Red
-        default: return '#808080'; // Gray
+        case 'pending': return '#FFD700';
+        case 'running': return '#1E90FF';
+        case 'completed': return '#32CD32';
+        case 'error': return '#FF0000';
+        case 'failed': return '#FF0000';
+        default: return '#808080';
     }
 };
 
-// Utility to determine best text color (black/white) for background
 function getContrastYIQ(hexcolor: string): string {
     let r, g, b;
     if (hexcolor.startsWith('hsl')) {
-        // Convert HSL to RGB
         const hsl = hexcolor.match(/hsl\(([-\d.]+),\s*([\d.]+)%,\s*([\d.]+)%\)/);
         if (hsl) {
             let h = parseFloat(hsl[1]);
@@ -51,7 +50,6 @@ function getContrastYIQ(hexcolor: string): string {
             b = Math.round((b1 + m) * 255);
         } else { r = g = b = 128; }
     } else {
-        // Assume hex
         let hex = hexcolor.replace('#', '');
         if (hex.length === 3) {
             hex = hex.split('').map(x => x + x).join('');
@@ -64,105 +62,94 @@ function getContrastYIQ(hexcolor: string): string {
     return yiq >= 128 ? '#222' : '#fff';
 }
 
-export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics }) => {
+export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics, zoom, setZoom, pan, setPan }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const networkRef = useRef<Network | null>(null);
-    // Store zoom and pan state
-    const viewStateRef = useRef<{scale: number, position: {x: number, y: number}} | null>(null);
-    // State to hold the data actually rendered by the graph
-    const [displayedNodes, setDisplayedNodes] = React.useState(() => new DataSet<Node>());
-    const [displayedEdges, setDisplayedEdges] = React.useState(() => new DataSet<Edge>());
+    
+    const isInitializedRef = useRef(false);
+    const lastDataHashRef = useRef<string>('');
+    
     // Step overview dialog state
     const [stepOverview, setStepOverview] = React.useState<any | null>(null);
     const [stepOverviewOpen, setStepOverviewOpen] = React.useState(false);
     const [stepOverviewLoading, setStepOverviewLoading] = React.useState(false);
     const [stepOverviewError, setStepOverviewError] = React.useState<string | null>(null);
 
-    // --- Zoom controls ---
-    const handleZoom = (factor: number) => {
+    // Zoom controls
+    const handleZoom = useCallback((factor: number) => {
         if (networkRef.current) {
-            const scale = networkRef.current.getScale();
-            // Remove upper limit on zoom scale, keep minimum at 0.1
-            const newScale = Math.max(0.1, scale * factor);
-            networkRef.current.moveTo({ scale: newScale });
-            // Save view state
-            const position = networkRef.current.getViewPosition();
-            viewStateRef.current = { scale: newScale, position };
+            const newScale = Math.max(0.1, zoom * factor);
+            setZoom(newScale);
         }
-    };
-    const handleResetZoom = () => {
-        if (networkRef.current) {
-            networkRef.current.moveTo({ scale: 1 });
-            // Save view state
-            const position = networkRef.current.getViewPosition();
-            viewStateRef.current = { scale: 1, position };
-        }
-    };
+    }, [zoom, setZoom]);
 
-    // --- Helper to preserve and restore view state on updates ---
-    const saveViewState = () => {
-        if (networkRef.current) {
-            const scale = networkRef.current.getScale();
-            const position = networkRef.current.getViewPosition();
-            viewStateRef.current = { scale, position };
-        }
-    };
-    const restoreViewState = () => {
-        if (networkRef.current && viewStateRef.current) {
-            networkRef.current.moveTo({
-                scale: viewStateRef.current.scale,
-                position: viewStateRef.current.position
-            });
-        }
-    };
+    const handleResetZoom = useCallback(() => {
+        setZoom(1);
+        setPan({ x: 0, y: 0 });
+    }, [setZoom, setPan]);
 
-    const { nodes, edges } = useMemo(() => {
-        console.log('[NetworkGraph] raw agentStatistics prop:', JSON.stringify(agentStatistics, null, 2));
+    
+
+    // Memoize the processed data and create a hash to detect real changes
+    const { nodes, edges, dataHash } = useMemo(() => {
+        console.log('[NetworkGraph] Processing agentStatistics...');
 
         let statsMap: Map<string, Array<AgentStatistics>>;
         if (agentStatistics instanceof Map) {
             statsMap = agentStatistics;
-            console.log('[NetworkGraph] agentStatistics is already a Map.');
         } else {
-            console.log('[NetworkGraph] agentStatistics is not a Map, attempting transformation...');
             try {
                 statsMap = MapSerializer.transformFromSerialization(agentStatistics);
-                console.log('[NetworkGraph] statsMap after transformation:', JSON.stringify(Array.from(statsMap.entries()), null, 2));
             } catch (e) {
-                console.error('[NetworkGraph] Error during MapSerializer.transformFromSerialization:', e);
-                console.error('[NetworkGraph] Original agentStatistics that caused error:', JSON.stringify(agentStatistics, null, 2));
-                return { nodes: new DataSet<Node>(), edges: new DataSet<Edge>() };
+                console.error('[NetworkGraph] Error transforming statistics:', e);
+                return { nodes: new DataSet<Node>(), edges: new DataSet<Edge>(), dataHash: '' };
             }
         }
 
         if (!statsMap || typeof statsMap.get !== 'function' || statsMap.size === 0) {
-            console.error('[NetworkGraph] Invalid or empty statsMap after processing. statsMap:', statsMap);
-             if (statsMap && typeof statsMap.get === 'function') {
-                console.log(`[NetworkGraph] statsMap size: ${statsMap.size}`);
-            }
-            return { nodes: new DataSet<Node>(), edges: new DataSet<Edge>() };
+            console.log('[NetworkGraph] No valid statistics data');
+            return { nodes: new DataSet<Node>(), edges: new DataSet<Edge>(), dataHash: 'empty' };
         }
 
+        // Create a hash of the data to detect actual changes
+        const dataString = JSON.stringify(Array.from(statsMap.entries()));
+        const dataHash = btoa(dataString).slice(0, 32); // Simple hash
+
+        // If data hasn't changed, return empty datasets (will be handled by effect)
+        if (dataHash === lastDataHashRef.current && networkRef.current) {
+            console.log('[NetworkGraph] Data unchanged, keeping existing network');
+            // Return empty datasets to signal no update needed
+            return { 
+                nodes: new DataSet<Node>(), 
+                edges: new DataSet<Edge>(), 
+                dataHash 
+            };
+        }
+
+        console.log('[NetworkGraph] Data changed, rebuilding network');
         const newNodes = new DataSet<Node>();
         const newEdges = new DataSet<Edge>();
-        let nodeCount = 0;
 
-        // --- Track step->agent and dependency relationships ---
+        // Build lookup tables and nodes
         const stepIdToAgentId: Record<string, string> = {};
         const stepIdToStep: Record<string, any> = {};
         const agentIdToSteps: Record<string, any[]> = {};
         const stepIdToDependents: Record<string, Set<string>> = {};
 
-        // First pass: create nodes and build lookup tables
+        // Create nodes and build lookup tables
         for (const [statusCategory, agents] of statsMap.entries()) {
             if (!Array.isArray(agents)) continue;
+            
             agents.forEach((agent: AgentStatistics) => {
                 const agentColor = agent.color || '#999999';
                 if (!agent.steps || !Array.isArray(agent.steps)) return;
+                
                 agentIdToSteps[agent.agentId] = agent.steps;
+                
                 agent.steps.forEach(step => {
                     stepIdToAgentId[step.id] = agent.agentId;
                     stepIdToStep[step.id] = step;
+                    
                     // Build dependents map
                     if (step.dependencies && Array.isArray(step.dependencies)) {
                         step.dependencies.forEach(depId => {
@@ -171,8 +158,10 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics }) =
                             stepIdToDependents[depId].add(step.id);
                         });
                     }
+                    
                     const stepStatusBorderColor = getStepStatusBorderColor(step.status);
                     const fontColor = getContrastYIQ(agentColor);
+                    
                     if (!newNodes.get(step.id)) {
                         newNodes.add({
                             id: step.id,
@@ -192,14 +181,16 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics }) =
             });
         }
 
-        // Second pass: create edges (dependencies, agent input/output links)
+        // Create edges
         for (const [statusCategory, agents] of statsMap.entries()) {
             if (!Array.isArray(agents)) continue;
+            
             agents.forEach((agent: AgentStatistics) => {
                 if (!agent.steps || !Array.isArray(agent.steps)) return;
-                // Use inputIds/outputIds if present, else fallback to []
+                
                 const agentInputIds: string[] = Array.isArray((agent as any).inputIds) ? (agent as any).inputIds : [];
                 const agentOutputIds: string[] = Array.isArray((agent as any).outputIds) ? (agent as any).outputIds : [];
+                
                 // Add input nodes (if not already present)
                 agentInputIds.forEach((inputId: string) => {
                     if (!newNodes.get(inputId)) {
@@ -214,6 +205,7 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics }) =
                         });
                     }
                 });
+                
                 // Add output nodes (if not already present)
                 agentOutputIds.forEach((outputId: string) => {
                     if (!newNodes.get(outputId)) {
@@ -228,6 +220,7 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics }) =
                         });
                     }
                 });
+                
                 // Step-to-step and agent input/output edges
                 agent.steps.forEach(step => {
                     // Standard dependencies
@@ -257,6 +250,7 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics }) =
                             });
                         });
                     }
+                    
                     // No dependents: connect this step to agent output(s)
                     const dependents = stepIdToDependents[step.id];
                     if (!dependents || dependents.size === 0) {
@@ -275,56 +269,28 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics }) =
                 });
             });
         }
-        console.log(`[NetworkGraph] Total nodes created: ${nodeCount}`);
-        if (nodeCount === 0) {
-            console.warn('[NetworkGraph] No nodes were created. Check the structure of agentStatistics and ensure agents have steps.');
-        }
 
-        return { nodes: newNodes, edges: newEdges };
+        return { nodes: newNodes, edges: newEdges, dataHash };
     }, [agentStatistics]);
 
-    // Effect to update displayedNodes and displayedEdges only if new data is valid
+    // Initialize or update the network only when data actually changes
     useEffect(() => {
-        if (nodes.length > 0) {
-            // New data is valid (non-empty)
-            saveViewState(); // Save view state before updating data
-            setDisplayedNodes(nodes);
-            setDisplayedEdges(edges);
-            console.log('[NetworkGraph] Valid new data received, updating displayed graph data.');
-        } else if (displayedNodes.length > 0 && nodes.length === 0) {
-            // New data is empty, but we have old valid data, so we don't update displayedNodes/Edges
-            // This effectively keeps the old graph displayed.
-            console.log('[NetworkGraph] New data is empty, retaining previously displayed graph.');
-        } else if (displayedNodes.length === 0 && nodes.length === 0) {
-            // Both current display and new data are empty. Ensure graph is cleared if it exists.
-             if (networkRef.current) {
-                networkRef.current.setData({ nodes: new DataSet<Node>(), edges: new DataSet<Edge>() });
-                console.log('[NetworkGraph] Both displayed and new data are empty. Clearing graph.');
-            }
-        }
-    }, [nodes, edges]); // Dependency: run when nodes/edges from useMemo change
+        if (!containerRef.current) return;
+        
+        if (stepOverviewOpen) return;
 
-    useEffect(() => {
-        if (!containerRef.current) {
+        if (dataHash === 'empty' || (dataHash === lastDataHashRef.current && nodes.length === 0)) {
+            console.log('[NetworkGraph] No data to display or unchanged');
             return;
         }
 
-        // Prevent refresh if StepOverviewDialog is open
-        if (stepOverviewOpen) {
+        if (dataHash === lastDataHashRef.current && networkRef.current) {
+            console.log('[NetworkGraph] Data unchanged, skipping network update');
             return;
         }
 
-        // Use displayedNodes and displayedEdges for rendering
-        if (displayedNodes.length === 0 && displayedEdges.length === 0) {
-            if (networkRef.current) {
-                // If there's genuinely no data to display (neither old nor new)
-                networkRef.current.setData({ nodes: new DataSet<Node>(), edges: new DataSet<Edge>() });
-                console.log('[NetworkGraph] No data to display (initial or cleared), ensuring network is empty.');
-            } else {
-                console.log('[NetworkGraph] No data to display, network not initialized.');
-            }
-            return;
-        }
+        console.log('[NetworkGraph] Updating network with new data');
+        lastDataHashRef.current = dataHash;
 
         const options: Options = {
             layout: {
@@ -372,22 +338,21 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics }) =
                     to: { enabled: true, scaleFactor: 1 }
                 },
                 width: 2
-            },
-            groups: {
             }
         };
 
         if (networkRef.current) {
             networkRef.current.setOptions(options);
-            // Use displayedNodes and displayedEdges here
-            networkRef.current.setData({ nodes: displayedNodes, edges: displayedEdges });
-            restoreViewState(); // Restore view state after data update
-            console.log('[NetworkGraph] Network updated with new data/options using displayedNodes/Edges.');
+            networkRef.current.setData({ nodes, edges });
+            networkRef.current.moveTo({ scale: zoom, position: pan });
+            console.log('[NetworkGraph] Network updated with preserved view state');
         } else {
-            // Use displayedNodes and displayedEdges here for initialization
-            networkRef.current = new Network(containerRef.current, { nodes: displayedNodes, edges: displayedEdges }, options);
+            networkRef.current = new Network(containerRef.current, { nodes, edges }, options);
+            networkRef.current.moveTo({ scale: zoom, position: pan });
+            isInitializedRef.current = true;
+            
             const securityClient = SecurityClient.getInstance(API_BASE_URL);
-            // Add node click handler for step overview
+            
             networkRef.current.on('click', async (params) => {
                 if (params.nodes && params.nodes.length > 0) {
                     const stepId = params.nodes[0];
@@ -395,11 +360,10 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics }) =
                     setStepOverviewOpen(true);
                     setStepOverviewError(null);
                     setStepOverview(null);
+                    
                     try {
                         const token = securityClient.getAccessToken();
-
-                        // Fetch step overview from AgentSet API
-                        const resp = await fetch(`${API_BASE_URL}/step/${stepId}`,{
+                        const resp = await fetch(`${API_BASE_URL}/step/${stepId}`, {
                             method: 'GET',
                             headers: {
                                 'Content-Type': 'application/json',
@@ -408,13 +372,15 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics }) =
                             credentials: 'include',
                             mode: 'cors'
                         });
-                        console.log('[Step Details] Result:', resp);
+                        
                         if (!resp.ok) {
-                            const errorData = await resp.json().catch(() => ({ message: 'Failed to fetch step overview and could not parse error response.' }));
+                            const errorData = await resp.json().catch(() => ({ 
+                                message: 'Failed to fetch step overview and could not parse error response.' 
+                            }));
                             throw new Error(errorData.message || `Failed to fetch step overview. Status: ${resp.status}`);
                         }
+                        
                         const data = await resp.json();
-                        // The new endpoint directly returns the step details, no need to access a nested 'data' field.
                         setStepOverview(data);
                     } catch (e: any) {
                         setStepOverviewError(e.message || 'Error fetching step overview');
@@ -423,55 +389,60 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics }) =
                     }
                 }
             });
-            console.log('[NetworkGraph] New network initialized.');
-        }
 
-        // Only destroy on unmount
+            networkRef.current.on("dragEnd", (params) => {
+                if (params.nodes.length > 0 && networkRef.current) {
+                    const newPosition = networkRef.current.getViewPosition();
+                    setPan(newPosition);
+                }
+            });
+
+            networkRef.current.on("zoom", (params) => {
+                const newScale = networkRef.current?.getScale() || 1;
+                const newPosition = networkRef.current?.getViewPosition() || { x: 0, y: 0 };
+                setZoom(newScale);
+                setPan(newPosition);
+            });
+            
+            console.log('[NetworkGraph] New network initialized');
+        }
+    }, [nodes, edges, dataHash, stepOverviewOpen, zoom, pan, setZoom, setPan]);
+
+    // Cleanup on unmount
+    useEffect(() => {
         return () => {
             if (networkRef.current) {
-                console.log('[NetworkGraph] useEffect: Cleanup on unmount. Network will be destroyed.');
+                console.log('[NetworkGraph] Cleaning up network on unmount');
                 networkRef.current.destroy();
                 networkRef.current = null;
+                isInitializedRef.current = false;
             }
         };
-    }, [displayedNodes, displayedEdges, stepOverviewOpen]);
+    }, []);
 
-    // Step Overview Dialog (now replaces the network graph visually)
-    const StepOverviewDialog = () => {
-        // Removed close on any keypress to prevent immediate closing
-        /*
-        React.useEffect(() => {
-            if (!stepOverviewOpen) return;
-            const handleKey = (e: KeyboardEvent) => {
-                setStepOverviewOpen(false);
-            };
-            window.addEventListener('keydown', handleKey);
-            return () => window.removeEventListener('keydown', handleKey);
-        }, [stepOverviewOpen]);
-        */
-        return (
-            <div className="step-overview-modal step-overview-fullscreen">
-                <div className="step-overview-content">
-                    <button className="close-btn" onClick={() => setStepOverviewOpen(false)}>×</button>
-                    {stepOverviewLoading && <div>Loading...</div>}
-                    {!stepOverviewLoading && stepOverviewError && (
-                        <div style={{ color: 'red' }}>{stepOverviewError}</div>
-                    )}
-                    {!stepOverviewLoading && !stepOverviewError && stepOverview && (
-                        <div className="stepbox" >
-                            <h3>Step Overview</h3>
-                            <div><b>Action:</b> {stepOverview.verb}</div>
-                            <div><b>Description:</b> {stepOverview.description}</div>
-                            <div><b>Status:</b> {stepOverview.status}</div>
-                            <div><b>Inputs:</b> <pre>{JSON.stringify(stepOverview.inputs, null, 2)}</pre></div>
-                            <div><b>Results:</b> <pre>{JSON.stringify(stepOverview.results, null, 2)}</pre></div>
-                            <div><b>Dependencies:</b> <pre>{JSON.stringify(stepOverview.dependencies, null, 2)}</pre></div>
-                        </div>
-                    )}
-                </div>
+    // Step Overview Dialog
+    const StepOverviewDialog = () => (
+        <div className="step-overview-modal step-overview-fullscreen">
+            <div className="step-overview-content">
+                <button className="close-btn" onClick={() => setStepOverviewOpen(false)}>×</button>
+                {stepOverviewLoading && <div>Loading...</div>}
+                {!stepOverviewLoading && stepOverviewError && (
+                    <div style={{ color: 'red' }}>{stepOverviewError}</div>
+                )}
+                {!stepOverviewLoading && !stepOverviewError && stepOverview && (
+                    <div className="stepbox">
+                        <h3>Step Overview</h3>
+                        <div><b>Action:</b> {stepOverview.verb}</div>
+                        <div><b>Description:</b> {stepOverview.description}</div>
+                        <div><b>Status:</b> {stepOverview.status}</div>
+                        <div><b>Inputs:</b> <pre>{JSON.stringify(stepOverview.inputs, null, 2)}</pre></div>
+                        <div><b>Results:</b> <pre>{JSON.stringify(stepOverview.results, null, 2)}</pre></div>
+                        <div><b>Dependencies:</b> <pre>{JSON.stringify(stepOverview.dependencies, null, 2)}</pre></div>
+                    </div>
+                )}
             </div>
-        );
-    };
+        </div>
+    );
 
     return (
         <div style={{ position: 'relative', width: '100%' }}>
@@ -480,8 +451,8 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics }) =
             ) : (
                 <>
                     <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 2, display: 'flex', gap: 8 }}>
-                        <button onClick={() => handleZoom(1.2)} title="Zoom In">＋</button>
-                        <button onClick={() => handleZoom(1/1.2)} title="Zoom Out">－</button>
+                        <button onClick={() => handleZoom(1.2)} title="Zoom In">+</button>
+                        <button onClick={() => handleZoom(1/1.2)} title="Zoom Out">-</button>
                         <button onClick={handleResetZoom} title="Reset Zoom">⟳</button>
                     </div>
                     <div ref={containerRef} className="network-graph" />

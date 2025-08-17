@@ -103,9 +103,8 @@ async function transformInputsWithBrain(
 
                 Your Goal: Create a JSON object where keys are the input names and values are the corresponding transformed values from 'Inputs Provided'.
                 This object MUST include every required input.
-                If a required input is NOT present in 'Inputs Provided' and you cannot derive a sensible value, provide a reasonable default based on its 'valueType'.
-                For example, if 'valueType' is 'string', use an empty string ""; if 'number', use 0; if 'boolean', use false; if 'object', use {}; if 'array', use [].
-                If no sensible default can be determined, explicitly set the value to null.
+                For required inputs, you MUST derive a sensible, non-empty value from the 'Inputs Provided' or the context.
+                - DO NOT use empty strings (""), empty arrays ([]), or empty objects ({}) for required inputs.
 
                 Return ONLY the transformed JSON object.
                 DO NOT include any explanation, markdown formatting, or extra text.

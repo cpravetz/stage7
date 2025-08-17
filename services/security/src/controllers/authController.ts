@@ -2,8 +2,6 @@ import { Request, Response, NextFunction } from 'express';
 import { AsyncRequestHandler } from '../types/express';
 import { AuthenticationService } from '../services/AuthenticationService';
 import { TokenService } from '../services/TokenService';
-import { AuthorizationService } from '../services/AuthorizationService';
-import { User } from '../models/User';
 import { TokenType } from '../models/Token';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { MongoUserRepository } from '../repositories/MongoUserRepository';
@@ -18,7 +16,6 @@ const tokenBlacklistRepository = new MongoTokenBlacklistRepository();
 // Initialize services
 const tokenService = new TokenService({}, tokenRepository, tokenBlacklistRepository, userRepository);
 const authenticationService = new AuthenticationService(tokenService);
-const authorizationService = new AuthorizationService();
 
 export const register: AsyncRequestHandler = async (req, res, next) => {
     try {
@@ -209,8 +206,6 @@ export const refreshToken: AsyncRequestHandler = async (req, res, next) => {
             accessToken: result.accessToken.token
         });
     } catch (error) {
-        analyzeError(error as Error);
-
         if ((error as Error).message === 'Invalid or expired token') {
             return res.status(401).json({ message: 'Invalid or expired refresh token' });
         }
@@ -342,8 +337,6 @@ export const verifyEmail: AsyncRequestHandler = async (req, res, next) => {
             }
         });
     } catch (error) {
-        analyzeError(error as Error);
-
         if ((error as Error).message === 'Invalid or expired token') {
             return res.status(401).json({ message: 'Invalid or expired verification token' });
         }
@@ -394,7 +387,6 @@ export const resetPassword: AsyncRequestHandler = async (req, res, next) => {
 
         res.status(200).json({ message: 'Password reset successful' });
     } catch (error) {
-        analyzeError(error as Error);
 
         if ((error as Error).message === 'Invalid password reset token') {
             return res.status(401).json({ message: 'Invalid or expired password reset token' });

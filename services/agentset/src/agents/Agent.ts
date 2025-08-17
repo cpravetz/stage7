@@ -35,6 +35,7 @@ export class Agent extends BaseEntity {
     conversation: Array<{ role: string, content: string }> = [];
     role: string = 'executor'; // Default role
     roleCustomizations?: any;
+    private isRecovering: boolean = false; // New flag for recovery mode
 
     // Properties for lifecycle management
     private checkpointInterval: NodeJS.Timeout | null = null;
@@ -206,7 +207,20 @@ Please consider this context and the available plugins when planning and executi
             while (this.status === AgentStatus.RUNNING &&
                    this.steps.some(step => step.status === StepStatus.PENDING || step.status === StepStatus.RUNNING)) {
                 try {
-                    for (const step of this.steps.filter(s => s.status === StepStatus.PENDING)) {
+                    let stepsToProcess: Step[];
+                    if (this.isRecovering) {
+                        // In recovery mode, only process the last added step (the recovery step)
+                        // And mark all other pending steps as cancelled
+                        stepsToProcess = [this.steps[this.steps.length - 1]];
+                        for (const step of this.steps.filter(s => s.status === StepStatus.PENDING && s !== stepsToProcess[0])) {
+                            step.status = StepStatus.CANCELLED;
+                            console.log(`[Agent ${this.id}] Cancelled step ${step.id} due to recovery mode.`);
+                        }
+                    } else {
+                        stepsToProcess = this.steps.filter(s => s.status === StepStatus.PENDING);
+                    }
+
+                    for (const step of stepsToProcess) {
                         if (this.status === AgentStatus.RUNNING && step.areDependenciesSatisfied(this.steps)) {
                             console.log(`Executing step ${step.actionVerb} (${step.id})...`);
 
@@ -276,7 +290,8 @@ Please consider this context and the available plugins when planning and executi
                                 }
                                 if (actualPlanArray && Array.isArray(actualPlanArray)) { // Added extra Array.isArray check for robustness
                                     this.say(`Generated a plan (${planSourceDescription}) with ${actualPlanArray.length} steps`);
-                                    this.addStepsFromPlan(actualPlanArray);
+                                    this.addStepsFromPlan(actualPlanArray, step);
+                                    this.isRecovering = false; // Exit recovery mode after successfully adding new plan
                                     await this.notifyTrafficManager();
                                 } else {
                                     const errorMessage = `Error: Expected a plan (array, or object with 'tasks'/'steps' array) from Brain service, but received: ${JSON.stringify(planningStepResult)}`;
@@ -350,9 +365,9 @@ Please consider this context and the available plugins when planning and executi
         }
     }
 
-    private addStepsFromPlan(plan: ActionVerbTask[]) {
+    private addStepsFromPlan(plan: ActionVerbTask[], parentStep: Step) {
         console.log(`[Agent ${this.id}] Parsed plan for addStepsFromPlan:`, JSON.stringify(plan));
-        const newSteps = createFromPlan(plan, this.steps.length + 1, this.agentPersistenceManager);
+        const newSteps = createFromPlan(plan, this.steps.length + 1, this.agentPersistenceManager, parentStep, this);
         this.steps.push(...newSteps);
     }
 
@@ -569,7 +584,8 @@ Please consider this context and the available plugins when planning and executi
                 missionId: this.missionId,
                 mimeType: data[0]?.mimeType || 'text/plain',
                 fileName: data[0]?.fileName,
-                workproduct: data[0]?.result
+                workproduct: (type === 'Plan' && data[0]?.result) ?
+                    `Plan with ${Array.isArray(data[0].result) ? data[0].result.length : Object.keys(data[0].result).length} steps` : data[0]?.result     
             };
             console.log('[Agent.ts] WORK_PRODUCT_UPDATE payload:', JSON.stringify(workProductPayload, null, 2));
 
@@ -853,7 +869,7 @@ Please consider this context and the available plugins when planning and executi
 
             // Add extended timeout for CapabilitiesManager calls, especially for ACCOMPLISH actions
             // that may need to call Brain service with long model retry timeouts
-            const timeout = step.actionVerb === 'ACCOMPLISH' ? 1500000 : 300000; // 25 minutes for ACCOMPLISH, 5 minutes for others
+            const timeout = step.actionVerb === 'ACCOMPLISH' ? 3600000 : 1800000; // 60 minutes for ACCOMPLISH, 30 minutes for others
 
             const response = await this.authenticatedApi.post(
                 `http://${this.capabilitiesManagerUrl}/executeAction`,
@@ -1932,6 +1948,7 @@ Please consider this context and the available plugins when planning and executi
             return;
         }
         Agent.replannedSteps.add(failedStep);
+        this.isRecovering = true; // Enter recovery mode
 
         const errorMsg = failedStep.lastError?.message || 'Unknown error';
         const workProductsSummary = await this.getCompletedWorkProductsSummary();
@@ -1959,7 +1976,7 @@ Please consider this context and the available plugins when planning and executi
 
 **Completed Work:** ${workProductsSummary}
 
-**Instructions:** Create a simple, alternative approach to accomplish what the failed step was trying to do. Use only basic, well-known action verbs like SEARCH, SCRAPE, RUN_CODE, TEXT_ANALYSIS, and THINK. Do not repeat the failed approach.
+**Instructions:** Create a simple, alternative approach to accomplish what the failed step was trying to do. Your new plan should use the step inputs and produce the step outputs. Do not repeat the failed approach.
         `;
 
         const recoveryStep = new Step({
@@ -1982,16 +1999,15 @@ Please consider this context and the available plugins when planning and executi
 
         // Instead of creating another ACCOMPLISH step, try to break down the task manually
         const taskBreakdownGoal = `
-**Task:** Break down the action "${failedStep.actionVerb}" into 2-3 simple, concrete steps.
+**Task:** 
+1. Break down the action "${failedStep.actionVerb}" into concrete steps.
+2. Each step should be specific and actionable
+3. Focus on the core objective of "${failedStep.actionVerb}" and seek a way to achieve it.
 
 **Context:** ${failedStep.description || 'No additional context provided'}
 
 **Available Inputs:** ${JSON.stringify(Array.from(failedStep.inputValues?.keys() || []))}
 
-**Instructions:**
-1. Each step should be specific and actionable
-2. Focus on the core objective of "${failedStep.actionVerb}"
-3. Return a simple plan with 2-3 steps maximum
         `;
 
         const breakdownStep = new Step({

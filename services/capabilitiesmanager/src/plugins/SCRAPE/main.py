@@ -81,7 +81,7 @@ from typing import Dict, List, Any, Optional, Union
 import logging
 import time
 import random
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, urlparse
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -282,6 +282,14 @@ class ScrapePlugin:
             return value.strip()
         return value
 
+    def _is_valid_url(self, url: str) -> bool:
+        try:
+            result = urlparse(url)
+            # Check if scheme and netloc (network location, i.e., domain) exist
+            return all([result.scheme, result.netloc])
+        except ValueError:
+            return False
+
     def execute(self, inputs_map: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Execute the SCRAPE plugin"""
         try:
@@ -309,8 +317,10 @@ class ScrapePlugin:
                 try:
                     # Validate and convert URL
                     full_url = self.convert_to_full_url(url, 'https')
-                    if not full_url:
-                        logger.warning(f"Invalid URL: {url}")
+                    
+                    # Add stricter URL validation
+                    if not self._is_valid_url(full_url):
+                        logger.warning(f"Skipping invalid or unresolvable URL: {url} (converted to: {full_url})")
                         continue
 
                     # Parse configuration

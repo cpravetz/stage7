@@ -30,7 +30,7 @@ import {
   Toolbar
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import { useWebSocket } from '../context/WebSocketContext';
+import { useWebSocket, useMission } from '../context/WebSocketContext';
 import { API_BASE_URL } from '../config';
 import { SecurityClient } from '../SecurityClient';
 
@@ -112,7 +112,9 @@ function a11yProps(index: number) {
 
 const ModelPerformanceDashboard: React.FC = () => {
   const navigate = useNavigate();
-  const { isConnected, activeMission, activeMissionId } = useWebSocket();
+  const { isConnected } = useWebSocket();
+    const { activeMission, activeMissionId } = useMission();
+  
   const [tabValue, setTabValue] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

@@ -35,6 +35,24 @@ export class ServiceTokenManager {
     this.fetchPublicKey().catch(error => {
       console.warn(`Failed to fetch public key: ${error.message}. Will retry later.`);
     });
+
+    // Proactively refresh the token every minute
+    setInterval(() => this.proactiveTokenRefresh(), 60 * 1000);
+  }
+
+  /**
+   * Proactively refresh the token if it is close to expiring
+   */
+  private async proactiveTokenRefresh(): Promise<void> {
+    const now = Date.now();
+    // Refresh if the token is within 5 minutes of expiring
+    if (this.token !== '' && this.tokenExpiry < now + (5 * 60 * 1000)) {
+      try {
+        await this.getToken();
+      } catch (error: any) {
+        console.warn(`[ServiceTokenManager] Proactive token refresh failed: ${error.message}`);
+      }
+    }
   }
 
   /**

@@ -14,11 +14,11 @@ export class KNLLMModel extends BaseModel {
         ]);
 
         super({
-            name: "openweb/knownow",
-            modelName: "knownow", // This is the model name that will be sent to the OpenWebUI API
+            name: "openweb/cogito",
+            modelName: "cogito:3b", // This is the model name that will be sent to the OpenWebUI API
             interfaceName: "openwebui", // Must match the interface name in OpenWebUIInterface.ts
             serviceName: "OWService", // Must match the service name in OWService.ts
-            tokenLimit: 8192,
+            tokenLimit: 128000,
             scoresByConversationType: scoresByConversationType,
             contentConversation: [
                 LLMConversationType.TextToCode,

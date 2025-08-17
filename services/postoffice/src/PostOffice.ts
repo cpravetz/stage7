@@ -101,8 +101,8 @@ export class PostOffice extends BaseEntity {
         // Handle preflight requests
         this.app.options('*', cors(corsOptions));
 
-        this.app.use(bodyParser.json());
-        this.app.use(bodyParser.urlencoded({ extended: true }));
+        this.app.use(bodyParser.json({ limit: '500mb' }));
+        this.app.use(bodyParser.urlencoded({ limit: '500mb', extended: true }));
 
         this.app.use((_req, res, next) => {
             res.setHeader('Content-Type', 'application/json');

@@ -77,6 +77,7 @@ export class BaseModel {
             return Promise.resolve('');
         }
         options.modelName = options.modelName || this.modelName;
+        options.max_length = options.max_length || this.tokenLimit;
         return this.llminterface.chat(this.service, messages, options);
     }
     convert(conversationType: LLMConversationType, convertParams: ConvertParamsType): Promise<any> {

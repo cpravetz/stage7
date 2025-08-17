@@ -27,7 +27,7 @@ export abstract class BaseInterface {
         this.converters = new Map(); // Initialize converters map
     }
 
-    abstract chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, responseType?: string }): Promise<string>;
+    abstract chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, responseType?: string, tokenLimit?: number }): Promise<string>;
 
     abstract convert(service: BaseService, conversionType: LLMConversationType, convertParams: ConvertParamsType): Promise<any>;
 
@@ -56,40 +56,65 @@ export abstract class BaseInterface {
 
         let cleanedResponse = response.trim();
 
-        // First, try to parse the original response as-is
-        try {
-            const parsed = JSON.parse(cleanedResponse);
-            console.log('[baseInterface] Response is valid JSON after cleaning.');
-            return JSON.stringify(parsed, null, 2);
-        } catch (e) {
-            // Only if parsing fails, try basic cleaning
-            console.log('[baseInterface] Initial JSON parse failed, attempting basic cleaning...');
+        // Per user request, find the first '{' or '[' and the last '}' or ']'.
+        const firstBrace = cleanedResponse.indexOf('{');
+        const firstBracket = cleanedResponse.indexOf('[');
+
+        let start = -1;
+        let endChar = '';
+
+        // Find the first opening bracket to determine the type of JSON (object or array)
+        if (firstBrace !== -1 && (firstBracket === -1 || firstBrace < firstBracket)) {
+            start = firstBrace;
+            endChar = '}';
+        } else if (firstBracket !== -1) {
+            start = firstBracket;
+            endChar = ']';
         }
 
-        // Remove markdown code blocks
-        cleanedResponse = cleanedResponse.replace(/```(?:json)?/g, '');
+        if (start !== -1) {
+            // Find the last corresponding closing bracket
+            const end = cleanedResponse.lastIndexOf(endChar);
 
-        // Remove comments
-        cleanedResponse = cleanedResponse.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+            if (end > start) {
+                // Trim the string to only include the content between the first and last brackets
+                cleanedResponse = cleanedResponse.substring(start, end + 1);
+            } else {
+                // If no closing bracket is found, just trim the beginning
+                cleanedResponse = cleanedResponse.substring(start);
+            }
+        }
 
-        // Basic JSON fixes
-        cleanedResponse = cleanedResponse.replace(/,(\s*[}\]])/g, '$1'); // trailing commas
-        cleanedResponse = cleanedResponse.replace(/([{,]\s*)(\w+)(\s*:)/g, '$1"$2"$3'); // unquoted keys
-
+        // First, try to parse the trimmed response as-is
         try {
             const parsed = JSON.parse(cleanedResponse);
-            console.log('[baseInterface] Response is valid JSON after cleaning.');
+            console.log('[baseInterface] Response is valid JSON after trimming.');
             return JSON.stringify(parsed, null, 2);
         } catch (e) {
-            if (!allowPartialRecovery) {
-                const errorMessage = e instanceof Error ? e.message : String(e);
-                console.log(`[baseInterface] JSON parse failed: ${errorMessage}`);
-                console.log('[baseInterface] malformed JSON:', cleanedResponse);
-                throw new Error(`JSON_PARSE_ERROR: ${errorMessage}`);
-            }
+            console.log('[baseInterface] Initial JSON parse failed after trimming, attempting robust extraction and repair...');
+        }
 
-            // Only attempt recovery if explicitly requested
-            return this.attemptJsonRecovery(cleanedResponse);
+        // Attempt robust extraction from the already trimmed response
+        let extractedJsonCandidate = this.extractJsonFromText(cleanedResponse);
+
+        if (extractedJsonCandidate) {
+            cleanedResponse = extractedJsonCandidate;
+        } else {
+            // If extraction failed, proceed with general cleaning and repair on the original response
+            console.log('[baseInterface] No clear JSON block extracted, proceeding with general repair.');
+            cleanedResponse = this.repairCommonJsonIssues(cleanedResponse);
+        }
+
+        // Now, try to parse the (extracted or generally repaired) response
+        try {
+            const parsed = JSON.parse(cleanedResponse);
+            console.log('[baseInterface] Response is valid JSON after extraction/repair.');
+            return JSON.stringify(parsed, null, 2);
+        } catch (e) {
+            const errorMessage = e instanceof Error ? e.message : String(e);
+            console.error(`[baseInterface] Final JSON parse failed after all attempts: ${errorMessage}`);
+            console.error('[baseInterface] Malformed JSON that caused final failure:', cleanedResponse.substring(0, 500) + '...');
+            throw new Error(`JSON_PARSE_ERROR: ${errorMessage}`);
         }
     }
 
@@ -127,8 +152,12 @@ export abstract class BaseInterface {
 
         console.log('[baseInterface] Starting JSON repair on text length:', repaired.length);
 
+        // NEW: Remove non-printable ASCII characters (except common JSON escapes)
+        // This regex keeps alphanumeric, common punctuation, and valid JSON escape sequences.
+        // It removes characters like form feed, vertical tab, etc., which can break JSON.
+        repaired = repaired.replace(/[^ -~]/g, ''); // Keep printable ASCII, newlines, tabs, backslashes
         // Remove markdown code blocks
-        repaired = repaired.replace(/```(?:json)?\s*\n?/g, '');
+        repaired = repaired.replace(/```(?:json)?/g, '');
         repaired = repaired.replace(/```\s*$/g, '');
 
         // Remove markdown headers and analysis sections that models often add
@@ -136,27 +165,24 @@ export abstract class BaseInterface {
         repaired = repaired.replace(/^#{1,6}\s+.*$/gm, '');
 
         // Remove common markdown patterns that interfere with JSON
-        repaired = repaired.replace(/^\*\*[^*]+\*\*:?\s*/gm, '');
-        repaired = repaired.replace(/^-\s+\*\*[^*]+\*\*:?\s*/gm, '');
-        repaired = repaired.replace(/^[0-9]+\.\s+\*\*[^*]+\*\*:?\s*/gm, '');
+        repaired = repaired.replace(/^\*\*[^*]+\*\*?:?\s*/gm, '');
+        repaired = repaired.replace(/^-?\s*\*\*[^*]+\*\*?:?\s*/gm, '');
+        repaired = repaired.replace(/^[0-9]+\.\s*\*\*[^*]+\*\*?:?\s*/gm, '');
 
         // Remove "end of response" markers
         repaired = repaired.replace(/###?\s*"?end of response"?\s*$/gmi, '');
 
-        // Only remove prefixes/suffixes if they're clearly not part of JSON
-        // Be more conservative to avoid removing valid content
-        repaired = repaired.replace(/^[^{[]*?(?=[{[])/g, ''); // Remove text before first { or [ (non-greedy)
-        repaired = repaired.replace(/(?<=[}\]])[^}\]]*$/g, ''); // Remove text after last } or ] (non-greedy)
+        repaired =  repaired.replace(/("(?:[^"\\]|\\.)*"|\d+|true|false|null)(\s*\n\s*)(?=")/g, '$1,$2');
 
         // Fix trailing commas (handle multi-line)
         repaired = repaired.replace(/,(\s*[}\]])/g, '$1');
 
         // Fix set notation to proper JSON objects (e.g., {"key"} -> {"key": "key"})
         // Handle single item sets first
-        repaired = repaired.replace(/{\s*"([^"]+)"\s*}/g, '{"$1": "$1"}');
+        repaired = repaired.replace(/{\s*"([^\"]+)"\s*}/g, '{"$1": "$1"}');
         
         // Handle multi-item sets with variable number of items
-        repaired = repaired.replace(/{\s*"([^"]+)"(?:\s*,\s*"([^"]+)")*\s*}/g, (match, ...args) => {
+        repaired = repaired.replace(/{\s*"([^\"]+)"(?:\s*,\s*"([^\"]+)")*\s*}/g, (match, ...args) => {
             const items = args.slice(0, -2).filter(Boolean); // Remove regex match metadata
             const obj: { [key: string]: string } = {};
             items.forEach(item => obj[item] = item);
@@ -164,13 +190,13 @@ export abstract class BaseInterface {
         });
 
         // Fix unquoted keys (simple cases) - handle multi-line
-        repaired = repaired.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":');
+        repaired = repaired.replace(/([{,])\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":');
 
         // Fix single quotes to double quotes (but be careful with content)
         repaired = repaired.replace(/'/g, '"');
 
         // Fix common escape issues
-        repaired = repaired.replace(/\\"/g, '\\"');
+        repaired = repaired.replace(/\\"/g, '"');
 
         // Remove duplicate commas
         repaired = repaired.replace(/,+/g, ',');
@@ -182,7 +208,7 @@ export abstract class BaseInterface {
         // Additional fixes for multi-line JSON issues
         // Fix missing commas after values (common LLM issue)
         repaired = repaired.replace(/("(?:[^"\\]|\\.)*"|\d+|true|false|null)(\s*\n\s*)(")/g, '$1,$2$3');
-        repaired = repaired.replace(/}(\s*\n\s*)"([^"]+)":/g, '},$1"$2":');
+        repaired = repaired.replace(/}(\s*\n\s*)"([^\"]+)":/g, '},$1"$2":');
 
         // Fix missing closing brackets - common LLM truncation issue
         // Count opening and closing brackets to detect imbalance
@@ -211,7 +237,7 @@ export abstract class BaseInterface {
         // Fix incomplete string literals at the end (common truncation issue)
         if (repaired.match(/[^"\\]"[^"]*$/)) {
             console.log('[baseInterface] Detected incomplete string at end - attempting fix');
-            repaired = repaired.replace(/([^"]\\"[^"]*)$/, '$1"');
+            repaired = repaired.replace(/([^"\\]\\"[^"]*)$/, '$1"');
         }
 
         // Fix trailing commas before closing brackets/braces (again, after bracket fixes)
@@ -223,7 +249,7 @@ export abstract class BaseInterface {
         const finalOpenBraces = (repaired.match(/\{/g) || []).length;
         const finalCloseBraces = (repaired.match(/\}/g) || []).length;
 
-        console.log(`[baseInterface] Final bracket counts - Open: [${finalOpenBrackets}] {${finalOpenBraces}}, Close: ]${finalCloseBrackets} }${finalCloseBraces}`);
+        console.log(`[baseInterface] Final bracket counts - Open: [${finalOpenBrackets}] {${finalOpenBraces}}, Close: ]${finalCloseBraces} }${finalCloseBraces}`);
 
         if (finalOpenBrackets !== finalCloseBrackets || finalOpenBraces !== finalCloseBraces) {
             console.log('[baseInterface] Warning: Bracket imbalance still exists after repair');
@@ -232,8 +258,6 @@ export abstract class BaseInterface {
 
         return repaired;
     }
-
-
 
 
 
@@ -274,9 +298,9 @@ export abstract class BaseInterface {
         console.log('[baseInterface] No complete responses found, trying general JSON extraction...');
         const generalPatterns = [
             // Match complete objects with proper nesting
-            /\{(?:[^{}]|\{(?:[^{}]|\{[^{}]*})*})*\}/g,
+            /\{(?:[^\{\}]|\{(?:[^\{\}]|\{[^\{\}]*})*})*\}/g,
             // Match complete arrays with proper nesting
-            /\[(?:[^[\]]|\[(?:[^[\]]|\[[^[\]]*\])*\])*\]/g
+            /\[(?:[^\[\]]|\[(?:[^\[\]]|\{[^\{\}]*})*\])*\]/g
         ];
 
         for (const pattern of generalPatterns) {

@@ -38,6 +38,8 @@ export const TabbedPanel: React.FC<TabbedPanelProps> = ({
   const [descriptionDialog, setDescriptionDialog] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [description, setDescription] = useState('');
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
 
   interface TabPanelProps {
     children?: React.ReactNode;
@@ -45,28 +47,17 @@ export const TabbedPanel: React.FC<TabbedPanelProps> = ({
     value: string;
   }
 
-  const TabPanel = (props: TabPanelProps) => {
+  const TabPanel = React.memo((props: TabPanelProps) => {
     const { children, value, index, ...other } = props;
     const isActive = value === index;
 
     return (
       <div
         role="tabpanel"
-        hidden={!isActive} // Use hidden for accessibility, but rely on style for visual hiding
+        hidden={value !== index}
         id={`tabpanel-${index}`}
         aria-labelledby={`tab-${index}`}
-        // Change display: 'none' to position: 'absolute' and opacity: 0 for inactive tabs
-        style={{
-          height: '100%',
-          width: '100%', // Ensure it takes full width when active
-          position: isActive ? 'relative' : 'absolute', // Use relative when active, absolute when inactive
-          opacity: isActive ? 1 : 0,
-          pointerEvents: isActive ? 'auto' : 'none', // Disable interactions for inactive tabs
-          overflow: 'hidden', // Keep overflow hidden for the panel itself
-          flexDirection: 'column', // Keep flex direction
-          top: 0, // Position at top
-          left: 0, // Position at left
-        }}
+        style={{ display: value === index ? 'flex' : 'none', height: '100%', flexDirection: 'column' }}
         {...other}
       >
         <Box key={index} sx={{ height: '100%', p: 1, flexGrow: 1, display: 'flex', flexDirection: 'column' }}> 
@@ -74,15 +65,17 @@ export const TabbedPanel: React.FC<TabbedPanelProps> = ({
         </Box>
       </div>
     );
-  };
+  }, (prevProps, nextProps) => {
+    return prevProps.value === nextProps.value;
+  });
 
-  const handleChange = (_event: React.SyntheticEvent, newValue: string) => {
+  const handleChange = React.useCallback((_event: React.SyntheticEvent, newValue: string) => {
     setActiveTab(newValue);
-  };
+  }, []);
 
   const securityClient = SecurityClient.getInstance(window.location.origin);
 
-  const handleWorkProductClick = async (event: React.MouseEvent<HTMLElement>, url: string) => {
+  const handleWorkProductClick = React.useCallback(async (event: React.MouseEvent<HTMLElement>, url: string) => {
     event.preventDefault();
     try {
       const apiClient = securityClient.getApi();
@@ -94,7 +87,7 @@ export const TabbedPanel: React.FC<TabbedPanelProps> = ({
       console.error('[TabbedPanel] handleWorkProductClick: Error fetching work product:', error);
       alert('Failed to open work product. See console for details.');
     }
-  };
+  }, [securityClient]);
 
   return (
     <Box sx={{
@@ -121,11 +114,11 @@ export const TabbedPanel: React.FC<TabbedPanelProps> = ({
 
       <Box sx={{ flexGrow: 1, overflow: 'auto' }}>
         <TabPanel value={activeTab} index="conversation">
-          <ConversationHistory history={conversationHistory} />
+          {React.useMemo(() => <ConversationHistory history={conversationHistory} />, [conversationHistory])}
         </TabPanel>
 
         <TabPanel value={activeTab} index="results">
-          <TableContainer component={Paper} sx={{ maxHeight: '100%' }}>
+          {React.useMemo(() => <TableContainer component={Paper} sx={{ maxHeight: '100%' }}>
             <Table stickyHeader aria-label="work products table">
               <TableHead>
                 <TableRow>
@@ -156,15 +149,15 @@ export const TabbedPanel: React.FC<TabbedPanelProps> = ({
                 )}
               </TableBody>
             </Table>
-          </TableContainer>
+          </TableContainer>, [workProducts, handleWorkProductClick])}
         </TabPanel>
 
         <TabPanel value={activeTab} index="network">
-            <NetworkGraph agentStatistics={agentStatistics} />
+            {React.useMemo(() => <NetworkGraph agentStatistics={agentStatistics} zoom={zoom} setZoom={setZoom} pan={pan} setPan={setPan} />, [agentStatistics, zoom, pan])}
         </TabPanel>
 
         <TabPanel value={activeTab} index="files">
-          {activeMissionId ? (
+          {React.useMemo(() => activeMissionId ? (
             <FileUpload
               missionId={activeMissionId}
               sharedFiles={sharedFiles}
@@ -181,7 +174,7 @@ export const TabbedPanel: React.FC<TabbedPanelProps> = ({
             <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 4 }}>
               No active mission. Create or load a mission to manage files.
             </Typography>
-          )}
+          ), [activeMissionId, sharedFiles, descriptionDialog, pendingFiles, description])}
         </TabPanel>
       </Box>
     </Box>

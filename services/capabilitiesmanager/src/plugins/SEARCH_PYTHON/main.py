@@ -80,32 +80,41 @@ class BrainSearchProvider(SearchProvider):
         self.inputs = kwargs.get('inputs', {})
 
     def search(self, search_term: str, **kwargs) -> List[Dict[str, str]]:
-        prompt = f"Perform a web search for '{search_term}' and provide a list of relevant links (title and URL). Return the results as a JSON array of objects, each with 'title' and 'url' keys."
+        prompt = f"Perform a web search for '{search_term}' and provide a list of relevant links (title and URL). Return the results as a JSON array of objects, each with 'title' and 'url' keys. Return ONLY the JSON array, no other text or markdown."
         try:
             response_str = self._call_brain(prompt, "json")
+            
+            # Attempt to parse the response directly as JSON
             try:
-                # Handle JSON-wrapped-in-JSON issue
-                if isinstance(response_str, str) and response_str.startswith('"') and response_str.endswith('"'):
-                    # Remove outer quotes and unescape
-                    response_str = response_str[1:-1].replace('\\"', '"').replace('\\n', '\n')
-                
                 results = json.loads(response_str)
                 if isinstance(results, list):
-                    return results
-                return []
+                    # Filter out results that don't have both 'title' and 'url'
+                    filtered_results = [r for r in results if isinstance(r, dict) and 'title' in r and 'url' in r]
+                    if filtered_results:
+                        return filtered_results
+                    else:
+                        logger.warning(f"Brain search returned empty or malformed results after JSON parse: {response_str}")
+                        return []
+                else:
+                    logger.warning(f"Brain search returned non-list JSON: {response_str}")
+                    return []
             except json.JSONDecodeError as e:
-                logger.warning(f"Brain search returned non-JSON response: {response_str}")
-                # Try to parse as string and extract JSON
-                try:
-                    # Look for JSON array in the response
-                    json_match = re.search(r'\[.*\]', response_str, re.DOTALL)
-                    if json_match:
-                        results = json.loads(json_match.group())
-                        if isinstance(results, list):
-                            return results
-                except:
-                    pass
-                return []
+                logger.warning(f"Brain search returned non-JSON response or unparseable JSON: {response_str[:200]}... Error: {e}")
+                # Attempt to extract JSON from the string if direct parse fails
+                json_match = re.search(r'\[\s*{[^}]*}\s*(?:,\s*{[^}]*}\s*)*\]', response_str, re.DOTALL)
+                if json_match:
+                    try:
+                        extracted_results = json.loads(json_match.group(0))
+                        if isinstance(extracted_results, list):
+                            filtered_results = [r for r in extracted_results if isinstance(r, dict) and 'title' in r and 'url' in r]
+                            if filtered_results:
+                                logger.info(f"Successfully extracted JSON from Brain response: {len(filtered_results)} results.")
+                                return filtered_results
+                    except json.JSONDecodeError as extract_e:
+                        logger.warning(f"Failed to parse extracted JSON: {extract_e}")
+                
+                logger.warning(f"Brain search could not recover valid JSON from response: {response_str[:200]}...")
+                return [] # Return empty list if JSON cannot be recovered
         except Exception as e:
             logger.error(f"Brain search failed: {e}")
             raise
@@ -195,6 +204,10 @@ class LangsearchSearchProvider(SearchProvider):
                 "query": search_term,
                 "count": 10
             }
+            if 'freshness' in kwargs:
+                payload['freshness'] = kwargs['freshness']
+            if 'summary' in kwargs:
+                payload['summary'] = kwargs['summary']
             
             logger.info(f"Calling LangSearch API at {url}")
             response = requests.post(url, headers=headers, json=payload, timeout=15)
@@ -414,8 +427,8 @@ class SearchPlugin:
             providers.append(GoogleSearchProvider(api_key=google_api_key, cse_id=google_cse_id))
         
         # 3. SearxNG as second fallback
-        logger.info("Initializing SearxNG search provider")
-        providers.append(SearxNGSearchProvider())
+        # logger.info("Initializing SearxNG search provider")
+        # providers.append(SearxNGSearchProvider()) # Disabled due to consistent failures
         
         # 4. DuckDuckGo as third fallback
         logger.info("Initializing DuckDuckGo search provider")
