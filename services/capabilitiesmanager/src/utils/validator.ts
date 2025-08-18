@@ -152,18 +152,26 @@ async function transformInputsWithBrain(
             }
 
             const parsedResponse = JSON.parse(cleanResult);
+            console.log(`[${trace_id}] ${source_component}: Parsed Brain response:`, JSON.stringify(parsedResponse, null, 2));
             const transformedInputsMap = new Map<string, InputValue>();
 
             // Validate and transform each input
             for (const key in parsedResponse) {
                 const inputDef = plugin.inputDefinitions?.find(def => def.name === key);
-                const value = parsedResponse[key];
+                let value = parsedResponse[key];
+
+                // Check if the returned value is an object with a 'value' property, which might indicate
+                // the Brain is returning an InputValue-like structure instead of the raw value.
+                if (typeof value === 'object' && value !== null && 'value' in value) {
+                    console.log(`[${trace_id}] ${source_component}: Brain returned a complex object for input '${key}'. Using 'value' property.`);
+                    value = value.value;
+                }
                 const valueType = inputDef?.type || PluginParameterType.ANY;
 
                 // Validate the transformed value against the expected type
                 const isValid = await validateInputType(value, valueType);
                 if (!isValid) {
-                    console.warn(`[${trace_id}] ${source_component}: Transformed value for ${key} doesn't match expected type ${valueType}`);
+                    console.warn(`[${trace_id}] ${source_component}: Transformed value for ${key} ('${value}') doesn't match expected type ${valueType}. Skipping this input.`);
                     continue;
                 }
 

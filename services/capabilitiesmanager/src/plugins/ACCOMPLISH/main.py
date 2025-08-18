@@ -339,9 +339,15 @@ class PlanValidator:
             if 'inputs' in step and isinstance(step['inputs'], dict):
                 for input_name, input_def in step['inputs'].items():
                     if not isinstance(input_def, dict):
-                        errors.append(f"Step {step_num}: Input '{input_name}' must be an object")
-                        continue
-
+                        if isinstance(input_def, (str, int, float, bool)):
+                            step['inputs'][input_name] = {
+                                "value": input_def,
+                                "valueType": "string" if isinstance(input_def, str) else "number" if isinstance(input_def, (int, float)) else "boolean"
+                            }
+                            input_def = step['inputs'][input_name]
+                        else:
+                            errors.append(f"Step {step_num}: Input '{input_name}' must be an object with a 'value' or 'outputName' property, but it is of type {type(input_def).__name__}")
+                            continue
                     has_value = 'value' in input_def
                     has_output_name = 'outputName' in input_def
                     has_source_step = 'sourceStep' in input_def
