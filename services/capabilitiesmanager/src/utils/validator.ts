@@ -28,33 +28,6 @@ interface EnhancedInputValue extends InputValue {
     originalName?: string;
 }
 
-export const validateInputType = async (value: any, expectedType: string): Promise<boolean> => {
-    switch (expectedType.toLowerCase()) {
-        case 'string':
-            return typeof value === 'string';
-        case 'number':
-            return typeof value === 'number';
-        case 'boolean':
-            return typeof value === 'boolean';
-        case 'array':
-            return Array.isArray(value);
-        case 'object':
-            if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-                return true;
-            }
-            if (typeof value === 'string') {
-                try {
-                    const parsed = JSON.parse(value);
-                    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed);
-                } catch {
-                    return false;
-                }
-            }
-            return false;
-        default:
-            return true; // Allow unknown types to pass validation
-    }
-}
 
 async function transformInputsWithBrain(
     plugin: PluginDefinition,
@@ -167,13 +140,6 @@ async function transformInputsWithBrain(
                     value = value.value;
                 }
                 const valueType = inputDef?.type || PluginParameterType.ANY;
-
-                // Validate the transformed value against the expected type
-                const isValid = await validateInputType(value, valueType);
-                if (!isValid) {
-                    console.warn(`[${trace_id}] ${source_component}: Transformed value for ${key} ('${value}') doesn't match expected type ${valueType}. Skipping this input.`);
-                    continue;
-                }
 
                 transformedInputsMap.set(key, {
                     inputName: key,
@@ -304,14 +270,6 @@ export const validateAndStandardizeInputs = async (plugin: PluginDefinition, inp
 
             if (input) {
                 const type = input.valueType || inputDef.type;
-                const typeValidation = await validateInputType(input.value, type);
-                if (!typeValidation) {
-                    return {
-                        success: false,
-                        error: `Invalid type for input ${inputName}: expected ${type}, got ${typeof input.value}`
-                    };
-                }
-
                 if (inputDef.required) {
                     const value = input.value;
                     let isEmpty = false;

@@ -95,12 +95,12 @@ def call_brain(prompt: str, inputs: Dict[str, Any], response_type: str = "json")
             conversation_type = "TextToJSON"
             system_message = (
                 "You are a planning assistant. Generate actionable plans as JSON arrays. "
-                "Each step must match the provided schema precisely"
-                "Return ONLY valid JSON, no other text." # Emphasize strict JSON output
+                "Each step must match the provided schema precisely.  You should attempt to use the available tools first to find solutions and complete tasks independently. Do not create steps to ask the user for information you can find elsewhere. "
+                "Return ONLY valid JSON, no other text." 
             )
         else:
             conversation_type = "TextToText"
-            system_message = "You are a planning assistant."
+            system_message = "You are an autonomous agent. Your primary goal is to accomplish the user's mission by creating and executing plans.  Be resourceful and proactive."
 
         payload = {
             "messages": [
@@ -328,9 +328,20 @@ class PlanValidator:
             # 2.1 Check outputs
             if 'outputs' in step and isinstance(step['outputs'], dict):
                 output_names = set()
-                for output_name, description in step['outputs'].items():
-                    if not isinstance(description, str) or not description.strip():
-                        errors.append(f"Step {step_num}: Output '{output_name}' has an invalid or empty description.")
+                for output_name, output_details in step['outputs'].items():
+                    # Ensure output_details is a dictionary and contains 'description'
+                    if isinstance(output_details, str):
+                        step['outputs'][output_name] = {'description': output_details}
+                        output_details = step['outputs'][output_name]
+
+                    if not isinstance(output_details, dict) or 'description' not in output_details:
+                        errors.append(f"Step {step_num}: Output '{output_name}' is missing 'description' or is malformed.")
+                        continue # Skip further checks for this output if malformed
+
+                    description = output_details['description']
+                    # Relaxed validation: allow empty strings for description
+                    if not isinstance(description, str):
+                        errors.append(f"Step {step_num}: Output '{output_name}' has an invalid description type (expected string).")
                     if output_name in output_names:
                         errors.append(f"Step {step_num}: Duplicate output name '{output_name}'.")
                     output_names.add(output_name)
@@ -825,6 +836,8 @@ After your internal analysis and self-correction is complete, provide ONLY the f
 **CRITICAL DEPENDENCY RULES:**
 - **Multi-step plans are essential:** Break down complex goals into multiple, sequential steps.
 - **Dependencies are crucial for flow:** Every step that uses an output from a previous step MUST declare that dependency in its `inputs` object using `outputName` and `sourceStep`.
+- **Allowed actionVerbs:** You MUST ONLY use the following actionVerbs in your plan steps: ACCOMPLISH, API_CLIENT, CHAT, RUN_CODE, DATA_TOOLKIT, FILE_OPERATION, ASK_USER_QUESTION, SCRAPE, SEARCH, TEXT_ANALYSIS, TRANSFORM, WEATHER.
+- **Avoid unnecessary ASK_USER_QUESTION:** Only use 'ASK_USER_QUESTION' if the information absolutely cannot be obtained by other means (e.g., SEARCH, SCRAPE, DATA_TOOLKIT). Prioritize autonomous information gathering. 'ASK_USER_QUESTION' is for subjective opinions, permissions, or clarification, NOT for delegating research or data collection.
 - **CRITICAL for sourceStep:**
     - Use `sourceStep: 0` ONLY for inputs that are explicitly provided in the initial mission context (the "PARENT STEP INPUTS" section if applicable, or the overall mission goal).
     - For any other input, it MUST be the `outputName` from a *preceding step* in this plan, and `sourceStep` MUST be the `number` of that preceding step.
@@ -864,6 +877,7 @@ class NovelVerbHandler:
 
     def __init__(self):
         self.validator = PlanValidator()
+        self.goal_planner = RobustMissionPlanner()
 
     def handle(self, inputs: Dict[str, Any]) -> str:
         try:
@@ -946,6 +960,12 @@ class NovelVerbHandler:
         verb = verb_info['verb']
         description = verb_info.get('description', 'No description provided')
         context = verb_info.get('context', description)
+        PLAN_ARRAY_SCHEMA = {
+            "type": "array",
+            "items": PLAN_STEP_SCHEMA,
+            "description": "A list of sequential steps to accomplish a goal."
+        }
+        schema_json = json.dumps(PLAN_ARRAY_SCHEMA, indent=2)
 
         prompt = f"""You are an expert system analyst. A user wants to use a novel action verb "{verb}" that is not currently supported.
 
@@ -955,22 +975,35 @@ CONTEXT: {context}
 
 PARENT STEP INPUTS: {json.dumps(inputs)}
 
-Your task is to create a plan to accomplish the goal of the novel verb "{verb}".
+Your task is to determine the best way to accomplish the goal of the novel verb "{verb}". Consider these options in order of preference:
 
-CRITICAL CONSTRAINTS:
-1.  You MUST NOT use the novel verb "{verb}" as an action verb in your plan. Your plan must break the novel verb down into concrete steps.
-2.  You MAY use ANY actionVerb that is suitable for the task. You are NOT restricted to a predefined list.
+1.  **Provide a Direct Answer:** If the task is simple enough to be answered directly with the given context and available tools, provide a JSON object with a single key "direct_answer". This is the most preferred option for straightforward tasks.
+2.  **Create a Plan:** If the task is complex and requires multiple steps, breaking it down into a sequence of actions using available tools, then create a plan. The plan should be a JSON array of steps. This is the preferred option for complex tasks that can be broken down.
+3.  **Recommend a Plugin:** If the task requires a new, complex, and reusable capability that is not covered by existing tools and would be beneficial for future use, recommend the development of a new plugin by providing a JSON object with a "plugin" key.
 
-Determine the best approach by creating a plan. The plan should be a JSON array of steps.
-- Each step must have "number", "actionVerb", "inputs", "description", and "outputs".
-- Inputs must come from the parent step or a preceding step.
-- **CRITICAL for sourceStep:**
+**CRITICAL CONSTRAINTS:**
+- You MUST NOT use the novel verb "{verb}" in your plan.
+- You should be able to accomplish most tasks by performing the work yourself now or creating a plan. Only recommend a new plugin for truly novel and complex capabilities.
+- **You are an autonomous agent. Do not ask the user for information or to perform tasks that you can find or figure out yourself using available tools.**
+- **If you generate a step with `actionVerb: "ASK"`, ensure it is ONLY for seeking clarification, approval, or subjective opinion from the user, NOT for delegating tasks that you can perform.**
+
+**RESPONSE FORMATS:**
+
+-   **For a Direct Answer:** `{{"direct_answer": "Your answer here"}}`
+-   **For a Plan:** A JSON array of steps defined with the schema below.
+-   **For a Plugin Recommendation:** `{{"plugin": {{"id": "new_plugin_id", "description": "Description of the new plugin"}}}}`
+
+Plan Schema
+"{schema_json}"
+
+- **CRITICAL for Plan Inputs, sourceStep:**
+    - All inputs for each step must be explicitly defined either as a constant `value` or by referencing an `outputName` from a `sourceStep` within the plan or from the `PARENT STEP INPUTS`. Do not assume implicit data structures or properties of inputs.
     - Use `sourceStep: 0` ONLY for inputs that are explicitly provided in the "PARENT STEP INPUTS" section above.
     - For any other input, it MUST be the `outputName` from a *preceding step* in this plan, and `sourceStep` MUST be the `number` of that preceding step.
     - Every input in your plan MUST be resolvable either from "PARENT STEP INPUTS" (using `sourceStep: 0`) or from an output of a previous step in the plan.
-- **Example for `sourceStep`:** If Step 2 needs `research_results` from Step 1, and Step 1 outputs `{{ "research_results": "..." }}`, then Step 2's inputs would be `{{ "research": {{'outputName': "research_results", "sourceStep": 1, "valueType": "string"}} }}`.
+- **Example for `sourceStep`:** If Step 2 needs `research_results` from Step 1, and Step 1 outputs `{{ "research_results": "..." }}`, then Step 2\'s inputs would be `{{ "research": {{'outputName': "research_results", "sourceStep": 1, "valueType": "string"}} }}`.
 
-CRITICAL: Respond with ONLY valid JSON. NO markdown, NO code blocks, NO extra text.
+CRITICAL: Respond with ONLY valid JSON in one of the three formats above. NO markdown, NO code blocks, NO extra text.
 """
 
         try:
@@ -1022,7 +1055,7 @@ CRITICAL: Respond with ONLY valid JSON. NO markdown, NO code blocks, NO extra te
                 validated_plan = self.validator.validate_and_repair(data, verb_info['description'], inputs)
                 
                 # Save the generated plan to Librarian
-                self._save_plan_to_librarian(verb_info['verb'], validated_plan, inputs)
+                # self._save_plan_to_librarian(verb_info['verb'], validated_plan, inputs)
 
                 return json.dumps([{ 
                     "success": True,
@@ -1055,7 +1088,7 @@ CRITICAL: Respond with ONLY valid JSON. NO markdown, NO code blocks, NO extra te
                 # If the dictionary is a single step, treat it as a plan with one step
                 elif "actionVerb" in data and "number" in data:
                     validated_plan = self.validator.validate_and_repair([data], verb_info['description'], inputs)
-                    self._save_plan_to_librarian(verb_info['verb'], validated_plan, inputs)
+                    # self._save_plan_to_librarian(verb_info['verb'], validated_plan, inputs)
                     return json.dumps([{
                         "success": True,
                         "name": "plan",

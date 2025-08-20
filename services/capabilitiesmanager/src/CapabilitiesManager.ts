@@ -608,10 +608,10 @@ export class CapabilitiesManager extends BaseEntity {
             }
 
             // 2. If no plugin, try to find a cached plan template in Librarian
-            const cachedPlan = await this.checkCachedPlan(actionVerb);
-            if (cachedPlan) {
-                return { type: 'cachedPlan', handler: cachedPlan };
-            }
+            // const cachedPlan = await this.checkCachedPlan(actionVerb);
+            // if (cachedPlan) {
+            //     return { type: 'cachedPlan', handler: cachedPlan };
+            // }
 
             return null;
         } catch (error: any) {
@@ -876,39 +876,39 @@ export class CapabilitiesManager extends BaseEntity {
         }
     }
 
-    private async checkCachedPlan(actionVerb: string): Promise<PluginOutput[] | null> {
-        const trace_id = uuidv4();
-        const source_component = "CapabilitiesManager.checkCachedPlan";
-        // 1. Check in-memory cache first
-        if (this.planCache.has(actionVerb)) {
-            console.log(`[${trace_id}] ${source_component}: Found cached plan for verb '${actionVerb}' in memory.`);
-            return this.planCache.get(actionVerb) || null;
-        }
+    // private async checkCachedPlan(actionVerb: string): Promise<PluginOutput[] | null> {
+    //     const trace_id = uuidv4();
+    //     const source_component = "CapabilitiesManager.checkCachedPlan";
+    //     // 1. Check in-memory cache first
+    //     if (this.planCache.has(actionVerb)) {
+    //         console.log(`[${trace_id}] ${source_component}: Found cached plan for verb '${actionVerb}' in memory.`);
+    //         return this.planCache.get(actionVerb) || null;
+    //     }
 
-        try {
-            const response = await this.authenticatedApi.get(`http://${this.librarianUrl}/loadData/${actionVerb}`, {
-                params: { collection: 'actionPlans', storageType: 'mongo' }
-            });
+    //     try {
+    //         const response = await this.authenticatedApi.get(`http://${this.librarianUrl}/loadData/${actionVerb}`, {
+    //             params: { collection: 'actionPlans', storageType: 'mongo' }
+    //         });
 
-            if (response.data?.data) {
-                console.log(`[${trace_id}] ${source_component}: Found cached plan for verb: ${actionVerb}`);
-                const plan = response.data.data as PluginOutput[];
-                this.planCache.set(actionVerb, plan); // Store in memory cache
-                return plan;
-            }
-            return null;
-        } catch (error:any) {
-            generateStructuredError({
-                error_code: GlobalErrorCodes.INTERNAL_ERROR_CM,
-                severity: ErrorSeverity.WARNING,
-                message: `Could not check cached plan for verb '${actionVerb}'. ${error.message}`,
-                source_component,
-                original_error: error,
-                trace_id_param: trace_id
-            });
-            return null;
-        }
-    }
+    //         if (response.data?.data) {
+    //             console.log(`[${trace_id}] ${source_component}: Found cached plan for verb: ${actionVerb}`);
+    //             const plan = response.data.data as PluginOutput[];
+    //             this.planCache.set(actionVerb, plan); // Store in memory cache
+    //             return plan;
+    //         }
+    //         return null;
+    //     } catch (error:any) {
+    //         generateStructuredError({
+    //             error_code: GlobalErrorCodes.INTERNAL_ERROR_CM,
+    //             severity: ErrorSeverity.WARNING,
+    //             message: `Could not check cached plan for verb '${actionVerb}'. ${error.message}`,
+    //             source_component,
+    //             original_error: error,
+    //             trace_id_param: trace_id
+    //         });
+    //         return null;
+    //     }
+    // }
 
 
     /**

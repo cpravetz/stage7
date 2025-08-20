@@ -2,6 +2,7 @@ import json
 import sys
 import requests
 import logging
+from typing import Any
 
 # Configure logging
 logging.basicConfig(
