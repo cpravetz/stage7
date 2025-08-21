@@ -836,8 +836,8 @@ After your internal analysis and self-correction is complete, provide ONLY the f
 **CRITICAL DEPENDENCY RULES:**
 - **Multi-step plans are essential:** Break down complex goals into multiple, sequential steps.
 - **Dependencies are crucial for flow:** Every step that uses an output from a previous step MUST declare that dependency in its `inputs` object using `outputName` and `sourceStep`.
-- **Allowed actionVerbs:** You MUST ONLY use the following actionVerbs in your plan steps: ACCOMPLISH, API_CLIENT, CHAT, RUN_CODE, DATA_TOOLKIT, FILE_OPERATION, ASK_USER_QUESTION, SCRAPE, SEARCH, TEXT_ANALYSIS, TRANSFORM, WEATHER.
-- **Avoid unnecessary ASK_USER_QUESTION:** Only use 'ASK_USER_QUESTION' if the information absolutely cannot be obtained by other means (e.g., SEARCH, SCRAPE, DATA_TOOLKIT). Prioritize autonomous information gathering. 'ASK_USER_QUESTION' is for subjective opinions, permissions, or clarification, NOT for delegating research or data collection.
+- **Prioritize autonomous information gathering:** Use tools like SEARCH, SCRAPE, DATA_TOOLKIT, TEXT_ANALYSIS, TRANSFORM, and FILE_OPERATION to gather information and perform tasks.
+- **Avoid unnecessary ASK_USER_QUESTION:** Only use 'ASK_USER_QUESTION' if the information absolutely cannot be obtained by other means (e.g., for subjective opinions, permissions, or clarification). Do NOT use it for delegating research or data collection that the agent can perform.
 - **CRITICAL for sourceStep:**
     - Use `sourceStep: 0` ONLY for inputs that are explicitly provided in the initial mission context (the "PARENT STEP INPUTS" section if applicable, or the overall mission goal).
     - For any other input, it MUST be the `outputName` from a *preceding step* in this plan, and `sourceStep` MUST be the `number` of that preceding step.
