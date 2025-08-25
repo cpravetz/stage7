@@ -94,7 +94,8 @@ def call_brain(prompt: str, inputs: Dict[str, Any], response_type: str = "json")
         if response_type == 'json':
             conversation_type = "TextToJSON"
             system_message = (
-                "You are a planning assistant. Generate actionable plans as JSON arrays. "
+                "You are a planning assistant for a system of agents. Generate meaningful and actionable plans as JSON arrays. "
+                "Plans must accomplish the provided goal, not simulate it. "
                 "Each step must match the provided schema precisely.  You should attempt to use the available tools first to find solutions and complete tasks independently. Do not create steps to ask the user for information you can find elsewhere. "
                 "Return ONLY valid JSON, no other text." 
             )
@@ -295,10 +296,8 @@ class PlanValidator:
         if not isinstance(plan, list) or len(plan) == 0:
             return {'valid': False, 'errors': ['Plan must be a non-empty array']}
         
-        # Create a mapping from actionVerb to its full plugin definition for easy lookup
         plugin_map = {plugin.get('actionVerb'): plugin for plugin in available_plugins}
 
-        # Collect all step numbers and their outputs for cross-referencing
         step_numbers = set()
         step_outputs: Dict[int, Set[str]] = {}
         for i, step in enumerate(plan):
@@ -312,43 +311,36 @@ class PlanValidator:
         for i, step in enumerate(plan):
             step_num = step.get('number', i + 1)
             
-            # 1. Check required properties
             required_fields = ['number', 'actionVerb', 'inputs', 'description', 'outputs']
             for field in required_fields:
                 if field not in step:
                     errors.append(f"Step {step_num}: Missing required field '{field}'")
             
-            # Check for allowed properties
             allowed_fields = required_fields + ['recommendedRole']
-            for field in step:
+            for field in list(step.keys()):
                 if field not in allowed_fields:
                     logger.warning(f"Step {step_num}: Removing unexpected property '{field}'")
                     del step[field]
             
-            # 2.1 Check outputs
             if 'outputs' in step and isinstance(step['outputs'], dict):
                 output_names = set()
-                for output_name, output_details in step['outputs'].items():
-                    # Ensure output_details is a dictionary and contains 'description'
+                for output_name, output_details in list(step['outputs'].items()):
                     if isinstance(output_details, str):
                         step['outputs'][output_name] = {'description': output_details}
                         output_details = step['outputs'][output_name]
 
                     if not isinstance(output_details, dict) or 'description' not in output_details:
                         errors.append(f"Step {step_num}: Output '{output_name}' is missing 'description' or is malformed.")
-                        continue # Skip further checks for this output if malformed
+                        continue
 
-                    description = output_details['description']
-                    # Relaxed validation: allow empty strings for description
-                    if not isinstance(description, str):
+                    if not isinstance(output_details['description'], str):
                         errors.append(f"Step {step_num}: Output '{output_name}' has an invalid description type (expected string).")
                     if output_name in output_names:
                         errors.append(f"Step {step_num}: Duplicate output name '{output_name}'.")
                     output_names.add(output_name)
 
-            # 2.2 Check inputs
             if 'inputs' in step and isinstance(step['inputs'], dict):
-                for input_name, input_def in step['inputs'].items():
+                for input_name, input_def in list(step['inputs'].items()):
                     if not isinstance(input_def, dict):
                         if isinstance(input_def, (str, int, float, bool)):
                             step['inputs'][input_name] = {
@@ -357,68 +349,57 @@ class PlanValidator:
                             }
                             input_def = step['inputs'][input_name]
                         else:
-                            errors.append(f"Step {step_num}: Input '{input_name}' must be an object with a 'value' or 'outputName' property, but it is of type {type(input_def).__name__}")
+                            errors.append(f"Step {step_num}: Input '{input_name}' is malformed.")
                             continue
-                    has_value = 'value' in input_def
-                    has_output_name = 'outputName' in input_def
-                    has_source_step = 'sourceStep' in input_def
-                    has_args = 'args' in input_def
-                    
-                    # 2.2.1 Check for one-and-only-one property set
-                    is_value_set = has_value
-                    is_output_set = has_output_name and has_source_step
+
+                    is_value_set = 'value' in input_def
+                    is_output_set = 'outputName' in input_def and 'sourceStep' in input_def
 
                     if not (is_value_set or is_output_set):
-                        errors.append(f"Step {step_num}: Input '{input_name}' must have either 'value' or both 'outputName' and 'sourceStep'")
+                        errors.append(f"Step {step_num}: Input '{input_name}' must have 'value' or 'outputName' and 'sourceStep'.")
                         continue
 
                     if is_value_set and is_output_set:
-                        errors.append(f"Step {step_num}: Input '{input_name}' has both 'value' and 'outputName'/'sourceStep'.")
-                        # Simple repair: prefer outputName reference
-                        if has_value:
-                            logger.info(f"Step {step_num}: Repairing input '{input_name}', removing 'value' and 'valueType'")
-                            del input_def['value']
-                            if 'valueType' in input_def: del input_def['valueType']
-                            is_value_set = False
+                        logger.info(f"Step {step_num}: Repairing input '{input_name}', preferring output reference.")
+                        del input_def['value']
+                        if 'valueType' in input_def: del input_def['valueType']
 
-                    # Remove extraneous properties
-                    allowed_keys = set()
-                    if is_value_set:
-                        allowed_keys.update(['value', 'valueType'])
-                    if is_output_set:
-                        allowed_keys.update(['outputName', 'sourceStep'])
-                    if has_args:
-                        allowed_keys.add('args')
-                    
-                    keys_to_delete = [key for key in input_def if key not in allowed_keys]
-                    for key in keys_to_delete:
-                        logger.info(f"Step {step_num}: Repairing input '{input_name}', removing extraneous property '{key}'")
-                        del input_def[key]
-
-
-                    # Check dependencies for output-based inputs
-                    if has_output_name and has_source_step:
+                    if 'outputName' in input_def and 'sourceStep' in input_def:
                         source_step_num = input_def['sourceStep']
                         if not isinstance(source_step_num, int) or source_step_num < 0:
-                            errors.append(f"Step {step_num}: Input '{input_name}' has invalid source step number: {source_step_num}")
+                            errors.append(f"Step {step_num}: Input '{input_name}' has invalid source step: {source_step_num}")
                             continue
                         
                         if source_step_num > 0:
                             if source_step_num >= step_num:
-                                errors.append(f"Step {step_num}: Input '{input_name}' refers to future or same step: {source_step_num}")
+                                errors.append(f"Step {step_num}: Input '{input_name}' refers to future step {source_step_num}")
                             if source_step_num not in step_numbers:
-                                errors.append(f"Step {step_num}: Input '{input_name}' refers to non-existent step: {source_step_num}")
+                                errors.append(f"Step {step_num}: Input '{input_name}' refers to non-existent step {source_step_num}")
                                 continue
-                            if input_def['outputName'] not in step_outputs.get(source_step_num, set()):
-                                errors.append(f"Step {step_num}: Input '{input_name}' refers to non-existent output '{input_def['outputName']}' in source step {source_step_num}")
+                            
+                            source_step = next((s for s in plan if s.get('number') == source_step_num), None)
+                            if source_step:
+                                source_verb = source_step.get('actionVerb')
+                                if source_verb in plugin_map:
+                                    source_plugin = plugin_map[source_verb]
+                                    plugin_outputs = [o.get('name') for o in source_plugin.get('outputDefinitions', [])]
+                                    
+                                    if input_def['outputName'] not in plugin_outputs:
+                                        error_msg = f"Step {step_num}: Input '{input_name}' refers to output '{input_def['outputName']}' which is not a valid output for plugin '{source_verb}'. Valid outputs are: {plugin_outputs}"
+                                        errors.append(error_msg)
+                                        
+                                        if len(plugin_outputs) == 1:
+                                            correct_name = plugin_outputs[0]
+                                            logger.info(f"Repairing output reference: changing '{input_def['outputName']}' to '{correct_name}'")
+                                            input_def['outputName'] = correct_name
+                                            # Remove the error since we fixed it
+                                            errors.pop()
 
-            # 3. Check for known actionVerbs
             action_verb = step.get('actionVerb')
             if action_verb in plugin_map:
                 plugin_definition = plugin_map[action_verb]
                 plugin_input_definitions = {inp.get('name'): inp for inp in plugin_definition.get('inputDefinitions', [])}
                 
-                # Apply heuristic for input name variations
                 if 'inputs' in step and isinstance(step['inputs'], dict):
                     original_inputs = step['inputs'].copy()
                     cleaned_inputs = {}
@@ -427,16 +408,31 @@ class PlanValidator:
                         cleaned_inputs[standardized_name] = input_def
                     step['inputs'] = cleaned_inputs
 
-                # Check for all required inputs
-                required_inputs_by_plugin = {
-                    def_name for def_name, def_obj in plugin_input_definitions.items()
-                    if def_obj.get('required')
-                }
+                required_inputs_by_plugin = {name for name, definition in plugin_input_definitions.items() if definition.get('required')}
                 
                 if 'inputs' in step and isinstance(step['inputs'], dict):
-                    missing_required = required_inputs_by_plugin - set(step['inputs'].keys())
+                    provided_inputs = set(step['inputs'].keys())
+                    missing_required = required_inputs_by_plugin - provided_inputs
                     if missing_required:
-                        errors.append(f"Step {step_num} (verb '{action_verb}'): Missing required inputs: {', '.join(missing_required)}")
+                        # Attempt to autofill missing required inputs from previous steps
+                        for missing_input in missing_required:
+                            for prev_step_num in range(step_num - 1, 0, -1):
+                                if prev_step_num in step_outputs:
+                                    # Simple heuristic: if there's only one output from the previous step, use it.
+                                    if len(step_outputs[prev_step_num]) == 1:
+                                        output_to_use = list(step_outputs[prev_step_num])[0]
+                                        logger.info(f"Step {step_num}: Autofilling missing input '{missing_input}' with output '{output_to_use}' from step {prev_step_num}")
+                                        step['inputs'][missing_input] = {
+                                            "outputName": output_to_use,
+                                            "sourceStep": prev_step_num
+                                        }
+                                        break # Move to the next missing input
+                        
+                        # Re-check for missing inputs after autofill
+                        provided_inputs = set(step['inputs'].keys())
+                        missing_required = required_inputs_by_plugin - provided_inputs
+                        if missing_required:
+                            errors.append(f"Step {step_num} (verb '{action_verb}'): Missing required inputs: {', '.join(missing_required)}")
 
         return {'valid': len(errors) == 0, 'errors': errors}
 
@@ -587,8 +583,7 @@ Your task is to fix the JSON object provided in section 2 to make it valid. Pay 
 - **JSON ONLY:** Your entire response MUST be a single, valid JSON object for the step.
 - **NO EXTRA TEXT:** Do NOT include explanations, comments, or markdown like ` ```json `.
 - **PRESERVE INTENT:** Fix ONLY the specific errors while preserving the plan's original intent.
-- **IMPORTANT**: If an input is missing a required `sourceStep`, it is likely a bug in the previous generation. You MUST add `sourceStep: 0` if the input is available from the parent context, or `sourceStep: [number of preceding step]` if it is available from a previous step in the plan. Do not create new steps unless absolutely necessary.
-- **IMPORTANT**: If an input has both `value` and `outputName`/`sourceStep`, choose the one that makes the most sense in the context of the plan and remove the other. Prefer the `outputName`/`sourceStep` if a dependency exists.
+- **IMPORTANT**: If an input has both `value` and `outputName`/`sourceStep`, choose the outputName and sourceStep if the 'sourceStep' does product the 'outputName'.
 
 Return the corrected JSON object for the step:"""
         
@@ -628,6 +623,8 @@ Return the corrected JSON object for the step:"""
         
         # This line should be unreachable
         raise AccomplishError("Unexpected LLM repair loop exit", "repair_error")
+
+
 
 class RobustMissionPlanner:
     """Streamlined LLM-driven mission planner"""
@@ -684,35 +681,94 @@ class RobustMissionPlanner:
             guidance_lines.append(f"{input_guidance}")
         return "\n".join(guidance_lines)
 
+    def _inject_progress_checks(self, plan: List[Dict[str, Any]], goal: str) -> List[Dict[str, Any]]:
+        if not plan:
+            return []
+
+        # Add a single REFLECT step at the end of the plan.
+        all_outputs = set()
+        for step in plan:
+            if 'outputs' in step and isinstance(step['outputs'], dict):
+                all_outputs.update(step['outputs'].keys())
+
+        completed_steps_summary = f"The following outputs have been produced: {', '.join(all_outputs)}"
+
+        # Get the last step's outputs for dependency
+        last_step = plan[-1]
+        last_step_outputs = list(last_step.get('outputs', {}).keys())
+        if not last_step_outputs:
+            last_step_outputs = ["completion"]  # Fallback if no outputs defined
+            
+        reflection_question = (
+            f"Analyze the effectiveness of the executed plan against the mission goal:\n"
+            f"1. Have all objectives been met?\n"
+            f"2. What specific outcomes were achieved?\n"
+            f"3. What challenges or gaps emerged?\n"
+            f"4. What adjustments or additional steps are needed?"
+        )
+
+        check_step = {
+            "number": len(plan) + 1,
+            "actionVerb": "REFLECT",
+            "description": "Analyze mission progress and effectiveness, determine if goals were met, and recommend next steps.",
+            "inputs": {
+                "mission_goal": {"value": goal, "valueType": "string"},
+                "plan_history": {
+                    "outputName": last_step_outputs[0],
+                    "sourceStep": last_step["number"],
+                    "valueType": "string"
+                },
+                "work_products": {"value": completed_steps_summary, "valueType": "string"},
+                "question": {"value": reflection_question, "valueType": "string"}
+            },
+            "outputs": {
+                "analysis": "Detailed analysis of plan effectiveness and goal achievement",
+                "recommendations": "Specific recommendations for next steps or adjustments",
+                "status": "Mission status: complete, partially_complete, or needs_revision"
+            }
+        }
+        
+        plan.append(check_step)
+        
+        # Renumber all steps sequentially
+        for i, step in enumerate(plan):
+            step['number'] = i + 1
+
+        return plan
 
     def create_plan(self, goal: str, inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Create a robust plan using a decoupled, multi-phase LLM approach with retries."""
         progress.checkpoint("planning_start")
         logger.info(f"🎯 Creating plan for goal: {goal[:100]}...")
 
-        # Phase 1: Get a well-thought-out prose plan. This is critical, so we retry it.
         try:
             prose_plan = self._get_prose_plan(goal, inputs)
         except Exception as e:
-            logger.error(f"❌ Failed to generate prose plan after all retries: {e}")
+            logger.exception(f"❌ Failed to generate prose plan after all retries: {e}") # Changed to logger.exception
             raise AccomplishError(f"Could not generate a prose plan: {e}", "prose_plan_error")
 
-        # Phase 2: Convert the prose plan to a structured JSON plan.
         try:
             structured_plan = self._convert_to_structured_plan(prose_plan, goal, inputs)
         except Exception as e:
-            logger.error(f"❌ Failed to convert prose plan to structured JSON after all retries: {e}")
+            logger.exception(f"❌ Failed to convert prose plan to structured JSON after all retries: {e}") # Changed to logger.exception
             raise AccomplishError(f"Could not convert prose to structured plan: {e}", "json_conversion_error")
 
-        # Phase 3: Validate and repair the structured plan.
         try:
             validated_plan = self.validator.validate_and_repair(structured_plan, goal, inputs)
             logger.info(f"✅ Successfully created and validated plan with {len(validated_plan)} steps")
-            return validated_plan
         except Exception as e:
-            logger.error(f"❌ Failed to validate and repair the plan after all retries: {e}")
+            logger.exception(f"❌ Failed to validate and repair the plan after all retries: {e}") # Changed to logger.exception
             raise AccomplishError(f"Could not validate or repair the plan: {e}", "validation_error")
-    
+
+        try:
+            plan_with_checks = self._inject_progress_checks(validated_plan, goal)
+            logger.info(f"✅ Successfully injected progress checks, new plan has {len(plan_with_checks)} steps")
+            return plan_with_checks
+        except Exception as e:
+            logger.exception(f"❌ Failed to inject progress checks: {e}") # Changed to logger.exception
+            return validated_plan
+
+
     def _get_prose_plan(self, goal: str, inputs: Dict[str, Any]) -> str:
         """Phase 1: Get a well-thought prose plan from LLM with retries."""
         logger.info("🧠 Phase 1: Requesting prose plan from LLM...")
@@ -827,7 +883,7 @@ Follow these steps to create the final JSON output:
 2.  **Verify Schema:** Carefully study the JSON SCHEMA. Your output must follow it perfectly.
 3.  **Restate the Plan as Explicit Steps:** Identify a list of steps that will be taken to achieve the Goal. Each Step should be a clear, actionable task with one or more outputs.
 4.  **Check Dependencies:** For each step, ensure its `inputs` that depend on previous steps correctly reference the `outputName` and `sourceStep`.
-5.  **Validate Inputs:** Ensure every input for each step has either a static `value` or a dynamic `outputName` and `sourceStep` reference from a prior step.
+5.  **Validate Inputs:** Ensure every input for each step is properly defined and has either a static literal `value` or a dynamic `outputName` and `sourceStep` reference from a prior step.
 6.  **Final Check:** Before generating the output, perform a final check to ensure the entire JSON structure is valid and fully compliant with the schema.
 
 **STEP B: Generate Final JSON (Your Final Output)**
@@ -837,13 +893,15 @@ After your internal analysis and self-correction is complete, provide ONLY the f
 - **Multi-step plans are essential:** Break down complex goals into multiple, sequential steps.
 - **Dependencies are crucial for flow:** Every step that uses an output from a previous step MUST declare that dependency in its `inputs` object using `outputName` and `sourceStep`.
 - **Prioritize autonomous information gathering:** Use tools like SEARCH, SCRAPE, DATA_TOOLKIT, TEXT_ANALYSIS, TRANSFORM, and FILE_OPERATION to gather information and perform tasks.
-- **Avoid unnecessary ASK_USER_QUESTION:** Only use 'ASK_USER_QUESTION' if the information absolutely cannot be obtained by other means (e.g., for subjective opinions, permissions, or clarification). Do NOT use it for delegating research or data collection that the agent can perform.
+- **Avoid unnecessary ASK_USER_QUESTION:** Only use 'ASK_USER_QUESTION' for subjective opinions, permissions, or clarification). Do NOT use it for delegating research or data collection that the agent can perform.
 - **CRITICAL for sourceStep:**
     - Use `sourceStep: 0` ONLY for inputs that are explicitly provided in the initial mission context (the "PARENT STEP INPUTS" section if applicable, or the overall mission goal).
     - For any other input, it MUST be the `outputName` from a *preceding step* in this plan, and `sourceStep` MUST be the `number` of that preceding step.
     - Every input in your plan MUST be resolvable either from the initial mission context (using `sourceStep: 0`) or from an output of a previous step in the plan.
 - **For 'THINK' actionVerb:** The `inputs` for 'THINK' MUST include a `prompt` field with a string value that clearly states the thinking task.
 - **Example for `sourceStep`:** If Step 2 needs `research_results` from Step 1, and Step 1 outputs `{{ "research_results": "..." }}`, then Step 2's inputs would be `{{ "research": {{'outputName': "research_results", "sourceStep": 1, "valueType": "string"}} }}`.
+- **Completeness:** The generated plan must be a complete and executable plan that will fully accomplish the goal. It should not be a partial plan or an outline. It should include all the necessary steps to produce the final deliverables.
+- **Iterative Processes/Feedback Loops:** If the prose plan describes a continuous feedback loop, iterative process, or any form of repetition, you MUST translate this into an appropriate looping construct (e.g., using 'WHILE', 'REPEAT', or 'FOREACH' actionVerbs) within the JSON plan. Do not simply list the steps once if they are intended to be repeated.
 
 {plugin_guidance}
 """
@@ -977,31 +1035,31 @@ PARENT STEP INPUTS: {json.dumps(inputs)}
 
 Your task is to determine the best way to accomplish the goal of the novel verb "{verb}". Consider these options in order of preference:
 
-1.  **Provide a Direct Answer:** If the task is simple enough to be answered directly with the given context and available tools, provide a JSON object with a single key "direct_answer". This is the most preferred option for straightforward tasks.
+1.  **Provide a Direct Answer:** If the task is simple enough to be answered directly with the given context and available tools, provide a JSON object with a single key "direct_answer".
 2.  **Create a Plan:** If the task is complex and requires multiple steps, breaking it down into a sequence of actions using available tools, then create a plan. The plan should be a JSON array of steps. This is the preferred option for complex tasks that can be broken down.
 3.  **Recommend a Plugin:** If the task requires a new, complex, and reusable capability that is not covered by existing tools and would be beneficial for future use, recommend the development of a new plugin by providing a JSON object with a "plugin" key.
 
 **CRITICAL CONSTRAINTS:**
 - You MUST NOT use the novel verb "{verb}" in your plan.
-- You should be able to accomplish most tasks by performing the work yourself now or creating a plan. Only recommend a new plugin for truly novel and complex capabilities.
-- **You are an autonomous agent. Do not ask the user for information or to perform tasks that you can find or figure out yourself using available tools.**
-- **If you generate a step with `actionVerb: "ASK"`, ensure it is ONLY for seeking clarification, approval, or subjective opinion from the user, NOT for delegating tasks that you can perform.**
+- You are an autonomous agent. Your primary goal is to solve problems independently.
+- Do not use the `ASK_USER_QUESTION` verb to seek information from the user that can be found using other tools like `SEARCH` or `SCRAPE`. Your goal is to be resourceful and autonomous.
 
 **RESPONSE FORMATS:**
 
--   **For a Direct Answer:** `{{"direct_answer": "Your answer here"}}`
 -   **For a Plan:** A JSON array of steps defined with the schema below.
--   **For a Plugin Recommendation:** `{{"plugin": {{"id": "new_plugin_id", "description": "Description of the new plugin"}}}}`
+-   **For a Direct Answer:** {{"direct_answer": "Your answer here"}}
+-   **For a Plugin Recommendation:** {{"plugin": {{"id": "new_plugin_id", "description": "Description of the new plugin"}}}}
 
 Plan Schema
 "{schema_json}"
 
 - **CRITICAL for Plan Inputs, sourceStep:**
+    - Step inputs are generally sourced from the outputs of other steps and less often fixed with constant values.
     - All inputs for each step must be explicitly defined either as a constant `value` or by referencing an `outputName` from a `sourceStep` within the plan or from the `PARENT STEP INPUTS`. Do not assume implicit data structures or properties of inputs.
     - Use `sourceStep: 0` ONLY for inputs that are explicitly provided in the "PARENT STEP INPUTS" section above.
     - For any other input, it MUST be the `outputName` from a *preceding step* in this plan, and `sourceStep` MUST be the `number` of that preceding step.
-    - Every input in your plan MUST be resolvable either from "PARENT STEP INPUTS" (using `sourceStep: 0`) or from an output of a previous step in the plan.
-- **Example for `sourceStep`:** If Step 2 needs `research_results` from Step 1, and Step 1 outputs `{{ "research_results": "..." }}`, then Step 2\'s inputs would be `{{ "research": {{'outputName': "research_results", "sourceStep": 1, "valueType": "string"}} }}`.
+    - Every input in your plan MUST be resolvable either from a given constant value, a "PARENT STEP INPUT" (using `sourceStep: 0`) or from an output of a previous step in the plan.
+- **Mapping Outputs to Inputs:** When the output of one step is used as the input to another, the `outputName` in the input of the second step must match the `name` of the output of the first step.
 
 CRITICAL: Respond with ONLY valid JSON in one of the three formats above. NO markdown, NO code blocks, NO extra text.
 """

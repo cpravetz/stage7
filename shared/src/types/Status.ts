@@ -6,5 +6,6 @@ export enum Status {
     AWAITING = 'awaiting',
     PAUSED = 'paused',
     COMPLETED = 'completed',
-    ABORTED = 'aborted'
+    ABORTED = 'aborted',
+    REFLECTING = 'reflecting'
 }

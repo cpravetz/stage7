@@ -16,19 +16,6 @@ import hashlib
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Error handler integration (for unexpected/code errors only)
-def send_to_errorhandler(error, context=None):
-    try:
-        import requests
-        errorhandler_url = os.environ.get('ERRORHANDLER_URL', 'errorhandler:5090')
-        payload = {
-            'error': str(error),
-            'context': context or ''
-        }
-        requests.post(f'http://{errorhandler_url}/analyze', json=payload, timeout=10)
-    except Exception as e:
-        print(f"Failed to send error to errorhandler: {e}")
-
 seen_hashes = set()
 
 def execute_plugin(inputs):
@@ -38,11 +25,15 @@ def execute_plugin(inputs):
         hash_input = json.dumps(inputs, sort_keys=True)
         input_hash = hashlib.sha256(hash_input.encode()).hexdigest()
         if input_hash in seen_hashes:
-            return {
+            return [{
                 "success": False,
-                "error": "Duplicate input detected. This input combination has already failed. Aborting to prevent infinite loop.",
-                "outputs": []
-            }
+                "name": "error",
+                "resultType": "error",
+                "result": "Duplicate input detected",
+                "resultDescription": "This input combination has already failed. Aborting to prevent infinite loop.",
+                "mimeType": "text/plain",
+                "error": "Duplicate input detected"
+            }]
         seen_hashes.add(input_hash)
 
         # Temp directory hygiene
@@ -56,11 +47,15 @@ def execute_plugin(inputs):
         auth = inputs.get("auth", {})
 
         if not method or not url:
-            return {
+            return [{
                 "success": False,
-                "error": "The 'method' and 'url' parameters are required.",
-                "outputs": []
-            }
+                "name": "error",
+                "resultType": "error",
+                "result": "Missing required parameters",
+                "resultDescription": "The 'method' and 'url' parameters are required.",
+                "mimeType": "text/plain",
+                "error": "The 'method' and 'url' parameters are required."
+            }]
 
         # Authentication handling
         auth_strategy = None
@@ -115,25 +110,23 @@ def execute_plugin(inputs):
 
         return output
     except Exception as e:
-        # Only escalate to errorhandler for unexpected/code errors
-        send_to_errorhandler(e, context=json.dumps(inputs))
-        return {
+        # Log the error locally and return a structured error output
+        logger.error(f"Error in execute_plugin: {e}")
+        return [{
             "success": False,
-            "error": f"Unexpected error: {str(e)}",
-            "outputs": []
-        }
+            "name": "error",
+            "resultType": "error",
+            "result": str(e),
+            "resultDescription": f"Unexpected error during API request execution",
+            "mimeType": "text/plain",
+            "error": str(e)
+        }]
     finally:
         if temp_dir and os.path.exists(temp_dir):
             try:
                 shutil.rmtree(temp_dir)
             except Exception as cleanup_err:
                 print(f"Failed to clean up temp dir {temp_dir}: {cleanup_err}")
-        logger.error(f"API request failed: {str(e)}")
-        return {
-            "success": False,
-            "error": str(e),
-            "outputs": []
-        }
 
 def main():
     """Main entry point for the plugin."""
@@ -142,11 +135,15 @@ def main():
         input_data = sys.stdin.read().strip()
         if not input_data:
             logger.error("No input data received")
-            result = {
+            result = [{
                 "success": False,
-                "error": "No input data received",
-                "outputs": []
-            }
+                "name": "error",
+                "resultType": "error",
+                "result": "No input data received",
+                "resultDescription": "Plugin received no input data on stdin",
+                "mimeType": "text/plain",
+                "error": "No input data received"
+            }]
         else:
             # Parse the input data
             inputs_array = json.loads(input_data)
@@ -160,11 +157,15 @@ def main():
 
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse input JSON: {str(e)}")
-        result = {
+        result = [{
             "success": False,
-            "error": f"Failed to parse input JSON: {str(e)}",
-            "outputs": []
-        }
+            "name": "error",
+            "resultType": "error",
+            "result": str(e),
+            "resultDescription": "Failed to parse input JSON",
+            "mimeType": "text/plain",
+            "error": str(e)
+        }]
         print(json.dumps(result))
     except Exception as e:
         logger.error(f"Plugin execution failed: {str(e)}")

@@ -11,10 +11,6 @@ const ConversationHistory: React.FC<Props> = React.memo(({ history }) => {
   const shouldScrollToBottomRef = useRef(true);
   const isUserScrollingRef = useRef(false);
   
-  // Track the previous history length to detect actual new messages
-  const prevHistoryLengthRef = useRef(history.length);
-  const lastScrollHeightRef = useRef(0);
-
   // Handle scroll events to detect user scrolling
   useEffect(() => {
     const element = historyContainerRef.current;
@@ -22,50 +18,29 @@ const ConversationHistory: React.FC<Props> = React.memo(({ history }) => {
 
     const handleScroll = () => {
       const { scrollTop, scrollHeight, clientHeight } = element;
-      const isAtBottom = scrollHeight - clientHeight <= scrollTop + 100;
+      // Consider within 50px of bottom as "at bottom" for smoother experience
+      const isAtBottom = Math.abs(scrollHeight - clientHeight - scrollTop) < 50;
       
-      // Only update shouldScroll if user is actively scrolling
-      if (!isUserScrollingRef.current) {
-        isUserScrollingRef.current = true;
-        shouldScrollToBottomRef.current = isAtBottom;
-        
-        // Reset user scrolling flag after a delay
-        setTimeout(() => {
-          isUserScrollingRef.current = false;
-        }, 150);
-      }
+      // Update scroll lock state
+      shouldScrollToBottomRef.current = isAtBottom;
     };
 
     element.addEventListener('scroll', handleScroll, { passive: true });
     return () => element.removeEventListener('scroll', handleScroll);
   }, []);
 
-  // Only scroll when new messages are actually added
-  useEffect(() => {
+  // Scroll handling using useLayoutEffect for smoother updates
+  useLayoutEffect(() => {
     const element = historyContainerRef.current;
     if (!element) return;
 
-    const currentLength = history.length;
-    const previousLength = prevHistoryLengthRef.current;
+    // Always scroll to bottom unless user has explicitly scrolled up
+    const shouldScroll = shouldScrollToBottomRef.current;
     
-    // Only handle scrolling if new messages were added
-    if (currentLength > previousLength) {
-      const wasAtBottom = shouldScrollToBottomRef.current;
-      
-      // If user was at bottom or this is the first message, scroll to bottom
-      if (wasAtBottom || previousLength === 0) {
-        // Use requestAnimationFrame to ensure DOM has updated
-        requestAnimationFrame(() => {
-          if (element) {
-            element.scrollTop = element.scrollHeight;
-          }
-        });
-      }
+    if (shouldScroll) {
+      element.scrollTop = element.scrollHeight;
     }
-
-    // Update the previous length
-    prevHistoryLengthRef.current = currentLength;
-  }, [history.length]); // Only depend on length, not full history array
+  }, [history]); // Depend on history to catch all updates
 
   const theme = useTheme();
 
@@ -89,7 +64,7 @@ const ConversationHistory: React.FC<Props> = React.memo(({ history }) => {
           px: 2,
           pb: 2,
           display: 'flex',
-          flexDirection: 'column',
+          flexDirection: 'column-reverse', // Display messages bottom-to-top
           '&::-webkit-scrollbar': {
             width: '8px',
           },

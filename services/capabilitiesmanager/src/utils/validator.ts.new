@@ -1,7 +1,9 @@
 import { InputValue, PluginDefinition, MapSerializer, PluginParameterType } from '@cktmcs/shared';
+import { PluginRegistry } from './pluginRegistry';
 import { v4 as uuidv4 } from 'uuid';
 import { createAuthenticatedAxios } from '@cktmcs/shared';
 import { sanitizeInputValue, performPreExecutionChecks } from './inputSanitizer';
+import { GlobalErrorCodes, ErrorSeverity, generateStructuredError } from './errorReporter';
 
 // Simple in-memory cache for transformed inputs
 const transformCache = new Map<string, Map<string, InputValue>>();
@@ -148,17 +150,11 @@ export const validateAndStandardizeInputs = async (
     const trace_id = `validate-${uuidv4().substring(0,8)}`;
     const source_component = "validator.validateAndStandardizeInputs";
     
-    const MAX_ATTEMPTS = 3;  // Allow up to 3 attempts with Brain transformations
-    let currentInputs = new Map(inputs);
-    let lastError: string | undefined;
-    let lastValidationType: string | undefined;
-
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-        try {
-            // First, sanitize current inputs
-            const sanitizedInputs = new Map<string, InputValue>();
-            for (const [key, input] of currentInputs.entries()) {
-                sanitizedInputs.set(key, sanitizeInputValue(input, plugin.verb, trace_id));
+    try {
+        // First, sanitize all inputs
+        const sanitizedInputs = new Map<string, InputValue>();
+        for (const [key, input] of inputs.entries()) {
+            sanitizedInputs.set(key, sanitizeInputValue(input, plugin.verb, trace_id));
         }
 
         // Perform pre-execution checks
@@ -270,51 +266,14 @@ export const validateAndStandardizeInputs = async (
             }
         }
 
-        const validationResult: ValidationResult = { 
-            success: true, 
-            inputs: standardizedInputs 
-        };
+        return { success: true, inputs: standardizedInputs };
 
-        if (validationResult.success) {
-            return validationResult;
-        } else {
-            lastError = validationResult.error;
-            lastValidationType = validationResult.validationType;
-            
-            // If this isn't our last attempt, try using Brain to transform the inputs
-            if (attempt < MAX_ATTEMPTS) {
-                console.log(`[${trace_id}] ${source_component}: Attempt ${attempt} failed. Error: ${lastError}. Using Brain to transform inputs...`);
-                try {
-                    currentInputs = await transformInputsWithBrain(plugin, currentInputs, trace_id, lastError);
-                    continue;
-                } catch (brainError: any) {
-                    console.error(`[${trace_id}] ${source_component}: Brain transformation failed:`, brainError);
-                    // If Brain transform fails, continue with next attempt using original inputs
-                }
-            }
-        }
     } catch (error: any) {
         console.error(`[${trace_id}] ${source_component}: Validation error:`, error);
-        lastError = error.message || 'Unknown validation error';
-        lastValidationType = 'ValidationError';
-        
-        // If this isn't our last attempt, try using Brain
-        if (attempt < MAX_ATTEMPTS) {
-            try {
-                currentInputs = await transformInputsWithBrain(plugin, currentInputs, trace_id, lastError);
-                continue;
-            } catch (brainError: any) {
-                console.error(`[${trace_id}] ${source_component}: Brain transformation failed:`, brainError);
-            }
-        }
+        return {
+            success: false,
+            error: error.message || 'Unknown validation error',
+            validationType: 'ValidationError'
+        };
     }
-    }
-
-    // If we get here, all attempts have failed
-    console.error(`[${trace_id}] ${source_component}: All validation attempts failed after ${MAX_ATTEMPTS} tries`);
-    return {
-        success: false,
-        error: lastError || 'Validation failed after multiple attempts',
-        validationType: lastValidationType || 'ValidationError'
-    };
 };

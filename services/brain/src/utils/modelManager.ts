@@ -93,7 +93,7 @@ export class ModelManager {
         return this.models.get(name.toLowerCase());
     }
 
-    selectModel(optimization: OptimizationType, conversationType: LLMConversationType): BaseModel | null {
+    selectModel(optimization: OptimizationType, conversationType: LLMConversationType, excludedModels: string[] = [], estimatedTokens: number = 0): BaseModel | null {
         console.log(`Selecting model for optimization: ${optimization}, conversationType: ${conversationType}`);
 
         // Special handling for TextToJSON - if no models are available due to blacklisting, reset blacklist
@@ -144,6 +144,15 @@ export class ModelManager {
         // Get all available models that support the conversation type
         const availableModels = Array.from(this.models.values())
             .filter(model => {
+
+                if (excludedModels.includes(model.name)) {
+                    return false;
+                }
+
+                // Check if the model can handle the estimated token count
+                if (estimatedTokens > 0 && model.tokenLimit < estimatedTokens) {
+                    return false;
+                }
 
                 // Check if model supports the conversation type
                 if (!model.contentConversation.includes(conversationType)) {

@@ -53,6 +53,12 @@ services:
         condition: service_started
       securitymanager:
         condition: service_started
+      trafficmanager:
+        condition: service_started
+      brain:
+        condition: service_started
+      engineer:
+        condition: service_started
     environment:
       NODE_ENV: production
       PORT: &missioncontrolPort 5030

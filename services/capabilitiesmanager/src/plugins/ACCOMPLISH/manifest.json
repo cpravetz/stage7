@@ -1,17 +1,59 @@
 {
-    "id":"plugin-ACCOMPLISH",
-    "verb":"ACCOMPLISH",
-    "description":"Takes a goal and either creates a solution for the goal, recommends development of a new plugin, or creates a detailed plan to create the solution",
-    "explanation":"This plugin takes a goal statement and either returns the result of accomplishing the goal or a plan of tasks to achieve it",
-    "inputDefinitions":[{"name":"goal","required":true,"type":"string","description":"The goal to be accomplished or planned for"}],
-    "outputDefinitions":[{"name":"plan","required":false,"type":"plan","description":"A plan of tasks to achieve the goal, or a direct answer if the goal can be immediately accomplished"},{"name":"answer","required":false,"type":"string","description":"A solution that matches or achieves the goal"}],
-    "language":"python",
-    "entryPoint":{"main":"main.py",
-    "packageSource":{"type":"local","path":"./",
-    "requirements":"requirements.txt"}},
-    "repository":{"type":"local"},
-    "inputGuidance":"Inputs for this plugin must include a goal statement as an input named 'goal'.",
-    "security":{"permissions":[],"sandboxOptions":{},
-    "trust":{"signature":"GEr7jE7Y6GDjfKXD2i1yMrIWPOko7GJxg9jPCNrxCae2pD1pvVXdi0YrTWK4SKGZis1G6GZcoTtrob26xt17Iuu9f8O8gX/Cz433TRKo78Akl5ggnQn8fqj1uQmIco6uGcspMxHF0PuNHTrZF5jKG+jVT2clG7HPkUXEYhRc61kD7Z6MaKAjFmg75JUkyaW5S6hNY1wFnmrTLX37mu017QE+65rZWELHzeGV9nbmataVMzCjPZmcvn583tCZTs+H9sC8iVr8kKwvCJ2Y3grmSnr6/8biKgQLlpIQp9x9vv7TuyMV7obicGkgkfvt6HQquynHZA0ForXKwwYbth3smg=="}},
-    "distribution":{"downloads":0,"rating":0},
-    "version":"1.0.0"}
+    "id": "plugin-ACCOMPLISH",
+    "verb": "ACCOMPLISH",
+    "description": "Takes a goal and creates a detailed, multi-step plan to achieve it. This is the primary tool for breaking down complex tasks.",
+    "explanation": "Use this plugin for complex goals that require a multi-step plan. It is the primary tool for breaking down a high-level objective into a detailed sequence of actions. It should be used to generate a comprehensive plan that can be executed by other agents or plugins. Do not use it for simple tasks that can be accomplished with a single command.",
+    "inputDefinitions": [
+        {
+            "name": "goal",
+            "required": true,
+            "type": "string",
+            "description": "The high-level goal to be accomplished."
+        }
+    ],
+    "outputDefinitions": [
+        {
+            "name": "plan",
+            "required": true,
+            "type": "plan",
+            "description": "A detailed, step-by-step plan to achieve the goal. Each step in the plan should be a concrete action that can be executed by another plugin. The plan should be comprehensive and sufficient to fully accomplish the goal."
+        },
+        {
+            "name": "answer",
+            "required": false,
+            "type": "string",
+            "description": "A direct answer or result, to be used only if the goal can be fully accomplished in a single step without requiring a plan."
+        },
+        {
+            "name": "plugin",
+            "required": false,
+            "type": "plugin",
+            "description": "A recommendation for a new plugin to be developed, including its ID and description."
+        }
+    ],
+    "language": "python",
+    "entryPoint": {
+        "main": "main.py",
+        "packageSource": {
+            "type": "local",
+            "path": "./",
+            "requirements": "requirements.txt"
+        }
+    },
+    "repository": {
+        "type": "local"
+    },
+    "inputGuidance": "Inputs for this plugin must include a goal statement as an input named 'goal'.",
+    "security": {
+        "permissions": [],
+        "sandboxOptions": {},
+        "trust": {
+            "signature": "GEr7jE7Y6GDjfKXD2i1yMrIWPOko7GJxg9jPCNrxCae2pD1pvVXdi0YrTWK4SKGZis1G6GZcoTtrob26xt17Iuu9f8O8gX/Cz433TRKo78Akl5ggnQn8fqj1uQmIco6uGcspMxHF0PuNHTrZF5jKG+jVT2clG7HPkUXEYhRc61kD7Z6MaKAjFmg75JUkyaW5S6hNY1wFnmrTLX37mu017QE+65rZWELHzeGV9nbmataVMzCjPZmcvn583tCZTs+H9sC8iVr8kKwvCJ2Y3grmSnr6/8biKgQLlpIQp9x9vv7TuyMV7obicGkgkfvt6HQquynHZA0ForXKwwYbth3smg=="
+        }
+    },
+    "distribution": {
+        "downloads": 0,
+        "rating": 0
+    },
+    "version": "1.0.0"
+}

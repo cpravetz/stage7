@@ -31,26 +31,20 @@ def format_plugin_output(success: bool, name: str, result_type: str, description
         output["error"] = error
     return json.dumps([output], indent=2)
 
-def execute_transform(script: str, language: str, inputs: dict) -> dict:
+def execute_transform(script: str, params: dict) -> dict:
     """Executes the transformation script using CODE_EXECUTOR."""
-    logger.info(f"Executing transform with language: {language}, inputs: {inputs}")
+    logger.info(f"Executing transform with params: {params}")
 
-    # Inject inputs into the script
-    if language == "javascript":
-        # For JavaScript, inputs will be a global const object
-        inputs_json = json.dumps(inputs)
-        code_to_execute = f"const inputs = {inputs_json};\n{script}"
-    elif language == "python":
-        # For Python, inputs will be a global dict
-        inputs_json = json.dumps(inputs)
-        code_to_execute = f"import json\ninputs = json.loads('{inputs_json}')\n{script}"
-    else:
-        raise TransformError(f"Unsupported language: {language}")
+    # For Python, script_parameters will be available as params
+    params_json = json.dumps(params)
+    code_to_execute = f"import json\nparams = json.loads('{params_json}')\n{script}"
+
+    logger.info("Using Python as the execution language per manifest")
 
     logger.info(f"Code to send to CODE_EXECUTOR (first 200 chars): {code_to_execute[:200]}...")
 
     payload = {
-        "language": language,
+        "language": "python",  # Set in manifest
         "code": code_to_execute
     }
 
@@ -90,20 +84,35 @@ if __name__ == "__main__":
         input_data = sys.stdin.read()
         logger.info(f"TRANSFORM plugin received input: {len(input_data)} characters")
 
-        inputs_dict = json.loads(input_data)
+        inputs_list = json.loads(input_data)
+        
+        inputs_dict = {}
+        for item in inputs_list:
+            if isinstance(item, list) and len(item) == 2:
+                key, value = item
+                inputs_dict[key] = value
+            else:
+                logger.warning(f"Skipping invalid input item: {item}")
 
-        script = inputs_dict.get("script", "")
-        language = inputs_dict.get("language", "")
-        # Ensure inputs is always a dictionary, even if not provided or null
-        user_inputs = inputs_dict.get("inputs", {})
-        if not isinstance(user_inputs, dict):
-            logger.warning(f"'inputs' field is not a dictionary. Coercing to empty dict. Received: {user_inputs}")
-            user_inputs = {}
+        script = inputs_dict.get("script", {}).get("value", "")
+        script_parameters = inputs_dict.get("script_parameters", {}).get("value", {})
 
-        if not script or not language:
-            raise TransformError("Missing required 'script' or 'language' input.")
+        if not script:
+            raise TransformError("Missing required 'script' input")
 
-        transform_output = execute_transform(script, language, user_inputs)
+        if not script_parameters:
+            raise TransformError("Missing required 'script_parameters' input")
+
+        if not isinstance(script_parameters, dict):
+            try:
+                if isinstance(script_parameters, str):
+                    script_parameters = json.loads(script_parameters)
+                else:
+                    raise TransformError(f"'script_parameters' must be a JSON object or string, got {type(script_parameters)}")
+            except json.JSONDecodeError:
+                raise TransformError("'script_parameters' must be valid JSON")
+
+        transform_output = execute_transform(script, script_parameters)
 
         # Format the successful output
         sys.stdout.write(format_plugin_output(

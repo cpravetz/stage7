@@ -231,9 +231,13 @@ export class Brain extends BaseEntity {
         const maxRetries = 3;
         const thread = this.createThreadFromRequest(req);
 
+        // Estimate token count (heuristic: 1 token ~= 4 characters)
+        const estimatedTokens = thread.exchanges.reduce((acc, ex) => acc + ex.content.length, 0) / 4;
+
         let attempt = 0;
         let lastError: string = '';
         let lastModelName: string | null = null;
+        const excludedModels: string[] = [];
 
         while (attempt < maxRetries) {
             attempt++;
@@ -243,7 +247,9 @@ export class Brain extends BaseEntity {
             try {
                 selectedModel = this.modelManager.selectModel(
                     thread.optimization || 'accuracy',
-                    thread.conversationType || LLMConversationType.TextToText
+                    thread.conversationType || LLMConversationType.TextToText,
+                    excludedModels,
+                    estimatedTokens
                 );
 
                 if (!selectedModel || !selectedModel.isAvailable()) {
@@ -280,8 +286,13 @@ export class Brain extends BaseEntity {
                     this.modelManager.trackModelResponse(trackingRequestId, '', 0, false, errorMessage);
                 }
 
+                if (selectedModel && selectedModel.name && errorMessage.includes('context window')) {
+                    console.log(`[Brain Chat] Context window error detected for model ${selectedModel.name}. Excluding it from retries.`);
+                    excludedModels.push(selectedModel.name);
+                }
+
                 // Check if this is a JSON error and if we should attempt a repair
-                if (thread.conversationType === LLMConversationType.TextToJSON && /json/i.test(errorMessage) && attempt < maxRetries) {
+                else if (thread.conversationType === LLMConversationType.TextToJSON && /json/i.test(errorMessage) && attempt < maxRetries) {
                     console.log(`[Brain Chat] JSON error detected. Attempting to repair with a new model.`);
                     // Modify the thread to include the repair instructions
                     const lastExchange = thread.exchanges[thread.exchanges.length - 1];

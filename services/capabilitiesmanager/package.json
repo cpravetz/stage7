@@ -6,7 +6,7 @@
     "type": "commonjs",
     "scripts": {
         "start": "ts-node src/index.ts",
-        "build": "tsc",
+        "build": "tsc && cp -r src/plugins dist/plugins",
         "test": "jest"
     },
     "dependencies": {

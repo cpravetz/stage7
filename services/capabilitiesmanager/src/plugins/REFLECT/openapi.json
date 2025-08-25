@@ -1,0 +1,44 @@
+{
+    "openapi": "3.0.0",
+    "info": {
+        "title": "REFLECT Plugin",
+        "version": "1.0.0",
+        "description": "A plugin for reflecting on mission progress."
+    },
+    "paths": {
+        "/reflect": {
+            "post": {
+                "summary": "Executes the reflection process",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "properties": {
+                                    "mission_goal": {
+                                        "type": "string"
+                                    },
+                                    "plan_history": {
+                                        "type": "string"
+                                    },
+                                    "work_products": {
+                                        "type": "string"
+                                    },
+                                    "question": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Reflection result"
+                    }
+                }
+            }
+        }
+    }
+}
