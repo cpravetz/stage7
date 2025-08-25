@@ -3,20 +3,7 @@ import tempfile
 import shutil
 import hashlib
 
-# Error handler integration (for unexpected/code errors only)
-def send_to_errorhandler(error, context=None):
-    try:
-        import requests
-        errorhandler_url = os.environ.get('ERRORHANDLER_URL', 'errorhandler:5090')
-        payload = {
-            'error': str(error),
-            'context': context or ''
-        }
-        requests.post(f'http://{errorhandler_url}/analyze', json=payload, timeout=10)
-    except Exception as e:
-        print(f"Failed to send error to errorhandler: {e}")
-
-_seen_hashes = set()
+seen_hashes = set()
 
 def robust_execute_plugin(inputs):
     temp_dir = None
@@ -24,7 +11,7 @@ def robust_execute_plugin(inputs):
         # Deduplication: hash the inputs
         hash_input = json.dumps(inputs, sort_keys=True)
         input_hash = hashlib.sha256(hash_input.encode()).hexdigest()
-        if input_hash in _seen_hashes:
+        if input_hash in seen_hashes:
             return [
                 {
                     "success": False,
@@ -34,7 +21,7 @@ def robust_execute_plugin(inputs):
                     "error": "Duplicate input detected."
                 }
             ]
-        _seen_hashes.add(input_hash)
+        seen_hashes.add(input_hash)
 
         # Temp directory hygiene
         temp_dir = tempfile.mkdtemp(prefix="scrape_plugin_")
@@ -49,8 +36,8 @@ def robust_execute_plugin(inputs):
 
         return result
     except Exception as e:
-        # Only escalate to errorhandler for unexpected/code errors
-        send_to_errorhandler(e, context=json.dumps(inputs))
+        # Log the error locally and return a structured error output
+        logger.error(f"Error in robust_execute_plugin: {e}")
         return [
             {
                 "success": False,
@@ -81,7 +68,7 @@ from typing import Dict, List, Any, Optional, Union
 import logging
 import time
 import random
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, urlparse
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -282,6 +269,14 @@ class ScrapePlugin:
             return value.strip()
         return value
 
+    def _is_valid_url(self, url: str) -> bool:
+        try:
+            result = urlparse(url)
+            # Check if scheme and netloc (network location, i.e., domain) exist
+            return all([result.scheme, result.netloc])
+        except ValueError:
+            return False
+
     def execute(self, inputs_map: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Execute the SCRAPE plugin"""
         try:
@@ -309,8 +304,10 @@ class ScrapePlugin:
                 try:
                     # Validate and convert URL
                     full_url = self.convert_to_full_url(url, 'https')
-                    if not full_url:
-                        logger.warning(f"Invalid URL: {url}")
+                    
+                    # Add stricter URL validation
+                    if not self._is_valid_url(full_url):
+                        logger.warning(f"Skipping invalid or unresolvable URL: {url} (converted to: {full_url})")
                         continue
 
                     # Parse configuration

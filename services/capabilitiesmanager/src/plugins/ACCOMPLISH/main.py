@@ -9,7 +9,7 @@ import logging
 import time
 import requests
 import re
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional, Set
 
 # Configure logging
 logging.basicConfig(
@@ -46,6 +46,42 @@ def get_auth_token(inputs: Dict[str, Any]) -> str:
             return token_data
     raise AccomplishError("No authentication token found", "auth_error")
 
+def _extract_json_from_string(text: str) -> Optional[str]:
+    """
+    Extracts a JSON object or array string from a given text.
+    Assumes the JSON is the primary content and attempts to find the outermost JSON structure.
+    """
+    text = text.strip()
+    if not text:
+        return None
+
+    # Find the first and last occurrences of the JSON delimiters
+    first_brace = text.find('{')
+    first_bracket = text.find('[')
+    last_brace = text.rfind('}')
+    last_bracket = text.rfind(']')
+
+    # Determine the start and end of the JSON string
+    if first_bracket != -1 and last_bracket != -1 and first_bracket < last_bracket:
+        # It's likely a JSON array
+        start_index = first_bracket
+        end_index = last_bracket
+    elif first_brace != -1 and last_brace != -1 and first_brace < last_brace:
+        # It's likely a JSON object
+        start_index = first_brace
+        end_index = last_brace
+    else:
+        return None # No valid JSON found
+
+    json_candidate = text[start_index : end_index + 1]
+
+    # Basic validation: check if the candidate string is likely JSON
+    if not (json_candidate.startswith('{') and json_candidate.endswith('}')) and \
+       not (json_candidate.startswith('[') and json_candidate.endswith(']')):
+        return None
+
+    return json_candidate
+
 def call_brain(prompt: str, inputs: Dict[str, Any], response_type: str = "json") -> str:
     """Call Brain service with proper authentication and conversation type"""
     progress.checkpoint("brain_call_start")
@@ -58,13 +94,14 @@ def call_brain(prompt: str, inputs: Dict[str, Any], response_type: str = "json")
         if response_type == 'json':
             conversation_type = "TextToJSON"
             system_message = (
-                "You are a planning assistant. Generate actionable plans as JSON arrays. "
-                "Each step must match the provided schema precisely"
-                "Return ONLY valid JSON, no other text."
+                "You are a planning assistant for a system of agents. Generate meaningful and actionable plans as JSON arrays. "
+                "Plans must accomplish the provided goal, not simulate it. "
+                "Each step must match the provided schema precisely.  You should attempt to use the available tools first to find solutions and complete tasks independently. Do not create steps to ask the user for information you can find elsewhere. "
+                "Return ONLY valid JSON, no other text." 
             )
         else:
             conversation_type = "TextToText"
-            system_message = "You are a planning assistant."
+            system_message = "You are an autonomous agent. Your primary goal is to accomplish the user's mission by creating and executing plans.  Be resourceful and proactive."
 
         payload = {
             "messages": [
@@ -95,13 +132,39 @@ def call_brain(prompt: str, inputs: Dict[str, Any], response_type: str = "json")
         if 'result' not in result:
             raise AccomplishError("Brain response missing result", "brain_response_error")
 
-        progress.checkpoint("brain_call_success")
-        return result['result']
+        raw_brain_response = result['result']
+
+        if response_type == 'text':
+            logger.info("Response type is TEXT. Not attempting JSON extraction.")
+            progress.checkpoint("brain_call_success_text_response")
+            return raw_brain_response
+
+        # Attempt to extract clean JSON from the raw response
+        extracted_json_str = _extract_json_from_string(raw_brain_response)
+
+        if extracted_json_str:
+            try:
+                # Validate that the extracted string is indeed valid JSON
+                json.loads(extracted_json_str)
+                logger.info("Successfully extracted and validated JSON from Brain response.")
+                logger.info(f"Raw JSON response from Brain: {extracted_json_str}")
+                progress.checkpoint("brain_call_success")
+                return extracted_json_str
+            except json.JSONDecodeError as e:
+                logger.warning(f"Extracted JSON is still invalid: {e}. Raw response: {raw_brain_response[:200]}...")
+                # Fallback to raw response if extraction leads to invalid JSON
+                progress.checkpoint("brain_call_success_with_warning")
+                return raw_brain_response
+        else:
+            logger.warning(f"Could not extract JSON from Brain response. Raw response: {raw_brain_response[:200]}...")
+            progress.checkpoint("brain_call_success_with_warning")
+            return raw_brain_response
 
     except Exception as e:
         progress.checkpoint("brain_call_failed")
         logger.error(f"Brain call failed: {e}")
         raise AccomplishError(f"Brain service call failed: {e}", "brain_error")
+
 
 def parse_inputs(inputs_str: str) -> Dict[str, Any]:
     """Parse and validate inputs"""
@@ -140,6 +203,10 @@ PLAN_STEP_SCHEMA = {
             "type": "string",
             "description": "The action to be performed in this step. It may be one of the plugin actionVerbs or a new actionVerb for a new type of task."
         },
+        "description": {
+            "type": "string",
+            "description": "A thorough description of the task to be performed in this step so that an agent or LLM can execute without needing external context beyond the inputs and output specification."
+        },
         "inputs": {
             "type": "object",
             "patternProperties": {
@@ -150,29 +217,32 @@ PLAN_STEP_SCHEMA = {
                         "type": "string",
                         "description": "Constant string value for this input"
                     },
+                    "valueType": {
+                        "type": "string",
+                        "enum": ["string", "number", "boolean", "array", "object", "plan", "plugin", "any"],
+                        "description": "The natural type of the Constant input value"
+                    },
                     "outputName": {
                         "type": "string",
                         "description": "Reference to an output from a previous step at the same level or higher"
                     },
-                    "valueType": {
-                        "type": "string",
-                        "enum": ["string", "number", "boolean", "array", "object", "plan", "plugin", "any"],
-                        "description": "The expected type of the input value"
+                    "sourceStep": {
+                        "type": "integer",
+                        "minimum": 0, 
+                        "description": "The step number that produces the output for this input. Use 0 to refer to an input from the parent step."
                     },
                     "args": {
                         "type": "object",
                         "description": "Additional arguments for the input"
                     }
                 },
-                "required": ["valueType"],
                 "oneOf": [
-                    {"required": ["value"]},
-                    {"required": ["outputName"]
-                }],
+                    {"required": ["value", "valueType"]},
+                    {"required": ["outputName", "sourceStep"]}
+                ],
                 "additionalProperties": False,
-                "description": "Thorough description of what this step does and context needed to understand it"
             },
-            "additionalProperties": False
+            "additionalProperties": False,
         },
         "outputs": {
             "type": "object",
@@ -185,27 +255,376 @@ PLAN_STEP_SCHEMA = {
             "additionalProperties": False,
             "description": "Expected outputs from this step, for control flow, should match the final outputs of the sub-plan(s)"
         },
-        "dependencies": {
-            "type": "object",
-            "patternProperties": {
-                "^[a-zA-Z][a-zA-Z0-9_]*$": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "description": "Step number that produces the output for the input with this name"
-                }
-            },
-            "additionalProperties": False,
-            "description": "Object mapping outputNames to the step number that produces each. Only one source per outputName. Format: {{outputName: stepNumber, ...}}"
-        },
         "recommendedRole": {
             "type": "string",
             "description": "Suggested role type for the agent executing this step. Allowed values are Coordinator, Researcher, Coder, Creative, Critic, Executor, and Domain Expert "
         }
     },
-    "required": ["number", "actionVerb", "inputs", "description", "outputs", "dependencies"],
+    "required": ["number", "actionVerb", "inputs", "description", "outputs"],
     "additionalProperties": False
     }
 }
+
+class PlanValidator:
+    """Handles validation and repair of plans."""
+    def __init__(self, max_retries: int = 3):
+        self.max_retries = max_retries
+
+    def _standardize_input_name(self, input_name: str, plugin_input_definitions: Dict[str, Any]) -> str:
+        """Heuristic to map a given input name to a known plugin input name."""
+        known_names = list(plugin_input_definitions.keys())
+        if input_name in known_names:
+            return input_name
+        
+        # Check for pluralization
+        if input_name.endswith('s') and input_name[:-1] in known_names:
+            return input_name[:-1]
+        
+        # Check for a more general case like 'tool_name' -> 'toolname'
+        if input_name.replace('_', '') in [name.replace('_', '') for name in known_names]:
+            for name in known_names:
+                if input_name.replace('_', '') == name.replace('_', ''):
+                    return name
+        
+        return input_name
+        
+    def _validate_plan(self, plan: List[Dict[str, Any]], available_plugins: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Validate plan structure and completeness"""
+        errors = []
+        logger.info("Starting plan validation...")
+
+        if not isinstance(plan, list) or len(plan) == 0:
+            return {'valid': False, 'errors': ['Plan must be a non-empty array']}
+        
+        plugin_map = {plugin.get('actionVerb'): plugin for plugin in available_plugins}
+
+        step_numbers = set()
+        step_outputs: Dict[int, Set[str]] = {}
+        for i, step in enumerate(plan):
+            step_num = step.get('number', i + 1)
+            step_numbers.add(step_num)
+            if 'outputs' in step and isinstance(step['outputs'], dict):
+                step_outputs[step_num] = set(step['outputs'].keys())
+            else:
+                step_outputs[step_num] = set()
+
+        for i, step in enumerate(plan):
+            step_num = step.get('number', i + 1)
+            
+            required_fields = ['number', 'actionVerb', 'inputs', 'description', 'outputs']
+            for field in required_fields:
+                if field not in step:
+                    errors.append(f"Step {step_num}: Missing required field '{field}'")
+            
+            allowed_fields = required_fields + ['recommendedRole']
+            for field in list(step.keys()):
+                if field not in allowed_fields:
+                    logger.warning(f"Step {step_num}: Removing unexpected property '{field}'")
+                    del step[field]
+            
+            if 'outputs' in step and isinstance(step['outputs'], dict):
+                output_names = set()
+                for output_name, output_details in list(step['outputs'].items()):
+                    if isinstance(output_details, str):
+                        step['outputs'][output_name] = {'description': output_details}
+                        output_details = step['outputs'][output_name]
+
+                    if not isinstance(output_details, dict) or 'description' not in output_details:
+                        errors.append(f"Step {step_num}: Output '{output_name}' is missing 'description' or is malformed.")
+                        continue
+
+                    if not isinstance(output_details['description'], str):
+                        errors.append(f"Step {step_num}: Output '{output_name}' has an invalid description type (expected string).")
+                    if output_name in output_names:
+                        errors.append(f"Step {step_num}: Duplicate output name '{output_name}'.")
+                    output_names.add(output_name)
+
+            if 'inputs' in step and isinstance(step['inputs'], dict):
+                for input_name, input_def in list(step['inputs'].items()):
+                    if not isinstance(input_def, dict):
+                        if isinstance(input_def, (str, int, float, bool)):
+                            step['inputs'][input_name] = {
+                                "value": input_def,
+                                "valueType": "string" if isinstance(input_def, str) else "number" if isinstance(input_def, (int, float)) else "boolean"
+                            }
+                            input_def = step['inputs'][input_name]
+                        else:
+                            errors.append(f"Step {step_num}: Input '{input_name}' is malformed.")
+                            continue
+
+                    is_value_set = 'value' in input_def
+                    is_output_set = 'outputName' in input_def and 'sourceStep' in input_def
+
+                    if not (is_value_set or is_output_set):
+                        errors.append(f"Step {step_num}: Input '{input_name}' must have 'value' or 'outputName' and 'sourceStep'.")
+                        continue
+
+                    if is_value_set and is_output_set:
+                        logger.info(f"Step {step_num}: Repairing input '{input_name}', preferring output reference.")
+                        del input_def['value']
+                        if 'valueType' in input_def: del input_def['valueType']
+
+                    if 'outputName' in input_def and 'sourceStep' in input_def:
+                        source_step_num = input_def['sourceStep']
+                        if not isinstance(source_step_num, int) or source_step_num < 0:
+                            errors.append(f"Step {step_num}: Input '{input_name}' has invalid source step: {source_step_num}")
+                            continue
+                        
+                        if source_step_num > 0:
+                            if source_step_num >= step_num:
+                                errors.append(f"Step {step_num}: Input '{input_name}' refers to future step {source_step_num}")
+                            if source_step_num not in step_numbers:
+                                errors.append(f"Step {step_num}: Input '{input_name}' refers to non-existent step {source_step_num}")
+                                continue
+                            
+                            source_step = next((s for s in plan if s.get('number') == source_step_num), None)
+                            if source_step:
+                                source_verb = source_step.get('actionVerb')
+                                if source_verb in plugin_map:
+                                    source_plugin = plugin_map[source_verb]
+                                    plugin_outputs = [o.get('name') for o in source_plugin.get('outputDefinitions', [])]
+                                    
+                                    if input_def['outputName'] not in plugin_outputs:
+                                        error_msg = f"Step {step_num}: Input '{input_name}' refers to output '{input_def['outputName']}' which is not a valid output for plugin '{source_verb}'. Valid outputs are: {plugin_outputs}"
+                                        errors.append(error_msg)
+                                        
+                                        if len(plugin_outputs) == 1:
+                                            correct_name = plugin_outputs[0]
+                                            logger.info(f"Repairing output reference: changing '{input_def['outputName']}' to '{correct_name}'")
+                                            input_def['outputName'] = correct_name
+                                            # Remove the error since we fixed it
+                                            errors.pop()
+
+            action_verb = step.get('actionVerb')
+            if action_verb in plugin_map:
+                plugin_definition = plugin_map[action_verb]
+                plugin_input_definitions = {inp.get('name'): inp for inp in plugin_definition.get('inputDefinitions', [])}
+                
+                if 'inputs' in step and isinstance(step['inputs'], dict):
+                    original_inputs = step['inputs'].copy()
+                    cleaned_inputs = {}
+                    for input_name, input_def in original_inputs.items():
+                        standardized_name = self._standardize_input_name(input_name, plugin_input_definitions)
+                        cleaned_inputs[standardized_name] = input_def
+                    step['inputs'] = cleaned_inputs
+
+                required_inputs_by_plugin = {name for name, definition in plugin_input_definitions.items() if definition.get('required')}
+                
+                if 'inputs' in step and isinstance(step['inputs'], dict):
+                    provided_inputs = set(step['inputs'].keys())
+                    missing_required = required_inputs_by_plugin - provided_inputs
+                    if missing_required:
+                        # Attempt to autofill missing required inputs from previous steps
+                        for missing_input in missing_required:
+                            for prev_step_num in range(step_num - 1, 0, -1):
+                                if prev_step_num in step_outputs:
+                                    # Simple heuristic: if there's only one output from the previous step, use it.
+                                    if len(step_outputs[prev_step_num]) == 1:
+                                        output_to_use = list(step_outputs[prev_step_num])[0]
+                                        logger.info(f"Step {step_num}: Autofilling missing input '{missing_input}' with output '{output_to_use}' from step {prev_step_num}")
+                                        step['inputs'][missing_input] = {
+                                            "outputName": output_to_use,
+                                            "sourceStep": prev_step_num
+                                        }
+                                        break # Move to the next missing input
+                        
+                        # Re-check for missing inputs after autofill
+                        provided_inputs = set(step['inputs'].keys())
+                        missing_required = required_inputs_by_plugin - provided_inputs
+                        if missing_required:
+                            errors.append(f"Step {step_num} (verb '{action_verb}'): Missing required inputs: {', '.join(missing_required)}")
+
+        return {'valid': len(errors) == 0, 'errors': errors}
+
+    def validate_and_repair(self, plan: List[Dict[str, Any]], goal: str, inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Phase 3: Validate and repair plan if needed, with retries."""
+        logger.info("🔍 Phase 3: Validating and repairing plan...")
+
+        # Initial code-based repair
+        plan = self._repair_plan_code_based(plan)
+
+        for attempt in range(self.max_retries):
+            validation_result = self._validate_plan(plan, inputs.get('availablePlugins', []))
+            
+            if validation_result['valid']:
+                logger.info("✅ Plan validation successful")
+                return plan
+            
+            logger.warning(f"Attempt {attempt + 1}: Plan validation failed with errors: {validation_result['errors']}")
+            
+            if attempt < self.max_retries - 1:
+                logger.info("🔧 Attempting to repair plan with LLM...")
+                try:
+                    plan = self._repair_plan_with_llm(plan, validation_result['errors'], goal, inputs)
+                    plan = self._repair_plan_code_based(plan) # Repair again after LLM changes
+                except Exception as e:
+                    logger.error(f"Plan repair failed on attempt {attempt + 1}: {e}")
+            else:
+                raise AccomplishError(
+                    f"Plan validation failed after {self.max_retries} attempts. Last errors: {validation_result['errors']}", 
+                    "validation_error"
+                )
+        
+        raise AccomplishError("Unexpected validation loop exit", "validation_error")
+
+    def _repair_plan_code_based(self, plan: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Automatically repair common schema violations in the plan."""
+        logger.info("[Repair] Starting code-based repair...")
+        
+        if not isinstance(plan, list):
+            logger.warning("Plan is not a list. Cannot repair.")
+            return []
+
+        for step in plan:
+            if not isinstance(step, dict):
+                logger.warning("Step is not a dictionary. Skipping.")
+                continue
+
+            # Ensure 'number' is an integer
+            if 'number' in step and not isinstance(step['number'], int):
+                try:
+                    step['number'] = int(step['number'])
+                except (ValueError, TypeError):
+                    logger.warning(f"Failed to convert step number '{step['number']}' to integer. Removing.")
+                    del step['number']
+
+            # Repair inputs
+            if 'inputs' in step and isinstance(step['inputs'], dict):
+                for input_name, input_def in step['inputs'].items():
+                    if isinstance(input_def, dict):
+                        has_output_name = 'outputName' in input_def
+                        has_source_step = 'sourceStep' in input_def
+                        has_value = 'value' in input_def
+
+                        if has_output_name and has_source_step:
+                            # Dependent input: only allow outputName, sourceStep, and args
+                            allowed_keys = ['outputName', 'sourceStep', 'args']
+                            keys_to_delete = [key for key in list(input_def.keys()) if key not in allowed_keys]
+                            for key in keys_to_delete:
+                                logger.info(f"[Repair] Dependent input '{input_name}': Deleting extraneous key '{key}'")
+                                del input_def[key]
+                        elif has_value:
+                            # Constant input: only allow value, valueType, and args
+                            allowed_keys = ['value', 'valueType', 'args']
+                            keys_to_delete = [key for key in list(input_def.keys()) if key not in allowed_keys]
+                            for key in keys_to_delete:
+                                logger.info(f"[Repair] Constant input '{input_name}': Deleting extraneous key '{key}'")
+                                del input_def[key]
+                        else:
+                            # Malformed input def, try to make sense of it
+                            if has_output_name:
+                                logger.warning(f"Input '{input_name}' has 'outputName' but no 'sourceStep'. Adding sourceStep: 0 as a guess.")
+                                input_def['sourceStep'] = 0
+                            elif has_source_step:
+                                logger.warning(f"Input '{input_name}' has 'sourceStep' but no 'outputName'. Removing.")
+                                del step['inputs'][input_name]
+                                
+
+            # Recursively repair sub-plans
+            if 'steps' in step and isinstance(step['steps'], list):
+                logger.info(f"[Repair] Recursively repairing sub-plan in step {step.get('number')}")
+                step['steps'] = self._repair_plan_code_based(step['steps'])
+                
+        logger.info(f"[Repair] Finished code-based repair.")
+        return plan
+
+    def _repair_plan_with_llm(self, plan: List[Dict[str, Any]], errors: List[str], goal: str, inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Ask LLM to repair the plan based on validation errors"""
+        
+        # Identify the step to be repaired
+        step_to_repair = None
+        for error in errors:
+            match = re.search(r"Step (\d+):", error)
+            if match:
+                step_number = int(match.group(1))
+                for step in plan:
+                    if step.get('number') == step_number:
+                        step_to_repair = step
+                        break
+            if step_to_repair:
+                break
+
+        if not step_to_repair:
+            logger.warning("Could not identify a single step to repair from errors. Sending the whole plan.")
+            step_to_repair_json = json.dumps(plan, indent=2)
+            prompt_type = "full_plan"
+        else:
+            step_to_repair_json = json.dumps(step_to_repair, indent=2)
+            prompt_type = "single_step"
+
+        errors_text = '\n'.join([f"- {error}" for error in errors])
+        
+        prompt = f"""You are an expert system for correcting JSON data that fails to conform to a schema.
+
+**1. THE GOAL:**
+---
+{goal}
+---
+
+**2. THE INVALID JSON OBJECT:**
+---
+{step_to_repair_json}
+---
+
+**3. THE FULL PLAN FOR CONTEXT:**
+---
+{json.dumps(plan, indent=2)}
+---
+
+**4. THE VALIDATION ERRORS:**
+---
+{errors_text}
+---
+
+**5. YOUR TASK:**
+Your task is to fix the JSON object provided in section 2 to make it valid. Pay close attention to the error messages and the schema to understand what needs to be corrected.
+
+**CRITICAL REQUIREMENTS:**
+- **JSON ONLY:** Your entire response MUST be a single, valid JSON object for the step.
+- **NO EXTRA TEXT:** Do NOT include explanations, comments, or markdown like ` ```json `.
+- **PRESERVE INTENT:** Fix ONLY the specific errors while preserving the plan's original intent.
+- **IMPORTANT**: If an input has both `value` and `outputName`/`sourceStep`, choose the outputName and sourceStep if the 'sourceStep' does product the 'outputName'.
+
+Return the corrected JSON object for the step:"""
+        
+        logger.info(f"🔧 Asking LLM to repair {prompt_type} with {len(errors)} validation errors...")
+
+        max_attempts = 2
+        for attempt in range(max_attempts):
+            try:
+                response = call_brain(prompt, inputs, "json")
+                repaired_step = json.loads(response)
+
+                if not isinstance(repaired_step, dict):
+                    raise ValueError("LLM response is not a JSON object for a single step.")
+                
+                # Find the step to replace in the original plan
+                for i, step in enumerate(plan):
+                    if step.get('number') == repaired_step.get('number'):
+                        plan[i] = repaired_step
+                        logger.info(f"Successfully replaced step {repaired_step.get('number')} in the plan.")
+                        return plan
+
+                # If we couldn't find the step to replace, something is wrong
+                logger.error(f"Could not find step {repaired_step.get('number')} to replace in the plan.")
+                raise ValueError("Repaired step number does not match any existing step.")
+
+            except (json.JSONDecodeError, ValueError) as e:
+                logger.warning(f"LLM repair JSON parsing failed on attempt {attempt + 1}: {e}")
+                if attempt < max_attempts - 1:
+                    continue
+                else:
+                    raise AccomplishError(f"LLM repair produced invalid JSON after {max_attempts} attempts: {e}", "repair_error")
+            except Exception as e:
+                if attempt == max_attempts - 1:
+                    raise AccomplishError(f"LLM repair call failed after {max_attempts} attempts: {e}", "repair_call_error")
+                logger.warning(f"LLM repair call failed on attempt {attempt + 1}: {e}, retrying...")
+                continue
+        
+        # This line should be unreachable
+        raise AccomplishError("Unexpected LLM repair loop exit", "repair_error")
+
+
 
 class RobustMissionPlanner:
     """Streamlined LLM-driven mission planner"""
@@ -213,6 +632,7 @@ class RobustMissionPlanner:
     def __init__(self):
         self.max_retries = 3
         self.max_llm_switches = 2
+        self.validator = PlanValidator()
     
     def plan(self, inputs: Dict[str, Any]) -> str:
         """Main interface method - create plan and return as JSON string"""
@@ -261,73 +681,109 @@ class RobustMissionPlanner:
             guidance_lines.append(f"{input_guidance}")
         return "\n".join(guidance_lines)
 
-    def _add_input_resolution_guidance(self, goal: str, inputs: Dict[str, Any]) -> str:
-        """Add guidance for resolving missing inputs using Brain or previous steps"""
-        guidance = f"""
-CRITICAL INPUT RESOLUTION RULES:
+    def _inject_progress_checks(self, plan: List[Dict[str, Any]], goal: str) -> List[Dict[str, Any]]:
+        if not plan:
+            return []
 
-1. ONLY use action verbs that exist in the available plugins: {', '.join([p.get('actionVerb', '') for p in inputs.get('availablePlugins', [])])}
+        # Add a single REFLECT step at the end of the plan.
+        all_outputs = set()
+        for step in plan:
+            if 'outputs' in step and isinstance(step['outputs'], dict):
+                all_outputs.update(step['outputs'].keys())
 
-2. For SCRAPE steps:
-   - ALWAYS provide "url" input with actual web addresses
-   - Use specific URLs like "https://github.com/trending" or "https://news.ycombinator.com"
-   - If you need to find URLs, create a SEARCH step first
+        completed_steps_summary = f"The following outputs have been produced: {', '.join(all_outputs)}"
 
-3. For SEARCH steps:
-   - ALWAYS use "searchTerm" (not "keywords" or "query")
-   - Provide specific search terms like "open source agentic platforms 2024"
+        # Get the last step's outputs for dependency
+        last_step = plan[-1]
+        last_step_outputs = list(last_step.get('outputs', {}).keys())
+        if not last_step_outputs:
+            last_step_outputs = ["completion"]  # Fallback if no outputs defined
+            
+        reflection_question = (
+            f"Analyze the effectiveness of the executed plan against the mission goal:\n"
+            f"1. Have all objectives been met?\n"
+            f"2. What specific outcomes were achieved?\n"
+            f"3. What challenges or gaps emerged?\n"
+            f"4. What adjustments or additional steps are needed?"
+        )
 
-4. For missing inputs:
-   - Reference outputs from previous steps using "outputName"
-   - Use the Brain to help determine inputs from context
-   - Provide concrete values, not placeholders
+        check_step = {
+            "number": len(plan) + 1,
+            "actionVerb": "REFLECT",
+            "description": "Analyze mission progress and effectiveness, determine if goals were met, and recommend next steps.",
+            "inputs": {
+                "mission_goal": {"value": goal, "valueType": "string"},
+                "plan_history": {
+                    "outputName": last_step_outputs[0],
+                    "sourceStep": last_step["number"],
+                    "valueType": "string"
+                },
+                "work_products": {"value": completed_steps_summary, "valueType": "string"},
+                "question": {"value": reflection_question, "valueType": "string"}
+            },
+            "outputs": {
+                "analysis": "Detailed analysis of plan effectiveness and goal achievement",
+                "recommendations": "Specific recommendations for next steps or adjustments",
+                "status": "Mission status: complete, partially_complete, or needs_revision"
+            }
+        }
+        
+        plan.append(check_step)
+        
+        # Renumber all steps sequentially
+        for i, step in enumerate(plan):
+            step['number'] = i + 1
 
-5. Input dependencies:
-   - Use dependencies format: {{"outputName": stepNumber}}
-   - Ensure step numbers are correct and sequential
-
-"""
-        return guidance
+        return plan
 
     def create_plan(self, goal: str, inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Create a robust plan using LLM-driven approach with retries"""
+        """Create a robust plan using a decoupled, multi-phase LLM approach with retries."""
         progress.checkpoint("planning_start")
         logger.info(f"🎯 Creating plan for goal: {goal[:100]}...")
 
-        for llm_attempt in range(self.max_llm_switches + 1):
-            logger.info(f"🤖 LLM attempt {llm_attempt + 1}/{self.max_llm_switches + 1}")
+        try:
+            prose_plan = self._get_prose_plan(goal, inputs)
+        except Exception as e:
+            logger.exception(f"❌ Failed to generate prose plan after all retries: {e}") # Changed to logger.exception
+            raise AccomplishError(f"Could not generate a prose plan: {e}", "prose_plan_error")
 
-            try:
-                # Phase 1: Get well-thought prose plan
-                prose_plan = self._get_prose_plan(goal, inputs)
+        try:
+            structured_plan = self._convert_to_structured_plan(prose_plan, goal, inputs)
+        except Exception as e:
+            logger.exception(f"❌ Failed to convert prose plan to structured JSON after all retries: {e}") # Changed to logger.exception
+            raise AccomplishError(f"Could not convert prose to structured plan: {e}", "json_conversion_error")
 
-                # Phase 2: Convert to structured JSON
-                structured_plan = self._convert_to_structured_plan(prose_plan, goal, inputs)
-                
-                # Phase 3: Validate and repair if needed
-                validated_plan = self._validate_and_repair_plan(structured_plan, goal, inputs)
-                
-                logger.info(f"✅ Successfully created plan with {len(validated_plan)} steps")
-                return validated_plan
-                
-            except Exception as e:
-                logger.error(f"❌ LLM attempt {llm_attempt + 1} failed: {e}")
-                if llm_attempt < self.max_llm_switches:
-                    logger.info(f"🔄 Retrying with different LLM...")
-                    continue
-                else:
-                    raise AccomplishError(f"All LLM attempts failed. Last error: {e}", "planning_error")
-    
+        try:
+            validated_plan = self.validator.validate_and_repair(structured_plan, goal, inputs)
+            logger.info(f"✅ Successfully created and validated plan with {len(validated_plan)} steps")
+        except Exception as e:
+            logger.exception(f"❌ Failed to validate and repair the plan after all retries: {e}") # Changed to logger.exception
+            raise AccomplishError(f"Could not validate or repair the plan: {e}", "validation_error")
+
+        try:
+            plan_with_checks = self._inject_progress_checks(validated_plan, goal)
+            logger.info(f"✅ Successfully injected progress checks, new plan has {len(plan_with_checks)} steps")
+            return plan_with_checks
+        except Exception as e:
+            logger.exception(f"❌ Failed to inject progress checks: {e}") # Changed to logger.exception
+            return validated_plan
+
+
     def _get_prose_plan(self, goal: str, inputs: Dict[str, Any]) -> str:
-        """Phase 1: Get a well-thought prose plan from LLM"""
+        """Phase 1: Get a well-thought prose plan from LLM with retries."""
+        logger.info("🧠 Phase 1: Requesting prose plan from LLM...")
 
+        # Create the prompt for prose plan generation
         plugin_guidance = self._create_detailed_plugin_guidance(inputs)
-        
+        context = inputs.get('context', {}).get('value', '')
         prompt = f"""You are an expert strategic planner. Create a comprehensive, well-thought plan to accomplish this goal:
 
 GOAL: {goal}
 
 {plugin_guidance}
+
+CONTEXT:
+{context}
 
 Write a detailed prose plan (3-5 paragraphs) that thoroughly explains:
 - The strategic approach you would take
@@ -339,23 +795,63 @@ Write a detailed prose plan (3-5 paragraphs) that thoroughly explains:
 
 Be specific, actionable, and comprehensive. Think deeply about THIS specific goal.
 
-IMPORTANT: Return ONLY plain text. NO markdown formatting, NO code blocks, NO special formatting.
+IMPORTANT: Return ONLY plain text for the plan. NO markdown formatting, NO code blocks, NO special formatting.
+"""
 
-Return your prose plan:"""
-
-        logger.info("🧠 Phase 1: Requesting prose plan from LLM...")
-        response = call_brain(prompt, inputs, "text")
+        # Retry logic for getting the prose plan
+        for attempt in range(self.max_retries):
+            try:
+                response = call_brain(prompt, inputs, "text")
+                if not response or len(response.strip()) < 100:
+                    logger.warning(f"Attempt {attempt + 1}: LLM returned an insufficient prose plan.")
+                    continue # Retry on insufficient content
+                
+                logger.info(f"✅ Received prose plan ({len(response)} chars)")
+                return response.strip()
+            except Exception as e:
+                logger.warning(f"Attempt {attempt + 1} to get prose plan failed: {e}")
+                if attempt == self.max_retries - 1:
+                    raise # Re-raise the last exception if all retries fail
         
-        if not response or len(response.strip()) < 100:
-            raise AccomplishError("LLM returned insufficient prose plan", "prose_plan_error")
-            
-        logger.info(f"✅ Received prose plan ({len(response)} chars)")
-        return response.strip()
+        raise AccomplishError("Could not generate a valid prose plan after multiple attempts.", "prose_plan_error")
     
     def _convert_to_structured_plan(self, prose_plan: str, goal: str, inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Phase 2: Convert prose plan to structured JSON"""
+        """Phase 2: Convert prose plan to structured JSON with retries."""
+        logger.info("🔧 Phase 2: Converting to structured JSON...")
+
         plugin_guidance = self._create_detailed_plugin_guidance(inputs)
-        schema_json = json.dumps(PLAN_STEP_SCHEMA, indent=2)
+        # Define the schema for the entire plan (an array of steps)
+        PLAN_ARRAY_SCHEMA = {
+            "type": "array",
+            "items": PLAN_STEP_SCHEMA,
+            "description": "A list of sequential steps to accomplish a goal."
+        }
+        schema_json = json.dumps(PLAN_ARRAY_SCHEMA, indent=2)
+
+        # Example of a multi-step plan to guide the LLM
+        example_plan = [
+            {
+                "number": 1,
+                "actionVerb": "RESEARCH",
+                "inputs": {
+                    "topic": {"value": "latest AI trends", "valueType": "string"}
+                },
+                "description": "Research current trends in AI.",
+                "outputs": {"research_results": "Summary of AI trends"},
+                "recommendedRole": "Researcher"
+            },
+            {
+                "number": 2,
+                "actionVerb": "ANALYZE",
+                "inputs": {
+                    "data": {"outputName": "research_results", "sourceStep": 1}
+                },
+                "description": "Analyze the research findings.",
+                "outputs": {"analysis_report": "Report on key findings"},
+                "recommendedRole": "Analyst"
+            }
+        ]
+        example_plan_json = json.dumps(example_plan, indent=2)
         
         prompt = f"""You are an expert system for converting prose plans into structured JSON according to a strict schema.
 
@@ -369,201 +865,77 @@ Return your prose plan:"""
 {prose_plan}
 ---
 
-**3. THE JSON SCHEMA:**
+**3. THE JSON SCHEMA FOR THE ENTIRE PLAN (ARRAY OF STEPS):**
 ---
 {schema_json}
 ---
 
-**4. YOUR TASK:**
+**4. EXAMPLE OF A VALID MULTI-STEP PLAN:**
+---
+{example_plan_json}
+---
+
+**5. YOUR TASK:**
 Follow these steps to create the final JSON output:
 
 **STEP A: Internal Analysis & Self-Correction (Your Internal Monologue)**
 1.  **Analyze:** Read the Goal and Prose Plan to fully understand the user's intent and the required sequence of actions.
 2.  **Verify Schema:** Carefully study the JSON SCHEMA. Your output must follow it perfectly.
-3.  **Restate the Plan as Explicit Steps:**  Identify a list of steps that will be taken to achieve the Goal. Each Step should be a clear, actionable task with one or more outputs.
-4.  **Check Dependencies:** For each step, ensure its `dependencies` correctly reference `outputs` from previous steps. The data flow must be logical.
-5.  **Validate Inputs:** Ensure every input for each step has either a static `value` or a dynamic `outputName` reference from a prior step.
+3.  **Restate the Plan as Explicit Steps:** Identify a list of steps that will be taken to achieve the Goal. Each Step should be a clear, actionable task with one or more outputs.
+4.  **Check Dependencies:** For each step, ensure its `inputs` that depend on previous steps correctly reference the `outputName` and `sourceStep`.
+5.  **Validate Inputs:** Ensure every input for each step is properly defined and has either a static literal `value` or a dynamic `outputName` and `sourceStep` reference from a prior step.
 6.  **Final Check:** Before generating the output, perform a final check to ensure the entire JSON structure is valid and fully compliant with the schema.
 
 **STEP B: Generate Final JSON (Your Final Output)**
-After your internal analysis and self-correction is complete, provide ONLY the final, valid JSON array.
-
-**CRITICAL REQUIREMENTS:**
-- **JSON ONLY:** Your entire response MUST be a single, valid JSON array.
-- **NO EXTRA TEXT:** Do NOT include explanations, comments, or markdown like ` ```json `.
-- **STRICT COMPLIANCE:** Adhere strictly to the provided schema and the logical plan.
+After your internal analysis and self-correction is complete, provide ONLY the final, valid JSON array of steps.
 
 **CRITICAL DEPENDENCY RULES:**
 - **Multi-step plans are essential:** Break down complex goals into multiple, sequential steps.
-- **Dependencies are crucial for flow:** Every step that uses an output from a previous step MUST declare that dependency in its `dependencies` object.
-- **Format:** {{ "dependencies": {{"inputName": "sourceStepNumber"}}}} where `inputName` is the name of the input in the current step that receives the output, and `sourceStepNumber` is the `number` of the step that produces that output.
-- **Example:** If Step 2 needs `research_results` from Step 1, and Step 1 outputs {{ "research_results": "..." }}, then Step 2's inputs might have {{ "query": {{"outputName": "research_results", "valueType": "string"}}}} and its dependencies would be {{ "dependencies": {{"query": 1}} }}.
+- **Dependencies are crucial for flow:** Every step that uses an output from a previous step MUST declare that dependency in its `inputs` object using `outputName` and `sourceStep`.
+- **Prioritize autonomous information gathering:** Use tools like SEARCH, SCRAPE, DATA_TOOLKIT, TEXT_ANALYSIS, TRANSFORM, and FILE_OPERATION to gather information and perform tasks.
+- **Avoid unnecessary ASK_USER_QUESTION:** Only use 'ASK_USER_QUESTION' for subjective opinions, permissions, or clarification). Do NOT use it for delegating research or data collection that the agent can perform.
+- **CRITICAL for sourceStep:**
+    - Use `sourceStep: 0` ONLY for inputs that are explicitly provided in the initial mission context (the "PARENT STEP INPUTS" section if applicable, or the overall mission goal).
+    - For any other input, it MUST be the `outputName` from a *preceding step* in this plan, and `sourceStep` MUST be the `number` of that preceding step.
+    - Every input in your plan MUST be resolvable either from the initial mission context (using `sourceStep: 0`) or from an output of a previous step in the plan.
+- **For 'THINK' actionVerb:** The `inputs` for 'THINK' MUST include a `prompt` field with a string value that clearly states the thinking task.
+- **Example for `sourceStep`:** If Step 2 needs `research_results` from Step 1, and Step 1 outputs `{{ "research_results": "..." }}`, then Step 2's inputs would be `{{ "research": {{'outputName': "research_results", "sourceStep": 1, "valueType": "string"}} }}`.
+- **Completeness:** The generated plan must be a complete and executable plan that will fully accomplish the goal. It should not be a partial plan or an outline. It should include all the necessary steps to produce the final deliverables.
+- **Iterative Processes/Feedback Loops:** If the prose plan describes a continuous feedback loop, iterative process, or any form of repetition, you MUST translate this into an appropriate looping construct (e.g., using 'WHILE', 'REPEAT', or 'FOREACH' actionVerbs) within the JSON plan. Do not simply list the steps once if they are intended to be repeated.
 
 {plugin_guidance}
 """
 
-        logger.info("🔧 Phase 2: Converting to structured JSON...")
-
-        max_attempts = 3
-        for attempt in range(max_attempts):
+        for attempt in range(self.max_retries):
             try:
                 response = call_brain(prompt, inputs, "json")
                 plan = json.loads(response)
-                if not isinstance(plan, list):
-                    raise ValueError("Response is not a JSON array")
-                return plan
-            except (json.JSONDecodeError, ValueError) as e:
-                logger.warning(f"JSON parsing failed on attempt {attempt + 1}: {e}")
-                if attempt < max_attempts - 1:
-                    continue
+                
+                if isinstance(plan, list):
+                    logger.info(f"✅ Received structured plan with {len(plan)} steps")
+                    return plan
                 else:
-                    raise AccomplishError(f"Failed to parse structured plan JSON after {max_attempts} attempts: {e}", "json_parse_error")
-            except Exception as e:
-                if attempt == max_attempts - 1:
-                    raise AccomplishError(f"Brain call failed after {max_attempts} attempts: {e}", "brain_call_error")
-                logger.warning(f"Brain call failed on attempt {attempt + 1}: {e}, retrying...")
-                continue
-    
-    def _validate_and_repair_plan(self, plan: List[Dict[str, Any]], goal: str, inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Phase 3: Validate and repair plan if needed"""
-        
-        for attempt in range(self.max_retries):
-            logger.info(f"🔍 Validation attempt {attempt + 1}/{self.max_retries}")
-            
-            validation_result = self._validate_plan(plan)
-            
-            if validation_result['valid']:
-                logger.info("✅ Plan validation successful")
-                return plan
-            
-            # Plan failed validation - ask LLM to fix it
-            logger.warning(f"⚠️ Plan validation failed: {validation_result['errors']}")
-            
-            if attempt < self.max_retries - 1:
-                plan = self._repair_plan_with_llm(plan, validation_result['errors'], goal, inputs)
-            else:
-                raise AccomplishError(f"Plan validation failed after {self.max_retries} attempts", "validation_error")
-        
-        raise AccomplishError("Unexpected validation loop exit", "validation_error")
-    
-    def _validate_plan(self, plan: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Validate plan structure and completeness"""
-        errors = []
-        
-        if not isinstance(plan, list) or len(plan) == 0:
-            return {'valid': False, 'errors': ['Plan must be a non-empty array']}
-        
-        # Collect all step numbers and their outputs for cross-referencing
-        step_numbers = set()
-        step_outputs: Dict[int, Set[str]] = {}
-        for i, step in enumerate(plan):
-            step_num = step.get('number', i + 1)
-            step_numbers.add(step_num)
-            if 'outputs' in step and isinstance(step['outputs'], dict):
-                step_outputs[step_num] = set(step['outputs'].keys())
-            else:
-                step_outputs[step_num] = set()
-
-        for i, step in enumerate(plan):
-            step_num = step.get('number', i + 1)
-            
-            # Check required fields
-            required_fields = ['number', 'actionVerb', 'inputs', 'description', 'outputs', 'dependencies']
-            for field in required_fields:
-                if field not in step:
-                    errors.append(f"Step {step_num}: Missing required field '{field}'")
-            
-            # Validate inputs structure
-            if 'inputs' in step and isinstance(step['inputs'], dict):
-                for input_name, input_def in step['inputs'].items():
-                    if not isinstance(input_def, dict):
-                        errors.append(f"Step {step_num}: Input '{input_name}' must be an object")
-                        continue
-
-                    # Check for unknown properties
-                    allowed_properties = ['value', 'outputName', 'valueType', 'args']
-                    for prop in input_def:
-                        if prop not in allowed_properties:
-                            errors.append(f"Step {step_num}: Input '{input_name}' has unknown property '{prop}'")
-                    
-                    if 'valueType' not in input_def:
-                        errors.append(f"Step {step_num}: Input '{input_name}' missing 'valueType'")
-                    
-                    has_value = 'value' in input_def
-                    has_output_name = 'outputName' in input_def
-                    
-                    if not has_value and not has_output_name:
-                        errors.append(f"Step {step_num}: Input '{input_name}' missing both 'value' and 'outputName'")
-
-            # Validate dependencies structure and correctness
-            if 'dependencies' in step and isinstance(step['dependencies'], dict):
-                for dep_input_name, source_step_num in step['dependencies'].items():
-                    if not isinstance(source_step_num, int) or source_step_num < 1:
-                        errors.append(f"Step {step_num}: Dependency for '{dep_input_name}' has invalid source step number: {source_step_num}")
-                        continue
-                    
-                    if source_step_num >= step_num:
-                        errors.append(f"Step {step_num}: Dependency for '{dep_input_name}' refers to future or same step: {source_step_num}")
-
-                    if source_step_num not in step_numbers:
-                        errors.append(f"Step {step_num}: Dependency for '{dep_input_name}' refers to non-existent step: {source_step_num}")
-                        continue
-                    
-                    # Check if the outputName exists in the source step's outputs
-                    # The dependency input name is assumed to be the output name from the source step
-                    if dep_input_name not in step_outputs.get(source_step_num, set()):
-                        errors.append(f"Step {step_num}: Dependency '{dep_input_name}' not found in outputs of source step {source_step_num}")
-            else:
-                if 'dependencies' in step and not isinstance(step['dependencies'], dict):
-                    errors.append(f"Step {step_num}: 'dependencies' field must be an object.")
-                elif 'dependencies' not in step: # This case is already covered by required_fields check
-                    pass
-        
-        return {'valid': len(errors) == 0, 'errors': errors}
-    
-    def _repair_plan_with_llm(self, plan: List[Dict[str, Any]], errors: List[str], goal: str, inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Ask LLM to repair the plan based on validation errors"""
-        
-        plan_json = json.dumps(plan, indent=2)
-        errors_text = '\n'.join([f"- {error}" for error in errors])
-        
-        prompt = f"""Fix the validation errors in this JSON plan:
-
-GOAL: {goal}
-
-PLAN WITH ERRORS:
-{plan_json}
-
-ERRORS TO FIX:
-{errors_text}
-
-Fix ONLY the specific errors while preserving the plan's intent.
-Return the corrected JSON plan:"""
-
-        logger.info(f"🔧 Asking LLM to repair {len(errors)} validation errors...")
-
-        max_attempts = 2
-        for attempt in range(max_attempts):
-            try:
-                response = call_brain(prompt, inputs, "json")
-                repaired_plan = json.loads(response)
-                if not isinstance(repaired_plan, list):
-                    raise ValueError("Repaired response is not a JSON array")
-                return repaired_plan
-            except (json.JSONDecodeError, ValueError) as e:
-                logger.warning(f"LLM repair JSON parsing failed on attempt {attempt + 1}: {e}")
-                if attempt < max_attempts - 1:
+                    logger.warning(f"Attempt {attempt + 1}: Response is not a JSON array. Response: {response}")
                     continue
-                else:
-                    raise AccomplishError(f"LLM repair produced invalid JSON after {max_attempts} attempts: {e}", "repair_error")
+
+            except json.JSONDecodeError as e:
+                logger.warning(f"Attempt {attempt + 1}: JSON parsing failed: {e}. Response: {response}")
+                if attempt == self.max_retries - 1:
+                    raise AccomplishError(f"Failed to parse structured plan JSON: {e}", "json_parse_error")
             except Exception as e:
-                if attempt == max_attempts - 1:
-                    raise AccomplishError(f"LLM repair call failed after {max_attempts} attempts: {e}", "repair_call_error")
-                logger.warning(f"LLM repair call failed on attempt {attempt + 1}: {e}, retrying...")
-                continue
+                logger.warning(f"Attempt {attempt + 1}: Brain call for JSON conversion failed: {e}")
+                if attempt == self.max_retries - 1:
+                    raise # Re-raise the last exception
+
+        raise AccomplishError("Could not generate a valid structured plan after multiple attempts.", "json_conversion_error")
+    
 
 class NovelVerbHandler:
     """Handles novel action verbs by recommending plugins or providing direct answers"""
+
+    def __init__(self):
+        self.validator = PlanValidator()
+        self.goal_planner = RobustMissionPlanner()
 
     def handle(self, inputs: Dict[str, Any]) -> str:
         try:
@@ -576,11 +948,11 @@ class NovelVerbHandler:
             brain_response = self._ask_brain_for_verb_handling(verb_info, inputs)
 
             # Interpret and format response
-            return self._format_response(brain_response, verb_info)
+            return self._format_response(brain_response, verb_info, inputs)
 
         except Exception as e:
             logger.error(f"Novel verb handling failed: {e}")
-            return json.dumps([{
+            return json.dumps([{ 
                 "success": False,
                 "name": "error",
                 "resultType": "error",
@@ -640,41 +1012,18 @@ class NovelVerbHandler:
             "inputValues": {},
             "outputs": {}
         }
-
-    def _create_detailed_plugin_guidance(self, inputs: Dict[str, Any]) -> str:
-        """Create a detailed list of available plugins with input specs and descriptions."""
-        available_plugins = inputs.get('availablePlugins', [])
-        if not available_plugins:
-            return "No plugins are available for use in the plan."
-
-        guidance_lines = ["Available Plugins & Input Specifications:"]
-        for plugin in available_plugins:
-            action_verb = plugin.get('actionVerb', 'UNKNOWN')
-            description = plugin.get('description', 'No description available.')
-            input_definitions = plugin.get('inputDefinitions', [])
-
-            guidance_lines.append(f"\nPlugin: {action_verb}")
-            guidance_lines.append(f"  Description: {description}")
-            if input_definitions:
-                guidance_lines.append("  Inputs:")
-                for input_def in input_definitions:
-                    input_name = input_def.get('name', 'UNKNOWN')
-                    input_desc = input_def.get('description', 'No description.')
-                    value_type = input_def.get('valueType', 'any')
-                    guidance_lines.append(f"    - {input_name} (type: {value_type}): {input_desc}")
-            else:
-                guidance_lines.append("  Inputs: None required.")
-
-        return "\n".join(guidance_lines)
     
     def _ask_brain_for_verb_handling(self, verb_info: Dict[str, Any], inputs: Dict[str, Any]) -> str:
         """Ask Brain how to handle the novel verb"""
         verb = verb_info['verb']
         description = verb_info.get('description', 'No description provided')
         context = verb_info.get('context', description)
-
-        # Get available plugins summary
-        plugin_summary = self._create_detailed_plugin_guidance(inputs)
+        PLAN_ARRAY_SCHEMA = {
+            "type": "array",
+            "items": PLAN_STEP_SCHEMA,
+            "description": "A list of sequential steps to accomplish a goal."
+        }
+        schema_json = json.dumps(PLAN_ARRAY_SCHEMA, indent=2)
 
         prompt = f"""You are an expert system analyst. A user wants to use a novel action verb "{verb}" that is not currently supported.
 
@@ -682,33 +1031,44 @@ VERB: {verb}
 DESCRIPTION: {description}
 CONTEXT: {context}
 
-AVAILABLE PLUGINS:
-{plugin_summary}
+PARENT STEP INPUTS: {json.dumps(inputs)}
 
-Determine the best approach:
+Your task is to determine the best way to accomplish the goal of the novel verb "{verb}". Consider these options in order of preference:
 
-1. **Create Plan**: Break down into steps (can use existing plugins OR novel verbs)
-2. **Direct Answer**: Provide answer directly if no execution needed
-3. **Plugin Definition**: Create new plugin only if truly novel functionality required
+1.  **Provide a Direct Answer:** If the task is simple enough to be answered directly with the given context and available tools, provide a JSON object with a single key "direct_answer".
+2.  **Create a Plan:** If the task is complex and requires multiple steps, breaking it down into a sequence of actions using available tools, then create a plan. The plan should be a JSON array of steps. This is the preferred option for complex tasks that can be broken down.
+3.  **Recommend a Plugin:** If the task requires a new, complex, and reusable capability that is not covered by existing tools and would be beneficial for future use, recommend the development of a new plugin by providing a JSON object with a "plugin" key.
 
-CRITICAL: Respond with ONLY valid JSON. NO markdown, NO code blocks, NO extra text.
+**CRITICAL CONSTRAINTS:**
+- You MUST NOT use the novel verb "{verb}" in your plan.
+- You are an autonomous agent. Your primary goal is to solve problems independently.
+- Do not use the `ASK_USER_QUESTION` verb to seek information from the user that can be found using other tools like `SEARCH` or `SCRAPE`. Your goal is to be resourceful and autonomous.
 
-For a plan (most common - can include novel verbs):
-{{"plan": [{{"actionVerb": "research", "description": "...", "inputs": {{}}, "outputs": {{}}}}, {{"actionVerb": "SEARCH", "description": "...", "inputs": {{}}, "outputs": {{}}}}]}}
+**RESPONSE FORMATS:**
 
-For a direct answer:
-{{"direct_answer": {{"result_name": "result_value"}}}}
+-   **For a Plan:** A JSON array of steps defined with the schema below.
+-   **For a Direct Answer:** {{"direct_answer": "Your answer here"}}
+-   **For a Plugin Recommendation:** {{"plugin": {{"id": "new_plugin_id", "description": "Description of the new plugin"}}}}
 
-For a plugin definition:
-{{"plugin": {{"id": "plugin_name", "description": "...", "actionVerb": "{verb}", "inputDefinitions": [], "outputDefinitions": []}}}}
+Plan Schema
+"{schema_json}"
 
-JSON only:"""
+- **CRITICAL for Plan Inputs, sourceStep:**
+    - Step inputs are generally sourced from the outputs of other steps and less often fixed with constant values.
+    - All inputs for each step must be explicitly defined either as a constant `value` or by referencing an `outputName` from a `sourceStep` within the plan or from the `PARENT STEP INPUTS`. Do not assume implicit data structures or properties of inputs.
+    - Use `sourceStep: 0` ONLY for inputs that are explicitly provided in the "PARENT STEP INPUTS" section above.
+    - For any other input, it MUST be the `outputName` from a *preceding step* in this plan, and `sourceStep` MUST be the `number` of that preceding step.
+    - Every input in your plan MUST be resolvable either from a given constant value, a "PARENT STEP INPUT" (using `sourceStep: 0`) or from an output of a previous step in the plan.
+- **Mapping Outputs to Inputs:** When the output of one step is used as the input to another, the `outputName` in the input of the second step must match the `name` of the output of the first step.
+
+CRITICAL: Respond with ONLY valid JSON in one of the three formats above. NO markdown, NO code blocks, NO extra text.
+"""
 
         try:
             return call_brain(prompt, inputs, "json")
         except Exception as e:
             logger.error(f"Brain call failed for novel verb '{verb}': {e}")
-            return f'{{"error": "Brain call failed: {str(e)}"}}'
+            return json.dumps({"error": f"Brain call failed: {str(e)}"})
 
     def _clean_brain_response(self, response: str) -> str:
         """Clean Brain response by removing markdown code blocks and extra formatting"""
@@ -736,69 +1096,129 @@ JSON only:"""
 
         return response
 
-    def _format_response(self, brain_response: str, verb_info: Dict[str, Any]) -> str:
+    def _format_response(self, brain_response: Any, verb_info: Dict[str, Any], inputs: Dict[str, Any]) -> str:
         """Format the Brain response into the expected output format"""
         try:
-            # Clean the brain response - remove markdown code blocks if present
-            cleaned_response = self._clean_brain_response(brain_response)
-            data = json.loads(cleaned_response)
+            # If brain_response is already a parsed JSON object/array, use it directly
+            # Otherwise, attempt to parse it as JSON
+            if isinstance(brain_response, (dict, list)):
+                data = brain_response
+            else:
+                # Attempt to clean and parse if it's a string
+                cleaned_response = self._clean_brain_response(str(brain_response))
+                data = json.loads(cleaned_response)
 
-            if "plan" in data:
-                # Plan provided - most common case
-                return json.dumps([{
+            if isinstance(data, list): # This is a plan
+                # Validate and repair the plan
+                validated_plan = self.validator.validate_and_repair(data, verb_info['description'], inputs)
+                
+                # Save the generated plan to Librarian
+                # self._save_plan_to_librarian(verb_info['verb'], validated_plan, inputs)
+
+                return json.dumps([{ 
                     "success": True,
                     "name": "plan",
                     "resultType": "plan",
                     "resultDescription": f"Plan created for novel verb '{verb_info['verb']}'",
-                    "result": data["plan"],
+                    "result": validated_plan,
                     "mimeType": "application/json"
                 }])
-
-            elif "direct_answer" in data:
-                # Direct answer provided
-                return json.dumps([{
-                    "success": True,
-                    "name": "direct_answer",
-                    "resultType": "direct_answer",
-                    "resultDescription": f"Direct answer for {verb_info['verb']}",
-                    "result": data["direct_answer"],
-                    "mimeType": "application/json"
-                }])
-
-            elif "plugin" in data:
-                # Plugin recommendation
-                plugin_data = data["plugin"]
-                return json.dumps([{
-                    "success": True,
-                    "name": "plugin",
-                    "resultType": "plugin",
-                    "resultDescription": f"Plugin recommended: {plugin_data.get('id', 'unknown')}",
-                    "result": plugin_data,
-                    "mimeType": "application/json"
-                }])
-
+            elif isinstance(data, dict): # Could be direct answer or plugin recommendation
+                if "direct_answer" in data:
+                    return json.dumps([{ 
+                        "success": True,
+                        "name": "direct_answer",
+                        "resultType": "direct_answer",
+                        "resultDescription": f"Direct answer for {verb_info['verb']}",
+                        "result": data["direct_answer"],
+                        "mimeType": "application/json"
+                    }])
+                elif "plugin" in data:
+                    plugin_data = data["plugin"]
+                    return json.dumps([{ 
+                        "success": True,
+                        "name": "plugin",
+                        "resultType": "plugin",
+                        "resultDescription": f"Plugin recommended: {plugin_data.get('id', 'unknown')}",
+                        "result": plugin_data,
+                        "mimeType": "application/json"
+                    }])
+                # If the dictionary is a single step, treat it as a plan with one step
+                elif "actionVerb" in data and "number" in data:
+                    validated_plan = self.validator.validate_and_repair([data], verb_info['description'], inputs)
+                    # self._save_plan_to_librarian(verb_info['verb'], validated_plan, inputs)
+                    return json.dumps([{
+                        "success": True,
+                        "name": "plan",
+                        "resultType": "plan",
+                        "resultDescription": f"Plan created for novel verb '{verb_info['verb']}'",
+                        "result": validated_plan,
+                        "mimeType": "application/json"
+                    }])
+                else:
+                    # Unexpected dictionary format
+                    return json.dumps([{ 
+                        "success": False,
+                        "name": "error",
+                        "resultType": "error",
+                        "resultDescription": "Unexpected Brain response format (dictionary)",
+                        "result": data,
+                        "mimeType": "application/json"
+                    }])
             else:
-                # Unexpected format
-                return json.dumps([{
+                # Truly unexpected format (e.g., non-JSON string that wasn't caught by _clean_brain_response)
+                return json.dumps([{ 
                     "success": False,
                     "name": "error",
                     "resultType": "error",
-                    "resultDescription": "Unexpected Brain response format",
-                    "result": brain_response,
+                    "resultDescription": "Unexpected Brain response format (non-JSON or unhandled type)",
+                    "result": str(brain_response),
                     "mimeType": "text/plain"
                 }])
 
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse Brain response: {e}")
-            logger.error(f"Raw Brain response: {brain_response[:500]}...")
-            return json.dumps([{
+        except (json.JSONDecodeError, TypeError) as e:
+            logger.error(f"Failed to parse or process Brain response in _format_response: {e}")
+            logger.error(f"Raw Brain response (type: {type(brain_response)}): {str(brain_response)[:500]}...")
+            return json.dumps([{ 
                 "success": False,
                 "name": "error",
                 "resultType": "error",
-                "resultDescription": f"Failed to parse Brain response: {str(e)}",
-                "result": brain_response,
+                "resultDescription": f"Failed to process Brain response: {str(e)}",
+                "result": str(brain_response),
                 "mimeType": "text/plain"
             }])
+
+    def _save_plan_to_librarian(self, verb: str, plan_data: List[Dict[str, Any]], inputs: Dict[str, Any]):
+        """Saves the generated plan to the Librarian service."""
+        try:
+            auth_token = get_auth_token(inputs)
+            librarian_url = inputs.get('librarian_url', {}).get('value', 'librarian:5040')
+            
+            payload = {
+                "key": verb,
+                "data": plan_data,
+                "collection": 'actionPlans', 
+                "storageType": 'mongo' 
+            }
+            headers = {
+                'Content-Type': 'application/json',
+                'Authorization': f'Bearer {auth_token}'
+            }
+            
+            logger.info(f"Attempting to save plan for verb '{verb}' to Librarian at: http://{librarian_url}/storeData")
+            response = requests.post(
+                f"http://{librarian_url}/storeData",
+                json=payload,
+                headers=headers,
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                logger.info(f"Successfully saved plan for verb '{verb}' to Librarian.")
+            else:
+                logger.error(f"Failed to save plan for verb '{verb}' to Librarian: {response.status_code} - {response.text}")
+        except Exception as e:
+            logger.error(f"Error saving plan for verb '{verb}' to Librarian: {e}")
 
 class AccomplishOrchestrator:
     """Main orchestrator for ACCOMPLISH plugin"""
@@ -827,7 +1247,7 @@ class AccomplishOrchestrator:
 
         except Exception as e:
             logger.error(f"ACCOMPLISH execution failed: {e}")
-            return json.dumps([{
+            return json.dumps([{ 
                 "success": False,
                 "name": "error",
                 "resultType": "error",
@@ -840,12 +1260,15 @@ class AccomplishOrchestrator:
         """Check if this is a novel verb request"""
         return 'novel_actionVerb' in inputs
 
-# Main execution
-if __name__ == "__main__":
-    try:
-        progress.checkpoint("main_start")
-        logger.info("ACCOMPLISH plugin starting...")
+def main():
+    """
+    Main function to run the ACCOMPLISH plugin.
+    Reads input from stdin, executes the orchestrator, and prints the result.
+    """
+    progress.checkpoint("main_start")
+    logger.info("ACCOMPLISH plugin starting...")
 
+    try:
         orchestrator = AccomplishOrchestrator()
         progress.checkpoint("orchestrator_created")
 
@@ -853,6 +1276,11 @@ if __name__ == "__main__":
         import sys
         input_data = sys.stdin.read()
         progress.checkpoint("input_read")
+        
+        if not input_data:
+            logger.warning("Input data is empty. Exiting.")
+            return
+
         logger.info(f"Input received: {len(input_data)} characters")
 
         # Execute
@@ -862,14 +1290,40 @@ if __name__ == "__main__":
         print(result)
         progress.checkpoint("execution_complete")
 
-    except Exception as e:
-        logger.error(f"ACCOMPLISH plugin failed: {e}")
+    except json.JSONDecodeError as e:
+        logger.error(f"ACCOMPLISH plugin failed due to JSON decoding error: {e}")
         error_result = json.dumps([{
             "success": False,
             "name": "error",
             "resultType": "error",
+            "resultDescription": f"Invalid JSON input: {str(e)}",
+            "result": str(e),
+            "mimeType": "text/plain"
+        }])
+        print(error_result)
+    except AccomplishError as e:
+        logger.error(f"ACCOMPLISH plugin failed with a known error: {e}")
+        error_result = json.dumps([{
+            "success": False,
+            "name": "error",
+            "resultType": e.error_type,
             "resultDescription": f"ACCOMPLISH plugin failed: {str(e)}",
             "result": str(e),
             "mimeType": "text/plain"
         }])
         print(error_result)
+    except Exception as e:
+        logger.error(f"An unexpected error occurred in ACCOMPLISH plugin: {e}", exc_info=True)
+        error_result = json.dumps([{
+            "success": False,
+            "name": "error",
+            "resultType": "unexpected_error",
+            "resultDescription": f"An unexpected error occurred: {str(e)}",
+            "result": str(e),
+            "mimeType": "text/plain"
+        }])
+        print(error_result)
+
+# Main execution
+if __name__ == "__main__":
+    main()

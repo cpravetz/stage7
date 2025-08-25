@@ -5,7 +5,7 @@ import { analyzeError } from '@cktmcs/errorhandler';
 
 export class OpenWebUIInterface extends BaseInterface {
     interfaceName: string = 'openwebui';
-    private readonly DEFAULT_TIMEOUT = 300000; // 5 minutes timeout for knownow model
+    private readonly DEFAULT_TIMEOUT = 60000; // 60 seconds timeout for openwebui model
 
     constructor() {
         super('openwebui');
@@ -135,7 +135,6 @@ export class OpenWebUIInterface extends BaseInterface {
                 throw fetchError;
             }
         } catch (error) {
-            analyzeError(error as Error);
             console.error('Error in OpenWebUI interface:', error instanceof Error ? error.message : String(error));
             throw error;
         }

@@ -1,0 +1,54 @@
+{
+    "id": "plugin-REFLECT",
+    "name": "REFLECT",
+    "verb": "REFLECT",
+    "actionVerb": "REFLECT",
+    "description": "Reflects on the current state of a mission to evaluate progress and determine next steps.",
+    "inputDefinitions": [
+        {
+            "name": "mission_goal",
+            "description": "The original, high-level mission goal.",
+            "type": "string",
+            "required": true
+        },
+        {
+            "name": "plan_history",
+            "description": "A JSON string representing the list of executed steps, their status, and parameters.",
+            "type": "string",
+            "required": true
+        },
+        {
+            "name": "work_products",
+            "description": "A JSON string representing a manifest of data artifacts created by the plan.",
+            "type": "string",
+            "required": true
+        },
+        {
+            "name": "question",
+            "description": "The specific question to reflect on.",
+            "type": "string",
+            "required": true
+        }
+    ],
+    "outputDefinitions": [
+        {
+            "name": "answer",
+            "description": "A direct answer to the reflection question."
+        },
+        {
+            "name": "plan",
+            "description": "A new plan of steps to continue the mission."
+        }
+    ],
+    "language": "python",
+    "plugin_type": "python",
+    "security": {
+        "permissions": [
+            "net.fetch"
+        ]
+    },
+    "entryPoint": {
+        "main": "main.py"
+    },
+    "version": "1.0.0"
+}

@@ -44,7 +44,7 @@ export class MistralInterface extends BaseInterface {
                 model: options.modelName || 'mistral-small-latest',
                 messages: formattedMessages,
                 temperature: options.temperature || 0.7,
-                max_tokens: options.max_length || 8192,
+                max_tokens: options.max_length,
                 top_p: 0.95
             };
             console.log('Mistral Request Body:', JSON.stringify(requestBody, null, 2)); // Log the request body

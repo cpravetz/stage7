@@ -213,6 +213,10 @@ export function getDangerousPermissions(plugin: PluginDefinition): Permission[] 
 export function validatePluginPermissions(plugin: PluginDefinition): string[] {
   const errors: string[] = [];
   
+  console.log('validatePluginPermissions: plugin.id:', plugin.id);
+  console.log('validatePluginPermissions: plugin.security:', JSON.stringify(plugin.security, null, 2));
+  console.log('validatePluginPermissions: plugin.security.permissions:', JSON.stringify(plugin.security?.permissions, null, 2));
+
   if (!plugin.security || !plugin.security.permissions) {
     errors.push('Plugin security permissions are missing');
     return errors;

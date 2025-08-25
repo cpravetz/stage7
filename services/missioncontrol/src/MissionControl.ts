@@ -1,4 +1,3 @@
-import axios from 'axios';
 import express from 'express';
 import { Request, Response, NextFunction } from 'express';
 import { AgentStatistics, Mission, PluginParameterType, Status } from '@cktmcs/shared';
@@ -547,12 +546,17 @@ class MissionControl extends BaseEntity {
             const { agentId, missionId, statistics, timestamp } = req.body;
             if (!uuidValidate(missionId)) {
                 res.status(400).send({ error: 'Invalid missionId format' });
+                return;
             }
-            // Stop sending stats for missions that are not changing
+            
             const mission = this.missions.get(missionId);
-            if (!mission || mission.status !== Status.RUNNING) {
-                res.status(204).send({ message: 'Mission not found or not running' });
+            // Don't return early for non-running missions - we still want to send statistics to front end
+            if (!mission) {
+                console.log(`Mission ${missionId} not found, but still processing statistics for front end`);
+            } else if (mission.status !== Status.RUNNING) {
+                console.log(`Mission ${missionId} is not running (status: ${mission.status}), but still processing statistics for front end`);
             }
+            
             console.log(`Received statistics update for agent ${agentId} in mission ${missionId}`);
 
             // Store the statistics for this agent
@@ -618,6 +622,51 @@ class MissionControl extends BaseEntity {
         }
     }
 
+    private async reflectOnMission(mission: Mission) {
+        console.log(`Reflecting on mission ${mission.id}`);
+        try {
+            // 1. Gather context for reflection
+            const planHistory: any[] = []; // Placeholder - requires fetching from TrafficManager or Librarian
+            const workProducts: any[] = []; // Placeholder - requires fetching from Librarian
+
+            const inputValues = new Map<string, InputValue>();
+            inputValues.set('mission_goal', { inputName: 'mission_goal', value: mission.goal, valueType: PluginParameterType.STRING, args: {} });
+            inputValues.set('plan_history', { inputName: 'plan_history', value: JSON.stringify(planHistory), valueType: PluginParameterType.STRING, args: {} });
+            inputValues.set('work_products', { inputName: 'work_products', value: JSON.stringify(workProducts), valueType: PluginParameterType.STRING, args: {} });
+            inputValues.set('question', { inputName: 'question', value: 'Given the original mission goal and the work completed, is the mission fully accomplished? If not, what is the next logical step?', valueType: PluginParameterType.STRING, args: {} });
+
+            const serializedInputs = MapSerializer.transformForSerialization(inputValues);
+
+            // 2. Call the REFLECT plugin - get capabilities manager URL dynamically
+            const serviceUrls = await this.getServiceUrls();
+            const response = await this.authenticatedApi.post(`http://${serviceUrls.capabilitiesManagerUrl}/executeAction`, {
+                actionVerb: 'REFLECT',
+                inputValues: serializedInputs,
+                missionId: mission.id,
+                dependencies: []
+            });
+
+            const result = response.data.result[0];
+
+            // 3. Process the result
+            if (result.name === 'plan') {
+                console.log(`Reflection resulted in a new plan for mission ${mission.id}.`);
+                // TODO: Implement logic to append the new plan to the mission and resume execution
+                this.sendStatusUpdate(mission, `Reflection complete. New plan generated.`);
+                mission.status = Status.RUNNING; // Or a new status like 'EXTENDING'
+            } else if (result.name === 'answer') {
+                console.log(`Reflection resulted in an answer for mission ${mission.id}: ${result.result}`);
+                this.sendStatusUpdate(mission, `Reflection complete: ${result.result}`);
+                mission.status = Status.COMPLETED;
+            }
+
+        } catch (error) {
+            console.error(`Error during reflection for mission ${mission.id}:`, error instanceof Error ? error.message : error);
+            mission.status = Status.ERROR;
+            this.sendStatusUpdate(mission, 'Reflection process failed.');
+        }
+    }
+
     private async getAndPushAgentStatistics() {
         try {
             console.log('Fetching agent statistics...');
@@ -649,8 +698,12 @@ class MissionControl extends BaseEntity {
                 for (const missionId of missionIds) {
                     console.log(`Fetching statistics for mission ${missionId}`);
                     const mission = this.missions.get(missionId);
-                    if (!mission || mission.status !== Status.RUNNING) {
-                        console.log(`Mission ${missionId} not found or not running, skipping`);
+                    if (!mission) {
+                        console.log(`Mission ${missionId} not found, skipping`);
+                        continue;
+                    }
+                    if (mission.status !== Status.RUNNING) {
+                        console.log(`Mission ${missionId} is not running (status: ${mission.status}), skipping`);
                         continue;
                     }
 
@@ -658,13 +711,7 @@ class MissionControl extends BaseEntity {
                     const trafficManagerResponse = await this.authenticatedApi.get(`http://${this.trafficManagerUrl}/getAgentStatistics/${missionId}`);
                     const trafficManagerStatistics = trafficManagerResponse.data;
 
-                    // Log raw statistics received from TrafficManager (for debugging purposes)
-                    // console.log('MissionControl: Raw TM Stats agentStatisticsByStatus:', JSON.stringify(trafficManagerStatistics.agentStatisticsByStatus, null, 2));
-
                     trafficManagerStatistics.agentStatisticsByStatus = MapSerializer.transformFromSerialization(trafficManagerStatistics.agentStatisticsByStatus);
-
-                    // Log deserialized statistics (for debugging purposes)
-                    // console.log('MissionControl: Deserialized TM Stats agentStatisticsByStatus:', JSON.stringify(Array.from(trafficManagerStatistics.agentStatisticsByStatus.entries()), null, 2));
 
                     // Attempt to fix/ensure agentStat.steps is a proper array
                     if (trafficManagerStatistics.agentStatisticsByStatus instanceof Map) {
@@ -698,7 +745,6 @@ class MissionControl extends BaseEntity {
                         });
                     }
 
-
                     let totalDependencies = 0;
                     if (trafficManagerStatistics.agentStatisticsByStatus?.values) {
                         totalDependencies = Array.from(trafficManagerStatistics.agentStatisticsByStatus.values())
@@ -731,9 +777,18 @@ class MissionControl extends BaseEntity {
                         content: missionStats
                     });
                     console.log(`Statistics update sent to PostOffice for client ${clientId}`);
+
+                    // Check for reflection after sending statistics
+                    const runningAgents = missionStats.agentCountByStatus.RUNNING || 0;
+                    if (mission.status in [Status.COMPLETED, Status.ERROR] && runningAgents === 0) {
+                        console.log(`Mission ${mission.id} has no running agents. Initiating reflection.`);
+                        mission.status = Status.REFLECTING; // Prevent re-triggering
+                        this.reflectOnMission(mission);
+                    }
                 }
             }
-        } catch (error) { analyzeError(error as Error);
+        } catch (error) {
+            analyzeError(error as Error);
             console.error('Error fetching and pushing agent statistics:', error instanceof Error ? error.message : error);
             if (error instanceof Error && error.stack) {
                 console.error(error.stack);

@@ -182,13 +182,35 @@ def execute_plugin(inputs):
                 print(f"Failed to clean up temp dir {temp_dir}: {cleanup_err}")
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        input_data = json.loads(sys.argv[1])
+    # Read input from stdin
+    raw_input_str = sys.stdin.read()
+    
+    # Attempt to clean the input string before parsing as JSON
+    # Remove common markdown code block fences and any leading/trailing whitespace
+    cleaned_input_str = raw_input_str.strip()
+    if cleaned_input_str.startswith('```json'):
+        cleaned_input_str = cleaned_input_str[7:].strip()
+    elif cleaned_input_str.startswith('```'):
+        cleaned_input_str = cleaned_input_str[3:].strip()
+    if cleaned_input_str.endswith('```'):
+        cleaned_input_str = cleaned_input_str[:-3].strip()
+
+    try:
+        input_data = json.loads(cleaned_input_str)
         print(execute_plugin(input_data))
-    else:
-        # For local testing
-        test_input = {
-            "language": "python",
-            "code": "print('Hello from Python!')"
-        }
-        print(execute_plugin(test_input))
+    except json.JSONDecodeError as e:
+        # If JSON decoding still fails, log the error and return a structured error output
+        error_message = f"JSONDecodeError: {e}. Raw input: {raw_input_str[:200]}..."
+        send_to_errorhandler(error_message, context={"raw_input": raw_input_str})
+        print(json.dumps({
+            "stdout": "",
+            "stderr": f"Error: Invalid JSON input to CODE_EXECUTOR plugin: {e}",
+            "exit_code": 1
+        }))
+    except Exception as e:
+        send_to_errorhandler(e, context=json.dumps({"raw_input": raw_input_str}))
+        print(json.dumps({
+            "stdout": "",
+            "stderr": f"An unexpected error occurred during input processing: {str(e)}",
+            "exit_code": 1
+        }))

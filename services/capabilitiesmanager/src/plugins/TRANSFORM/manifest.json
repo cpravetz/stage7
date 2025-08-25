@@ -14,7 +14,7 @@
         {
             "name": "script_parameters",
             "required": true,
-            "type": "object",
+            "type": "json",
             "description": "The input data (JSON object) to be transformed by the code snippet."
         }
     ],

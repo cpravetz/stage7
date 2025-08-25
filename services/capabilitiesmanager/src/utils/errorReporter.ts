@@ -6,6 +6,7 @@ export enum ErrorSeverity {
   WARNING = 'WARNING',
   ERROR = 'ERROR',
   CRITICAL = 'CRITICAL',
+  VALIDATION = 'VALIDATION'  // Added for input validation errors
 }
 
 // Define initial Planning Error Codes (can be expanded by other modules)
@@ -28,6 +29,12 @@ export const GlobalErrorCodes = {
   GITHUB_API_ERROR: 'G006_GITHUB_API_ERROR', // Generic GitHub API error
   GITHUB_CONFIG_ERROR: 'G007_GITHUB_CONFIG_ERROR',
   GITHUB_FETCH_DEFAULT_BRANCH_FAILED: 'G008_GITHUB_FETCH_DEFAULT_BRANCH_FAILED',
+  
+  // Input Validation Error Codes
+  INVALID_INPUT: 'V001_INVALID_INPUT',
+  MISSING_REQUIRED_INPUT: 'V002_MISSING_REQUIRED_INPUT',
+  INVALID_INPUT_TYPE: 'V003_INVALID_INPUT_TYPE',
+  INPUT_VALIDATION_FAILED: 'V004_INPUT_VALIDATION_FAILED',
 
   PLUGIN_REGISTRY_INVALID_MANIFEST_PACKAGE_SOURCE: 'PR001_INVALID_MANIFEST_PACKAGE_SOURCE',
   PLUGIN_REGISTRY_GIT_CLONE_FAILED: 'PR002_GIT_CLONE_FAILED',
@@ -45,7 +52,6 @@ export const GlobalErrorCodes = {
   CAPABILITIES_MANAGER_ERROR_TRANSLATION_FAILED: 'CM004_ERROR_TRANSLATION_FAILED',
   PLUGIN_NOT_FOUND: 'CM005_PLUGIN_NOT_FOUND',
   PLUGIN_VERSION_NOT_FOUND: 'CM006_PLUGIN_VERSION_NOT_FOUND',
-  INPUT_VALIDATION_FAILED: 'CM007_INPUT_VALIDATION_FAILED',
   PLUGIN_PERMISSION_VALIDATION_FAILED: 'CM008_PLUGIN_PERMISSION_VALIDATION_FAILED',
   ACCOMPLISH_PLUGIN_MANIFEST_NOT_FOUND: 'CM009_ACCOMPLISH_PLUGIN_MANIFEST_NOT_FOUND',
   ACCOMPLISH_PLUGIN_EXECUTION_FAILED: 'CM010_ACCOMPLISH_PLUGIN_EXECUTION_FAILED',
@@ -91,8 +97,10 @@ export interface StructuredErrorParams {
   source_component: string;
   contextual_info?: Record<string, any>;
   suggested_action?: string;
+  http_status?: number; // Added to support HTTP status codes
   original_error?: Error | any; 
   trace_id?: string;
+  validation_type?: string; // Added for input validation errors
   trace_id_param?: string; // For backward compatibility
 }
 
@@ -149,7 +157,34 @@ export function generateStructuredError({
     structuredErrorOutput.suggested_action = suggested_action;
   }
   
-  console.error(`StructuredError Generated [${source_component}]: ${message} (Code: ${error_code}, Trace: ${current_trace_id}, ID: ${error_id})`);
+  // Enhance error output based on severity
+  if (severity === ErrorSeverity.VALIDATION) {
+    const validationType = enriched_contextual_info.validation_type;
+    console.warn(`Validation Error [${source_component}]: ${message} (Type: ${validationType}, Code: ${error_code}, Trace: ${current_trace_id}, ID: ${error_id})`);
+
+    // For validation errors, add more specific handling and context
+    structuredErrorOutput.contextual_info.is_validation_error = true;
+    if (validationType) {
+      structuredErrorOutput.contextual_info.validation_type = validationType;
+    }
+
+    // Add suggestions for common validation errors
+    switch (error_code) {
+      case GlobalErrorCodes.MISSING_REQUIRED_INPUT:
+        structuredErrorOutput.suggested_action = 'Ensure all required inputs are provided with non-empty values';
+        break;
+      case GlobalErrorCodes.INVALID_INPUT_TYPE:
+        structuredErrorOutput.suggested_action = 'Check the type of the provided input matches the expected type';
+        break;
+      case GlobalErrorCodes.INVALID_INPUT:
+        structuredErrorOutput.suggested_action = 'Validate input format and content against the plugin requirements';
+        break;
+      default:
+        structuredErrorOutput.suggested_action = 'Review input requirements in the plugin documentation';
+    }
+  } else {
+    console.error(`StructuredError Generated [${source_component}]: ${message} (Code: ${error_code}, Trace: ${current_trace_id}, ID: ${error_id})`);
+  }
 
   return structuredErrorOutput;
 }

@@ -2,7 +2,7 @@
   "id": "plugin-API_CLIENT",
   "verb": "API_CLIENT",
   "description": "A generic interface for interacting with third-party RESTful APIs.",
-  "explanation": "This plugin provides a command to make HTTP requests to any RESTful API, handling various authentication methods and returning the full HTTP response.",
+  "explanation": "This plugin provides a command to make HTTP requests to any RESTful API, handling various authentication methods and returning the full HTTP response.  You are responsible for providing any keys, IDs or required request parameters needed to use the API.",
   "inputDefinitions": [
     {
       "name": "method",

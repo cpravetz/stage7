@@ -1,3 +1,9 @@
+import json
+import csv
+import io
+from jsonpath_ng import jsonpath, parse
+import duckdb
+
 def query_json(inputs):
     """Queries a JSON object using a JSONPath expression."""
     json_object = inputs.get("json_object")
@@ -58,71 +64,10 @@ def execute_plugin(operation, inputs):
     if operation not in operations:
         return {"error": f"Operation '{operation}' not supported."}
 
-    return operations[operation](inputs)
-import json
-import csv
-import io
-from jsonpath_ng import jsonpath, parse
-import duckdb
-import tempfile
-import shutil
-import os
-import hashlib
+    result = operations[operation](inputs)
 
-# Error handler integration (for unexpected/code errors only)
-def send_to_errorhandler(error, context=None):
-    try:
-        import requests
-        errorhandler_url = os.environ.get('ERRORHANDLER_URL', 'errorhandler:5090')
-        payload = {
-            'error': str(error),
-            'context': context or ''
-        }
-        requests.post(f'http://{errorhandler_url}/analyze', json=payload, timeout=10)
-    except Exception as e:
-        print(f"Failed to send error to errorhandler: {e}")
+    # Ensure result is a dictionary or list for JSON serialization
+    if result is None:
+        return {"result": None} # Or handle as an error if None is not expected
 
-seen_hashes = set()
-
-def execute_plugin(operation, inputs):
-    temp_dir = None
-    try:
-        # Deduplication: hash the operation and inputs
-        hash_input = json.dumps({'operation': operation, 'inputs': inputs}, sort_keys=True)
-        input_hash = hashlib.sha256(hash_input.encode()).hexdigest()
-        if input_hash in seen_hashes:
-            return {"error": "Duplicate input detected. This operation/input combination has already failed. Aborting to prevent infinite loop."}
-        seen_hashes.add(input_hash)
-
-        # Temp directory hygiene
-        temp_dir = tempfile.mkdtemp(prefix="data_toolkit_")
-        os.environ["DATA_TOOLKIT_TEMP_DIR"] = temp_dir
-
-        operations = {
-            "query_json": query_json,
-            "validate_json": validate_json,
-            "csv_to_json": csv_to_json,
-            "json_to_csv": json_to_csv,
-            "execute_sql_on_json": execute_sql_on_json,
-        }
-
-        if operation not in operations:
-            return {"error": f"Operation '{operation}' not supported."}
-
-        result = operations[operation](inputs)
-
-        # Strict output validation (example: must be dict, not None)
-        if result is None or not isinstance(result, (dict, list)):
-            raise ValueError("Output schema validation failed: result must be dict or list.")
-
-        return result
-    except Exception as e:
-        # Only escalate to errorhandler for unexpected/code errors
-        send_to_errorhandler(e, context=json.dumps({'operation': operation, 'inputs': inputs}))
-        return {"error": f"Unexpected error: {str(e)}"}
-    finally:
-        if temp_dir and os.path.exists(temp_dir):
-            try:
-                shutil.rmtree(temp_dir)
-            except Exception as cleanup_err:
-                print(f"Failed to clean up temp dir {temp_dir}: {cleanup_err}")
+    return result

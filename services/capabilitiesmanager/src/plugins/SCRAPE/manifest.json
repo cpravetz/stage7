@@ -51,7 +51,9 @@
     "type": "local"
   },
   "security": {
-    "permissions": [],
+    "permissions": [
+      "net.fetch"
+    ],
     "sandboxOptions": {},
     "trust": {
       "signature": "1v8qYLEKhIRhUnWubKeAv96AaOjVAePDNdFY07ZAWwr6ufp9AI4NQTdpsYGoSo6nAf2dJpQ9QbOYtThcsWyMnGE00tuSGyq6zzPrdMMxGub5OMHIICAYdfnpTT0yisj45OUrb/sUkSrjeCsDZFKg5iSiS5IUbhcoZnQr9xFqXpIurXX9kNLiBttmG8thw9WQtAVIpGW/bGncNKRGMd3r/IOSH/R0rl+Y9bgXWdIGtkOC9vMVKHIVPbVtpskAEHT9Rx9v40KKDT6r2EZfY7P22DVNq81s8nQaabXw2W71euqatzXaVND1snHmmZLka4Lx2cUxN4KUTIw/z+epVZ1jKw=="

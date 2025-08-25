@@ -3,6 +3,7 @@ import { AxiosError } from 'axios';
 export enum StepErrorType {
     TRANSIENT = 'transient', // Errors that might resolve on retry (e.g., network timeout, temporary service unavailability)
     PERMANENT = 'permanent', // Errors that will not resolve on retry (e.g., invalid input, auth error, bug in plugin)
+    VALIDATION = 'validation', // Input validation errors that might be fixable through replanning
 }
 
 /**
@@ -43,7 +44,10 @@ export function classifyStepError(error: any): StepErrorType {
             if (status >= 500) { // 500, 502, 503, 504 are server-side issues, potentially transient
                 return StepErrorType.TRANSIENT;
             }
-            if (status >= 400 && status < 500) { // 400, 401, 403, 404 are client-side errors, almost always permanent
+            if (status === 400) { // 400 is validation error
+                return StepErrorType.VALIDATION;
+            }
+            if (status > 400 && status < 500) { // 401, 403, 404 are client-side errors, almost always permanent
                 return StepErrorType.PERMANENT;
             }
         }
@@ -56,7 +60,11 @@ export function classifyStepError(error: any): StepErrorType {
         return StepErrorType.TRANSIENT;
     }
 
-    if (errorMessage.includes('invalid input') || errorMessage.includes('missing required') || errorMessage.includes('unauthorized') || errorMessage.includes('access denied') || errorMessage.includes('not found')) {
+    if (errorMessage.includes('invalid input') || errorMessage.includes('missing required')) {
+        return StepErrorType.VALIDATION;
+    }
+    
+    if (errorMessage.includes('unauthorized') || errorMessage.includes('access denied') || errorMessage.includes('not found')) {
         return StepErrorType.PERMANENT;
     }
 

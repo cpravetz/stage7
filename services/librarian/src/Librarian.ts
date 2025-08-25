@@ -73,7 +73,7 @@ export class Librarian extends BaseEntity {
         });
 
         this.app.post('/storeData', (req, res) => this.storeData(req, res));
-        this.app.get('/loadData/:id', (req, res) => this.loadData(req, res));
+        this.app.get('/loadData/:id', this.loadData);
         this.app.get('/loadData', (req, res) => this.loadDataByQuery(req, res));
         this.app.post('/queryData', (req, res) => this.queryData(req, res));
         this.app.get('/getDataHistory/:id', (req, res) => this.getDataHistory(req, res));

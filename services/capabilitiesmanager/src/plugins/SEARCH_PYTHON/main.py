@@ -80,35 +80,11 @@ class BrainSearchProvider(SearchProvider):
         self.inputs = kwargs.get('inputs', {})
 
     def search(self, search_term: str, **kwargs) -> List[Dict[str, str]]:
-        prompt = f"Perform a web search for '{search_term}' and provide a list of relevant links (title and URL). Return the results as a JSON array of objects, each with 'title' and 'url' keys."
-        try:
-            response_str = self._call_brain(prompt, "json")
-            try:
-                # Handle JSON-wrapped-in-JSON issue
-                if isinstance(response_str, str) and response_str.startswith('"') and response_str.endswith('"'):
-                    # Remove outer quotes and unescape
-                    response_str = response_str[1:-1].replace('\\"', '"').replace('\\n', '\n')
-                
-                results = json.loads(response_str)
-                if isinstance(results, list):
-                    return results
-                return []
-            except json.JSONDecodeError as e:
-                logger.warning(f"Brain search returned non-JSON response: {response_str}")
-                # Try to parse as string and extract JSON
-                try:
-                    # Look for JSON array in the response
-                    json_match = re.search(r'\[.*\]', response_str, re.DOTALL)
-                    if json_match:
-                        results = json.loads(json_match.group())
-                        if isinstance(results, list):
-                            return results
-                except:
-                    pass
-                return []
-        except Exception as e:
-            logger.error(f"Brain search failed: {e}")
-            raise
+        # This provider is a fallback that uses an LLM, which can hallucinate results.
+        # Instead of returning potentially fake data, we will raise an exception
+        # to indicate that all primary, real search providers have failed.
+        logger.error("All primary search providers failed. BrainSearchProvider will not be used to prevent fake results.")
+        raise Exception("All primary search providers failed. Aborting to prevent fake results.")
 
     def _call_brain(self, prompt: str, response_type: str) -> str:
         auth_token = self._get_auth_token()
@@ -195,12 +171,23 @@ class LangsearchSearchProvider(SearchProvider):
                 "query": search_term,
                 "count": 10
             }
+            if 'freshness' in kwargs:
+                payload['freshness'] = kwargs['freshness']
+            if 'summary' in kwargs:
+                payload['summary'] = kwargs['summary']
             
             logger.info(f"Calling LangSearch API at {url}")
             response = requests.post(url, headers=headers, json=payload, timeout=15)
             response.raise_for_status()
-            data = response.json()
             
+            # Extract the 'data' field from the top-level response
+            full_response = response.json()
+            if "data" in full_response:
+                data = full_response["data"]
+            else:
+                # If 'data' key is not present, assume the response itself is the data
+                data = full_response
+
             # Handle different response structures
             results = []
             
@@ -414,8 +401,8 @@ class SearchPlugin:
             providers.append(GoogleSearchProvider(api_key=google_api_key, cse_id=google_cse_id))
         
         # 3. SearxNG as second fallback
-        logger.info("Initializing SearxNG search provider")
-        providers.append(SearxNGSearchProvider())
+        # logger.info("Initializing SearxNG search provider")
+        # providers.append(SearxNGSearchProvider()) # Disabled due to consistent failures
         
         # 4. DuckDuckGo as third fallback
         logger.info("Initializing DuckDuckGo search provider")
