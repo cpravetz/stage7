@@ -53,12 +53,16 @@ export class AgentPersistenceManager {
             return;
         }
 
-        const state = MapSerializer.transformForSerialization(agent);
+        // Serialize only the Map properties, not the entire agent object
+        const stateToSave = {
+            ...agent,
+            inputs: MapSerializer.transformForSerialization(agent.inputs),
+        };
 
         try {
             await this.authenticatedApi.post(`http://${this.librarianUrl}/storeData`, {
                 id: agent.id,
-                data: state,
+                data: stateToSave,
                 storageType: 'mongo',
                 collection: 'agents'
             });

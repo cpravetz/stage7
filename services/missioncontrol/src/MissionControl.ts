@@ -50,7 +50,7 @@ class MissionControl extends BaseEntity {
             windowMs: 15 * 60 * 1000, // 15 minutes
             max: 1000, // max 100 requests per windowMs
         }));
-        app.use(express.json());
+        app.use(express.json({ limit: '50mb' }));
 
         // Use authentication middleware from BaseEntity
         app.use((req: Request, res: Response, next: NextFunction) => {
@@ -587,12 +587,12 @@ class MissionControl extends BaseEntity {
                             const trafficManagerStatistics = trafficManagerResponse.data;
 
                             // Create mission statistics
-                            const missionStats: MissionStatistics = {
-                                llmCalls: llmCallsResponse.data.llmCalls,
-                                agentCountByStatus: trafficManagerStatistics.agentStatisticsByType.agentCountByStatus,
-                                agentStatistics: MapSerializer.transformForSerialization(trafficManagerStatistics.agentStatisticsByStatus),
-                                engineerStatistics: engineerStatisticsResponse.data
-                            };
+                                                const missionStats: MissionStatistics = {
+                        llmCalls: llmCallsResponse.data.llmCalls,
+                        agentCountByStatus: trafficManagerStatistics.agentStatisticsByType.agentCountByStatus,
+                        agentStatistics: MapSerializer.transformForSerialization(trafficManagerStatistics.agentStatisticsByStatus),
+                        engineerStatistics: engineerStatisticsResponse.data
+                    };
 
                             // Log before sending
                             console.log('MissionControl: Sending agentStatistics to PostOffice for client', clientId);
@@ -828,9 +828,25 @@ class MissionControl extends BaseEntity {
 
     // Add: Resume step logic (stub, to be implemented as per your step engine)
     private async resumeStepWithUserInput(missionId: string, stepId: string, agentId: string, userInput: any) {
-        // TODO: Implement logic to resume the paused step with the provided user input
-        console.log(`Resuming step ${stepId} for agent ${agentId} in mission ${missionId} with user input:`, userInput);
-        // Example: fetch the step, update its input, and continue processing
+        console.log(`MissionControl: Resuming step ${stepId} for agent ${agentId} in mission ${missionId} with user input:`, userInput);
+        try {
+            // Send a message to the TrafficManager to forward the user input to the specific agent
+            await this.authenticatedApi.post(`http://${this.trafficManagerUrl}/message`, {
+                type: MessageType.USER_INPUT_RESPONSE,
+                sender: this.id,
+                recipient: agentId, // Target the specific agent
+                content: {
+                    missionId: missionId,
+                    stepId: stepId,
+                    agentId: agentId,
+                    response: userInput
+                }
+            });
+            console.log(`MissionControl: Sent USER_INPUT_RESPONSE to TrafficManager for agent ${agentId}, step ${stepId}.`);
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error(`MissionControl: Error resuming step ${stepId} with user input:`, error instanceof Error ? error.message : error);
+        }
     }
 
     // In your step execution logic, when you get a pending_user_input result from the plugin:

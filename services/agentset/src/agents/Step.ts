@@ -154,14 +154,52 @@ export class Step {
     }
 
     areDependenciesSatisfied(allSteps: Step[]): boolean {
-        // Check if all dependencies have a sourceStepId that exists in allSteps and that source step is completed
         return this.dependencies.every(dep => {
             if (!dep.sourceStepId) {
-                // If dependency has no sourceStepId, consider it unsatisfied
                 return true;
             }
             const sourceStep = allSteps.find(s => s.id === dep.sourceStepId);
-            return sourceStep !== undefined && sourceStep.status === StepStatus.COMPLETED;
+
+            // Source step must exist and be completed.
+            if (!sourceStep || sourceStep.status !== StepStatus.COMPLETED) {
+                return false;
+            }
+
+            // If dependency is just a signal (like for control flow), we don't need to check for a named output.
+            if (dep.inputName.startsWith('__')) {
+                return true;
+            }
+
+            // For regular dependencies, the named output must exist in the source step's result.
+            const outputExists = sourceStep.result?.some(r => r.name === dep.outputName);
+            if (!outputExists) {
+                console.warn(`[areDependenciesSatisfied] Step ${this.id} dependency on output '${dep.outputName}' from step ${sourceStep.id} is not met because the output is not in the result.`);
+                return false;
+            }
+
+            return true;
+        });
+    }
+
+    areDependenciesPermanentlyUnsatisfied(allSteps: Step[]): boolean {
+        return this.dependencies.some(dep => {
+            if (!dep.sourceStepId) {
+                return false; // Cannot determine, assume not unsatisfied
+            }
+            const sourceStep = allSteps.find(s => s.id === dep.sourceStepId);
+            if (!sourceStep) {
+                return true; // Source step doesn't exist, permanently unsatisfied
+            }
+            const isTerminated = sourceStep.status === StepStatus.COMPLETED ||
+                                 sourceStep.status === StepStatus.ERROR ||
+                                 sourceStep.status === StepStatus.CANCELLED;
+
+            if (isTerminated) {
+                // The source step is finished. Now check if the dependency is actually met.
+                const isSatisfied = this.areDependenciesSatisfied(allSteps);
+                return !isSatisfied; // If it's terminated and not satisfied, it's permanently unsatisfied.
+            }
+            return false; // Source step is still running or pending, so not permanently unsatisfied yet.
         });
     }
 

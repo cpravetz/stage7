@@ -735,7 +735,6 @@ export class CapabilitiesManager extends BaseEntity {
 
     private async executeAccomplishPlugin(inputs: Map<string, InputValue>, trace_id: string): Promise<PluginOutput[]> {
         const source_component = "CapabilitiesManager.executeAccomplishPlugin";
-        let availablePluginsStr = ""; // Initialize
         try {            
             // Fetch detailed plugin manifests to provide a schema to the Brain
             const allPlugins = await this.pluginRegistry.list();
@@ -748,17 +747,8 @@ export class CapabilitiesManager extends BaseEntity {
             );
             const manifests = (await Promise.all(manifestPromises)).filter((m): m is PluginManifest => m !== null);
             
-            // Create a lean, prompt-friendly version of the manifests
-            const leanManifests = manifests.map(m => ({
-                actionVerb: m.verb,
-                description: m.description,
-                inputs: (m.inputDefinitions || []).map(i => ({ name: i.name, description: i.description, type: i.type, required: i.required }))
-            }));
-            availablePluginsStr = JSON.stringify(leanManifests, null, 2);
-            console.log(`[${trace_id}] ${source_component}: Plugins string for ACCOMPLISH: ${truncate(availablePluginsStr)}...`);
-
             const accomplishInputs : Map<string, InputValue> = new Map(inputs); // Start with all provided inputs
-            accomplishInputs.set('available_plugins', { inputName: 'available_plugins', value: availablePluginsStr, valueType: PluginParameterType.STRING, args: {} });
+            accomplishInputs.set('availablePlugins', { inputName: 'availablePlugins', value: manifests, valueType: PluginParameterType.OBJECT, args: {} });
 
             const accomplishPluginManifest = await this.pluginRegistry.fetchOneByVerb('ACCOMPLISH');
             if (!accomplishPluginManifest) {
@@ -811,13 +801,6 @@ export class CapabilitiesManager extends BaseEntity {
             );
             const manifests = (await Promise.all(manifestPromises)).filter((m): m is PluginManifest => m !== null);
 
-            const leanManifests = manifests.map(m => ({
-                actionVerb: m.verb,
-                description: m.description,
-                inputs: (m.inputDefinitions || []).map(i => ({ name: i.name, description: i.description, type: i.type, required: i.required }))
-            }));
-            const availablePluginsStr = JSON.stringify(leanManifests, null, 2);
-
             // Create inputs specifically for novel verb handling
             const accomplishInputs: Map<string, InputValue> = new Map();
             // Merge novelVerbInfo.inputValues with top-level inputs
@@ -832,10 +815,10 @@ export class CapabilitiesManager extends BaseEntity {
                 valueType: PluginParameterType.OBJECT,
                 args: {}
             });
-            accomplishInputs.set('available_plugins', {
-                inputName: 'available_plugins',
-                value: availablePluginsStr,
-                valueType: PluginParameterType.STRING,
+            accomplishInputs.set('availablePlugins', {
+                inputName: 'availablePlugins',
+                value: manifests,
+                valueType: PluginParameterType.OBJECT,
                 args: {}
             });
 

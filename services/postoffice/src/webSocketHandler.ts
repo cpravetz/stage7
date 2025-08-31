@@ -191,9 +191,6 @@ export class WebSocketHandler {
         client.send(messageJson);
         console.log(`Message sent to client ${clientId}. Message type: ${message.type}`);
 
-        if (message.type === MessageType.STATISTICS) {
-          console.log(`Statistics message sent to client ${clientId}:`, JSON.stringify(message, null, 2));
-        }
       } catch (error) {
         console.error(`Error sending message to client ${clientId}:`, error instanceof Error ? error.message : 'Unknown error');
       }

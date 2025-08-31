@@ -2,6 +2,7 @@ import { Message, MessageType } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 import axios from 'axios';
 import WebSocket from 'ws';
+import { WebSocketHandler } from './webSocketHandler'; // Import WebSocketHandler
 
 // Create an axios instance for HTTP communication
 const api = axios.create({
@@ -17,38 +18,29 @@ const api = axios.create({
  */
 export class MessageRouter {
   private components: Map<string, any>;
-  private componentsByType: Map<string, Set<string>>;
   private messageQueue: Map<string, Message[]>;
-  private clients: Map<string, WebSocket>;
   private missionClients: Map<string, Set<string>>;
-  private clientMessageQueue: Map<string, Message[]>;
   private mqClient: any;
   private authenticatedApi: any;
   private id: string;
-  private serviceDiscoveryManager: any;
+  private webSocketHandler: WebSocketHandler; // Reference to WebSocketHandler
 
   constructor(
     components: Map<string, any>,
-    componentsByType: Map<string, Set<string>>,
     messageQueue: Map<string, Message[]>,
-    clients: Map<string, WebSocket>,
     missionClients: Map<string, Set<string>>,
-    clientMessageQueue: Map<string, Message[]>,
     mqClient: any,
     authenticatedApi: any,
     id: string,
-    serviceDiscoveryManager: any
+    webSocketHandler: WebSocketHandler // Add WebSocketHandler to constructor parameters
   ) {
     this.components = components;
-    this.componentsByType = componentsByType;
     this.messageQueue = messageQueue;
-    this.clients = clients;
     this.missionClients = missionClients;
-    this.clientMessageQueue = clientMessageQueue;
     this.mqClient = mqClient;
     this.authenticatedApi = authenticatedApi;
     this.id = id;
-    this.serviceDiscoveryManager = serviceDiscoveryManager;
+    this.webSocketHandler = webSocketHandler; // Initialize the WebSocketHandler reference
   }
 
   /**
@@ -67,12 +59,12 @@ export class MessageRouter {
 
     // Handle messages to users (via WebSocket)
     if (clientId) {
-        this.sendToClient(clientId, message);
+        this.webSocketHandler.sendToClient(clientId, message); // Delegate to WebSocketHandler
         return;
     }
 
     if (message.recipient === 'user') {
-        this.broadcastToClients(message);
+        this.webSocketHandler.broadcastToClients(message); // Delegate to WebSocketHandler
         return;
     }
     
@@ -97,7 +89,7 @@ export class MessageRouter {
     // If clientId is provided, send directly to that client
     if (clientId) {
       console.log(`Routing statistics update to client: ${clientId}`);
-      this.sendToClient(clientId, message);
+      this.webSocketHandler.sendToClient(clientId, message);
       return;
     }
 
@@ -109,7 +101,7 @@ export class MessageRouter {
       if (clientsForMission && clientsForMission.size > 0) {
         console.log(`Routing statistics update for mission ${missionId} to ${clientsForMission.size} clients`);
         clientsForMission.forEach(cId => {
-          this.sendToClient(cId, message);
+          this.webSocketHandler.sendToClient(cId, message);
         });
         return;
       } else {
@@ -119,7 +111,7 @@ export class MessageRouter {
 
     // If we get here, we couldn't find specific clients, so broadcast to all
     console.log('Broadcasting statistics update to all clients');
-    this.broadcastToClients(message);
+    this.webSocketHandler.broadcastToClients(message);
   }
 
   /**
@@ -131,7 +123,7 @@ export class MessageRouter {
     // If clientId is provided, send directly to that client
     if (clientId) {
       console.log(`Routing message to client: ${clientId}`);
-      this.sendToClient(clientId, message);
+      this.webSocketHandler.sendToClient(clientId, message);
       return;
     }
 
@@ -148,7 +140,7 @@ export class MessageRouter {
           console.log(`Routing say message from agent ${agentId} to ${clients.size} clients for mission ${missionId}`);
           clients.forEach(cId => {
             console.log(`Sending say message to client ${cId}`);
-            this.sendToClient(cId, message);
+            this.webSocketHandler.sendToClient(cId, message);
           });
           clientsFound = true;
         }
@@ -156,14 +148,14 @@ export class MessageRouter {
 
       if (!clientsFound) {
         console.log(`No clients found for agent ${agentId}, broadcasting message to all clients`);
-        this.broadcastToClients(message);
+        this.webSocketHandler.broadcastToClients(message);
       }
       return;
     }
 
     // If no specific client, broadcast to all connected clients
     console.log('Broadcasting message to all clients');
-    this.broadcastToClients(message);
+    this.webSocketHandler.broadcastToClients(message);
   }
 
   /**
@@ -209,7 +201,7 @@ export class MessageRouter {
 
           // If this is a request from a client, send the response back to the client
           if (clientId) {
-            this.sendToClient(clientId, response);
+            this.webSocketHandler.sendToClient(clientId, response); // Delegate to WebSocketHandler
           }
 
           return;
@@ -262,7 +254,7 @@ export class MessageRouter {
         // Process messages for users
         while (messages.length > 0) {
           const message = messages.shift()!;
-          this.broadcastToClients(message);
+          this.webSocketHandler.broadcastToClients(message); // Delegate to WebSocketHandler
         }
       } else {
         // Process messages for services
@@ -282,67 +274,7 @@ export class MessageRouter {
     }
   }
 
-  /**
-   * Send a message to a specific client
-   * @param clientId Client ID
-   * @param message Message to send
-   */
-  sendToClient(clientId: string, message: any): void {
-    console.log(`Attempting to send message of type ${message.type} to client ${clientId}`);
-
-    const client = this.clients.get(clientId);
-    if (client && client.readyState === WebSocket.OPEN) {
-      try {
-        const messageJson = JSON.stringify(message);
-        client.send(messageJson);
-        console.log(`Message sent to client ${clientId}. Message type: ${message.type}`);
-
-        if (message.type === MessageType.STATISTICS) {
-          console.log(`Statistics message sent to client ${clientId}:`, JSON.stringify(message, null, 2));
-        }
-      } catch (error) {
-        console.error(`Error sending message to client ${clientId}:`, error instanceof Error ? error.message : 'Unknown error');
-      }
-    } else {
-      console.log(`Client ${clientId} not found or not ready. ReadyState: ${client ? client.readyState : 'Client not found'}`);
-
-      // Queue the message for when the client connects
-      if (!this.clientMessageQueue.has(clientId)) {
-        this.clientMessageQueue.set(clientId, []);
-      }
-      this.clientMessageQueue.get(clientId)!.push(message);
-      console.log(`Message queued for client ${clientId}. Queue size: ${this.clientMessageQueue.get(clientId)!.length}`);
-
-      if (client) {
-        console.log(`Attempting to reconnect client ${clientId}`);
-      }
-    }
-  }
-
-  /**
-   * Broadcast a message to all connected clients
-   * @param message Message to broadcast
-   */
-  broadcastToClients(message: any): void {
-    console.log(`Broadcasting message of type ${message.type} to all clients`);
-    let sentCount = 0;
-
-    this.clients.forEach((client, clientId) => {
-      if (client.readyState === WebSocket.OPEN) {
-        try {
-          client.send(JSON.stringify(message));
-          console.log(`Broadcast message sent to client ${clientId}`);
-          sentCount++;
-        } catch (error) {
-          console.error(`Error broadcasting message to client ${clientId}:`, error instanceof Error ? error.message : 'Unknown error');
-        }
-      } else {
-        console.log(`Client ${clientId} not ready for broadcast, readyState: ${client.readyState}`);
-      }
-    });
-
-    console.log(`Broadcast complete: sent to ${sentCount} of ${this.clients.size} clients`);
-  }
+  // Removed sendToClient and broadcastToClients methods to eliminate overlap with WebSocketHandler
 
   /**
    * Handle a message received from the RabbitMQ queue
@@ -366,4 +298,3 @@ export class MessageRouter {
     }
   }
 }
-

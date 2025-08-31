@@ -186,18 +186,15 @@ export class PostOffice extends BaseEntity {
         this.server.listen(serverPort, '0.0.0.0', () => {
             console.log(`PostOffice listening on all interfaces at port ${serverPort}`);
         });
-        // Initialize the MessageRouter with serviceDiscoveryManager
+        // Initialize the MessageRouter with serviceDiscoveryManager and webSocketHandler
         this.messageRouter = new MessageRouter(
             this.components,
-            this.componentsByType,
             this.messageQueue,
-            this.clients as Map<string, WebSocket>,
             this.missionClients,
-            this.clientMessageQueue,
             this.mqClient,
             this.authenticatedApi,
             this.id,
-            this.serviceDiscoveryManager
+            this.webSocketHandler
         );
 
         // Set up the message processing interval

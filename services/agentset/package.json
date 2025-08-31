@@ -6,13 +6,12 @@
   "scripts": {
     "start": "ts-node src/AgentSet.ts",
     "build": "tsc",
-    "test": "jest",
-    "dev": "ts-node-dev --respawn src/AgentSet.ts"
+    "test": "jest"
   },
   "dependencies": {
     "@cktmcs/shared": "file:../../shared",
     "@cktmcs/errorhandler": "file:../../errorhandler",
-    "axios": "^1.8.4",
+    "axios": "^1.11.0",
     "body-parser": "^1.19.0",
     "cors": "^2.8.5",
     "dotenv": "^16.5.0",
@@ -26,11 +25,10 @@
     "@types/supertest": "^6.0.2",
     "@types/uuid": "^10.0.0",
     "@types/ws": "^8.5.12",
-    "jest": "^29.7.0",
+    "jest": "^30.0.5",
     "supertest": "^7.0.0",
     "ts-jest": "^29.2.5",
     "ts-node": "^10.9.1",
-    "ts-node-dev": "^2.0.0",
     "typescript": "^5.6.3"
   },
   "jest": {

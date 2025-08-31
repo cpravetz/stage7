@@ -9,13 +9,13 @@
             "name": "script",
             "required": true,
             "type": "string",
-            "description": "The Python code snippet to execute for transformation. The code should define a function named 'transform_data' that accepts 'input_data' and returns the transformed data."
+            "description": "The Python code snippet to execute for transformation. The code has access to a 'params' variable containing the script_parameters. The script should print its result to stdout rather than returning it."
         },
         {
             "name": "script_parameters",
-            "required": true,
+            "required": false,
             "type": "json",
-            "description": "The input data (JSON object) to be transformed by the code snippet."
+            "description": "Parameters to be passed to the script. Available as a 'params' variable in the script context. Can be a JSON object or a JSON string."
         }
     ],
     "outputDefinitions":[
@@ -23,13 +23,12 @@
             "name": "transform_result",
             "required": true,
             "type": "string",
-            "description": "The transformed output data (JSON object) after executing the code snippet."
+            "description": "The output captured from stdout after executing the code snippet. Can be any string data printed by the script."
         }
     ],
     "language":"python",
     "entryPoint":{
       "main":"main.py",
-      "function": "execute_transformation",
       "packageSource":{"type":"local","path":"./",
       "requirements":"requirements.txt"}
     },

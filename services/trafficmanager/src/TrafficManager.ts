@@ -123,7 +123,7 @@ export class TrafficManager extends BaseEntity {
 
     private async updateAgentStatus(message: Message) {
         const agentId = message.sender;
-        const status = message.content.status;
+        const { status, statistics, missionId, timestamp } = message.content;
         console.log(`Updating status for agent ${agentId} to ${status}`);
         try {
             if (status === 'CHECK') {
@@ -144,6 +144,23 @@ export class TrafficManager extends BaseEntity {
                     await this.handleAgentPaused(agentId);
                     break;
                 // Add more cases as needed
+            }
+
+            // Forward statistics to MissionControl if they exist
+            if (statistics && missionId) {
+                try {
+                    const missionControlUrl = process.env.MISSIONCONTROL_URL || 'missioncontrol:5010';
+                    await this.authenticatedApi.post(`http://${missionControlUrl}/agentStatisticsUpdate`, {
+                        agentId,
+                        missionId,
+                        statistics,
+                        timestamp: timestamp || new Date().toISOString()
+                    });
+                    console.log(`Forwarded statistics for agent ${agentId} to MissionControl`);
+                } catch (mcError) {
+                    console.error(`Failed to forward statistics to MissionControl:`,
+                        mcError instanceof Error ? mcError.message : mcError);
+                }
             }
 
             // Check if this status update affects any dependent agents
@@ -371,7 +388,7 @@ export class TrafficManager extends BaseEntity {
             inputsMap = new Map();
             for (const [key, value] of Object.entries(inputsDeserialized)) {
                 if (typeof value === 'object' && value !== null && 'value' in value) {
-                    inputsMap.set(key, {inputName: key, value:value, valueType: PluginParameterType.ANY });
+                    inputsMap.set(key, value as InputValue);
                 } else {
                     inputsMap.set(key, {
                         inputName: key,

@@ -5,13 +5,12 @@
     "main": "dist/TrafficManager.js",
     "scripts": {
         "start": "ts-node src/TrafficManager.ts",
-        "build": "tsc",
-        "dev": "ts-node-dev --respawn src/TrafficManager.ts"
+        "build": "tsc"
     },
     "dependencies": {
         "@cktmcs/errorhandler": "file:../../errorhandler",
         "@cktmcs/shared": "file:../../shared",
-        "axios": "^1.8.4",
+        "axios": "^1.11.0",
         "dockerode": "^4.0.7",
         "dotenv": "^16.5.0",
         "express": "^4.21.1",
@@ -24,11 +23,10 @@
         "@types/supertest": "^6.0.2",
         "@types/uuid": "^10.0.0",
         "@types/ws": "^8.5.12",
-        "jest": "^29.7.0",
+        "jest": "^30.0.5",
         "supertest": "^7.0.0",
         "ts-jest": "^29.2.5",
         "ts-node": "^10.9.1",
-        "ts-node-dev": "^2.0.0",
         "typescript": "^5.6.3"
     },
     "overrides": {

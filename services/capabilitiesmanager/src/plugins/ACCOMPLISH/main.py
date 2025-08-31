@@ -179,7 +179,15 @@ def parse_inputs(inputs_str: str) -> Dict[str, Any]:
         for item in input_list:
             if isinstance(item, list) and len(item) == 2:
                 key, value = item
-                inputs[key] = value
+                
+                # Special handling for 'availablePlugins'
+                if key == 'availablePlugins': # Removed isinstance(value, str)
+                    if isinstance(value, dict) and 'value' in value: # Check if it's a serialized InputValue
+                        inputs[key] = value['value'] # Extract the actual list of manifests
+                    else:
+                        inputs[key] = value # Keep as is if not the expected InputValue format
+                else:
+                    inputs[key] = value
             else:
                 logger.warning(f"Skipping invalid input item: {item}")
         
@@ -379,21 +387,32 @@ class PlanValidator:
                             
                             source_step = next((s for s in plan if s.get('number') == source_step_num), None)
                             if source_step:
-                                source_verb = source_step.get('actionVerb')
-                                if source_verb in plugin_map:
-                                    source_plugin = plugin_map[source_verb]
-                                    plugin_outputs = [o.get('name') for o in source_plugin.get('outputDefinitions', [])]
-                                    
-                                    if input_def['outputName'] not in plugin_outputs:
-                                        error_msg = f"Step {step_num}: Input '{input_name}' refers to output '{input_def['outputName']}' which is not a valid output for plugin '{source_verb}'. Valid outputs are: {plugin_outputs}"
-                                        errors.append(error_msg)
-                                        
-                                        if len(plugin_outputs) == 1:
-                                            correct_name = plugin_outputs[0]
-                                            logger.info(f"Repairing output reference: changing '{input_def['outputName']}' to '{correct_name}'")
-                                            input_def['outputName'] = correct_name
-                                            # Remove the error since we fixed it
-                                            errors.pop()
+                                # Get the actual outputs of the source step (which might have been remediated)
+                                actual_source_step_outputs = set(source_step.get('outputs', {}).keys())
+                                
+                                # Primary check: Does the input's outputName exist in the source step's actual outputs?
+                                if input_def['outputName'] not in actual_source_step_outputs:
+                                    # If not, try to find a suitable replacement
+                                    found_match = False
+                                    # Heuristic 1: If there's only one output in the source step, use it.
+                                    if len(actual_source_step_outputs) == 1:
+                                        correct_name = list(actual_source_step_outputs)[0]
+                                        logger.info(f"Step {step_num}: Repairing input '{input_name}' by changing outputName from '{input_def['outputName']}' to '{correct_name}' (single output heuristic).")
+                                        input_def['outputName'] = correct_name
+                                        found_match = True
+                                    # Heuristic 2: Check for similar names (e.g., case-insensitive, pluralization)
+                                    # This would require a more complex string matching logic, similar to _standardize_input_name
+                                    # For now, let's stick to the single output heuristic or report an error.
+
+                                    if not found_match:
+                                        # If no remediation, report an error
+                                        errors.append(f"Step {step_num}: Input '{input_name}' refers to output '{input_def['outputName']}' which is not found in source step {source_step_num}'s outputs: {list(actual_source_step_outputs)}.")
+                                else:
+                                    # Output name is valid in the source step's outputs, no action needed.
+                                    pass
+                            else:
+                                # This case should ideally be caught by earlier non-existent step check, but for robustness:
+                                errors.append(f"Step {step_num}: Input '{input_name}' refers to non-existent source step {source_step_num}.")
 
             action_verb = step.get('actionVerb')
             if action_verb in plugin_map:
@@ -414,25 +433,29 @@ class PlanValidator:
                     provided_inputs = set(step['inputs'].keys())
                     missing_required = required_inputs_by_plugin - provided_inputs
                     if missing_required:
-                        # Attempt to autofill missing required inputs from previous steps
-                        for missing_input in missing_required:
-                            for prev_step_num in range(step_num - 1, 0, -1):
-                                if prev_step_num in step_outputs:
-                                    # Simple heuristic: if there's only one output from the previous step, use it.
-                                    if len(step_outputs[prev_step_num]) == 1:
-                                        output_to_use = list(step_outputs[prev_step_num])[0]
-                                        logger.info(f"Step {step_num}: Autofilling missing input '{missing_input}' with output '{output_to_use}' from step {prev_step_num}")
-                                        step['inputs'][missing_input] = {
-                                            "outputName": output_to_use,
-                                            "sourceStep": prev_step_num
-                                        }
-                                        break # Move to the next missing input
-                        
-                        # Re-check for missing inputs after autofill
-                        provided_inputs = set(step['inputs'].keys())
-                        missing_required = required_inputs_by_plugin - provided_inputs
-                        if missing_required:
-                            errors.append(f"Step {step_num} (verb '{action_verb}'): Missing required inputs: {', '.join(missing_required)}")
+                        errors.append(f"Step {step_num} (verb '{action_verb}'): Missing required inputs: {', '.join(missing_required)}")
+
+                # Check if the step's outputs match the plugin's output definitions
+                expected_outputs_from_plugin = {out.get('name'): out for out in plugin_definition.get('outputDefinitions', [])} # Get name and full definition
+                actual_outputs_in_step = step.get('outputs', {})
+
+                # Identify missing outputs and add them
+                for output_name, output_def in expected_outputs_from_plugin.items():
+                    if output_name not in actual_outputs_in_step:
+                        logger.info(f"Step {step_num} (verb '{action_verb}'): Adding missing output '{output_name}' from plugin definition.")
+                        # Add the missing output with its description from the plugin definition
+                        actual_outputs_in_step[output_name] = {'description': output_def.get('description', f"Output '{output_name}' from {action_verb} plugin.")}
+                        # No error added, as it's remediated
+
+                # Identify extra outputs and remove them
+                outputs_to_remove = [name for name in actual_outputs_in_step.keys() if name not in expected_outputs_from_plugin]
+                for output_name in outputs_to_remove:
+                    logger.info(f"Step {step_num} (verb '{action_verb}'): Removing unexpected output '{output_name}'.")
+                    del actual_outputs_in_step[output_name]
+                    # No error added, as it's remediated
+
+                # After remediation, ensure the step's outputs are updated
+                step['outputs'] = actual_outputs_in_step
 
         return {'valid': len(errors) == 0, 'errors': errors}
 
@@ -548,9 +571,36 @@ class PlanValidator:
             logger.warning("Could not identify a single step to repair from errors. Sending the whole plan.")
             step_to_repair_json = json.dumps(plan, indent=2)
             prompt_type = "full_plan"
+            plugin_guidance = "Schema for multiple steps is complex. Please refer to the full plan and error messages."
         else:
             step_to_repair_json = json.dumps(step_to_repair, indent=2)
             prompt_type = "single_step"
+            
+            # Get the plugin definition for the failed step
+            action_verb = step_to_repair.get('actionVerb')
+            available_plugins = inputs.get('availablePlugins', [])
+            plugin_map = {plugin.get('actionVerb'): plugin for plugin in available_plugins}
+            plugin_definition = plugin_map.get(action_verb)
+
+            plugin_guidance = ""
+            if plugin_definition:
+                guidance_lines = [f"Plugin Schema for '{action_verb}':"]
+                description = plugin_definition.get('description', 'No description available.')
+                input_definitions = plugin_definition.get('inputDefinitions', [])
+                guidance_lines.append(f"  Description: {description}")
+                if input_definitions:
+                    guidance_lines.append("  Inputs Required:")
+                    for input_def in input_definitions:
+                        input_name = input_def.get('name', 'UNKNOWN')
+                        input_desc = input_def.get('description', 'No description.')
+                        value_type = input_def.get('valueType', 'any')
+                        required = ' (required)' if input_def.get('required') else ''
+                        guidance_lines.append(f"    - {input_name} (type: {value_type}){required}: {input_desc}")
+                else:
+                    guidance_lines.append("  Inputs: None required.")
+                plugin_guidance = "\n".join(guidance_lines)
+            else:
+                plugin_guidance = f"No specific plugin schema found for action verb '{action_verb}'."
 
         errors_text = '\n'.join([f"- {error}" for error in errors])
         
@@ -566,9 +616,9 @@ class PlanValidator:
 {step_to_repair_json}
 ---
 
-**3. THE FULL PLAN FOR CONTEXT:**
+**3. PLUGIN SCHEMA:**
 ---
-{json.dumps(plan, indent=2)}
+{plugin_guidance}
 ---
 
 **4. THE VALIDATION ERRORS:**
@@ -577,7 +627,11 @@ class PlanValidator:
 ---
 
 **5. YOUR TASK:**
-Your task is to fix the JSON object provided in section 2 to make it valid. Pay close attention to the error messages and the schema to understand what needs to be corrected.
+Your task is to fix the JSON object provided in section 2 to make it valid.
+- **Analyze the error:** The error message in section 4 says required inputs are missing.
+- **Consult the schema:** Look at the 'Inputs Required' in section 3 to see what the plugin needs.
+- **Examine the invalid object:** Look at the 'inputs' in section 2.
+- **Correct the object:** Modify the JSON object to include all required inputs with correct names and values/sources.
 
 **CRITICAL REQUIREMENTS:**
 - **JSON ONLY:** Your entire response MUST be a single, valid JSON object for the step.
@@ -894,6 +948,7 @@ After your internal analysis and self-correction is complete, provide ONLY the f
 - **Dependencies are crucial for flow:** Every step that uses an output from a previous step MUST declare that dependency in its `inputs` object using `outputName` and `sourceStep`.
 - **Prioritize autonomous information gathering:** Use tools like SEARCH, SCRAPE, DATA_TOOLKIT, TEXT_ANALYSIS, TRANSFORM, and FILE_OPERATION to gather information and perform tasks.
 - **Avoid unnecessary ASK_USER_QUESTION:** Only use 'ASK_USER_QUESTION' for subjective opinions, permissions, or clarification). Do NOT use it for delegating research or data collection that the agent can perform.
+- **CRITICAL for recommendedRole:** The `recommendedRole` field MUST be one of the following exact values: 'Coordinator', 'Researcher', 'Coder', 'Creative', 'Critic', 'Executor', 'Domain Expert'. Ensure strict adherence to these values.
 - **CRITICAL for sourceStep:**
     - Use `sourceStep: 0` ONLY for inputs that are explicitly provided in the initial mission context (the "PARENT STEP INPUTS" section if applicable, or the overall mission goal).
     - For any other input, it MUST be the `outputName` from a *preceding step* in this plan, and `sourceStep` MUST be the `number` of that preceding step.

@@ -18,6 +18,26 @@ import { CollaborationMessage, CollaborationMessageType, ConflictResolution as C
 
 
 export class Agent extends BaseEntity {
+    public lastActivityTime: number = Date.now();
+    private cleanupHandlers: Array<() => Promise<void>> = [];
+    private isAborting: boolean = false;
+    private isPaused: boolean = false;
+    private isExecuting: boolean = false;
+    private isComplete: boolean = false;
+    private hasError: boolean = false;
+
+    public cleanup(): Promise<void> {
+        this.lastActivityTime = Date.now();
+        return Promise.all(this.cleanupHandlers.map(handler => handler())).then(() => {});
+    }
+
+    public getLastActivityTime(): number {
+        return this.lastActivityTime;
+    }
+
+    public addCleanupHandler(handler: () => Promise<void>): void {
+        this.cleanupHandlers.push(handler);
+    }
     private missionContext: string = '';
     private agentSetUrl: string;
     private agentPersistenceManager: AgentPersistenceManager;
@@ -45,7 +65,7 @@ export class Agent extends BaseEntity {
 
     constructor(config: AgentConfig) {
         super(config.id, 'AgentSet', `agentset`, process.env.PORT || '9000');
-        console.log(`Agent ${config.id} created. missionId=${config.missionId}. Inputs: ${JSON.stringify(config.inputValues)}` );
+        // console.log(`Agent ${config.id} created. missionId=${config.missionId}. Inputs: ${JSON.stringify(config.inputValues)}` );
         this.agentPersistenceManager = new AgentPersistenceManager();
         this.stateManager = new StateManager(config.id, this.agentPersistenceManager);
         this.inputValues = config.inputValues instanceof Map ? config.inputValues : new Map(Object.entries(config.inputValues||{}));
@@ -61,7 +81,7 @@ export class Agent extends BaseEntity {
             const goalInput = this.inputValues.get('goal');
             if (goalInput?.value && typeof goalInput.value === 'string') {
                 this.missionContext = goalInput.value;
-                console.log(`[Agent Constructor] Initialized missionContext from 'goal' input for agent ${this.id}.`);
+                // console.log(`[Agent Constructor] Initialized missionContext from 'goal' input for agent ${this.id}.`);
             }
         }
         // Handle role and roleCustomizations if they exist in the config
@@ -94,7 +114,7 @@ export class Agent extends BaseEntity {
         });
 
         this.initializeAgent().then(() => {
-            console.log(`Agent ${this.id} initialized successfully. Status: ${this.status}. Commencing main execution loop.`);
+            // console.log(`Agent ${this.id} initialized successfully. Status: ${this.status}. Commencing main execution loop.`);
             this.say(`Agent ${this.id} initialized and commencing operations.`);
             this.runUntilDone();
         }).catch((error) => { // Added error parameter
@@ -203,16 +223,16 @@ Please consider this context and the available plugins when planning and executi
         try {
             if (this.status !== AgentStatus.RUNNING) return;
 
-            console.log(`Executing step ${step.actionVerb} (${step.id})...`);
+            // console.log(`Executing step ${step.actionVerb} (${step.id})...`);
 
             if (step.recommendedRole && step.recommendedRole !== this.role && this.role !== 'coordinator') {
-                console.log(`Step ${step.id} recommends role ${step.recommendedRole}, but this agent has role ${this.role}`);
+                // console.log(`Step ${step.id} recommends role ${step.recommendedRole}, but this agent has role ${this.role}`);
                 const delegationResult = await this.delegateStepToSpecializedAgent(step);
                 if (delegationResult.success) {
                     step.status = StepStatus.COMPLETED; // Mark as completed since it's delegated
                     return;
                 }
-                console.log(`No specialized agent available, executing step with current agent`);
+                // console.log(`No specialized agent available, executing step with current agent`);
             }
 
             this.say(`Executing step: ${step.actionVerb} - ${step.description || 'No description'}`);
@@ -231,7 +251,7 @@ Please consider this context and the available plugins when planning and executi
                 return;
             }
 
-            console.log(`Step ${step.actionVerb} result:`, result);
+            // console.log(`Step ${step.actionVerb} result:`, result);
 
             if (result && result.length > 0 && result[0].name === 'pending_user_input') {
                 const requestId = (result[0] as any).request_id;
@@ -240,7 +260,7 @@ Please consider this context and the available plugins when planning and executi
                     step.status = StepStatus.WAITING;
                     this.waitingSteps.set(requestId, step.id);
                     await this.notifyTrafficManager();
-                    console.log(`Agent ${this.id} is waiting for user input for step ${step.id} with request ID ${requestId}`);
+                    // console.log(`Agent ${this.id} is waiting for user input for step ${step.id} with request ID ${requestId}`);
                     return;
                 }
             }
@@ -314,13 +334,27 @@ Please consider this context and the available plugins when planning and executi
                 return;
             }
 
-            const executableSteps = this.steps.filter(step =>
-                step.status === StepStatus.PENDING && step.areDependenciesSatisfied(this.steps)
-            );
+            const pendingSteps = this.steps.filter(step => step.status === StepStatus.PENDING);
+            const executableSteps = pendingSteps.filter(step => step.areDependenciesSatisfied(this.steps));
 
             if (executableSteps.length > 0) {
                 const executionPromises = executableSteps.map(step => this.executeStep(step));
                 await Promise.all(executionPromises);
+            } else if (pendingSteps.length > 0) {
+                // Deadlock detection: pending steps exist, but none are executable.
+                for (const step of pendingSteps) {
+                    if (step.areDependenciesPermanentlyUnsatisfied(this.steps)) {
+                        step.status = StepStatus.CANCELLED;
+                        this.logEvent({
+                            eventType: 'step_cancelled_dependency_unsatisfied',
+                            agentId: this.id,
+                            stepId: step.id,
+                            dependencies: step.dependencies,
+                            timestamp: new Date().toISOString()
+                        });
+                        console.log(`[Agent ${this.id}] Cancelling step ${step.id} due to permanently unsatisfied dependencies.`);
+                    }
+                }
             } else if (!this.hasActiveWork()) {
                 this.status = AgentStatus.COMPLETED;
                 const finalStep = this.steps.filter(s => s.status === StepStatus.COMPLETED).pop();

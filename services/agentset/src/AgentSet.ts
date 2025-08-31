@@ -1,8 +1,10 @@
 import express from 'express';
+import * as http from 'http';
 import { Agent } from './agents/Agent';
 import { MapSerializer, BaseEntity, createAuthenticatedAxios, PluginParameterType, OutputType } from '@cktmcs/shared';
-import { AgentSetStatistics, InputValue } from '@cktmcs/shared';
+import { AgentStatistics, AgentSetStatistics, InputValue } from '@cktmcs/shared';
 import { AgentPersistenceManager } from './utils/AgentPersistenceManager';
+import { AgentLifecycleManager } from './lifecycle/AgentLifecycleManager';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { setInterval } from 'timers';
 import { CollaborationManager } from './collaboration/CollaborationManager';
@@ -19,6 +21,11 @@ export class AgentSet extends BaseEntity {
     private librarianUrl: string = process.env.LIBRARIAN_URL || 'librarian:5040';
     private brainUrl: string = process.env.BRAIN_URL || 'brain:5070';
     private app: express.Application;
+    private healthCheckInterval: NodeJS.Timeout | null = null;
+    private memoryThreshold: number = 0.8; // 80% memory threshold
+    private lifecycleManager: AgentLifecycleManager;
+    private lastMemoryCheck: number = Date.now();
+    private server: http.Server | null = null;
 
 
     // Agent systems
@@ -35,8 +42,20 @@ export class AgentSet extends BaseEntity {
         // Initialize Express app
         this.app = express();
 
+        
+
+            // Initialize authenticated API client
+        this.authenticatedApi = createAuthenticatedAxios({
+            serviceId: 'AgentSet',
+            securityManagerUrl: this.librarianUrl,
+            clientSecret: process.env.CLIENT_SECRET || 'defaultSecret',
+        });
+
         // Initialize persistence manager with authenticated API
         this.persistenceManager = new AgentPersistenceManager(this.librarianUrl, this.authenticatedApi);
+        
+        // Initialize memory and lifecycle management
+        this.lifecycleManager = new AgentLifecycleManager(this.persistenceManager, this.trafficManagerUrl);
 
         // Initialize agent systems
         this.taskDelegation = new TaskDelegation(this.agents, this.trafficManagerUrl);
@@ -547,17 +566,54 @@ export class AgentSet extends BaseEntity {
 
     }
 
+    
+
+    private async notifyTrafficManager(agentId: string, status: string): Promise<void> {
+        try {
+            const response = await this.authenticatedApi.post(`${this.trafficManagerUrl}/agent/status`, {
+                agentId,
+                status,
+                timestamp: new Date().toISOString()
+            });
+            console.log(`Successfully notified TrafficManager about agent ${agentId} status: ${status}`);
+            return response.data;
+        } catch (error) {
+            console.error(`Failed to notify TrafficManager about agent ${agentId}:`, error);
+            throw error;
+        }
+    }
+
     private async removeAgentFromSet(agentId: string, status: string): Promise<void> {
         console.log(`Attempting to remove agent ${agentId} with status ${status} from AgentSet.`);
         const agent = this.agents.get(agentId);
 
         if (agent) {
-            // this.agents.delete(agentId);
-            //console.log(`Agent ${agentId} removed from AgentSet and unregistered from LifecycleManager due to status: ${status}. Current agent count: ${this.agents.size}`);
+            try {
+                
+                // Cleanup agent resources
+                await agent.cleanup();
+                
+                // Remove from lifecycle manager
+                if (this.lifecycleManager) {
+                    this.lifecycleManager.unregisterAgent(agentId);
+                }
 
-            // Potentially notify TrafficManager to update its counts, if AgentSet is authoritative for agent existence.
-            // For now, TrafficManager counts will be stale until it tries to interact with a removed agent or a separate cleanup for TM is implemented.
+                // Clear from memory
+                this.agents.delete(agentId);
 
+                console.log(`Agent ${agentId} removed from AgentSet. Current agent count: ${this.agents.size}`);
+
+                // Notify TrafficManager
+                try {
+                    await this.notifyTrafficManager(agentId, status);
+                } catch (error) {
+                    console.warn(`Failed to notify TrafficManager about agent ${agentId} removal:`, error);
+                }
+            } catch (error) {
+                console.error(`Error during cleanup for agent ${agentId}:`, error);
+                // Continue with removal even if cleanup fails
+                this.agents.delete(agentId);
+            }
         } else {
             console.warn(`Agent ${agentId} not found in AgentSet during removal attempt. Status was: ${status}.`);
         }
@@ -600,8 +656,8 @@ export class AgentSet extends BaseEntity {
 
     private async addAgent(req: express.Request, res: express.Response): Promise<void> {
         const { agentId, actionVerb, inputs, missionId, missionContext, roleId, roleCustomizations } = req.body;
-        console.log('Adding agent with req.body', req.body);
-        console.log('Adding agent with inputs', inputs);
+        // console.log('Adding agent with req.body', req.body);
+        // console.log('Adding agent with inputs', inputs);
         let inputsMap: Map<string, InputValue>;
 
         if (inputs?._type === 'Map') {
@@ -627,8 +683,8 @@ export class AgentSet extends BaseEntity {
                 }
             }
         }
-        console.log(`addAgent provided inputs:`, inputs);
-        console.log(`addAgent inputsMap:`, inputsMap);
+        // console.log(`addAgent provided inputs:`, inputs);
+        // console.log(`addAgent inputsMap:`, inputsMap);
         const agentConfig = {
             actionVerb,
             inputValues: inputsMap,
@@ -886,42 +942,42 @@ export class AgentSet extends BaseEntity {
             return;
         }
 
-        let stats  : AgentSetStatistics = {
-            agentsByStatus: new Map(),
-            agentsCount: 0,
-            agentValuesCount: this.agents.size
-        };
-
         try {
-            // Build a global step map for all agents in this mission
-            const globalStepMap: Map<string, { agentId: string, step: any }> = new Map();
-            for (const agent of this.agents.values()) {
-                if (agent.getMissionId() === missionId) {
-                    for (const step of agent.steps) {
-                        globalStepMap.set(step.id, { agentId: agent.id, step });
-                    }
-                }
-            }
-            const allStepsForMission = Array.from(globalStepMap.values()).map(entry => entry.step);
+            // Group agents by status and collect their detailed statistics
+            const agentStatisticsByStatus = new Map<string, AgentStatistics[]>();
+            let totalAgentCount = 0;
+            const allSteps: { id: string, verb: string, status: string, dependencies?: string[] }[] = [];
+
             for (const agent of this.agents.values()) {
                 if (agent.getMissionId() === missionId) {
                     const status = agent.getStatus();
-                    // Pass the globalStepMap to getStatistics
-                    const agentStats = await agent.getStatistics(globalStepMap, allStepsForMission);
-                    if (!stats.agentsByStatus.has(status)) {
-                        stats.agentsByStatus.set(status, [agentStats]);
-                    } else {
-                        stats.agentsByStatus.get(status)!.push(agentStats);
+                    totalAgentCount++;
+
+                    // Ensure the array for this status exists
+                    if (!agentStatisticsByStatus.has(status)) {
+                        agentStatisticsByStatus.set(status, []);
                     }
-                    stats.agentsCount++;
+
+                    // Get agent's detailed statistics
+                    // Assuming Agent class has a method like toAgentStatistics() that returns AgentStatistics
+                    // Get agent's detailed statistics using the agent's own getStatistics method
+                                        const agentStat: AgentStatistics = await agent.getStatistics();
+                    agentStatisticsByStatus.get(status)!.push(agentStat);
+
+                    // Collect all steps for totalSteps count
+                    allSteps.push(...agentStat.steps);
                 }
             }
-            const serializedStats = {
-                agentsByStatus: MapSerializer.transformForSerialization(stats.agentsByStatus),
-                agentsCount: stats.agentsCount,
-                agentValuesCount: stats.agentValuesCount
+
+            const stats = {
+                agentsByStatus: MapSerializer.transformForSerialization(agentStatisticsByStatus),
+                agentsCount: totalAgentCount,
+                memoryUsage: process.memoryUsage(),
+                lastGC: this.lastMemoryCheck,
+                totalSteps: allSteps.length
             };
-            res.status(200).send(serializedStats);
+
+            res.status(200).json(stats);
         } catch (error) {
             analyzeError(error as Error);
             console.error(`Error in getAgentStatistics for mission ${missionId}:`, error);

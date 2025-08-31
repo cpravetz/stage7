@@ -1,17 +1,15 @@
 import json
 import sys
-import requests
 import logging
+import io
+import re
 from typing import Any
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - [%(funcName)s:%(lineno)d] - %(message)s'
 )
 logger = logging.getLogger(__name__)
-
-CODE_EXECUTOR_URL = "http://localhost:5000/execute_code" # Assuming CODE_EXECUTOR is accessible at this URL
 
 class TransformError(Exception):
     """Custom exception for TRANSFORM plugin errors"""
@@ -32,52 +30,66 @@ def format_plugin_output(success: bool, name: str, result_type: str, description
     return json.dumps([output], indent=2)
 
 def execute_transform(script: str, params: dict) -> dict:
-    """Executes the transformation script using CODE_EXECUTOR."""
+    """Executes the transformation script locally."""
     logger.info(f"Executing transform with params: {params}")
 
-    # For Python, script_parameters will be available as params
-    params_json = json.dumps(params)
-    code_to_execute = f"import json\nparams = json.loads('{params_json}')\n{script}"
+    match = re.search(r"def\s+(\w+)\(.*\):", script)
+    
+    code_to_execute = ""
+    if match:
+        func_name = match.group(1)
+        code_to_execute = f"""
+import json
+import sys
 
-    logger.info("Using Python as the execution language per manifest")
+{script}
 
-    logger.info(f"Code to send to CODE_EXECUTOR (first 200 chars): {code_to_execute[:200]}...")
+try:
+    result = {func_name}(**{json.dumps(params)})
+    print(json.dumps(result))
+except Exception as e:
+    print(f"Error calling transform function: {e}", file=sys.stderr)
+"""
+    else:
+        # If no function definition is found, execute the script directly.
+        # The 'params' dictionary is injected into the script's global scope.
+        code_to_execute = f"""
+import json
+import sys
 
-    payload = {
-        "language": "python",  # Set in manifest
-        "code": code_to_execute
-    }
+params = {json.dumps(params)}
+{script}
+"""
+
+    logger.info(f"Executing code locally (first 200 chars): {code_to_execute[:200]}...")
+
+    old_stdout = sys.stdout
+    old_stderr = sys.stderr
+    redirected_stdout = io.StringIO()
+    redirected_stderr = io.StringIO()
+    sys.stdout = redirected_stdout
+    sys.stderr = redirected_stderr
 
     try:
-        response = requests.post(CODE_EXECUTOR_URL, json=payload, timeout=120) # Increased timeout
-        response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
-        code_executor_result = response.json()
+        exec(code_to_execute, {'json': json, 're': re, 'params': params})
 
-        stdout = code_executor_result.get("stdout", "")
-        stderr = code_executor_result.get("stderr", "")
-        exit_code = code_executor_result.get("exit_code", None)
+        stdout = redirected_stdout.getvalue()
+        stderr = redirected_stderr.getvalue()
 
-        # Assuming the script's return value is printed to stdout or is the last expression's value
-        # For simplicity, we'll take stdout as the result. More sophisticated parsing might be needed.
         transform_result = stdout.strip()
 
         if stderr:
-            logger.warning(f"CODE_EXECUTOR returned stderr: {stderr}")
-
-        if exit_code != 0:
-            raise TransformError(f"CODE_EXECUTOR exited with non-zero code {exit_code}. Stderr: {stderr}")
+            logger.warning(f"Local execution returned stderr: {stderr}")
 
         return {"result": transform_result, "stdout": stdout, "stderr": stderr}
 
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Error calling CODE_EXECUTOR: {e}")
-        raise TransformError(f"Failed to communicate with CODE_EXECUTOR: {e}")
-    except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse CODE_EXECUTOR response: {e}")
-        raise TransformError(f"Invalid response from CODE_EXECUTOR: {e}")
     except Exception as e:
-        logger.error(f"An unexpected error occurred during transform execution: {e}")
-        raise TransformError(f"Unexpected error: {e}")
+        stderr = redirected_stderr.getvalue()
+        logger.error(f"An error occurred during local transform execution: {e}. Stderr: {stderr}")
+        raise TransformError(f"Local code execution failed: {e}. Stderr: {stderr}")
+    finally:
+        sys.stdout = old_stdout
+        sys.stderr = old_stderr
 
 if __name__ == "__main__":
     try:
@@ -100,25 +112,23 @@ if __name__ == "__main__":
         if not script:
             raise TransformError("Missing required 'script' input")
 
-        if not script_parameters:
-            raise TransformError("Missing required 'script_parameters' input")
-
-        if not isinstance(script_parameters, dict):
+        if isinstance(script_parameters, str):
             try:
-                if isinstance(script_parameters, str):
+                if script_parameters.strip():
                     script_parameters = json.loads(script_parameters)
                 else:
-                    raise TransformError(f"'script_parameters' must be a JSON object or string, got {type(script_parameters)}")
+                    script_parameters = {}
             except json.JSONDecodeError:
-                raise TransformError("'script_parameters' must be valid JSON")
+                raise TransformError("Invalid JSON string for 'script_parameters'")
+        elif not isinstance(script_parameters, dict):
+            raise TransformError(f"'script_parameters' must be a JSON object or string, got {type(script_parameters)}")
 
         transform_output = execute_transform(script, script_parameters)
 
-        # Format the successful output
         sys.stdout.write(format_plugin_output(
             success=True,
             name="transform_result",
-            result_type="string", # Assuming string result, can be refined based on script output
+            result_type="string",
             description="Transformation executed successfully.",
             result=transform_output["result"]
         ))

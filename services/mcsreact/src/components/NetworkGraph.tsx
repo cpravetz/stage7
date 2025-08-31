@@ -107,7 +107,7 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics, zoo
         }
 
         if (!statsMap || typeof statsMap.get !== 'function' || statsMap.size === 0) {
-            console.log('[NetworkGraph] No valid statistics data');
+            console.log('[NetworkGraph] No valid statistics data in map: ',statsMap);
             return { nodes: new DataSet<Node>(), edges: new DataSet<Edge>(), dataHash: 'empty' };
         }
 
@@ -126,7 +126,6 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics, zoo
             };
         }
 
-        console.log('[NetworkGraph] Data changed, rebuilding network');
         const newNodes = new DataSet<Node>();
         const newEdges = new DataSet<Edge>();
 
@@ -289,7 +288,6 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics, zoo
             return;
         }
 
-        console.log('[NetworkGraph] Updating network with new data');
         lastDataHashRef.current = dataHash;
 
         const options: Options = {
@@ -404,7 +402,6 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics, zoo
                 setPan(newPosition);
             });
             
-            console.log('[NetworkGraph] New network initialized');
         }
     }, [nodes, edges, dataHash, stepOverviewOpen, zoom, pan, setZoom, setPan]);
 
@@ -412,7 +409,6 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics, zoo
     useEffect(() => {
         return () => {
             if (networkRef.current) {
-                console.log('[NetworkGraph] Cleaning up network on unmount');
                 networkRef.current.destroy();
                 networkRef.current = null;
                 isInitializedRef.current = false;
