@@ -365,55 +365,6 @@ export class PluginMarketplace {
     private _availablePluginsCacheTime: number = 0;
     private static readonly PLUGIN_CACHE_TTL_MS = 60 * 1000; // 1 minute
 
-    public async getAvailablePluginsStr(forceRefresh = false): Promise<string> {
-        // If cache is valid, return it
-        if (!forceRefresh && this._availablePluginsCache && (Date.now() - this._availablePluginsCacheTime < PluginMarketplace.PLUGIN_CACHE_TTL_MS)) {
-            return this._availablePluginsCache;
-        }
-        // Gather all plugin manifests from all repositories
-        const pluginManifests: PluginManifest[] = [];
-        for (const repo of this.repositories.values()) {
-            try {
-                const locators = await repo.list();
-                for (const locator of locators) {
-                    const manifest = await repo.fetch(locator.id, locator.version);
-                    if (manifest) pluginManifests.push(manifest);
-                }
-            } catch (err) {
-                // Ignore errors from individual repos
-                continue;
-            }
-        }
-        // Format as a readable string for prompt injection
-        const lines: string[] = [];
-        // Add internal verbs (hardcoded for now, could be made dynamic)
-        lines.push(`- DELEGATE: create independent sub-agents for major autonomous work streams. ONLY use for truly independent goals that require separate agent management. Do NOT use for simple task breakdown or sub-plans - use ACCOMPLISH instead.`);
-        lines.push('- THINK: - uses LLMs to respond to a prompt you provide. Use it for making decisions, providing guidance or answering questions and more.  The prompt can use outputs from prior Steps. (required input: prompt) (optional inputs: optimization (cost|accuracy|creativity|speed|continuity), conversationType) accuracy is the default optimization');
-        lines.push('- GENERATE: - uses LLM services to generate content from a prompt or other content. Services include image creation, audio transcription, image editing, etc. (required input: conversationType) (optional inputs: modelName, optimization, prompt, file, audio, video, image...)');
-        lines.push('- IF_THEN: - Conditional branching based on a condition (required inputs: condition: {"inputName": "value"}, trueSteps[], falseSteps[])');
-        lines.push('- WHILE: - Repeat steps while a condition is true (required inputs: condition: {"inputName": "value"}, steps[])');
-        lines.push('- UNTIL: - Repeat steps until a condition becomes true (required inputs: condition: {"inputName": "value"}, steps[])');
-        lines.push('- SEQUENCE: - Execute steps in strict sequential order / no concurrency (required inputs: steps[])');
-        lines.push('- TIMEOUT: - Set a timeout for a group of steps (required inputs: timeout, steps[])');
-        lines.push('- REPEAT: - Repeat steps a specific number of times (required inputs: count, steps[])');
-        lines.push('- FOREACH: - Iterate over an array and execute steps for each item (required inputs: array, steps[plan])');
-
-        for (const plugin of pluginManifests) {
-            lines.push(`- ${plugin.verb}: ${plugin.description || 'No description.'}`);
-/*            if (plugin.inputDefinitions && plugin.inputDefinitions.length > 0) {
-                lines.push(`    Required Inputs:`);
-                for (const input of plugin.inputDefinitions) {
-                    lines.push(`      - ${input.name} (${input.type})${input.required ? ' [required]' : ''}: ${input.description || ''}`);
-                }
-            }*/
-        }
-
-        // Add more internal verbs as needed
-        const result = lines.join('\n');
-        this._availablePluginsCache = result;
-        this._availablePluginsCacheTime = Date.now();
-        return result;
-    }
 }
 
 export default PluginMarketplace;

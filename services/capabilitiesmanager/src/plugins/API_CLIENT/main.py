@@ -147,7 +147,13 @@ def main():
         else:
             # Parse the input data
             inputs_array = json.loads(input_data)
-            inputs_dict = {key: value["value"] for key, value in inputs_array}
+            inputs_dict = {}
+            for item in inputs_array:
+                if isinstance(item, list) and len(item) == 2:
+                    key, val = item
+                    inputs_dict[key] = val
+                else:
+                    logger.warning(f"Skipping invalid input item: {item}")
 
             # Execute the plugin
             result = execute_plugin(inputs_dict)

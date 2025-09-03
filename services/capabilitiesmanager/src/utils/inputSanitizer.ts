@@ -143,7 +143,7 @@ export function performPreExecutionChecks(
             // Basic check to avoid flagging base64 encoded data
             const isLikelyBase64 = /^[A-Za-z0-9+/=\s]+$/.test(value) && value.length % 4 === 0;
             if (!isLikelyBase64 && /[<>&;`$]/.test(value)) {
-                issues.push(`Input '${key}' contains potentially unsafe characters.`);
+                issues.push(`Input '${key}' contains characters (e.g., <, >, &, ;, \`, $) that may require special handling in certain contexts (e.g., HTML rendering, shell commands).`);
             }
         }
 

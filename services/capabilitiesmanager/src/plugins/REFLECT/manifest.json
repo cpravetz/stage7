@@ -6,22 +6,22 @@
     "description": "Reflects on the current state of a mission to evaluate progress and determine next steps.",
     "inputDefinitions": [
         {
-            "name": "mission_goal",
-            "description": "The original, high-level mission goal.",
+            "name": "missionId",
+            "description": "The ID of the mission to reflect on. The plugin will use this to fetch the mission goal and other context from the librarian.",
             "type": "string",
-            "required": true
+            "required": false
         },
         {
             "name": "plan_history",
             "description": "A JSON string representing the list of executed steps, their status, and parameters.",
             "type": "string",
-            "required": true
+            "required": false
         },
         {
             "name": "work_products",
             "description": "A JSON string representing a manifest of data artifacts created by the plan.",
             "type": "string",
-            "required": true
+            "required": false
         },
         {
             "name": "question",
@@ -32,12 +32,16 @@
     ],
     "outputDefinitions": [
         {
-            "name": "answer",
-            "description": "A direct answer to the reflection question."
+            "name": "plan",
+            "required": false,
+            "type": "plan",
+            "description": "A detailed, step-by-step plan to achieve the goal. Each step in the plan should be a concrete action that can be executed by another plugin. The plan should be comprehensive and sufficient to fully accomplish the goal."
         },
         {
-            "name": "plan",
-            "description": "A new plan of steps to continue the mission."
+            "name": "answer",
+            "required": false,
+            "type": "string",
+            "description": "A direct answer or result, to be used only if the goal can be fully accomplished in a single step without requiring a plan."
         }
     ],
     "language": "python",

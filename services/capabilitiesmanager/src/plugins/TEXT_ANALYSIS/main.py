@@ -96,6 +96,10 @@ class InputValue:
 
 
 
+
+
+
+
 class PluginOutput:
     """Represents a plugin output result"""
     def __init__(self, success: bool, name: str, result_type: str, 
@@ -352,25 +356,34 @@ def main():
 
         # Parse inputs - expecting serialized Map format
         inputs_list = json.loads(inputs_str)
-        inputs_map = {item[0]: item[1] for item in inputs_list}
+        inputs_map = {} # Correctly parse inputs_map
+        for item in inputs_list:
+            if isinstance(item, list) and len(item) == 2:
+                key, val = item
+                inputs_map[key] = val
+            else:
+                logger.warning(f"Skipping invalid input item: {item}")
 
         # Convert to InputValue objects for compatibility
         script_parameters = {}
-        for key, value in inputs_map.items():
-            if isinstance(value, dict) and 'value' in value:
-                script_parameters[key] = InputValue(
-                    inputName=key,
-                    value=value['value'],
-                    valueType=value.get('valueType', 'string'),
-                    args=value.get('args', {})
-                )
-            else:
-                script_parameters[key] = InputValue(
-                    inputName=key,
-                    value=value,
-                    valueType='string',
-                    args={}
-                )
+        for key, raw_value in inputs_map.items(): # Use raw_value here
+            # Infer valueType based on raw_value
+            inferred_value_type = 'string'
+            if isinstance(raw_value, bool):
+                inferred_value_type = 'boolean'
+            elif isinstance(raw_value, (int, float)):
+                inferred_value_type = 'number'
+            elif isinstance(raw_value, list):
+                inferred_value_type = 'array'
+            elif isinstance(raw_value, dict):
+                inferred_value_type = 'object'
+
+            script_parameters[key] = InputValue(
+                inputName=key, # Assuming inputName is the same as key
+                value=raw_value,
+                valueType=inferred_value_type,
+                args={} # No args provided in the raw input
+            )
 
         # Execute the plugin
         outputs = execute_plugin(script_parameters)

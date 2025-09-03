@@ -101,13 +101,15 @@ if __name__ == "__main__":
         inputs_dict = {}
         for item in inputs_list:
             if isinstance(item, list) and len(item) == 2:
-                key, value = item
-                inputs_dict[key] = value
+                key, val = item # val is already the raw value
+                inputs_dict[key] = val
             else:
                 logger.warning(f"Skipping invalid input item: {item}")
 
-        script = inputs_dict.get("script", {}).get("value", "")
-        script_parameters = inputs_dict.get("script_parameters", {}).get("value", {})
+        # Extract script and script_parameters directly from inputs_dict
+        # They are already raw values due to the parsing above
+        script = inputs_dict.get("script", "")
+        script_parameters = inputs_dict.get("script_parameters", {})
 
         if not script:
             raise TransformError("Missing required 'script' input")

@@ -186,7 +186,13 @@ def main():
 
         # Parse inputs - expecting serialized Map format
         inputs_list = json.loads(inputs_str)
-        inputs_map = {item[0]: item[1] for item in inputs_list}
+        inputs_map = {}
+        for item in inputs_list:
+            if isinstance(item, list) and len(item) == 2:
+                key, val = item
+                inputs_map[key] = val
+            else:
+                logger.warning(f"Skipping invalid input item: {item}")
 
         # Execute plugin
         plugin = GetUserInputPlugin()

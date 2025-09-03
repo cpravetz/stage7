@@ -1,4 +1,3 @@
-import { Agent } from '../agents/Agent';
 import { WorkProduct } from './WorkProduct';
 import { MapSerializer, PluginOutput, createAuthenticatedAxios } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
@@ -20,6 +19,21 @@ export interface AgentState {
     missionContext: string;
     role?: string;
     roleCustomizations?: any;
+}
+
+export interface StepEvent {
+    eventType: string;
+    stepId: string;
+    missionId: string;
+    timestamp: string;
+    error?: {
+        message: string;
+        stack?: string;
+        type?: string;
+    };
+    context?: any;
+    recoveryAttempt?: number;
+    strategy?: string;
 }
 
 export class AgentPersistenceManager {
@@ -53,11 +67,8 @@ export class AgentPersistenceManager {
             return;
         }
 
-        // Serialize only the Map properties, not the entire agent object
-        const stateToSave = {
-            ...agent,
-            inputs: MapSerializer.transformForSerialization(agent.inputs),
-        };
+        // Apply MapSerializer to the entire agent object to ensure all nested Maps are handled
+        const stateToSave = MapSerializer.transformForSerialization(agent);
 
         try {
             await this.authenticatedApi.post(`http://${this.librarianUrl}/storeData`, {
@@ -70,6 +81,7 @@ export class AgentPersistenceManager {
             console.error(`Error saving agent state for agent ${agent.id}:`, error instanceof Error ? error.message : error);
         }
     }
+
 
     async logEvent(event: any): Promise<void> {
         if (!event) {
@@ -109,7 +121,7 @@ export class AgentPersistenceManager {
         // Implement logic to delete agent state from persistent storage
         try {
             await this.authenticatedApi.delete(`http://${this.librarianUrl}/deleteData/${agentId}`, {
-                params: { collection: 'agents' }
+                params: { storageType: 'mongo', collection: 'agents' }
             });
             console.log(`Agent ${agentId} deleted successfully`);
         } catch (error) {
@@ -147,35 +159,81 @@ export class AgentPersistenceManager {
     }
 
     async loadWorkProduct(agentId: string, stepId: string): Promise<WorkProduct | null> {
-        if (!agentId || !stepId) {
-            console.error('Cannot load work product: missing agent ID or step ID');
+        try {
+            const response = await this.authenticatedApi.get(
+                `http://${this.librarianUrl}/loadData/${agentId}_${stepId}`,
+                { params: { storageType: 'mongo', collection: 'work_products' } }
+            );
+            return response.data.data;
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error loading work product:', error instanceof Error ? error.message : error);
             return null;
         }
+    }
 
+    async getStepEvents(stepId: string): Promise<StepEvent[]> {
         try {
-            console.log(`Loading work product for agent ${agentId}, step ${stepId}`);
-            const response = await this.authenticatedApi.get(`http://${this.librarianUrl}/loadWorkProduct/${stepId}`);
-
-            if (!response.data || !response.data.data) {
-                console.log(`No work product found for step ${stepId} (this is normal if step hasn't been executed yet)`);
-                return null;
-            }
-
-            return new WorkProduct(
-                agentId,
-                stepId,
-                MapSerializer.transformFromSerialization(response.data.data) as PluginOutput[]
-            );
+            const response = await this.authenticatedApi.get(`http://${this.librarianUrl}/queryData`, {
+                params: {
+                    storageType: 'mongo',
+                    collection: 'step_events',
+                    query: { stepId }
+                }
+            });
+            return response.data.data || [];
         } catch (error) {
-            // 404 errors are normal when work products don't exist yet
-            if ((error as any).response?.status === 404) {
-                console.log(`Work product not found for step ${stepId} (step may not have been executed yet)`);
-                return null;
-            }
-
             analyzeError(error as Error);
-            console.error(`Error loading work product ${agentId}_${stepId}:`, error instanceof Error ? error.message : error);
-            return null;
+            console.error(`Error getting step events for step ${stepId}:`, error instanceof Error ? error.message : error);
+            return [];
+        }
+    }
+
+    async getStepErrorHistory(stepId: string): Promise<StepEvent[]> {
+        try {
+            const response = await this.authenticatedApi.get(`http://${this.librarianUrl}/queryData`, {
+                params: {
+                    storageType: 'mongo',
+                    collection: 'step_events',
+                    query: { 
+                        stepId,
+                        eventType: { $in: ['step_error', 'step_failure', 'recovery_attempt'] }
+                    }
+                }
+            });
+            return response.data.data || [];
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error(`Error getting error history for step ${stepId}:`, error instanceof Error ? error.message : error);
+            return [];
+        }
+    }
+
+    async getRecoveryAttempts(stepId: string): Promise<number> {
+        try {
+            const events = await this.getStepEvents(stepId);
+            return events.filter(e => 
+                e.eventType === 'recovery_attempt' || 
+                e.eventType === 'step_retry'
+            ).length;
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error(`Error getting recovery attempts for step ${stepId}:`, error instanceof Error ? error.message : error);
+            return 0;
+        }
+    }
+
+    async clearStepHistory(stepId: string): Promise<void> {
+        try {
+            await this.authenticatedApi.delete(`http://${this.librarianUrl}/deleteData`, {
+                params: {
+                    storageType: 'mongo',
+                    collection: 'step_events',
+                    query: { stepId }
+                }
+            });
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error(`Error clearing history for step ${stepId}:`, error instanceof Error ? error.message : error);
         }
     }
 

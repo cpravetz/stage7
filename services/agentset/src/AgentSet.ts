@@ -12,6 +12,7 @@ import { SpecializationFramework } from './specialization/SpecializationFramewor
 import { DomainKnowledge } from './specialization/DomainKnowledge';
 import { TaskDelegation } from './collaboration/TaskDelegation';
 import { ConflictResolution } from './collaboration/ConflictResolution';
+import { v4 as uuidv4 } from 'uuid';
 
 export class AgentSet extends BaseEntity {
     agents: Map<string, Agent> = new Map(); // Store agents by their ID
@@ -122,6 +123,8 @@ export class AgentSet extends BaseEntity {
 
         // Add a new agent to the set
         this.app.post('/addAgent', this.addAgent.bind(this));
+
+        this.app.post('/createSpecializedAgent', this.createSpecializedAgent.bind(this));
 
         // Endpoint for agents to notify of their terminal state for removal
         this.app.post('/removeAgent', async (req: express.Request, res: express.Response, next: express.NextFunction): Promise<void> => {
@@ -344,7 +347,7 @@ export class AgentSet extends BaseEntity {
        this.app.post('/findAgentWithRole', (req: express.Request, res: express.Response): void => {
             try {
                 const { roleId, missionId } = req.body;
-                const agentId = this.specializationFramework.findBestAgentForTask(roleId, '', missionId);
+                                const agentId = this.specializationFramework.findBestAgentForTask(roleId, '', [], missionId);
 
                 if (agentId) {
                     res.status(200).send({ agentId });
@@ -723,6 +726,21 @@ export class AgentSet extends BaseEntity {
         }
 
         res.status(200).send({ message: 'Agent added', agentId: newAgent.id });
+    }
+
+    private async createSpecializedAgent(req: express.Request, res: express.Response): Promise<void> {
+        const { roleId, missionId, missionContext } = req.body;
+        const agentId = uuidv4();
+        const agentConfig = {
+            agentId: agentId,
+            actionVerb: 'ACCOMPLISH',
+            inputs: new Map(),
+            missionId: missionId,
+            missionContext: missionContext,
+            roleId: roleId,
+        };
+        await this.addAgentWithConfig(agentConfig);
+        res.status(200).send({ agentId: agentId });
     }
 
     // Add a new agent with a configuration object

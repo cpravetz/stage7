@@ -12,9 +12,10 @@ interface UserInputModalProps {
     answerType: AnswerType;
     onSubmit: (requestId: string, response: any) => void;
     onClose: () => void;
+    darkMode?: boolean;
 }
 
-const UserInputModal: React.FC<UserInputModalProps> = ({ requestId, question, choices, answerType, onSubmit, onClose }) => {
+const UserInputModal: React.FC<UserInputModalProps> = ({ requestId, question, choices, answerType, onSubmit, onClose, darkMode }) => {
     const [response, setResponse] = useState<string | number | boolean>('');
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
     const [dragOver, setDragOver] = useState(false);
@@ -162,7 +163,7 @@ const UserInputModal: React.FC<UserInputModalProps> = ({ requestId, question, ch
     };
 
     return (
-        <div className="modal user-input-modal">
+        <div className={`modal user-input-modal${darkMode ? ' dark' : ''}`}>
             <div className="modal-content">
                 <h2>User Input Required</h2>
                 <p className="modal-question">{question}</p>

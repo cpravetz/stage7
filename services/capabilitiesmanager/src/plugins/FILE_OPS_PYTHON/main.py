@@ -93,10 +93,10 @@ logger = logging.getLogger(__name__)
 SHARED_FILES_BASE_PATH = os.environ.get('SHARED_FILES_PATH', '/usr/src/app/shared/mission-files/')
 
 class FileOperationPlugin:
-    def execute(self, inputs_str: str) -> str:
+    def execute(self, inputs_map: Dict[str, Any]) -> str:
         try:
-            # 1. Correctly parse inputs from list of pairs to dict
-            inputs = self._parse_inputs(inputs_str)
+            # 1. Inputs are already parsed
+            inputs = inputs_map
 
             # 2. Get operation and other parameters
             operation = self._get_input_value(inputs, 'operation')
@@ -129,25 +129,15 @@ class FileOperationPlugin:
                 "error": str(e)
             }])
 
-    def _parse_inputs(self, inputs_str: str) -> Dict[str, Any]:
-        """Parses the input JSON string (list of pairs) into a dictionary."""
-        try:
-            inputs_list = json.loads(inputs_str)
-            # This is the fix for the "'list' object has no attribute 'items'" error
-            if isinstance(inputs_list, list):
-                 return {item[0]: item[1] for item in inputs_list}
-            elif isinstance(inputs_list, dict): # Handle if it's already a dict
-                 return inputs_list
-            else:
-                 raise TypeError("Inputs are not in a valid list-of-pairs or dictionary format.")
-        except (json.JSONDecodeError, TypeError) as e:
-            raise ValueError(f"Failed to parse inputs: {e}")
-
     def _get_input_value(self, inputs: Dict[str, Any], key: str, default: Any = None) -> Any:
         """Safely gets a value from the parsed inputs dictionary."""
         if key in inputs and isinstance(inputs[key], dict):
             return inputs[key].get('value', default)
         return default
+
+    
+
+    
 
     def _get_secure_path(self, user_path: str) -> str:
         """Constructs a secure, absolute path within the shared directory."""
@@ -219,7 +209,7 @@ class FileOperationPlugin:
         }
 
     def _list_operation(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
-        path = self._get_input_value(inputs, 'path', '.') # Default to base dir
+        path = self._get_input_value(inputs, 'path', '.')
         secure_path = self._get_secure_path(path)
         files = os.listdir(secure_path)
         return {
@@ -251,6 +241,6 @@ class FileOperationPlugin:
 
 if __name__ == "__main__":
     inputs_str = sys.stdin.read().strip()
-    plugin = FileOperationPlugin()
-    result_str = plugin.execute(inputs_str)
+    # Call the robust wrapper
+    result_str = robust_execute_plugin(inputs_str)
     print(result_str)

@@ -58,6 +58,9 @@ export class ModelManager {
     }
 
     private async loadModels() {
+        // Ensure interfaces are loaded before attempting to load models
+        await interfaceManager.ready();
+
         const modelsDirectory = path.join(__dirname, '..', 'models');
 
         try {
@@ -70,13 +73,27 @@ export class ModelManager {
                 const modelModule = await import(path.join(modelsDirectory, file));
                 const modelInstance = modelModule.default;
                 if (typeof modelInstance === 'object' && modelInstance.name) {
+                    console.log(`[ModelManager Debug] Processing model file: ${file}`);
+                    console.log(`[ModelManager Debug] Model name: ${modelInstance.name}, Interface: ${modelInstance.interfaceName}, Service: ${modelInstance.serviceName}`);
+
                     const interfaceInstance = interfaceManager.getInterface(modelInstance.interfaceName);
                     const serviceInstance = serviceManager.getService(modelInstance.serviceName);
+
+                    console.log(`[ModelManager Debug] Interface instance found: ${!!interfaceInstance}`);
+                    console.log(`[ModelManager Debug] Service instance found: ${!!serviceInstance}`);
+                    if (serviceInstance) {
+                        console.log(`[ModelManager Debug] Service is available: ${serviceInstance.isAvailable()}`);
+                    }
+
                     if (interfaceInstance && serviceInstance?.isAvailable()) {
                         modelInstance.setProviders(interfaceInstance, serviceInstance);
                         this.models.set(modelInstance.name.toLowerCase(), modelInstance);
                         console.log(`Loaded model: ${modelInstance.name}`);
+                    } else {
+                        console.warn(`[ModelManager Warn] Skipping model ${modelInstance.name} due to missing interface, service, or unavailable service.`);
                     }
+                } else {
+                    console.warn(`[ModelManager Warn] Skipping file ${file}: default export is not a valid model instance.`);
                 }
             }
             console.log(`modelManager Loaded ${this.models.size} models.`);

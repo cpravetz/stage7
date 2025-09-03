@@ -202,6 +202,7 @@ export type environmentType = {
 export interface Step {
     id: string;
     stepNo: number;
+    missionId: string;
     actionVerb: string;
     description?: string;
     inputReferences?: Map<string, InputReference>;

@@ -626,13 +626,44 @@ class MissionControl extends BaseEntity {
         console.log(`Reflecting on mission ${mission.id}`);
         try {
             // 1. Gather context for reflection
-            const planHistory: any[] = []; // Placeholder - requires fetching from TrafficManager or Librarian
-            const workProducts: any[] = []; // Placeholder - requires fetching from Librarian
+            // 1. Gather context for reflection
+            // Fetch plan history from TrafficManager
+            let planHistory: any[] = [];
+            try {
+                const trafficManagerResponse = await this.authenticatedApi.get(`http://${this.trafficManagerUrl}/getAgentStatistics/${mission.id}`);
+                const trafficManagerStatistics = trafficManagerResponse.data;
+
+                if (trafficManagerStatistics.agentStatisticsByStatus instanceof Map) {
+                    trafficManagerStatistics.agentStatisticsByStatus.forEach((agentList: AgentStatistics[]) => {
+                        agentList.forEach((agentStat: any) => {
+                            if (agentStat.steps && Array.isArray(agentStat.steps)) {
+                                agentStat.steps.forEach((step: any) => {
+                                    // Map TrafficManager's step format to ACCOMPLISH's expected plan step format
+                                    planHistory.push({
+                                        number: step.id, // Assuming step.id can serve as number
+                                        actionVerb: step.verb,
+                                        description: `Agent ${agentStat.id} executed ${step.verb} with status ${step.status}. Result: ${JSON.stringify(step.result)}`,
+                                        inputs: {}, // TrafficManager stats don't easily provide original inputs
+                                        outputs: { result: JSON.stringify(step.result) } // Use step.result as output
+                                    });
+                                });
+                            }
+                        });
+                    });
+                }
+            } catch (error) {
+                console.warn(`Failed to fetch agent statistics for plan history:`, error instanceof Error ? error.message : error);
+                planHistory = [{ number: 0, description: "Could not retrieve detailed plan history.", actionVerb: "INITIALIZE", inputs: {}, outputs: {} }];
+            }
+
+            // Refine work_products
+            const workProductsSummary = `Mission Goal: ${mission.goal}. Current Status: ${mission.status}.`;
+            // TODO: Future enhancement: Fetch actual work products from Librarian based on mission.id or agent.id
 
             const inputValues = new Map<string, InputValue>();
-            inputValues.set('mission_goal', { inputName: 'mission_goal', value: mission.goal, valueType: PluginParameterType.STRING, args: {} });
+            inputValues.set('missionId', { inputName: 'missionId', value: mission.id, valueType: PluginParameterType.STRING, args: {} });
             inputValues.set('plan_history', { inputName: 'plan_history', value: JSON.stringify(planHistory), valueType: PluginParameterType.STRING, args: {} });
-            inputValues.set('work_products', { inputName: 'work_products', value: JSON.stringify(workProducts), valueType: PluginParameterType.STRING, args: {} });
+            inputValues.set('work_products', { inputName: 'work_products', value: workProductsSummary, valueType: PluginParameterType.STRING, args: {} });
             inputValues.set('question', { inputName: 'question', value: 'Given the original mission goal and the work completed, is the mission fully accomplished? If not, what is the next logical step?', valueType: PluginParameterType.STRING, args: {} });
 
             const serializedInputs = MapSerializer.transformForSerialization(inputValues);

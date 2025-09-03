@@ -6,9 +6,10 @@ import { analyzeError } from '@cktmcs/errorhandler';
 
 export class InterfaceManager {
     private interfaces: Map<string, BaseInterface> = new Map();
+    private _readyPromise: Promise<void>;
 
     constructor() {
-        this.loadInterfaces();
+        this._readyPromise = this.loadInterfaces();
     }
 
     private async loadInterfaces() {
@@ -56,6 +57,13 @@ export class InterfaceManager {
      */
     getAllInterfaces(): Map<string, BaseInterface> {
         return this.interfaces;
+    }
+
+    /**
+     * Returns a promise that resolves when all interfaces have been loaded.
+     */
+    public async ready(): Promise<void> {
+        return this._readyPromise;
     }
 }
 

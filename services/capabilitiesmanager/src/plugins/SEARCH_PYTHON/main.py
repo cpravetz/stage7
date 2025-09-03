@@ -31,6 +31,10 @@ class InputValue:
         self.valueType = valueType
         self.args = args or {}
 
+
+
+
+
 class PluginOutput:
     """Represents a plugin output result."""
     def __init__(self, success: bool, name: str, result_type: str,
@@ -138,9 +142,6 @@ class BrainSearchProvider(SearchProvider):
                 elif isinstance(token_data, str):
                     logger.info("Found Brain auth token in inputs['__brain_auth_token'].value")
                     return token_data
-                
-            logger.warning("Brain auth token not found in expected locations")
-            raise Exception("No valid authentication token found for Brain service")
         except Exception as e:
             logger.error(f"Failed to get Brain auth token: {str(e)}")
             raise
@@ -260,7 +261,7 @@ class DuckDuckGoSearchProvider(SearchProvider):
                 'skip_disambig': 1
             }
             url = f"{self.base_url}/?{urllib.parse.urlencode(params)}"
-            with urllib.request.urlopen(url) as response:
+            with urllib.request.urlopen(url, timeout=10) as response:
                 data = json.loads(response.read().decode('utf-8'))
             
             results = []
@@ -291,15 +292,13 @@ class DuckDuckGoSearchProvider(SearchProvider):
 class SearxNGSearchProvider(SearchProvider):
     """Search provider for SearxNG with improved error handling."""
     def __init__(self):
-        super().__init__("SearxNG", performance_score=60)  # Lower initial score due to potential rate limiting
+        super().__init__("SearxNG", performance_score=60)
         self.base_urls = [
-            'https://searx.prvcy.eu',
-            'https://searx.be',
-            'https://search.bus-hit.me',
-            'https://searx.work',
-            'https://searx.xyz',
-            'https://search.projectsegfau.lt',
-            'https://searx.mx'
+            'https://searx.stream/',
+            'https://search.inetol.net/',
+            'https://search.rhscz.eu/',
+            'https://s.mble.dk/',
+            'https://search.hbubli.cc/'
         ]
         self.current_url_index = 0
 
@@ -312,27 +311,22 @@ class SearxNGSearchProvider(SearchProvider):
                     'q': search_term,
                     'categories': 'general',
                     'language': 'en',
-                    'engines': 'google,bing,brave,duckduckgo',  # Specify preferred engines
-                    'timeout': 5.0  # Shorter timeout to fail faster
+                    'engines': 'google,bing,brave,duckduckgo',
+                    'format': 'json'
                 }
                 
                 response = requests.get(
                     searxng_url,
                     params=params,
-                    timeout=8,
+                    timeout=10,
                     headers={'User-Agent': 'Mozilla/5.0 Stage7SearchBot/1.0'}
                 )
                 response.raise_for_status()
-                html_content = response.text
-                
+                data = response.json()
                 results = []
-                # Regex to find search result links and titles
-                # This is a simplified regex and might need to be adjusted based on the actual HTML structure of SearxNG instances
-                pattern = re.compile(r'<h3 class="title"><a href="(.*?)".*?>(.*?)</a></h3>')
-                matches = pattern.findall(html_content)
-                for url, title in matches:
-                    results.append({'title': title, 'url': url, 'snippet': ''})
-                
+                for item in data.get("results", []):
+                    results.append({"title": item.get("title"), "url": item.get("url"), "snippet": item.get("content")})
+
                 if results:
                     logger.info(f"Successfully retrieved {len(results)} results from SearxNG instance {self.base_urls[self.current_url_index]}")
                     return results
@@ -445,7 +439,8 @@ class SearchPlugin:
             
             # Sort providers by performance score, highest first
             sorted_providers = sorted(self.providers, key=lambda p: p.performance_score, reverse=True)
-
+            
+            search_successful = False
             for provider in sorted_providers:
                 try:
                     logger.info(f"Attempting search with {provider.name} provider (score: {provider.performance_score})")
@@ -455,17 +450,36 @@ class SearchPlugin:
                         logger.info(f"Successfully found {len(results)} results for '{term}' using {provider.name}")
                         term_results.extend(results)
                         provider.update_performance(success=True)
+                        search_successful = True
                         break  # Move to the next search term
                     else:
                         logger.warning(f"{provider.name} found no results for '{term}' - trying next provider")
                         # Only slightly penalize for no results
                         provider.performance_score = max(0, provider.performance_score - 5)
+                        time.sleep(1) # Add a small delay to avoid overwhelming services
                 except Exception as e:
                     error_msg = f"{provider.name} search failed for '{term}': {e}"
                     logger.error(error_msg)
                     term_errors.append(error_msg)
                     provider.update_performance(success=False)
             
+            if not search_successful:
+                logger.error(f"All providers failed for search term: {term}")
+                # Try brain search as a last resort if it's not already tried
+                brain_provider = next((p for p in self.providers if isinstance(p, BrainSearchProvider)), None)
+                if brain_provider:
+                    try:
+                        logger.info("Attempting final fallback to BrainSearchProvider")
+                        results = brain_provider.search(term)
+                        if results:
+                            logger.info(f"Successfully found {len(results)} results for '{term}' using BrainSearchProvider fallback")
+                            term_results.extend(results)
+                            search_successful = True
+                    except Exception as e:
+                        logger.error(f"BrainSearchProvider fallback also failed: {e}")
+                        all_errors.append(f"BrainSearchProvider fallback failed: {e}")
+
+
             if term_results:
                 all_results.extend(term_results)
             else:
@@ -525,16 +539,30 @@ def main():
         for item in input_list_of_pairs:
             if not (isinstance(item, (list, tuple)) and len(item) == 2):
                 raise ValueError(f"Each item in the input array should be a [key, value] pair. Found: {item}")
-            key, value_dict = item
-            if isinstance(value_dict, dict) and 'value' in value_dict:
-                inputs[key] = InputValue(
-                    inputName=key,
-                    value=value_dict['value'],
-                    valueType=value_dict.get('valueType', 'string'),
-                    args=value_dict.get('args', {})
-                )
-            else: # Fallback for non-standard value formats
-                inputs[key] = InputValue(inputName=key, value=value_dict, valueType='string')
+            key, raw_value = item # Renamed value_dict to raw_value for clarity
+            
+            # Create InputValue object from the raw_value
+            # We assume the type is string for simplicity, or infer if possible
+            inferred_value_type = 'string'
+            if isinstance(raw_value, bool):
+                inferred_value_type = 'boolean'
+            elif isinstance(raw_value, (int, float)):
+                inferred_value_type = 'number'
+            elif isinstance(raw_value, list):
+                inferred_value_type = 'array'
+            elif isinstance(raw_value, dict):
+                # If it's a dict, it could be a complex object or an output reference
+                if 'outputName' in raw_value and 'sourceStep' in raw_value:
+                    inferred_value_type = 'reference' # Custom type for internal handling
+                else:
+                    inferred_value_type = 'object'
+
+            inputs[key] = InputValue(
+                inputName=key,
+                value=raw_value,
+                valueType=inferred_value_type,
+                args={} # No args provided in the raw input
+            )
 
         outputs = execute_plugin(inputs)
         print(json.dumps(outputs, indent=2))

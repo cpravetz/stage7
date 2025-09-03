@@ -73,7 +73,28 @@ def execute_plugin(operation, inputs):
     return result
 
 if __name__ == "__main__":
-    operation = sys.argv[1]
-    inputs = json.loads(sys.stdin.read())
-    result = execute_plugin(operation, inputs)
+    # Read inputs from stdin
+    inputs_str = sys.stdin.read().strip()
+    if not inputs_str:
+        raise ValueError("No input provided")
+
+    # Parse inputs - expecting a list of [key, value] pairs
+    inputs_list = json.loads(inputs_str)
+    
+    # Convert the list of pairs into a dictionary
+    inputs_dict = {}
+    for item in inputs_list:
+        if isinstance(item, list) and len(item) == 2:
+            key, val = item
+            inputs_dict[key] = val
+        else:
+            sys.stderr.write(f"Warning: Skipping invalid input item: {item}\n")
+
+    # Extract the operation from the inputs_dict
+    operation = inputs_dict.get("operation")
+    if not operation:
+        raise ValueError("Missing required input: operation")
+
+    # Pass the rest of the inputs_dict to execute_plugin
+    result = execute_plugin(operation, inputs_dict)
     print(json.dumps(result))
