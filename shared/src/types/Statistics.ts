@@ -35,10 +35,13 @@ export interface AgentSetManagerStatistics {
 }
 
 export interface AgentSetStatistics {
+    agentsByStatus: Map<string, number>;
     agentsCount: number;
-    agentValuesCount: number; 
-    agentsByStatus: Map<string, Array<AgentStatistics>>; // Implicitly uses new AgentStatistics
+    agentValuesCount: number;
+    memoryUsage?: NodeJS.MemoryUsage;
+    lastGC?: number;
 }
+
 
 export interface TrafficManagerStatistics {
     agentStatisticsByType: {

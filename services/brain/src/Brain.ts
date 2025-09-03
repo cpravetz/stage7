@@ -215,7 +215,9 @@ export class Brain extends BaseEntity {
                 }
 
                 if (attempt < maxRetries) {
-                    console.log(`[Brain Generate] Attempting retry ${attempt + 1}/${maxRetries}`);
+                    const retryDelay = Math.pow(2, attempt) * 1000; // Exponential backoff: 2s, 4s, 8s, 16s
+                    console.log(`[Brain Generate] Attempting retry ${attempt + 1}/${maxRetries} in ${retryDelay / 1000}s`);
+                    await new Promise(resolve => setTimeout(resolve, retryDelay)); // Add delay
                 }
             }
         }
@@ -326,8 +328,10 @@ export class Brain extends BaseEntity {
                 }
 
                 if (attempt < maxRetries) {
-                    console.log(`[Brain Chat] Clearing model selection cache and retrying...`);
+                    const retryDelay = Math.pow(2, attempt) * 1000; // Exponential backoff: 2s, 4s, 8s
+                    console.log(`[Brain Chat] Clearing model selection cache and retrying in ${retryDelay / 1000}s...`);
                     this.modelManager.clearModelSelectionCache();
+                    await new Promise(resolve => setTimeout(resolve, retryDelay)); // Add delay
                 }
             }
         }

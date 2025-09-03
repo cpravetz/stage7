@@ -517,26 +517,31 @@ export class ModelManager {
 
 1. **Update Frontend Dependencies**
 ```json
-{
   "dependencies": {
     "@cktmcs/errorhandler": "file:../../errorhandler",
-    "@cktmcs/shared": "file:../../shared",
-    "@emotion/react": "^11.10.6",
-    "@emotion/styled": "^11.10.6",
-    "@mui/icons-material": "^5.11.16",
-    "@mui/material": "^5.12.1",
-    "axios": "^1.7.7",
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.0",
+    "@mui/icons-material": "^5.13.7",
+    "@mui/material": "^5.13.7",
+    "@mui/system": "^5.13.7",
+    "ajv": "^8.17.1",
+    "axios": "^1.11.0",
+    "buffer": "^6.0.3",
     "cross-spawn": "^7.0.6",
-    "crypto-browserify": "^3.12.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "react-scripts": "^5.0.1",
+    "framer-motion": "^11.0.20",
+    "notistack": "^3.0.1",
+    "process": "^0.11.10",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "react-markdown": "^10.1.0",
+    "react-router-dom": "^7.8.2",
+    "stream-browserify": "^3.0.0",
     "typescript": "^5.6.3",
-    "uuid": "^11.0.3",
+    "util": "^0.12.5",
+    "uuid": "^10.0.0",
     "vis-data": "^7.1.9",
     "vis-network": "^9.1.9"
-  }
-}
+  },
 ```
 
 2. **Create Theme Provider**

@@ -1,8 +1,8 @@
 {
   "id": "plugin-DATA_TOOLKIT",
   "verb": "DATA_TOOLKIT",
-  "description": "A set of tools for processing and manipulating structured data formats like JSON, CSV, and SQL.",
-  "explanation": "This plugin provides commands to parse, query, and transform data from various sources, which is a critical capability for data analysis, reporting, and many other complex tasks.",
+  "description": "A set of tools for processing and manipulating structured data formats like JSON and CSV.",
+  "explanation": "This plugin provides commands to parse, query, and transform data from various sources, which is a critical capability for data analysis and reporting.",
   "inputGuidance": "Inputs for this plugin must include 'operation'.",
   "inputDefinitions": [
     {
@@ -14,8 +14,7 @@
         "query_json",
         "validate_json",
         "csv_to_json",
-        "json_to_csv",
-        "execute_sql_on_json"
+        "json_to_csv"
       ]
     },
     {
@@ -25,10 +24,10 @@
       "description": "The JSON object to query. Used with 'query_json'."
     },
     {
-      "name": "expression",
-      "type": "string",
+      "name": "query",
+      "type": "object",
       "required": false,
-      "description": "The JSONPath expression to use. Used with 'query_json'."
+      "description": "A dictionary of key-value pairs to filter a list of JSON objects. Used with 'query_json'."
     },
     {
       "name": "json_string",
@@ -46,13 +45,7 @@
       "name": "json_data",
       "type": "array",
       "required": false,
-      "description": "A JSON array of objects. Used with 'json_to_csv' and 'execute_sql_on_json'."
-    },
-    {
-      "name": "sql_query",
-      "type": "string",
-      "required": false,
-      "description": "The SQL query to execute on the JSON data. Used with 'execute_sql_on_json'."
+      "description": "A JSON array of objects. Used with 'json_to_csv'."
     }
   ],
   "outputDefinitions": [
@@ -74,10 +67,10 @@
   "security": {
     "permissions": []
   },
-  "version": "1.0.0",
+  "version": "1.1.0",
   "metadata": {
     "author": "Stage7 Development Team",
-    "tags": ["data", "json", "csv", "sql", "toolkit"],
+    "tags": ["data", "json", "csv", "toolkit"],
     "category": "utility",
     "license": "MIT"
   }

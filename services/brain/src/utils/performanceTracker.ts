@@ -81,9 +81,6 @@ export class ModelPerformanceTracker {
   constructor() {
     this.loadPerformanceData();
 
-    // Reset any excessive blacklists on startup
-    this.resetExcessiveBlacklists();
-
     // Set up periodic saving - more frequent (every 2 minutes)
     this.saveInterval = setInterval(() => {
       // Reset excessive blacklists during periodic check
@@ -697,7 +694,10 @@ export class ModelPerformanceTracker {
     const metrics = this.getPerformanceMetrics(modelName, conversationType);
 
     // If the model has no blacklistedUntil date, it's not blacklisted
-    if (!metrics.blacklistedUntil) return false;
+    if (!metrics.blacklistedUntil) {
+        // console.log(`[isModelBlacklisted] ${modelName}/${conversationType}: No blacklist date.`);
+        return false;
+    }
 
     // Check if the blacklist period has expired
     const blacklistedUntil = new Date(metrics.blacklistedUntil);
@@ -705,6 +705,7 @@ export class ModelPerformanceTracker {
 
     if (now > blacklistedUntil) {
       // Blacklist period has expired, clear the blacklist
+      console.log(`[isModelBlacklisted] ${modelName}/${conversationType}: Blacklist expired at ${metrics.blacklistedUntil}.`);
       const modelData = this.performanceData.get(modelName);
       if (modelData && modelData.metrics[conversationType]) {
         modelData.metrics[conversationType].blacklistedUntil = null;
@@ -712,6 +713,7 @@ export class ModelPerformanceTracker {
       return false;
     }
 
+    console.log(`[isModelBlacklisted] ${modelName}/${conversationType}: Blacklisted until ${metrics.blacklistedUntil}.`);
     // Model is still blacklisted
     return true;
   }

@@ -106,9 +106,13 @@ const MainApp: React.FC = () => {
   // Handler for submitting user input from modal
   const handleUserInputSubmit = async (requestId: string, response: any) => {
     try {
+      const authHeader = securityClient.getAuthHeader();
       await fetch('http://localhost:5020/submitUserInput', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          ...authHeader
+        },
         body: JSON.stringify({ requestId, response })
       });
       if (setPendingUserInput) setPendingUserInput(null);

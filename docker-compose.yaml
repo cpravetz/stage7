@@ -346,7 +346,7 @@ services:
       postoffice:
         condition: service_healthy
     environment:
-      - ENV REACT_APP_API_BASE_URL=http://localhost:5020
+      - ENV REACT_APP_API_BASE_URL=http://postoffice:5020
       - ENV REACT_APP_WS_URL=ws://localhost:5020
 
 

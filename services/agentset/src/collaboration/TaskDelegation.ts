@@ -27,7 +27,7 @@ export enum TaskStatus {
  */
 export interface DelegatedTask {
   id: string;
-  type: string;
+  taskType: string;
   description: string;
   inputs: Record<string, any>;
   delegatedBy: string;
@@ -114,7 +114,7 @@ export class TaskDelegation {
       // Create task
       const task: DelegatedTask = {
         id: request.taskId || uuidv4(),
-        type: request.taskType,
+        taskType: request.taskType,
         description: request.description,
         inputs: request.inputs,
         delegatedBy: delegatorId,

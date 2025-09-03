@@ -1,3 +1,5 @@
 All data and state issues are to be resolved within the code, not thrown unless a higher level of scop is needed - and then they are handled there.  Our system is intended to grow through the development of new plugins and discovery of available tools.  The core capabilitiesManager executes Steps as requested by the agent.  The ACCOMPLISH actionVerb is intended to determine how to achieve a mission or step objective by providing an LLM generated answer, creating a new plan of steps or recommending the development of a new plugin for mechanical task likely to repeat.
 
 All code in our system is production-ready, efficient, and scalable.  We never use placeholders, stubs, or mocks in our code.  Nor do we leave TODO items in place of working code.
+
+All code must be production ready - no mocks, stubs, simulations.  All data and state issues are resolved in the system, not thrown as errors.  Unknown verbs are expected and permitted in plans.  We develop for classes and generalizations, not hardcoding for very specific items or for this particular mission from the test run.

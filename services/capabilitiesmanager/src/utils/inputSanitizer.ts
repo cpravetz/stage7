@@ -63,8 +63,8 @@ export function sanitizeInputValue(
                 if (typeof sanitizedValue !== 'string') {
                     sanitizedValue = String(sanitizedValue);
                 }
-                // Remove non-printable characters
-                sanitizedValue = sanitizedValue.replace(/[\x00-\x1F\x7F]/g, '');
+                // Only remove null bytes, which are a common source of issues.
+                sanitizedValue = sanitizedValue.replace(/\x00/g, '');
                 break;
 
             case PluginParameterType.NUMBER:
@@ -139,8 +139,12 @@ export function performPreExecutionChecks(
         }
 
         // Check for potentially problematic characters in string inputs
-        if (typeof value === 'string' && /[<>&;`$]/.test(value)) {
-            issues.push(`Input '${key}' contains potentially unsafe characters.`);
+        if (typeof value === 'string') {
+            // Basic check to avoid flagging base64 encoded data
+            const isLikelyBase64 = /^[A-Za-z0-9+/=\s]+$/.test(value) && value.length % 4 === 0;
+            if (!isLikelyBase64 && /[<>&;`$]/.test(value)) {
+                issues.push(`Input '${key}' contains characters (e.g., <, >, &, ;, \`, $) that may require special handling in certain contexts (e.g., HTML rendering, shell commands).`);
+            }
         }
 
         // Check for array size limits

@@ -196,8 +196,24 @@ if __name__ == "__main__":
         cleaned_input_str = cleaned_input_str[:-3].strip()
 
     try:
-        input_data = json.loads(cleaned_input_str)
-        print(execute_plugin(input_data))
+        # Parse the input data, which should be a list of [key, value] pairs
+        inputs_list = json.loads(cleaned_input_str)
+        
+        # Convert the list of pairs into a dictionary
+        inputs_dict = {}
+        if isinstance(inputs_list, list):
+            for item in inputs_list:
+                if isinstance(item, list) and len(item) == 2:
+                    key, val = item
+                    inputs_dict[key] = val
+                else:
+                    # Log a warning if an item is not a valid [key, value] pair
+                    sys.stderr.write(f"Warning: Skipping invalid input item: {item}\n")
+        else:
+            # If it's not a list, assume it's already a dictionary (for direct testing or older formats)
+            inputs_dict = inputs_list
+
+        print(execute_plugin(inputs_dict))
     except json.JSONDecodeError as e:
         # If JSON decoding still fails, log the error and return a structured error output
         error_message = f"JSONDecodeError: {e}. Raw input: {raw_input_str[:200]}..."

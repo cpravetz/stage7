@@ -25,8 +25,17 @@ export interface StepModification {
     // Add other modifiable fields as necessary
 }
 
+interface ErrorContext {
+    message: string;
+    stack?: string;
+    type: string;
+    timestamp: string;
+    recoveryAttempts: number;
+}
+
 export class Step {
     readonly id: string;
+    readonly missionId: string;
     readonly stepNo: number;
     readonly actionVerb: string;
     inputReferences: Map<string, InputReference>;
@@ -42,11 +51,14 @@ export class Step {
     retryCount: number;
     maxRetries: number;
     lastError: any | null;
+    errorContext: ErrorContext | null = null;
     private tempData: Map<string, any> = new Map();
     private persistenceManager: AgentPersistenceManager;
+    private backoffTime: number = 1000; // Initial backoff time in ms
 
     constructor(params: {
         id?: string,
+        missionId: string,
         actionVerb: string,
         stepNo: number,
         inputReferences?: Map<string, InputReference>,
@@ -60,6 +72,7 @@ export class Step {
         maxRetries?: number
     }) {
         this.id = params.id || uuidv4();
+        this.missionId = params.missionId;
         this.stepNo = params.stepNo;
         this.actionVerb = params.actionVerb;
         this.inputReferences = params.inputReferences || new Map();
@@ -96,6 +109,7 @@ export class Step {
             this.logEvent({
                 eventType: 'step_created',
                 stepId: this.id,
+                missionId: this.missionId,
                 stepNo: this.stepNo,
                 actionVerb: this.actionVerb,
                 inputValues:MapSerializer.transformForSerialization(this.inputValues),
@@ -154,22 +168,55 @@ export class Step {
     }
 
     areDependenciesSatisfied(allSteps: Step[]): boolean {
-        // Check if all dependencies have a sourceStepId that exists in allSteps and that source step is completed
         return this.dependencies.every(dep => {
             if (!dep.sourceStepId) {
-                // If dependency has no sourceStepId, consider it unsatisfied
                 return true;
             }
             const sourceStep = allSteps.find(s => s.id === dep.sourceStepId);
-            return sourceStep !== undefined && sourceStep.status === StepStatus.COMPLETED;
+
+            // Source step must exist and be completed.
+            if (!sourceStep || sourceStep.status !== StepStatus.COMPLETED) {
+                return false;
+            }
+
+            // If dependency is just a signal (like for control flow), we don't need to check for a named output.
+            if (dep.inputName.startsWith('__')) {
+                return true;
+            }
+
+            // For regular dependencies, the named output must exist in the source step's result.
+            const outputExists = sourceStep.result?.some(r => r.name === dep.outputName);
+            if (!outputExists) {
+                console.warn(`[areDependenciesSatisfied] Step ${this.id} dependency on output '${dep.outputName}' from step ${sourceStep.id} is not met because the output is not in the result.`);
+                return false;
+            }
+
+            return true;
         });
     }
 
-    /**
-     * Determines if this step is an endpoint (no other steps depend on it)
-     * @param allSteps All steps in the current process
-     * @returns Boolean indicating if this is an endpoint step
-     */
+    areDependenciesPermanentlyUnsatisfied(allSteps: Step[]): boolean {
+        return this.dependencies.some(dep => {
+            if (!dep.sourceStepId) {
+                return false; // Cannot determine, assume not unsatisfied
+            }
+            const sourceStep = allSteps.find(s => s.id === dep.sourceStepId);
+            if (!sourceStep) {
+                return true; // Source step doesn't exist, permanently unsatisfied
+            }
+            const isTerminated = sourceStep.status === StepStatus.COMPLETED ||
+                                 sourceStep.status === StepStatus.ERROR ||
+                                 sourceStep.status === StepStatus.CANCELLED;
+
+            if (isTerminated) {
+                // The source step is finished. Now check if the dependency is actually met.
+                const isSatisfied = this.areDependenciesSatisfied(allSteps);
+                return !isSatisfied; // If it's terminated and not satisfied, it's permanently unsatisfied.
+            }
+            return false; // Source step is still running or pending, so not permanently unsatisfied yet.
+        });
+    }
+
     isEndpoint(allSteps: Step[]): boolean {
         const dependents = allSteps.filter(s =>
             s.dependencies.some(dep => dep.sourceStepId === this.id)
@@ -178,15 +225,12 @@ export class Step {
     }
 
     getOutputType(allSteps: Step[]): OutputType {
-        // If the step generates a plan, its output type is PLAN
         if (this.result?.some(r => r.resultType === PluginParameterType.PLAN)) {
             return OutputType.PLAN;
         }
-        // If the step is an endpoint and doesn't generate a plan, its output type is FINAL
         if (this.isEndpoint(allSteps)) {
             return OutputType.FINAL;
         }
-        // Otherwise, its output type is INTERIM
         return OutputType.INTERIM;
     }
 
@@ -281,9 +325,7 @@ export class Step {
         askAction: (inputValues: Map<string, InputValue>) => Promise<PluginOutput[]>,
         allSteps?: Step[]
     ): Promise<PluginOutput[]> {
-        // Ensure inputValues are populated from inputReferences before execution
         this.populateInputsFromReferences();
-        // Only populate from dependencies if we have the full list of steps
         if (allSteps) {
             this.populateInputsFromDependencies(allSteps);
         }
@@ -295,8 +337,6 @@ export class Step {
                     result = await thinkAction(this.inputValues);
                     break;
                 case 'DELEGATE':
-                    // Instead of creating new agents, use ACCOMPLISH to generate a plan
-                    // and return it for incorporation into the current agent
                     result = await this.handleDelegate(executeAction);
                     break;
                 case 'ASK':
@@ -328,7 +368,6 @@ export class Step {
                     result = await executeAction(this);
             }
 
-            // Ensure result is always an array of PluginOutput
             if (!Array.isArray(result)) {
                 result = [result];
             }
@@ -337,19 +376,17 @@ export class Step {
                 if (!resultItem.mimeType) { resultItem.mimeType = 'text/plain'; }
             });
 
-            // Check if the result is a plan
             if (result[0]?.resultType === PluginParameterType.PLAN) {
                 this.status = StepStatus.SUB_PLAN_RUNNING; 
-                this.result = result; // Store the plan as the result
-                // No need to save work product here, Agent will add steps and manage
+                this.result = result;
             } else {
                 this.status = StepStatus.COMPLETED;
-                this.result = result; // Store the result on the step object
+                this.result = result;
 
-                // Log step result event
                 await this.logEvent({
                     eventType: 'step_result',
                     stepId: this.id,
+                    missionId: this.missionId,
                     stepNo: this.stepNo,
                     actionVerb: this.actionVerb,
                     status: this.status,
@@ -359,7 +396,7 @@ export class Step {
                 });
 
                 await this.persistenceManager.saveWorkProduct({
-                    agentId: this.id.split('_')[0],                stepId: this.id,
+                    agentId: this.id.split('_')[0], stepId: this.id,
                     data: result
                 });
             }
@@ -374,11 +411,12 @@ export class Step {
                 result: error instanceof Error ? error.message : String(error),
                 error: error instanceof Error ? error.message : String(error)
             }];
-            this.result = errorResult; // Store the error result on the step object
+            this.result = errorResult;
 
             await this.logEvent({
                 eventType: 'step_result',
                 stepId: this.id,
+                missionId: this.missionId,
                 stepNo: this.stepNo,
                 actionVerb: this.actionVerb,
                 status: this.status,
@@ -386,7 +424,6 @@ export class Step {
                 timestamp: new Date().toISOString()
             });
 
-            // Push error output to Librarian
             await this.persistenceManager.saveWorkProduct({
                 agentId: this.id.split('_')[0],
                 stepId: this.id,
@@ -397,20 +434,15 @@ export class Step {
         }
     }
 
-    /**
-     * Updates the step's status
-     * @param newStatus New status for the step
-     * @param result Optional result of the step
-     */
     private updateStatus(status: StepStatus, result?: PluginOutput[]): void {
         this.status = status;
         if (result) {
             this.result = result;
         }
-        // Log step status change event
         this.logEvent({
             eventType: 'step_status_changed',
             stepId: this.id,
+            missionId: this.missionId,
             newStatus: status,
             result: result,
             timestamp: new Date().toISOString()
@@ -432,7 +464,6 @@ export class Step {
         const stepsToExecute = result ? trueSteps : falseSteps;
         if (stepsToExecute) {
             const newSteps = createFromPlan(stepsToExecute, this.stepNo + 1, this.persistenceManager, this);
-            // Add these steps to the agent's step queue
             return [{
                 success: true,
                 name: 'steps',
@@ -484,7 +515,7 @@ export class Step {
     private async handleWhile(): Promise<PluginOutput[]> {
         const conditionInput = this.inputValues.get('condition');
         const stepsInput = this.inputValues.get('steps');
-        const maxIterations = 100; // Safety limit
+        const maxIterations = 100;
 
         if (!conditionInput || !stepsInput) {
             return [{
@@ -503,9 +534,9 @@ export class Step {
         let currentIteration = 0;
         const newSteps: Step[] = [];
 
-        // Initial condition check step
         const checkStep = new Step({
             actionVerb: 'THINK',
+            missionId: this.missionId,
             stepNo: this.stepNo + 1,
             inputReferences: new Map([
                 ['prompt', {
@@ -521,10 +552,8 @@ export class Step {
 
         newSteps.push(checkStep);
 
-        // Create steps for first potential iteration
         const iterationSteps = createFromPlan(steps, this.stepNo + 2, this.persistenceManager, this);
 
-        // Add dependency on condition check for all first iteration steps
         iterationSteps.forEach(step => {
             step.dependencies.push({
                 inputName: '__condition',
@@ -535,9 +564,9 @@ export class Step {
 
         newSteps.push(...iterationSteps);
 
-        // Add next condition check step that will determine if another iteration is needed
         const nextCheckStep = new Step({
             actionVerb: 'THINK',
+            missionId: this.missionId,
             stepNo: this.stepNo + 2 + steps.length,
             inputReferences: new Map([
                 ['prompt', {
@@ -549,7 +578,6 @@ export class Step {
             ]),
             description: 'While loop continuation check',
             persistenceManager: this.persistenceManager,
-
         });
 
         newSteps.push(nextCheckStep);
@@ -561,7 +589,6 @@ export class Step {
             resultDescription: '[Step]Initial steps created from while loop',
             result: newSteps
         }];
-
     }
 
     private async handleUntil(): Promise<PluginOutput[]> {
@@ -584,13 +611,12 @@ export class Step {
 
         const newSteps: Step[] = [];
 
-        // Create first iteration steps (UNTIL executes at least once)
         const iterationSteps = createFromPlan(steps, this.stepNo + 1, this.persistenceManager, this);
         newSteps.push(...iterationSteps);
 
-        // Add condition check step after first iteration
         const checkStep = new Step({
             actionVerb: 'THINK',
+            missionId: this.missionId,
             stepNo: this.stepNo + 1 + steps.length,
             inputReferences: new Map([
                 ['prompt', {
@@ -602,10 +628,8 @@ export class Step {
             ]),
             description: 'Until loop condition evaluation',
             persistenceManager: this.persistenceManager,
-
         });
 
-        // Add dependencies from condition check to all iteration steps
         iterationSteps.forEach(step => {
             checkStep.dependencies.push({
                 inputName: `__until_${step.id}`,
@@ -626,7 +650,6 @@ export class Step {
     }
 
     private async handleDelegate(executeAction: (step: Step) => Promise<PluginOutput[]>): Promise<PluginOutput[]> {
-        // Convert DELEGATE to ACCOMPLISH to generate a plan instead of creating new agents
         const goal = this.inputValues.get('goal')?.value ||
                     this.inputValues.get('task')?.value ||
                     this.inputValues.get('description')?.value ||
@@ -643,9 +666,9 @@ export class Step {
             }];
         }
 
-        // Create a temporary ACCOMPLISH step to generate the plan
         const accomplishStep = new Step({
             actionVerb: 'ACCOMPLISH',
+            missionId: this.missionId,
             stepNo: this.stepNo,
             inputReferences: new Map(),
             inputValues: new Map([...this.inputValues.entries(),
@@ -660,11 +683,9 @@ export class Step {
             persistenceManager: this.persistenceManager
         });
 
-        // Execute the ACCOMPLISH step to get a plan
         const accomplishResult = await executeAction(accomplishStep);
 
         if (accomplishResult && accomplishResult.length > 0 && accomplishResult[0].success) {
-            // Return the plan for incorporation into the current agent
             return [{
                 success: true,
                 name: 'delegatedPlan',
@@ -701,12 +722,12 @@ export class Step {
         const steps = stepsInput.value as ActionVerbTask[];
         const newSteps: Step[] = [];
 
-        // Create steps with explicit dependencies to force sequential execution
         let previousStepId: string | undefined;
 
         steps.forEach((task, index) => {
             const newStep = new Step({
                 actionVerb: task.actionVerb,
+                missionId: this.missionId,
                 stepNo: this.stepNo + 1 + index,
                 inputReferences: task.inputReferences || new Map(),
                 inputValues: new Map<string, InputValue>(),
@@ -715,7 +736,6 @@ export class Step {
             });
 
             if (previousStepId) {
-                // Add dependency on previous step
                 newStep.dependencies.push({
                     inputName: '__sequence',
                     sourceStepId: previousStepId,
@@ -736,14 +756,9 @@ export class Step {
         }];
     }
 
-    /**
-     * Clears any temporary data stored during step execution
-     */
     public clearTempData(): void {
         this.tempData.clear();
-        // Clear any large objects or buffers
         if (this.result) {
-            // Keep only essential data in results
             this.result = this.result.map(output => ({
                 ...output,
                 result: typeof output.result === 'string' ? output.result : null
@@ -751,35 +766,18 @@ export class Step {
         }
     }
 
-    /**
-     * Stores temporary data during step execution
-     * @param key Identifier for the temp data
-     * @param data The data to store
-     */
     public storeTempData(key: string, data: any): void {
         this.tempData.set(key, data);
     }
 
-    // Note: Shared folder interactions have been moved to plugins that need them (e.g., file_ops_python)
-    // Step outputs are now handled by the persistence manager and individual plugins as needed
-
-
-
-    /**
-     * Retrieves temporary data
-     * @param key Identifier for the temp data
-     */
     public getTempData(key: string): any {
         return this.tempData.get(key);
     }
 
-    /**
-     * Converts the step to a simple JSON-serializable object
-     * @returns Simplified representation of the step
-     */
     toJSON() {
         return {
             id: this.id,
+            missionId: this.missionId,
             stepNo: this.stepNo,
             actionVerb: this.actionVerb,
             inputReferences: MapSerializer.transformForSerialization(this.inputReferences),
@@ -793,21 +791,16 @@ export class Step {
         };
     }
 
-
-    /**
-     * Applies modifications to the step instance.
-     * @param modifications - An object containing properties to update.
-     */
     public applyModifications(modifications: StepModification): void {
         if (modifications.description !== undefined) {
             this.description = modifications.description;
             this.logEvent({ eventType: 'step_description_updated', stepId: this.id, newDescription: this.description });
         }
-        if (modifications.inputValues) { // Complete replacement
-            this.inputValues = new Map(modifications.inputValues); // Assuming Map or convert from Record
+        if (modifications.inputValues) {
+            this.inputValues = new Map(modifications.inputValues);
             this.logEvent({ eventType: 'step_inputs_replaced', stepId: this.id });
         }
-        if (modifications.updateInputs) { // Merge/update
+        if (modifications.updateInputs) {
             if (!this.inputValues) this.inputValues = new Map<string, InputValue>();
             modifications.updateInputs.forEach((value, key) => {
                 this.inputValues.set(key, value);
@@ -815,25 +808,19 @@ export class Step {
             this.logEvent({ eventType: 'step_inputs_updated', stepId: this.id });
         }
         if (modifications.status) {
-            this.updateStatus(modifications.status); // Use existing updateStatus to ensure logging
+            this.updateStatus(modifications.status);
         }
         if (modifications.actionVerb) {
-            // Note: Changing actionVerb is a significant change and might require re-evaluation of dependencies or capabilities.
-            // For now, just updating the property.
             console.warn(`Agent ${this.id.split('_')[0]}: Step ${this.id} actionVerb changed from ${this.actionVerb} to ${modifications.actionVerb}. This might have execution implications.`);
-            (this as any).actionVerb = modifications.actionVerb; // Bypass readonly if necessary, or reconsider readonly
+            (this as any).actionVerb = modifications.actionVerb;
             this.logEvent({ eventType: 'step_actionVerb_updated', stepId: this.id, oldActionVerb: this.actionVerb, newActionVerb: modifications.actionVerb });
         }
         if (modifications.recommendedRole) {
             this.recommendedRole = modifications.recommendedRole;
             this.logEvent({ eventType: 'step_recommendedRole_updated', stepId: this.id, newRecommendedRole: this.recommendedRole });
         }
-        // Add handling for other modifiable fields here
     }
 
-    /**
-     * Populates inputValues from inputReferences if not already present
-     */
     public populateInputsFromReferences(): void {
         if (!this.inputValues) this.inputValues = new Map<string, InputValue>();
         this.inputReferences.forEach((inputRef, key) => {
@@ -849,188 +836,194 @@ export class Step {
     }
 }
 
+export function createFromPlan(
+    plan: ActionVerbTask[],
+    startingStepNo: number,
+    persistenceManager: AgentPersistenceManager,
+    parentStep?: Step,
+    agentContext?: any
+): Step[] {
+    type PlanTask = ActionVerbTask & { number?: number; outputs?: Record<string, any>; id?: string; };
+    const planTasks = plan as PlanTask[];
+    const stepNumberToUUID: Record<number, string> = {};
 
-    /**
-     * Creates steps from a plan of action verb tasks
-     * @param plan Array of action verb tasks
-     * @param startingStepNo The starting step number
-     * @param persistenceManager The persistence manager for the steps
-     * @returns Array of Step instances
-     */
-    export function createFromPlan(
-        plan: ActionVerbTask[],
-        startingStepNo: number,
-        persistenceManager: AgentPersistenceManager,
-        parentStep?: Step,
-        agentContext?: any
-    ): Step[] {
-        // Extend ActionVerbTask locally to include number and outputs for conversion
-        type PlanTask = ActionVerbTask & { number?: number; outputs?: Record<string, any>; id?: string; };
-        const planTasks = plan as PlanTask[];
-        const stepNumberToUUID: Record<number, string> = {};
-    
-        planTasks.forEach((task, idx) => {
-            const uuid = uuidv4();
-            task.id = uuid;
-            const stepNum = task.number || idx + 1;
-            stepNumberToUUID[stepNum] = uuid;
-        });
-    
-        const newSteps = planTasks.map((task, idx) => {
-            const dependencies: StepDependency[] = [];
-            const inputReferences = new Map<string, InputReference>();
-            const inputValues = new Map<string, InputValue>();
-    
-            const inputSource = (task as any).inputs || task.inputReferences;
-            if (inputSource) {
-                for (const [inputName, inputDef] of Object.entries(inputSource as Record<string, any>)) {
-                    if (typeof inputDef !== 'object' || inputDef === null) {
-                        console.warn(`[createFromPlan] Skipping invalid input definition for '${inputName}' in task '${task.actionVerb}'.`);
-                        continue;
-                    }
-    
-                    const hasValue = inputDef.value !== undefined && inputDef.value !== null;
-                    const hasOutputName = inputDef.outputName !== undefined && inputDef.outputName !== null && inputDef.outputName !== '';
-                    const hasSourceStep = inputDef.sourceStep !== undefined && inputDef.sourceStep !== null;
-    
-                    if (hasValue) {
-                        inputValues.set(inputName, {
-                            inputName: inputName,
-                            value: inputDef.value,
-                            valueType: inputDef.valueType,
-                            args: inputDef.args,
-                        });
-                    } else if (hasOutputName && hasSourceStep) {
-                        if (inputDef.sourceStep === 0) {
-                            let resolvedValue: any;
-                            let resolvedValueType: PluginParameterType = inputDef.valueType;
-    
-                            // 1. Try to resolve from parentStep inputs
-                            if (parentStep && parentStep.inputValues.has(inputDef.outputName)) {
-                                const parentInputValue = parentStep.inputValues.get(inputDef.outputName);
-                                resolvedValue = parentInputValue?.value;
-                                resolvedValueType = parentInputValue?.valueType || inputDef.valueType;
-                            }
-                            // 2. If not found, try to resolve from agentContext (global)
-                            else if (agentContext && agentContext[inputDef.outputName]) {
-                                resolvedValue = agentContext[inputDef.outputName];
-                            }
-    
-                            if (resolvedValue !== undefined) {
-                                inputValues.set(inputName, {
-                                    inputName: inputName,
-                                    value: resolvedValue,
-                                    valueType: resolvedValueType,
-                                    args: {}
-                                });
-                            } else {
-                                // Fallback to creating a dependency on the parent step if it exists
-                                if (parentStep) {
-                                    dependencies.push({
-                                        outputName: inputDef.outputName,
-                                        sourceStepId: parentStep.id,
-                                        inputName: inputName
-                                    });
-                                } else {
-                                    console.error(`[createFromPlan] 🚨 Unresolved sourceStep 0: Input '${inputDef.outputName}' not found for step '${task.actionVerb}'.`);
-                                }
-                            }
+    planTasks.forEach((task, idx) => {
+        const uuid = uuidv4();
+        task.id = uuid;
+        const stepNum = task.number || idx + 1;
+        stepNumberToUUID[stepNum] = uuid;
+    });
+
+    const newSteps = planTasks.map((task, idx) => {
+        const dependencies: StepDependency[] = [];
+        const inputReferences = new Map<string, InputReference>();
+        const inputValues = new Map<string, InputValue>();
+
+        const missionId = parentStep?.missionId || agentContext?.missionId;
+        if (!missionId) {
+            throw new Error('Cannot create step from plan without a missionId from parentStep or agentContext');
+        }
+
+        const inputSource = (task as any).inputs || task.inputReferences;
+        if (inputSource) {
+            for (const [inputName, inputDef] of Object.entries(inputSource as Record<string, any>)) {
+                if (typeof inputDef !== 'object' || inputDef === null) {
+                    console.warn(`[createFromPlan] Skipping invalid input definition for '${inputName}' in task '${task.actionVerb}'.`);
+                    continue;
+                }
+
+                const hasValue = inputDef.value !== undefined && inputDef.value !== null;
+                const hasOutputName = inputDef.outputName !== undefined && inputDef.outputName !== null && inputDef.outputName !== '';
+                const hasSourceStep = inputDef.sourceStep !== undefined && inputDef.sourceStep !== null;
+
+                if (inputName === 'missionId') {
+                    inputValues.set(inputName, {
+                        inputName: inputName,
+                        value: missionId,
+                        valueType: PluginParameterType.STRING,
+                        args: {},
+                    });
+                } else if (hasValue) {
+                    inputValues.set(inputName, {
+                        inputName: inputName,
+                        value: inputDef.value,
+                        valueType: inputDef.valueType,
+                        args: inputDef.args,
+                    });
+                } else if (hasOutputName && hasSourceStep) {
+                    if (inputDef.sourceStep === 0) {
+                        let resolvedValue: any;
+                        let resolvedValueType: PluginParameterType = inputDef.valueType;
+
+                        if (parentStep && parentStep.inputValues.has(inputDef.outputName)) {
+                            const parentInputValue = parentStep.inputValues.get(inputDef.outputName);
+                            resolvedValue = parentInputValue?.value;
+                            resolvedValueType = parentInputValue?.valueType || inputDef.valueType;
+                        }
+                        else if (agentContext && agentContext[inputDef.outputName]) {
+                            resolvedValue = agentContext[inputDef.outputName];
+                        }
+
+                        if (resolvedValue !== undefined) {
+                            inputValues.set(inputName, {
+                                inputName: inputName,
+                                value: resolvedValue,
+                                valueType: resolvedValueType,
+                                args: {}
+                            });
                         } else {
-                            const sourceStepId = stepNumberToUUID[inputDef.sourceStep];
-                            if (sourceStepId) {
+                            if (parentStep) {
                                 dependencies.push({
                                     outputName: inputDef.outputName,
-                                    sourceStepId,
+                                    sourceStepId: parentStep.id,
                                     inputName: inputName
                                 });
                             } else {
-                                console.error(`[createFromPlan] 🚨 Unresolved sourceStep ${inputDef.sourceStep} for input '${inputName}' in step '${task.actionVerb}'`);
+                                console.error(`[createFromPlan] 🚨 Unresolved sourceStep 0: Input '${inputDef.outputName}' not found for step '${task.actionVerb}'.`);
                             }
                         }
                     } else {
-                        console.error(`[createFromPlan] 🚨 MALFORMED INPUT DETECTED: '${inputName}' in step '${task.actionVerb}' (step ${idx + 1})`);
-                        console.error(`[createFromPlan] Input definition:`, JSON.stringify(inputDef, null, 2));
+                        const sourceStepId = stepNumberToUUID[inputDef.sourceStep];
+                        if (sourceStepId) {
+                            dependencies.push({
+                                outputName: inputDef.outputName,
+                                sourceStepId,
+                                inputName: inputName
+                            });
+                        } else {
+                            console.error(`[createFromPlan] 🚨 Unresolved sourceStep ${inputDef.sourceStep} for input '${inputName}' in step '${task.actionVerb}'`);
+                        }
                     }
-    
-                    const reference: InputReference = {
-                        inputName: inputName,
-                        value: inputDef.value,
-                        outputName: inputDef.outputName,
-                        valueType: inputDef.valueType,
-                        args: inputDef.args,
-                    };
-                    inputReferences.set(inputName, reference);
+                } else {
+                    console.error(`[createFromPlan] 🚨 MALFORMED INPUT DETECTED: '${inputName}' in step '${task.actionVerb}' (step ${idx + 1})`);
+                    console.error(`[createFromPlan] Input definition:`, JSON.stringify(inputDef, null, 2));
                 }
-            }
-    
-            // Inherit dependencies from parent step, avoiding duplicates for the same input name
-            if (parentStep) {
-                const subPlanInputNames = new Set(dependencies.map(d => d.inputName));
-                parentStep.dependencies.forEach(parentDep => {
-                    if (!subPlanInputNames.has(parentDep.inputName)) {
-                        dependencies.push(parentDep);
-                    }
-                });
-            }
-    
-            if (task.actionVerb === 'EXECUTE') {
-                task.actionVerb = 'ACCOMPLISH';
-            }
-    
-            const step = new Step({
-                id: task.id!,
-                actionVerb: task.actionVerb,
-                stepNo: startingStepNo + idx,
-                description: task.description,
-                dependencies: dependencies,
-                inputReferences: inputReferences,
-                inputValues: inputValues,
-                outputs: task.outputs ? new Map(Object.entries(task.outputs)) : undefined,
-                recommendedRole: task.recommendedRole,
-                persistenceManager: persistenceManager
-            });
-            return step;
-        });
-    
-        if (parentStep && newSteps.length > 0) {
-            // Wire parent step outputs to sub-plan outputs
-            parentStep.outputs.forEach((outputType, outputName) => {
-                const producingStep = [...newSteps].reverse().find(s => s.outputs.has(outputName));
-                if (producingStep) {
-                    parentStep.dependencies.push({
-                        inputName: outputName,
-                        sourceStepId: producingStep.id,
-                        outputName: outputName,
-                    });
-                    parentStep.inputReferences.set(outputName, {
-                        inputName: outputName,
-                        outputName: outputName,
-                        valueType: outputType as PluginParameterType,
-                        args: {},
-                    });
-                }
-            });
 
-            // If parent is an ACCOMPLISH step with no outputs, it needs a completion signal
-            if (parentStep.actionVerb === 'ACCOMPLISH' && parentStep.outputs.size === 0) {
-                const lastSubStep = newSteps[newSteps.length - 1];
-                const completionInputName = `__completion_${lastSubStep.id}`;
-
-                if (!parentStep.dependencies.some(dep => dep.sourceStepId === lastSubStep.id)) {
-                    parentStep.dependencies.push({
-                        inputName: completionInputName,
-                        sourceStepId: lastSubStep.id,
-                        outputName: 'result' // Generic dependency on the final step's result
-                    });
-                    parentStep.inputReferences.set(completionInputName, {
-                        inputName: completionInputName,
-                        outputName: 'result',
-                        valueType: PluginParameterType.ANY,
-                        args: { isCompletionSignal: true },
-                    });
-                }
+                const reference: InputReference = {
+                    inputName: inputName,
+                    value: inputDef.value,
+                    outputName: inputDef.outputName,
+                    valueType: inputDef.valueType,
+                    args: inputDef.args,
+                };
+                inputReferences.set(inputName, reference);
             }
         }
-    
-        return newSteps;
+
+        if (parentStep) {
+            const subPlanInputNames = new Set(dependencies.map(d => d.inputName));
+            parentStep.dependencies.forEach(parentDep => {
+                if (!subPlanInputNames.has(parentDep.inputName)) {
+                    dependencies.push(parentDep);
+                }
+            });
+        }
+
+        if (task.actionVerb === 'EXECUTE') {
+            task.actionVerb = 'ACCOMPLISH';
+        }
+        if (task.actionVerb === 'LLM') {
+            task.actionVerb = 'THINK';
+        }
+
+        if (!task.actionVerb) {
+        console.log('Step Line 1018 - Missing required property "actionVerb" in task', task);
+        throw new Error(`Missing required property 'actionVerb' in agent config`);
     }
+
+        const step = new Step({
+            id: task.id!,
+            missionId: missionId,
+            actionVerb: task.actionVerb,
+            stepNo: startingStepNo + idx,
+            description: task.description,
+            dependencies: dependencies,
+            inputReferences: inputReferences,
+            inputValues: inputValues,
+            outputs: task.outputs ? new Map(Object.entries(task.outputs)) : undefined,
+            recommendedRole: task.recommendedRole,
+            persistenceManager: persistenceManager
+        });
+        return step;
+    });
+
+    if (parentStep && newSteps.length > 0) {
+        parentStep.outputs.forEach((outputType, outputName) => {
+            const producingStep = [...newSteps].reverse().find(s => s.outputs.has(outputName));
+            if (producingStep) {
+                parentStep.dependencies.push({
+                    inputName: outputName,
+                    sourceStepId: producingStep.id,
+                    outputName: outputName,
+                });
+                parentStep.inputReferences.set(outputName, {
+                    inputName: outputName,
+                    outputName: outputName,
+                    valueType: outputType as PluginParameterType,
+                    args: {},
+                });
+            }
+        });
+
+        if (parentStep.actionVerb === 'ACCOMPLISH' && parentStep.outputs.size === 0) {
+            const lastSubStep = newSteps[newSteps.length - 1];
+            const completionInputName = `__completion_${lastSubStep.id}`;
+
+            if (!parentStep.dependencies.some(dep => dep.sourceStepId === lastSubStep.id)) {
+                parentStep.dependencies.push({
+                    inputName: completionInputName,
+                    sourceStepId: lastSubStep.id,
+                    outputName: 'result'
+                });
+                parentStep.inputReferences.set(completionInputName, {
+                    inputName: completionInputName,
+                    outputName: 'result',
+                    valueType: PluginParameterType.ANY,
+                    args: { isCompletionSignal: true },
+                });
+            }
+        }
+    }
+
+    return newSteps;
+}

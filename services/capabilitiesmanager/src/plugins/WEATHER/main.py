@@ -23,6 +23,9 @@ class InputValue:
 
 
 
+
+
+
 class PluginOutput:
     """Represents a plugin output result"""
     def __init__(self, success: bool, name: str, result_type: str, 
@@ -143,7 +146,7 @@ def execute_plugin(inputs: Dict[str, InputValue]) -> List[PluginOutput]:
         if not location_input:
             return [create_error_output("error", "Missing required input: location")]
         
-        location = location_input.input_value
+        location = location_input.value
         if not location or not isinstance(location, str):
             return [create_error_output("error", "Location must be a non-empty string")]
         
@@ -151,7 +154,7 @@ def execute_plugin(inputs: Dict[str, InputValue]) -> List[PluginOutput]:
         api_key = os.environ.get('OPENWEATHER_API_KEY')
         api_key_input = inputs.get('api_key')
         if api_key_input:
-            api_key = api_key_input.input_value
+            api_key = api_key_input.value
         
         if not api_key:
             return [create_error_output("error", 
@@ -196,15 +199,34 @@ def main():
 
         # Parse inputs - expecting serialized Map format
         inputs_list = json.loads(inputs_str)
-        inputs_map = {item[0]: item[1] for item in inputs_list}
+        inputs_map = {} # Correctly parse inputs_map
+        for item in inputs_list:
+            if isinstance(item, list) and len(item) == 2:
+                key, val = item
+                inputs_map[key] = val
+            else:
+                logger.warning(f"Skipping invalid input item: {item}")
 
         # Convert to InputValue objects for compatibility
         inputs = {}
-        for key, value in inputs_map.items():
-            if isinstance(value, dict) and 'value' in value:
-                inputs[key] = InputValue(value['value'], value.get('args', {}))
-            else:
-                inputs[key] = InputValue(value)
+        for key, raw_value in inputs_map.items(): # Use raw_value here
+            # Infer valueType based on raw_value
+            inferred_value_type = 'string'
+            if isinstance(raw_value, bool):
+                inferred_value_type = 'boolean'
+            elif isinstance(raw_value, (int, float)):
+                inferred_value_type = 'number'
+            elif isinstance(raw_value, list):
+                inferred_value_type = 'array'
+            elif isinstance(raw_value, dict):
+                inferred_value_type = 'object'
+
+            inputs[key] = InputValue(
+                inputName=key, # Assuming inputName is the same as key
+                value=raw_value,
+                valueType=inferred_value_type,
+                args={} # No args provided in the raw input
+            )
 
         # Execute the plugin
         outputs = execute_plugin(inputs)

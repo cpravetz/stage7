@@ -318,33 +318,14 @@ class AgentSetManager {
     }
 
     async assignAgentToSet(agentId: string, actionVerb: string, inputs: Map<string, InputValue>,  missionId: string, missionContext: string): Promise<string> {
-
-        // If we don't have any AgentSets, create one directly
-        if (this.agentSets.size === 0) {
-            try {
-                await this.createNewAgentSet();
-            } catch (error) {
-                analyzeError(error as Error);
-                console.error('Error creating new agent set:', error instanceof Error ? error.message : error);
-            }
-        }
+        await this.ensureAgentSets(); // Ensure agent sets are populated
 
         // Get an available set from our internal state
-        let availableSet = Array.from(this.agentSets.values()).find(set => set.agentCount < this.maxAgentsPerSet);
+        let availableSet = await this.getAvailableAgentSet();
 
         if (!availableSet) {
-            try {
-                await this.createNewAgentSet();
-                availableSet = Array.from(this.agentSets.values()).find(set => set.agentCount < this.maxAgentsPerSet);
-
-                if (!availableSet) {
-                    throw new Error('Failed to create an available agent set');
-                }
-            } catch (error) {
-                analyzeError(error as Error);
-                console.error('Error creating new agent set:', error instanceof Error ? error.message : error);
-                throw new Error('Failed to create agent set');
-            }
+            // If no set is available after ensuring they are populated, something is wrong.
+            throw new Error('No available agent set found after initialization.');
         }
 
         this.agentToSetMap.set(agentId, availableSet.id);
@@ -718,40 +699,20 @@ class AgentSetManager {
     }
 
     private async createNewAgentSet(): Promise<void> {
-        try {
-            // IMPORTANT: Always use the same AgentSet URL to avoid multiple instances
-            // This ensures we're always using the same AgentSet service
-            const defaultAgentSetUrl = 'agentset:5100';
-            console.log('Using AgentSet with URL:', defaultAgentSetUrl);
-
-            // Use a consistent ID for the AgentSet to avoid creating multiple references
-            const id = 'primary-agentset';
-
-            // Check if we already have this AgentSet in our map
-            if (this.agentSets.has(id)) {
-                console.log(`AgentSet ${id} already exists, reusing it`);
-                return;
-            }
-
-            const newSet = {
-                id: id,
-                url: defaultAgentSetUrl,
-                agentCount: 0,
-                maxAgents: this.maxAgentsPerSet
-            };
-
-            this.agentSets.set(newSet.id, newSet);
-
-            // Skip PostOffice registration to avoid duplicate registrations
-            // The AgentSet service registers itself with Consul directly
-
-            console.log('Created new AgentSet reference:', newSet);
+        // This function should only ever be called to ensure the primary agentset exists.
+        if (this.agentSets.has('primary-agentset')) {
             return;
-        } catch (error) {
-            analyzeError(error as Error);
-            console.error('Error creating new AgentSet:', error instanceof Error ? error.message : error);
-            throw error; // Re-throw to allow caller to handle
         }
+
+        const primaryAgentSet = {
+            id: 'primary-agentset',
+            url: 'agentset:5100',
+            agentCount: 0,
+            maxAgents: this.maxAgentsPerSet,
+        };
+
+        this.agentSets.set(primaryAgentSet.id, primaryAgentSet);
+        console.log('Ensured primary agentset reference exists:', primaryAgentSet);
     }
 
     // We're now using the existing AgentSet container instead of creating new ones

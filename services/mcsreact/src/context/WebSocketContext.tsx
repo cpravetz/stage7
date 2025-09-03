@@ -177,6 +177,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         
       case MessageType.STATISTICS:
       case "agentStatistics":
+        console.log('AgentStatistics received:', data.content);
         // Batch statistics updates to prevent multiple re-renders
         const batchUpdate = () => {
           let statsToSet = { ...data.content };

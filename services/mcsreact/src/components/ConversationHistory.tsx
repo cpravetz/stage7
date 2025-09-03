@@ -64,7 +64,7 @@ const ConversationHistory: React.FC<Props> = React.memo(({ history }) => {
           px: 2,
           pb: 2,
           display: 'flex',
-          flexDirection: 'column-reverse', // Display messages bottom-to-top
+          flexDirection: 'column', // Display messages top-to-bottom
           '&::-webkit-scrollbar': {
             width: '8px',
           },

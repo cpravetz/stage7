@@ -1,16 +1,27 @@
 import json
 import csv
 import io
-from jsonpath_ng import jsonpath, parse
-import duckdb
+import sys
 
 def query_json(inputs):
-    """Queries a JSON object using a JSONPath expression."""
+    """Queries a JSON object using basic key-value filtering."""
     json_object = inputs.get("json_object")
-    expression = inputs.get("expression")
-    jsonpath_expression = parse(expression)
-    matches = [match.value for match in jsonpath_expression.find(json_object)]
-    return {"result": matches}
+    query = inputs.get("query")
+
+    if not isinstance(json_object, list):
+        return {"error": "JSON object must be a list of dictionaries."}
+
+    if not isinstance(query, dict):
+        return {"error": "Query must be a dictionary of key-value pairs."}
+
+    def matches(item, query):
+        for key, value in query.items():
+            if item.get(key) != value:
+                return False
+        return True
+
+    results = [item for item in json_object if isinstance(item, dict) and matches(item, query)]
+    return {"result": results}
 
 def validate_json(inputs):
     """Validates a JSON string."""
@@ -40,15 +51,6 @@ def json_to_csv(inputs):
     writer.writerows(json_data)
     return {"csv_data": output.getvalue()}
 
-def execute_sql_on_json(inputs):
-    """Executes a SQL query on a JSON array of objects."""
-    json_data = inputs.get("json_data")
-    sql_query = inputs.get("sql_query")
-    
-    # DuckDB can query a list of dictionaries directly
-    result = duckdb.query(sql_query, my_table=json_data).to_df().to_dict(orient='records')
-    return result
-
 def execute_plugin(operation, inputs):
     """
     Main entry point for the DATA_TOOLKIT plugin.
@@ -58,7 +60,6 @@ def execute_plugin(operation, inputs):
         "validate_json": validate_json,
         "csv_to_json": csv_to_json,
         "json_to_csv": json_to_csv,
-        "execute_sql_on_json": execute_sql_on_json,
     }
 
     if operation not in operations:
@@ -66,8 +67,34 @@ def execute_plugin(operation, inputs):
 
     result = operations[operation](inputs)
 
-    # Ensure result is a dictionary or list for JSON serialization
     if result is None:
-        return {"result": None} # Or handle as an error if None is not expected
+        return {"result": None}
 
     return result
+
+if __name__ == "__main__":
+    # Read inputs from stdin
+    inputs_str = sys.stdin.read().strip()
+    if not inputs_str:
+        raise ValueError("No input provided")
+
+    # Parse inputs - expecting a list of [key, value] pairs
+    inputs_list = json.loads(inputs_str)
+    
+    # Convert the list of pairs into a dictionary
+    inputs_dict = {}
+    for item in inputs_list:
+        if isinstance(item, list) and len(item) == 2:
+            key, val = item
+            inputs_dict[key] = val
+        else:
+            sys.stderr.write(f"Warning: Skipping invalid input item: {item}\n")
+
+    # Extract the operation from the inputs_dict
+    operation = inputs_dict.get("operation")
+    if not operation:
+        raise ValueError("Missing required input: operation")
+
+    # Pass the rest of the inputs_dict to execute_plugin
+    result = execute_plugin(operation, inputs_dict)
+    print(json.dumps(result))

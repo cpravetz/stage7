@@ -331,21 +331,6 @@ export class PluginRegistry {
         }
     }
 
-    public async getAvailablePluginsStr(): Promise<string> {
-        // Use the pluginMarketplace instance to get the formatted/cached string
-        // @ts-ignore: getAvailablePluginsStr may not be in the type definition if not yet published
-        if (typeof (this.pluginMarketplace as any).getAvailablePluginsStr === 'function') {
-            return await (this.pluginMarketplace as any).getAvailablePluginsStr();
-        }
-        // Fallback: list verbs only if method is missing
-        const locators = await this.pluginMarketplace.list();
-        const lines: string[] = [];
-        for (const locator of locators) {
-            lines.push(`- ${locator.verb}`);
-        }
-        return lines.join('\n');
-    }
-
     /**
      * Returns a list of active/configured repository types (for frontend repo picker)
      */

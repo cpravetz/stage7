@@ -269,6 +269,8 @@ class ScrapePlugin:
             return value.strip()
         return value
 
+    
+
     def _is_valid_url(self, url: str) -> bool:
         try:
             result = urlparse(url)
@@ -280,7 +282,7 @@ class ScrapePlugin:
     def execute(self, inputs_map: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Execute the SCRAPE plugin"""
         try:
-            # Extract URL using the helper
+            # Extract URL directly
             url_input = self._get_input_value(inputs_map, 'url') or self._get_input_value(inputs_map, 'websites')
 
             if not url_input:
@@ -336,7 +338,7 @@ class ScrapePlugin:
                 "success": False,
                 "name": "error",
                 "resultType": PluginParameterType.ERROR,
-                "resultDescription": f"Error scraping {self._get_input_value(inputs_map, 'url', 'undefined URL')}",
+                "resultDescription": f"Error scraping {self._get_input_value(inputs_map, 'url', 'undefined URL')}", # Direct access
                 "result": None,
                 "error": str(e)
             }]
@@ -351,7 +353,13 @@ def main():
 
         # Parse inputs - expecting serialized Map format
         inputs_list = json.loads(inputs_str)
-        inputs_map = {item[0]: item[1] for item in inputs_list}
+        inputs_map = {}
+        for item in inputs_list:
+            if isinstance(item, list) and len(item) == 2:
+                key, val = item
+                inputs_map[key] = val
+            else:
+                logger.warning(f"Skipping invalid input item: {item}")
 
         # Execute plugin
         plugin = ScrapePlugin()

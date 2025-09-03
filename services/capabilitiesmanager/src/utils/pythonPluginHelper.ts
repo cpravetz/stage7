@@ -4,6 +4,7 @@ import { promisify } from 'util';
 import { exec as execCallback } from 'child_process';
 import { PluginDefinition, PluginOutput, PluginParameterType } from '@cktmcs/shared';
 import { generateStructuredError, GlobalErrorCodes, ErrorSeverity } from './errorReporter';
+import * as crypto from 'crypto'; 
 
 const execAsync = promisify(execCallback);
 
@@ -18,11 +19,11 @@ export async function ensurePythonDependencies(pluginRootPath: string, trace_id:
     const venvPythonPath = path.join(venvBinDir, isWindows ? 'python.exe' : 'python');
     const venvPipPath = path.join(venvBinDir, isWindows ? 'pip.exe' : 'pip');
 
-    function venvHealthy() {
+    function venvHealthy(): boolean {
         return fs.existsSync(venvPythonPath);
     }
 
-    function sleep(ms: number) {
+    function sleep(ms: number): Promise<void> {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
 
@@ -45,23 +46,6 @@ export async function ensurePythonDependencies(pluginRootPath: string, trace_id:
                     throw err;
                 }
             }
-        }
-    }
-
-    if (fs.existsSync(venvPath) && !venvHealthy()) {
-        console.warn(`[${trace_id}] ${source_component}: Existing venv at ${venvPath} is broken. Deleting and recreating.`);
-        try {
-            await deleteVenvWithRetries(venvPath, 5, 1000);
-        } catch (deleteError: any) {
-            throw generateStructuredError({
-                error_code: GlobalErrorCodes.CAPABILITIES_MANAGER_PLUGIN_DEPENDENCY_FAILED,
-                severity: ErrorSeverity.CRITICAL,
-                message: `Failed to delete broken venv directory after multiple attempts: ${deleteError.message}`,
-                source_component,
-                original_error: deleteError,
-                trace_id_param: trace_id,
-                contextual_info: { pluginRootPath }
-            });
         }
     }
 
@@ -89,58 +73,86 @@ export async function ensurePythonDependencies(pluginRootPath: string, trace_id:
     }
 
     let requirementsHash: string | null = null;
+    if (fs.existsSync(requirementsPath)) {
+        const requirementsContent = fs.readFileSync(requirementsPath, 'utf8');
+        requirementsHash = crypto.createHash('md5').update(requirementsContent).digest('hex');
+    }
+
     try {
         const pythonCmd = await checkPythonExecutable();
 
+        let shouldRecreateVenv = false;
+
         if (!fs.existsSync(venvPath)) {
+            console.log(`[${trace_id}] ${source_component}: venv directory does not exist. Creating.`);
+            shouldRecreateVenv = true;
+        } else if (!venvHealthy()) {
+            console.warn(`[${trace_id}] ${source_component}: Existing venv at ${venvPath} is broken. Deleting and recreating.`);
+            await deleteVenvWithRetries(venvPath, 5, 1000);
+            shouldRecreateVenv = true;
+        } else if (requirementsHash && fs.existsSync(markerPath)) {
+            const oldRequirementsHash = fs.readFileSync(markerPath, 'utf8');
+            if (oldRequirementsHash !== requirementsHash) {
+                console.log(`[${trace_id}] ${source_component}: requirements.txt has changed. Deleting and recreating venv.`);
+                await deleteVenvWithRetries(venvPath, 5, 1000);
+                shouldRecreateVenv = true;
+            } else {
+                console.log(`[${trace_id}] ${source_component}: Existing venv is healthy and requirements are up to date.`);
+            }
+        } else if (requirementsHash && !fs.existsSync(markerPath)) {
+            console.log(`[${trace_id}] ${source_component}: requirements.txt exists but marker file is missing. Recreating venv.`);
+            await deleteVenvWithRetries(venvPath, 5, 1000);
+            shouldRecreateVenv = true;
+        } else {
+            console.log(`[${trace_id}] ${source_component}: Existing venv is healthy and no requirements.txt or marker file found.`);
+        }
+
+
+        if (shouldRecreateVenv) {
             console.log(`[${trace_id}] ${source_component}: Creating virtual environment at ${venvPath}.`);
             const createVenvCmd = `${pythonCmd} -m venv "${venvPath}"`;
             await execAsync(createVenvCmd, { cwd: pluginRootPath, timeout: 60000 });
-        }
 
-        if (fs.existsSync(venvPipPath)) {
-            const upgradePipCmd = `"${venvPipPath}" install --upgrade pip`;
-            await execAsync(upgradePipCmd, { cwd: pluginRootPath, timeout: 60000 });
-        } else {
-            console.log(`[${trace_id}] ${source_component}: pip not found, attempting to bootstrap with ensurepip`);
-            try {
-                const bootstrapPipCmd = `"${venvPythonPath}" -m ensurepip --upgrade`;
-                await execAsync(bootstrapPipCmd, { cwd: pluginRootPath, timeout: 60000 });
-                if (fs.existsSync(venvPipPath)) {
-                    const upgradePipCmd = `"${venvPipPath}" install --upgrade pip`;
-                    await execAsync(upgradePipCmd, { cwd: pluginRootPath, timeout: 60000 });
-                }
-            } catch (ensurepipError: any) {
-                console.warn(`[${trace_id}] ${source_component}: Failed to bootstrap pip with ensurepip: ${ensurepipError.message}`);
-            }
-        }
-
-        if (fs.existsSync(requirementsPath)) {
-            const requirementsContent = fs.readFileSync(requirementsPath, 'utf8');
-            requirementsHash = require('crypto').createHash('md5').update(requirementsContent).digest('hex');
-
-            if (fs.existsSync(markerPath)) {
-                const existingHash = fs.readFileSync(markerPath, 'utf8').trim();
-                if (existingHash === requirementsHash) {
-                    console.log(`[${trace_id}] ${source_component}: Dependencies already installed and up to date`);
-                    return;
-                }
-            }
-
-            let installReqsCmd: string;
             if (fs.existsSync(venvPipPath)) {
-                installReqsCmd = `"${venvPipPath}" install -r "${requirementsPath}"`;
+                const upgradePipCmd = `"${venvPipPath}" install --upgrade pip`;
+                await execAsync(upgradePipCmd, { cwd: pluginRootPath, timeout: 60000 });
             } else {
-                installReqsCmd = `"${venvPythonPath}" -m pip install -r "${requirementsPath}"`;
+                console.log(`[${trace_id}] ${source_component}: pip not found, attempting to bootstrap with ensurepip`);
+                try {
+                    const bootstrapPipCmd = `"${venvPythonPath}" -m ensurepip --upgrade`;
+                    await execAsync(bootstrapPipCmd, { cwd: pluginRootPath, timeout: 60000 });
+                    if (fs.existsSync(venvPipPath)) {
+                        const upgradePipCmd = `"${venvPipPath}" install --upgrade pip`;
+                        await execAsync(upgradePipCmd, { cwd: pluginRootPath, timeout: 60000 });
+                    }
+                } catch (ensurepipError: any) {
+                    console.warn(`[${trace_id}] ${source_component}: Failed to bootstrap pip with ensurepip: ${ensurepipError.message}`);
+                    console.log(`[${trace_id}] ${source_component}: Trying to install pip with get-pip.py`);
+                    try {
+                        const getPipCmd = `curl https://bootstrap.pypa.io/get-pip.py | "${venvPythonPath}"`;
+                        await execAsync(getPipCmd, { cwd: pluginRootPath, timeout: 60000 });
+                    } catch (getPipError: any) {
+                        throw new Error(`Failed to install pip with get-pip.py: ${getPipError.message}`);
+                    }
+                }
             }
-            const { stdout, stderr } = await execAsync(installReqsCmd, { cwd: pluginRootPath, timeout: 120000 });
 
-            if (stderr && !stderr.includes('Successfully installed') && !stderr.includes('Requirement already satisfied')) {
-                console.warn(`[${trace_id}] ${source_component}: Python dependency installation stderr: ${stderr}`);
-            }
+            if (fs.existsSync(requirementsPath)) {
+                let installReqsCmd: string;
+                if (fs.existsSync(venvPipPath)) {
+                    installReqsCmd = `"${venvPipPath}" install -r "${requirementsPath}"`;
+                } else {
+                    installReqsCmd = `"${venvPythonPath}" -m pip install -r "${requirementsPath}"`;
+                }
+                const { stdout, stderr } = await execAsync(installReqsCmd, { cwd: pluginRootPath, timeout: 120000 });
 
-            if (requirementsHash !== null) {
-                fs.writeFileSync(markerPath, requirementsHash);
+                if (stderr && !stderr.includes('Successfully installed') && !stderr.includes('Requirement already satisfied')) {
+                    console.warn(`[${trace_id}] ${source_component}: Python dependency installation stderr: ${stderr}`);
+                }
+
+                if (requirementsHash !== null) {
+                    fs.writeFileSync(markerPath, requirementsHash);
+                }
             }
         }
     } catch (error: any) {

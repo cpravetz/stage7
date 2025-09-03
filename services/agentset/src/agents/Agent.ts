@@ -18,6 +18,9 @@ import { CollaborationMessage, CollaborationMessageType, ConflictResolution as C
 
 
 export class Agent extends BaseEntity {
+    public lastActivityTime: number = Date.now();
+    private cleanupHandlers: Array<() => Promise<void>> = [];
+
     private missionContext: string = '';
     private agentSetUrl: string;
     private agentPersistenceManager: AgentPersistenceManager;
@@ -35,7 +38,6 @@ export class Agent extends BaseEntity {
     conversation: Array<{ role: string, content: string }> = [];
     role: string = 'executor'; // Default role
     roleCustomizations?: any;
-    private isRecovering: boolean = false; // New flag for recovery mode
     private waitingSteps: Map<string, string> = new Map();
 
     // Properties for lifecycle management
@@ -45,7 +47,7 @@ export class Agent extends BaseEntity {
 
     constructor(config: AgentConfig) {
         super(config.id, 'AgentSet', `agentset`, process.env.PORT || '9000');
-        console.log(`Agent ${config.id} created. missionId=${config.missionId}. Inputs: ${JSON.stringify(config.inputValues)}` );
+        // console.log(`Agent ${config.id} created. missionId=${config.missionId}. Inputs: ${JSON.stringify(config.inputValues)}` );
         this.agentPersistenceManager = new AgentPersistenceManager();
         this.stateManager = new StateManager(config.id, this.agentPersistenceManager);
         this.inputValues = config.inputValues instanceof Map ? config.inputValues : new Map(Object.entries(config.inputValues||{}));
@@ -61,7 +63,7 @@ export class Agent extends BaseEntity {
             const goalInput = this.inputValues.get('goal');
             if (goalInput?.value && typeof goalInput.value === 'string') {
                 this.missionContext = goalInput.value;
-                console.log(`[Agent Constructor] Initialized missionContext from 'goal' input for agent ${this.id}.`);
+                // console.log(`[Agent Constructor] Initialized missionContext from 'goal' input for agent ${this.id}.`);
             }
         }
         // Handle role and roleCustomizations if they exist in the config
@@ -71,10 +73,14 @@ export class Agent extends BaseEntity {
         if ('roleCustomizations' in config && config.roleCustomizations) {
             this.roleCustomizations = config.roleCustomizations;
         }
-
+        if (!config.actionVerb) {
+            console.log('Agent Line 95 - Missing required property "actionVerb" in agent config');
+            throw new Error(`Missing required property 'actionVerb' in agent config`);
+        }
         // Create initial step using the new Step class
         const initialStep = new Step({
             actionVerb: config.actionVerb,
+            missionId: this.missionId,
             stepNo: 1,
             inputValues: this.inputValues,
             description: 'Initial mission step',
@@ -94,7 +100,7 @@ export class Agent extends BaseEntity {
         });
 
         this.initializeAgent().then(() => {
-            console.log(`Agent ${this.id} initialized successfully. Status: ${this.status}. Commencing main execution loop.`);
+            // console.log(`Agent ${this.id} initialized successfully. Status: ${this.status}. Commencing main execution loop.`);
             this.say(`Agent ${this.id} initialized and commencing operations.`);
             this.runUntilDone();
         }).catch((error) => { // Added error parameter
@@ -106,6 +112,19 @@ export class Agent extends BaseEntity {
                  console.error(`Agent ${this.id} failed to notify TrafficManager about initialization error:`, notifyError);
             });
         });
+    }
+
+    async cleanup(): Promise<void> {
+        this.lastActivityTime = Date.now();
+        return Promise.all(this.cleanupHandlers.map(handler => handler())).then(() => {});
+    }
+
+    public getLastActivityTime(): number {
+        return this.lastActivityTime;
+    }
+
+    public addCleanupHandler(handler: () => Promise<void>): void {
+        this.cleanupHandlers.push(handler);
     }
 
     async logEvent(event: any): Promise<void> {
@@ -203,16 +222,16 @@ Please consider this context and the available plugins when planning and executi
         try {
             if (this.status !== AgentStatus.RUNNING) return;
 
-            console.log(`Executing step ${step.actionVerb} (${step.id})...`);
+            // console.log(`Executing step ${step.actionVerb} (${step.id})...`);
 
             if (step.recommendedRole && step.recommendedRole !== this.role && this.role !== 'coordinator') {
-                console.log(`Step ${step.id} recommends role ${step.recommendedRole}, but this agent has role ${this.role}`);
+                // console.log(`Step ${step.id} recommends role ${step.recommendedRole}, but this agent has role ${this.role}`);
                 const delegationResult = await this.delegateStepToSpecializedAgent(step);
                 if (delegationResult.success) {
                     step.status = StepStatus.COMPLETED; // Mark as completed since it's delegated
                     return;
                 }
-                console.log(`No specialized agent available, executing step with current agent`);
+                // console.log(`No specialized agent available, executing step with current agent`);
             }
 
             this.say(`Executing step: ${step.actionVerb} - ${step.description || 'No description'}`);
@@ -231,7 +250,7 @@ Please consider this context and the available plugins when planning and executi
                 return;
             }
 
-            console.log(`Step ${step.actionVerb} result:`, result);
+            // console.log(`Step ${step.actionVerb} result:`, result);
 
             if (result && result.length > 0 && result[0].name === 'pending_user_input') {
                 const requestId = (result[0] as any).request_id;
@@ -240,7 +259,7 @@ Please consider this context and the available plugins when planning and executi
                     step.status = StepStatus.WAITING;
                     this.waitingSteps.set(requestId, step.id);
                     await this.notifyTrafficManager();
-                    console.log(`Agent ${this.id} is waiting for user input for step ${step.id} with request ID ${requestId}`);
+                    // console.log(`Agent ${this.id} is waiting for user input for step ${step.id} with request ID ${requestId}`);
                     return;
                 }
             }
@@ -267,6 +286,25 @@ Please consider this context and the available plugins when planning and executi
                     await this.notifyTrafficManager();
                 } else if (answerOutput && answerOutput.result) {
                     this.say(`Reflection result: ${answerOutput.result}`);
+                    try {
+                        const newPlan = JSON.parse(answerOutput.result);
+                        if (Array.isArray(newPlan)) {
+                            this.say('Reflection resulted in a new plan. Updating plan.');
+                            const currentStepIndex = this.steps.findIndex(s => s.id === step.id);
+                            if (currentStepIndex !== -1) {
+                                // Cancel all steps that come after the current REFLECT step
+                                for (let i = currentStepIndex + 1; i < this.steps.length; i++) {
+                                    this.steps[i].status = StepStatus.CANCELLED;
+                                }
+                            }
+                            this.addStepsFromPlan(newPlan, step);
+                            await this.notifyTrafficManager();
+                            return;
+                        }
+                    } catch (e) {
+                        // Not a JSON plan, so just log it and continue
+                    }
+
                     this.say('Progress is on track. Continuing with the current plan.'); // Assuming 'answer' means continue
                 } else {
                     this.say('Reflection did not provide a clear plan or answer. Continuing with the current plan.');
@@ -314,13 +352,27 @@ Please consider this context and the available plugins when planning and executi
                 return;
             }
 
-            const executableSteps = this.steps.filter(step =>
-                step.status === StepStatus.PENDING && step.areDependenciesSatisfied(this.steps)
-            );
+            const pendingSteps = this.steps.filter(step => step.status === StepStatus.PENDING);
+            const executableSteps = pendingSteps.filter(step => step.areDependenciesSatisfied(this.steps));
 
             if (executableSteps.length > 0) {
                 const executionPromises = executableSteps.map(step => this.executeStep(step));
                 await Promise.all(executionPromises);
+            } else if (pendingSteps.length > 0) {
+                // Deadlock detection: pending steps exist, but none are executable.
+                for (const step of pendingSteps) {
+                    if (step.areDependenciesPermanentlyUnsatisfied(this.steps)) {
+                        step.status = StepStatus.CANCELLED;
+                        this.logEvent({
+                            eventType: 'step_cancelled_dependency_unsatisfied',
+                            agentId: this.id,
+                            stepId: step.id,
+                            dependencies: step.dependencies,
+                            timestamp: new Date().toISOString()
+                        });
+                        console.log(`[Agent ${this.id}] Cancelling step ${step.id} due to permanently unsatisfied dependencies.`);
+                    }
+                }
             } else if (!this.hasActiveWork()) {
                 this.status = AgentStatus.COMPLETED;
                 const finalStep = this.steps.filter(s => s.status === StepStatus.COMPLETED).pop();
@@ -413,9 +465,10 @@ Please consider this context and the available plugins when planning and executi
                 if (waitingStepId) {
                     const step = this.steps.find(s => s.id === waitingStepId);
                     if (step) {
+                        const outputName = step.outputs?.keys().next().value || 'answer';
                         step.result = [{
                             success: true,
-                            name: 'answer',
+                            name: outputName,
                             resultType: PluginParameterType.STRING,
                             result: answer,
                             resultDescription: 'User response'
@@ -461,7 +514,13 @@ Please consider this context and the available plugins when planning and executi
                 error: 'Question is required for ASK plugin'
             }]
         }
-        const question = input.value || input.args?.question;
+        let question = input.value || input.args?.question;
+        inputs.forEach((value, key) => {
+            if (key !== 'question') {
+                const regex = new RegExp(`\{${key}\}`, 'g');
+                question = question.replace(regex, value.value);
+            }
+        });
         const choices = input.args?.choices;
         const answerType = input.args?.answerType || 'text';
         const timeout = input.args?.timeout || 600000; // Default timeout of 10 minutes if not specified
@@ -590,20 +649,6 @@ Please consider this context and the available plugins when planning and executi
         }
     }
 
-    /**
-     * Checks if any step in the given list of agents depends on the given stepId.
-     */
-    private static isStepFinal(stepId: string, allAgents: Agent[]): boolean {
-        for (const agent of allAgents) {
-            for (const step of agent.steps) {
-                if (step.dependencies && step.dependencies.some(dep => dep.sourceStepId === stepId)) {
-                    return false; // Found a dependent step
-                }
-            }
-        }
-        return true; // No dependent step found
-    }
-
     private async createSubAgent(inputs: Map<string, InputValue>): Promise<PluginOutput[]> {
         if (this.status !== AgentStatus.RUNNING) {
             console.log(`Agent ${this.id} is not RUNNING, aborting createSubAgent.`);
@@ -653,7 +698,6 @@ Please consider this context and the available plugins when planning and executi
                 inputValues: MapSerializer.transformForSerialization(newInputs),
                 missionId: this.missionId,
                 dependencies: [this.id, ...(this.dependencies || [])],
-                missionContext: this.missionContext,
                 roleId: finalRoleId,
                 roleCustomizations: roleCustomizations
             };
@@ -806,7 +850,7 @@ Please consider this context and the available plugins when planning and executi
 
             const verificationTask: ActionVerbTask = {
                 actionVerb: 'VERIFY_FACT',
-                description: `Verify the following information which was returned with low confidence: "${brainResponse}"`,
+                description: `Verify the following information which was returned with low confidence: "${brainResponse}"`, 
                 inputReferences: new Map<string, InputReference>([
                     ['fact', { inputName: 'fact', value: brainResponse, valueType: PluginParameterType.STRING }]
                 ]),
@@ -819,7 +863,7 @@ Please consider this context and the available plugins when planning and executi
 
             const continuationTask: ActionVerbTask = {
                 actionVerb: 'THINK',
-                description: `Re-evaluating the original prompt with a verified fact.`,
+                description: `Re-evaluating the original prompt with a verified fact.`, 
                 inputReferences: inputs || new Map<string, InputReference>(),
                 outputs:  new Map<string, PluginParameterType>([
                     ['final_answer', PluginParameterType.STRING]
@@ -836,7 +880,7 @@ Please consider this context and the available plugins when planning and executi
                 name: 'recovery_plan',
                 resultType: PluginParameterType.PLAN,
                 result: [verificationTask, continuationTask],
-                resultDescription: `Generated a 2-step recovery plan due to low confidence score.`,
+                resultDescription: `Generated a 2-step recovery plan due to low confidence score.`, 
             }];
         } catch (error) {
             console.error('Error using Brain for reasoning:', error instanceof Error ? error.message : error);
@@ -857,14 +901,29 @@ Please consider this context and the available plugins when planning and executi
                 return this.handleAskStep(step.inputValues);
             }
 
-            const payload = MapSerializer.transformForSerialization(step);
+            // Create a mutable copy of inputValues to inject the missionId
+            const inputsForExecution = new Map(step.inputValues);
+
+            // Ensure missionId is always present for the capabilities manager
+            if (!inputsForExecution.has('missionId')) {
+                inputsForExecution.set('missionId', {
+                    inputName: 'missionId',
+                    value: this.missionId,
+                    valueType: PluginParameterType.STRING
+                });
+            }
+
+            // Create a payload with a standard JSON-serializable format for inputs
+            const payload = {
+                ...step,
+                inputValues: [...inputsForExecution] // Convert Map to array of [key, value] pairs
+            };
             step.storeTempData('payload', payload);
 
-            //console.log('Agent: Executing serialized action with CapabilitiesManager:', payload);
+            //console.log('Agent: Executing action with CapabilitiesManager:', JSON.stringify(payload, null, 2));
 
-            // Add extended timeout for CapabilitiesManager calls, especially for ACCOMPLISH actions
-            // that may need to call Brain service with long model retry timeouts
-            const timeout = step.actionVerb === 'ACCOMPLISH' ? 3600000 : 1800000; // 60 minutes for ACCOMPLISH, 30 minutes for others
+            // Add extended timeout for CapabilitiesManager calls
+            const timeout = step.actionVerb === 'ACCOMPLISH' ? 3600000 : 1800000; // 60m for ACCOMPLISH, 30m for others
 
             const response = await this.authenticatedApi.post(
                 `http://${this.capabilitiesManagerUrl}/executeAction`,
@@ -872,7 +931,8 @@ Please consider this context and the available plugins when planning and executi
                 { timeout }
             );
 
-            return MapSerializer.transformFromSerialization(response.data);
+            // The response should be standard JSON, no custom deserialization needed here
+            return response.data;
         } catch (error) {
             console.error('Error executing action with CapabilitiesManager:', error instanceof Error ? error.message : error);
 
@@ -976,7 +1036,7 @@ Please consider this context and the available plugins when planning and executi
 
             console.log(`Completed cleanup for failed step ${step.id}`);
         } catch (cleanupError) {
-            console.error(`Error during step ${step.id} cleanup:`,
+            console.error(`Error during step ${step.id} cleanup:`, 
                 cleanupError instanceof Error ? cleanupError.message : cleanupError
             );
             // Log the error but don't throw - we want to continue with other cleanup tasks
@@ -1187,7 +1247,7 @@ Please consider this context and the available plugins when planning and executi
 
         // Set up new interval
         this.checkpointInterval = setInterval(() => {
-            this.saveAgentState()
+            this.saveAgentState() 
                 .catch(error => {
                     const agentIdForError = this.id || 'unknown-agent-id';
                     if (error instanceof Error) {
@@ -1233,37 +1293,13 @@ Please consider this context and the available plugins when planning and executi
     async getAgentState(): Promise<any> {
         const agentIdForLog = this.id || 'unknown-agent-id';
         try {
-            if (!this.stateManager) {
-                console.error(`[Agent ${agentIdForLog}] StateManager not initialized. Cannot get agent state.`);
-                // Return a default structure if stateManager is missing
-                return {
-                    id: this.id,
-                    status: this.status || AgentStatus.UNKNOWN,
-                    missionId: this.missionId,
-                    role: this.role || 'executor',
-                    stepCount: Array.isArray(this.steps) ? this.steps.length : 0,
-                    // Provide default empty arrays for step counts if this.steps is not an array
-                    completedSteps: Array.isArray(this.steps) ? this.steps.filter(step => step?.status === StepStatus.COMPLETED).length : 0,
-                    pendingSteps: Array.isArray(this.steps) ? this.steps.filter(step => step?.status === StepStatus.PENDING).length : 0,
-                    runningSteps: Array.isArray(this.steps) ? this.steps.filter(step => step?.status === StepStatus.RUNNING).length : 0,
-                    errorSteps: Array.isArray(this.steps) ? this.steps.filter(step => step?.status === StepStatus.ERROR).length : 0,
-                    roleCustomizations: this.roleCustomizations
-                };
-            }
-
-            const loadedState = await this.stateManager.loadState(this.id);
-            if (loadedState) {
-                return loadedState;
-            }
-
-            // Fallback to default state if loadedState is null/undefined
-            console.warn(`[Agent ${agentIdForLog}] Could not load state from StateManager, returning default state representation.`);
             return {
                 id: this.id,
                 status: this.status || AgentStatus.UNKNOWN,
                 missionId: this.missionId,
                 role: this.role || 'executor',
                 stepCount: Array.isArray(this.steps) ? this.steps.length : 0,
+                // Provide default empty arrays for step counts if this.steps is not an array
                 completedSteps: Array.isArray(this.steps) ? this.steps.filter(step => step?.status === StepStatus.COMPLETED).length : 0,
                 pendingSteps: Array.isArray(this.steps) ? this.steps.filter(step => step?.status === StepStatus.PENDING).length : 0,
                 runningSteps: Array.isArray(this.steps) ? this.steps.filter(step => step?.status === StepStatus.RUNNING).length : 0,
@@ -1304,8 +1340,14 @@ Please consider this context and the available plugins when planning and executi
           case CollaborationMessageType.TASK_DELEGATION:
             const task = message.payload as TaskDelegationRequest;
             console.log(`Agent ${this.id} received delegated task: ${task.description}`);
+            if (!task.taskType) {
+                console.log('Agent Line 1364 - Missing required property "taskType" in task');
+                throw new Error(`Missing required property 'taskType' in task`);
+            }
+
             const newStep = new Step({
               actionVerb: task.taskType,
+              missionId: this.missionId,
               stepNo: this.steps.length + 1,
               inputValues: new Map(Object.entries(task.inputs)),
               description: task.description,
@@ -1369,7 +1411,8 @@ Please consider this context and the available plugins when planning and executi
         // A more advanced implementation would involve the agent taking action based on the resolution,
         // such as retrying a failed step with corrected data or updating its plan.
         // For now, we log the outcome and add it to the conversation for context.
-        this.addToConversation('system', `Conflict Resolution Outcome for ${resolution.conflictId}:\nResolution: ${JSON.stringify(resolution.resolution)}\nExplanation: ${resolution.explanation}`);
+        this.addToConversation('system', `Conflict Resolution Outcome for ${resolution.conflictId}:\nResolution: ${JSON.stringify(resolution.resolution)}
+Explanation: ${resolution.explanation}`);
     }
 
     /**
@@ -1381,21 +1424,8 @@ Please consider this context and the available plugins when planning and executi
         try {
             console.log(`Attempting to delegate step ${step.id} to an agent with role ${step.recommendedRole}`);
 
-            // Create a task delegation request
-            const delegationRequest = {
-                taskId: uuidv4(),
-                taskType: step.actionVerb,
-                description: step.description || `Execute ${step.actionVerb}`,
-                inputValues: MapSerializer.transformForSerialization(step.inputValues),
-                priority: 'normal',
-                context: {
-                    sourceAgentId: this.id,
-                    sourceStepId: step.id,
-                    recommendedRole: step.recommendedRole
-                }
-            };
-
             // Find an agent with the appropriate role
+            let recipientId: string | null = null;
             try {
                 const response = await this.authenticatedApi.post(`http://${this.agentSetUrl}/findAgentWithRole`, {
                     roleId: step.recommendedRole,
@@ -1403,39 +1433,91 @@ Please consider this context and the available plugins when planning and executi
                 });
 
                 if (response.data && response.data.agentId) {
-                    const recipientId = response.data.agentId;
+                    recipientId = response.data.agentId;
                     console.log(`Found agent ${recipientId} with role ${step.recommendedRole}`);
-
-                    // Delegate the task to the specialized agent
-                    const delegationResponse = await this.authenticatedApi.post(`http://${this.agentSetUrl}/delegateTask`, {
-                        delegatorId: this.id,
-                        recipientId: recipientId,
-                        request: delegationRequest
+                } else {
+                    console.log(`No agent found with role ${step.recommendedRole}, creating a new one.`);
+                    const createAgentResponse = await this.authenticatedApi.post(`http://${this.agentSetUrl}/createSpecializedAgent`, {
+                        roleId: step.recommendedRole,
+                        missionId: this.missionId
                     });
+                    if (createAgentResponse.data && createAgentResponse.data.agentId) {
+                        recipientId = createAgentResponse.data.agentId;
+                        console.log(`Created new agent ${recipientId} with role ${step.recommendedRole}`);
+                        
+                        let agentReady = false;
+                        const maxWaitTime = 30000; // 30 seconds
+                        const pollInterval = 2000; // 2 seconds
+                        const startTime = Date.now();
 
-                    if (delegationResponse.data && delegationResponse.data.accepted) {
-                        console.log(`Successfully delegated step ${step.id} to agent ${recipientId}`);
-                        // Store the mapping from the delegated task ID to our internal step ID
-                        this.delegatedSteps.set(delegationResponse.data.taskId, step.id);
-
-                        return {
-                            success: true,
-                            result: {
-                                taskId: delegationResponse.data.taskId,
-                                recipientId: recipientId,
-                                estimatedCompletion: delegationResponse.data.estimatedCompletion
+                        while (Date.now() - startTime < maxWaitTime) {
+                            try {
+                                const agentStatusResponse = await this.authenticatedApi.get(`http://${this.agentSetUrl}/agent/${recipientId}`);
+                                if (agentStatusResponse.data && agentStatusResponse.data.status === AgentStatus.RUNNING) {
+                                    agentReady = true;
+                                    break;
+                                }
+                            } catch (e) {
+                                // Ignore errors, just retry
                             }
-                        };
+                            await new Promise(resolve => setTimeout(resolve, pollInterval));
+                        }
+
+                        if (!agentReady) {
+                            console.error(`Agent ${recipientId} did not become ready in time.`);
+                            return { success: false, result: null };
+                        }
                     } else {
-                        console.log(`Agent ${recipientId} rejected delegation: ${delegationResponse.data.reason}`);
+                        console.error(`Failed to create specialized agent with role ${step.recommendedRole}`);
                         return { success: false, result: null };
                     }
-                } else {
-                    console.log(`No agent found with role ${step.recommendedRole}`);
-                    return { success: false, result: null };
                 }
             } catch (error) {
-                console.error(`Error finding agent with role ${step.recommendedRole}:`, error);
+                console.error(`Error finding or creating agent with role ${step.recommendedRole}:`, error);
+                return { success: false, result: null };
+            }
+
+            if (recipientId) {
+                // Create a task delegation request
+                const delegationRequest = {
+                    taskId: uuidv4(),
+                    taskType: step.actionVerb,
+                    description: step.description || `Execute ${step.actionVerb}`,
+                    inputs: MapSerializer.transformForSerialization(step.inputValues),
+                    priority: 'normal',
+                    context: {
+                        sourceAgentId: this.id,
+                        sourceStepId: step.id,
+                        recommendedRole: step.recommendedRole
+                    }
+                };
+
+                // Delegate the task to the specialized agent
+                const delegationResponse = await this.authenticatedApi.post(`http://${this.agentSetUrl}/delegateTask`, {
+                    delegatorId: this.id,
+                    recipientId: recipientId,
+                    request: delegationRequest
+                });
+
+                if (delegationResponse.data && delegationResponse.data.accepted) {
+                    console.log(`Successfully delegated step ${step.id} to agent ${recipientId}`);
+                    // Store the mapping from the delegated task ID to our internal step ID
+                    this.delegatedSteps.set(delegationResponse.data.taskId, step.id);
+
+                    return {
+                        success: true,
+                        result: {
+                            taskId: delegationResponse.data.taskId,
+                            recipientId: recipientId,
+                            estimatedCompletion: delegationResponse.data.estimatedCompletion
+                        }
+                    };
+                } else {
+                    console.log(`Agent ${recipientId} rejected delegation: ${delegationResponse.data.reason}`);
+                    return { success: false, result: null };
+                }
+            } else {
+                console.error(`Could not find or create an agent with role ${step.recommendedRole}`);
                 return { success: false, result: null };
             }
         } catch (error) {
@@ -1558,6 +1640,7 @@ Please consider this context and the available plugins when planning and executi
         // Create a new step for plan template execution
         const planStep = new Step({
             actionVerb: 'EXECUTE_PLAN_TEMPLATE',
+            missionId: this.missionId,
             stepNo: this.steps.length + 1,
             inputReferences: new Map([
                 ['templateId', { inputName: 'templateId', value: templateId, valueType: PluginParameterType.STRING, args: {} }],
@@ -1974,7 +2057,6 @@ Please consider this context and the available plugins when planning and executi
             return;
         }
         Agent.replannedSteps.add(failedStep);
-        this.isRecovering = true; // Enter recovery mode
 
         const errorMsg = failedStep.lastError?.message || 'Unknown error';
         const workProductsSummary = await this.getCompletedWorkProductsSummary();
@@ -1998,18 +2080,22 @@ Please consider this context and the available plugins when planning and executi
         const recoveryGoal = `
 **Recovery Task:** The step "${failedStep.actionVerb}" failed.
 
+** Step Details:** ${JSON.stringify(failedStep)}
+
 **Original Mission:** ${this.missionContext}
 
 **Completed Work:** ${workProductsSummary}
 
-**Instructions:** Create a simple, alternative approach to accomplish what the failed step was trying to do. Your new plan should use the step inputs and produce the step outputs. Do not repeat the failed approach.
+**Instructions:** Create an alternative approach to accomplish what the failed step was trying to do. Your new plan should use the step inputs and produce the step outputs. Do not repeat the failed approach.
         `;
 
         const recoveryStep = new Step({
             actionVerb: 'ACCOMPLISH',
+            missionId: this.missionId,
             stepNo: this.steps.length + 1,
             inputValues: new Map([
-                ['goal', { inputName: 'goal', value: recoveryGoal, valueType: PluginParameterType.STRING, args: {} }]
+                ['goal', { inputName: 'goal', value: recoveryGoal, valueType: PluginParameterType.STRING, args: {} }],
+                ['missionId', { inputName: 'missionId', value: this.missionId, valueType: PluginParameterType.STRING, args: {} }]
             ]),
             description: `Recovery plan for failed step: ${failedStep.actionVerb}`,
             persistenceManager: this.agentPersistenceManager
@@ -2038,6 +2124,7 @@ Please consider this context and the available plugins when planning and executi
 
         const breakdownStep = new Step({
             actionVerb: 'THINK',
+            missionId: this.missionId,
             stepNo: this.steps.length + 1,
             inputValues: new Map([
                 ['prompt', { inputName: 'prompt', value: taskBreakdownGoal, valueType: PluginParameterType.STRING, args: {} }]
