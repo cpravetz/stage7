@@ -1,5 +1,6 @@
 import { PluginParameterType } from './Plugin';
 
+
 /**
  * OpenAPI authentication configuration
  */

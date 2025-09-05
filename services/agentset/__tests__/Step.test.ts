@@ -249,4 +249,51 @@ describe('Step', () => {
             expect(step1.getOutputType(allSteps)).toBe(OutputType.INTERIM);
         });
     });
-});
+
+    describe('execute', () => {
+        const mockExecuteAction = jest.fn();
+        const mockThinkAction = jest.fn();
+        const mockDelegateAction = jest.fn();
+        const mockAskAction = jest.fn();
+
+        it('should execute an IF_THEN step correctly when condition is true', async () => {
+            const step = new Step({
+                missionId: 'test-mission',
+                actionVerb: 'IF_THEN',
+                stepNo: 1,
+                inputValues: new Map([
+                    ['condition', { inputName: 'condition', value: true, valueType: PluginParameterType.BOOLEAN, args: {} }],
+                    ['trueSteps', { inputName: 'trueSteps', value: [{ actionVerb: 'TRUE_ACTION' }], valueType: PluginParameterType.PLAN, args: {} }],
+                ]),
+                persistenceManager: mockPersistenceManager,
+            });
+
+            const result = await step.execute(mockExecuteAction, mockThinkAction, mockDelegateAction, mockAskAction);
+
+            expect(result[0].success).toBe(true);
+            expect(result[0].resultType).toBe(PluginParameterType.PLAN);
+            const newSteps = result[0].result as any[];
+            expect(newSteps[0].actionVerb).toBe('TRUE_ACTION');
+        });
+
+        it('should execute an IF_THEN step correctly when condition is false', async () => {
+            const step = new Step({
+                missionId: 'test-mission',
+                actionVerb: 'IF_THEN',
+                stepNo: 1,
+                inputValues: new Map([
+                    ['condition', { inputName: 'condition', value: false, valueType: PluginParameterType.BOOLEAN, args: {} }],
+                    ['trueSteps', { inputName: 'trueSteps', value: [{ actionVerb: 'TRUE_ACTION' }], valueType: PluginParameterType.PLAN, args: {} }],
+                    ['falseSteps', { inputName: 'falseSteps', value: [{ actionVerb: 'FALSE_ACTION' }], valueType: PluginParameterType.PLAN, args: {} }],
+                ]),
+                persistenceManager: mockPersistenceManager,
+            });
+
+            const result = await step.execute(mockExecuteAction, mockThinkAction, mockDelegateAction, mockAskAction);
+
+            expect(result[0].success).toBe(true);
+            expect(result[0].resultType).toBe(PluginParameterType.PLAN);
+            const newSteps = result[0].result as any[];
+            expect(newSteps[0].actionVerb).toBe('FALSE_ACTION');
+        });
+    });

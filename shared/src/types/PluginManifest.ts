@@ -15,6 +15,7 @@ export interface PluginLocator {
     version?: string;
     repository: PluginRepositoryLink;
     language?: string;
+    name?: string; // Added name property
     // Potentially add 'publisher' or 'namespace' here for better unique identification
 }
 

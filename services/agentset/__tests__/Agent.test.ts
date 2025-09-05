@@ -843,3 +843,38 @@ describe('Agent', () => {
 
     });
 });
+
+    describe('Execution Loop', () => {
+        it('should execute a pending step', async () => {
+            const step = agent.steps[0];
+            step.areDependenciesSatisfied = jest.fn().mockReturnValue(true);
+            step.execute = jest.fn().mockResolvedValue([{ success: true, result: 'test' }]);
+
+            await (agent as any).runAgent();
+
+            expect(step.execute).toHaveBeenCalled();
+            expect(step.status).toBe(StepStatus.COMPLETED);
+        });
+
+        it('should handle step failure', async () => {
+            const step = agent.steps[0];
+            step.areDependenciesSatisfied = jest.fn().mockReturnValue(true);
+            step.execute = jest.fn().mockRejectedValue(new Error('test error'));
+
+            await (agent as any).runAgent();
+
+            expect(step.status).toBe(StepStatus.ERROR);
+        });
+
+        it('should handle plan generation from a step', async () => {
+            const step = agent.steps[0];
+            step.areDependenciesSatisfied = jest.fn().mockReturnValue(true);
+            const newPlan = [{ actionVerb: 'NEW_STEP' }];
+            step.execute = jest.fn().mockResolvedValue([{ resultType: PluginParameterType.PLAN, result: newPlan }]);
+
+            await (agent as any).runAgent();
+
+            expect(agent.steps.length).toBe(2);
+            expect(agent.steps[1].actionVerb).toBe('NEW_STEP');
+        });
+    });

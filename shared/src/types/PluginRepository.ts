@@ -22,9 +22,10 @@ export interface RepositoryConfig {
         email?: string;
     };
     options?: {
-        defaultBranch?: string;
-        registry?: string;
-        localPath?: string;
-        collection?: string;
-    };
+            defaultBranch?: string;
+            registry?: string;
+            localPath?: string;
+            collection?: string;
+            pluginsPath?: string;
+        };
 }
