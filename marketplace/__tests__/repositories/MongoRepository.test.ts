@@ -359,7 +359,7 @@ describe('MongoRepository', () => {
         it('should throw error if delete fails', async () => {
             mockAuthenticatedApiPost.mockRejectedValueOnce(new Error('Delete API error'));
 
-            await expect(repository.delete(mockPluginId)).rejects.toThrow("Failed to delete plugin ID 'plugin-to-delete' from MongoDB: Delete API error");
+            await expect(repository.delete(mockPluginId)).rejects.toThrow(`Failed to delete plugin ID '${mockPluginId}' from MongoDB: Delete API error`);
             expect(mockAnalyzeError).toHaveBeenCalledTimes(1);
         });
     });

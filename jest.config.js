@@ -1,6 +1,8 @@
 module.exports = {
   preset: 'ts-jest',
   testEnvironment: 'node',
+  rootDir: '.',
+  moduleDirectories: ['node_modules', 'src'],
   testMatch: [
     '<rootDir>/services/engineer/__tests__/**/*.test.ts',
     '<rootDir>/marketplace/__tests__/**/*.test.ts'

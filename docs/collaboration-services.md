@@ -10,6 +10,7 @@ The collaboration system consists of four main components:
 - **CollaborationProtocol**: Defines the message types, interfaces, and protocols used for collaboration between agents.
 - **TaskDelegation**: Manages the delegation of tasks between agents, including task creation, forwarding, status updates, and notifications.
 - **ConflictResolution**: Handles conflicts that arise during collaboration, supporting multiple resolution strategies such as voting, consensus, authority, negotiation, and escalation.
+- **SharedMemory**: Provides a key-value store with access control for agents to share data, backed by the `Librarian` service for persistence.
 
 ---
 
@@ -42,7 +43,7 @@ The core strategy is **delegation to specialized agents**. Instead of creating a
 
 ## CollaborationManager
 
-The `CollaborationManager` class implements the `CollaborationProtocol` interface and acts as the core coordinator for collaboration among agents.
+The `CollaborationManager` class, instantiated within the `AgentSet`, implements the `CollaborationProtocol` interface and acts as the core coordinator for collaboration among agents.
 
 ### Key Responsibilities
 
@@ -110,7 +111,11 @@ Manages the delegation of tasks between agents.
 - Delegates tasks to agents within the same or different agent sets, forwarding requests as needed.
 - Updates task status and notifies delegators of progress or completion.
 - Supports task cancellation and expiration checks.
-- Uses service-to-service authentication for secure communication.
+- Includes error handling and timeout mechanisms for robust operation.
+
+### Security and Authentication
+
+The `TaskDelegation` system uses a `ServiceTokenManager` to obtain JWTs from the `SecurityManager`. These tokens are used to make authenticated requests when forwarding task delegations to other agent sets, ensuring that all communication is secure.
 
 ### Task Lifecycle
 
@@ -140,6 +145,10 @@ Handles conflicts that arise during collaboration.
 - Notifies participants of resolutions or escalations.
 - Checks for expired conflicts and escalates if unresolved.
 
+### Security and Authentication
+
+Similar to `TaskDelegation`, the `ConflictResolution` system utilizes a `ServiceTokenManager` to make secure, authenticated requests when communicating with other services, such as the `Brain` for negotiation or the `TrafficManager` for escalations.
+
 ### Conflict Lifecycle
 
 1. Conflict created and stored with status `PENDING`.
@@ -150,12 +159,25 @@ Handles conflicts that arise during collaboration.
 
 ---
 
+## SharedMemory
+
+The `SharedMemory` class provides a persistent, mission-specific, key-value store for agents to share data.
+
+### Features
+
+- **Persistent Storage**: Uses the `Librarian` service to persist shared memory entries in MongoDB.
+- **Access Control**: Each memory entry has read and write access control lists, allowing agents to control who can access their data.
+- **Versioning**: Keeps a history of previous versions of a memory entry.
+- **Tagging and Querying**: Supports tagging entries with keywords and provides a query interface to search for entries based on tags, creator, and timestamps.
+
+---
+
 ## Interaction Between Components
 
 - `CollaborationManager` acts as the central hub, receiving and routing messages.
 - Task delegation and conflict resolution are handled by their respective systems but coordinated through the manager.
 - Agents communicate via collaboration messages adhering to the `CollaborationProtocol`.
-- Shared memory is used to store and share knowledge among agents.
+- `SharedMemory` is used to store and share knowledge among agents.
 - The system supports distributed agent sets, forwarding messages and delegations across network boundaries securely.
 
 ---

@@ -8,7 +8,7 @@ This guide covers deploying the Stage7 system with the new enterprise-ready plug
 
 ### System Requirements
 - **Docker**: Version 20.10+ with Docker Compose
-- **Node.js**: Version 18+ for frontend and services
+- **Node.js**: Version 20+ for frontend and services
 - **Python**: Version 3.9+ for Python plugins
 - **Memory**: Minimum 8GB RAM recommended
 - **Storage**: Minimum 20GB available space
@@ -22,39 +22,77 @@ This guide covers deploying the Stage7 system with the new enterprise-ready plug
 
 ### 1. Environment Variables
 
-Create a `.env` file in the project root:
+Create a `.env` file in the project root by copying the `.env.example` file and filling in the values.
 
-```bash
-# Core Configuration
-NODE_ENV=production
-CLIENT_SECRET=your-secure-secret-here
+#### Core Configuration
+- `NODE_ENV`: The environment for Node.js (e.g., `production`, `development`).
+- `HOST`: The hostname for the services (e.g., `localhost`).
+- `PORT`: The port for the services (e.g., `5020` for PostOffice).
 
-# Service URLs (adjust for your deployment)
-POSTOFFICE_URL=postoffice:5020
-BRAIN_URL=brain:5030
-LIBRARIAN_URL=librarian:5040
-CAPABILITIESMANAGER_URL=capabilitiesmanager:5060
-MARKETPLACE_URL=marketplace:5050
-ENGINEER_URL=engineer:5080
-SECURITYMANAGER_URL=securitymanager:5010
+#### Security
+- `CLIENT_SECRET`: A shared secret for client authentication.
+- `SHARED_CLIENT_SECRET`: A shared secret for all services in simple deployments.
+- `JWT_SECRET`: The secret key for signing JWT tokens.
+- `JWT_REFRESH_SECRET`: The secret key for refreshing JWT tokens.
+- `ENCRYPTION_KEY`: A key for encrypting sensitive data.
+- `POSTOFFICE_SECRET`, `MISSIONCONTROL_SECRET`, `BRAIN_SECRET`, `LIBRARIAN_SECRET`, `ENGINEER_SECRET`, `TRAFFICMANAGER_SECRET`, `CAPABILITIESMANAGER_SECRET`, `AGENTSET_SECRET`, `AGENT_SECRET`, `ERRORHANDLER_SECRET`: Individual secrets for each service.
 
-# Database Configuration
-MONGODB_URI=mongodb://mongodb:27017/stage7
-REDIS_URL=redis://redis:6379
+#### Service URLs
+- `POSTOFFICE_URL`: URL for the PostOffice service.
+- `BRAIN_URL`: URL for the Brain service.
+- `LIBRARIAN_URL`: URL for the Librarian service.
+- `CAPABILITIESMANAGER_URL`: URL for the CapabilitiesManager service.
+- `MARKETPLACE_URL`: URL for the Marketplace service.
+- `ENGINEER_URL`: URL for the Engineer service.
+- `SECURITYMANAGER_URL`: URL for the SecurityManager service.
+- `TRAFFICMANAGER_URL`: URL for the TrafficManager service.
+- `MISSIONCONTROL_URL`: URL for the MissionControl service.
+- `AGENTSET_URL`: URL for the AgentSet service.
+- `FRONTEND_URL`: URL for the frontend application.
 
-# External APIs (optional)
-OPENWEATHER_API_KEY=your-openweather-api-key
-DUCKDUCKGO_API_KEY=your-duckduckgo-api-key
+#### Database Configuration
+- `MONGODB_URI`: The connection string for MongoDB.
+- `MONGO_URL`: The URL for the MongoDB instance.
+- `MONGO_DB`: The name of the MongoDB database.
+- `REDIS_URL`: The URL for the Redis instance.
+- `REDIS_HOST`: The host for the Redis instance.
+- `REDIS_PORT`: The port for the Redis instance.
 
-# Security
-JWT_SECRET=your-jwt-secret-here
-ENCRYPTION_KEY=your-encryption-key-here
+#### Plugin Configuration
+- `DEFAULT_PLUGIN_REPOSITORY`: The default repository for plugins (e.g., `mongo`, `github`, `local`).
+- `LOCAL_PLUGIN_PATH`: The local path for plugins.
+- `MONGO_COLLECTION`: The MongoDB collection for plugins.
+- `PLUGIN_TIMEOUT`: The timeout for plugin execution in milliseconds.
+- `CONTAINER_MEMORY_LIMIT`: The memory limit for containerized plugins.
+- `CONTAINER_CPU_LIMIT`: The CPU limit for containerized plugins.
+- `PLUGIN_SIGNING_KEY`: The key for signing plugins.
+- `PLUGIN_PUBLIC_KEY`: The key for verifying signed plugins.
 
-# Plugin Configuration
-PLUGIN_TIMEOUT=30000
-CONTAINER_MEMORY_LIMIT=512m
-CONTAINER_CPU_LIMIT=1.0
-```
+#### GitHub Integration
+- `ENABLE_GITHUB`: Set to `true` to enable GitHub integration.
+- `GITHUB_TOKEN`: Your GitHub personal access token.
+- `GITHUB_USERNAME`: Your GitHub username.
+- `GIT_REPOSITORY_URL`: The URL of your Git repository.
+- `GIT_DEFAULT_BRANCH`: The default branch of your Git repository.
+- `GITHUB_EMAIL`: Your GitHub email address.
+
+#### LLM and API Keys
+- `GROQ_API_KEY`: API key for Groq.
+- `ANTHROPIC_API_KEY`: API key for Anthropic.
+- `GEMINI_API_KEY`: API key for Gemini.
+- `OPENAI_API_KEY`: API key for OpenAI.
+- `OPENROUTER_API_KEY`: API key for OpenRouter.
+- `MISTRAL_API_KEY`: API key for Mistral.
+- `HUGGINGFACE_API_KEY` or `HF_API_KEY`: API key for Hugging Face.
+- `AIML_API_KEY`: API key for AIML.
+- `CLOUDFLARE_WORKERS_AI_API_TOKEN`: API token for Cloudflare Workers AI.
+- `CLOUDFLARE_WORKERS_AI_ACCOUNT_ID`: Account ID for Cloudflare Workers AI.
+- `OPENWEATHER_API_KEY`: API key for OpenWeather.
+- `DUCKDUCKGO_API_KEY`: API key for DuckDuckGo.
+- `GOOGLE_SEARCH_API_KEY`: API key for Google Search.
+- `GOOGLE_CSE_ID`: Google Custom Search Engine ID.
+- `LANGSEARCH_API_KEY`: API key for LangSearch.
+- `WEATHER_API_KEY`: API key for Weather API.
 
 ### 2. Docker Configuration
 
