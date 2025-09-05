@@ -299,4 +299,142 @@ describe('AgentSet', () => {
     });
   });
 
+  describe('Endpoints', () => {
+    it('should create a specialized agent', async () => {
+      const mockReq = {
+        body: {
+          roleId: 'test-role',
+          missionId: 'test-mission',
+        }
+      } as express.Request;
+      const mockRes = {
+        status: jest.fn().mockReturnThis(),
+        send: jest.fn()
+      } as unknown as express.Response;
+
+      await (agentSet as any).createSpecializedAgent(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(200);
+      expect(mockRes.send).toHaveBeenCalledWith(expect.objectContaining({
+        agentId: expect.any(String),
+      }));
+    });
+
+    it('should pause agents for a mission', async () => {
+      const mockAgent = { pause: jest.fn(), getMissionId: () => 'test-mission' };
+      (agentSet as any).agents.set('test-agent', mockAgent);
+
+      const mockReq = { body: { missionId: 'test-mission' } } as express.Request;
+      const mockRes = {
+        status: jest.fn().mockReturnThis(),
+        send: jest.fn()
+      } as unknown as express.Response;
+
+      await (agentSet as any).app.post.mock.calls.find((call: any) => call[0] === '/pauseAgents')?.[1](mockReq, mockRes, jest.fn());
+
+      expect(mockAgent.pause).toHaveBeenCalled();
+      expect(mockRes.status).toHaveBeenCalledWith(200);
+    });
+
+    it('should resume agents for a mission', async () => {
+      const mockAgent = { resume: jest.fn(), getMissionId: () => 'test-mission' };
+      (agentSet as any).agents.set('test-agent', mockAgent);
+
+      const mockReq = { body: { missionId: 'test-mission' } } as express.Request;
+      const mockRes = {
+        status: jest.fn().mockReturnThis(),
+        send: jest.fn()
+      } as unknown as express.Response;
+
+      await (agentSet as any).app.post.mock.calls.find((call: any) => call[0] === '/resumeAgents')?.[1](mockReq, mockRes, jest.fn());
+
+      expect(mockAgent.resume).toHaveBeenCalled();
+      expect(mockRes.status).toHaveBeenCalledWith(200);
+    });
+
+    it('should abort an agent', async () => {
+      const mockAgent = { abort: jest.fn() };
+      (agentSet as any).agents.set('test-agent', mockAgent);
+
+      const mockReq = { body: { agentId: 'test-agent' } } as express.Request;
+      const mockRes = {
+        status: jest.fn().mockReturnThis(),
+        send: jest.fn()
+      } as unknown as express.Response;
+
+      await (agentSet as any).app.post.mock.calls.find((call: any) => call[0] === '/abortAgent')?.[1](mockReq, mockRes, jest.fn());
+
+      expect(mockAgent.abort).toHaveBeenCalled();
+      expect(mockRes.status).toHaveBeenCalledWith(200);
+    });
+
+    it('should get agent details', async () => {
+      const mockAgent = { getAgentState: jest.fn().mockResolvedValue({ id: 'test-agent' }) };
+      (agentSet as any).agents.set('test-agent', mockAgent);
+
+      const mockReq = { params: { agentId: 'test-agent' } } as unknown as express.Request;
+      const mockRes = {
+        status: jest.fn().mockReturnThis(),
+        send: jest.fn()
+      } as unknown as express.Response;
+
+      await (agentSet as any).getAgent(mockReq, mockRes);
+
+      expect(mockAgent.getAgentState).toHaveBeenCalled();
+      expect(mockRes.status).toHaveBeenCalledWith(200);
+      expect(mockRes.send).toHaveBeenCalledWith({ id: 'test-agent' });
+    });
+
+    it('should get agent output', async () => {
+      const mockAgent = { getOutput: jest.fn().mockResolvedValue({ output: 'test-output' }) };
+      (agentSet as any).agents.set('test-agent', mockAgent);
+
+      const mockReq = { params: { agentId: 'test-agent' } } as unknown as express.Request;
+      const mockRes = {
+        status: jest.fn().mockReturnThis(),
+        send: jest.fn()
+      } as unknown as express.Response;
+
+      await (agentSet as any).getAgentOutput(mockReq, mockRes);
+
+      expect(mockAgent.getOutput).toHaveBeenCalled();
+      expect(mockRes.status).toHaveBeenCalledWith(200);
+      expect(mockRes.send).toHaveBeenCalledWith({ output: 'test-output' });
+    });
+
+    it('should get step details', async () => {
+      const mockStep = { id: 'test-step', actionVerb: 'TEST' };
+      const mockAgent = { steps: [mockStep] };
+      (agentSet as any).agents.set('test-agent', mockAgent);
+
+      const mockReq = { params: { stepId: 'test-step' } } as unknown as express.Request;
+      const mockRes = {
+        status: jest.fn().mockReturnThis(),
+        send: jest.fn()
+      } as unknown as express.Response;
+
+      await (agentSet as any).getStepDetailsHandler(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(200);
+      expect(mockRes.send).toHaveBeenCalledWith(expect.objectContaining({
+        verb: 'TEST',
+      }));
+    });
+
+    it('should save an agent', async () => {
+      const mockAgent = { saveAgentState: jest.fn().mockResolvedValue(undefined), id: 'test-agent' };
+      (agentSet as any).agents.set('test-agent', mockAgent);
+
+      const mockReq = { body: { agentId: 'test-agent' } } as express.Request;
+      const mockRes = {
+        status: jest.fn().mockReturnThis(),
+        send: jest.fn()
+      } as unknown as express.Response;
+
+      await (agentSet as any).app.post.mock.calls.find((call: any) => call[0] === '/saveAgent')?.[1](mockReq, mockRes, jest.fn());
+
+      expect(mockAgent.saveAgentState).toHaveBeenCalled();
+      expect(mockRes.status).toHaveBeenCalledWith(200);
+    });
+  });
 });

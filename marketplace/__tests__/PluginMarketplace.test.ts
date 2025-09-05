@@ -2,187 +2,490 @@ import { PluginMarketplace } from '../src/PluginMarketplace';
 import { LibrarianDefinitionRepository, LibrarianDefinitionRepositoryConfig } from '../src/repositories/LibrarianDefinitionRepository';
 import { MongoRepository } from '../src/repositories/MongoRepository';
 import { LocalRepository } from '../src/repositories/LocalRepository';
+import { GitHubRepository } from '../src/repositories/GitHubRepository';
+import { GitRepository } from '../src/repositories/GitRepository';
 import { repositoryConfig as originalRepositoryConfig } from '../src/config/repositoryConfig';
-import { PluginManifest, PluginLocator, DefinitionManifest, DefinitionType, OpenAPITool, MCPTool, createOpenApiDefinitionManifest, createMcpDefinitionManifest } from '@cktmcs/shared';
+import { PluginManifest, PluginLocator, DefinitionType, OpenAPITool, MCPTool, createOpenApiDefinitionManifest, createMcpDefinitionManifest, PluginRepositoryType } from '@cktmcs/shared';
+import axios from 'axios';
 
-// Mock individual repositories
+// Mock individual repository constructors
 jest.mock('../src/repositories/LibrarianDefinitionRepository');
 jest.mock('../src/repositories/MongoRepository');
 jest.mock('../src/repositories/LocalRepository');
+jest.mock('../src/repositories/GitHubRepository');
+jest.mock('../src/repositories/GitRepository');
+jest.mock('axios'); // Mock axios for any internal calls by repos if not already mocked
 
+// Cast mocked classes
 const MockedLibrarianDefinitionRepository = LibrarianDefinitionRepository as jest.MockedClass<typeof LibrarianDefinitionRepository>;
 const MockedMongoRepository = MongoRepository as jest.MockedClass<typeof MongoRepository>;
 const MockedLocalRepository = LocalRepository as jest.MockedClass<typeof LocalRepository>;
+const MockedGitHubRepository = GitHubRepository as jest.MockedClass<typeof GitHubRepository>;
+const MockedGitRepository = GitRepository as jest.MockedClass<typeof GitRepository>;
 
-describe('PluginMarketplace with LibrarianDefinitionRepository', () => {
+// Mock repositoryConfig module
+jest.mock('../src/config/repositoryConfig', () => ({
+    repositoryConfig: {
+        defaultRepository: 'local',
+        Repositories: [
+            { type: 'local', name: 'Local Repo', path: '/tmp/plugins' },
+            { type: 'mongo', name: 'Mongo Repo', url: 'mongodb://test', options: { collection: 'plugins' } },
+            { type: 'github', name: 'GitHub Repo', owner: 'test', repo: 'test', token: 'test', branch: 'main' },
+            { type: 'git', name: 'Git Repo', url: 'git://test', branch: 'main' },
+            { type: 'librarian-definition', name: 'Librarian Defs', librarianUrl: 'http://librarian.test', openApiToolsCollection: 'openApiTools', mcpToolsCollection: 'mcpTools' },
+        ]
+    }
+}));
+
+describe('PluginMarketplace', () => {
     let marketplace: PluginMarketplace;
     let mockLibrarianRepoInstance: jest.Mocked<LibrarianDefinitionRepository>;
     let mockMongoRepoInstance: jest.Mocked<MongoRepository>;
+    let mockLocalRepoInstance: jest.Mocked<LocalRepository>;
+    let mockGitHubRepoInstance: jest.Mocked<GitHubRepository>;
+    let mockGitRepoInstance: jest.Mocked<GitRepository>;
 
-    const sampleOpenAPITool: OpenAPITool = { /* ... minimal valid OpenAPITool ... */ id: 'oa1', name:'oa name', description:'desc', version:'1', specUrl:'url', baseUrl:'base', authentication:{type:'none'}, actionMappings:[{actionVerb:'VERB_OA', operationId:'op1',method:'GET',path:'/',inputs:[],outputs:[]}], metadata:{created: new Date().toISOString()}};
-    const sampleMCPTool: MCPTool = { /* ... minimal valid MCPTool ... */ id: 'mcp1', name:'mcp name', description:'desc', version:'1', actionMappings:[{actionVerb:'VERB_MCP', mcpServiceTarget:{serviceName:'s',endpointOrCommand:'e',method:'m'},inputs:[],outputs:[]}], metadata:{created: new Date().toISOString()}};
+    const sampleOpenAPITool: OpenAPITool = { id: 'oa1', name: 'oa name', description: 'desc', version: '1', specUrl: 'url', baseUrl: 'base', authentication: { type: 'none' }, actionMappings: [{ actionVerb: 'VERB_OA', operationId: 'op1', method: 'GET', path: '/', inputs: [], outputs: [] }], metadata: { created: new Date().toISOString() } };
+    const sampleMCPTool: MCPTool = { id: 'mcp1', name: 'mcp name', description: 'desc', version: '1', actionMappings: [{ actionVerb: 'VERB_MCP', mcpServiceTarget: { serviceName: 's', endpointOrCommand: 'e', method: 'm' }, inputs: [], outputs: [] }], metadata: { created: new Date().toISOString() } };
 
     const openApiManifest = createOpenApiDefinitionManifest(sampleOpenAPITool, 'VERB_OA');
     const mcpManifest = createMcpDefinitionManifest(sampleMCPTool, 'VERB_MCP');
 
     beforeEach(() => {
         jest.clearAllMocks();
+        jest.resetModules(); // Important to reset modules to clear mocks affecting constructors
 
-        // Create mock instances for each repository type we'll use
-        mockLibrarianRepoInstance = new MockedLibrarianDefinitionRepository({} as LibrarianDefinitionRepositoryConfig) as jest.Mocked<LibrarianDefinitionRepository>;
-        mockMongoRepoInstance = new MockedMongoRepository({} as any) as jest.Mocked<MongoRepository>;
+        // Mock instances for each repository type
+        mockLibrarianRepoInstance = {
+            list: jest.fn().mockResolvedValue([]),
+            fetch: jest.fn().mockResolvedValue(undefined),
+            fetchByVerb: jest.fn().mockResolvedValue(undefined),
+            fetchAllVersionsOfPlugin: jest.fn().mockResolvedValue(undefined),
+            store: jest.fn().mockResolvedValue(undefined),
+            delete: jest.fn().mockResolvedValue(undefined),
+        } as any;
+        mockMongoRepoInstance = { ...mockLibrarianRepoInstance } as any;
+        mockLocalRepoInstance = { ...mockLibrarianRepoInstance } as any;
+        mockGitHubRepoInstance = { ...mockLibrarianRepoInstance } as any;
+        mockGitRepoInstance = { ...mockLibrarianRepoInstance } as any;
 
-        // Override the createRepository method in the actual marketplace instance
-        // by mocking the module's repositoryConfig and the createRepository method itself.
+        // Make the mocked constructors return our mock instances
+        MockedLibrarianDefinitionRepository.mockImplementation(() => mockLibrarianRepoInstance);
+        MockedMongoRepository.mockImplementation(() => mockMongoRepoInstance);
+        MockedLocalRepository.mockImplementation(() => mockLocalRepoInstance);
+        MockedGitHubRepository.mockImplementation(() => mockGitHubRepoInstance);
+        MockedGitRepository.mockImplementation(() => mockGitRepoInstance);
 
-        const testRepositoryConfig = {
-            defaultRepository: 'mongo', // Or any other default
-            Repositories: [
-                { type: 'mongo', url: 'mongodb://test', options: { collection: 'plugins' } },
-                {
-                    type: 'librarian-definition',
-                    name: 'librarianDefs',
-                    librarianUrl: 'http://librarian.test',
-                    openApiToolsCollection: 'openApiTools',
-                    mcpToolsCollection: 'mcpTools',
-                }
-            ]
-        };
+        // Set default environment variables
+        process.env.DEFAULT_PLUGIN_REPOSITORY = 'local';
+        process.env.ENABLE_GITHUB = 'true';
+        process.env.GITHUB_TOKEN = 'test-token';
+        process.env.GITHUB_USERNAME = 'test-user';
+        process.env.GIT_REPOSITORY_URL = 'https://github.com/test/repo';
 
-        jest.doMock('../src/config/repositoryConfig', () => ({
-            repositoryConfig: testRepositoryConfig
-        }));
-
-        // Re-require PluginMarketplace to use the mocked config
+        // Re-require PluginMarketplace to use the mocked config and env vars
         const { PluginMarketplace: PatchedPluginMarketplace } = require('../src/PluginMarketplace');
         marketplace = new PatchedPluginMarketplace();
 
-        // Further mock the createRepository to return our specific instances
-        const createRepositoryMock = jest.spyOn(marketplace as any, 'createRepository');
-        createRepositoryMock.mockImplementation((config: any) => {
-            if (config.type === 'mongo') {
-                return mockMongoRepoInstance;
-            }
-            if (config.type === 'librarian-definition') {
-                return mockLibrarianRepoInstance;
-            }
-            return undefined;
-        });
-
-        // Manually set up the repositories map after mocking createRepository
-        marketplace['repositories'].clear();
-        for (const repoCfg of testRepositoryConfig.Repositories) {
-            if (repoCfg.type === 'mongo') marketplace['repositories'].set('mongo', mockMongoRepoInstance);
-            if (repoCfg.type === 'librarian-definition') marketplace['repositories'].set('librarian-definition', mockLibrarianRepoInstance);
-        }
-        marketplace.defaultRepository = testRepositoryConfig.defaultRepository as any;
-
-
+        // Suppress console logs for cleaner test output
+        jest.spyOn(console, 'log').mockImplementation(() => {});
+        jest.spyOn(console, 'warn').mockImplementation(() => {});
+        jest.spyOn(console, 'error').mockImplementation(() => {});
     });
 
     afterEach(() => {
-        jest.unmock('../src/config/repositoryConfig');
-        jest.resetModules(); // Important to reset modules to clear mocks affecting constructors
+        jest.restoreAllMocks();
     });
 
+    describe('constructor', () => {
+        it('should initialize all configured repositories', () => {
+            expect(MockedLocalRepository).toHaveBeenCalledTimes(1);
+            expect(MockedMongoRepository).toHaveBeenCalledTimes(1);
+            expect(MockedGitHubRepository).toHaveBeenCalledTimes(1);
+            expect(MockedGitRepository).toHaveBeenCalledTimes(1);
+            expect(MockedLibrarianDefinitionRepository).toHaveBeenCalledTimes(1);
 
-    it('should list plugins from all repositories including LibrarianDefinitionRepository', async () => {
-        const codePluginLocators: PluginLocator[] = [{ id: 'code1', verb: 'VERB_CODE', language:'python', name:'Code Plugin', version:'1', description:'desc', repository: { type: 'mongo', url:''}}];
-        const definitionLocators: PluginLocator[] = [
-            { id: 'oa1-VERB_OA', verb: 'VERB_OA', language: DefinitionType.OPENAPI, name:'oa name', version:'1', description:'desc', repository: { type: 'librarian-definition', url:'' } },
-            { id: 'mcp1-VERB_MCP', verb: 'VERB_MCP', language: DefinitionType.MCP, name:'mcp name', version:'1', description:'desc', repository: { type: 'librarian-definition', url:'' } }
+            expect(marketplace.getRepositories().size).toBe(5);
+            expect(marketplace.getRepositories().get('local')).toBe(mockLocalRepoInstance);
+            expect(marketplace.getRepositories().get('mongo')).toBe(mockMongoRepoInstance);
+            expect(marketplace.getRepositories().get('github')).toBe(mockGitHubRepoInstance);
+            expect(marketplace.getRepositories().get('git')).toBe(mockGitRepoInstance);
+            expect(marketplace.getRepositories().get('librarian-definition')).toBe(mockLibrarianRepoInstance);
+        });
+
+        it('should skip GitHub repository initialization if ENABLE_GITHUB is not true', () => {
+            process.env.ENABLE_GITHUB = 'false';
+            jest.resetModules();
+            const { PluginMarketplace: PatchedPluginMarketplace } = require('../src/PluginMarketplace');
+            marketplace = new PatchedPluginMarketplace();
+
+            expect(MockedGitHubRepository).not.toHaveBeenCalled();
+            expect(marketplace.getRepositories().has('github')).toBe(false);
+            expect(console.log).toHaveBeenCalledWith('Skipping GitHub repository initialization as ENABLE_GITHUB is not set to true');
+        });
+
+        it('should skip GitHub repository initialization if GITHUB_TOKEN is missing', () => {
+            delete process.env.GITHUB_TOKEN;
+            jest.resetModules();
+            const { PluginMarketplace: PatchedPluginMarketplace } = require('../src/PluginMarketplace');
+            marketplace = new PatchedPluginMarketplace();
+
+            expect(MockedGitHubRepository).not.toHaveBeenCalled();
+            expect(marketplace.getRepositories().has('github')).toBe(false);
+            expect(console.warn).toHaveBeenCalledWith('GitHub TOKEN is missing.');
+        });
+
+        it('should skip GitHub repository initialization if GITHUB_USERNAME is missing', () => {
+            delete process.env.GITHUB_USERNAME;
+            jest.resetModules();
+            const { PluginMarketplace: PatchedPluginMarketplace } = require('../src/PluginMarketplace');
+            marketplace = new PatchedPluginMarketplace();
+
+            expect(MockedGitHubRepository).not.toHaveBeenCalled();
+            expect(marketplace.getRepositories().has('github')).toBe(false);
+            expect(console.warn).toHaveBeenCalledWith('GitHub USERNAME is missing.');
+        });
+
+        it('should skip GitHub repository initialization if GIT_REPOSITORY_URL is missing', () => {
+            delete process.env.GIT_REPOSITORY_URL;
+            jest.resetModules();
+            const { PluginMarketplace: PatchedPluginMarketplace } = require('../src/PluginMarketplace');
+            marketplace = new PatchedPluginMarketplace();
+
+            expect(MockedGitHubRepository).not.toHaveBeenCalled();
+            expect(marketplace.getRepositories().has('github')).toBe(false);
+            expect(console.warn).toHaveBeenCalledWith('GitHub REPOSITORY_URL is missing.');
+        });
+
+        it('should log error if repository creation fails', () => {
+            MockedMongoRepository.mockImplementationOnce(() => { throw new Error('Mongo init failed'); });
+            jest.resetModules();
+            const { PluginMarketplace: PatchedPluginMarketplace } = require('../src/PluginMarketplace');
+            marketplace = new PatchedPluginMarketplace();
+
+            expect(console.error).toHaveBeenCalledWith(expect.stringContaining('Error initializing repository of type mongo'), expect.any(Error));
+            expect(marketplace.getRepositories().has('mongo')).toBe(false);
+        });
+
+        it('should log warning for unknown repository type', () => {
+            jest.doMock('../src/config/repositoryConfig', () => ({
+                repositoryConfig: {
+                    defaultRepository: 'local',
+                    Repositories: [
+                        { type: 'unknown-type', name: 'Unknown Repo' },
+                    ]
+                }
+            }));
+            jest.resetModules();
+            const { PluginMarketplace: PatchedPluginMarketplace } = require('../src/PluginMarketplace');
+            marketplace = new PatchedPluginMarketplace();
+
+            expect(console.warn).toHaveBeenCalledWith('Unknown repository type: unknown-type');
+            expect(marketplace.getRepositories().size).toBe(0);
+            jest.unmock('../src/config/repositoryConfig');
+        });
+    });
+
+    describe('list', () => {
+        const mockPluginLocator: PluginLocator = { id: 'p1', verb: 'V1', language: 'js', name: 'P1', version: '1', description: 'desc', repository: { type: 'local' } };
+        const mockContainerPluginLocator: PluginLocator = { id: 'c1', verb: 'C1', language: 'container', name: 'C1', version: '1', description: 'desc', repository: { type: 'local' } };
+        const mockContainerPluginManifest: PluginManifest = { id: 'c1', verb: 'C1', language: 'container', repository: { type: 'local' } };
+
+        beforeEach(() => {
+            mockLocalRepoInstance.list.mockResolvedValue([mockPluginLocator, mockContainerPluginLocator]);
+            mockLocalRepoInstance.fetch.mockImplementation((id) => {
+                if (id === 'c1') return Promise.resolve(mockContainerPluginManifest);
+                return Promise.resolve({ id, language: 'js' } as PluginManifest);
+            });
+        });
+
+        it('should list all plugins from default repository', async () => {
+            const plugins = await marketplace.list();
+            expect(plugins).toEqual([mockPluginLocator, mockContainerPluginLocator]);
+            expect(mockLocalRepoInstance.list).toHaveBeenCalledTimes(1);
+        });
+
+        it('should list plugins from specified repository', async () => {
+            const plugins = await marketplace.list('local' as PluginRepositoryType);
+            expect(plugins).toEqual([mockPluginLocator, mockContainerPluginLocator]);
+            expect(mockLocalRepoInstance.list).toHaveBeenCalledTimes(1);
+        });
+
+        it('should filter out container plugins if includeContainerPlugins is false', async () => {
+            const plugins = await marketplace.list('local' as PluginRepositoryType, false);
+            expect(plugins).toEqual([mockPluginLocator]);
+            expect(mockLocalRepoInstance.list).toHaveBeenCalledTimes(1);
+            expect(mockLocalRepoInstance.fetch).toHaveBeenCalledWith('p1', undefined);
+            expect(mockLocalRepoInstance.fetch).toHaveBeenCalledWith('c1', undefined);
+        });
+
+        it('should log warning and return empty array if repository not found', async () => {
+            const plugins = await marketplace.list('nonexistent' as PluginRepositoryType);
+            expect(plugins).toEqual([]);
+            expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('Repository nonexistent not found (list)'));
+        });
+
+        it('should log warning and return empty array if list fails', async () => {
+            mockLocalRepoInstance.list.mockRejectedValueOnce(new Error('List error'));
+            const plugins = await marketplace.list('local' as PluginRepositoryType);
+            expect(plugins).toEqual([]);
+            expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('Error listing plugins from repository local'), expect.any(Error));
+        });
+
+        it('should log warning if fetching manifest fails during container filtering', async () => {
+            mockLocalRepoInstance.fetch.mockRejectedValueOnce(new Error('Fetch error'));
+            const plugins = await marketplace.list('local' as PluginRepositoryType, false);
+            // Should still return the original locators if fetch fails
+            expect(plugins).toEqual([mockPluginLocator, mockContainerPluginLocator]);
+            expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('Error fetching manifest for plugin'), expect.any(Error));
+        });
+    });
+
+    describe('fetchOne', () => {
+        const mockManifest: PluginManifest = { id: 'p1', verb: 'V1', language: 'js', repository: { type: 'local' } };
+
+        beforeEach(() => {
+            mockLocalRepoInstance.fetch.mockResolvedValue(mockManifest);
+        });
+
+        it('should fetch a plugin from default repository', async () => {
+            const plugin = await marketplace.fetchOne('p1');
+            expect(plugin).toEqual(mockManifest);
+            expect(mockLocalRepoInstance.fetch).toHaveBeenCalledWith('p1', undefined);
+        });
+
+        it('should fetch a plugin from specified repository', async () => {
+            const plugin = await marketplace.fetchOne('p1', undefined, 'local' as PluginRepositoryType);
+            expect(plugin).toEqual(mockManifest);
+            expect(mockLocalRepoInstance.fetch).toHaveBeenCalledWith('p1', undefined);
+        });
+
+        it('should log warning and return undefined if repository not found', async () => {
+            const plugin = await marketplace.fetchOne('p1', undefined, 'nonexistent' as PluginRepositoryType);
+            expect(plugin).toBeUndefined();
+            expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('Repository nonexistent not found (fetchOne)'));
+        });
+
+        it('should log warning and return undefined if fetch fails', async () => {
+            mockLocalRepoInstance.fetch.mockRejectedValueOnce(new Error('Fetch error'));
+            const plugin = await marketplace.fetchOne('p1', undefined, 'local' as PluginRepositoryType);
+            expect(plugin).toBeUndefined();
+            expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('Error fetching plugin p1 from repository local'), expect.any(Error));
+        });
+    });
+
+    describe('fetchOneByVerb', () => {
+        const mockManifest: PluginManifest = { id: 'p1', verb: 'V1', language: 'js', repository: { type: 'local' } };
+
+        it('should fetch a plugin by verb from any repository', async () => {
+            mockLocalRepoInstance.fetchByVerb.mockResolvedValueOnce(undefined); // Not found in local
+            mockMongoRepoInstance.fetchByVerb.mockResolvedValueOnce(mockManifest); // Found in mongo
+
+            const plugin = await marketplace.fetchOneByVerb('V1');
+            expect(plugin).toEqual(mockManifest);
+            expect(mockLocalRepoInstance.fetchByVerb).toHaveBeenCalledWith('V1', undefined);
+            expect(mockMongoRepoInstance.fetchByVerb).toHaveBeenCalledWith('V1', undefined);
+        });
+
+        it('should return undefined if plugin not found by verb in any repository', async () => {
+            mockLocalRepoInstance.fetchByVerb.mockResolvedValueOnce(undefined);
+            mockMongoRepoInstance.fetchByVerb.mockResolvedValueOnce(undefined);
+            mockGitHubRepoInstance.fetchByVerb.mockResolvedValueOnce(undefined);
+            mockGitRepoInstance.fetchByVerb.mockResolvedValueOnce(undefined);
+            mockLibrarianRepoInstance.fetchByVerb.mockResolvedValueOnce(undefined);
+
+            const plugin = await marketplace.fetchOneByVerb('NON_EXISTENT_VERB');
+            expect(plugin).toBeUndefined();
+        });
+
+        it('should log warning and continue if fetchByVerb fails for a repository', async () => {
+            mockLocalRepoInstance.fetchByVerb.mockRejectedValueOnce(new Error('Local fetch error'));
+            mockMongoRepoInstance.fetchByVerb.mockResolvedValueOnce(mockManifest);
+
+            const plugin = await marketplace.fetchOneByVerb('V1');
+            expect(plugin).toEqual(mockManifest);
+            expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('Error fetching from repository'), expect.any(Error));
+        });
+    });
+
+    describe('fetchAllVersionsOfPlugin', () => {
+        const mockManifests: PluginManifest[] = [
+            { id: 'p1', verb: 'V1', language: 'js', version: '1.0.0', repository: { type: 'local' } },
+            { id: 'p1', verb: 'V1', language: 'js', version: '1.1.0', repository: { type: 'local' } },
         ];
 
-        mockMongoRepoInstance.list.mockResolvedValue(codePluginLocators);
-        mockLibrarianRepoInstance.list.mockResolvedValue(definitionLocators);
+        it('should fetch all versions from default repository if supported', async () => {
+            mockLocalRepoInstance.fetchAllVersionsOfPlugin.mockResolvedValueOnce(mockManifests);
+            const versions = await marketplace.fetchAllVersionsOfPlugin('p1');
+            expect(versions).toEqual(mockManifests);
+            expect(mockLocalRepoInstance.fetchAllVersionsOfPlugin).toHaveBeenCalledWith('p1');
+        });
 
-        // To test listing from *all* repositories, we iterate through them as getAvailablePluginsStr does
-        // Or, if we had a direct marketplace.listAll() method, we'd use that.
-        // For now, we'll test that each configured repository's list method is called by getAvailablePluginsStr (indirectly)
-        // and that it can fetch from a specific repo type.
+        it('should fetch all versions from specified repository if supported', async () => {
+            mockMongoRepoInstance.fetchAllVersionsOfPlugin.mockResolvedValueOnce(mockManifests);
+            const versions = await marketplace.fetchAllVersionsOfPlugin('p1', 'mongo' as PluginRepositoryType);
+            expect(versions).toEqual(mockManifests);
+            expect(mockMongoRepoInstance.fetchAllVersionsOfPlugin).toHaveBeenCalledWith('p1');
+        });
 
-        // Test fetching locators specifically from librarian-definition repo
-        const librarianLocators = await marketplace.list('librarian-definition' as any);
-        expect(mockLibrarianRepoInstance.list).toHaveBeenCalled();
-        expect(librarianLocators).toEqual(definitionLocators);
+        it('should return undefined if repository does not support fetchAllVersionsOfPlugin', async () => {
+            mockLocalRepoInstance.fetchAllVersionsOfPlugin = undefined; // Simulate no support
+            const versions = await marketplace.fetchAllVersionsOfPlugin('p1', 'local' as PluginRepositoryType);
+            expect(versions).toBeUndefined();
+            expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('Repository type local does not support fetchAllVersionsOfPlugin.'));
+        });
+
+        it('should log warning and return undefined if fetchAllVersionsOfPlugin fails', async () => {
+            mockLocalRepoInstance.fetchAllVersionsOfPlugin.mockRejectedValueOnce(new Error('Fetch all versions error'));
+            const versions = await marketplace.fetchAllVersionsOfPlugin('p1', 'local' as PluginRepositoryType);
+            expect(versions).toBeUndefined();
+            expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('Error fetching all versions for plugin p1 from repository local'), expect.any(Error));
+        });
+
+        it('should return undefined if repository not found', async () => {
+            const versions = await marketplace.fetchAllVersionsOfPlugin('p1', 'nonexistent' as PluginRepositoryType);
+            expect(versions).toBeUndefined();
+            expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('Repository nonexistent not found (fetchAllVersionsOfPlugin)'));
+        });
     });
 
-    it('should fetch a DefinitionManifest from LibrarianDefinitionRepository by ID', async () => {
-        mockLibrarianRepoInstance.fetch.mockResolvedValue(openApiManifest);
-
-        // Fetching by the ID used by LibrarianDefinitionRepository (toolId-verb)
-        // and specifying the repository type.
-        const result = await marketplace.fetchOne(openApiManifest.id, openApiManifest.version, 'librarian-definition' as any);
-
-        expect(mockLibrarianRepoInstance.fetch).toHaveBeenCalledWith(openApiManifest.id, openApiManifest.version);
-        expect(result).toEqual(openApiManifest);
-    });
-
-    it('should fetch a DefinitionManifest from LibrarianDefinitionRepository by verb', async () => {
-        mockLibrarianRepoInstance.fetchByVerb.mockResolvedValue(mcpManifest);
-
-        // This will iterate all repositories. We ensure the mock for librarian one returns it.
-        const result = await marketplace.fetchOneByVerb('VERB_MCP', mcpManifest.version);
-
-        expect(mockLibrarianRepoInstance.fetchByVerb).toHaveBeenCalledWith('VERB_MCP', mcpManifest.version);
-        // We also expect mongoRepo.fetchByVerb to have been called
-        expect(mockMongoRepoInstance.fetchByVerb).toHaveBeenCalled();
-        expect(result).toEqual(mcpManifest);
-    });
-
-    it('should store a DefinitionManifest using LibrarianDefinitionRepository if language matches', async () => {
-        // The marketplace.store() method itself decides the repo based on plugin.repository.type or default.
-        // For definition manifests, we'd likely set plugin.repository.type to 'librarian-definition'
-        // or rely on a new logic in store() to check language.
-        // Let's assume the manifest indicates its preferred repository type.
-        const manifestToStore: DefinitionManifest = {
-            ...mcpManifest,
-            repository: { type: 'librarian-definition' as any, url: ''}
+    describe('store', () => {
+        const mockPluginManifest: PluginManifest = { id: 'new-plugin', verb: 'NEW_VERB', language: 'js', repository: { type: 'local' } };
+        const mockContainerManifest: PluginManifest = {
+            id: 'container-plugin', verb: 'CONTAINER_VERB', language: 'container',
+            repository: { type: 'local' },
+            container: { dockerfile: 'Dockerfile', buildContext: '.', image: 'img', ports: [{ container: 8080 }] },
+            api: { endpoint: '/', method: 'get' }
         };
 
-        await marketplace.store(manifestToStore);
+        it('should store a plugin in the specified repository', async () => {
+            await marketplace.store(mockPluginManifest);
+            expect(mockLocalRepoInstance.store).toHaveBeenCalledWith(mockPluginManifest);
+        });
 
-        expect(mockLibrarianRepoInstance.store).toHaveBeenCalledWith(manifestToStore);
-        expect(mockMongoRepoInstance.store).not.toHaveBeenCalled();
+        it('should store a plugin in the default repository if none specified in manifest', async () => {
+            const pluginWithoutRepo = { ...mockPluginManifest, repository: { type: undefined as any } };
+            await marketplace.store(pluginWithoutRepo);
+            expect(mockLocalRepoInstance.store).toHaveBeenCalledWith(pluginWithoutRepo);
+        });
+
+        it('should update existing plugin if found by verb', async () => {
+            const existingPlugin = { ...mockPluginManifest, id: 'existing-plugin', repository: { type: 'mongo' } };
+            mockLocalRepoInstance.fetchByVerb.mockResolvedValueOnce(undefined);
+            mockMongoRepoInstance.fetchByVerb.mockResolvedValueOnce(existingPlugin);
+
+            const updatedPlugin = { ...mockPluginManifest, description: 'Updated desc' };
+            await marketplace.store(updatedPlugin);
+
+            expect(mockMongoRepoInstance.store).toHaveBeenCalledWith(updatedPlugin);
+            expect(mockLocalRepoInstance.store).not.toHaveBeenCalled();
+        });
+
+        it('should validate container plugin manifest before storing', async () => {
+            await marketplace.store(mockContainerManifest);
+            expect(mockLocalRepoInstance.store).toHaveBeenCalledWith(mockContainerManifest);
+        });
+
+        it('should not store container plugin if validation fails', async () => {
+            const invalidContainerManifest = { ...mockContainerManifest, container: { dockerfile: 'Dockerfile' } }; // Missing buildContext, image, ports
+            await marketplace.store(invalidContainerManifest);
+            expect(mockLocalRepoInstance.store).not.toHaveBeenCalled();
+            expect(console.error).toHaveBeenCalledWith(expect.stringContaining('Container configuration missing required field: buildContext'));
+        });
+
+        it('should log warning if repository not found for storing', async () => {
+            const pluginWithNonExistentRepo = { ...mockPluginManifest, repository: { type: 'nonexistent' as any } };
+            await marketplace.store(pluginWithNonExistentRepo);
+            expect(mockLocalRepoInstance.store).not.toHaveBeenCalled();
+            expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('Repository nonexistent not found (store)'));
+        });
+
+        it('should log error if store operation fails', async () => {
+            mockLocalRepoInstance.store.mockRejectedValueOnce(new Error('Store failed'));
+            await marketplace.store(mockPluginManifest);
+            expect(console.error).toHaveBeenCalledWith(expect.stringContaining('Failed to store plugin'), expect.any(Error));
+        });
     });
 
-    it('should delete a DefinitionManifest using LibrarianDefinitionRepository', async () => {
-        // Similar to store, deletion might depend on how the target is identified.
-        // Assuming we know it's a definition type and thus use librarian-definition repo.
-        // This test might be better if delete took a type hint or if fetchOne was used first.
-        // For now, let's assume we'd fetch it first to know its repo type, or delete iterates.
+    describe('delete', () => {
+        const mockPluginId = 'plugin-to-delete';
+        const mockPluginVersion = '1.0.0';
 
-        // To ensure it hits the right repo, we can mock fetchOne to return it from librarian
-        mockLibrarianRepoInstance.fetchOneByVerb.mockResolvedValue(openApiManifest);
+        it('should delete a plugin from specified repository', async () => {
+            await marketplace.delete(mockPluginId, mockPluginVersion, 'local' as PluginRepositoryType);
+            expect(mockLocalRepoInstance.delete).toHaveBeenCalledWith(mockPluginId, mockPluginVersion);
+        });
 
-        // The current store logic updates repo type if existing plugin found.
-        // Delete logic is not explicitly shown but should use the correct repo.
-        // We'll directly call delete on the repo for this unit test's purpose if marketplace.delete isn't directly usable
-        // For now, let's assume marketplace.delete would iterate or take a repo hint.
-        // A more robust test of marketplace.delete would require more setup of its internal logic.
+        it('should delete a plugin from default repository if none specified', async () => {
+            await marketplace.delete(mockPluginId, mockPluginVersion);
+            expect(mockLocalRepoInstance.delete).toHaveBeenCalledWith(mockPluginId, mockPluginVersion);
+        });
 
-        // This tests if the marketplace *can* call delete on the librarian repo if it's chosen.
-        // It doesn't fully test the marketplace's own routing logic for delete without more info.
-        // Let's assume we want to delete from a specific type of repo:
+        it('should log warning if repository not found for deleting', async () => {
+            await marketplace.delete(mockPluginId, mockPluginVersion, 'nonexistent' as PluginRepositoryType);
+            expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('Repository nonexistent not found (delete)'));
+        });
 
-        // To test the routing in marketplace.delete, we'd need to mock what fetchOneByVerb returns
-        // so that the internal logic of delete (if it uses fetch to determine repo) works.
-        // The current marketplace.store logic tries to determine repositoryType. Delete might be similar.
-        // For simplicity, we'll assume if we had a direct way to call delete on a specific repo via marketplace:
-
-        // Let's test a scenario where it has to iterate to find it.
-        mockMongoRepoInstance.fetch.mockResolvedValue(undefined); // Not in mongo
-        mockLibrarianRepoInstance.fetch.mockResolvedValue(openApiManifest); // Found in librarian
-
-        // A hypothetical refined delete that determines the repo (not current PM implementation detail)
-        // For now, we'll assume the marketplace's delete function would iterate repositories.
-        // If we were to test the direct call:
-        const marketplaceWithExplicitRepo = new PluginMarketplace();
-        marketplaceWithExplicitRepo['repositories'].set('librarian-definition', mockLibrarianRepoInstance);
-
-        // This is a bit of a workaround to directly test delegation to the specific repo's delete
-        await marketplaceWithExplicitRepo['repositories'].get('librarian-definition')?.delete(openApiManifest.id, openApiManifest.version);
-        expect(mockLibrarianRepoInstance.delete).toHaveBeenCalledWith(openApiManifest.id, openApiManifest.version);
+        it('should log warning if delete operation fails', async () => {
+            mockLocalRepoInstance.delete.mockRejectedValueOnce(new Error('Delete failed'));
+            await marketplace.delete(mockPluginId, mockPluginVersion, 'local' as PluginRepositoryType);
+            expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('Error deleting plugin'), expect.any(Error));
+        });
     });
 
+    describe('validateContainerPlugin', () => {
+        it('should return true for a valid container plugin manifest', () => {
+            const validManifest: PluginManifest = {
+                id: 'valid-container', verb: 'VALID_CONTAINER', language: 'container',
+                repository: { type: 'local' },
+                container: {
+                    dockerfile: 'Dockerfile',
+                    buildContext: '.',
+                    image: 'my-image',
+                    ports: [{ container: 8080, host: 8080 }],
+                    healthCheck: { path: '/health' }
+                },
+                api: { endpoint: '/api', method: 'post' }
+            };
+            expect((marketplace as any).validateContainerPlugin(validManifest)).toBe(true);
+        });
+
+        it('should return false if container config is missing', () => {
+            const manifest = { ...mockContainerManifest, container: undefined };
+            expect((marketplace as any).validateContainerPlugin(manifest as any)).toBe(false);
+            expect(console.error).toHaveBeenCalledWith('Container plugin missing container configuration');
+        });
+
+        it('should return false if API config is missing', () => {
+            const manifest = { ...mockContainerManifest, api: undefined };
+            expect((marketplace as any).validateContainerPlugin(manifest as any)).toBe(false);
+            expect(console.error).toHaveBeenCalledWith('Container plugin missing API configuration');
+        });
+
+        it('should return false if required container fields are missing', () => {
+            const manifest = { ...mockContainerManifest, container: { dockerfile: 'Dockerfile' } }; // Missing buildContext, image, ports
+            expect((marketplace as any).validateContainerPlugin(manifest as any)).toBe(false);
+            expect(console.error).toHaveBeenCalledWith(expect.stringContaining('Container configuration missing required field: buildContext'));
+        });
+
+        it('should return false if API endpoint or method is missing', () => {
+            const manifest = { ...mockContainerManifest, api: { endpoint: '/' } }; // Missing method
+            expect((marketplace as any).validateContainerPlugin(manifest as any)).toBe(false);
+            expect(console.error).toHaveBeenCalledWith('Container API configuration missing endpoint or method');
+        });
+
+        it('should return false if ports configuration is missing or empty', () => {
+            const manifest1 = { ...mockContainerManifest, container: { ...mockContainerManifest.container, ports: undefined } };
+            const manifest2 = { ...mockContainerManifest, container: { ...mockContainerManifest.container, ports: [] } };
+            expect((marketplace as any).validateContainerPlugin(manifest1 as any)).toBe(false);
+            expect((marketplace as any).validateContainerPlugin(manifest2 as any)).toBe(false);
+            expect(console.error).toHaveBeenCalledWith('Container configuration must specify at least one port mapping');
+        });
+
+        it('should return false if health check path is missing when healthCheck is present', () => {
+            const manifest = { ...mockContainerManifest, container: { ...mockContainerManifest.container, healthCheck: { timeout: '10s' } } }; // Missing path
+            expect((marketplace as any).validateContainerPlugin(manifest as any)).toBe(false);
+            expect(console.error).toHaveBeenCalledWith('Container health check configuration missing path');
+        });
+    });
 });

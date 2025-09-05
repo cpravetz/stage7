@@ -1,10 +1,12 @@
 import { CapabilitiesManager } from '../src/CapabilitiesManager';
-import { MCPTool, Step, PluginParameterType, PluginOutput, MapSerializer, GlobalErrorCodes } from '@cktmcs/shared';
+import { CapabilitiesManager } from '../src/CapabilitiesManager';
+import { CapabilitiesManager } from '../src/CapabilitiesManager';
+import { MCPTool, Step, PluginParameterType, PluginOutput, MapSerializer, InputValue } from '@cktmcs/shared';
+import { GlobalErrorCodes } from '../src/utils/errorReporter';
 import axios from 'axios';
 
 // Mock axios
 jest.mock('axios');
-const mockedAxios = axios as jest.Mocked<typeof axios>;
 
 // Mock shared utilities and BaseEntity
 jest.mock('@cktmcs/shared', () => {
@@ -28,14 +30,14 @@ jest.mock('@cktmcs/shared', () => {
                 put: jest.fn(),
                 delete: jest.fn(),
             };
-            verifyToken = jest.fn((req, res, next) => next());
+            verifyToken = jest.fn((req: any, res: any, next: any) => next());
             registerWithPostOffice = jest.fn().mockResolvedValue(undefined);
             getTokenManager = jest.fn().mockReturnValue({
                 getToken: jest.fn().mockResolvedValue('mocked-cm-service-token')
             });
              handleBaseMessage = jest.fn().mockResolvedValue(undefined);
         },
-        validateAndStandardizeInputs: jest.fn().mockImplementation(async (def, inputs) => {
+        validateAndStandardizeInputs: jest.fn().mockImplementation(async (def: any, inputs: any) => {
             // Simplified mock: assumes all inputs are valid and returns them
             return { success: true, inputs: inputs };
         }),
@@ -50,7 +52,7 @@ jest.mock('../src/utils/pluginRegistry', () => {
     mockPluginRegistryInstance = {
         fetchOneByVerb: jest.fn().mockResolvedValue(null), // Default to no plugin found
         list: jest.fn().mockResolvedValue([]),
-        preparePluginForExecution: jest.fn().mockImplementation((manifest) => Promise.resolve({
+        preparePluginForExecution: jest.fn().mockImplementation((manifest: any) => Promise.resolve({
             pluginRootPath: `/tmp/plugins/${manifest.id}`,
             effectiveManifest: manifest
         })),
@@ -75,7 +77,6 @@ jest.mock('../src/utils/configManager', () => {
 
 describe('CapabilitiesManager - MCP and OpenAPI Tool Execution via PluginRegistry', () => {
     let capabilitiesManager: CapabilitiesManager;
-    // let mockAuthApi: any; // No longer needed as we don't mock direct Librarian calls here
 
     const sampleMCPTool: MCPTool = {
         id: 'mcp-financial-tool-001', // This is the ID of the MCPTool definition itself
@@ -117,30 +118,22 @@ describe('CapabilitiesManager - MCP and OpenAPI Tool Execution via PluginRegistr
                     endpointOrCommand: '/api/balance',
                     method: 'GET',
                 },
-                authentication: { // Action-level auth override
-                    type: 'customToken',
-                    customToken: {
-                        headerName: 'Authorization',
-                        tokenPrefix: 'MCPBearer ',
-                        credentialSource: 'ENV_MCP_ACCOUNT_TOKEN'
-                    }
-                },
                 inputs: [{ name: 'accountId', type: PluginParameterType.STRING, required: true, description: 'Account ID' }],
                 outputs: [{ name: 'balance', type: PluginParameterType.NUMBER, required: true, description: 'Account balance' }],
             }
         ],
         metadata: {
             author: 'MCP Corp',
-            created: new Date().toISOString(),
+            created: new Date().toISOString(), // Reverted to ISO string
             tags: ['finance', 'mcp', 'payment'],
             category: 'financial_services',
         },
     };
 
     const createStep = (actionVerb: string, inputs: Record<string, any>): Step => {
-        const inputMap = new Map<string, any>();
+        const inputMap = new Map<string, InputValue>();
         for (const key in inputs) {
-            inputMap.set(key, { inputName: key, inputValue: inputs[key], args: {} });
+            inputMap.set(key, { inputName: key, value: inputs[key], valueType: PluginParameterType.ANY, args: {} });
         }
         return {
             id: `step-${Date.now()}`,
@@ -168,10 +161,6 @@ describe('CapabilitiesManager - MCP and OpenAPI Tool Execution via PluginRegistr
         delete process.env.MCP_ACCOUNT_SERVICE_URL;
     });
 
-
-    });
-
-
     beforeEach(async () => {
         jest.clearAllMocks();
         capabilitiesManager = new CapabilitiesManager();
@@ -182,7 +171,7 @@ describe('CapabilitiesManager - MCP and OpenAPI Tool Execution via PluginRegistr
 
         // Mock getCredential directly on the CM instance for these tests
         // as it's a private method called by auth logic.
-        jest.spyOn(capabilitiesManager as any, 'getCredential').mockImplementation(async (source: string) => {
+        jest.spyOn(capabilitiesManager as any, 'getCredential').mockImplementation(async (source: any) => {
             if (source === 'ENV_MCP_TOOL_TOKEN') return 'tool_api_key_123';
             if (source === 'ENV_MCP_ACCOUNT_TOKEN') return 'account_custom_token_456';
             if (source === 'ENV_OPENAPI_KEY') return 'openapi_key_789';
@@ -198,9 +187,14 @@ describe('CapabilitiesManager - MCP and OpenAPI Tool Execution via PluginRegistr
         version: '1.0.0',
         specUrl: 'http://weather.example.com/openapi.json',
         baseUrl: 'http://weather.example.com/api',
+        specVersion: '3.0', // Added specVersion
         authentication: {
             type: 'apiKey',
-            apiKey: { name: 'X-Weather-API-Key', in: 'header', credentialSource: 'ENV_OPENAPI_KEY' }
+            apiKey: {
+                in: 'header',
+                name: 'X-Weather-API-Key',
+                credentialSource: 'ENV_OPENAPI_KEY'
+            }
         },
         actionMappings: [
             {
@@ -209,11 +203,29 @@ describe('CapabilitiesManager - MCP and OpenAPI Tool Execution via PluginRegistr
                 method: 'GET',
                 path: '/forecast',
                 description: 'Gets the weather forecast for a location.',
-                inputs: [{ name: 'location', type: PluginParameterType.STRING, required: true, description: 'City name' }],
-                outputs: [{ name: 'forecast', type: PluginParameterType.OBJECT, required: true, description: 'Forecast data' }]
+                inputs: [
+                    {
+                        name: 'location',
+                        type: PluginParameterType.STRING,
+                        required: true,
+                        description: 'City name',
+                        in: 'query'
+                    }
+                ],
+                outputs: [
+                    {
+                        name: 'forecast',
+                        type: PluginParameterType.OBJECT,
+                        description: 'Forecast data'
+                    }
+                ]
             }
         ],
-        metadata: { created: new Date().toISOString(), tags: ['weather', 'openapi'], category: 'utilities' }
+        metadata: {
+            created: new Date(), // Changed to Date object
+            tags: ['weather', 'openapi'],
+            category: 'utilities'
+        }
     };
 
     describe('executeActionVerb with MCP Tool via PluginRegistry', () => {
@@ -225,10 +237,13 @@ describe('CapabilitiesManager - MCP and OpenAPI Tool Execution via PluginRegistr
 
             const step = createStep(mcpVerb, { amount: 100, currency: 'USD', recipientId: 'recv-001' });
             const mcpApiResponse = { transactionId: 'txn_123abc', status: 'completed' };
-            mockedAxios.mockResolvedValueOnce({ data: mcpApiResponse, status: 200 });
+            jest.spyOn(axios, 'post').mockResolvedValueOnce({ data: mcpApiResponse, status: 200 }); // Mock axios.post
 
             // Simulate express request/response for executeActionVerb
-            const mockReq: any = { body: step, trace_id: 'trace-exec-mcp' };
+            const mockReq: any = {
+                body: step,
+                trace_id: 'trace-exec-mcp'
+            };
             const mockRes: any = {
                 status: jest.fn().mockReturnThis(),
                 send: jest.fn(),
@@ -238,7 +253,7 @@ describe('CapabilitiesManager - MCP and OpenAPI Tool Execution via PluginRegistr
             await (capabilitiesManager as any).executeActionVerb(mockReq, mockRes);
 
             expect(mockPluginRegistryInstance.fetchOneByVerb).toHaveBeenCalledWith(mcpVerb, expect.any(String));
-            expect(mockedAxios).toHaveBeenCalledWith(expect.objectContaining({
+            expect(axios.post).toHaveBeenCalledWith(expect.objectContaining({
                 method: 'post',
                 url: 'http://mcp-payment-service.example.com/api/v2/payments',
                 headers: expect.objectContaining({
@@ -246,34 +261,55 @@ describe('CapabilitiesManager - MCP and OpenAPI Tool Execution via PluginRegistr
                     'X-Trace-ID': 'trace-mcp-post',
                     'X-MCP-Tool-Token': 'tool_api_key_123'
                 }),
-                data: { amount: 100, currency: 'USD', recipientId: 'recv-001' }
+                data: {
+                    amount: 100,
+                    currency: 'USD',
+                    recipientId: 'recv-001'
+                }
             }));
-            expect(result).toEqual([
-                { success: true, name: 'transactionId', resultType: PluginParameterType.STRING, result: 'txn_123abc', resultDescription: expect.any(String) },
-                { success: true, name: 'status', resultType: PluginParameterType.STRING, result: 'completed', resultDescription: expect.any(String) },
-            ]);
+            const result = mockRes.send.mock.calls[0][0]; // Get result from mockRes.send
+            expect(result).toEqual(MapSerializer.transformForSerialization([
+                {
+                    success: true,
+                    name: 'transactionId',
+                    resultType: PluginParameterType.STRING,
+                    result: 'txn_123abc',
+                    resultDescription: expect.any(String)
+                },
+                {
+                    success: true,
+                    name: 'status',
+                    resultType: PluginParameterType.STRING,
+                    result: 'completed',
+                    resultDescription: expect.any(String)
+                },
+            ]));
         });
 
         it('should execute a GET MCP tool action successfully with action-level auth', async () => {
             const step = createStep('GET_BALANCE_MCP', { accountId: 'acc-007' });
             const mcpApiResponse = { balance: 5000.75 };
-            mockedAxios.mockResolvedValueOnce({ data: mcpApiResponse, status: 200 });
+            jest.spyOn(axios, 'get').mockResolvedValueOnce({ data: mcpApiResponse, status: 200 }); // Mock axios.get
 
             const result = await (capabilitiesManager as any).executeMCPTool(sampleMCPTool, step, 'trace-mcp-get');
 
-            expect(mockedAxios).toHaveBeenCalledWith(expect.objectContaining({
+            expect(axios.get).toHaveBeenCalledWith(expect.objectContaining({
                 method: 'get',
-                url: 'http://mcp-account-service.example.com/api/balance', // Note: GET request usually sends data in query params, not body
+                url: 'http://mcp-account-service.example.com/api/balance',
                 headers: expect.objectContaining({
-                    'Content-Type': 'application/json', // May not be needed for GET if no body
+                    'Content-Type': 'application/json',
                     'X-Trace-ID': 'trace-mcp-get',
                     'Authorization': 'MCPBearer account_custom_token_456'
                 }),
-                // data: { accountId: 'acc-007' } // For GET, this should likely be a query param. The current executeMCPTool sends all inputs as body.
-                                                 // This might need refinement in executeMCPTool for GET requests.
             }));
             expect(result).toEqual([
-                { success: true, name: 'balance', resultType: PluginParameterType.NUMBER, result: 5000.75, resultDescription: expect.any(String) },
+                {
+                    success: true,
+                    name: 'balance',
+                    resultType: PluginParameterType.NUMBER,
+                    result: 5000.75,
+                    resultDescription: expect.any(String)
+                },
             ]);
         });
 
@@ -290,13 +326,13 @@ describe('CapabilitiesManager - MCP and OpenAPI Tool Execution via PluginRegistr
             expect(result[0].success).toBe(false);
             expect(result[0].name).toBe(GlobalErrorCodes.INPUT_VALIDATION_FAILED);
             expect(result[0].error).toContain("Missing required input: amount");
-            expect(mockedAxios).not.toHaveBeenCalled();
+            expect(axios.post).not.toHaveBeenCalled();
         });
 
         it('should handle MCP service returning an error', async () => {
             const step = createStep('PROCESS_PAYMENT_MCP', { amount: 100, currency: 'USD', recipientId: 'recv-001' });
             const mcpApiErrorResponse = { message: "Insufficient funds" };
-            mockedAxios.mockRejectedValueOnce({ response: { data: mcpApiErrorResponse, status: 400 }});
+            jest.spyOn(axios, 'post').mockRejectedValueOnce({ response: { data: mcpApiErrorResponse, status: 400 }});
 
             const result = await (capabilitiesManager as any).executeMCPTool(sampleMCPTool, step, 'trace-mcp-service-error');
 
@@ -330,15 +366,15 @@ describe('CapabilitiesManager - MCP and OpenAPI Tool Execution via PluginRegistr
 
             expect(result.length).toBe(1);
             expect(result[0].success).toBe(false);
-            expect(result[0].name).toBe(GlobalErrorCodes.CAPABILITIES_MANAGER_MCP_TOOL_EXECUTION_FAILED); // The error is caught by executeMCPTool's main try-catch
-            expect(result[0].error).toContain("Failed to apply MCP authentication: Vault unavailable"); // The specific error from applyMCPAuthentication
+            expect(result[0].name).toBe(GlobalErrorCodes.CAPABILITIES_MANAGER_MCP_TOOL_EXECUTION_FAILED);
+            expect(result[0].error).toContain("Failed to apply MCP authentication: Vault unavailable");
         });
     });
 
     describe('listCapabilities', () => {
         it('should include MCP tools in the list of capabilities', async () => {
             // Mock Librarian response for MCP tools
-            mockAuthApi.post.mockImplementation(async (url: string, data: any) => {
+            jest.spyOn(capabilitiesManager.authenticatedApi, 'post').mockImplementation(async (url: any, data: any) => {
                 if (url.includes('/queryData') && data.collection === 'mcpTools') {
                     return { data: { data: [sampleMCPTool] } };
                 }

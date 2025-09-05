@@ -1,7 +1,7 @@
 import { BaseModel, ModelScore } from './baseModel';
 import { LLMConversationType } from '@cktmcs/shared';
 
-export class ClaudeHaikuModel extends BaseModel {
+export class ClaudeSonnetModel extends BaseModel {
     constructor() {
         const scoresByConversationType = new Map<LLMConversationType, ModelScore>([
             [LLMConversationType.TextToText, {
@@ -25,8 +25,8 @@ export class ClaudeHaikuModel extends BaseModel {
         ]);
 
         super({
-            name: "anthropic/claude-3-haiku-20240307",
-            modelName: "claude-3-haiku-20240307",
+            name: "anthropic/claude-sonnet-4-20250514",
+            modelName: "claude-sonnet-4-20250514",
             interfaceName: "anthropic",
             serviceName: "AntService",
             tokenLimit: 200000, // Adjust this value if you know the exact token limit for Claude Haiku
@@ -36,5 +36,5 @@ export class ClaudeHaikuModel extends BaseModel {
     }
 }
 
-const aiModel = new ClaudeHaikuModel();
+const aiModel = new ClaudeSonnetModel();
 export default aiModel;
