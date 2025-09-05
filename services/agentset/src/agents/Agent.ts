@@ -1932,6 +1932,7 @@ Explanation: ${resolution.explanation}`);
         const isAgentEndpoint = step.isEndpoint(this.steps);
         await this.saveWorkProductWithClassification(step.id, result, isAgentEndpoint, this.getAllAgentsInMission());
         await this.notifyTrafficManager();
+        await this.pruneSteps();
     }
 
     private async handleStepFailure(step: Step, error: Error): Promise<void> {
@@ -1998,6 +1999,45 @@ Explanation: ${resolution.explanation}`);
             // Permanent failure
             step.status = StepStatus.ERROR;
             this.say(`Step ${step.actionVerb} failed permanently. Attempting to create a new plan to recover.`);
+    }
+
+    private async pruneSteps(): Promise<void> {
+        const stepsToKeep: Step[] = [];
+        const activeStepIds = new Set(this.steps.filter(s => 
+            s.status === StepStatus.PENDING || 
+            s.status === StepStatus.RUNNING || 
+            s.status === StepStatus.SUB_PLAN_RUNNING ||
+            s.status === StepStatus.WAITING
+        ).map(s => s.id));
+
+        for (const step of this.steps) {
+            if (step.status === StepStatus.COMPLETED || 
+                step.status === StepStatus.ERROR || 
+                step.status === StepStatus.CANCELLED) {
+                
+                let hasActiveDependents = false;
+                for (const otherStep of this.steps) {
+                    if (activeStepIds.has(otherStep.id) && 
+                        otherStep.dependencies.some(dep => dep.sourceStepId === step.id)) {
+                        hasActiveDependents = true;
+                        break;
+                    }
+                }
+
+                if (!hasActiveDependents) {
+                    // This step can be pruned. Clear its data to free memory.
+                    step.clearTempData(); // Clears result and tempData
+                    console.log(`[Agent ${this.id}] Pruned completed step ${step.id} (${step.actionVerb}).`);
+                    // Do not add to stepsToKeep
+                } else {
+                    stepsToKeep.push(step);
+                }
+            } else {
+                stepsToKeep.push(step);
+            }
+        }
+        this.steps = stepsToKeep;
+    }
 
             // Intelligent Replanning
             await this.replanFromFailure(step);
