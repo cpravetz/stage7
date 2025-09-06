@@ -13,6 +13,8 @@ export enum MessageType {
     RESUME = "resume",
     SAVE = "save",
     LOAD = "load",
+    LIST_MISSIONS = "listMissions",
+    RECONNECT_MISSION = "reconnectMission",
     WORK_PRODUCT_UPDATE = "workProductUpdate",
     REGISTER="REGISTER",
     AGENT_UPDATE = "agentUpdate",

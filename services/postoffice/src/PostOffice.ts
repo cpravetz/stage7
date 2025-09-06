@@ -558,6 +558,17 @@ export class PostOffice extends BaseEntity {
             }
 
             console.log('WebSocket message received:', parsedMessage);
+
+            if (parsedMessage.type === MessageType.LIST_MISSIONS) {
+                const missionControlUrl = await this.serviceDiscoveryManager.discoverService('MissionControl');
+                if (missionControlUrl) {
+                    await this.sendToComponent(missionControlUrl, parsedMessage, token);
+                } else {
+                    console.error(`(ws)Recipient not found for ${JSON.stringify(parsedMessage)}`);
+                }
+                return;
+            }
+
             console.log('Looking for client:', parsedMessage.recipient);
             const recipientUrl = await this.serviceDiscoveryManager.discoverService(parsedMessage.recipient || '');
             if (!recipientUrl) {

@@ -27,6 +27,8 @@ interface WebSocketContextType {
   sendMessage: (message: string) => Promise<void>;
   handleControlAction: (action: string) => Promise<void>;
   handleLoadMission: (missionId: string) => Promise<void>;
+  listMissions: () => Promise<void>;
+  missions: Partial<Mission>[];
   pendingUserInput?: {
     request_id: string;
     question: string;
@@ -73,6 +75,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [activeMissionId, setActiveMissionId] = useState<string | null>(null);
   const [isPaused, setIsPaused] = useState<boolean>(false);
   const [missionStatus, setMissionStatus] = useState<any>(null);
+  const [missions, setMissions] = useState<Partial<Mission>[]>([]);
   
   // Data state
   const [workProducts, setWorkProducts] = useState<{ type: 'Interim' | 'Final' | 'Plan', name: string, url: string, workproduct: any }[]>([]);
@@ -233,7 +236,12 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           // Batch mission status updates
           setActiveMission((prev: boolean) => statusContent.active !== prev ? statusContent.active : prev);
           setActiveMissionName((prev: string | null) => statusContent.name !== prev ? statusContent.name : prev);
-          setActiveMissionId((prev: string | null) => statusContent.id !== prev ? statusContent.id : prev);
+          setActiveMissionId((prev: string | null) => {
+            if (prev !== statusContent.id) {
+              localStorage.setItem('missionId', statusContent.id);
+            }
+            return statusContent.id;
+          });
           setMissionStatus((prev: any) => {
             const stringified = JSON.stringify(prev);
             const newStringified = JSON.stringify(statusContent);
@@ -278,6 +286,10 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             choices: data.choices
           }
         ]);
+        break;
+
+      case MessageType.LIST_MISSIONS:
+        setMissions(data.content.missions);
         break;
         
       default:
@@ -424,6 +436,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           setActiveMission(false);
           setActiveMissionName(null);
           setActiveMissionId(null);
+          localStorage.removeItem('missionId');
         }
       } catch (error) {
         console.error('[WebSocketContext] Failed to send control action:', error instanceof Error ? error.message : error);
@@ -465,6 +478,18 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         setConversationHistory((prev: string[]) => [...prev, 'System: Failed to load mission. Please try again.']);
       }
     },
+    listMissions: async () => {
+      if (!ws.current) {
+        connectWebSocket();
+      }
+      ws.current?.send(JSON.stringify({
+        type: 'LIST_MISSIONS',
+        sender: 'user',
+        recipient: 'MissionControl',
+        clientId
+      }));
+    },
+    missions,
     pendingUserInput,
     setPendingUserInput: (value) => {
       if (value === null) {
@@ -479,7 +504,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         setPendingUserInput(value);
       }
     }
-  }), [isConnected, clientId, conversationHistory, currentQuestion, pendingUserInput, activeMission, activeMissionName, activeMissionId]);
+  }), [isConnected, clientId, conversationHistory, currentQuestion, pendingUserInput, activeMission, activeMissionName, activeMissionId, missions]);
 
   const missionContextValue = useMemo<MissionContextType>(() => ({
     activeMission,
@@ -533,6 +558,16 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         type: 'CLIENT_CONNECT',
         clientId: clientId
       }));
+
+      const storedMissionId = localStorage.getItem('missionId');
+      if (storedMissionId) {
+        ws.current?.send(JSON.stringify({
+          type: 'RECONNECT_MISSION',
+          content: {
+            missionId: storedMissionId
+          }
+        }));
+      }
     };
 
     ws.current.onmessage = (event) => {

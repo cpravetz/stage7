@@ -1356,6 +1356,7 @@ Please consider this context and the available plugins when planning and executi
             });
             this.steps.push(newStep);
             // The agent will pick up and run this new step in its main loop.
+            await this.notifyTrafficManager();
             break;
 
           case CollaborationMessageType.TASK_RESULT:
@@ -1372,6 +1373,7 @@ Please consider this context and the available plugins when planning and executi
                   this.say(`Delegated step ${step.actionVerb} failed. Reason: ${taskResult.error}`);
                 }
                 this.delegatedSteps.delete(taskResult.taskId);
+                await this.notifyTrafficManager();
               }
             }
             break;
@@ -1999,6 +2001,10 @@ Explanation: ${resolution.explanation}`);
             // Permanent failure
             step.status = StepStatus.ERROR;
             this.say(`Step ${step.actionVerb} failed permanently. Attempting to create a new plan to recover.`);
+            // Intelligent Replanning
+            await this.replanFromFailure(step);
+        }
+        await this.notifyTrafficManager();
     }
 
     private async pruneSteps(): Promise<void> {
@@ -2017,10 +2023,14 @@ Explanation: ${resolution.explanation}`);
                 
                 let hasActiveDependents = false;
                 for (const otherStep of this.steps) {
-                    if (activeStepIds.has(otherStep.id) && 
-                        otherStep.dependencies.some(dep => dep.sourceStepId === step.id)) {
-                        hasActiveDependents = true;
-                        break;
+                    if (activeStepIds.has(otherStep.id)) {
+                        for (const dep of otherStep.dependencies) {
+                            if (dep.sourceStepId === step.id) {
+                                hasActiveDependents = true;
+                                break;
+                            }
+                        }
+                        if (hasActiveDependents) break;
                     }
                 }
 
@@ -2037,12 +2047,6 @@ Explanation: ${resolution.explanation}`);
             }
         }
         this.steps = stepsToKeep;
-    }
-
-            // Intelligent Replanning
-            await this.replanFromFailure(step);
-        }
-        await this.notifyTrafficManager();
     }
 
     private async getCompletedWorkProductsSummary(): Promise<string> {

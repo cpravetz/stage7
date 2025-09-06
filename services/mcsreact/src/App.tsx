@@ -10,6 +10,7 @@ import TextInput from './components/TextInput';
 import MissionControls from './components/MissionControls';
 import StatisticsWindow from './components/StatisticsWindow';
 import SavedMissionsList from './components/SavedMissionsList';
+import MissionList from './components/MissionList';
 import ErrorBoundary from './components/ErrorBoundary';
 import LoginComponent from './components/Login';
 import EmailVerification from './components/EmailVerification';
@@ -30,6 +31,7 @@ import './App.css';
 const MainApp: React.FC = () => {
   const { isAuthenticated, login, logout } = useAuth();
   const [showSavedMissions, setShowSavedMissions] = useState<boolean>(false);
+  const [showMissionList, setShowMissionList] = useState<boolean>(false);
   const securityClient = SecurityClient.getInstance(API_BASE_URL);
 
   // Use the split contexts for shared state across routes
@@ -38,6 +40,8 @@ const MainApp: React.FC = () => {
     sendMessage: contextSendMessage,
     handleControlAction: contextHandleControlAction,
     handleLoadMission: contextHandleLoadMission,
+    listMissions,
+    missions,
     pendingUserInput,
     setPendingUserInput
   } = useWebSocket();
@@ -134,6 +138,12 @@ const MainApp: React.FC = () => {
       return;
     }
 
+    if (action === 'list_missions') {
+      await listMissions();
+      setShowMissionList(true);
+      return;
+    }
+
     // For all other actions, use the context function
     await contextHandleControlAction(action);
   };
@@ -142,6 +152,7 @@ const MainApp: React.FC = () => {
   const handleLoadMission = async (missionId: string) => {
     await contextHandleLoadMission(missionId);
     setShowSavedMissions(false);
+    setShowMissionList(false);
   };
 
   if (!isAuthenticated) {
@@ -273,7 +284,13 @@ const MainApp: React.FC = () => {
               borderColor: 'divider'
             }}
           >
-            {!showSavedMissions ? (
+            {showMissionList ? (
+              <MissionList
+                missions={missions}
+                onMissionSelect={handleLoadMission}
+                onClose={() => setShowMissionList(false)}
+              />
+            ) : !showSavedMissions ? (
               <StatisticsWindow
                 statistics={statistics}
                 activeMissionName={activeMissionName}
