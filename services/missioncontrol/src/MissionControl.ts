@@ -242,6 +242,9 @@ class MissionControl extends BaseEntity {
             case MessageType.LOAD:
                 const loadedMission = await this.loadMission(missionId, clientId, effectiveUserId);
                 return { missionId, status: 'loaded', mission: loadedMission };
+            case MessageType.LIST_MISSIONS:
+                const missions = await this.listMissions(effectiveUserId);
+                return { status: 'listed', missions: missions };
             case MessageType.USER_MESSAGE:
                 await this.handleUserMessage(content, clientId, missionId);
                 return { missionId, status: 'message_sent' };
@@ -840,6 +843,65 @@ class MissionControl extends BaseEntity {
             if (this.clientMissions.get(clientId)!.size === 0) {
                 this.clientMissions.delete(clientId);
             }
+        }
+    }
+
+    private async listMissions(userId: string): Promise<Partial<Mission>[]> {
+        try {
+            console.log(`Listing all missions for user ${userId}`);
+
+            // 1. Get missions from memory
+            const inMemoryMissions = Array.from(this.missions.values());
+
+            // 2. Get all missions from storage
+            const response = await this.authenticatedApi.get(`http://${this.librarianUrl}/queryData`, {
+                params: {
+                    collection: 'missions',
+                    query: JSON.stringify({ userId: userId }) // Filter by user
+                }
+            });
+            const storedMissions: Mission[] = response.data.data || [];
+
+            // 3. Combine and deduplicate
+            const allMissions = new Map<string, Mission>();
+            for (const mission of inMemoryMissions) {
+                if (mission.userId === userId) {
+                    allMissions.set(mission.id, mission);
+                }
+            }
+            for (const mission of storedMissions) {
+                // In-memory version is likely more up-to-date
+                if (!allMissions.has(mission.id)) {
+                    allMissions.set(mission.id, mission);
+                }
+            }
+
+            // 4. Format for output
+            const missionList = Array.from(allMissions.values()).map(mission => ({
+                id: mission.id,
+                name: mission.name,
+                status: mission.status,
+                goal: mission.goal,
+                createdAt: mission.createdAt,
+                updatedAt: mission.updatedAt,
+            }));
+
+            console.log(`Found ${missionList.length} missions for user ${userId}`);
+            return missionList;
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error('Error listing missions:', error instanceof Error ? error.message : error);
+            // Return a mix of in-memory and potentially incomplete data if storage fails
+            return Array.from(this.missions.values())
+                .filter(m => m.userId === userId)
+                .map(mission => ({
+                    id: mission.id,
+                    name: mission.name,
+                    status: mission.status,
+                    goal: mission.goal,
+                    createdAt: mission.createdAt,
+                    updatedAt: mission.updatedAt,
+                }));
         }
     }
 

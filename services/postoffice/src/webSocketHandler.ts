@@ -126,6 +126,20 @@ export class WebSocketHandler {
               // Add the client to the mission's client set
               this.missionClients.get(missionId)!.add(clientId!);
             }
+          } else if (parsedMessage.type === MessageType.RECONNECT_MISSION) {
+            const { missionId } = parsedMessage.content;
+            if (missionId) {
+                console.log(`Reconnecting client ${clientId} to mission ${missionId}`);
+                this.clientMissions.set(clientId!, missionId);
+
+                if (!this.missionClients.has(missionId)) {
+                    this.missionClients.set(missionId, new Set());
+                }
+                this.missionClients.get(missionId)!.add(clientId!);
+                
+                // Optionally, send a confirmation to the client
+                ws.send(JSON.stringify({ type: 'RECONNECT_SUCCESS', missionId }));
+            }
           } else {
             this.handleWebSocketMessage(parsedMessage, token || '');
           }

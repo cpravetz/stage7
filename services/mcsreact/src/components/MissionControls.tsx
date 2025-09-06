@@ -5,6 +5,7 @@ import PauseIcon from '@mui/icons-material/Pause';
 import StopIcon from '@mui/icons-material/Stop';
 import SaveIcon from '@mui/icons-material/Save';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
+import ListIcon from '@mui/icons-material/List';
 
 interface Props {
   onControl: (action: string) => void;
