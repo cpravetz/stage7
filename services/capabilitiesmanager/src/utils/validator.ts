@@ -188,6 +188,9 @@ export const validateAndStandardizeInputs = async (
         for (const inputDef of inputDefinitions) {
             const inputName = inputDef.name;
             const inputKey = Array.from(sanitizedInputs.keys()).find(key => {
+                if (typeof key !== 'string') {
+                    return false;
+                }
                 const lowerKey = key.toLowerCase();
                 const lowerInputName = inputName.toLowerCase();
                 return lowerKey === lowerInputName || 

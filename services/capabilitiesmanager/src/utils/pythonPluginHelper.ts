@@ -43,7 +43,18 @@ export async function ensurePythonDependencies(pluginRootPath: string, trace_id:
                 if (attempt < maxRetries) {
                     await sleep(delayMs);
                 } else {
-                    throw err;
+                    const newErr = new Error(`Failed to delete venv directory ${pathToDelete} after ${maxRetries} attempts. Last error: ${err.message}`);
+                    if (process.platform === 'linux') { // lsof is typically available on Linux
+                        try {
+                            const { stdout } = await execAsync(`lsof +D ${pathToDelete}`);
+                            if (stdout) {
+                                (newErr as any).context = `Files may be locked by the following processes:\n${stdout}`;
+                            }
+                        } catch (lsofErr: any) {
+                            (newErr as any).context = `Could not run lsof to check for locked files: ${lsofErr.message}`;
+                        }
+                    }
+                    throw newErr;
                 }
             }
         }
@@ -123,6 +134,10 @@ export async function ensurePythonDependencies(pluginRootPath: string, trace_id:
                     await execAsync(bootstrapPipCmd, { cwd: pluginRootPath, timeout: 60000 });
                     if (fs.existsSync(venvPipPath)) {
                         const upgradePipCmd = `"${venvPipPath}" install --upgrade pip`;
+                        await execAsync(upgradePipCmd, { cwd: pluginRootPath, timeout: 60000 });
+                    } else {
+                        // Fallback to python -m pip
+                        const upgradePipCmd = `"${venvPythonPath}" -m pip install --upgrade pip`;
                         await execAsync(upgradePipCmd, { cwd: pluginRootPath, timeout: 60000 });
                     }
                 } catch (ensurepipError: any) {

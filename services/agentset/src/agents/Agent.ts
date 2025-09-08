@@ -2008,7 +2008,6 @@ Explanation: ${resolution.explanation}`);
     }
 
     private async pruneSteps(): Promise<void> {
-        const stepsToKeep: Step[] = [];
         const activeStepIds = new Set(this.steps.filter(s => 
             s.status === StepStatus.PENDING || 
             s.status === StepStatus.RUNNING || 
@@ -2038,15 +2037,9 @@ Explanation: ${resolution.explanation}`);
                     // This step can be pruned. Clear its data to free memory.
                     step.clearTempData(); // Clears result and tempData
                     console.log(`[Agent ${this.id}] Pruned completed step ${step.id} (${step.actionVerb}).`);
-                    // Do not add to stepsToKeep
-                } else {
-                    stepsToKeep.push(step);
                 }
-            } else {
-                stepsToKeep.push(step);
             }
         }
-        this.steps = stepsToKeep;
     }
 
     private async getCompletedWorkProductsSummary(): Promise<string> {
