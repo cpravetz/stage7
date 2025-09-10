@@ -244,8 +244,6 @@ class RobustMissionPlanner:
         else:
             mission_id = mission_id_input if mission_id_input is not None else None
 
-        logger.info(f"ACCOMPLISH: Parsed available_plugins: {json.dumps(inputs.get('availablePlugins'), indent=2)}")
-
         logger.info(f"DEBUG: goal = '{goal}...'") 
         logger.info(f"DEBUG: mission_id = '{mission_id}'") 
 

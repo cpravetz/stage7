@@ -378,11 +378,12 @@ export class Step {
             });
 
             if (result[0]?.resultType === PluginParameterType.PLAN) {
-                this.status = StepStatus.SUB_PLAN_RUNNING; 
+                this.status = StepStatus.SUB_PLAN_RUNNING;
                 this.result = result;
             } else {
                 this.status = StepStatus.COMPLETED;
-                this.result = result;
+                // Map plugin output names to step-defined custom names
+                this.result = this.mapPluginOutputsToCustomNames(result);
 
                 await this.logEvent({
                     eventType: 'step_result',
@@ -846,11 +847,12 @@ export class Step {
             });
 
             if (result[0]?.resultType === PluginParameterType.PLAN) {
-                this.status = StepStatus.SUB_PLAN_RUNNING; 
+                this.status = StepStatus.SUB_PLAN_RUNNING;
                 this.result = result;
             } else {
                 this.status = StepStatus.COMPLETED;
-                this.result = result;
+                // Map plugin output names to step-defined custom names
+                this.result = this.mapPluginOutputsToCustomNames(result);
 
                 await this.logEvent({
                     eventType: 'step_result',
@@ -963,6 +965,41 @@ export class Step {
                     args: inputRef.args || {}
                 });
             }
+        });
+    }
+
+    /**
+     * Maps plugin output names to step-defined custom output names.
+     * This ensures that when other steps reference outputs, they can use the custom names.
+     */
+    private mapPluginOutputsToCustomNames(pluginOutputs: PluginOutput[]): PluginOutput[] {
+        if (!this.outputs || this.outputs.size === 0) {
+            // No custom output names defined, return plugin outputs as-is
+            return pluginOutputs;
+        }
+
+        // For single output plugins, map to the single custom name
+        if (pluginOutputs.length === 1 && this.outputs.size === 1) {
+            const customName = Array.from(this.outputs.keys())[0];
+            const pluginOutput = pluginOutputs[0];
+
+            return [{
+                ...pluginOutput,
+                name: customName  // Replace plugin name with custom name
+            }];
+        }
+
+        // For multiple outputs, try to map by position or keep original names
+        // This is a more complex case that may need enhancement based on actual usage
+        const customNames = Array.from(this.outputs.keys());
+        return pluginOutputs.map((output, index) => {
+            if (index < customNames.length) {
+                return {
+                    ...output,
+                    name: customNames[index]
+                };
+            }
+            return output; // Keep original name if no custom name available
         });
     }
 }

@@ -273,7 +273,7 @@ class ScrapePlugin:
                 "name": "content",
                 "resultType": PluginParameterType.ARRAY,
                 "resultDescription": f"Scraped content from {len(urls_to_scrape)} URL(s)",
-                "result": all_scraped_.data,
+                "result": all_scraped_data,
                 "mimeType": "application/json"
             }]
 

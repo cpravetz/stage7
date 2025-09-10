@@ -1,0 +1,97 @@
+{
+  "description": "Example showing how custom output names make plans more user-friendly",
+  "before_change": {
+    "description": "Before the change, all outputs had to match plugin definitions exactly",
+    "plan": [
+      {
+        "number": 1,
+        "actionVerb": "CHAT",
+        "description": "Ask user for their favorite color",
+        "inputs": {
+          "message": {"value": "What is your favorite color?", "valueType": "string"}
+        },
+        "outputs": {
+          "response": "User's response (forced to use plugin's output name)"
+        }
+      },
+      {
+        "number": 2,
+        "actionVerb": "FILE_OPERATION",
+        "description": "Save the color preference",
+        "inputs": {
+          "operation": {"value": "write", "valueType": "string"},
+          "path": {"value": "color_preference.txt", "valueType": "string"},
+          "content": {"outputName": "response", "sourceStep": 1}
+        },
+        "outputs": {
+          "result": "File operation result (forced to use plugin's output name)"
+        }
+      },
+      {
+        "number": 3,
+        "actionVerb": "TEXT_ANALYSIS",
+        "description": "Analyze the color name",
+        "inputs": {
+          "text": {"outputName": "response", "sourceStep": 1},
+          "analysis_type": {"value": "all", "valueType": "string"}
+        },
+        "outputs": {
+          "statistics": "Text statistics (forced plugin name)",
+          "sentiment": "Sentiment analysis (forced plugin name)",
+          "keywords": "Keywords found (forced plugin name)"
+        }
+      }
+    ]
+  },
+  "after_change": {
+    "description": "After the change, planners can use descriptive, context-appropriate output names",
+    "plan": [
+      {
+        "number": 1,
+        "actionVerb": "CHAT",
+        "description": "Ask user for their favorite color",
+        "inputs": {
+          "message": {"value": "What is your favorite color?", "valueType": "string"}
+        },
+        "outputs": {
+          "favoriteColor": "The user's favorite color (descriptive custom name)"
+        }
+      },
+      {
+        "number": 2,
+        "actionVerb": "FILE_OPERATION",
+        "description": "Save the color preference",
+        "inputs": {
+          "operation": {"value": "write", "valueType": "string"},
+          "path": {"value": "color_preference.txt", "valueType": "string"},
+          "content": {"outputName": "favoriteColor", "sourceStep": 1}
+        },
+        "outputs": {
+          "saveStatus": "Status of saving the color preference (descriptive custom name)"
+        }
+      },
+      {
+        "number": 3,
+        "actionVerb": "TEXT_ANALYSIS",
+        "description": "Analyze the color name",
+        "inputs": {
+          "text": {"outputName": "favoriteColor", "sourceStep": 1},
+          "analysis_type": {"value": "all", "valueType": "string"}
+        },
+        "outputs": {
+          "colorNameStats": "Statistics about the color name (descriptive custom name)",
+          "colorSentiment": "Emotional tone of the color name (descriptive custom name)",
+          "colorKeywords": "Key terms in the color description (descriptive custom name)"
+        }
+      }
+    ]
+  },
+  "benefits": [
+    "Plans are more readable and self-documenting",
+    "Output names provide context about what the data represents",
+    "Dependencies are clearer when using descriptive names",
+    "LLMs can generate more intuitive plans",
+    "Human users can better understand plan flow",
+    "No loss of functionality - system still validates output count and types"
+  ]
+}

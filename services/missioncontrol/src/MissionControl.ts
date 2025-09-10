@@ -629,7 +629,6 @@ class MissionControl extends BaseEntity {
         console.log(`Reflecting on mission ${mission.id}`);
         try {
             // 1. Gather context for reflection
-            // 1. Gather context for reflection
             // Fetch plan history from TrafficManager
             let planHistory: any[] = [];
             try {

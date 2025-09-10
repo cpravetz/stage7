@@ -14,11 +14,17 @@ export class CloudflareWorkersAIModel extends BaseModel {
                     speedScore: 80,
                     accuracyScore: 70,
                     creativityScore: 60,
-                    costScore: 10, // Assuming low cost for free tier
+                    costScore: 99, 
+                }],
+                [LLMConversationType.TextToJSON, {
+                    speedScore: 80,
+                    accuracyScore: 70,
+                    creativityScore: 60,
+                    costScore: 99, 
                 }],
             ]),
             contentConversation: [
-                LLMConversationType.TextToText,
+                LLMConversationType.TextToJSON,
             ],
         });
     }

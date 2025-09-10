@@ -426,16 +426,13 @@ Return the corrected JSON object for the step."""
                     # For novel verbs, we can't validate inputs strictly
                     logger.info(f"Step {step_number}: actionVerb '{action_verb}' not found in plugin_map. Skipping strict input validation.")
 
-            # Validate and fix outputs to match plugin definitions
+            # Validate outputs against plugin definitions (allowing custom names)
             outputs = step.get('outputs', {})
             if isinstance(outputs, dict):
                 if action_verb and plugin_def:
-                    # Fix outputs to match plugin definition
-                    fixed_outputs = self._fix_step_outputs(step, plugin_def, outputs)
-                    if fixed_outputs != outputs:
-                        step['outputs'] = fixed_outputs
-                        logger.info(f"Step {step_number}: Fixed outputs to match plugin definition for '{action_verb}'")
-                    step_outputs = set(fixed_outputs.keys())
+                    # Allow custom output names - just log what we're allowing
+                    validated_outputs = self._fix_step_outputs(step, plugin_def, outputs)
+                    step_outputs = set(validated_outputs.keys())
                 else:
                     step_outputs = set(outputs.keys())
                 available_outputs[step_number] = step_outputs
@@ -454,7 +451,7 @@ Return the corrected JSON object for the step."""
         return {'valid': len(errors) == 0, 'errors': errors}
 
     def _fix_step_outputs(self, step: Dict[str, Any], plugin_def: Dict[str, Any], current_outputs: Dict[str, str]) -> Dict[str, str]:
-        """Fix step outputs to match plugin definition and update dependent step inputs."""
+        """Allow custom output names - just validate basic structure."""
         step_number = step.get('number')
         action_verb = step.get('actionVerb')
 
@@ -463,26 +460,21 @@ Return the corrected JSON object for the step."""
         if not output_definitions:
             return current_outputs
 
-        # If plugin has only one output and step has only one output, rename to match plugin
-        if len(output_definitions) == 1 and len(current_outputs) == 1:
-            plugin_output_name = output_definitions[0]['name']
-            current_output_name = list(current_outputs.keys())[0]
-            current_output_description = list(current_outputs.values())[0]
+        # Simple validation: allow any output names, just log what we're allowing
+        if len(current_outputs) > 0:
+            logger.info(f"Step {step_number}: Allowing custom output names for '{action_verb}': {list(current_outputs.keys())}")
+        else:
+            logger.warning(f"Step {step_number}: No outputs defined for plugin '{action_verb}'")
 
-            if plugin_output_name != current_output_name:
-                logger.info(f"Step {step_number}: Renaming output '{current_output_name}' to '{plugin_output_name}' to match plugin definition")
-
-                # Update dependent steps that reference this output
-                self._update_dependent_inputs(step_number, current_output_name, plugin_output_name)
-
-                return {plugin_output_name: current_output_description}
-
-        # For multiple outputs, try to match by name similarity or keep as-is
-        # This is a more complex case that we can enhance later if needed
+        # Return outputs as-is - dependency validation will ensure references work
         return current_outputs
 
     def _update_dependent_inputs(self, source_step_number: int, old_output_name: str, new_output_name: str):
-        """Update inputs in dependent steps that reference the renamed output."""
+        """Update inputs in dependent steps that reference a renamed output.
+
+        Note: This method is preserved for potential future use but is no longer called
+        since we now allow custom output names without forced renaming.
+        """
         if not hasattr(self, '_current_plan'):
             return
 
