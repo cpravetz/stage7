@@ -467,11 +467,24 @@ export class CapabilitiesManager extends BaseEntity {
             actionVerb: req.body.actionVerb,
             inputKeys: Object.keys(req.body.inputValues || {})
         });
+        // Handle inputValues - can be either array of [key, value] pairs or serialized Map
+        let inputValues: Map<string, InputValue>;
+        if (Array.isArray(req.body.inputValues)) {
+            // Convert array of [key, value] pairs to Map
+            inputValues = new Map(req.body.inputValues);
+        } else if (req.body.inputValues && req.body.inputValues._type === 'Map') {
+            // Handle serialized Map format
+            inputValues = MapSerializer.transformFromSerialization(req.body.inputValues);
+        } else {
+            // Handle object format
+            inputValues = new Map(Object.entries(req.body.inputValues || {}));
+        }
+
         const step = {
-    ...req.body,
-    inputValues: MapSerializer.transformFromSerialization(req.body.inputValues || {}),
-    outputs: MapSerializer.transformFromSerialization(req.body.outputs || {}) // Add this line
-} as Step;
+            ...req.body,
+            inputValues: inputValues,
+            outputs: MapSerializer.transformFromSerialization(req.body.outputs || {}) instanceof Map ? MapSerializer.transformFromSerialization(req.body.outputs || {}) : new Map(Object.entries(MapSerializer.transformFromSerialization(req.body.outputs || {})))
+        } as Step;
 
         if (!step.actionVerb || typeof step.actionVerb !== 'string') {
             const sError = generateStructuredError({
@@ -542,7 +555,48 @@ export class CapabilitiesManager extends BaseEntity {
                         // Standard code-based plugin execution
                         const pluginDefinition = manifest as PluginDefinition; // Assuming PluginManifest is compatible enough
 
-                        step.inputValues = step.inputValues || new Map<string, InputValue>();
+                        if (!(step.inputValues instanceof Map)) {
+                            step.inputValues = new Map(Object.entries(step.inputValues || {}));
+                        }
+
+                        // Fetch all available plugins to provide context to Python plugins
+                        const allPlugins = await this.pluginRegistry.list();
+                        const manifestPromises = allPlugins.map(p => {
+                            // Ensure repository property exists and has type
+                            const repositoryType = p.repository?.type;
+                            if (!repositoryType) {
+                                console.warn(`[${trace_id}] Plugin ${p.id} missing repository.type, skipping`);
+                                return Promise.resolve(null);
+                            }
+                            return this.pluginRegistry.fetchOne(p.id, p.version, repositoryType)
+                                .catch(e => {
+                                    console.warn(`[${trace_id}] Failed to fetch manifest for ${p.id} v${p.version}: ${e.message}`);
+                                    return null;
+                                });
+                        });
+                        const manifests = (await Promise.all(manifestPromises)).filter((m): m is PluginManifest => m !== null);
+
+                        // Transform manifests to the format expected by Python plugins (verb -> actionVerb, type -> valueType)
+                        const transformedManifests = manifests.map(manifest => ({
+                            ...manifest,
+                            actionVerb: manifest.verb, // Add actionVerb property for plugin compatibility
+                            inputDefinitions: manifest.inputDefinitions.map(input => ({
+                                ...input,
+                                valueType: input.type // Map type to valueType for plugin compatibility
+                            })),
+                            outputDefinitions: manifest.outputDefinitions.map(output => ({
+                                ...output,
+                                valueType: output.type // Map type to valueType for plugin compatibility
+                            }))
+                        }));
+
+                        step.inputValues.set('availablePlugins', {
+                            inputName: 'availablePlugins',
+                            value: transformedManifests,
+                            valueType: PluginParameterType.OBJECT,
+                            args: {}
+                        });
+
                         // Transform inputValues to a simpler map before validation
                         const rawInputValues = this.extractRawInputValues(step.inputValues);
 
@@ -565,6 +619,23 @@ export class CapabilitiesManager extends BaseEntity {
                         const { pluginRootPath, effectiveManifest } = await this.pluginRegistry.preparePluginForExecution(manifest);
                         const result = await this.pluginExecutor.execute(effectiveManifest, validatedInputs.inputs, pluginRootPath, trace_id);
                         res.status(200).send(MapSerializer.transformForSerialization(result));
+                        return;
+                    } else if (manifest.language === 'internal') {
+                        console.log(`[${trace_id}] ${source_component}: Internal verb '${step.actionVerb}' detected. Signaling agent for internal handling.`);
+                        res.status(200).send(MapSerializer.transformForSerialization([
+                            {
+                                success: true,
+                                name: 'internalVerbExecution',
+                                resultType: PluginParameterType.OBJECT,
+                                result: {
+                                    actionVerb: step.actionVerb,
+                                    inputValues: MapSerializer.transformForSerialization(step.inputValues),
+                                    outputs: MapSerializer.transformForSerialization(step.outputs)
+                                },
+                                resultDescription: `Internal verb '${step.actionVerb}' to be handled by agent.`,
+                                mimeType: 'application/json'
+                            }
+                        ]));
                         return;
                     } else {
                         console.warn(`[${trace_id}] ${source_component}: Unknown handler language/type '${manifest.language}' for verb '${step.actionVerb}'. Falling back.`);
@@ -713,7 +784,7 @@ export class CapabilitiesManager extends BaseEntity {
             // Pass missionId for context, instead of the full mission text.
             accomplishInputs.set('missionId', {
                 inputName: 'missionId',
-                value: step.missionId,
+                value: step.missionId || '', // Ensure it's an empty string if null/undefined
                 valueType: PluginParameterType.STRING,
                 args: {}
             });
@@ -744,124 +815,38 @@ export class CapabilitiesManager extends BaseEntity {
 
             // Fetch available plugins to provide context to ACCOMPLISH
             const allPlugins = await this.pluginRegistry.list();
-            const manifestPromises = allPlugins.map(p =>
-                this.pluginRegistry.fetchOne(p.id, p.version, p.repository.type)
+            const manifestPromises = allPlugins.map(p => {
+                // Ensure repository property exists and has type
+                const repositoryType = p.repository?.type;
+                if (!repositoryType) {
+                    console.warn(`[${trace_id}] Plugin ${p.id} missing repository.type, skipping`);
+                    return Promise.resolve(null);
+                }
+                return this.pluginRegistry.fetchOne(p.id, p.version, repositoryType)
                     .catch(e => {
                         console.warn(`[${trace_id}] Failed to fetch manifest for ${p.id} v${p.version}: ${e.message}`);
                         return null;
-                    })
-            );
+                    });
+            });
             const manifests = (await Promise.all(manifestPromises)).filter((m): m is PluginManifest => m !== null);
-            const internalVerbManifests = [
-                {
-                    verb: 'DELEGATE',
-                    description: 'Create independent sub-agents for major autonomous work streams. ONLY use for truly independent goals that require separate agent management. Do NOT use for simple task breakdown or sub-plans - use ACCOMPLISH instead.',
-                    inputDefinitions: [],
-                    outputDefinitions: [],
-                    language: 'internal'
-                },
-                {
-                    verb: 'THINK',
-                    description: 'Uses LLMs to respond to a prompt you provide. Use it for making decisions, providing guidance or answering questions and more. The prompt can use outputs from prior Steps.',
-                    inputDefinitions: [
-                        { name: 'prompt', type: 'string', required: true, description: 'The prompt for the LLM.' },
-                        { name: 'optimization', type: 'string', required: false, description: 'Optimization strategy (cost|accuracy|creativity|speed|continuity). Default: accuracy.' },
-                        { name: 'conversationType', type: 'string', required: false, description: 'Type of conversation.' }
-                    ],
-                    outputDefinitions: [],
-                    language: 'internal'
-                },
-                {
-                    verb: 'GENERATE',
-                    description: 'Uses LLM services to generate content from a prompt or other content. Services include image creation, audio transcription, image editing, etc.',
-                    inputDefinitions: [
-                        { name: 'conversationType', type: 'string', required: true, description: 'Type of content to generate.' },
-                        { name: 'modelName', type: 'string', required: false, description: 'The specific model to use.' },
-                        { name: 'optimization', type: 'string', required: false, description: 'Optimization strategy.' },
-                        { name: 'prompt', type: 'string', required: false, description: 'Text prompt for generation.' },
-                        { name: 'file', type: 'object', required: false, description: 'File for generation context.' },
-                        { name: 'audio', type: 'object', required: false, description: 'Audio for generation context.' },
-                        { name: 'video', type: 'object', required: false, description: 'Video for generation context.' },
-                        { name: 'image', type: 'object', required: false, description: 'Image for generation context.' }
-                    ],
-                    outputDefinitions: [],
-                    language: 'internal'
-                },
-                {
-                    verb: 'IF_THEN',
-                    description: 'Conditional branching based on a condition.',
-                    inputDefinitions: [
-                        { name: 'condition', type: 'object', required: true, description: 'Condition to evaluate. e.g. {"inputName": "value"}' },
-                        { name: 'trueSteps', type: 'array', required: true, description: 'Steps to execute if condition is true.' },
-                        { name: 'falseSteps', type: 'array', required: false, description: 'Steps to execute if condition is false.' }
-                    ],
-                    outputDefinitions: [],
-                    language: 'internal'
-                },
-                {
-                    verb: 'WHILE',
-                    description: 'Repeat steps while a condition is true.',
-                    inputDefinitions: [
-                        { name: 'condition', type: 'object', required: true, description: 'Condition to evaluate for each loop. e.g. {"inputName": "value"}' },
-                        { name: 'steps', type: 'array', required: true, description: 'Steps to execute in each iteration.' }
-                    ],
-                    outputDefinitions: [],
-                    language: 'internal'
-                },
-                {
-                    verb: 'UNTIL',
-                    description: 'Repeat steps until a condition becomes true.',
-                    inputDefinitions: [
-                        { name: 'condition', type: 'object', required: true, description: 'Condition to evaluate after each loop. e.g. {"inputName": "value"}' },
-                        { name: 'steps', type: 'array', required: true, description: 'Steps to execute in each iteration.' }
-                    ],
-                    outputDefinitions: [],
-                    language: 'internal'
-                },
-                {
-                    verb: 'SEQUENCE',
-                    description: 'Execute steps in strict sequential order / no concurrency.',
-                    inputDefinitions: [
-                        { name: 'steps', type: 'array', required: true, description: 'Steps to execute sequentially.' }
-                    ],
-                    outputDefinitions: [],
-                    language: 'internal'
-                },
-                {
-                    verb: 'TIMEOUT',
-                    description: 'Set a timeout for a group of steps.',
-                    inputDefinitions: [
-                        { name: 'timeout', type: 'number', required: true, description: 'Timeout in milliseconds.' },
-                        { name: 'steps', type: 'array', required: true, description: 'Steps to execute with a timeout.' }
-                    ],
-                    outputDefinitions: [],
-                    language: 'internal'
-                },
-                {
-                    verb: 'REPEAT',
-                    description: 'Repeat steps a specific number of times.',
-                    inputDefinitions: [
-                        { name: 'count', type: 'number', required: true, description: 'Number of times to repeat.' },
-                        { name: 'steps', type: 'array', required: true, description: 'Steps to repeat.' }
-                    ],
-                    outputDefinitions: [],
-                    language: 'internal'
-                },
-                {
-                    verb: 'FOREACH',
-                    description: 'Iterate over an array and execute steps for each item.',
-                    inputDefinitions: [
-                        { name: 'array', type: 'array', required: true, description: 'Array to iterate over.' },
-                        { name: 'steps', type: 'array', required: true, description: 'A plan of steps to execute for each item.' }
-                    ],
-                    outputDefinitions: [],
-                    language: 'internal'
-                }
-            ];
-            manifests.push(...internalVerbManifests as any[]);
+
+            // Transform manifests to the format expected by ACCOMPLISH plugin (verb -> actionVerb, type -> valueType)
+            const transformedManifests = manifests.map(manifest => ({
+                ...manifest,
+                actionVerb: manifest.verb, // Add actionVerb property for ACCOMPLISH plugin compatibility
+                inputDefinitions: manifest.inputDefinitions.map(input => ({
+                    ...input,
+                    valueType: input.type // Map type to valueType for plugin compatibility
+                })),
+                outputDefinitions: manifest.outputDefinitions.map(output => ({
+                    ...output,
+                    valueType: output.type // Map type to valueType for plugin compatibility
+                }))
+            }));
+
             accomplishInputs.set('availablePlugins', {
                 inputName: 'availablePlugins',
-                value: manifests,
+                value: transformedManifests,
                 valueType: PluginParameterType.OBJECT,
                 args: {}
             });
@@ -961,124 +946,37 @@ export class CapabilitiesManager extends BaseEntity {
         try {            
             // Fetch detailed plugin manifests to provide a schema to the Brain
             const allPlugins = await this.pluginRegistry.list();
-            const manifestPromises = allPlugins.map(p => 
-                this.pluginRegistry.fetchOne(p.id, p.version, p.repository.type)
+            const manifestPromises = allPlugins.map(p => {
+                // Ensure repository property exists and has type
+                const repositoryType = p.repository?.type;
+                if (!repositoryType) {
+                    console.warn(`[${trace_id}] Plugin ${p.id} missing repository.type, skipping`);
+                    return Promise.resolve(null);
+                }
+                return this.pluginRegistry.fetchOne(p.id, p.version, repositoryType)
                     .catch(e => {
                         console.warn(`[${trace_id}] Failed to fetch manifest for ${p.id} v${p.version}: ${e.message}`);
                         return null; // Return null on failure to not break Promise.all
-                    })
-            );
+                    });
+            });
             const manifests = (await Promise.all(manifestPromises)).filter((m): m is PluginManifest => m !== null);
-            const internalVerbManifests = [
-                {
-                    verb: 'DELEGATE',
-                    description: 'Create independent sub-agents for major autonomous work streams. ONLY use for truly independent goals that require separate agent management. Do NOT use for simple task breakdown or sub-plans - use ACCOMPLISH instead.',
-                    inputDefinitions: [],
-                    outputDefinitions: [],
-                    language: 'internal'
-                },
-                {
-                    verb: 'THINK',
-                    description: 'Uses LLMs to respond to a prompt you provide. Use it for making decisions, providing guidance or answering questions and more. The prompt can use outputs from prior Steps.',
-                    inputDefinitions: [
-                        { name: 'prompt', type: 'string', required: true, description: 'The prompt for the LLM.' },
-                        { name: 'optimization', type: 'string', required: false, description: 'Optimization strategy (cost|accuracy|creativity|speed|continuity). Default: accuracy.' },
-                        { name: 'conversationType', type: 'string', required: false, description: 'Type of conversation.' }
-                    ],
-                    outputDefinitions: [],
-                    language: 'internal'
-                },
-                {
-                    verb: 'GENERATE',
-                    description: 'Uses LLM services to generate content from a prompt or other content. Services include image creation, audio transcription, image editing, etc.',
-                    inputDefinitions: [
-                        { name: 'conversationType', type: 'string', required: true, description: 'Type of content to generate.' },
-                        { name: 'modelName', type: 'string', required: false, description: 'The specific model to use.' },
-                        { name: 'optimization', type: 'string', required: false, description: 'Optimization strategy.' },
-                        { name: 'prompt', type: 'string', required: false, description: 'Text prompt for generation.' },
-                        { name: 'file', type: 'object', required: false, description: 'File for generation context.' },
-                        { name: 'audio', type: 'object', required: false, description: 'Audio for generation context.' },
-                        { name: 'video', type: 'object', required: false, description: 'Video for generation context.' },
-                        { name: 'image', type: 'object', required: false, description: 'Image for generation context.' }
-                    ],
-                    outputDefinitions: [],
-                    language: 'internal'
-                },
-                {
-                    verb: 'IF_THEN',
-                    description: 'Conditional branching based on a condition.',
-                    inputDefinitions: [
-                        { name: 'condition', type: 'object', required: true, description: 'Condition to evaluate. e.g. {"inputName": "value"}' },
-                        { name: 'trueSteps', type: 'array', required: true, description: 'Steps to execute if condition is true.' },
-                        { name: 'falseSteps', type: 'array', required: false, description: 'Steps to execute if condition is false.' }
-                    ],
-                    outputDefinitions: [],
-                    language: 'internal'
-                },
-                {
-                    verb: 'WHILE',
-                    description: 'Repeat steps while a condition is true.',
-                    inputDefinitions: [
-                        { name: 'condition', type: 'object', required: true, description: 'Condition to evaluate for each loop. e.g. {"inputName": "value"}' },
-                        { name: 'steps', type: 'array', required: true, description: 'Steps to execute in each iteration.' }
-                    ],
-                    outputDefinitions: [],
-                    language: 'internal'
-                },
-                {
-                    verb: 'UNTIL',
-                    description: 'Repeat steps until a condition becomes true.',
-                    inputDefinitions: [
-                        { name: 'condition', type: 'object', required: true, description: 'Condition to evaluate after each loop. e.g. {"inputName": "value"}' },
-                        { name: 'steps', type: 'array', required: true, description: 'Steps to execute in each iteration.' }
-                    ],
-                    outputDefinitions: [],
-                    language: 'internal'
-                },
-                {
-                    verb: 'SEQUENCE',
-                    description: 'Execute steps in strict sequential order / no concurrency.',
-                    inputDefinitions: [
-                        { name: 'steps', type: 'array', required: true, description: 'Steps to execute sequentially.' }
-                    ],
-                    outputDefinitions: [],
-                    language: 'internal'
-                },
-                {
-                    verb: 'TIMEOUT',
-                    description: 'Set a timeout for a group of steps.',
-                    inputDefinitions: [
-                        { name: 'timeout', type: 'number', required: true, description: 'Timeout in milliseconds.' },
-                        { name: 'steps', type: 'array', required: true, description: 'Steps to execute with a timeout.' }
-                    ],
-                    outputDefinitions: [],
-                    language: 'internal'
-                },
-                {
-                    verb: 'REPEAT',
-                    description: 'Repeat steps a specific number of times.',
-                    inputDefinitions: [
-                        { name: 'count', type: 'number', required: true, description: 'Number of times to repeat.' },
-                        { name: 'steps', type: 'array', required: true, description: 'Steps to repeat.' }
-                    ],
-                    outputDefinitions: [],
-                    language: 'internal'
-                },
-                {
-                    verb: 'FOREACH',
-                    description: 'Iterate over an array and execute steps for each item.',
-                    inputDefinitions: [
-                        { name: 'array', type: 'array', required: true, description: 'Array to iterate over.' },
-                        { name: 'steps', type: 'array', required: true, description: 'A plan of steps to execute for each item.' }
-                    ],
-                    outputDefinitions: [],
-                    language: 'internal'
-                }
-            ];
-            manifests.push(...internalVerbManifests as any[]);
-            
+
+            // Transform manifests to the format expected by ACCOMPLISH plugin (verb -> actionVerb, type -> valueType)
+            const transformedManifests = manifests.map(manifest => ({
+                ...manifest,
+                actionVerb: manifest.verb, // Add actionVerb property for ACCOMPLISH plugin compatibility
+                inputDefinitions: manifest.inputDefinitions.map(input => ({
+                    ...input,
+                    valueType: input.type // Map type to valueType for ACCOMPLISH plugin compatibility
+                })),
+                outputDefinitions: manifest.outputDefinitions.map(output => ({
+                    ...output,
+                    valueType: output.type // Map type to valueType for ACCOMPLISH plugin compatibility
+                }))
+            }));
+
             const accomplishInputs : Map<string, InputValue> = new Map(inputs); // Start with all provided inputs
-            accomplishInputs.set('availablePlugins', { inputName: 'availablePlugins', value: manifests, valueType: PluginParameterType.OBJECT, args: {} });
+            accomplishInputs.set('availablePlugins', { inputName: 'availablePlugins', value: transformedManifests, valueType: PluginParameterType.ARRAY, args: {} });
 
             const accomplishPluginManifest = await this.pluginRegistry.fetchOneByVerb('ACCOMPLISH');
             if (!accomplishPluginManifest) {

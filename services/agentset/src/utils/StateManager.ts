@@ -1,4 +1,5 @@
 import { AgentState, AgentPersistenceManager } from './AgentPersistenceManager';
+import { Step } from '../agents/Step';
 
 export class StateManager {
     private agentPersistenceManager: AgentPersistenceManager;
@@ -54,7 +55,23 @@ export class StateManager {
                 agent.output = state.output;
                 agent.inputValues = state.inputs;
                 agent.missionId = state.missionId;
-                agent.steps = state.steps;
+                
+                // Load steps from events
+                const stepEvents = await this.agentPersistenceManager.loadStepsForAgent(agent.id);
+                agent.steps = stepEvents.map((event: any) => new Step({
+                    id: event.stepId,
+                    missionId: event.missionId,
+                    actionVerb: event.actionVerb,
+                    stepNo: event.stepNo,
+                    inputValues: new Map(Object.entries(event.inputValues?.entries || {})),
+                    description: event.description,
+                    dependencies: event.dependencies,
+                    outputs: new Map(Object.entries(event.outputs?.entries || {})),
+                    status: event.status,
+                    recommendedRole: event.recommendedRole,
+                    persistenceManager: this.agentPersistenceManager
+                }));
+
                 agent.dependencies = state.dependencies;
                 agent.capabilitiesManagerUrl = state.capabilitiesManagerUrl;
                 agent.brainUrl = state.brainUrl;

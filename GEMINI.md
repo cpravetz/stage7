@@ -2,6 +2,6 @@ All data and state issues are to be resolved within the code, not thrown unless 
 
 All code in our system is production-ready, efficient, and scalable.  We never use placeholders, stubs, or mocks in our code.  Nor do we leave TODO items in place of working code.
 
-All code must be production ready - no mocks, stubs, simulations.  All data and state issues are resolved in the system, not thrown as errors.  Unknown verbs are expected and permitted in plans.  We develop for classes and generalizations, not hardcoding for very specific items or for this particular mission from the test run.
+All code must be production ready - no mocks, stubs, simulations.  All data and state issues are resolved in the system, not thrown as errors.  Unknown verbs are expected and permitted in plans.  We develop for classes and generalizations, not hardcoding for very specific items or for this particular mission from the test run.  We do not create default values for missing data - we find the reason it is missing.
 
 Never make assumptions or short cut an analysis because you think you know what it is likely to tell you.  Confirm assignments. When asked about the project/code - check the project/code.  Verify the validity of your understanding about this project.

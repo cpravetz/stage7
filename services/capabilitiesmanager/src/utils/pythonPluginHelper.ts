@@ -152,6 +152,11 @@ export async function ensurePythonDependencies(pluginRootPath: string, trace_id:
                 }
             }
 
+            // Install the shared Python package
+            console.log(`[${trace_id}] ${source_component}: Installing shared ckt_plan_validator package.`);
+            const installSharedPackageCmd = `"${venvPipPath}" install /usr/src/app/shared/python`;
+            await execAsync(installSharedPackageCmd, { cwd: pluginRootPath, timeout: 60000 });
+
             if (fs.existsSync(requirementsPath)) {
                 let installReqsCmd: string;
                 if (fs.existsSync(venvPipPath)) {

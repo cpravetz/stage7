@@ -12,6 +12,7 @@ export class LocalRepository implements PluginRepository {
     private pluginListCache: PluginLocator[] | null = null;
     private cacheTimestamp: number = 0;
     private readonly CACHE_TTL = 60000; // 1 minute cache TTL
+    private loadingPromise: Promise<PluginLocator[]> | null = null;
 
     constructor(config: RepositoryConfig) {
         this.baseDir = config.options?.localPath || path.join(process.cwd(), '/plugins');
@@ -20,6 +21,7 @@ export class LocalRepository implements PluginRepository {
     private invalidateCache(): void {
         this.pluginListCache = null;
         this.cacheTimestamp = 0;
+        this.loadingPromise = null; // Also clear the promise on cache invalidation
     }
 
     async store(manifest: PluginManifest): Promise<void> {
@@ -278,16 +280,29 @@ export class LocalRepository implements PluginRepository {
 
     async list(): Promise<PluginLocator[]> {
         // Return cached list if valid
-        if (this.isCacheValid() || this.loadingCache) {
+        if (this.isCacheValid()) {
             console.log('LocalRepo: Using cached plugin list');
             return this.pluginListCache!;
         }
+
+        // If a loading operation is already in progress, wait for it
+        if (this.loadingPromise) {
+            console.log('LocalRepo: Waiting for ongoing plugin list load...');
+            return this.loadingPromise;
+        }
+
         this.loadingCache = true;
         // Load fresh list and cache it
         console.log('LocalRepo: Loading fresh plugin list');
-        this.pluginListCache = await this.loadPluginList();
+        
+        // Start loading and store the promise
+        this.loadingPromise = this.loadPluginList();
+        this.pluginListCache = await this.loadingPromise; // Wait for it to complete and assign to cache
+        
         this.cacheTimestamp = Date.now();
         this.loadingCache = false;
+        this.loadingPromise = null; // Clear the promise once loading is complete
+
         return this.pluginListCache;
     }
 }

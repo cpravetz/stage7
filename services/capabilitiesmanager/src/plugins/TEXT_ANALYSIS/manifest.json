@@ -82,6 +82,9 @@
       "signature": null
     }
   },
+  "repository": {
+    "type": "local"
+  },
   "version": "1.0.0",
   "metadata": {
     "author": "Stage7 Development Team",

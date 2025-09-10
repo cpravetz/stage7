@@ -200,9 +200,19 @@ export const validateAndStandardizeInputs = async (
 
             if (inputKey) {
                 const value = sanitizedInputs.get(inputKey)!;
+                let extractedValue: any;
+
+                // Extract the actual value from InputValue object
+                if (value && 'value' in value) {
+                    extractedValue = value.value;
+                } else {
+                    extractedValue = value; // Use as is if not an InputValue object
+                }
+
                 standardizedInputs.set(inputName, {
-                    ...value,
+                    ...value, // Keep original InputValue structure for other properties
                     inputName,
+                    value: extractedValue, // Use the extracted actual value
                     validationType: inputDef.type,
                     originalName: inputKey
                 });

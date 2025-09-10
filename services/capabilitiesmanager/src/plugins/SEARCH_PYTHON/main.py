@@ -23,18 +23,6 @@ logger = logging.getLogger(__name__)
 
 # --- Data Classes ---
 
-class InputValue:
-    """Represents a plugin input parameter."""
-    def __init__(self, inputName: str, value: Any, valueType: str, args: Dict[str, Any] = None):
-        self.inputName = inputName
-        self.value = value
-        self.valueType = valueType
-        self.args = args or {}
-
-
-
-
-
 class PluginOutput:
     """Represents a plugin output result."""
     def __init__(self, success: bool, name: str, result_type: str,
@@ -104,7 +92,7 @@ class BrainSearchProvider(SearchProvider):
     def _call_brain(self, prompt: str, response_type: str) -> str:
         auth_token = self._get_auth_token()
         brain_url_input = self.inputs.get('brain_url')
-        brain_url = brain_url_input.value if brain_url_input and brain_url_input.value else 'brain:5070'
+        brain_url = brain_url_input if brain_url_input else 'brain:5070'
         
         payload = {
             "messages": [{"role": "system", "content": "You are a helpful assistant that outputs JSON."},
@@ -131,7 +119,7 @@ class BrainSearchProvider(SearchProvider):
             # Then check inputs
             token_input = self.inputs.get('__brain_auth_token')
             if token_input:
-                token_data = token_input.value
+                token_data = token_input
                 if isinstance(token_data, dict):
                     if 'value' in token_data:
                         logger.info("Found Brain auth token in inputs['__brain_auth_token'].value['value']")
@@ -348,7 +336,7 @@ class SearxNGSearchProvider(SearchProvider):
 
 class SearchPlugin:
     """Manages search providers and executes the search."""
-    def __init__(self, inputs: Dict[str, InputValue]):
+    def __init__(self, inputs: Dict[str, Any]):
         self.inputs = inputs
         self.providers = self._initialize_providers()
 
@@ -487,14 +475,14 @@ class SearchPlugin:
         
         return all_results, all_errors
 
-def execute_plugin(inputs: Dict[str, InputValue]) -> List[Dict[str, Any]]:
+def execute_plugin(inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Main plugin execution function."""
     try:
         search_term_input = inputs.get('searchTerm')
         if not search_term_input:
             return [PluginOutput(False, "error", "error", None, "Missing required input: searchTerm").to_dict()]
 
-        search_terms_raw = search_term_input.value
+        search_terms_raw = search_term_input
         if isinstance(search_terms_raw, str):
             search_terms = [search_terms_raw.strip()]
         elif isinstance(search_terms_raw, list):
@@ -519,50 +507,39 @@ def execute_plugin(inputs: Dict[str, InputValue]) -> List[Dict[str, Any]]:
         return [PluginOutput(False, "error", "error", None, f"An unexpected error occurred: {e}").to_dict()]
 
 # --- Main Execution ---
+def parse_inputs(inputs_str: str) -> Dict[str, Any]:
+    """Parse and validate inputs"""
+    try:
+        logger.info(f"Parsing input string ({len(inputs_str)} chars)")
+        
+        input_list = json.loads(inputs_str)
+        
+        inputs = {}
+        for item in input_list:
+            if isinstance(item, list) and len(item) == 2:
+                key, raw_value = item # Renamed 'value' to 'raw_value' for clarity
+                
+                # If raw_value is an InputValue object, extract its 'value' property
+                if isinstance(raw_value, dict) and 'value' in raw_value:
+                    inputs[key] = raw_value['value']
+                else:
+                    # Otherwise, use raw_value directly (for non-InputValue types)
+                    inputs[key] = raw_value
+            else:
+                logger.warning(f"Skipping invalid input item: {item}")
+        
+        logger.info(f"Successfully parsed {len(inputs)} input fields")
+        return inputs
+        
+    except Exception as e:
+        logger.error(f"Input parsing failed: {e}")
+        raise Exception(f"Input validation failed: {e}")
 
 def main():
     """Main entry point for the plugin."""
     try:
-        input_data = sys.stdin.read().strip()
-        # Temporary debug logging
-        with open("/tmp/search_plugin_input.log", "a") as f:
-            f.write(input_data + "\n")
-
-        if not input_data:
-            raise ValueError("No input data provided")
-
-        input_list_of_pairs = json.loads(input_data)
-        if not isinstance(input_list_of_pairs, list):
-            raise ValueError("Input data should be a JSON array of [key, value] pairs.")
-
-        inputs: Dict[str, InputValue] = {}
-        for item in input_list_of_pairs:
-            if not (isinstance(item, (list, tuple)) and len(item) == 2):
-                raise ValueError(f"Each item in the input array should be a [key, value] pair. Found: {item}")
-            key, raw_value = item # Renamed value_dict to raw_value for clarity
-            
-            # Create InputValue object from the raw_value
-            # We assume the type is string for simplicity, or infer if possible
-            inferred_value_type = 'string'
-            if isinstance(raw_value, bool):
-                inferred_value_type = 'boolean'
-            elif isinstance(raw_value, (int, float)):
-                inferred_value_type = 'number'
-            elif isinstance(raw_value, list):
-                inferred_value_type = 'array'
-            elif isinstance(raw_value, dict):
-                # If it's a dict, it could be a complex object or an output reference
-                if 'outputName' in raw_value and 'sourceStep' in raw_value:
-                    inferred_value_type = 'reference' # Custom type for internal handling
-                else:
-                    inferred_value_type = 'object'
-
-            inputs[key] = InputValue(
-                inputName=key,
-                value=raw_value,
-                valueType=inferred_value_type,
-                args={} # No args provided in the raw input
-            )
+        input_data = sys.stdin.read()
+        inputs = parse_inputs(input_data)
 
         outputs = execute_plugin(inputs)
         print(json.dumps(outputs, indent=2))

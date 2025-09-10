@@ -1,14 +1,14 @@
 {
   "id": "plugin-SEARCH_PYTHON",
   "verb": "SEARCH",
-  "description": "Searches the internet using SearchXNG for a given term and returns a list of links",
-  "explanation": "This plugin takes a search term and returns a JSON array of search results from SearchXNG, including titles and URLs. Python version with enhanced functionality and maintainability.",
+  "description": "Searches the internet using multiple providers with intelligent fallback strategy",
+  "explanation": "This plugin takes a search term and returns a JSON array of search results using a prioritized fallback strategy: LangSearch (primary), Google Custom Search, DuckDuckGo, SearXNG, and Brain/LLM as final fallback. Python version with enhanced functionality and maintainability.",
   "inputDefinitions": [
     {
       "name": "searchTerm",
       "required": true,
       "type": "string",
-      "description": "The term to search for on SearchXNG"
+      "description": "The term to search for using intelligent provider fallback"
     }
   ],
   "outputDefinitions": [

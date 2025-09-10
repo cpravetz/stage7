@@ -54,5 +54,8 @@
     "entryPoint": {
         "main": "main.py"
     },
+    "repository": {
+        "type": "local"
+    },
     "version": "1.0.0"
 }

@@ -30,6 +30,7 @@ COPY services/capabilitiesmanager ./services/capabilitiesmanager
 COPY templates ./templates
 COPY examples ./examples
 COPY tools ./tools
+COPY shared/python /usr/src/app/shared/python
 
 # Build the TypeScript code
 RUN cd shared && npm run build

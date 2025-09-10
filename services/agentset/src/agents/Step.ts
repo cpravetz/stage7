@@ -320,7 +320,7 @@ export class Step {
 
     async execute(
         executeAction: (step: Step) => Promise<PluginOutput[]>,
-        thinkAction: (inputValues: Map<string, InputValue>) => Promise<PluginOutput[]>,
+        thinkAction: (inputValues: Map<string, InputValue>, actionVerb: string) => Promise<PluginOutput[]>,
         delegateAction: (inputValues: Map<string, InputValue>) => Promise<PluginOutput[]>,
         askAction: (inputValues: Map<string, InputValue>) => Promise<PluginOutput[]>,
         allSteps?: Step[]
@@ -334,7 +334,8 @@ export class Step {
             let result: PluginOutput[];
             switch (this.actionVerb) {
                 case 'THINK':
-                    result = await thinkAction(this.inputValues);
+                case 'GENERATE':
+                    result = await thinkAction(this.inputValues, this.actionVerb);
                     break;
                 case 'DELEGATE':
                     result = await this.handleDelegate(executeAction);
@@ -772,6 +773,136 @@ export class Step {
 
     public getTempData(key: string): any {
         return this.tempData.get(key);
+    }
+
+    public async handleInternalVerb(
+        internalActionVerb: string,
+        internalInputValues: Map<string, InputValue>,
+        internalOutputs: Map<string, string>,
+        executeAction: (step: Step) => Promise<PluginOutput[]>,
+        thinkAction: (inputValues: Map<string, InputValue>, actionVerb: string) => Promise<PluginOutput[]>,
+        delegateAction: (inputValues: Map<string, InputValue>) => Promise<PluginOutput[]>,
+        askAction: (inputValues: Map<string, InputValue>) => Promise<PluginOutput[]>,
+        allSteps?: Step[]
+    ): Promise<void> {
+        // Temporarily update the step's actionVerb, inputValues, and outputs
+        // so the internal handlers can use them.
+        const originalActionVerb = this.actionVerb;
+        const originalInputValues = this.inputValues;
+        const originalOutputs = this.outputs;
+
+        (this as any).actionVerb = internalActionVerb;
+        this.inputValues = internalInputValues;
+        this.outputs = internalOutputs;
+
+        try {
+            let result: PluginOutput[];
+            switch (internalActionVerb) {
+                case 'THINK':
+                case 'GENERATE':
+                    result = await thinkAction(this.inputValues, internalActionVerb);
+                    break;
+                case 'DELEGATE':
+                    result = await this.handleDelegate(executeAction);
+                    break;
+                case 'ASK':
+                case MessageType.REQUEST:
+                    result = await askAction(this.inputValues);
+                    break;
+                case 'IF_THEN':
+                    result = await this.handleDecide();
+                    break;
+                case 'REPEAT':
+                    result = await this.handleRepeat();
+                    break;
+                case 'WHILE':
+                    result = await this.handleWhile();
+                    break;
+                case 'UNTIL':
+                    result = await this.handleUntil();
+                    break;
+                case 'SEQUENCE':
+                    result = await this.handleSequence();
+                    break;
+                case 'TIMEOUT':
+                    result = await this.handleTimeout();
+                    break;
+                case 'FOREACH':
+                    result = await this.handleForeach();
+                    break;
+                default:
+                    // This should ideally not be reached if CapabilitiesManager correctly identifies internal verbs
+                    // and only sends known internal verbs.
+                    console.warn(`[Step] Unknown internal action verb: ${internalActionVerb}. Falling back to external execution.`);
+                    result = await executeAction(this);
+            }
+
+            if (!Array.isArray(result)) {
+                result = [result];
+            }
+
+            result.forEach(resultItem => {
+                if (!resultItem.mimeType) { resultItem.mimeType = 'text/plain'; }
+            });
+
+            if (result[0]?.resultType === PluginParameterType.PLAN) {
+                this.status = StepStatus.SUB_PLAN_RUNNING; 
+                this.result = result;
+            } else {
+                this.status = StepStatus.COMPLETED;
+                this.result = result;
+
+                await this.logEvent({
+                    eventType: 'step_result',
+                    stepId: this.id,
+                    missionId: this.missionId,
+                    stepNo: this.stepNo,
+                    actionVerb: this.actionVerb,
+                    status: this.status,
+                    result: result,
+                    dependencies: this.dependencies,
+                    timestamp: new Date().toISOString()
+                });
+
+                await this.persistenceManager.saveWorkProduct({
+                    agentId: this.id.split('_')[0], stepId: this.id,
+                    data: result
+                });
+            }
+        } catch (error) {
+            this.status = StepStatus.ERROR;
+            const errorResult = [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: '[Step]Error executing internal step',
+                result: error instanceof Error ? error.message : String(error),
+                error: error instanceof Error ? error.message : String(error)
+            }];
+            this.result = errorResult;
+
+            await this.logEvent({
+                eventType: 'step_result',
+                stepId: this.id,
+                missionId: this.missionId,
+                stepNo: this.stepNo,
+                actionVerb: this.actionVerb,
+                status: this.status,
+                result: errorResult,
+                timestamp: new Date().toISOString()
+            });
+
+            await this.persistenceManager.saveWorkProduct({
+                agentId: this.id.split('_')[0],
+                stepId: this.id,
+                data: errorResult
+            });
+        } finally {
+            // Restore original values
+            (this as any).actionVerb = originalActionVerb;
+            this.inputValues = originalInputValues;
+            this.outputs = originalOutputs;
+        }
     }
 
     toJSON() {

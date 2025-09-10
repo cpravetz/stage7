@@ -1,58 +1,3 @@
-# --- Robust wrapper for deduplication, temp dir hygiene, and error escalation ---
-import tempfile
-import shutil
-import hashlib
-
-seen_hashes = set()
-
-def robust_execute_plugin(inputs):
-    temp_dir = None
-    try:
-        # Deduplication: hash the inputs
-        hash_input = json.dumps(inputs, sort_keys=True)
-        input_hash = hashlib.sha256(hash_input.encode()).hexdigest()
-        if input_hash in seen_hashes:
-            return [
-                {
-                    "success": False,
-                    "name": "error",
-                    "resultType": "error",
-                    "resultDescription": "Duplicate input detected. This input combination has already failed. Aborting to prevent infinite loop.",
-                    "error": "Duplicate input detected."
-                }
-            ]
-        seen_hashes.add(input_hash)
-
-        # Temp directory hygiene
-        temp_dir = tempfile.mkdtemp(prefix="scrape_plugin_")
-        os.environ["SCRAPE_PLUGIN_TEMP_DIR"] = temp_dir
-
-        # Call the original plugin logic
-        result = execute_plugin(inputs)
-
-        # Strict output validation: must be a list or dict
-        if not isinstance(result, (list, dict)):
-            raise ValueError("Output schema validation failed: must be a list or dict.")
-
-        return result
-    except Exception as e:
-        # Log the error locally and return a structured error output
-        logger.error(f"Error in robust_execute_plugin: {e}")
-        return [
-            {
-                "success": False,
-                "name": "error",
-                "resultType": "error",
-                "resultDescription": f"Error: {str(e)}",
-                "error": str(e)
-            }
-        ]
-    finally:
-        if temp_dir and os.path.exists(temp_dir):
-            try:
-                shutil.rmtree(temp_dir)
-            except Exception as cleanup_err:
-                print(f"Failed to clean up temp dir {temp_dir}: {cleanup_err}")
 #!/usr/bin/env python3
 """
 SCRAPE Plugin - Python Implementation
@@ -328,7 +273,7 @@ class ScrapePlugin:
                 "name": "content",
                 "resultType": PluginParameterType.ARRAY,
                 "resultDescription": f"Scraped content from {len(urls_to_scrape)} URL(s)",
-                "result": all_scraped_data,
+                "result": all_scraped_.data,
                 "mimeType": "application/json"
             }]
 
@@ -343,23 +288,40 @@ class ScrapePlugin:
                 "error": str(e)
             }]
 
+def parse_inputs(inputs_str: str) -> Dict[str, Any]:
+    """Parse and validate inputs"""
+    try:
+        logger.info(f"Parsing input string ({len(inputs_str)} chars)")
+        
+        input_list = json.loads(inputs_str)
+        
+        inputs = {}
+        for item in input_list:
+            if isinstance(item, list) and len(item) == 2:
+                key, raw_value = item # Renamed 'value' to 'raw_value' for clarity
+                
+                # If raw_value is an InputValue object, extract its 'value' property
+                if isinstance(raw_value, dict) and 'value' in raw_value:
+                    inputs[key] = raw_value['value']
+                else:
+                    # Otherwise, use raw_value directly (for non-InputValue types)
+                    inputs[key] = raw_value
+            else:
+                logger.warning(f"Skipping invalid input item: {item}")
+        
+        logger.info(f"Successfully parsed {len(inputs)} input fields")
+        return inputs
+        
+    except Exception as e:
+        logger.error(f"Input parsing failed: {e}")
+        raise Exception(f"Input validation failed: {e}")
+
 def main():
     """Main entry point for the plugin"""
     try:
         # Read inputs from stdin
-        inputs_str = sys.stdin.read().strip()
-        if not inputs_str:
-            raise ValueError("No input provided")
-
-        # Parse inputs - expecting serialized Map format
-        inputs_list = json.loads(inputs_str)
-        inputs_map = {}
-        for item in inputs_list:
-            if isinstance(item, list) and len(item) == 2:
-                key, val = item
-                inputs_map[key] = val
-            else:
-                logger.warning(f"Skipping invalid input item: {item}")
+        inputs_str = sys.stdin.read()
+        inputs_map = parse_inputs(inputs_str)
 
         # Execute plugin
         plugin = ScrapePlugin()

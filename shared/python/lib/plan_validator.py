@@ -1,0 +1,544 @@
+#!/usr/bin/env python3
+
+import json
+import logging
+import re
+from typing import Dict, Any, List, Optional, Set
+
+logger = logging.getLogger(__name__)
+
+class AccomplishError(Exception):
+    """Custom exception for ACCOMPLISH plugin errors"""
+    def __init__(self, message: str, error_type: str = "general_error"):
+        super().__init__(message)
+        self.error_type = error_type
+
+# Plan step schema for validation
+PLAN_STEP_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "number": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Sequential step number"
+        },
+        "actionVerb": {
+            "type": "string",
+            "description": "The action to be performed in this step. It may be one of the plugin actionVerbs or a new actionVerb for a new type of task."
+        },
+        "description": {
+            "type": "string",
+            "description": "A thorough description of the task to be performed in this step so that an agent or LLM can execute without needing external context beyond the inputs and output specification."
+        },
+        "inputs": {
+            "type": "object",
+            "patternProperties": {
+                "^[a-zA-Z][a-zA-Z0-9_]*$": {
+                "type": "object",
+                "properties": {
+                    "value": {
+                        "type": "string",
+                        "description": "Constant string value for this input"
+                    },
+                    "valueType": {
+                        "type": "string",
+                        "enum": ["string", "number", "boolean", "array", "object", "plan", "plugin", "any"],
+                        "description": "The natural type of the Constant input value"
+                    },
+                    "outputName": {
+                        "type": "string",
+                        "description": "Reference to an output from a previous step at the same level or higher"
+                    },
+                    "sourceStep": {
+                        "type": "integer",
+                        "minimum": 0, 
+                        "description": "The step number that produces the output for this input. Use 0 to refer to an input from the parent step."
+                    },
+                    "args": {
+                        "type": "object",
+                        "description": "Additional arguments for the input"
+                    }
+                },
+                "oneOf": [
+                    {"required": ["value", "valueType"]},
+                    {"required": ["outputName", "sourceStep"]}
+                ],
+                "additionalProperties": False,
+            },
+            "additionalProperties": False,
+        },
+        "outputs": {
+            "type": "object",
+            "patternProperties": {
+                "^[a-zA-Z][a-zA-Z0-9_]*$": {
+                    "type": "string",
+                    "description": "Thorough description of the expected output"
+                }
+            },
+            "additionalProperties": False,
+            "description": "Expected outputs from this step, for control flow, should match the final outputs of the sub-plan(s)"
+        },
+        "recommendedRole": {
+            "type": "string",
+            "description": "Suggested role type for the agent executing this step. Allowed values are Coordinator, Researcher, Coder, Creative, Critic, Executor, and Domain Expert"
+        }
+    },
+    "required": ["number", "actionVerb", "inputs", "description", "outputs"],
+    "additionalProperties": False
+    }
+}
+
+PLAN_ARRAY_SCHEMA = {
+    "type": "array",
+    "items": PLAN_STEP_SCHEMA,
+    "description": "A list of sequential steps to accomplish a goal."
+}
+
+class PlanValidator:
+    """Handles validation and repair of plans."""
+    def __init__(self, max_retries: int = 3, brain_call=None):
+        self.max_retries = max_retries
+        self.brain_call = brain_call
+
+    def _standardize_input_name(self, input_name: str, plugin_input_definitions: Dict[str, Any]) -> str:
+        """Heuristic to map a given input name to a known plugin input name."""
+        known_names = list(plugin_input_definitions.keys())
+        if input_name in known_names:
+            return input_name
+        
+        # Check for pluralization
+        if input_name.endswith('s') and input_name[:-1] in known_names:
+            return input_name[:-1]
+        
+        # Check for a more general case like 'tool_name' -> 'toolname'
+        if input_name.replace('_', '') in [name.replace('_', '') for name in known_names]:
+            for name in known_names:
+                if input_name.replace('_', '') == name.replace('_', ''):
+                    return name
+        
+        return input_name
+        
+    def validate_and_repair(self, plan: List[Dict[str, Any]], goal: str, inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Phase 3: Validate and repair plan if needed, with retries."""
+        logger.info("Phase 3: Validating and repairing plan...")
+
+        # Store the plan for dependent input updates
+        self._current_plan = plan
+
+        # Initial code-based repair
+        plan = self._repair_plan_code_based(plan)
+
+        # Update the stored plan reference
+        self._current_plan = plan
+
+        available_plugins_raw = inputs.get('availablePlugins', [])
+        if isinstance(available_plugins_raw, str):
+            try:
+                available_plugins_raw = json.loads(available_plugins_raw)
+            except json.JSONDecodeError:
+                available_plugins_raw = []
+        if isinstance(available_plugins_raw, dict):
+            available_plugins = available_plugins_raw.get('value', [])
+        else:
+            available_plugins = available_plugins_raw if isinstance(available_plugins_raw, list) else []
+
+        previous_errors = []
+        for attempt in range(self.max_retries):
+            validation_result = self._validate_plan(plan, available_plugins)
+
+            if validation_result['valid']:
+                logger.info("Plan validation successful")
+                return plan
+
+            logger.warning(f"Attempt {attempt + 1}: Plan validation failed with errors: {validation_result['errors']}")
+
+            if attempt < self.max_retries - 1:
+                logger.info("Attempting to repair plan with LLM...")
+                try:
+                    plan = self._repair_plan_with_llm(plan, validation_result['errors'], goal, inputs, previous_errors)
+                    plan = self._repair_plan_code_based(plan)  # Repair again after LLM changes
+                    self._current_plan = plan  # Update stored plan reference
+                    previous_errors = validation_result['errors']  # Update previous_errors for next iteration
+                except Exception as e:
+                    logger.error(f"Plan repair failed on attempt {attempt + 1}: {e}")
+            else:
+                raise AccomplishError(
+                    f"Plan validation failed after {self.max_retries} attempts. Last errors: {validation_result['errors']}",
+                    "validation_error"
+                )
+
+        raise AccomplishError("Unexpected validation loop exit", "validation_error")
+
+    def _repair_plan_code_based(self, plan: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Automatically repair common schema violations in the plan."""
+        logger.info("[Repair] Starting code-based repair...")
+        
+        if not isinstance(plan, list):
+            logger.warning("Plan is not a list. Cannot repair.")
+            return []
+
+        for step in plan:
+            if not isinstance(step, dict):
+                logger.warning("Step is not a dictionary. Skipping.")
+                continue
+
+            # Ensure 'number' is an integer
+            if 'number' in step and not isinstance(step['number'], int):
+                try:
+                    step['number'] = int(step['number'])
+                except (ValueError, TypeError):
+                    logger.warning(f"Failed to convert step number '{step['number']}' to integer. Removing.")
+                    del step['number']
+
+            # Repair inputs
+            if 'inputs' in step and isinstance(step['inputs'], dict):
+                for input_name, input_def in step['inputs'].items():
+                    if isinstance(input_def, dict):
+                        has_output_name = 'outputName' in input_def
+                        has_source_step = 'sourceStep' in input_def
+                        has_value = 'value' in input_def
+
+                        if has_output_name and has_source_step:
+                            # Dependent input: only allow outputName, sourceStep, and args
+                            allowed_keys = ['outputName', 'sourceStep', 'args', 'valueType'] # Keep valueType for dependent inputs
+                            keys_to_delete = [key for key in list(input_def.keys()) if key not in allowed_keys]
+                            for key in keys_to_delete:
+                                logger.info(f"[Repair] Dependent input '{input_name}': Deleting extraneous key '{key}'")
+                                del input_def[key]
+                        elif has_value:
+                            # Constant input: only allow value, valueType, and args
+                            allowed_keys = ['value', 'valueType', 'args']
+                            keys_to_delete = [key for key in list(input_def.keys()) if key not in allowed_keys]
+                            for key in keys_to_delete:
+                                logger.info(f"[Repair] Constant input '{input_name}': Deleting extraneous key '{key}'")
+                                del input_def[key]
+                        else:
+                            # Malformed input def, try to make sense of it
+                            if has_output_name:
+                                logger.warning(f"Input '{input_name}' has 'outputName' but no 'sourceStep'. Adding sourceStep: 0 as a guess.")
+                                input_def['sourceStep'] = 0
+                            elif has_source_step:
+                                logger.warning(f"Input '{input_name}' has 'sourceStep' but no 'outputName'. Removing.")
+                                del step['inputs'][input_name]
+                                
+
+            # Recursively repair sub-plans
+            if 'steps' in step and isinstance(step['steps'], list):
+                logger.info(f"[Repair] Recursively repairing sub-plan in step {step.get('number')}")
+                step['steps'] = self._repair_plan_code_based(step['steps'])
+                
+        logger.info(f"[Repair] Finished code-based repair.")
+        return plan
+
+    def _repair_plan_with_llm(self, plan: List[Dict[str, Any]], errors: List[str], goal: str, inputs: Dict[str, Any], previous_errors: List[str]) -> List[Dict[str, Any]]:
+        """Ask LLM to repair the plan based on validation errors"""
+
+        # Identify the step to be repaired
+        step_to_repair = None
+        for error in errors:
+            match = re.search(r"Step (\d+):", error)
+            if match:
+                step_number = int(match.group(1))
+                for step in plan:
+                    if step.get('number') == step_number:
+                        step_to_repair = step
+                        break
+            if step_to_repair:
+                break
+
+        if not step_to_repair:
+            logger.warning("Could not identify a single step to repair from errors. Sending the whole plan.")
+            step_to_repair_json = json.dumps(plan, indent=2)
+            prompt_type = "full_plan"
+            plugin_guidance = "Schema for multiple steps is complex. Please refer to the full plan and error messages."
+        else:
+            step_to_repair_json = json.dumps(step_to_repair, indent=2)
+            prompt_type = "single_step"
+
+            # Get the plugin definition for the failed step
+            action_verb = step_to_repair.get('actionVerb')
+            available_plugins_raw = inputs.get('availablePlugins', [])
+            if isinstance(available_plugins_raw, str):
+                try:
+                    available_plugins_raw = json.loads(available_plugins_raw)
+                except json.JSONDecodeError:
+                    available_plugins_raw = []
+            if isinstance(available_plugins_raw, dict):
+                available_plugins = available_plugins_raw.get('value', [])
+            else:
+                available_plugins = available_plugins_raw if isinstance(available_plugins_raw, list) else []
+            plugin_map = {plugin.get('actionVerb'): plugin for plugin in available_plugins}
+            plugin_definition = plugin_map.get(action_verb)
+
+            plugin_guidance = ""
+            if plugin_definition:
+                guidance_lines = [f"Plugin Schema for '{action_verb}':"]
+                description = plugin_definition.get('description', 'No description available.')
+                input_definitions = plugin_definition.get('inputDefinitions', [])
+                guidance_lines.append(f"  Description: {description}")
+                if input_definitions:
+                    guidance_lines.append("  Inputs:")
+                    for input_def in input_definitions:
+                        input_name = input_def.get('name', 'UNKNOWN')
+                        input_desc = input_def.get('description', 'No description.')
+                        value_type = input_def.get('valueType', 'any')
+                        required = ' (required)' if input_def.get('required') else ''
+                        guidance_lines.append(f"    - {input_name} (type: {value_type}){required}: {input_desc}")
+                else:
+                    guidance_lines.append("  Inputs: None required.")
+                plugin_guidance = "\n".join(guidance_lines)
+            else:
+                plugin_guidance = f"No specific plugin schema found for action verb '{action_verb}'."
+
+        errors_text = '\n'.join([f"- {error}" for error in errors])
+        previous_errors_text = '\n'.join([f"- {error}" for error in previous_errors]) if previous_errors else "(None)"
+
+        prompt = f"""You are an expert system for correcting JSON data that fails to conform to a schema.
+
+1. THE GOAL:
+{goal}
+
+2. THE INVALID JSON OBJECT:
+{step_to_repair_json}
+
+3. PLUGIN DEFINITION:
+{plugin_guidance}
+
+4. THE CURRENT VALIDATION ERRORS:
+{errors_text}
+
+5. PREVIOUS VALIDATION ERRORS (if any):
+{previous_errors_text}
+
+6. THE SCHEMA FOR STEPS:
+{json.dumps(PLAN_STEP_SCHEMA)}
+
+7. YOUR TASK:
+Your task is to fix the JSON object provided in section 2 to make it valid.
+- Analyze the error: Understand the current validation errors, and consider the previous errors to identify persistent or new issues.
+- Consult the schema: Ensure your fix adheres strictly to the PLAN_STEP_SCHEMA and the PLUGIN DEFINITION for the actionVerb.
+- Examine the invalid object: Identify where the missing inputs should be added or where existing inputs need correction.
+- Correct the object: Add the missing required inputs to the inputs object of the step. For each added input, ensure it has either:
+    - A value and valueType (if it's a constant).
+    - An outputName and sourceStep (if it's referencing an output from a previous step). If sourceStep is 0, it refers to an input from the parent step. Otherwise, it must refer to a preceding step in the plan.
+- Source Inputs Properly: If an input is missing and it's expected to come from a previous step, ensure you correctly identify the sourceStep and outputName.
+
+CRITICAL REQUIREMENTS:
+- JSON ONLY: Your entire response MUST be a single, valid JSON object for the step.
+- NO EXTRA TEXT: Do NOT include explanations, comments, or markdown like ```json.
+- PRESERVE INTENT: Fix ONLY the specific errors while preserving the plan's original intent.
+- IMPORTANT: If an input has both value and outputName/sourceStep, choose the outputName and sourceStep if the sourceStep does produce the outputName.
+
+Return the corrected JSON object for the step."""
+
+        logger.info(f"Attempting to repair {prompt_type} with {len(errors)} validation errors...")
+
+        max_attempts = self.max_retries
+        for attempt in range(max_attempts):
+            try:
+                if not self.brain_call:
+                    raise AccomplishError("Brain call not available for LLM repair", "brain_error")
+                response = self.brain_call(prompt, inputs, "json")
+                repaired_data = json.loads(response)
+
+                if isinstance(repaired_data, list):
+                    # LLM returned a full plan
+                    logger.info("LLM returned a full repaired plan. Replacing the old plan.")
+                    return repaired_data
+                elif isinstance(repaired_data, dict):
+                    # This case handles when the LLM returns a single step or the full plan as a dict with numeric keys
+                    if all(k.isdigit() for k in repaired_data.keys()):
+                         # It's a dict of steps, convert to a list
+                        logger.info("LLM returned a dictionary of steps, converting to a plan list.")
+                        return [repaired_data[k] for k in sorted(repaired_data.keys(), key=int)]
+
+                    # It's a single repaired step
+                    repaired_step = repaired_data
+                    # Find the step to replace in the original plan
+                    for i, step in enumerate(plan):
+                        if step.get('number') == repaired_step.get('number'):
+                            plan[i] = repaired_step
+                            logger.info(f"Successfully replaced step {repaired_step.get('number')} in the plan.")
+                            return plan
+
+                    # If we couldn't find the step to replace, something is wrong
+                    logger.error(f"Could not find step {repaired_step.get('number')} to replace in the plan.")
+                    raise ValueError("Repaired step number does not match any existing step.")
+                else:
+                    raise ValueError("LLM response is not a valid JSON object or array.")
+
+            except (json.JSONDecodeError, ValueError) as e:
+                logger.warning(f"LLM repair JSON parsing failed on attempt {attempt + 1}: {e}")
+                if attempt < max_attempts - 1:
+                    continue
+                else:
+                    raise AccomplishError(f"LLM repair produced invalid JSON after {max_attempts} attempts: {e}", "repair_error")
+            except Exception as e:
+                if attempt == max_attempts - 1:
+                    raise AccomplishError(f"LLM repair call failed after {max_attempts} attempts: {e}", "repair_call_error")
+                logger.warning(f"LLM repair call failed on attempt {attempt + 1}: {e}, retrying...")
+                continue
+
+        # This line should be unreachable
+        raise AccomplishError("Unexpected LLM repair loop exit", "repair_error")
+
+    def _validate_plan(self, plan: List[Dict[str, Any]], available_plugins: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Validate the plan against the schema and plugin requirements."""
+        errors = []
+
+        if not isinstance(plan, list):
+            errors.append("Plan must be a list of steps")
+            return {'valid': False, 'errors': errors}
+
+        if len(plan) == 0:
+            errors.append("Plan cannot be empty")
+            return {'valid': False, 'errors': errors}
+
+        # Create a map of plugins for quick lookup
+        plugin_map = {plugin.get('actionVerb'): plugin for plugin in available_plugins}
+
+        logger.info(f"plan_validator: available_plugins received: {json.dumps(available_plugins, indent=2)}")
+        logger.info(f"plan_validator: plugin_map keys: {list(plugin_map.keys())}")
+
+        # Track outputs from previous steps
+        available_outputs = {}  # step_number -> set of output names
+
+        for i, step in enumerate(plan):
+            step_number = step.get('number')
+            if step_number is None:
+                errors.append(f"Step {i+1}: Missing 'number' field")
+                continue
+
+            # Validate required fields
+            required_fields = ['actionVerb', 'description', 'inputs', 'outputs']
+            for field in required_fields:
+                if field not in step:
+                    errors.append(f"Step {step_number}: Missing required field '{field}'")
+
+            # Validate actionVerb
+            action_verb = step.get('actionVerb')
+            if action_verb:
+                plugin_def = plugin_map.get(action_verb)
+                if plugin_def:
+                    # Validate inputs against plugin definition
+                    self._validate_step_inputs(step, plugin_def, available_outputs, errors)
+                else:
+                    # For novel verbs, we can't validate inputs strictly
+                    logger.info(f"Step {step_number}: actionVerb '{action_verb}' not found in plugin_map. Skipping strict input validation.")
+
+            # Validate and fix outputs to match plugin definitions
+            outputs = step.get('outputs', {})
+            if isinstance(outputs, dict):
+                if action_verb and plugin_def:
+                    # Fix outputs to match plugin definition
+                    fixed_outputs = self._fix_step_outputs(step, plugin_def, outputs)
+                    if fixed_outputs != outputs:
+                        step['outputs'] = fixed_outputs
+                        logger.info(f"Step {step_number}: Fixed outputs to match plugin definition for '{action_verb}'")
+                    step_outputs = set(fixed_outputs.keys())
+                else:
+                    step_outputs = set(outputs.keys())
+                available_outputs[step_number] = step_outputs
+            else:
+                errors.append(f"Step {step_number}: 'outputs' must be a dictionary")
+
+            # Validate recommendedRole
+            recommended_role = step.get('recommendedRole')
+            if recommended_role:
+                allowed_roles = ['Coordinator', 'Researcher', 'Coder', 'Creative', 'Critic', 'Executor', 'Domain Expert']
+                if recommended_role not in allowed_roles:
+                    # Drop the recommendedRole if it's not in the allowed list
+                    logger.warning(f"Step {step_number}: Invalid 'recommendedRole' '{recommended_role}'. Dropping it.")
+                    del step['recommendedRole']
+
+        return {'valid': len(errors) == 0, 'errors': errors}
+
+    def _fix_step_outputs(self, step: Dict[str, Any], plugin_def: Dict[str, Any], current_outputs: Dict[str, str]) -> Dict[str, str]:
+        """Fix step outputs to match plugin definition and update dependent step inputs."""
+        step_number = step.get('number')
+        action_verb = step.get('actionVerb')
+
+        # Get plugin output definitions
+        output_definitions = plugin_def.get('outputDefinitions', [])
+        if not output_definitions:
+            return current_outputs
+
+        # If plugin has only one output and step has only one output, rename to match plugin
+        if len(output_definitions) == 1 and len(current_outputs) == 1:
+            plugin_output_name = output_definitions[0]['name']
+            current_output_name = list(current_outputs.keys())[0]
+            current_output_description = list(current_outputs.values())[0]
+
+            if plugin_output_name != current_output_name:
+                logger.info(f"Step {step_number}: Renaming output '{current_output_name}' to '{plugin_output_name}' to match plugin definition")
+
+                # Update dependent steps that reference this output
+                self._update_dependent_inputs(step_number, current_output_name, plugin_output_name)
+
+                return {plugin_output_name: current_output_description}
+
+        # For multiple outputs, try to match by name similarity or keep as-is
+        # This is a more complex case that we can enhance later if needed
+        return current_outputs
+
+    def _update_dependent_inputs(self, source_step_number: int, old_output_name: str, new_output_name: str):
+        """Update inputs in dependent steps that reference the renamed output."""
+        if not hasattr(self, '_current_plan'):
+            return
+
+        for step in self._current_plan:
+            step_inputs = step.get('inputs', {})
+            for input_name, input_def in step_inputs.items():
+                if (isinstance(input_def, dict) and
+                    input_def.get('sourceStep') == source_step_number and
+                    input_def.get('outputName') == old_output_name):
+
+                    logger.info(f"Step {step.get('number')}: Updating input '{input_name}' to reference output '{new_output_name}' instead of '{old_output_name}'")
+                    input_def['outputName'] = new_output_name
+
+    def _validate_step_inputs(self, step: Dict[str, Any], plugin_def: Dict[str, Any], available_outputs: Dict[int, Set[str]], errors: List[str]):
+        """Validate inputs for a single step against the plugin definition."""
+        step_number = step['number']
+        inputs = step.get('inputs', {})
+        input_definitions = plugin_def.get('inputDefinitions', [])
+
+        # Create map of required inputs
+        required_inputs = {inp['name']: inp for inp in input_definitions if inp.get('required', False)}
+
+        # Check required inputs are present
+        for req_name, req_def in required_inputs.items():
+            if req_name not in inputs:
+                errors.append(f"Step {step_number}: Missing required input '{req_name}' for actionVerb '{step['actionVerb']}'")
+
+        # Validate each input
+        for input_name, input_def in inputs.items():
+            if not isinstance(input_def, dict):
+                errors.append(f"Step {step_number}: Input '{input_name}' must be a dictionary")
+                continue
+
+            has_value = 'value' in input_def
+            has_output_name = 'outputName' in input_def
+            has_source_step = 'sourceStep' in input_def
+
+            if has_value and has_output_name:
+                # Both present - this is ambiguous, prefer outputName
+                logger.warning(f"Step {step_number}: Input '{input_name}' has both 'value' and 'outputName'. Using 'outputName'.")
+            elif has_output_name and not has_source_step:
+                errors.append(f"Step {step_number}: Input '{input_name}' has 'outputName' but missing 'sourceStep'")
+            elif has_source_step and not has_output_name:
+                errors.append(f"Step {step_number}: Input '{input_name}' has 'sourceStep' but missing 'outputName'")
+            elif not has_value and not has_output_name:
+                errors.append(f"Step {step_number}: Input '{input_name}' must have either 'value' or 'outputName'/'sourceStep'")
+
+            # Validate sourceStep references
+            if has_source_step:
+                source_step = input_def['sourceStep']
+                if source_step != 0:  # 0 means parent input
+                    if source_step not in available_outputs:
+                        errors.append(f"Step {step_number}: Input '{input_name}' references sourceStep {source_step} which does not exist or has no outputs")
+                    elif has_output_name:
+                        output_name = input_def['outputName']
+                        if source_step in available_outputs and output_name not in available_outputs[source_step]:
+                            errors.append(f"Step {step_number}: Input '{input_name}' references output '{output_name}' from step {source_step} which does not exist")
+
+
