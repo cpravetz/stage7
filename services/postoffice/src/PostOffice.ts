@@ -140,7 +140,6 @@ export class PostOffice extends BaseEntity {
                 req.path === '/registerComponent' ||
                 req.path === '/securityManager/refresh-token' ||
                 req.path === '/securityManager/auth/refresh-token') {
-                console.log(`[PostOffice] Skipping authentication for exempt path: ${req.path}`);
                 return next();
             }
 

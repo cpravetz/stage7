@@ -40,10 +40,21 @@ export class Librarian extends BaseEntity {
         super('Librarian', 'Librarian', `librarian`, process.env.PORT || '5040');
         this.app = express();
         this.setupRoutes();
-        this.startServer();
-      }
+      this.startServer();
+    }
 
-      private setupRoutes() {
+    private isRestrictedCollection(collection: string): boolean {
+      const restricted = ['users', 'tokens', 'token_blacklist'];
+      return restricted.includes(collection.toLowerCase());
+    }
+
+    private isCallerAuthorized(req: express.Request): boolean {
+      const user = (req as any).user;
+      if (!user) return false;
+      return user.sub === 'SecurityManager' || user.componentType === 'SecurityManager';
+    }
+
+    private setupRoutes() {
         this.app.get('/health', (req: express.Request, res: express.Response): void => {
             res.status(200).json({
                 status: 'healthy',
@@ -178,6 +189,10 @@ export class Librarian extends BaseEntity {
         let { id, data, storageType, collection } = req.body;
         collection = collection || 'mcsdata';
 
+        if (this.isRestrictedCollection(collection) && !this.isCallerAuthorized(req)) {
+          return res.status(403).send({ error: 'Access denied to restricted collection' });
+        }
+
         /*if (!id) {
             console.log(`storeData failed: id is ${id === undefined ? 'undefined' : 'null'}`);
             return res.status(400).send({ error: 'ID is required' });
@@ -211,6 +226,9 @@ export class Librarian extends BaseEntity {
     private async loadData(req: express.Request, res: express.Response) {
         const { id } = req.params;
         const { storageType = 'mongo', collection = 'mcsdata' } = req.query;
+        if (this.isRestrictedCollection(collection as string) && !this.isCallerAuthorized(req)) {
+          return res.status(403).send({ error: 'Access denied to restricted collection' });
+        }
         console.log(`loadData for ${id} requested`)
         if (!id) {
             console.log('loadData failed for no id.')
@@ -297,6 +315,9 @@ export class Librarian extends BaseEntity {
 
     private async queryData(req: express.Request, res: express.Response) {
         const { collection, query, limit } = req.body;
+        if (this.isRestrictedCollection(collection) && !this.isCallerAuthorized(req)) {
+          return res.status(403).send({ error: 'Access denied to restricted collection' });
+        }
         console.log('Querying data:', { collection, query, limit });
 
         if (!collection || !query) {
@@ -332,6 +353,9 @@ export class Librarian extends BaseEntity {
 
     private async searchData(req: express.Request, res: express.Response) {
         const {collection, query = {}, options = {}} = req.body;
+        if (this.isRestrictedCollection(collection as string) && !this.isCallerAuthorized(req)) {
+          return res.status(403).send({ error: 'Access denied to restricted collection' });
+        }
         const parsedOptions = options ? JSON.parse(JSON.stringify(options)) : {};
         // Convert string '1' to number 1 for MongoDB projection
         Object.keys(parsedOptions).forEach(key => {
@@ -391,6 +415,9 @@ export class Librarian extends BaseEntity {
 
     private async deleteCollection(req: express.Request, res: express.Response) {
         const { collection } = req.query;
+        if (this.isRestrictedCollection(collection as string) && !this.isCallerAuthorized(req)) {
+          return res.status(403).send({ error: 'Access denied to restricted collection' });
+        }
         if (!collection) {
             console.log('deleteCollection failed for no collection.');
             return res.status(400).send({ error: 'Collection is required' });

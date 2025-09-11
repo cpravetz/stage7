@@ -397,9 +397,6 @@ Return the corrected JSON object for the step."""
         # Create a map of plugins for quick lookup
         plugin_map = {plugin.get('actionVerb'): plugin for plugin in available_plugins}
 
-        logger.info(f"plan_validator: available_plugins received: {json.dumps(available_plugins, indent=2)}")
-        logger.info(f"plan_validator: plugin_map keys: {list(plugin_map.keys())}")
-
         # Track outputs from previous steps
         available_outputs = {}  # step_number -> set of output names
 

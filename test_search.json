@@ -1,0 +1,12 @@
+{
+  "actionVerb": "SEARCH",
+  "inputValues": {
+    "searchTerm": {
+      "value": "stage7 platform",
+      "valueType": "string"
+    }
+  },
+  "outputs": {
+    "results": "Search results"
+  }
+}

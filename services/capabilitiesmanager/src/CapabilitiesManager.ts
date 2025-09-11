@@ -445,9 +445,10 @@ export class CapabilitiesManager extends BaseEntity {
     private extractRawInputValues(inputMap: Map<string, InputValue>): Map<string, any> {
         const rawInputs = new Map<string, any>();
         inputMap.forEach((inputValue, key) => {
-            if (inputValue && 'value' in inputValue) {
+            // Check if inputValue is an object and has a 'value' property
+            if (inputValue && typeof inputValue === 'object' && inputValue !== null && 'value' in inputValue) {
                 rawInputs.set(key, inputValue.value);
-            } else if (inputValue && 'outputName' in (inputValue as any) && 'sourceStep' in (inputValue as any)) {
+            } else if (inputValue && typeof inputValue === 'object' && inputValue !== null && 'outputName' in inputValue && 'sourceStep' in inputValue) {
                 // Handle input references, pass them as is for now, validation might handle this later
                 rawInputs.set(key, { outputName: (inputValue as any).outputName, sourceStep: (inputValue as any).sourceStep });
             } else {
@@ -467,6 +468,7 @@ export class CapabilitiesManager extends BaseEntity {
             actionVerb: req.body.actionVerb,
             inputKeys: Object.keys(req.body.inputValues || {})
         });
+        console.log(`[${trace_id}] ${source_component}: Full request body:`, JSON.stringify(req.body, null, 2));
         // Handle inputValues - can be either array of [key, value] pairs or serialized Map
         let inputValues: Map<string, InputValue>;
         if (Array.isArray(req.body.inputValues)) {
@@ -485,6 +487,8 @@ export class CapabilitiesManager extends BaseEntity {
             inputValues: inputValues,
             outputs: MapSerializer.transformFromSerialization(req.body.outputs || {}) instanceof Map ? MapSerializer.transformFromSerialization(req.body.outputs || {}) : new Map(Object.entries(MapSerializer.transformFromSerialization(req.body.outputs || {})))
         } as Step;
+
+
 
         if (!step.actionVerb || typeof step.actionVerb !== 'string') {
             const sError = generateStructuredError({
@@ -597,10 +601,8 @@ export class CapabilitiesManager extends BaseEntity {
                             args: {}
                         });
 
-                        // Transform inputValues to a simpler map before validation
-                        const rawInputValues = this.extractRawInputValues(step.inputValues);
-
-                        const validatedInputs = await validateAndStandardizeInputs(pluginDefinition, rawInputValues);
+                        // Pass the full inputValues Map to validation (it expects InputValue objects, not raw values)
+                        const validatedInputs = await validateAndStandardizeInputs(pluginDefinition, step.inputValues);
                         if (!validatedInputs.success || !validatedInputs.inputs) {
                             throw generateStructuredError({
                                 error_code: GlobalErrorCodes.INPUT_VALIDATION_FAILED,

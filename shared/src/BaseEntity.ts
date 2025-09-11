@@ -915,7 +915,6 @@ protected async cleanup() {
     try {
       // Skip authentication for health check endpoints
       if (this.isHealthCheckEndpoint(req.path)) {
-        console.log(`[BaseEntity] Skipping authentication for health check endpoint: ${req.path}`);
         return next();
       }
       const AUTH_PATHS = ['/auth/', '/login', '/securityManager/login', '/securityManager/register', '/public-key', '/refresh-token', '/registerComponent'];

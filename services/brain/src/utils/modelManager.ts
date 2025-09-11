@@ -312,13 +312,7 @@ export class ModelManager {
         return Array.from(this.models.keys());
     }
 
-    /**
-     * Get all models
-     * @returns Map of all models
-     */
-    getAllModels(): Map<string, BaseModel> {
-        return this.models;
-    }
+
 
     /**
      * Get the interface manager
@@ -521,6 +515,14 @@ export class ModelManager {
      */
     getActiveRequestsCount(): number {
         return this.activeRequests.size;
+    }
+
+    /**
+     * Get all loaded models
+     * @returns Array of all models
+     */
+    getAllModels(): BaseModel[] {
+        return Array.from(this.models.values());
     }
 
     /**
