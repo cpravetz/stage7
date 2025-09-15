@@ -27,6 +27,7 @@ export class PostOffice extends BaseEntity {
     private clients: Map<string, WebSocket> = new Map();
     private userInputRequests: Map<string, (response: any) => void> = new Map();
     private userInputRequestMetadata: Map<string, { answerType: string; question: string; choices?: string[] }> = new Map();
+    private userInputResponses: Map<string, { status: string; answer?: any; timestamp: number }> = new Map();
     private messageQueue: Map<string, Message[]> = new Map();
     private messageRouter: MessageRouter;
     private clientMessageQueue: Map<string, Message[]> = new Map(); // Queue for messages to clients without active connections
@@ -166,6 +167,7 @@ export class PostOffice extends BaseEntity {
         this.app.get('/getServices', (req, res) => this.getServices(req, res));
         this.app.post('/submitUserInput', this.fileUploadManager.getUploadMiddleware(), (req, res) => { this.submitUserInput(req, res)});
         this.app.post('/sendUserInputRequest', (req, res) => this.sendUserInputRequest(req, res));
+        this.app.get('/getUserInputResponse/:requestId', (req, res) => this.getUserInputResponse(req, res));
         this.app.post('/createMission', (req, res) => this.createMission(req, res));
         this.app.post('/loadMission', (req, res) => this.loadMission(req, res));
         this.app.get('/librarian/retrieve/:id', (req, res) => this.retrieveWorkProduct(req, res));
@@ -668,6 +670,13 @@ export class PostOffice extends BaseEntity {
                 }
             }
 
+            // Store the response for polling
+            this.userInputResponses.set(requestId, {
+                status: 'completed',
+                answer: finalResponse,
+                timestamp: Date.now()
+            });
+
             // Resolve the request with the response (either text response or file ID)
             resolver(finalResponse);
             this.userInputRequests.delete(requestId);
@@ -872,17 +881,18 @@ export class PostOffice extends BaseEntity {
         console.log('Request body:', req.body);
 
         const securityManagerPath = req.originalUrl.split('/securityManager')[1] || '/';
-        const fullUrl = `http://${this.securityManagerUrl}${securityManagerPath}`;
+        const fullUrl = `${this.securityManagerUrl}${securityManagerPath}`;
         console.log(`Forwarding request to SecurityManager: ${fullUrl}`);
 
         try {
+            const securityManagerUrlObject = new URL(this.securityManagerUrl);
             const requestConfig = {
                 method: req.method as any,
                 url: fullUrl,
                 data: req.body,
                 headers: {
                     ...req.headers,
-                    host: this.securityManagerUrl.split(':')[0],
+                    host: securityManagerUrlObject.host,
                     'Content-Type': 'application/json'
                 },
                 params: req.query,
@@ -971,6 +981,12 @@ export class PostOffice extends BaseEntity {
                 choices
             });
 
+            // Initialize response status as pending
+            this.userInputResponses.set(request_id, {
+                status: 'pending',
+                timestamp: Date.now()
+            });
+
             // Store the request for later resolution
             this.userInputRequests.set(request_id, (response: any) => {
                 // This callback will be called when the user responds
@@ -987,6 +1003,33 @@ export class PostOffice extends BaseEntity {
             res.status(200).json({ request_id });
         } catch (error) {
             res.status(500).json({ error: 'Failed to send user input request' });
+        }
+    }
+
+    private async getUserInputResponse(req: express.Request, res: express.Response) {
+        try {
+            const { requestId } = req.params;
+
+            if (!requestId) {
+                return res.status(400).json({ error: 'Request ID is required' });
+            }
+
+            const response = this.userInputResponses.get(requestId);
+
+            if (!response) {
+                return res.status(404).json({ error: 'Request not found' });
+            }
+
+            // Clean up old completed responses (older than 1 hour)
+            const oneHourAgo = Date.now() - (60 * 60 * 1000);
+            if (response.status === 'completed' && response.timestamp < oneHourAgo) {
+                this.userInputResponses.delete(requestId);
+                return res.status(404).json({ error: 'Request expired' });
+            }
+
+            res.status(200).json(response);
+        } catch (error) {
+            res.status(500).json({ error: 'Failed to get user input response' });
         }
     }
 }

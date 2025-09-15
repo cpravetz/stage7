@@ -62,7 +62,7 @@ export class GroqService extends BaseService {
         const hasValidKey = !!(this.apiKey && this.apiKey !== "''" && this.apiKey !== '""');
         const available = this.ready && hasValidKey;
 
-        console.log(`GroqService availability check: ${available ? 'Available' : 'Not available'}`);
+        //console.log(`GroqService availability check: ${available ? 'Available' : 'Not available'}`);
         console.log(`GroqService ready state: ${this.ready ? 'Ready' : 'Not ready'}`);
 
         if (!available) {

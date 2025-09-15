@@ -216,11 +216,11 @@ export class ModelManager {
                 const serviceAvailable = service ? service.isAvailable() : false;
                 const isBlacklisted = this.performanceTracker.isModelBlacklisted(model.name, conversationType);
 
-                console.log(`Model ${model.name}:`);
-                console.log(`  - Supports ${conversationType}: ${supportsConversation}`);
-                console.log(`  - Interface available: ${!!interfaceInstance}`);
-                console.log(`  - Service available: ${serviceAvailable}`);
-                console.log(`  - Blacklisted: ${isBlacklisted}`);
+                //console.log(`Model ${model.name}:`);
+                //console.log(`  - Supports ${conversationType}: ${supportsConversation}`);
+                //console.log(`  - Interface available: ${!!interfaceInstance}`);
+                //console.log(`  - Service available: ${serviceAvailable}`);
+                //console.log(`  - Blacklisted: ${isBlacklisted}`);
             });
 
             return null;

@@ -46,7 +46,7 @@ class AgentSetManager {
         const serviceId = 'TrafficManager';
         const serviceSecret = process.env.CLIENT_SECRET || 'stage7AuthSecret';
         this.tokenManager = ServiceTokenManager.getInstance(
-            `http://${this.securityManagerUrl}`,
+            `${this.securityManagerUrl}`,
             serviceId,
             serviceSecret
         );

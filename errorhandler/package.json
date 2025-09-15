@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@cktmcs/shared": "file:../shared",
-    "axios": "^1.11.0"
+    "axios": "^1.12.0"
   },
   "devDependencies": {
     "@types/jest": "^29.5.14",

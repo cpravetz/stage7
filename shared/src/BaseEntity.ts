@@ -34,12 +34,16 @@ export class BaseEntity implements IBaseEntity {
   protected tokenManager: ServiceTokenManager | null = null;
   protected securityManagerUrl: string = process.env.SECURITYMANAGER_URL || 'securitymanager:5010';
 
+
   constructor(id: string, componentType: string, urlBase: string, port: string, skipPostOfficeRegistration: boolean = false) {
     this.id = id;
     this.componentType = componentType;
     this.postOfficeUrl = process.env.POSTOFFICE_URL || 'postoffice:5020'
     this.port = port;
     this.url = `${urlBase}:${port}` //url;
+    if (!this.securityManagerUrl.startsWith('http')) {
+      this.securityManagerUrl = `http://${this.securityManagerUrl}`;
+    }
     // Dynamically import to avoid circular dependency
     const { AuthenticatedApiClient } = require('./AuthenticatedApiClient');
     this.authenticatedApi = new AuthenticatedApiClient(this);
@@ -857,7 +861,7 @@ protected async cleanup() {
       const serviceId = this.componentType;
       const serviceSecret = process.env.CLIENT_SECRET || 'stage7AuthSecret';
       this.tokenManager = ServiceTokenManager.getInstance(
-        `http://${this.securityManagerUrl}`,
+        `${this.securityManagerUrl}`,
         serviceId,
         serviceSecret
       );

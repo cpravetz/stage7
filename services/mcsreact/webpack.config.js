@@ -8,7 +8,7 @@ module.exports = {
     filename: 'static/js/[name].[contenthash:8].js',
     publicPath: '/',
   },
-  mode: 'production',
+  mode: 'development',
   resolve: {
     extensions: ['.tsx', '.ts', '.js', '.jsx'],
     fallback: {

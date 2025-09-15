@@ -879,13 +879,6 @@ Context: ${contextString}`;
         }
     }
 
-    // MCP Tool Management Methods - REMOVED as per revised plan
-    // private validateMCPToolDefinition(...) { ... }
-    // async registerMCPTool(...) { ... }
-    // async updateMCPTool(...) { ... }
-    // async getMCPTool(...) { ... }
-    // async listMCPTools(...) { ... }
-    // async deleteMCPTool(...) { ... }
 }
 
 // Instantiate the Engineer - this line should typically be in an entry point file (e.g., index.ts for the service)

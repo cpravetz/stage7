@@ -25,7 +25,8 @@ export class StateManager {
                 trafficManagerUrl: agent.trafficManagerUrl,
                 librarianUrl: agent.librarianUrl,
                 conversation: agent.conversation,
-                missionContext: agent.missionContext
+                missionContext: agent.missionContext,
+                lastFailedStep: agent.lastFailedStep
             });
         } catch (error) {
             console.error('Error saving agent state:', error instanceof Error ? error.message : error);
@@ -81,6 +82,7 @@ export class StateManager {
                 agent.missionContext = state.missionContext;
                 agent.role = state.role || 'executor';
                 agent.roleCustomizations = state.roleCustomizations;
+                agent.lastFailedStep = state.lastFailedStep;
                 console.log('Agent state applied successfully.');
             }
         } catch (error) {

@@ -19,6 +19,7 @@ export interface AgentState {
     missionContext: string;
     role?: string;
     roleCustomizations?: any;
+    lastFailedStep?: any;
 }
 
 export interface StepEvent {

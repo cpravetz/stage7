@@ -62,7 +62,7 @@ def get_mission_goal(mission_id: str, inputs: Dict[str, Any]) -> Optional[str]:
 
         headers = {'Authorization': f'Bearer {auth_token}'}
         # Assuming the mission is stored in a 'missions' collection
-        response = requests.get(f"http://{librarian_url}/loadData/{mission_id}?collection=missions", headers=headers)
+        response = requests.get(f"http://{librarian_url}/loadData/{mission_id}?collection=missions", headers=headers, timeout=30)
         response.raise_for_status()
         mission_data = response.json()
         return mission_data.get('data', {}).get('goal')
@@ -151,7 +151,7 @@ def call_brain(prompt: str, inputs: Dict[str, Any], response_type: str = "json")
             f"http://{brain_url}/chat",
             json=payload,
             headers=headers,
-            timeout=60  # Reduced timeout to 60 seconds
+            timeout=300  # Increased timeout to 300 seconds
         )
 
         if response.status_code != 200:
@@ -168,6 +168,8 @@ def call_brain(prompt: str, inputs: Dict[str, Any], response_type: str = "json")
             progress.checkpoint("brain_call_success_text_response")
             return raw_brain_response
 
+        logger.info(f"Raw Brain response (before extraction): {raw_brain_response[:500]}...") # Log raw response
+
         # Attempt to extract clean JSON from the raw response
         extracted_json_str = _extract_json_from_string(raw_brain_response)
 
@@ -176,16 +178,16 @@ def call_brain(prompt: str, inputs: Dict[str, Any], response_type: str = "json")
                 # Validate that the extracted string is indeed valid JSON
                 json.loads(extracted_json_str)
                 logger.info("Successfully extracted and validated JSON from Brain response.")
-                logger.info(f"Raw JSON response from Brain: {extracted_json_str}")
+                logger.info(f"Raw JSON response from Brain (extracted): {extracted_json_str}")
                 progress.checkpoint("brain_call_success")
                 return extracted_json_str
             except json.JSONDecodeError as e:
-                logger.warning(f"Extracted JSON is still invalid: {e}. Raw response: {raw_brain_response[:200]}...")
+                logger.warning(f"Extracted JSON is still invalid: {e}. Full raw response: {raw_brain_response}") # Log full raw response on error
                 # Fallback to raw response if extraction leads to invalid JSON
                 progress.checkpoint("brain_call_success_with_warning")
                 return raw_brain_response
         else:
-            logger.warning(f"Could not extract JSON from Brain response. Raw response: {raw_brain_response[:200]}...")
+            logger.warning(f"Could not extract JSON from Brain response. Full raw response: {raw_brain_response}") # Log full raw response
             progress.checkpoint("brain_call_success_with_warning")
             return raw_brain_response
 
@@ -253,11 +255,17 @@ class RobustMissionPlanner:
             goal = mission_goal
         
         if not goal:
-            logger.error(f"Missing required 'goal' or a valid 'missionId' that resolves in {inputs}")
-            logger.error(f"Goal:{goal}")
-            logger.error(f"Goal Input:{goal_input}")
-            logger.error(f"Mission Id:{mission_id}")
-            raise AccomplishError("Missing required 'goal' or a valid 'missionId' that resolves to a goal.", "input_error")
+            # If we have a mission_id but couldn't fetch the goal due to connection issues,
+            # try to provide a reasonable fallback instead of failing completely
+            if mission_id and mission_goal is None:
+                logger.warning(f"Could not fetch mission goal for {mission_id} due to connection issues. Using fallback approach.")
+                goal = f"Continue working on mission {mission_id} using available context and previous work products."
+            else:
+                logger.error(f"Missing required 'goal' or a valid 'missionId' that resolves in {inputs}")
+                logger.error(f"Goal:{goal}")
+                logger.error(f"Goal Input:{goal_input}")
+                logger.error(f"Mission Id:{mission_id}")
+                raise AccomplishError("Missing required 'goal' or a valid 'missionId' that resolves to a goal.", "input_error")
         
         plan = self.create_plan(goal, mission_goal, inputs)
 
@@ -437,6 +445,13 @@ Write a detailed prose plan (3-5 paragraphs) that thoroughly explains:
 
 Be specific, actionable, and comprehensive. Think deeply about THIS specific goal.
 
+CRITICAL PLANNING PRINCIPLES:
+- Prioritize autonomous information gathering using SEARCH, SCRAPE, API_CLIENT, and other research tools.
+- **Use the ASK_USER_QUESTION verb for any and all questions to the user.** This is the only way to ask the user for input.
+- **Do not use the CHAT verb to ask questions.** The CHAT verb is for sending notifications to the user, not for asking questions.
+- Design plans that can execute independently without requiring user input for factual information.
+- Use available tools and APIs to gather data rather than asking users to provide it.
+
 IMPORTANT: Return ONLY plain text for the plan. NO markdown formatting, NO code blocks, NO special formatting.
 
 CRITICAL: The actionVerb for each step MUST be a valid, existing plugin actionVerb (from the provided list) or a descriptive, new actionVerb (e.g., 'ANALYZE_DATA', 'GENERATE_REPORT'). It MUST NOT be 'UNKNOWN' or 'NOVEL_VERB'.
@@ -530,7 +545,8 @@ After your internal analysis and self-correction is complete, provide ONLY the f
 - **Multi-step plans are essential:** Break down complex goals into multiple, sequential steps.
 - **Dependencies are crucial for flow:** Every step that uses an output from a previous step MUST declare that dependency in its `inputs` object using `outputName` and `sourceStep`.
 - **Prioritize autonomous information gathering:** Use tools like SEARCH, SCRAPE, DATA_TOOLKIT, TEXT_ANALYSIS, TRANSFORM, and FILE_OPERATION to gather information and perform tasks.
-- **Avoid unnecessary ASK_USER_QUESTION:** Only use 'ASK_USER_QUESTION' for subjective opinions, permissions, or clarification). Do NOT use it for delegating research or data collection that the agent can perform.
+- **Avoid unnecessary user interaction:** Only use 'ASK_USER_QUESTION' for subjective opinions, permissions, or clarification. Do NOT use it for delegating research or data collection that the agent can perform.
+- **CHAT vs ASK_USER_QUESTION:** Use ASK_USER_QUESTION for structured questions requiring user input. Use CHAT only for notifications, status updates, or conversational interactions where you're informing the user, not gathering information.
 - **CRITICAL for recommendedRole:** The `recommendedRole` field MUST be one of the following exact values: 'Coordinator', 'Researcher', 'Coder', 'Creative', 'Critic', 'Executor', 'Domain Expert'. Ensure strict adherence to these values.
 - **CRITICAL for sourceStep:**
     - Use `sourceStep: 0` ONLY for inputs that are explicitly provided in the initial mission context (the "PARENT STEP INPUTS" section if applicable, or the overall mission goal).

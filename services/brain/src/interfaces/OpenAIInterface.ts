@@ -116,7 +116,7 @@ export class OpenAIInterface extends BaseInterface {
             // --- Ensure JSON if required ---
             let requireJson = options.responseType === 'json' ? true : false;
             if (requireJson) {
-                return this.ensureJsonResponse(fullResponse, true);
+                return await this.ensureJsonResponse(fullResponse, true, service);
             }
             return fullResponse || '';
         } catch (error) {
@@ -290,7 +290,7 @@ export class OpenAIInterface extends BaseInterface {
             const rawResponse = response.choices[0].message.content;
 
             // Always apply JSON cleanup for TextToJSON conversion type
-            return this.ensureJsonResponse(rawResponse, true);
+            return await this.ensureJsonResponse(rawResponse, true, service);
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             console.error(`OpenAI Interface: Error generating JSON with ${service.serviceName}:`, errorMessage);

@@ -66,7 +66,7 @@ export class MistralInterface extends BaseInterface {
                 // --- Ensure JSON if required ---
                 let requireJson = options.responseType === 'json' ? true : false;
                 if (requireJson) {
-                    return this.ensureJsonResponse(content, true);
+                    return await this.ensureJsonResponse(content, true, service);
                 }
                 return content;
             } else {

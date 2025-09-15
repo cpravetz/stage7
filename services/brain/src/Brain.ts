@@ -247,6 +247,7 @@ export class Brain extends BaseEntity {
         let lastError: string = '';
         let lastModelName: string | null = null;
         const excludedModels: string[] = [];
+        let repairAttempted = false;
 
         while (true) { // Infinite retry until success or no models available
             attempt++;
@@ -302,14 +303,6 @@ export class Brain extends BaseEntity {
                 if (selectedModel && selectedModel.name && errorMessage.includes('context window')) {
                     console.log(`[Brain Chat] Context window error detected for model ${selectedModel.name}. Excluding it from retries.`);
                     excludedModels.push(selectedModel.name);
-                }
-
-                // Check if this is a JSON error and if we should attempt a repair
-                else if (thread.conversationType === LLMConversationType.TextToJSON && /json/i.test(errorMessage)) {
-                    console.log(`[Brain Chat] JSON error detected. Attempting to repair with a new model.`);
-                    // Modify the thread to include the repair instructions
-                    const lastExchange = thread.exchanges[thread.exchanges.length - 1];
-                    lastExchange.content = `The previous model failed to produce valid JSON. Please fix the following output to be a single, valid JSON object. Do not include any explanations, markdown, or code blocks - just the raw JSON object.\n\nBROKEN OUTPUT:\n${lastError.replace('JSON_RECOVERY_FAILED: Could not repair or extract valid JSON from: ', '')}`;
                 } else if (selectedModel && selectedModel.name) {
                     const isTimeout = /timeout|system_error|connection error/i.test(errorMessage);
                     const isJsonError = /json|parse|invalid format/i.test(errorMessage);

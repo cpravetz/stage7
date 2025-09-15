@@ -468,7 +468,7 @@ export class CapabilitiesManager extends BaseEntity {
             actionVerb: req.body.actionVerb,
             inputKeys: Object.keys(req.body.inputValues || {})
         });
-        console.log(`[${trace_id}] ${source_component}: Full request body:`, JSON.stringify(req.body, null, 2));
+        //console.log(`[${trace_id}] ${source_component}: Full request body:`, JSON.stringify(req.body, null, 2));
         // Handle inputValues - can be either array of [key, value] pairs or serialized Map
         let inputValues: Map<string, InputValue>;
         if (Array.isArray(req.body.inputValues)) {

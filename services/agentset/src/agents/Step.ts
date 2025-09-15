@@ -141,16 +141,6 @@ export class Step {
     }
 
     populateInputsFromDependencies(allSteps: Step[]): void {
-       this.inputReferences.forEach((inputReference, name) => {
-            if (inputReference.value) {
-                this.inputValues.set(inputReference.inputName, {
-                    inputName: inputReference.inputName,
-                    value: inputReference.value,
-                    valueType: inputReference.valueType,
-                    args: inputReference.args || {}
-                });
-            }
-        });
         this.dependencies.forEach(dep => {
             const sourceStep = allSteps.find(s => s.id === dep.sourceStepId);
             if (sourceStep?.result) {
@@ -716,14 +706,53 @@ export class Step {
                 name: 'error',
                 resultType: PluginParameterType.ERROR,
                 resultDescription: '[Step]Error in SEQUENCE step',
-                result: null,
+                result: 'Missing required input: steps',
                 error: 'Missing required input: steps'
             }];
         }
 
-        const steps = stepsInput.value as ActionVerbTask[];
-        const newSteps: Step[] = [];
+        let steps: ActionVerbTask[];
 
+        // Handle different input types
+        if (typeof stepsInput.value === 'string') {
+            try {
+                // Try to parse as JSON
+                steps = JSON.parse(stepsInput.value);
+            } catch (e) {
+                return [{
+                    success: false,
+                    name: 'error',
+                    resultType: PluginParameterType.ERROR,
+                    resultDescription: '[Step]Error in SEQUENCE step: Invalid JSON format for steps',
+                    result: `steps.forEach is not a function`,
+                    error: `steps.forEach is not a function`
+                }];
+            }
+        } else if (Array.isArray(stepsInput.value)) {
+            steps = stepsInput.value as ActionVerbTask[];
+        } else {
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: '[Step]Error in SEQUENCE step: steps must be an array or JSON string',
+                result: `steps.forEach is not a function`,
+                error: `steps.forEach is not a function`
+            }];
+        }
+
+        if (!Array.isArray(steps)) {
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: '[Step]Error in SEQUENCE step: steps must be an array',
+                result: `steps.forEach is not a function`,
+                error: `steps.forEach is not a function`
+            }];
+        }
+
+        const newSteps: Step[] = [];
         let previousStepId: string | undefined;
 
         steps.forEach((task, index) => {
@@ -1032,7 +1061,17 @@ export function createFromPlan(
             throw new Error('Cannot create step from plan without a missionId from parentStep or agentContext');
         }
 
-        const inputSource = (task as any).inputs || task.inputReferences;
+        let inputSource = (task as any).inputs || task.inputReferences;
+
+        // FIX: Check if inputSource is a serialized map and deserialize it before processing.
+        if (inputSource && inputSource._type === 'Map' && Array.isArray(inputSource.entries)) {
+            try {
+                inputSource = Object.fromEntries(inputSource.entries);
+            } catch (e) {
+                console.error(`[createFromPlan] Failed to deserialize nested input map for task '${task.actionVerb}'. Inputs may be incorrect.`, e);
+            }
+        }
+
         if (inputSource) {
             for (const [inputName, inputDef] of Object.entries(inputSource as Record<string, any>)) {
                 if (typeof inputDef !== 'object' || inputDef === null) {
@@ -1052,13 +1091,19 @@ export function createFromPlan(
                         args: {},
                     });
                 } else if (hasValue) {
+                    let value = inputDef.value;
+                    if (typeof value === 'object' && value !== null) {
+                        value = JSON.stringify(value);
+                    }
                     inputValues.set(inputName, {
                         inputName: inputName,
-                        value: inputDef.value,
+                        value: value,
                         valueType: inputDef.valueType,
                         args: inputDef.args,
                     });
                 } else if (hasOutputName && hasSourceStep) {
+                    console.log(`[createFromPlan] 🔗 Creating dependency: ${inputName} <- step ${inputDef.sourceStep}.${inputDef.outputName} for task '${task.actionVerb}'`);
+
                     if (inputDef.sourceStep === 0) {
                         let resolvedValue: any;
                         let resolvedValueType: PluginParameterType = inputDef.valueType;
@@ -1086,6 +1131,7 @@ export function createFromPlan(
                                     sourceStepId: parentStep.id,
                                     inputName: inputName
                                 });
+                                console.log(`[createFromPlan] ✅ Added dependency to parent step: ${inputName} <- ${parentStep.id}.${inputDef.outputName}`);
                             } else {
                                 console.error(`[createFromPlan] 🚨 Unresolved sourceStep 0: Input '${inputDef.outputName}' not found for step '${task.actionVerb}'.`);
                             }
@@ -1098,8 +1144,10 @@ export function createFromPlan(
                                 sourceStepId,
                                 inputName: inputName
                             });
+                            console.log(`[createFromPlan] ✅ Added dependency: ${inputName} <- ${sourceStepId}.${inputDef.outputName} (step ${inputDef.sourceStep})`);
                         } else {
                             console.error(`[createFromPlan] 🚨 Unresolved sourceStep ${inputDef.sourceStep} for input '${inputName}' in step '${task.actionVerb}'`);
+                            console.error(`[createFromPlan] Available step numbers:`, Object.keys(stepNumberToUUID));
                         }
                     }
                 } else {
@@ -1152,6 +1200,9 @@ export function createFromPlan(
             recommendedRole: task.recommendedRole,
             persistenceManager: persistenceManager
         });
+
+        console.log(`[createFromPlan] 📊 Created step ${step.stepNo} (${task.actionVerb}) with ${dependencies.length} dependencies:`,
+            dependencies.map(d => `${d.inputName} <- ${d.sourceStepId}.${d.outputName}`));
         return step;
     });
 

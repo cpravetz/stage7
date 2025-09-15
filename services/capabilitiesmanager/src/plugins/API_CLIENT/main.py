@@ -57,6 +57,17 @@ def execute_plugin(inputs):
                 "error": "The 'method' and 'url' parameters are required."
             }]
 
+        if not isinstance(method, str):
+            return [{
+                "success": False,
+                "name": "error",
+                "resultType": "error",
+                "result": "Invalid parameter type",
+                "resultDescription": f"The 'method' parameter must be a string, but got {type(method).__name__}.",
+                "mimeType": "text/plain",
+                "error": "Invalid parameter type"
+            }]
+
         # Authentication handling
         auth_strategy = None
         if auth:

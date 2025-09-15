@@ -34,7 +34,7 @@ class MissionControl extends BaseEntity {
         const serviceId = 'MissionControl';
         const serviceSecret = process.env.CLIENT_SECRET || 'stage7AuthSecret';
         this.tokenManager = ServiceTokenManager.getInstance(
-            `http://${this.securityManagerUrl}`,
+            this.securityManagerUrl,
             serviceId,
             serviceSecret
         );
@@ -539,6 +539,73 @@ class MissionControl extends BaseEntity {
         }
     }
 
+    private async fetchAndPushStatsForMission(missionId: string, clientId: string): Promise<MissionStatistics | null> {
+        try {
+            console.log(`Fetching and pushing statistics for mission ${missionId} to client ${clientId}`);
+    
+            const [llmCallsResponse, engineerStatisticsResponse] = await Promise.all([
+                this.authenticatedApi.get(`http://${this.brainUrl}/getLLMCalls`).catch((error: any) => {
+                    console.warn(`Failed to fetch LLM calls for mission ${missionId}:`, error instanceof Error ? error.message : error);
+                    return { data: { llmCalls: 0 } };
+                }),
+                this.authenticatedApi.get(`http://${this.engineerUrl}/statistics`).catch((error: any) => {
+                    console.warn(`Failed to fetch engineer statistics for mission ${missionId}:`, error instanceof Error ? error.message : error);
+                    return { data: { newPlugins: [] } };
+                })
+            ]);
+    
+            const trafficManagerResponse = await this.authenticatedApi.get(`http://${this.trafficManagerUrl}/getAgentStatistics/${missionId}`);
+            const trafficManagerStatistics = trafficManagerResponse.data;
+    
+            trafficManagerStatistics.agentStatisticsByStatus = MapSerializer.transformFromSerialization(trafficManagerStatistics.agentStatisticsByStatus);
+    
+            if (trafficManagerStatistics.agentStatisticsByStatus instanceof Map) {
+                trafficManagerStatistics.agentStatisticsByStatus.forEach((agentList: AgentStatistics[]) => {
+                    agentList.forEach((agentStat: any) => {
+                        if (agentStat.steps && typeof agentStat.steps === 'object' && !Array.isArray(agentStat.steps)) {
+                            console.warn(`MissionControl: Reconstructing steps for agent ${agentStat.id} which were an object.`);
+                            try {
+                                agentStat.steps = Object.values(agentStat.steps);
+                            } catch (e) {
+                                console.error(`MissionControl: Failed to reconstruct steps for agent ${agentStat.id}:`, e);
+                                agentStat.steps = [];
+                            }
+                        } else if (!agentStat.steps || !Array.isArray(agentStat.steps)) {
+                            if (!agentStat.steps) console.warn(`MissionControl: Agent ${agentStat.id} was missing steps array, initializing to [].`);
+                            else console.warn(`MissionControl: Agent ${agentStat.id} steps was not an array, re-initializing to []. Original:`, agentStat.steps);
+                            agentStat.steps = [];
+                        }
+                    });
+                });
+            }
+    
+            const missionStats: MissionStatistics = {
+                llmCalls: llmCallsResponse.data.llmCalls,
+                agentCountByStatus: trafficManagerStatistics.agentStatisticsByType.agentCountByStatus,
+                agentStatistics: MapSerializer.transformForSerialization(trafficManagerStatistics.agentStatisticsByStatus),
+                engineerStatistics: engineerStatisticsResponse.data
+            };
+    
+            await this.authenticatedApi.post(`http://${this.postOfficeUrl}/message`, {
+                type: MessageType.STATISTICS,
+                sender: this.id,
+                recipient: 'user',
+                clientId: clientId,
+                content: missionStats
+            });
+    
+            console.log(`Successfully sent statistics for mission ${missionId} to client ${clientId}`);
+            return missionStats;
+    
+        } catch (error) {
+            console.error(`Error fetching and pushing stats for mission ${missionId}:`, error instanceof Error ? error.message : error);
+            if (error instanceof Error && error.stack) {
+                console.error(error.stack);
+            }
+            return null;
+        }
+    }
+
     /**
      * Handle agent statistics updates from TrafficManager
      * @param req Request
@@ -546,82 +613,34 @@ class MissionControl extends BaseEntity {
      */
     private async handleAgentStatisticsUpdate(req: express.Request, res: express.Response) {
         try {
-            const { agentId, missionId, statistics, timestamp } = req.body;
+            const { agentId, missionId, statistics } = req.body;
             if (!uuidValidate(missionId)) {
                 res.status(400).send({ error: 'Invalid missionId format' });
                 return;
             }
             
-            const mission = this.missions.get(missionId);
-            // Don't return early for non-running missions - we still want to send statistics to front end
-            if (!mission) {
-                console.log(`Mission ${missionId} not found, but still processing statistics for front end`);
-            } else if (mission.status !== Status.RUNNING) {
-                console.log(`Mission ${missionId} is not running (status: ${mission.status}), but still processing statistics for front end`);
-            }
-            
-            console.log(`Received statistics update for agent ${agentId} in mission ${missionId}`);
-
-            // Store the statistics for this agent
-            // For now, we'll just log them and rely on the getAndPushAgentStatistics method
-            // to fetch the latest statistics from TrafficManager when needed
+            console.log(`Received statistics update for agent ${agentId} in mission ${missionId}. Triggering push to clients.`);
             console.log(`Agent ${agentId} statistics:`, JSON.stringify(statistics, null, 2));
 
-            // Find the clients associated with this mission
-            if (missionId) {
-                for (const [clientId, missionIds] of this.clientMissions.entries()) {
-                    if (missionIds.has(missionId)) {
-                        console.log(`Found client ${clientId} for mission ${missionId}, sending statistics update`);
-                        // Push statistics directly to this client
-                        try {
-                            const [llmCallsResponse, engineerStatisticsResponse] = await Promise.all([
-                                this.authenticatedApi.get(`http://${this.brainUrl}/getLLMCalls`).catch((error: any) => {
-                                    console.warn('Failed to fetch LLM calls:', error instanceof Error ? error.message : error);
-                                    return { data: { llmCalls: 0 } };
-                                }),
-                                this.authenticatedApi.get(`http://${this.engineerUrl}/statistics`).catch((error: any) => {
-                                    console.warn('Failed to fetch engineer statistics:', error instanceof Error ? error.message : error);
-                                    return { data: { newPlugins: [] } };
-                                })
-                            ]);
-
-                            // Get agent statistics from TrafficManager
-                            const trafficManagerResponse = await this.authenticatedApi.get(`http://${this.trafficManagerUrl}/getAgentStatistics/${missionId}`);
-                            const trafficManagerStatistics = trafficManagerResponse.data;
-
-                            // Create mission statistics
-                                                const missionStats: MissionStatistics = {
-                        llmCalls: llmCallsResponse.data.llmCalls,
-                        agentCountByStatus: trafficManagerStatistics.agentStatisticsByType.agentCountByStatus,
-                        agentStatistics: MapSerializer.transformForSerialization(trafficManagerStatistics.agentStatisticsByStatus),
-                        engineerStatistics: engineerStatisticsResponse.data
-                    };
-
-                            // Log before sending
-                            console.log('MissionControl: Sending agentStatistics to PostOffice for client', clientId);
-                            console.log('MissionControl: Sending agentStatistics to PostOffice for client', clientId, 'Data:', JSON.stringify(missionStats.agentStatistics, null, 2));
-
-                            // Send statistics to client
-                            await this.authenticatedApi.post(`http://${this.postOfficeUrl}/message`, {
-                                type: MessageType.STATISTICS,
-                                sender: this.id,
-                                recipient: 'user',
-                                clientId: clientId, // Include clientId
-                                content: missionStats
-                            });
-                            console.log(`Statistics update sent to client ${clientId} for mission ${missionId}`);
-                        } catch (error) {
-                            console.error(`Error sending statistics to client ${clientId}:`, error instanceof Error ? error.message : error);
-                        }
-                    }
+            // Find the clients associated with this mission and push updated stats to them.
+            const promises: Promise<any>[] = [];
+            for (const [clientId, missionIds] of this.clientMissions.entries()) {
+                if (missionIds.has(missionId)) {
+                    console.log(`Found client ${clientId} for mission ${missionId}, queueing statistics update.`);
+                    promises.push(this.fetchAndPushStatsForMission(missionId, clientId));
                 }
             }
 
-            res.status(200).send({ message: 'Agent statistics updated successfully.' });
+            // We don't need to wait for the pushes to complete to respond to the caller (e.g., TrafficManager)
+            Promise.all(promises).catch(error => {
+                console.error(`An error occurred during the async statistics push from handleAgentStatisticsUpdate for mission ${missionId}:`, error);
+            });
+
+            res.status(200).send({ message: 'Agent statistics update acknowledged and is being processed.' });
         } catch (error) {
             analyzeError(error as Error);
-            console.error('Error updating agent statistics:', error instanceof Error ? error.message : error);
-            res.status(500).send({ error: 'Failed to update agent statistics' });
+            console.error('Error in handleAgentStatisticsUpdate:', error instanceof Error ? error.message : error);
+            res.status(500).send({ error: 'Failed to handle agent statistics update' });
         }
     }
 
@@ -702,121 +721,31 @@ class MissionControl extends BaseEntity {
 
     private async getAndPushAgentStatistics() {
         try {
-            console.log('Fetching agent statistics...');
-            const [llmCallsResponse, engineerStatisticsResponse] = await Promise.all([
-                this.authenticatedApi.get(`http://${this.brainUrl}/getLLMCalls`).catch((error: any) => {
-                    console.warn('Failed to fetch LLM calls:', error instanceof Error ? error.message : error);
-                    return { data: { llmCalls: 0 } };
-                }),
-                this.authenticatedApi.get(`http://${this.engineerUrl}/statistics`).catch((error: any) => {
-                    console.warn('Failed to fetch engineer statistics:', error instanceof Error ? error.message : error);
-                    return { data: { newPlugins: [] } };
-                })
-            ]);
-
-            console.log(`Received LLM calls count: ${llmCallsResponse.data.llmCalls}`);
-            console.log(`Received engineer statistics: ${JSON.stringify(engineerStatisticsResponse.data)}`);
-
-            // Check if we have any client missions
             if (this.clientMissions.size === 0) {
-                console.log('No client missions found, skipping statistics update');
                 return;
             }
-
-            console.log(`Found ${this.clientMissions.size} client(s) with missions`);
+            console.log(`Periodic statistics fetch running for ${this.clientMissions.size} client(s).`);
 
             for (const [clientId, missionIds] of this.clientMissions.entries()) {
-                console.log(`Processing statistics for client ${clientId} with ${missionIds.size} mission(s)`);
-
                 for (const missionId of missionIds) {
-                    console.log(`Fetching statistics for mission ${missionId}`);
                     const mission = this.missions.get(missionId);
                     if (!mission) {
-                        console.log(`Mission ${missionId} not found, skipping`);
-                        continue;
-                    }
-                    if (mission.status !== Status.RUNNING) {
-                        console.log(`Mission ${missionId} is not running (status: ${mission.status}), skipping`);
                         continue;
                     }
 
-                    console.log(`Fetching agent statistics from TrafficManager for mission ${missionId}`);
-                    const trafficManagerResponse = await this.authenticatedApi.get(`http://${this.trafficManagerUrl}/getAgentStatistics/${missionId}`);
-                    const trafficManagerStatistics = trafficManagerResponse.data;
+                    // We need stats for running missions (to update UI) and for completed/errored missions (for reflection check).
+                    if (mission.status === Status.RUNNING || mission.status === Status.COMPLETED || mission.status === Status.ERROR) {
+                        const missionStats = await this.fetchAndPushStatsForMission(missionId, clientId);
 
-                    trafficManagerStatistics.agentStatisticsByStatus = MapSerializer.transformFromSerialization(trafficManagerStatistics.agentStatisticsByStatus);
-
-                    // Attempt to fix/ensure agentStat.steps is a proper array
-                    if (trafficManagerStatistics.agentStatisticsByStatus instanceof Map) {
-                        trafficManagerStatistics.agentStatisticsByStatus.forEach((agentList: AgentStatistics[], status: string) => {
-                            agentList.forEach((agentStat: any) => { // Use 'any' temporarily for potential object-form steps
-                                if (agentStat.steps && typeof agentStat.steps === 'object' && !Array.isArray(agentStat.steps)) {
-                                    console.warn(`MissionControl: Reconstructing steps for agent ${agentStat.id} which were an object.`);
-                                    try {
-                                        agentStat.steps = Object.values(agentStat.steps);
-                                    } catch (e) {
-                                        console.error(`MissionControl: Failed to reconstruct steps for agent ${agentStat.id}:`, e);
-                                        agentStat.steps = []; // Default to empty array on reconstruction failure
-                                    }
-                                } else if (!agentStat.steps || !Array.isArray(agentStat.steps)) {
-                                    // If steps is missing, null, or not an array (and not an object handled above), ensure it's an empty array.
-                                    if (!agentStat.steps) console.warn(`MissionControl: Agent ${agentStat.id} was missing steps array, initializing to [].`);
-                                    else console.warn(`MissionControl: Agent ${agentStat.id} steps was not an array, re-initializing to []. Original:`, agentStat.steps);
-                                    agentStat.steps = [];
-                                }
-                                // Further ensure each step object has the required fields (optional, for deeper integrity)
-                                if (agentStat.steps.forEach) { // Check if it's an array now
-                                    agentStat.steps.forEach((step: any, index: number) => {
-                                        if (!step || typeof step.id === 'undefined' || typeof step.verb === 'undefined' || typeof step.status === 'undefined') {
-                                            console.warn(`MissionControl: Agent ${agentStat.id}, step ${index} is malformed, ensuring default structure. Original:`, step);
-                                            // This might be too aggressive if partial data is better than none.
-                                            // For now, just logging, could replace with a default StepStat structure.
-                                        }
-                                    });
-                                }
-                            });
-                        });
-                    }
-
-                    let totalDependencies = 0;
-                    if (trafficManagerStatistics.agentStatisticsByStatus?.values) {
-                        totalDependencies = Array.from(trafficManagerStatistics.agentStatisticsByStatus.values())
-                        .flat()
-                        .reduce<number>((totalCount, agent) =>
-                            totalCount + (agent as AgentStatistics).steps.reduce<number>((stepCount, step) =>
-                                stepCount + (step.dependencies?.length || 0), 0
-                            ), 0);
-                    }
-                    console.log(`Total step dependencies across all agents: ${totalDependencies}`);
-
-                    const missionStats: MissionStatistics = {
-                        llmCalls: llmCallsResponse.data.llmCalls,
-                        agentCountByStatus: trafficManagerStatistics.agentStatisticsByType.agentCountByStatus,
-                        agentStatistics: MapSerializer.transformForSerialization(trafficManagerStatistics.agentStatisticsByStatus),
-                        engineerStatistics: engineerStatisticsResponse.data
-                    };
-
-                    console.log(`Sending statistics update to PostOffice for client ${clientId}`);
-                    console.log(`Statistics summary: LLM calls: ${missionStats.llmCalls}, Agent count: ${Object.values(missionStats.agentCountByStatus || {}).reduce((sum, count) => sum + count, 0)}`);
-
-                    // Log before sending
-                    console.log('MissionControl (periodic): Sending agentStatistics to PostOffice for client', clientId, 'mission:', missionId, 'Data:', JSON.stringify(missionStats.agentStatistics, null, 2));
-
-                    await this.authenticatedApi.post(`http://${this.postOfficeUrl}/message`, {
-                        type: MessageType.STATISTICS,
-                        sender: this.id,
-                        recipient: 'user',
-                        clientId: clientId, // Make sure clientId is included
-                        content: missionStats
-                    });
-                    console.log(`Statistics update sent to PostOffice for client ${clientId}`);
-
-                    // Check for reflection after sending statistics
-                    const runningAgents = missionStats.agentCountByStatus.RUNNING || 0;
-                    if (mission.status in [Status.COMPLETED, Status.ERROR] && runningAgents === 0) {
-                        console.log(`Mission ${mission.id} has no running agents. Initiating reflection.`);
-                        mission.status = Status.REFLECTING; // Prevent re-triggering
-                        this.reflectOnMission(mission);
+                        // Check for reflection after sending statistics
+                        if (missionStats && (mission.status === Status.COMPLETED || mission.status === Status.ERROR)) {
+                            const runningAgents = missionStats.agentCountByStatus.RUNNING || 0;
+                            if (runningAgents === 0) {
+                                console.log(`Mission ${mission.id} has no running agents and is in status ${mission.status}. Initiating reflection.`);
+                                mission.status = Status.REFLECTING; // Prevent re-triggering
+                                this.reflectOnMission(mission);
+                            }
+                        }
                     }
                 }
             }
@@ -941,8 +870,6 @@ class MissionControl extends BaseEntity {
         }
     }
 
-    // In your step execution logic, when you get a pending_user_input result from the plugin:
-    // this.pendingUserInputs.set(request_id, { missionId, stepId, agentId });
 }
 
 new MissionControl();

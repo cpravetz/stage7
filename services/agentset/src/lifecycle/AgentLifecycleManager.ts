@@ -538,21 +538,21 @@ export class AgentLifecycleManager {
           // If agent is in error state, try to recover
           if (agent.getStatus() === AgentStatus.ERROR) {
             console.warn(`Attempting to recover agent ${agentId} from error state`);
-
-            // First try to resume the agent in its current state (for transient errors like timeouts)
-            try {
-              console.log(`Attempting to resume agent ${agentId} in current state`);
-              await this.resumeAgent(agentId);
-              console.log(`Successfully resumed agent ${agentId}`);
-            } catch (resumeError) {
-              console.warn(`Failed to resume agent ${agentId}, attempting version restore:`, resumeError);
-
-              // If resume fails, try to restore to last known good state
-              const versions = this.agentVersions.get(agentId) || [];
-              if (versions.length > 1) {
-                const previousVersion = versions[versions.length - 2].version;
-                await this.restoreVersion(agentId, previousVersion);
+            const failedStep = agent.getLastFailedStep();
+            if (failedStep) {
+              try {
+                await agent.replanFromFailure(failedStep);
+              } catch (replanError) {
+                console.error(`Failed to replan for agent ${agentId}:`, replanError);
+                // If replanning fails, fall back to the old restore logic
+                const versions = this.agentVersions.get(agentId) || [];
+                if (versions.length > 1) {
+                  const previousVersion = versions[versions.length - 2].version;
+                  await this.restoreVersion(agentId, previousVersion);
+                }
               }
+            } else {
+                console.warn(`Agent ${agentId} is in error state but no failed step was found.`);
             }
           }
         }

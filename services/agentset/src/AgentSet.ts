@@ -43,12 +43,10 @@ export class AgentSet extends BaseEntity {
         // Initialize Express app
         this.app = express();
 
-        
-
-            // Initialize authenticated API client
+        // Initialize authenticated API client
         this.authenticatedApi = createAuthenticatedAxios({
             serviceId: 'AgentSet',
-            securityManagerUrl: this.librarianUrl,
+            securityManagerUrl: this.securityManagerUrl,
             clientSecret: process.env.CLIENT_SECRET || 'defaultSecret',
         });
 
@@ -74,7 +72,7 @@ export class AgentSet extends BaseEntity {
         // Initialize authenticated API client
         this.authenticatedApi = createAuthenticatedAxios({
             serviceId: 'AgentSet',
-            securityManagerUrl: this.librarianUrl,
+            securityManagerUrl: this.securityManagerUrl,
             clientSecret: process.env.CLIENT_SECRET || 'defaultSecret',
         });
 

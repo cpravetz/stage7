@@ -7,6 +7,7 @@ export enum AgentStatus {
     ERROR = 'error',
     PENDING = "pending",
     PLANNING = "planning",
+    REFLECTING = "reflecting",
     WAITING_FOR_USER_INPUT = "waiting_for_user_input",
     UNKNOWN = 'unknown' // Added this line
 }

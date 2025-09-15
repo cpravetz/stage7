@@ -44,6 +44,7 @@ export class Librarian extends BaseEntity {
     }
 
     private isRestrictedCollection(collection: string): boolean {
+        return false; // Disable restrictions for now
       const restricted = ['users', 'tokens', 'token_blacklist'];
       return restricted.includes(collection.toLowerCase());
     }
@@ -84,7 +85,7 @@ export class Librarian extends BaseEntity {
         });
 
         this.app.post('/storeData', (req, res) => this.storeData(req, res));
-        this.app.get('/loadData/:id', this.loadData);
+        this.app.get('/loadData/:id', (req, res) => this.loadData(req, res));
         this.app.get('/loadData', (req, res) => this.loadDataByQuery(req, res));
         this.app.post('/queryData', (req, res) => this.queryData(req, res));
         this.app.get('/getDataHistory/:id', (req, res) => this.getDataHistory(req, res));
@@ -184,7 +185,7 @@ export class Librarian extends BaseEntity {
     }
 
     private async storeData(req: express.Request, res: express.Response) {
-        console.log('storeData called with body:', JSON.stringify(req.body, null, 2));
+        console.log('storeData called ');
 
         let { id, data, storageType, collection } = req.body;
         collection = collection || 'mcsdata';
@@ -253,12 +254,13 @@ export class Librarian extends BaseEntity {
 
             res.status(200).send({ data });
         } catch (error) { analyzeError(error as Error);
+            console.log('Error in loadData:', error instanceof Error ? error.message : error);
             res.status(500).send({ error: 'Failed to load data', details: error instanceof Error ? error.message : String(error) });
         }
     }
 
     private async storeWorkProduct(req: express.Request, res: express.Response) {
-        console.log('storeWorkProduct called with body:', JSON.stringify(req.body, null, 2));
+        console.log('storeWorkProduct called ');
 
         const { agentId, stepId, data } = req.body;
 
@@ -290,7 +292,7 @@ export class Librarian extends BaseEntity {
     }
 
     private async loadWorkProduct(req: express.Request, res: express.Response) {
-        console.log('loadWorkProduct called with params:', req.params);
+        console.log('loadWorkProduct called ');
 
         const { stepId } = req.params;
 
@@ -307,7 +309,8 @@ export class Librarian extends BaseEntity {
             }
 
             res.status(200).send({ data: workProduct });
-        } catch (error) { analyzeError(error as Error);
+        } catch (error) { 
+            console.error(`Error loading work product for step ${stepId}:`, error instanceof Error ? error.message : String(error));
             res.status(500).send({ error: 'Failed to load work product', details: error instanceof Error ? error.message : String(error) });
         }
     }

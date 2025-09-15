@@ -96,14 +96,14 @@ export class PluginExecutor {
             let token = null;
             let brainToken = null;
             const tokenManager = new ServiceTokenManager(
-                `http://${this.securityManagerUrl}`,
+                this.securityManagerUrl,
                 'CapabilitiesManager',
                 process.env.CLIENT_SECRET || 'stage7AuthSecret'
             );
             token = await tokenManager.getToken();
 
             const brainTokenManager = new ServiceTokenManager(
-                `http://${this.securityManagerUrl}`,
+                this.securityManagerUrl,
                 'Brain',
                 process.env.CLIENT_SECRET || 'stage7AuthSecret'
             );
@@ -173,6 +173,8 @@ export class PluginExecutor {
                     args: { token: brainToken }
                 });
             }
+
+
             
             if (process.env.GOOGLE_SEARCH_API_KEY) {
                 executionInputs.set('__google_search_api_key', {

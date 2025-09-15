@@ -5,7 +5,7 @@ import { analyzeError } from '@cktmcs/errorhandler';
 
 export class OpenWebUIInterface extends BaseInterface {
     interfaceName: string = 'openwebui';
-    private readonly DEFAULT_TIMEOUT = 60000; // 60 seconds timeout for openwebui model
+    private readonly DEFAULT_TIMEOUT = 120000; // 120 seconds timeout for openwebui model (increased from 60s)
 
     constructor() {
         super('openwebui');

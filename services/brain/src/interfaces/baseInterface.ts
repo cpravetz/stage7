@@ -47,7 +47,7 @@ export abstract class BaseInterface {
      * @param originalPrompt Optional original prompt for context-aware validation.
      * @returns Valid JSON string or throws an error.
      */
-    public ensureJsonResponse(response: string, allowPartialRecovery: boolean = false): string {
+    public async ensureJsonResponse(response: string, allowPartialRecovery: boolean = false, service?: BaseService, originalPrompt?: string): Promise<string> {
         console.log('[baseInterface] Ensuring JSON response');
         console.log('[baseInterface] Original response:', response);
         if (!response || response.trim() === '') {
@@ -100,9 +100,17 @@ export abstract class BaseInterface {
         if (extractedJsonCandidate) {
             cleanedResponse = extractedJsonCandidate;
         } else {
-            // If extraction failed, proceed with general cleaning and repair on the original response
-            console.log('[baseInterface] No clear JSON block extracted, proceeding with general repair.');
-            cleanedResponse = this.repairCommonJsonIssues(cleanedResponse);
+            // If extraction failed, try prose-to-JSON conversion
+            console.log('[baseInterface] No clear JSON block extracted, trying prose-to-JSON conversion.');
+            const proseJsonCandidate = this.extractJsonFromProse(cleanedResponse);
+            if (proseJsonCandidate) {
+                console.log('[baseInterface] Successfully converted prose to JSON.');
+                cleanedResponse = proseJsonCandidate;
+            } else {
+                // If prose conversion failed, proceed with general cleaning and repair
+                console.log('[baseInterface] Prose conversion failed, proceeding with general repair.');
+                cleanedResponse = this.repairCommonJsonIssues(cleanedResponse);
+            }
         }
 
         // Now, try to parse the (extracted or generally repaired) response
@@ -111,39 +119,15 @@ export abstract class BaseInterface {
             console.log('[baseInterface] Response is valid JSON after extraction/repair.');
             return JSON.stringify(parsed, null, 2);
         } catch (e) {
+            if (service) {
+                console.log('[baseInterface] Local JSON repair failed, attempting LLM-assisted repair...');
+                const repairPrompt = `The following text is supposed to be a single valid JSON object, but it is malformed. Please fix it. Your entire response must be a single, valid JSON object. Do not include any explanations, markdown, or code blocks - just the raw JSON object.\n\nBROKEN JSON:\n${cleanedResponse}`;
+                return this.chat(service, [{ role: 'user', content: repairPrompt }], { responseType: 'json' });
+            }
             const errorMessage = e instanceof Error ? e.message : String(e);
             console.error(`[baseInterface] Final JSON parse failed after all attempts: ${errorMessage}`);
             console.error('[baseInterface] Malformed JSON that caused final failure:', cleanedResponse.substring(0, 500) + '...');
             throw new Error(`JSON_PARSE_ERROR: ${errorMessage}`);
-        }
-    }
-
-    private attemptJsonRecovery(response: string): string {
-        console.log('[baseInterface] Attempting JSON repair...');
-
-        try {
-            // Step 1: Try to repair common JSON issues without losing content
-            let repaired = this.repairCommonJsonIssues(response);
-
-            // Step 2: Try parsing the repaired JSON
-            const parsed = JSON.parse(repaired);
-            console.log('[baseInterface] JSON repair successful');
-            return JSON.stringify(parsed, null, 2);
-
-        } catch (e) {
-            console.log('[baseInterface] JSON repair failed:', e instanceof Error ? e.message : String(e));
-            console.log('[baseInterface] Attempting content extraction...');
-
-            // Step 3: Try to extract JSON blocks from the response
-            const extracted = this.extractJsonFromText(response);
-            if (extracted) {
-                return extracted;
-            }
-
-
-
-            console.error('[baseInterface] All JSON recovery attempts failed for:', response.substring(0, 200) + '...');
-            throw new Error('JSON_RECOVERY_FAILED: Could not repair or extract valid JSON');
         }
     }
 
@@ -179,10 +163,10 @@ export abstract class BaseInterface {
 
         // Fix set notation to proper JSON objects (e.g., {"key"} -> {"key": "key"})
         // Handle single item sets first
-        repaired = repaired.replace(/{\s*"([^\"]+)"\s*}/g, '{"$1": "$1"}');
+        repaired = repaired.replace(/{\s*"([^"]+)"\s*}/g, '{"$1": "$1"}');
         
         // Handle multi-item sets with variable number of items
-        repaired = repaired.replace(/{\s*"([^\"]+)"(?:\s*,\s*"([^\"]+)")*\s*}/g, (match, ...args) => {
+        repaired = repaired.replace(/{\s*"([^"]+)"(?:\s*,\s*"([^"]+)")*\s*}/g, (match, ...args) => {
             const items = args.slice(0, -2).filter(Boolean); // Remove regex match metadata
             const obj: { [key: string]: string } = {};
             items.forEach(item => obj[item] = item);
@@ -208,7 +192,7 @@ export abstract class BaseInterface {
         // Additional fixes for multi-line JSON issues
         // Fix missing commas after values (common LLM issue)
         repaired = repaired.replace(/("(?:[^"\\]|\\.)*"|\d+|true|false|null)(\s*\n\s*)(")/g, '$1,$2$3');
-        repaired = repaired.replace(/}(\s*\n\s*)"([^\"]+)":/g, '},$1"$2":');
+        repaired = repaired.replace(/}(\s*\n\s*)"([^"]+)":/g, '},$1"$2":');
 
         // Fix missing closing brackets - common LLM truncation issue
         // Count opening and closing brackets to detect imbalance
@@ -362,5 +346,92 @@ export abstract class BaseInterface {
         }
 
         return trimmedMessages.length > 0 ? trimmedMessages : [messages[messages.length - 1]];
+    }
+
+    /**
+     * Attempts to extract JSON from prose text that contains JSON embedded within it
+     */
+    private extractJsonFromProse(text: string): string | null {
+        console.log('[baseInterface] Attempting to extract JSON from prose text');
+
+        // Look for JSON objects or arrays in the text
+        const jsonPatterns = [
+            // Look for complete JSON objects
+            /\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/g,
+            // Look for JSON arrays
+            /\[[^\[\]]*(?:\[[^\[\]]*\][^\[\]]*)*\]/g,
+            // Look for JSON objects with nested structures
+            /\{(?:[^{}]|\{[^{}]*\})*\}/g
+        ];
+
+        for (const pattern of jsonPatterns) {
+            const matches = text.match(pattern);
+            if (matches) {
+                for (const match of matches) {
+                    try {
+                        // Try to parse each potential JSON match
+                        JSON.parse(match);
+                        console.log('[baseInterface] Successfully extracted JSON from prose');
+                        return match;
+                    } catch (e) {
+                        // Continue to next match
+                    }
+                }
+            }
+        }
+
+        // If no valid JSON found, try to convert prose to JSON structure
+        console.log('[baseInterface] No valid JSON found in prose, attempting prose-to-JSON conversion');
+        return this.convertProseToJson(text);
+    }
+
+    /**
+     * Attempts to convert prose text into a JSON structure
+     */
+    private convertProseToJson(text: string): string | null {
+        try {
+            // Simple heuristic: if text looks like a list or structured content, try to convert it
+            const lines = text.split('\n').filter(line => line.trim().length > 0);
+
+            if (lines.length === 0) {
+                return null;
+            }
+
+            // If it's a single line, wrap it as a simple object
+            if (lines.length === 1) {
+                return JSON.stringify({ content: text.trim() });
+            }
+
+            // If it looks like a list (multiple lines with bullets or numbers), convert to array
+            const listPattern = /^[\s]*[-*•\d+\.]\s+/;
+            if (lines.some(line => listPattern.test(line))) {
+                const items = lines.map(line => line.replace(listPattern, '').trim());
+                return JSON.stringify(items);
+            }
+
+            // If it looks like key-value pairs, try to convert to object
+            const kvPattern = /^([^:]+):\s*(.+)$/;
+            const kvPairs: Record<string, string> = {};
+            let hasKvPairs = false;
+
+            for (const line of lines) {
+                const match = line.match(kvPattern);
+                if (match) {
+                    kvPairs[match[1].trim()] = match[2].trim();
+                    hasKvPairs = true;
+                }
+            }
+
+            if (hasKvPairs) {
+                return JSON.stringify(kvPairs);
+            }
+
+            // Default: wrap the entire text as content
+            return JSON.stringify({ content: text.trim() });
+
+        } catch (e) {
+            console.log('[baseInterface] Failed to convert prose to JSON:', e);
+            return null;
+        }
     }
 }

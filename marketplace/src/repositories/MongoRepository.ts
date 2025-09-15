@@ -22,11 +22,14 @@ export class MongoRepository implements PluginRepository {
         if (!this.librarianUrl.startsWith('http')) {
             this.librarianUrl = `http://${this.librarianUrl}`;
         }
+        if (!this.securityManagerUrl.startsWith('http')) {
+            this.securityManagerUrl = `http://${this.securityManagerUrl}`;
+        }
 
         // Create authenticated API client
         this.authenticatedApi = createAuthenticatedAxios({
             serviceId: 'MarketplaceMongoRepository',
-            securityManagerUrl: this.librarianUrl,
+            securityManagerUrl: this.securityManagerUrl,
             clientSecret: process.env.CLIENT_SECRET || 'stage7AuthSecret'
     });
     }

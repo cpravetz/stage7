@@ -134,9 +134,13 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       case 'say':
         setConversationHistory((prev) => {
           // Prevent duplicate messages
-          const newMessage = `${data.content}`;
-          if (prev[prev.length - 1] === newMessage) return prev;
-          return [...prev, newMessage];
+          let newMessage = data.content;
+          if (typeof newMessage === 'object' && newMessage !== null) {
+            newMessage = newMessage.message || JSON.stringify(newMessage);
+          }
+          const finalMessage = `${newMessage}`;
+          if (prev[prev.length - 1] === finalMessage) return prev;
+          return [...prev, finalMessage];
         });
         break;
         

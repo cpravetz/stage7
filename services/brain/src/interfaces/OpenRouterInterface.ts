@@ -111,7 +111,7 @@ export class OpenRouterInterface extends BaseInterface {
         const response = await this.chat(service, messages, { modelName, responseType: 'json' });
 
         // Always apply JSON cleanup for TextToJSON conversion type
-        return this.ensureJsonResponse(response, true);
+        return await this.ensureJsonResponse(response, true, service);
     }
 
     async convertTextToImage(args: ConvertParamsType): Promise<string> {
@@ -173,7 +173,7 @@ export class OpenRouterInterface extends BaseInterface {
         // --- Ensure JSON if required ---
         let requireJson = options.responseType === 'json' ? true : false;
         if (requireJson) {
-            return this.ensureJsonResponse(fullResponse, true);
+            return await this.ensureJsonResponse(fullResponse, true, service);
         }
 
         return fullResponse || '';
