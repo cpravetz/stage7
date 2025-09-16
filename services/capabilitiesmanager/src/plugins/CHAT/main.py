@@ -30,22 +30,19 @@ def get_auth_token(inputs: Dict[str, Any]) -> str:
     raise Exception(f"Error retrieving auth token")
 
 
-def ASK_USER_QUESTION(prompt: str, inputs: Dict[str, Any]) -> str:
+def send_user_input_request(request_data: Dict[str, Any], inputs: Dict[str, Any]) -> str:
     """
-    Sends a prompt to the user via the PostOffice and waits for their response.
+    Sends a user input request to PostOffice and returns the request_id.
     """
     token = get_auth_token(inputs)
     headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
 
-    # 1. Send the request to PostOffice to ask the user a question
-    request_id = None
     try:
         postoffice_url = POSTOFFICE_URL
         if not postoffice_url.startswith('http://') and not postoffice_url.startswith('https://'):
             postoffice_url = f"http://{postoffice_url}"
 
         logger.info(f"Sending user input request to {postoffice_url}")
-        request_data = {"question": prompt, "answerType": "text"}
         response = requests.post(
             f"{postoffice_url}/sendUserInputRequest",
             json=request_data,
@@ -57,35 +54,12 @@ def ASK_USER_QUESTION(prompt: str, inputs: Dict[str, Any]) -> str:
         request_id = response_data.get('request_id')
         if not request_id:
             logger.error("PostOffice did not return a request_id.")
-            raise Exception("PostOffice did not return a request_id")
+            return None
         logger.info(f"User input request sent. request_id: {request_id}")
+        return request_id
     except requests.exceptions.RequestException as e:
         logger.error(f"Error sending user input request to PostOffice: {e}")
-        raise Exception(f"Error sending user input request: {e}")
-
-    # 2. Poll PostOffice for the user's response
-    response_url = f"{postoffice_url}/getUserInputResponse/{request_id}"
-    max_wait_seconds = 300  # 5 minutes timeout
-    poll_interval_seconds = 2
-    waited = 0
-    while waited < max_wait_seconds:
-        try:
-            poll_response = requests.get(response_url, headers=headers, timeout=10)
-            if poll_response.status_code == 200:
-                poll_data = poll_response.json()
-                if poll_data.get('status') == 'completed':
-                    answer = poll_data.get('answer', '')
-                    # Strict output schema validation
-                    if not isinstance(answer, str):
-                        raise ValueError("Answer must be a string.")
-                    return answer
-            elif poll_response.status_code == 404:
-                pass  # Not ready yet
-        except Exception as poll_err:
-            logger.warning(f"Polling error: {poll_err}")
-        time.sleep(poll_interval_seconds)
-        waited += poll_interval_seconds
-    raise Exception("Timed out waiting for user response.")
+        return None
 
 def execute_plugin(inputs):
     """
@@ -107,19 +81,41 @@ def execute_plugin(inputs):
         ]
 
     try:
-        # Get user response to the message
-        user_response = ASK_USER_QUESTION(message, inputs)
+        # Prepare request data
+        request_data = {
+            "question": message,
+            "answerType": "text"
+        }
 
+        # Send request to PostOffice and get request_id
+        request_id = send_user_input_request(request_data, inputs)
+
+        if request_id is None:
+            return [
+                {
+                    "success": False,
+                    "name": "error",
+                    "resultType": "error",
+                    "result": None,
+                    "resultDescription": "Failed to send user input request to PostOffice service",
+                    "error": "PostOffice service unavailable or did not return request_id",
+                    "mimeType": "text/plain"
+                }
+            ]
+
+        # Return a pending result with the request_id for async handling
         return [
             {
                 "success": True,
-                "name": "response",
+                "name": "pending_user_input",
                 "resultType": "string",
-                "result": user_response,
-                "resultDescription": "User's response to the chat message",
-                "mimeType": "text/plain"
+                "resultDescription": "User input requested, awaiting response.",
+                "result": None,
+                "request_id": request_id,
+                "mimeType": "application/x-user-input-pending"
             }
         ]
+
     except Exception as e:
         logger.error(f"Chat plugin execution failed: {str(e)}")
         return [

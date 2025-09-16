@@ -4,6 +4,8 @@ export enum StepErrorType {
     TRANSIENT = 'transient', // Errors that might resolve on retry (e.g., network timeout, temporary service unavailability)
     PERMANENT = 'permanent', // Errors that will not resolve on retry (e.g., invalid input, auth error, bug in plugin)
     VALIDATION = 'validation', // Input validation errors that might be fixable through replanning
+    RECOVERABLE = 'recoverable', // Errors that can be fixed with specific recovery actions
+    USER_INPUT_NEEDED = 'user_input_needed', // Errors that require user intervention
 }
 
 /**
@@ -56,18 +58,54 @@ export function classifyStepError(error: any): StepErrorType {
     // 3. Fallback to checking error messages for common patterns
     const errorMessage = (error.message || '').toLowerCase();
 
-    if (errorMessage.includes('timeout') || errorMessage.includes('network error') || errorMessage.includes('rate limit')) {
+    // Transient errors that should be retried
+    if (errorMessage.includes('timeout') ||
+        errorMessage.includes('network error') ||
+        errorMessage.includes('rate limit') ||
+        errorMessage.includes('service unavailable') ||
+        errorMessage.includes('connection refused') ||
+        errorMessage.includes('temporary failure') ||
+        errorMessage.includes('try again later')) {
         return StepErrorType.TRANSIENT;
     }
 
-    if (errorMessage.includes('invalid input') || errorMessage.includes('missing required')) {
+    // Recoverable errors that can be fixed with specific actions
+    if (errorMessage.includes('python script exited with code null') ||
+        errorMessage.includes('plugin execution failed') ||
+        errorMessage.includes('no response from') ||
+        errorMessage.includes('waiting for user input') ||
+        errorMessage.includes('dependency not satisfied') ||
+        errorMessage.includes('missing dependency')) {
+        return StepErrorType.RECOVERABLE;
+    }
+
+    // User input needed
+    if (errorMessage.includes('user confirmation required') ||
+        errorMessage.includes('please provide') ||
+        errorMessage.includes('user input required') ||
+        errorMessage.includes('awaiting user response')) {
+        return StepErrorType.USER_INPUT_NEEDED;
+    }
+
+    // Validation errors that might be fixable through replanning
+    if (errorMessage.includes('invalid input') ||
+        errorMessage.includes('missing required') ||
+        errorMessage.includes('parameter validation failed') ||
+        errorMessage.includes('invalid parameter type') ||
+        errorMessage.includes('schema validation failed')) {
         return StepErrorType.VALIDATION;
     }
-    
-    if (errorMessage.includes('unauthorized') || errorMessage.includes('access denied') || errorMessage.includes('not found')) {
+
+    // Permanent errors that won't resolve with retry
+    if (errorMessage.includes('unauthorized') ||
+        errorMessage.includes('access denied') ||
+        errorMessage.includes('not found') ||
+        errorMessage.includes('permission denied') ||
+        errorMessage.includes('authentication failed') ||
+        errorMessage.includes('forbidden')) {
         return StepErrorType.PERMANENT;
     }
 
-    // 4. Default to permanent to avoid infinite retry loops on unknown errors.
-    return StepErrorType.PERMANENT;
+    // 4. Default to recoverable for unknown errors to allow for intelligent recovery
+    return StepErrorType.RECOVERABLE;
 }

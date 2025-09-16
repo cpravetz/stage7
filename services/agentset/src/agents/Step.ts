@@ -12,7 +12,8 @@ export enum StepStatus {
     PAUSED = 'paused',
     CANCELLED = 'cancelled',
     WAITING = 'waiting',
-    SUB_PLAN_RUNNING = 'delegated' 
+    DELEGATED = 'delegated',
+    SUB_PLAN_RUNNING = 'sub_plan_running'
 }
 
 export interface StepModification {
@@ -48,9 +49,11 @@ export class Step {
     timeout?: number;
     recommendedRole?: string;
     awaitsSignal: string;
-    retryCount: number;
-    maxRetries: number;
-    lastError: any | null;
+    isDelegated?: boolean;
+    delegationTaskId?: string;
+    retryCount: number = 0;
+    maxRetries: number = 3;
+    lastError?: Error;
     errorContext: ErrorContext | null = null;
     private tempData: Map<string, any> = new Map();
     private persistenceManager: AgentPersistenceManager;
@@ -85,7 +88,7 @@ export class Step {
         this.persistenceManager = params.persistenceManager;
         this.retryCount = 0;
         this.maxRetries = params.maxRetries || 3;
-        this.lastError = null;
+        this.lastError = undefined;
 
         // Validate and standardize recommendedRole
         if (this.recommendedRole) {

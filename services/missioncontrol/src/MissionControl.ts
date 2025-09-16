@@ -78,6 +78,13 @@ class MissionControl extends BaseEntity {
             });
         });
 
+        app.post('/registerPendingUserInput', (req, res) => {
+            this.handleRegisterPendingUserInput(req, res).catch((error: any) => {
+                console.error('Error in handleRegisterPendingUserInput:', error);
+                res.status(500).send({ error: 'Internal server error' });
+            });
+        });
+
         app.listen(this.port, () => {
             console.log(`MissionControl is running on port ${this.port}`);
         });
@@ -831,6 +838,20 @@ class MissionControl extends BaseEntity {
                     updatedAt: mission.updatedAt,
                 }));
         }
+    }
+
+    // Add: Handler for registering pending user input
+    private async handleRegisterPendingUserInput(req: express.Request, res: express.Response) {
+        const { requestId, missionId, stepId, agentId } = req.body;
+        if (!requestId || !missionId || !stepId || !agentId) {
+            res.status(400).send({ error: 'Missing required fields: requestId, missionId, stepId, agentId' });
+            return;
+        }
+
+        // Store the pending user input
+        this.pendingUserInputs.set(requestId, { missionId, stepId, agentId });
+        console.log(`Registered pending user input: requestId=${requestId}, missionId=${missionId}, stepId=${stepId}, agentId=${agentId}`);
+        res.status(200).send({ message: 'Pending user input registered' });
     }
 
     // Add: Handler for user input response
