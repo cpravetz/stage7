@@ -1,4 +1,4 @@
-import { BaseEntity, MessageType, PluginOutput, PluginParameterType, InputValue } from '@cktmcs/shared';
+import { BaseEntity, MessageType } from '@cktmcs/shared';
 import { Step, StepStatus, createFromPlan } from './Step';
 import { StateManager } from '../utils/StateManager';
 import { AgentErrorRecovery } from './AgentErrorRecovery';
@@ -44,26 +44,34 @@ export class Agent extends BaseEntity {
     conversation: Array<{ role: string, content: string }> = [];
     role: string = 'executor';
     roleCustomizations?: any;
+    private checkpointInterval?: NodeJS.Timeout;
 
-    constructor(id: string, goal: string, missionId: string, steps: Step[] = []) {
-        super(id, 'Agent', 'localhost', '0');
+    constructor(id: string, goal: string, missionId: string, steps: Step[] = [], persistenceManager?: AgentPersistenceManager) {
+        // Agents don't register as individual services - they are managed by AgentSet
+        super(id, 'Agent', 'localhost', '0', true);
         this.id = id;
         this.goal = goal;
         this.missionId = missionId;
         this.steps = steps;
-        this.agentPersistenceManager = new AgentPersistenceManager(this.id);
+        this.agentPersistenceManager = persistenceManager || new AgentPersistenceManager();
         this.stateManager = new StateManager(this.id, this.agentPersistenceManager);
-        
+
         // Initialize modules
         this.errorRecovery = new AgentErrorRecovery(this.id, this);
         this.workProductManager = new AgentWorkProductManager(this.id, this.missionId, this, this.agentPersistenceManager);
         this.stepExecutor = new AgentStepExecutor(this.id, this.missionId, this, this.errorRecovery, this.workProductManager);
         this.collaboration = new AgentCollaboration(this.id, this.missionId, this);
+
+        // If no steps provided and goal is an actionVerb, create an initial step
+        if (this.steps.length === 0 && goal && goal !== 'AGENT') {
+            this.createInitialStep(goal);
+        }
     }
 
     async initialize(): Promise<void> {
         try {
-            await this.initializeServiceDiscovery();
+            // Agents don't register with service discovery - they are managed by AgentSet
+            // Just load service URLs and agent state
             await this.loadServiceUrls();
             await this.loadAgentState();
             this.status = AgentStatus.RUNNING;
@@ -202,22 +210,109 @@ export class Agent extends BaseEntity {
     async resume(): Promise<void> { this.status = AgentStatus.RUNNING; await this.runAgent(); }
     async abort(): Promise<void> { this.status = AgentStatus.ABORTED; }
     async cleanup(): Promise<void> { /* cleanup logic */ }
-    async start(): Promise<void> { await this.runAgent(); }
+    async start(): Promise<void> {
+        await this.initialize();
+        await this.runAgent();
+    }
     async getAgentState(): Promise<any> { return { id: this.id, status: this.status, steps: this.steps }; }
     async getOutput(): Promise<any> { return this.steps.filter(s => s.status === StepStatus.COMPLETED).map(s => s.result); }
     handleMessage(message: any): Promise<void> { return this.handleBaseMessage(message); }
     handleCollaborationMessage(message: any): Promise<void> { return this.handleBaseMessage(message); }
     getActionVerb(): string { return 'AGENT'; }
     setRole(roleId: string): void { this.role = roleId; }
-    setSystemPrompt(prompt: string): void { /* set system prompt */ }
-    setCapabilities(capabilities: any): void { /* set capabilities */ }
-    async storeInContext(key: string, value: any): Promise<void> { /* store in context */ }
-    setupCheckpointing(interval: number): void { /* setup checkpointing */ }
+    setSystemPrompt(_prompt: string): void { /* set system prompt */ }
+    setCapabilities(_capabilities: any): void { /* set capabilities */ }
+    async storeInContext(_key: string, _value: any): Promise<void> { /* store in context */ }
+    setupCheckpointing(interval: number): void {
+        // Set up automatic checkpointing
+        if (this.checkpointInterval) {
+            clearInterval(this.checkpointInterval);
+        }
+        this.checkpointInterval = setInterval(async () => {
+            try {
+                await this.saveAgentState();
+                console.log(`Checkpoint saved for agent ${this.id}`);
+            } catch (error) {
+                console.error(`Failed to save checkpoint for agent ${this.id}:`, error);
+            }
+        }, interval * 60 * 1000); // Convert minutes to milliseconds
+    }
     getLastFailedStep(): Step | undefined { return this.steps.find(s => s.status === StepStatus.ERROR); }
-    async replanFromFailure(step: Step): Promise<void> { /* replan from failure */ }
-    async getStatistics(): Promise<any> { return {}; }
+    async replanFromFailure(_step: Step): Promise<void> { /* replan from failure */ }
+    async getStatistics(): Promise<any> {
+        const stepStats = this.steps.map(step => ({
+            id: step.id,
+            verb: step.actionVerb,
+            status: step.status,
+            dependencies: step.dependencies?.map(dep => dep.sourceStepId) || [],
+            stepNo: step.stepNo
+        }));
+
+        return {
+            id: this.id,
+            status: this.status,
+            taskCount: this.steps.length,
+            currentTaskNo: this.steps.filter(s => s.status === StepStatus.COMPLETED).length + 1,
+            currentTaskVerb: this.steps.find(s => s.status === StepStatus.RUNNING)?.actionVerb || 'NONE',
+            steps: stepStats,
+            color: this.getAgentColor()
+        };
+    }
     getMissionContext(): string { return ''; }
     inputValues: Map<string, any> = new Map();
+
+    private getAgentColor(): string {
+        // Generate a consistent color based on agent ID
+        const colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', '#98D8C8', '#F7DC6F'];
+        const hash = this.id.split('').reduce((a, b) => {
+            a = ((a << 5) - a) + b.charCodeAt(0);
+            return a & a;
+        }, 0);
+        return colors[Math.abs(hash) % colors.length];
+    }
+
+    private createInitialStep(actionVerb: string): void {
+        const initialStep = new Step({
+            missionId: this.missionId,
+            actionVerb: actionVerb,
+            stepNo: 1,
+            description: `Initial step: ${actionVerb}`,
+            persistenceManager: this.agentPersistenceManager
+        });
+        this.steps.push(initialStep);
+        console.log(`Agent ${this.id} created initial step: ${actionVerb}`);
+    }
+
+    setInitialInputs(inputValues: Map<string, any>): void {
+        if (this.steps.length > 0) {
+            const initialStep = this.steps[0];
+            // Convert the input values to InputValue format
+            for (const [key, value] of inputValues.entries()) {
+                if (typeof value === 'object' && value !== null && 'inputName' in value) {
+                    // Already in InputValue format
+                    initialStep.inputValues.set(key, value);
+                } else {
+                    // Convert to InputValue format
+                    initialStep.inputValues.set(key, {
+                        inputName: key,
+                        value: value,
+                        valueType: this.inferValueType(value),
+                        args: {}
+                    });
+                }
+            }
+            console.log(`Agent ${this.id} set initial inputs for step: ${initialStep.actionVerb}`);
+        }
+    }
+
+    private inferValueType(value: any): any {
+        if (typeof value === 'string') return 'STRING';
+        if (typeof value === 'number') return 'NUMBER';
+        if (typeof value === 'boolean') return 'BOOLEAN';
+        if (Array.isArray(value)) return 'ARRAY';
+        if (typeof value === 'object') return 'OBJECT';
+        return 'ANY';
+    }
 
     private async loadServiceUrls(): Promise<void> {
         try {
