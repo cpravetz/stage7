@@ -682,21 +682,6 @@ export class PostOffice extends BaseEntity {
             this.userInputRequests.delete(requestId);
             this.userInputRequestMetadata.delete(requestId);
 
-            // NEW: Notify MissionControl about the user input response
-            try {
-                const missionControlUrl = this.getComponentUrl('MissionControl');
-                if (missionControlUrl) {
-                    await this.authenticatedApi.post(`http://${missionControlUrl}/userInputResponse`, {
-                        requestId: requestId,
-                        response: finalResponse
-                    });
-                    console.log(`Notified MissionControl about user input response for request ${requestId}`);
-                }
-            } catch (notifyError) {
-                console.error('Failed to notify MissionControl about user input response:', notifyError);
-                // Don't fail the request if notification fails
-            }
-
             res.status(200).send({ message: 'User input received' });
         } catch (error) {
             console.error('Error in submitUserInput:', error);

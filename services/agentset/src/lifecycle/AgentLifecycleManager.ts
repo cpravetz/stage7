@@ -209,24 +209,13 @@ export class AgentLifecycleManager {
 
     // Save agent state with this state ID
     const agentState = {
-        id: agent.id,
-        status: agent.status,
-        output: agent.getOutput ? await agent.getOutput() : null,
-        inputs: agent.inputValues || new Map<string, any>(),
-        missionId: agent.missionId,
-        steps: agent.steps || [],
-        dependencies: [],
-        capabilitiesManagerUrl: agent.capabilitiesManagerUrl || '',
-        brainUrl: '',
-        trafficManagerUrl: agent.trafficManagerUrl || '',
-        librarianUrl: agent.librarianUrl || '',
-        conversation: agent.conversation || [],
-        missionContext: agent.getMissionContext ? agent.getMissionContext() : '',
-        role: agent.role,
-        roleCustomizations: agent.roleCustomizations,
-        lastFailedStep: agent.getLastFailedStep ? agent.getLastFailedStep() : undefined
+        ...agent,
+        inputs: agent.inputValues || new Map<string, any>(), // Ensure inputs is always defined
+        missionContext: agent.getMissionContext ? agent.getMissionContext() : ''
     };
-    await this.persistenceManager.saveAgent(agentState);
+    await this.persistenceManager.saveAgent({
+        ...agentState
+    });
 
     // Create new version
     const version: AgentVersion = {

@@ -1,3 +1,4 @@
+import { Agent } from '../agents/Agent';
 import { TaskDelegation, TaskStatus } from './TaskDelegation';
 import { ConflictResolution } from './ConflictResolution';
 import {

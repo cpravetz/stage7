@@ -1,3 +1,4 @@
+import { Agent } from '../agents/Agent';
 import { v4 as uuidv4 } from 'uuid';
 
 /**

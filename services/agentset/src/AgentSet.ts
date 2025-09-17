@@ -696,7 +696,7 @@ export class AgentSet extends BaseEntity {
             agentSetUrl: this.url,
             role: roleId
         };
-        const newAgent = new Agent(agentConfig.id, agentConfig.actionVerb || 'AGENT', agentConfig.missionId);
+        const newAgent = new Agent(agentConfig);
         this.agents.set(newAgent.id, newAgent);
 
         // Set up automatic checkpointing
@@ -796,7 +796,7 @@ export class AgentSet extends BaseEntity {
                 role: roleId
             };
 
-            const newAgent = new Agent(agentConfig.id, agentConfig.actionVerb || 'AGENT', agentConfig.missionId);
+            const newAgent = new Agent(agentConfig);
             this.agents.set(newAgent.id, newAgent);
 
             // Set up automatic checkpointing
