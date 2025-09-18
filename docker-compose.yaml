@@ -74,6 +74,8 @@ services:
 
       MISSIONCONTROL_CLIENT_SECRET: *sharedSecret
       CLIENT_SECRET: *sharedSecret
+    ports:
+      - "5030:5030"
     volumes:
       - ./shared/keys:/usr/src/app/shared/keys
 

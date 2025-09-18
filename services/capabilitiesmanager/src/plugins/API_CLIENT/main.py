@@ -40,11 +40,39 @@ def execute_plugin(inputs):
         temp_dir = tempfile.mkdtemp(prefix="api_client_")
         os.environ["API_CLIENT_TEMP_DIR"] = temp_dir
 
-        method = inputs.get("method")
-        url = inputs.get("url")
-        headers = inputs.get("headers", {})
-        body = inputs.get("body", {})
-        auth = inputs.get("auth", {})
+        # Extract inputs, handling both wrapped and raw values
+        method = None
+        url = None
+        headers = {}
+        body = {}
+        auth = {}
+
+        for key, value in inputs.items():
+            if key == 'method':
+                if isinstance(value, dict) and 'value' in value:
+                    method = value['value']
+                else:
+                    method = value
+            elif key == 'url':
+                if isinstance(value, dict) and 'value' in value:
+                    url = value['value']
+                else:
+                    url = value
+            elif key == 'headers':
+                if isinstance(value, dict) and 'value' in value:
+                    headers = value['value'] if value['value'] else {}
+                else:
+                    headers = value if value else {}
+            elif key == 'body':
+                if isinstance(value, dict) and 'value' in value:
+                    body = value['value'] if value['value'] else {}
+                else:
+                    body = value if value else {}
+            elif key == 'auth':
+                if isinstance(value, dict) and 'value' in value:
+                    auth = value['value'] if value['value'] else {}
+                else:
+                    auth = value if value else {}
 
         if not method or not url:
             return [{

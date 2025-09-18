@@ -435,15 +435,7 @@ GOAL: {full_goal}
 CONTEXT:
 {context}
 
-Write a detailed prose plan (3-5 paragraphs) that thoroughly explains:
-- The strategic approach you would take
-- The key phases or areas of work
-- The specific actions and research needed
-- How LLMs can be used in this effort
-- How the pieces fit together
-- Why this approach will achieve the goal
-
-Be specific, actionable, and comprehensive. Think deeply about THIS specific goal.
+Write a concise prose plan (1-2 paragraphs) that explains the strategic approach.
 
 CRITICAL PLANNING PRINCIPLES:
 - Prioritize autonomous information gathering using SEARCH, SCRAPE, API_CLIENT, and other research tools.
@@ -460,12 +452,14 @@ CRITICAL: The actionVerb for each step MUST be a valid, existing plugin actionVe
         for attempt in range(self.max_retries):
             try:
                 response = call_brain(prompt, inputs, "text")
-                if not response or len(response.strip()) < 100:
+                if not response or len(response.strip()) < 50:
                     logger.warning(f"Attempt {attempt + 1}: LLM returned an insufficient prose plan.")
                     continue
                 
-                logger.info(f"✅ Received prose plan ({len(response)} chars)")
-                return response.strip()
+                # Truncate the prose plan to a maximum of 16000 characters
+                truncated_response = response.strip()[:16000]
+                logger.info(f"✅ Received and truncated prose plan to {len(truncated_response)} chars")
+                return truncated_response
             except Exception as e:
                 logger.warning(f"Attempt {attempt + 1} to get prose plan failed: {e}")
                 if attempt == self.max_retries - 1:

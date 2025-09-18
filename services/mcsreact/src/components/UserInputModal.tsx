@@ -166,7 +166,7 @@ const UserInputModal: React.FC<UserInputModalProps> = ({ requestId, question, ch
         <div className={`modal user-input-modal${darkMode ? ' dark' : ''}`}>
             <div className="modal-content">
                 <h2>User Input Required</h2>
-                <p className="modal-question">{typeof question === 'object' && question !== null ? question.value : question}</p>
+                <p className="modal-question">{question && typeof question === 'object' && 'value' in question ? question.value : question}</p>
                 <div className="modal-input">{renderInput()}</div>
                 <div className="modal-actions">
                     <button className="modal-submit" onClick={handleSubmit} disabled={isSubmitting}>

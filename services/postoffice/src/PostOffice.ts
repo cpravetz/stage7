@@ -988,9 +988,10 @@ export class PostOffice extends BaseEntity {
             });
 
             // Store the request for later resolution
-            this.userInputRequests.set(request_id, (response: any) => {
+            this.userInputRequests.set(request_id, async (response: any) => {
                 // This callback will be called when the user responds
-                // You may want to notify the agent system here
+                // Notify the agent system about the response
+                await this.notifyAgentOfUserResponse(request_id, response);
             });
             // Broadcast to all connected clients (or filter by mission/user as needed)
             this.webSocketHandler.broadcastToClients({
@@ -1030,6 +1031,33 @@ export class PostOffice extends BaseEntity {
             res.status(200).json(response);
         } catch (error) {
             res.status(500).json({ error: 'Failed to get user input response' });
+        }
+    }
+
+    private async notifyAgentOfUserResponse(requestId: string, response: any): Promise<void> {
+        try {
+            // Find all agents that might be waiting for this response
+            // We need to broadcast to all AgentSet instances since we don't know which one is waiting
+            const agentSetComponents = this.componentsByType.get('agentset') || new Set();
+
+            for (const agentSetId of agentSetComponents) {
+                const component = this.components.get(agentSetId);
+                if (component) {
+                    try {
+                        const messageContent = {
+                            requestId: requestId,
+                            answer: response
+                        };
+
+                        await this.sendMessage('USER_INPUT_RESPONSE', agentSetId, messageContent, false);
+                        console.log(`Notified AgentSet ${agentSetId} of user response for request ${requestId}`);
+                    } catch (error) {
+                        console.error(`Failed to notify AgentSet ${agentSetId} of user response:`, error);
+                    }
+                }
+            }
+        } catch (error) {
+            console.error(`Error notifying agents of user response for request ${requestId}:`, error);
         }
     }
 }

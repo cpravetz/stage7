@@ -58,7 +58,9 @@
     "inputGuidance": "Inputs for this plugin must include a goal statement as an input named 'goal'.",
     "security": {
         "permissions": [],
-        "sandboxOptions": {},
+        "sandboxOptions": {
+            "timeout": 360000
+        },
         "trust": {
             "signature": "GEr7jE7Y6GDjfKXD2i1yMrIWPOko7GJxg9jPCNrxCae2pD1pvVXdi0YrTWK4SKGZis1G6GZcoTtrob26xt17Iuu9f8O8gX/Cz433TRKo78Akl5ggnQn8fqj1uQmIco6uGcspMxHF0PuNHTrZF5jKG+jVT2clG7HPkUXEYhRc61kD7Z6MaKAjFmg75JUkyaW5S6hNY1wFnmrTLX37mu017QE+65rZWELHzeGV9nbmataVMzCjPZmcvn583tCZTs+H9sC8iVr8kKwvCJ2Y3grmSnr6/8biKgQLlpIQp9x9vv7TuyMV7obicGkgkfvt6HQquynHZA0ForXKwwYbth3smg=="
         }

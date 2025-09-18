@@ -902,6 +902,42 @@ export class AgentSet extends BaseEntity {
         const message = req.body;
         await super.handleBaseMessage(message);
 
+        // Handle USER_INPUT_RESPONSE messages specially
+        if (message.type === 'USER_INPUT_RESPONSE') {
+            const { requestId, answer } = message.content;
+            console.log(`AgentSet received USER_INPUT_RESPONSE for request ${requestId}`);
+
+            // Find the agent waiting for this specific request
+            let messageDelivered = false;
+            for (const agent of this.agents.values()) {
+                if (agent.isWaitingForUserInput && agent.isWaitingForUserInput(requestId)) {
+                    try {
+                        await agent.handleMessage(message);
+                        messageDelivered = true;
+                        console.log(`Delivered USER_INPUT_RESPONSE to agent ${agent.id}`);
+                        break; // Only one agent should be waiting for this specific request
+                    } catch (error) {
+                        console.error(`Error delivering USER_INPUT_RESPONSE to agent ${agent.id}:`, error);
+                    }
+                }
+            }
+
+            if (!res.headersSent) {
+                if (messageDelivered) {
+                    res.status(200).send({ status: 'User input response delivered to waiting agent' });
+                } else {
+                    // Check if any agents are stuck with unresolved placeholders
+                    const fixedAny = await this.checkAndFixStuckAgents();
+                    if (fixedAny) {
+                        res.status(200).send({ status: 'Fixed stuck agent with unresolved placeholders' });
+                    } else {
+                        res.status(404).send({ error: 'No agent found waiting for this user input request' });
+                    }
+                }
+            }
+            return;
+        }
+
         if (message.forAgent) {
           const agentId = message.forAgent;
           const agent = this.agents.get(agentId);
@@ -1153,6 +1189,29 @@ export class AgentSet extends BaseEntity {
 
         // Default to executor if no match found
         return 'executor';
+    }
+
+    /**
+     * Check for agents stuck waiting for user input with unresolved placeholders and fix them
+     */
+    private async checkAndFixStuckAgents(): Promise<boolean> {
+        let fixedAny = false;
+
+        for (const agent of this.agents.values()) {
+            try {
+                if (agent.checkAndFixStuckUserInput) {
+                    const fixed = await agent.checkAndFixStuckUserInput();
+                    if (fixed) {
+                        console.log(`Fixed stuck agent ${agent.id} with unresolved placeholders`);
+                        fixedAny = true;
+                    }
+                }
+            } catch (error) {
+                console.error(`Error checking/fixing stuck agent ${agent.id}:`, error);
+            }
+        }
+
+        return fixedAny;
     }
 }
 

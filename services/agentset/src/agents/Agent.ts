@@ -279,6 +279,14 @@ Please consider this context and the available plugins when planning and executi
             if (result && result.length > 0 && result[0].name === 'pending_user_input') {
                 const requestId = (result[0] as any).request_id;
                 if (requestId) {
+                    // Check if the step has unresolved placeholders that we can now resolve
+                    if (this.stepHasUnresolvedPlaceholders(step)) {
+                        console.log(`[Agent ${this.id}] Step ${step.id} has unresolved placeholders, retrying with resolved values`);
+                        // Cancel the pending user input and retry the step
+                        await this.retryStepWithResolvedPlaceholders(step);
+                        return;
+                    }
+
                     this.status = AgentStatus.WAITING_FOR_USER_INPUT;
                     step.status = StepStatus.WAITING;
                     this.waitingSteps.set(requestId, step.id);
@@ -959,6 +967,141 @@ Please consider this context and the available plugins when planning and executi
         }
     }
 
+    /**
+     * Resolve placeholders in input values by looking up outputs from completed steps
+     */
+    private resolvePlaceholdersInInputs(inputsForExecution: Map<string, InputValue>): void {
+        for (const [inputName, inputValue] of inputsForExecution.entries()) {
+            if (typeof inputValue.value === 'string') {
+                const resolvedValue = this.resolvePlaceholdersInString(inputValue.value);
+                if (resolvedValue !== inputValue.value) {
+                    console.log(`[Agent ${this.id}] Resolved placeholder in ${inputName}: "${inputValue.value}" -> "${resolvedValue}"`);
+                    inputValue.value = resolvedValue;
+                }
+            }
+        }
+    }
+
+    /**
+     * Resolve placeholders like [userPersonas] in a string by looking up outputs from completed steps
+     */
+    private resolvePlaceholdersInString(text: string): string {
+        // Find all placeholders in the format [outputName]
+        const placeholderRegex = /\[([^\]]+)\]/g;
+        let resolvedText = text;
+        let match;
+
+        while ((match = placeholderRegex.exec(text)) !== null) {
+            const placeholderName = match[1];
+            const fullPlaceholder = match[0]; // e.g., "[userPersonas]"
+
+            // Look for this output in completed steps
+            const outputValue = this.findOutputFromCompletedSteps(placeholderName);
+            if (outputValue !== null) {
+                resolvedText = resolvedText.replace(fullPlaceholder, outputValue);
+                console.log(`[Agent ${this.id}] Resolved placeholder ${fullPlaceholder} with value from completed step`);
+            } else {
+                console.warn(`[Agent ${this.id}] Could not resolve placeholder ${fullPlaceholder} - no matching output found in completed steps`);
+            }
+        }
+
+        return resolvedText;
+    }
+
+    /**
+     * Find an output value from completed steps by output name
+     */
+    private findOutputFromCompletedSteps(outputName: string): string | null {
+        // Search through completed steps in reverse order (most recent first)
+        for (let i = this.steps.length - 1; i >= 0; i--) {
+            const step = this.steps[i];
+            if (step.status === StepStatus.COMPLETED && step.result) {
+                // Look through the step's results for a matching output name
+                for (const result of step.result) {
+                    if (result.name === outputName && result.result) {
+                        // Convert the result to a string representation
+                        if (typeof result.result === 'string') {
+                            return result.result;
+                        } else if (typeof result.result === 'object') {
+                            return JSON.stringify(result.result, null, 2);
+                        } else {
+                            return String(result.result);
+                        }
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Check if a step has unresolved placeholders that can now be resolved
+     */
+    private stepHasUnresolvedPlaceholders(step: Step): boolean {
+        for (const [inputName, inputValue] of step.inputValues.entries()) {
+            if (typeof inputValue.value === 'string') {
+                const placeholderRegex = /\[([^\]]+)\]/g;
+                let match;
+                while ((match = placeholderRegex.exec(inputValue.value)) !== null) {
+                    const placeholderName = match[1];
+                    // Check if we can now resolve this placeholder
+                    const outputValue = this.findOutputFromCompletedSteps(placeholderName);
+                    if (outputValue !== null) {
+                        console.log(`[Agent ${this.id}] Found resolvable placeholder [${placeholderName}] in step ${step.id} input ${inputName}`);
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Retry a step with resolved placeholders
+     */
+    private async retryStepWithResolvedPlaceholders(step: Step): Promise<void> {
+        console.log(`[Agent ${this.id}] Retrying step ${step.id} (${step.actionVerb}) with resolved placeholders`);
+
+        // Reset the step status
+        step.status = StepStatus.PENDING;
+        step.result = undefined;
+
+        // Clear any waiting state
+        for (const [requestId, stepId] of this.waitingSteps.entries()) {
+            if (stepId === step.id) {
+                this.waitingSteps.delete(requestId);
+                break;
+            }
+        }
+
+        // Resume agent execution which will pick up the pending step
+        this.status = AgentStatus.RUNNING;
+        await this.runAgent();
+    }
+
+    /**
+     * Check if agent is stuck waiting for user input with unresolved placeholders and fix it
+     */
+    public async checkAndFixStuckUserInput(): Promise<boolean> {
+        if (this.status !== AgentStatus.WAITING_FOR_USER_INPUT) {
+            return false;
+        }
+
+        // Find the step that's waiting for user input
+        for (const [requestId, stepId] of this.waitingSteps.entries()) {
+            const step = this.steps.find(s => s.id === stepId);
+            if (step && step.status === StepStatus.WAITING) {
+                if (this.stepHasUnresolvedPlaceholders(step)) {
+                    console.log(`[Agent ${this.id}] Found stuck step ${step.id} with unresolved placeholders, fixing...`);
+                    await this.retryStepWithResolvedPlaceholders(step);
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
     private async executeActionWithCapabilitiesManager(step: Step): Promise<PluginOutput[]> {
         try {
             if (step.actionVerb === 'ASK') {
@@ -967,6 +1110,9 @@ Please consider this context and the available plugins when planning and executi
 
             // Create a mutable copy of inputValues to inject the missionId
             const inputsForExecution = new Map(step.inputValues);
+
+            // Resolve any placeholders in input values before execution
+            this.resolvePlaceholdersInInputs(inputsForExecution);
 
             // Ensure missionId is always present for the capabilities manager
             if (!inputsForExecution.has('missionId')) {
@@ -1199,6 +1345,16 @@ Please consider this context and the available plugins when planning and executi
 
     getStatus(): string {
         return this.status;
+    }
+
+    isWaitingForUserInput(requestId?: string): boolean {
+        if (this.status !== AgentStatus.WAITING_FOR_USER_INPUT) {
+            return false;
+        }
+        if (requestId) {
+            return this.waitingSteps.has(requestId);
+        }
+        return this.waitingSteps.size > 0;
     }
 
     async getStatistics(globalStepMap?: Map<string, { agentId: string, step: any }>, allStepsForMission?: Step[]): Promise<AgentStatistics> {
