@@ -62,6 +62,25 @@ const UserInputModal: React.FC<UserInputModalProps> = ({ requestId, question, ch
         }
     };
 
+    const handleCancel = async () => {
+        try {
+            // Send cancellation request to backend
+            const securityClient = SecurityClient.getInstance(API_BASE_URL);
+            const apiClient = securityClient.getApi();
+
+            await apiClient.post('/submitUserInput', {
+                requestId: requestId,
+                cancel: true
+            });
+
+            onClose();
+        } catch (error) {
+            console.error('Error cancelling user input:', error instanceof Error ? error.message : error);
+            // Still close the modal even if cancellation fails
+            onClose();
+        }
+    };
+
     const handleDragOver = (e: React.DragEvent) => {
         e.preventDefault();
         setDragOver(true);
@@ -172,7 +191,7 @@ const UserInputModal: React.FC<UserInputModalProps> = ({ requestId, question, ch
                     <button className="modal-submit" onClick={handleSubmit} disabled={isSubmitting}>
                         {isSubmitting ? 'Submitting...' : 'Submit'}
                     </button>
-                    <button className="modal-cancel" onClick={onClose} disabled={isSubmitting}>Cancel</button>
+                    <button className="modal-cancel" onClick={handleCancel} disabled={isSubmitting}>Cancel</button>
                 </div>
             </div>
             <div className="modal-backdrop" onClick={onClose}></div>
