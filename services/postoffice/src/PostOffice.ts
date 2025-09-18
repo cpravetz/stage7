@@ -617,7 +617,7 @@ export class PostOffice extends BaseEntity {
 
     private async submitUserInput(req: express.Request, res: express.Response) {
         try {
-            const { requestId, response } = req.body;
+            const { requestId, response, cancel } = req.body;
             const files = req.files as Express.Multer.File[];
 
             const resolver = this.userInputRequests.get(requestId);
@@ -629,6 +629,24 @@ export class PostOffice extends BaseEntity {
 
             if (!metadata) {
                 return res.status(404).send({ error: 'User input request metadata not found' });
+            }
+
+            // Handle cancellation
+            if (cancel === true) {
+                // Clean up the request without resolving
+                this.userInputRequests.delete(requestId);
+                this.userInputRequestMetadata.delete(requestId);
+
+                // Store cancelled status for polling
+                this.userInputResponses.set(requestId, {
+                    status: 'cancelled',
+                    timestamp: Date.now()
+                });
+
+                // Notify agents of cancellation
+                await this.notifyAgentOfUserResponse(requestId, null); // Send null to indicate cancellation
+
+                return res.status(200).send({ message: 'User input cancelled' });
             }
 
             let finalResponse = response;

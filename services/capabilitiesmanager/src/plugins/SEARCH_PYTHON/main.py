@@ -135,40 +135,52 @@ class BrainSearchProvider(SearchProvider):
             raise
 
 class GoogleWebSearchProvider(SearchProvider):
-    """Search provider that uses the google_web_search tool."""
+    """Search provider that uses Google Custom Search API."""
     def __init__(self):
         super().__init__("GoogleWebSearch", performance_score=95) # High priority
+        self.api_key = os.getenv('GOOGLE_API_KEY')
+        self.search_engine_id = os.getenv('GOOGLE_SEARCH_ENGINE_ID')
+        self.base_url = "https://www.googleapis.com/customsearch/v1"
 
     def search(self, search_term: str, **kwargs) -> List[Dict[str, str]]:
         try:
-            # The google_web_search tool is available in the environment
-            # It's assumed to be a global function or accessible via a specific mechanism
-            # For this Python plugin, we assume it's exposed via an environment variable or direct call
-            # In a real scenario, this would be an API call to the CapabilitiesManager
-            # that then calls the google_web_search tool.
-            # For the purpose of this exercise, we'll simulate its direct call.
-            # The actual implementation would involve a call to the CapabilitiesManager
-            # which then executes the google_web_search tool.
-            # Since we cannot directly call the tool from here, we'll log a message
-            # and return a dummy result. In a real system, this would be an actual API call.
-            
-            # Simulate calling the google_web_search tool
-            # This part needs to be replaced with an actual call to the google_web_search tool
-            # when the environment supports it.
-            # For now, we'll use a placeholder.
-            
-            # Example of how it *might* be called if exposed via an internal API:
-            # response = requests.post("http://capabilitiesmanager/executeTool", json={"tool": "google_web_search", "query": search_term})
-            # response.raise_for_status()
-            # results = response.json().get("results", [])
+            if not self.api_key or not self.search_engine_id:
+                logger.warning("Google Custom Search API key or Search Engine ID not configured. Skipping Google search.")
+                self.update_performance(success=False)
+                raise Exception("Google API credentials not configured")
 
-            # For now, we'll return a dummy result to simulate success
-            logger.info(f"Simulating google_web_search for: {search_term}")
-            results = [
-                {"title": f"Simulated Result 1 for {search_term}", "url": "http://simulated.com/1", "snippet": "This is a simulated snippet."},
-                {"title": f"Simulated Result 2 for {search_term}", "url": "http://simulated.com/2", "snippet": "Another simulated snippet."}
-            ]
+            params = {
+                'key': self.api_key,
+                'cx': self.search_engine_id,
+                'q': search_term,
+                'num': 10,  # Number of results to return (max 10 per request)
+                'safe': 'medium',  # Safe search setting
+                'fields': 'items(title,link,snippet)'  # Only return fields we need
+            }
+
+            logger.info(f"Calling Google Custom Search API for: {search_term}")
+            response = requests.get(self.base_url, params=params, timeout=15)
+            response.raise_for_status()
+
+            data = response.json()
+            results = []
+
+            if 'items' in data:
+                for item in data['items']:
+                    results.append({
+                        'title': item.get('title', ''),
+                        'url': item.get('link', ''),
+                        'snippet': item.get('snippet', '')
+                    })
+
+            logger.info(f"Google Custom Search found {len(results)} results for '{search_term}'")
+            self.update_performance(success=True)
             return results
+
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Google Custom Search API request failed: {str(e)}")
+            self.update_performance(success=False)
+            raise
         except Exception as e:
             logger.error(f"GoogleWebSearch failed: {str(e)}")
             self.update_performance(success=False)
@@ -181,20 +193,13 @@ class LangsearchSearchProvider(SearchProvider):
         self.api_key = api_key
         self.base_url = os.getenv('LANGSEARCH_API_URL', 'https://api.langsearch.com')
         self.rate_limit_seconds = 1
-        self.timestamp_file = "/tmp/langsearch_ratelimit.txt"
+        self.last_request_time = 0
 
     def search(self, search_term: str, **kwargs) -> List[Dict[str, str]]:
         """Execute semantic search using LangSearch API."""
         # --- Rate Limiting Logic ---
-        last_request_time = 0
-        try:
-            with open(self.timestamp_file, 'r') as f:
-                last_request_time = float(f.read())
-        except (FileNotFoundError, ValueError):
-            pass # File doesn't exist or is invalid, proceed
-
         current_time = time.time()
-        time_since_last_request = current_time - last_request_time
+        time_since_last_request = current_time - self.last_request_time
 
         if time_since_last_request < self.rate_limit_seconds:
             sleep_duration = self.rate_limit_seconds - time_since_last_request
@@ -229,7 +234,7 @@ class LangsearchSearchProvider(SearchProvider):
             results = []
             if "webPages" in data and "value" in data["webPages"]:
                 for item in data["webPages"]["value"]:
-                    if item.get("title") and item.get("url"):
+                    if item.get("name") and item.get("url"):
                         results.append({"title": item.get("name", ""), "url": item.get("url", ""), "snippet": item.get("snippet", "")})
             elif "results" in data and isinstance(data["results"], list):
                 for item in data["results"]:
@@ -256,8 +261,7 @@ class LangsearchSearchProvider(SearchProvider):
             self.update_performance(success=False)
             raise
         finally:
-            with open(self.timestamp_file, 'w') as f:
-                f.write(str(time.time()))
+            self.last_request_time = time.time()
 
 class DuckDuckGoSearchProvider(SearchProvider):
     """Search provider for DuckDuckGo."""
