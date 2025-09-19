@@ -59,16 +59,29 @@ export class CapabilitiesManager extends BaseEntity {
             attempts++;
             try {
                 await this.initialize(trace_id);
-            } catch (error) {
+            } catch (error: any) {
                 const initError = error instanceof Error ? error : new Error(String(error));
                 const message = (initError as any).message_human_readable || initError.message;
-                console.error(`[${trace_id}] INIT_FAILURE (attempt ${attempts}): ${message}`, (initError as any).contextual_info || initError.stack);
+                generateStructuredError({
+                    error_code: GlobalErrorCodes.INTERNAL_ERROR_CM,
+                    severity: ErrorSeverity.CRITICAL,
+                    message: `INIT_FAILURE (attempt ${attempts}): ${message}`,
+                    source_component,
+                    original_error: initError,
+                    trace_id_param: trace_id
+                });
                 if (attempts < maxAttempts) {
                     console.warn(`[${trace_id}] ${source_component}: Retrying initialization in ${retryDelayMs}ms...`);
                     setTimeout(tryInitialize, retryDelayMs);
                 } else {
-                    console.error(`[${trace_id}] ${source_component}: Initialization failed after ${maxAttempts} attempts. CapabilitiesManager will not start.`);
-                    // Optionally, set a flag or notify health check endpoint
+                    // Final failure, log as critical and do not retry
+                    generateStructuredError({
+                        error_code: GlobalErrorCodes.INTERNAL_ERROR_CM,
+                        severity: ErrorSeverity.CRITICAL,
+                        message: `Initialization failed after ${maxAttempts} attempts. CapabilitiesManager will not start.`,
+                        source_component,
+                        trace_id_param: trace_id
+                    });
                 }
             }
         };
@@ -84,22 +97,43 @@ export class CapabilitiesManager extends BaseEntity {
                     await this.pluginRegistry.initialize(); // Await PluginRegistry initialization
                     this.initializationStatus.pluginRegistry = true;
                     console.log(`[${trace_id}] ${source_component}: PluginRegistry initialized.`);
-                } catch (error) {
-                    console.warn(`[${trace_id}] ${source_component}: PluginRegistry initialization failed, continuing with limited functionality:`, error);
+                } catch (error: any) {
+                    generateStructuredError({
+                        error_code: GlobalErrorCodes.PLUGIN_REGISTRY_INITIALIZATION_FAILED,
+                        severity: ErrorSeverity.WARNING,
+                        message: "PluginRegistry initialization failed, continuing with limited functionality.",
+                        source_component,
+                        original_error: error,
+                        trace_id_param: trace_id
+                    });
                     // Continue initialization even if plugin registry fails
                 }
             } else {
-                console.warn(`[${trace_id}] ${source_component}: PluginRegistry or its initialize method is not available.`);
+                generateStructuredError({
+                    error_code: GlobalErrorCodes.PLUGIN_REGISTRY_NOT_AVAILABLE,
+                    severity: ErrorSeverity.WARNING,
+                    message: "PluginRegistry or its initialize method is not available.",
+                    source_component,
+                    trace_id_param: trace_id
+                });
             }
 
             try {
                 this.configManager = await ConfigManager.initialize(this.librarianUrl);
                 this.initializationStatus.configManager = true;
                 console.log(`[${trace_id}] ${source_component}: ConfigManager initialized.`);
-            } catch (error) {
-                console.warn(`[${trace_id}] ${source_component}: ConfigManager initialization failed, using defaults:`, error);
+            } catch (error: any) {
+                generateStructuredError({
+                    error_code: GlobalErrorCodes.CONFIG_MANAGER_INITIALIZATION_FAILED,
+                    severity: ErrorSeverity.WARNING,
+                    message: "ConfigManager initialization failed, using defaults.",
+                    source_component,
+                    original_error: error,
+                    trace_id_param: trace_id
+                });
                 // Continue without ConfigManager - use default configurations
             }
+
 
             // Initialize PluginExecutor after ConfigManager is available
             this.pluginExecutor = new PluginExecutor(this.configManager, this.containerManager, this.librarianUrl, this.securityManagerUrl);
@@ -175,63 +209,134 @@ export class CapabilitiesManager extends BaseEntity {
 
                 // --- Plugin CRUD API ---
                 app.get('/plugins', async (req, res) => {
+                    const trace_id = (req as any).trace_id || `${trace_id_parent}-plugins-list-${uuidv4().substring(0,8)}`;
                     try {
                         const repository = req.query.repository as PluginRepositoryType | undefined;
-                        console.log(`[${trace_id_parent}] ${source_component}: Fetching plugins from repository: ${repository || 'default'}`);
+                        console.log(`[${trace_id}] ${source_component}: Fetching plugins from repository: ${repository || 'default'}`);
                         const plugins = await this.pluginRegistry.list(repository);
                         res.json({ plugins });
                     } catch (error: any) {
-                        res.status(200).json({ plugins: [] });
+                        const sError = generateStructuredError({
+                            error_code: GlobalErrorCodes.CAPABILITIES_MANAGER_PLUGIN_FETCH_FAILED,
+                            severity: ErrorSeverity.ERROR,
+                            message: "Failed to list plugins.",
+                            source_component: `${source_component}.getPlugins`,
+                            original_error: error,
+                            trace_id_param: trace_id
+                        });
+                        res.status(500).json(createPluginOutputError(sError));
                     }
                 });
                 app.get('/plugins/:id', async (req, res) => {
+                    const trace_id = (req as any).trace_id || `${trace_id_parent}-plugins-get-${uuidv4().substring(0,8)}`;
                     try {
                         const repository = req.query.repository as PluginRepositoryType | undefined;
                         const plugin = await this.pluginRegistry.fetchOne(req.params.id, undefined, repository);
                         if (!plugin) {
-                            res.status(404).json({ error: 'Plugin not found' });
+                            const sError = generateStructuredError({
+                                error_code: GlobalErrorCodes.PLUGIN_NOT_FOUND,
+                                severity: ErrorSeverity.WARNING,
+                                message: `Plugin with ID ${req.params.id} not found.`, 
+                                source_component: `${source_component}.getPluginById`,
+                                trace_id_param: trace_id
+                            });
+                            res.status(404).json(createPluginOutputError(sError));
                         } else {
                             res.json({ plugin });
                         }
                     } catch (error: any) {
-                        res.status(404).json({ error: 'Plugin not found' });
+                        const sError = generateStructuredError({
+                            error_code: GlobalErrorCodes.CAPABILITIES_MANAGER_PLUGIN_FETCH_FAILED,
+                            severity: ErrorSeverity.ERROR,
+                            message: `Failed to fetch plugin with ID ${req.params.id}.`, 
+                            source_component: `${source_component}.getPluginById`,
+                            original_error: error,
+                            trace_id_param: trace_id
+                        });
+                        res.status(500).json(createPluginOutputError(sError));
                     }
                 });
                 app.post('/plugins', async (req, res) => {
+                    const trace_id = (req as any).trace_id || `${trace_id_parent}-plugins-post-${uuidv4().substring(0,8)}`;
                     try {
                         await this.pluginRegistry.store(req.body);
                         res.status(201).json({ success: true });
                     } catch (error: any) {
-                        res.status(400).json({ error: 'Failed to create plugin', details: error.message });
+                        const sError = generateStructuredError({
+                            error_code: GlobalErrorCodes.CAPABILITIES_MANAGER_PLUGIN_STORE_FAILED,
+                            severity: ErrorSeverity.ERROR,
+                            message: "Failed to create plugin.",
+                            source_component: `${source_component}.postPlugins`,
+                            original_error: error,
+                            trace_id_param: trace_id
+                        });
+                        res.status(400).json(createPluginOutputError(sError));
                     }
                 });
                 app.put('/plugins/:id', async (req, res) => {
+                    const trace_id = (req as any).trace_id || `${trace_id_parent}-plugins-put-${uuidv4().substring(0,8)}`;
                     try {
                         await this.pluginRegistry.store(req.body);
                         res.json({ success: true });
                     } catch (error: any) {
-                        res.status(400).json({ error: 'Failed to update plugin', details: error.message });
+                        const sError = generateStructuredError({
+                            error_code: GlobalErrorCodes.CAPABILITIES_MANAGER_PLUGIN_STORE_FAILED,
+                            severity: ErrorSeverity.ERROR,
+                            message: `Failed to update plugin with ID ${req.params.id}.`, 
+                            source_component: `${source_component}.putPlugins`,
+                            original_error: error,
+                            trace_id_param: trace_id
+                        });
+                        res.status(400).json(createPluginOutputError(sError));
                     }
                 });
                 app.delete('/plugins/:id', async (req, res) => {
+                    const trace_id = (req as any).trace_id || `${trace_id_parent}-plugins-delete-${uuidv4().substring(0,8)}`;
                     try {
                         const repository = req.query.repository as string | undefined;
                         // Only librarian-definition repos support delete
                         if (repository === 'librarian-definition' && typeof this.pluginRegistry.delete === 'function') {
                             await this.pluginRegistry.delete(req.params.id, undefined, repository);
+                        } else {
+                            const sError = generateStructuredError({
+                                error_code: GlobalErrorCodes.CAPABILITIES_MANAGER_INVALID_REQUEST_GENERIC,
+                                severity: ErrorSeverity.WARNING,
+                                message: "Plugin deletion only supported for 'librarian-definition' repository type.",
+                                source_component: `${source_component}.deletePlugins`,
+                                trace_id_param: trace_id
+                            });
+                            res.status(400).json(createPluginOutputError(sError));
+                            return;
                         }
                         res.json({ success: true });
                     } catch (error: any) {
-                        res.status(400).json({ error: 'Failed to delete plugin', details: error.message });
+                        const sError = generateStructuredError({
+                            error_code: GlobalErrorCodes.CAPABILITIES_MANAGER_PLUGIN_STORE_FAILED,
+                            severity: ErrorSeverity.ERROR,
+                            message: `Failed to delete plugin with ID ${req.params.id}.`, 
+                            source_component: `${source_component}.deletePlugins`,
+                            original_error: error,
+                            trace_id_param: trace_id
+                        });
+                        res.status(400).json(createPluginOutputError(sError));
                     }
                 });
                 // --- Plugin Repositories API ---
                 app.get('/pluginRepositories', (req, res) => {
+                    const trace_id = (req as any).trace_id || `${trace_id_parent}-repos-list-${uuidv4().substring(0,8)}`;
                     try {
                         const repos = this.pluginRegistry.getActiveRepositories();
                         res.json({ repositories: repos });
                     } catch (error: any) {
-                        res.status(200).json({ repositories: [] });
+                        const sError = generateStructuredError({
+                            error_code: GlobalErrorCodes.CAPABILITIES_MANAGER_PLUGIN_FETCH_FAILED,
+                            severity: ErrorSeverity.ERROR,
+                            message: "Failed to list plugin repositories.",
+                            source_component: `${source_component}.getPluginRepositories`,
+                            original_error: error,
+                            trace_id_param: trace_id
+                        });
+                        res.status(500).json(createPluginOutputError(sError));
                     }
                 });
 
@@ -249,7 +354,7 @@ export class CapabilitiesManager extends BaseEntity {
                             original_error: error,
                             trace_id_param: trace_id
                         });
-                        res.status(500).json(sError);
+                        res.status(500).json(createPluginOutputError(sError));
                     }
                 });
 
@@ -269,7 +374,7 @@ export class CapabilitiesManager extends BaseEntity {
                             original_error: error,
                             trace_id_param: trace_id
                         });
-                        res.status(500).json(sError);
+                        res.status(500).json(createPluginOutputError(sError));
                     }
                 });
 
@@ -280,9 +385,15 @@ export class CapabilitiesManager extends BaseEntity {
                         const { goal, constraints } = req.body;
 
                         if (!goal || typeof goal !== 'string') {
-                            return res.status(400).json({
-                                error: 'Missing or invalid goal parameter'
+                            const sError = generateStructuredError({
+                                error_code: GlobalErrorCodes.MISSING_REQUIRED_INPUT,
+                                severity: ErrorSeverity.ERROR,
+                                message: 'Missing or invalid goal parameter for plugin context generation.',
+                                source_component: `${source_component}.generatePluginContext`,
+                                trace_id_param: trace_id,
+                                contextual_info: { parameter: 'goal' }
                             });
+                            return res.status(400).json(createPluginOutputError(sError));
                         }
 
                         const defaultConstraints = {
@@ -302,7 +413,7 @@ export class CapabilitiesManager extends BaseEntity {
                             original_error: error,
                             trace_id_param: trace_id
                         });
-                        res.status(500).json(sError);
+                        res.status(500).json(createPluginOutputError(sError));
                     }
                 });
 
@@ -597,7 +708,7 @@ export class CapabilitiesManager extends BaseEntity {
                         step.inputValues.set('availablePlugins', {
                             inputName: 'availablePlugins',
                             value: transformedManifests,
-                            valueType: PluginParameterType.OBJECT,
+                            valueType: PluginParameterType.ARRAY,
                             args: {}
                         });
 
@@ -657,38 +768,43 @@ export class CapabilitiesManager extends BaseEntity {
             }
             res.status(200).send(MapSerializer.transformForSerialization(resultUnknownVerb.map(r => this.normalizePluginOutput(r))));
         } catch (error: any) {
-            // Classify the error type to determine appropriate handling
-            const errorType = this.classifyError(error, trace_id);
+            // Ensure the error is a StructuredError
+            const sError = error.error_id && error.trace_id ? error : generateStructuredError({
+                error_code: GlobalErrorCodes.INTERNAL_ERROR_CM,
+                severity: ErrorSeverity.ERROR,
+                message: `Unhandled error during ${step.actionVerb} execution.`, 
+                source_component,
+                original_error: error,
+                trace_id_param: trace_id
+            });
 
-            switch (errorType) {
-                case 'validation_error':
-                    // Input validation errors should be returned as errors, not handled as unknown verbs
-                    console.error(`[${trace_id}] ${source_component}: Input validation error for ${step.actionVerb}:`, error.message);
-                    res.status(400).json(createPluginOutputError(error));
+            switch (sError.error_code) {
+                case GlobalErrorCodes.INPUT_VALIDATION_FAILED:
+                    console.error(`[${trace_id}] ${source_component}: Input validation error for ${step.actionVerb}:`, sError.message_human_readable);
+                    res.status(400).json(createPluginOutputError(sError));
                     return;
 
-                case 'authentication_error':
-                    // Authentication errors should be returned as errors
-                    console.error(`[${trace_id}] ${source_component}: Authentication error for ${step.actionVerb}:`, error.message);
-                    res.status(401).json(createPluginOutputError(error));
+                case GlobalErrorCodes.AUTHENTICATION_ERROR:
+                    console.error(`[${trace_id}] ${source_component}: Authentication error for ${step.actionVerb}:`, sError.message_human_readable);
+                    res.status(401).json(createPluginOutputError(sError));
                     return;
 
-                case 'plugin_execution_error':
-                    // Plugin execution errors should be returned as errors
-                    console.error(`[${trace_id}] ${source_component}: Plugin execution error for ${step.actionVerb}:`, error.message);
-                    res.status(500).json(createPluginOutputError(error));
+                case GlobalErrorCodes.CAPABILITIES_MANAGER_PLUGIN_EXECUTION_FAILED:
+                case GlobalErrorCodes.ACCOMPLISH_PLUGIN_EXECUTION_FAILED:
+                    console.error(`[${trace_id}] ${source_component}: Plugin execution error for ${step.actionVerb}:`, sError.message_human_readable);
+                    res.status(500).json(createPluginOutputError(sError));
                     return;
 
-                case 'brain_response_error':
-                    // Brain service response errors - these indicate issues with LLM responses
-                    console.error(`[${trace_id}] ${source_component}: Brain response error for ${step.actionVerb}:`, error.message);
-                    res.status(500).json(createPluginOutputError(error));
+                case GlobalErrorCodes.BRAIN_QUERY_FAILED:
+                case GlobalErrorCodes.LLM_RESPONSE_PARSE_FAILED:
+                case GlobalErrorCodes.INVALID_BRAIN_RESPONSE_FORMAT:
+                    console.error(`[${trace_id}] ${source_component}: Brain/LLM interaction error for ${step.actionVerb}:`, sError.message_human_readable);
+                    res.status(500).json(createPluginOutputError(sError));
                     return;
 
                 default:
-                    // Generic errors
-                    console.error(`[${trace_id}] ${source_component}: Execution error for ${step.actionVerb}:`, error);
-                    res.status(500).json(createPluginOutputError(error));
+                    console.error(`[${trace_id}] ${source_component}: Generic execution error for ${step.actionVerb}:`, sError.message_human_readable);
+                    res.status(500).json(createPluginOutputError(sError));
                     return;
             }
         }
@@ -697,41 +813,7 @@ export class CapabilitiesManager extends BaseEntity {
     /**
      * Classify error types to determine appropriate handling strategy
      */
-    private classifyError(error: any, trace_id: string): string {
-        const source_component = "CapabilitiesManager.classifyError";
 
-        // Check error codes first
-        if (error.error_code) {
-            switch (error.error_code) {
-                case GlobalErrorCodes.INPUT_VALIDATION_FAILED:
-                    return 'validation_error';
-                case GlobalErrorCodes.AUTHENTICATION_ERROR:
-                    return 'authentication_error';
-                case GlobalErrorCodes.CAPABILITIES_MANAGER_PLUGIN_EXECUTION_FAILED:
-                case GlobalErrorCodes.ACCOMPLISH_PLUGIN_EXECUTION_FAILED:
-                    return 'plugin_execution_error';
-            }
-        }
-
-        const errorMessage = error.message || error.toString();
-        const lowerMessage = errorMessage.toLowerCase();
-
-        // Classify based on error patterns
-        if (lowerMessage.includes('validation') || lowerMessage.includes('required input')) {
-            return 'validation_error';
-        }
-        if (lowerMessage.includes('authentication') || lowerMessage.includes('unauthorized')) {
-            return 'authentication_error';
-        }
-        if (lowerMessage.includes('brain') && lowerMessage.includes('500')) {
-            return 'brain_service_error';
-        }
-        if (lowerMessage.includes('json') && lowerMessage.includes('parse')) {
-            return 'json_parse_error';
-        }
-
-        return 'generic_error';
-    }
 
     /**
      * Find the best handler (plugin or plan template) for an actionVerb.
@@ -849,7 +931,7 @@ export class CapabilitiesManager extends BaseEntity {
             accomplishInputs.set('availablePlugins', {
                 inputName: 'availablePlugins',
                 value: transformedManifests,
-                valueType: PluginParameterType.OBJECT,
+                valueType: PluginParameterType.ARRAY,
                 args: {}
             });
 
@@ -926,20 +1008,19 @@ export class CapabilitiesManager extends BaseEntity {
                     mimeType: 'application/json'
                 }];
             } else {
-                // For other result types, return as is
-                return accomplishResultArray;
+                // For other result types, return the first element of the array
+                return [accomplishResult];
             }
         } catch (error: any) {
-            // Return a PluginOutput indicating the error but not treating it as a failure
-            return [{
-                success: false,
-                name: 'handleUnknownVerb',
-                resultType: PluginParameterType.ERROR,
-                result: error.message,
-                resultDescription: `Error while handling unknown verb '${step.actionVerb}': ${error.message}`,
-                error: error.message,
-                trace_id: trace_id
-            }];
+            const sError = generateStructuredError({
+                error_code: GlobalErrorCodes.CAPABILITIES_MANAGER_UNKNOWN_VERB_HANDLING_FAILED,
+                severity: ErrorSeverity.ERROR,
+                message: `Error while handling unknown verb '${step.actionVerb}'.`,
+                source_component,
+                original_error: error,
+                trace_id_param: trace_id
+            });
+            return createPluginOutputError(sError);
         }
     }
 
@@ -1001,7 +1082,11 @@ export class CapabilitiesManager extends BaseEntity {
                 }
             };
             const { pluginRootPath, effectiveManifest } = await this.pluginRegistry.preparePluginForExecution(manifestForExecution);
-            return await this.pluginExecutor.execute(effectiveManifest, accomplishInputs, pluginRootPath, trace_id);
+            const result = await this.pluginExecutor.execute(effectiveManifest, accomplishInputs, pluginRootPath, trace_id);
+            if (!Array.isArray(result)) {
+                return [result];
+            }
+            return result;
         } catch (error:any) {
             if (error.error_id && error.trace_id) {
                 throw error;
@@ -1050,7 +1135,14 @@ export class CapabilitiesManager extends BaseEntity {
                 }
             }
         } catch (error: any) {
-            console.error(`[${trace_id}] ${source_component}: Error during cleanup:`, error);
+            generateStructuredError({
+                error_code: GlobalErrorCodes.INTERNAL_ERROR_CM,
+                severity: ErrorSeverity.ERROR,
+                message: "Error during cleanup of stale resources.",
+                source_component,
+                original_error: error,
+                trace_id_param: trace_id
+            });
         }
     }
 

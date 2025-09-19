@@ -151,7 +151,7 @@ def call_brain(prompt: str, inputs: Dict[str, Any], response_type: str = "json")
             f"http://{brain_url}/chat",
             json=payload,
             headers=headers,
-            timeout=300  # Increased timeout to 300 seconds
+            timeout=600  # Increased timeout to 600 seconds to allow more time for Brain response
         )
 
         if response.status_code != 200:
@@ -426,7 +426,7 @@ class RobustMissionPlanner:
         context_input = inputs.get('context')
         context = context_input if context_input is not None else ''
         full_goal = f"MISSION: {mission_goal}\n\nTASK: {goal}" if mission_goal and mission_goal != goal else goal
-        prompt = f"""You are an expert strategic planner. Create a comprehensive, well-thought plan to accomplish this goal:
+        prompt = f"""You are an expert strategic planner and an autonomous agent. Your core purpose is to accomplish the user's mission and complete tasks *for* the user, not to delegate them back. Create a comprehensive, well-thought plan to achieve the given goal:
 
 GOAL: {full_goal}
 
@@ -437,10 +437,10 @@ CONTEXT:
 
 Write a concise prose plan (1-2 paragraphs) that explains the strategic approach.
 
-CRITICAL PLANNING PRINCIPLES:
-- Prioritize autonomous information gathering using SEARCH, SCRAPE, API_CLIENT, and other research tools.
-- **Use the ASK_USER_QUESTION verb for any and all questions to the user.** This is the only way to ask the user for input.
-- **Do not use the CHAT verb to ask questions.** The CHAT verb is for sending notifications to the user, not for asking questions.
+CRITICAL PLANNING_PRINCIPLES:
+- **Autonomous Execution:** Your primary role is to complete tasks independently. Prioritize autonomous information gathering using SEARCH, SCRAPE, API_CLIENT, and other research tools.
+- **Strategic Use of User Questions:** Use the ASK_USER_QUESTION verb *only* when information is truly unobtainable through your own tools (e.g., subjective opinions, personal preferences, or explicit permissions). Do NOT use it to ask the user for information you can find yourself or to delegate tasks back to them.
+- **Distinction between CHAT and ASK_USER_QUESTION:** The CHAT verb is for sending notifications or updates to the user. It is NOT for asking questions. Use ASK_USER_QUESTION for any structured input required from the user.
 - Design plans that can execute independently without requiring user input for factual information.
 - Use available tools and APIs to gather data rather than asking users to provide it.
 
@@ -457,7 +457,8 @@ CRITICAL: The actionVerb for each step MUST be a valid, existing plugin actionVe
                     continue
                 
                 # Truncate the prose plan to a maximum of 16000 characters
-                truncated_response = response.strip()[:16000]
+                # Increased truncation limit to 128000 characters to avoid cutting off the plan
+                truncated_response = response.strip()[:128000]
                 logger.info(f"✅ Received and truncated prose plan to {len(truncated_response)} chars")
                 return truncated_response
             except Exception as e:
@@ -539,14 +540,13 @@ After your internal analysis and self-correction is complete, provide ONLY the f
 - **Multi-step plans are essential:** Break down complex goals into multiple, sequential steps.
 - **Dependencies are crucial for flow:** Every step that uses an output from a previous step MUST declare that dependency in its `inputs` object using `outputName` and `sourceStep`.
 - **Prioritize autonomous information gathering:** Use tools like SEARCH, SCRAPE, DATA_TOOLKIT, TEXT_ANALYSIS, TRANSFORM, and FILE_OPERATION to gather information and perform tasks.
-- **Avoid unnecessary user interaction:** Only use 'ASK_USER_QUESTION' for subjective opinions, permissions, or clarification. Do NOT use it for delegating research or data collection that the agent can perform.
+- **Avoid unnecessary user interaction:** Only use 'ASK_USER_QUESTION' for decisions, permissions, or clarification. Do NOT use it for seeking advice, delegating research or data collection that the agent can perform.
 - **CHAT vs ASK_USER_QUESTION:** Use ASK_USER_QUESTION for structured questions requiring user input. Use CHAT only for notifications, status updates, or conversational interactions where you're informing the user, not gathering information.
 - **CRITICAL for recommendedRole:** The `recommendedRole` field MUST be one of the following exact values: 'Coordinator', 'Researcher', 'Coder', 'Creative', 'Critic', 'Executor', 'Domain Expert'. Ensure strict adherence to these values.
 - **CRITICAL for sourceStep:**
     - Use `sourceStep: 0` ONLY for inputs that are explicitly provided in the initial mission context (the "PARENT STEP INPUTS" section if applicable, or the overall mission goal).
     - For any other input, it MUST be the `outputName` from a *preceding step* in this plan, and `sourceStep` MUST be the `number` of that preceding step.
     - Every input in your plan MUST be resolvable either from a given constant value, a "PARENT STEP INPUT" (using `sourceStep: 0`) or from an output of a previous step in the plan.
-- **For 'THINK' actionVerb:** The `inputs` for 'THINK' MUST include a `prompt` field with a string value that clearly states the thinking task.
 - **Example for `sourceStep`:** If Step 2 needs `research_results` from Step 1, and Step 1 outputs `{{ "research_results": "..." }}`, then Step 2's inputs would be `{{ "research": {{"outputName": "research_results", "sourceStep": 1, "valueType": "string"}} }}`.
 - **Completeness:** The generated plan must be a complete and executable plan that will fully accomplish the goal. It should not be a partial plan or an outline. It should include all the necessary steps to produce the final deliverables.
 - **Iterative Processes/Feedback Loops:** If the prose plan describes a continuous feedback loop, iterative process, or any form of repetition, you MUST translate this into an appropriate looping construct (e.g., using 'WHILE', 'REPEAT', or 'FOREACH' actionVerbs) within the JSON plan. Do not simply list the steps once if they are intended to be repeated.

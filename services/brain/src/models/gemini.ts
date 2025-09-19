@@ -19,8 +19,8 @@ const geminiModel = new BaseModel({
     scoresByConversationType: scoresByConversationType,
     contentConversation: [
         LLMConversationType.TextToText,
-        LLMConversationType.TextToCode,
         LLMConversationType.CodeToText,
+        LLMConversationType.TextToCode,
         LLMConversationType.TextToJSON
     ]
 });

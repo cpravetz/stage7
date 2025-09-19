@@ -318,7 +318,8 @@ class SearxNGSearchProvider(SearchProvider):
             'https://search.hbubli.cc/'
         ]
         self.current_url_index = 0
-        self.backoff_time = 1 # Initial backoff time in seconds
+        self.backoff_time = 5 # Increased initial backoff time in seconds
+        self.max_backoff_time = 60 # Maximum backoff time
 
     def search(self, search_term: str, **kwargs) -> List[Dict[str, str]]:
         errors = []
@@ -347,7 +348,7 @@ class SearxNGSearchProvider(SearchProvider):
 
                 if results:
                     logger.info(f"Successfully retrieved {len(results)} results from SearxNG instance {self.base_urls[self.current_url_index]}")
-                    self.backoff_time = 1 # Reset backoff time on success
+                    self.backoff_time = 5 # Reset backoff time on success
                     return results
                     
             except requests.exceptions.HTTPError as e:
@@ -355,7 +356,7 @@ class SearxNGSearchProvider(SearchProvider):
                     error_msg = f"SearxNG instance {searxng_url} failed: 429 Client Error: Too Many Requests for url: {searxng_url}"
                     logger.warning(f"SearxNG instance rate limited (429) - sleeping for {self.backoff_time} seconds.")
                     time.sleep(self.backoff_time)
-                    self.backoff_time *= 2 # Exponential backoff
+                    self.backoff_time = min(self.backoff_time * 2, self.max_backoff_time) # Exponential backoff with cap
                 else:
                     error_msg = f"SearxNG instance {searxng_url} failed: {str(e)}"
                     logger.warning(error_msg)

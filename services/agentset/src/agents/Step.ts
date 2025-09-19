@@ -251,7 +251,44 @@ export class Step {
         }
 
         const inputArray: any[] = arrayInput.value;
-        const subPlanTemplate: ActionVerbTask[] = stepsInput.value;
+        let subPlanTemplate: ActionVerbTask[];
+
+        if (typeof stepsInput.value === 'string') {
+            try {
+                subPlanTemplate = JSON.parse(stepsInput.value);
+            } catch (e) {
+                return [{
+                    success: false,
+                    name: 'error',
+                    resultType: PluginParameterType.ERROR,
+                    resultDescription: '[Step]Error in FOREACH step: Invalid JSON format for steps',
+                    result: `steps.forEach is not a function`,
+                    error: `steps.forEach is not a function`
+                }];
+            }
+        } else if (Array.isArray(stepsInput.value)) {
+            subPlanTemplate = stepsInput.value as ActionVerbTask[];
+        } else {
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: '[Step]Error in FOREACH step: steps must be an array or JSON string',
+                result: `steps.forEach is not a function`,
+                error: `steps.forEach is not a function`
+            }];
+        }
+
+        if (!Array.isArray(subPlanTemplate)) {
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: '[Step]Error in FOREACH step: steps must be an array',
+                result: `steps.forEach is not a function`,
+                error: `steps.forEach is not a function`
+            }];
+        }
         const allGeneratedSteps: ActionVerbTask[] = [];
 
         if (inputArray.length === 0) {
@@ -469,7 +506,57 @@ export class Step {
 
     private async handleRepeat(): Promise<PluginOutput[]> {
         const count = this.inputValues.get('count')?.value as number;
-        const steps = this.inputValues.get('steps')?.value as ActionVerbTask[];
+        const stepsInput = this.inputValues.get('steps');
+
+        if (!stepsInput) {
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: '[Step]Error in REPEAT step',
+                result: null,
+                error: 'Missing required input: steps'
+            }];
+        }
+
+        let steps: ActionVerbTask[];
+
+        if (typeof stepsInput.value === 'string') {
+            try {
+                steps = JSON.parse(stepsInput.value);
+            } catch (e) {
+                return [{
+                    success: false,
+                    name: 'error',
+                    resultType: PluginParameterType.ERROR,
+                    resultDescription: '[Step]Error in REPEAT step: Invalid JSON format for steps',
+                    result: `steps.forEach is not a function`,
+                    error: `steps.forEach is not a function`
+                }];
+            }
+        } else if (Array.isArray(stepsInput.value)) {
+            steps = stepsInput.value as ActionVerbTask[];
+        } else {
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: '[Step]Error in REPEAT step: steps must be an array or JSON string',
+                result: `steps.forEach is not a function`,
+                error: `steps.forEach is not a function`
+            }];
+        }
+
+        if (!Array.isArray(steps)) {
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: '[Step]Error in REPEAT step: steps must be an array',
+                result: `steps.forEach is not a function`,
+                error: `steps.forEach is not a function`
+            }];
+        }
         const newSteps: Step[] = [];
 
         for (let i = 0; i < count; i++) {
@@ -488,7 +575,57 @@ export class Step {
 
     private async handleTimeout(): Promise<PluginOutput[]> {
         const timeoutMs = this.inputValues.get('timeout')?.value as number;
-        const steps = this.inputValues.get('steps')?.value as ActionVerbTask[];
+        const stepsInput = this.inputValues.get('steps');
+
+        if (!stepsInput) {
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: '[Step]Error in TIMEOUT step',
+                result: null,
+                error: 'Missing required input: steps'
+            }];
+        }
+
+        let steps: ActionVerbTask[];
+
+        if (typeof stepsInput.value === 'string') {
+            try {
+                steps = JSON.parse(stepsInput.value);
+            } catch (e) {
+                return [{
+                    success: false,
+                    name: 'error',
+                    resultType: PluginParameterType.ERROR,
+                    resultDescription: '[Step]Error in TIMEOUT step: Invalid JSON format for steps',
+                    result: `steps.forEach is not a function`,
+                    error: `steps.forEach is not a function`
+                }];
+            }
+        } else if (Array.isArray(stepsInput.value)) {
+            steps = stepsInput.value as ActionVerbTask[];
+        } else {
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: '[Step]Error in TIMEOUT step: steps must be an array or JSON string',
+                result: `steps.forEach is not a function`,
+                error: `steps.forEach is not a function`
+            }];
+        }
+
+        if (!Array.isArray(steps)) {
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: '[Step]Error in TIMEOUT step: steps must be an array',
+                result: `steps.forEach is not a function`,
+                error: `steps.forEach is not a function`
+            }];
+        }
         const newSteps = createFromPlan(steps, this.stepNo + 1, this.persistenceManager, this);
 
         newSteps.forEach(step => {
@@ -520,7 +657,44 @@ export class Step {
             }];
         }
 
-        const steps = stepsInput.value as ActionVerbTask[];
+        let steps: ActionVerbTask[];
+
+        if (typeof stepsInput.value === 'string') {
+            try {
+                steps = JSON.parse(stepsInput.value);
+            } catch (e) {
+                return [{
+                    success: false,
+                    name: 'error',
+                    resultType: PluginParameterType.ERROR,
+                    resultDescription: '[Step]Error in WHILE step: Invalid JSON format for steps',
+                    result: `steps.forEach is not a function`,
+                    error: `steps.forEach is not a function`
+                }];
+            }
+        } else if (Array.isArray(stepsInput.value)) {
+            steps = stepsInput.value as ActionVerbTask[];
+        } else {
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: '[Step]Error in WHILE step: steps must be an array or JSON string',
+                result: `steps.forEach is not a function`,
+                error: `steps.forEach is not a function`
+            }];
+        }
+
+        if (!Array.isArray(steps)) {
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: '[Step]Error in WHILE step: steps must be an array',
+                result: `steps.forEach is not a function`,
+                error: `steps.forEach is not a function`
+            }];
+        }
         const condition = conditionInput.value;
 
         let currentIteration = 0;
@@ -598,7 +772,44 @@ export class Step {
             }];
         }
 
-        const steps = stepsInput.value as ActionVerbTask[];
+        let steps: ActionVerbTask[];
+
+        if (typeof stepsInput.value === 'string') {
+            try {
+                steps = JSON.parse(stepsInput.value);
+            } catch (e) {
+                return [{
+                    success: false,
+                    name: 'error',
+                    resultType: PluginParameterType.ERROR,
+                    resultDescription: '[Step]Error in UNTIL step: Invalid JSON format for steps',
+                    result: `steps.forEach is not a function`,
+                    error: `steps.forEach is not a function`
+                }];
+            }
+        } else if (Array.isArray(stepsInput.value)) {
+            steps = stepsInput.value as ActionVerbTask[];
+        } else {
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: '[Step]Error in UNTIL step: steps must be an array or JSON string',
+                result: `steps.forEach is not a function`,
+                error: `steps.forEach is not a function`
+            }];
+        }
+
+        if (!Array.isArray(steps)) {
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: '[Step]Error in UNTIL step: steps must be an array',
+                result: `steps.forEach is not a function`,
+                error: `steps.forEach is not a function`
+            }];
+        }
         const condition = conditionInput.value;
 
         const newSteps: Step[] = [];

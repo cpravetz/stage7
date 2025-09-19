@@ -15,7 +15,7 @@
             "name": "script_parameters",
             "required": false,
             "type": "json",
-            "description": "Parameters to be passed to the script. Available as a 'params' variable in the script context. Can be a JSON object or a JSON string."
+            "description": "Parameters to be passed to the script. Available as a 'params' variable in the script context. If a JSON object, it should be a valid JSON object."
         }
     ],
     "outputDefinitions":[

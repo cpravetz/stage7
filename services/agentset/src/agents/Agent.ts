@@ -274,9 +274,10 @@ Please consider this context and the available plugins when planning and executi
                 return;
             }
 
-            // console.log(`Step ${step.actionVerb} result:`, result);
+            console.log(`[Agent ${this.id}] executeStep: Checking result for pending_user_input. Result: ${JSON.stringify(result)}`);
 
             if (result && result.length > 0 && result[0].name === 'pending_user_input') {
+                console.log(`[Agent ${this.id}] executeStep: Detected pending_user_input. RequestId: ${(result[0] as any).request_id}`);
                 const requestId = (result[0] as any).request_id;
                 if (requestId) {
                     // Check if the step has unresolved placeholders that we can now resolve
@@ -290,10 +291,12 @@ Please consider this context and the available plugins when planning and executi
                     this.status = AgentStatus.WAITING_FOR_USER_INPUT;
                     step.status = StepStatus.WAITING;
                     this.waitingSteps.set(requestId, step.id);
+                    console.log(`[Agent ${this.id}] Stored waiting step for requestId: ${requestId}, stepId: ${step.id}. Current waitingSteps size: ${this.waitingSteps.size}`);
                     await this.notifyTrafficManager();
-                    // console.log(`Agent ${this.id} is waiting for user input for step ${step.id} with request ID ${requestId}`);
                     return;
                 }
+            } else {
+                console.log(`[Agent ${this.id}] executeStep: Result is NOT pending_user_input. Actual result: ${JSON.stringify(result)}`);
             }
 
             this.say(`Completed step: ${step.actionVerb}`);
@@ -380,15 +383,23 @@ Please consider this context and the available plugins when planning and executi
 
     private async runAgent() {
         try {
+            console.log(`[Agent ${this.id}] runAgent: Agent status: ${this.status}`);
             if (this.status !== AgentStatus.RUNNING) {
                 return;
             }
 
             const pendingSteps = this.steps.filter(step => step.status === StepStatus.PENDING);
+            console.log(`[Agent ${this.id}] runAgent: Pending steps: ${pendingSteps.map(s => `${s.id} (${s.actionVerb}, ${s.status})`).join(', ') || 'None'}`);
+
             const executableSteps = pendingSteps.filter(step => step.areDependenciesSatisfied(this.steps));
+            console.log(`[Agent ${this.id}] runAgent: Executable steps: ${executableSteps.map(s => `${s.id} (${s.actionVerb}, ${s.status})`).join(', ') || 'None'}`);
 
             if (executableSteps.length > 0) {
-                const executionPromises = executableSteps.map(step => this.executeStep(step));
+                console.log(`[Agent ${this.id}] runAgent: Executing ${executableSteps.length} steps.`);
+                const executionPromises = executableSteps.map(step => {
+                    console.log(`[Agent ${this.id}] runAgent: Calling executeStep for step ${step.id} (${step.actionVerb})`);
+                    return this.executeStep(step);
+                });
                 await Promise.all(executionPromises);
             } else if (pendingSteps.length > 0) {
                 // Deadlock detection: pending steps exist, but none are executable.
@@ -493,6 +504,7 @@ Please consider this context and the available plugins when planning and executi
                 break;
             case 'USER_INPUT_RESPONSE': // Assuming this is the message type from PostOffice
                 const { requestId, answer } = message.content;
+                console.log(`[Agent ${this.id}] Received USER_INPUT_RESPONSE for requestId: ${requestId}. Current waitingSteps size: ${this.waitingSteps.size}`);
                 const waitingStepId = this.waitingSteps.get(requestId);
                 if (waitingStepId) {
                     const step = this.steps.find(s => s.id === waitingStepId);
@@ -502,15 +514,20 @@ Please consider this context and the available plugins when planning and executi
                             success: true,
                             name: outputName,
                             resultType: PluginParameterType.STRING,
-                            result: answer,
+                            result: answer, // answer can be null
                             resultDescription: 'User response'
                         }];
                         step.status = StepStatus.COMPLETED;
                         this.status = AgentStatus.RUNNING;
                         this.waitingSteps.delete(requestId);
+                        console.log(`[Agent ${this.id}] Processed user input for requestId: ${requestId}. New waitingSteps size: ${this.waitingSteps.size}`);
                         await this.notifyTrafficManager();
                         this.runAgent();
+                    } else {
+                        console.warn(`[Agent ${this.id}] Step with ID ${waitingStepId} not found for requestId ${requestId}.`);
                     }
+                } else {
+                    console.warn(`[Agent ${this.id}] No waiting step found for requestId: ${requestId}. It might have been already processed or is invalid.`);
                 }
                 break;
             default:
@@ -1123,29 +1140,6 @@ Please consider this context and the available plugins when planning and executi
                 });
             }
 
-            // Add specific input validation for SEARCH and CHAT verbs
-            if (step.actionVerb === 'SEARCH') {
-                if (!inputsForExecution.has('searchTerm') || !inputsForExecution.get('searchTerm')?.value) {
-                    console.warn(`[Agent ${this.id}] Step ${step.id} (SEARCH) is missing 'searchTerm'. Attempting to use description as fallback.`);
-                    const fallbackSearchTerm = step.description || 'default search query';
-                    inputsForExecution.set('searchTerm', {
-                        inputName: 'searchTerm',
-                        value: fallbackSearchTerm,
-                        valueType: PluginParameterType.STRING
-                    });
-                }
-            } else if (step.actionVerb === 'CHAT') {
-                if (!inputsForExecution.has('message') || !inputsForExecution.get('message')?.value) {
-                    console.warn(`[Agent ${this.id}] Step ${step.id} (CHAT) is missing 'message'. Attempting to use description as fallback.`);
-                    const fallbackMessage = step.description || 'default chat message';
-                    inputsForExecution.set('message', {
-                        inputName: 'message',
-                        value: fallbackMessage,
-                        valueType: PluginParameterType.STRING
-                    });
-                }
-            }
-
             // Create a payload with a standard JSON-serializable format for inputs
             const payload = {
                 actionVerb: step.actionVerb,
@@ -1174,6 +1168,7 @@ Please consider this context and the available plugins when planning and executi
             );
 
             // The response should be standard JSON, no custom deserialization needed here
+            console.log(`[Agent ${this.id}] executeActionWithCapabilitiesManager: Returning data: ${JSON.stringify(response.data)}`);
             return response.data;
         } catch (error) {
             console.error('Error executing action with CapabilitiesManager:', error instanceof Error ? error.message : error);

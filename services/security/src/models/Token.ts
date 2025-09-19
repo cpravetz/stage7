@@ -75,8 +75,8 @@ export interface TokenConfig {
  * Default token configuration
  */
 export const DEFAULT_TOKEN_CONFIG: TokenConfig = {
-    accessTokenExpiresIn: 15 * 60, // 15 minutes
-    refreshTokenExpiresIn: 7 * 24 * 60 * 60, // 7 days
+    accessTokenExpiresIn: 60 * 60, // 1 hour
+    refreshTokenExpiresIn: 30 * 24 * 60 * 60, // 30 days
     verificationTokenExpiresIn: 24 * 60 * 60, // 24 hours
     passwordResetTokenExpiresIn: 1 * 60 * 60, // 1 hour
     apiTokenExpiresIn: 30 * 24 * 60 * 60, // 30 days

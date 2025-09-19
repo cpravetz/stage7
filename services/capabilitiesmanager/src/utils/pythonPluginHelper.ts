@@ -82,6 +82,7 @@ export async function ensurePythonDependencies(pluginRootPath: string, trace_id:
                 try {
                     if (fs.existsSync(venvPath)) {
                         fs.rmSync(venvPath, { recursive: true, force: true });
+                        await new Promise(resolve => setTimeout(resolve, 100)); // Small delay to ensure OS releases handles
                         console.log(`[${trace_id}] ${source_component}: Successfully deleted venv directory on attempt ${attempt}`);
                         return;
                     }
@@ -115,12 +116,12 @@ export async function ensurePythonDependencies(pluginRootPath: string, trace_id:
 
         if (!fs.existsSync(venvPath) || !venvHealthy()) {
             console.log(`[${trace_id}] ${source_component}: Venv missing or broken. Recreating.`);
-            await deleteVenvWithRetries(3, 500);
+            await deleteVenvWithRetries(5, 1000); // Increased retries and delay
             shouldRecreateVenv = true;
         } else if (requirementsHash) {
             if (!fs.existsSync(markerPath) || fs.readFileSync(markerPath, 'utf8') !== requirementsHash) {
                 console.log(`[${trace_id}] ${source_component}: Requirements changed or marker missing. Recreating venv.`);
-                await deleteVenvWithRetries(3, 500);
+                await deleteVenvWithRetries(5, 1000); // Increased retries and delay
                 shouldRecreateVenv = true;
             } else {
                 console.log(`[${trace_id}] ${source_component}: Existing venv is healthy and up to date.`);
@@ -145,6 +146,20 @@ export async function ensurePythonDependencies(pluginRootPath: string, trace_id:
                 await execAsync(installReqsCmd, { cwd: pluginRootPath, timeout: 120000 });
                 fs.writeFileSync(markerPath, requirementsHash);
                 console.log(`[${trace_id}] ${source_component}: Dependencies installed and marker file created.`);
+            }
+
+            // Verify 'requests' is importable
+            try {
+                await execAsync(`"${venvPythonPath}" -c "import requests"`, { cwd: pluginRootPath, timeout: 10000 });
+                console.log(`[${trace_id}] ${source_component}: 'requests' module successfully imported.`);
+            } catch (reqError: any) {
+                throw generateStructuredError({
+                    error_code: GlobalErrorCodes.CAPABILITIES_MANAGER_PLUGIN_DEPENDENCY_FAILED,
+                    severity: ErrorSeverity.CRITICAL,
+                    message: `'requests' module failed to import after installation for ${pluginRootPath}: ${reqError.message}`,
+                    source_component, original_error: reqError, trace_id_param: trace_id,
+                    contextual_info: { pluginRootPath, stderr: reqError.stderr }
+                });
             }
         }
 

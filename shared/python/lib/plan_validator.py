@@ -169,6 +169,33 @@ class PlanValidator:
 
         raise AccomplishError("Unexpected validation loop exit", "validation_error")
 
+    def _resolve_placeholder_to_reference(self, current_plan: List[Dict[str, Any]], current_step_number: int, placeholder_string: str) -> Optional[tuple[str, int, str]]:
+        """
+        Resolves a placeholder string (e.g., "{output_name}" or "[output_name]") to a tuple
+        of (output_name, source_step_number, value_type) by searching previous steps.
+        """
+        match = re.match(r"[{[]([a-zA-Z0-9_]+)[}]\]", placeholder_string)
+        if not match:
+            return None
+        
+        output_name = match.group(1)
+        
+        # Search backward through the plan for the output
+        for i in range(current_step_number - 1, -1, -1):
+            if i == 0: # Special case for parent input
+                # We can't determine the parent's output type here, assume string for now
+                # This might need more sophisticated handling if parent inputs have diverse types
+                return (output_name, 0, "string") 
+
+            prev_step = current_plan[i-1] # Adjust index for 0-based list
+            if 'outputs' in prev_step and output_name in prev_step['outputs']:
+                # Found the output in a previous step
+                # The actual valueType would be from the plugin's outputDefinition,
+                # but we don't have that here. Default to 'string' or 'any'.
+                return (output_name, prev_step['number'], "string") 
+        
+        return None
+
     def _repair_plan_code_based(self, plan: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Automatically repair common schema violations in the plan."""
         logger.info("[Repair] Starting code-based repair...")
@@ -177,9 +204,14 @@ class PlanValidator:
             logger.warning("Plan is not a list. Cannot repair.")
             return []
 
-        for step in plan:
+        for i, step in enumerate(plan):
             if not isinstance(step, dict):
                 logger.warning("Step is not a dictionary. Skipping.")
+                continue
+
+            current_step_number = step.get('number')
+            if current_step_number is None:
+                logger.warning(f"Step {i+1}: Missing 'number' field. Cannot process inputs for this step.")
                 continue
 
             # Ensure 'number' is an integer
@@ -529,5 +561,3 @@ Return the corrected JSON object for the step."""
                         output_name = input_def['outputName']
                         if source_step in available_outputs and output_name not in available_outputs[source_step]:
                             errors.append(f"Step {step_number}: Input '{input_name}' references output '{output_name}' from step {source_step} which does not exist")
-
-
