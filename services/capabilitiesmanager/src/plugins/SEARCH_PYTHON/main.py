@@ -76,7 +76,7 @@ class BrainSearchProvider(SearchProvider):
 
     def search(self, search_term: str, **kwargs) -> List[Dict[str, str]]:
         logger.warning("All primary search providers failed. Using BrainSearchProvider as a last resort. Results may be hallucinated.")
-        prompt = f"Perform a web search for '{search_term}' and return the top 5 results as a JSON array of objects, where each object has 'title', 'url', and 'snippet' keys."
+        prompt = f"Perform a web search for '{search_term}' and return the top 5 results as a JSON array of objects, where each object has 'name', 'url', and 'snippet' keys."
         try:
             raw_response = self._call_brain(prompt, "json")
             results = json.loads(raw_response)
@@ -168,7 +168,7 @@ class GoogleWebSearchProvider(SearchProvider):
             if 'items' in data:
                 for item in data['items']:
                     results.append({
-                        'title': item.get('title', ''),
+                        'title': item.get('title', item.get('name', '')),
                         'url': item.get('link', ''),
                         'snippet': item.get('snippet', '')
                     })

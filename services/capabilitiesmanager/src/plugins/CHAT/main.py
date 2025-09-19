@@ -66,6 +66,7 @@ def execute_plugin(inputs):
     Execute the CHAT plugin with the given inputs.
     """
     message = inputs.get("message", "")
+    mission_id = inputs.get("missionId", "") # Assuming missionId is passed as an input
 
     if not message:
         return [
@@ -81,41 +82,54 @@ def execute_plugin(inputs):
         ]
 
     try:
-        # Prepare request data
-        request_data = {
-            "question": message,
-            "answerType": "text"
+        token = get_auth_token(inputs)
+        headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
+
+        postoffice_url = POSTOFFICE_URL
+        if not postoffice_url.startswith('http://') and not postoffice_url.startswith('https://'):
+            postoffice_url = f"http://{postoffice_url}"
+
+        payload = {
+            "type": "say", # Using "say" message type
+            "sender": "agent", # Or a more specific sender if available
+            "recipient": "user",
+            "content": message,
+            "missionId": mission_id # Include missionId for context
         }
 
-        # Send request to PostOffice and get request_id
-        request_id = send_user_input_request(request_data, inputs)
+        logger.info(f"Sending chat message to PostOffice: {message}")
+        response = requests.post(
+            f"{postoffice_url}/sendMessage",
+            json=payload,
+            headers=headers,
+            timeout=15
+        )
+        response.raise_for_status()
 
-        if request_id is None:
-            return [
-                {
-                    "success": False,
-                    "name": "error",
-                    "resultType": "error",
-                    "result": None,
-                    "resultDescription": "Failed to send user input request to PostOffice service",
-                    "error": "PostOffice service unavailable or did not return request_id",
-                    "mimeType": "text/plain"
-                }
-            ]
-
-        # Return a pending result with the request_id for async handling
         return [
             {
                 "success": True,
-                "name": "pending_user_input",
+                "name": "message_sent",
                 "resultType": "string",
-                "resultDescription": "User input requested, awaiting response.",
-                "result": None,
-                "request_id": request_id,
-                "mimeType": "application/x-user-input-pending"
+                "resultDescription": "Chat message sent successfully.",
+                "result": message,
+                "mimeType": "text/plain"
             }
         ]
 
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error sending chat message to PostOffice: {e}")
+        return [
+            {
+                "success": False,
+                "name": "error",
+                "resultType": "error",
+                "result": None,
+                "resultDescription": f"Failed to send chat message: {str(e)}",
+                "error": str(e),
+                "mimeType": "text/plain"
+            }
+        ]
     except Exception as e:
         logger.error(f"Chat plugin execution failed: {str(e)}")
         return [

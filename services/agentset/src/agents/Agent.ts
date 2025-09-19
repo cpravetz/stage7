@@ -17,9 +17,42 @@ import { classifyStepError, StepErrorType } from '../utils/ErrorClassifier';
 import { CollaborationMessage, CollaborationMessageType, ConflictResolution as ConflictResolutionData, ConflictResolutionResponse, TaskDelegationRequest, TaskResult, KnowledgeSharing, ConflictResolutionRequest } from '../collaboration/CollaborationProtocol';
 
 
+import * as amqp from 'amqplib';
+import * as amqp_connection_manager from 'amqp-connection-manager';
+
 export class Agent extends BaseEntity {
+    private async publishAgentStatus(): Promise<void> {
+        try {
+            if (!this.channel) {
+                console.warn(`Agent ${this.id} RabbitMQ channel not available, cannot publish status.`);
+                return;
+            }
+
+            const agentId = this.id || 'unknown-agent-id';
+            const agentStatus = this.status || AgentStatus.UNKNOWN;
+            const routingKey = 'agent.status.update'; // Explicit routing key
+            const exchange = 'agent.events'; // Explicit exchange
+
+            const messageContent = {
+                agentId: agentId,
+                status: agentStatus,
+                missionId: this.missionId,
+                timestamp: new Date().toISOString()
+            };
+
+            console.log(`Agent ${agentId} publishing status update to ${exchange} with routing key ${routingKey}: ${agentStatus}`);
+
+            this.channel.publish(exchange, routingKey, Buffer.from(JSON.stringify(messageContent)));
+        } catch (error) {
+            console.error(`Failed to publish agent status update for ${this.id}:`, error);
+        }
+    }
+
     public lastActivityTime: number = Date.now();
     private cleanupHandlers: Array<() => Promise<void>> = [];
+
+    private connection: amqp_connection_manager.AmqpConnectionManager | null = null;
+    private channel: amqp_connection_manager.ChannelWrapper | null = null;
 
     private missionContext: string = '';
     private agentSetUrl: string;
@@ -51,7 +84,6 @@ export class Agent extends BaseEntity {
 
     constructor(config: AgentConfig) {
         super(config.id, 'AgentSet', `agentset`, process.env.PORT || '9000');
-        // console.log(`Agent ${config.id} created. missionId=${config.missionId}. Inputs: ${JSON.stringify(config.inputValues)}` );
         this.agentPersistenceManager = new AgentPersistenceManager();
         this.stateManager = new StateManager(config.id, this.agentPersistenceManager);
         this.inputValues = config.inputValues instanceof Map ? config.inputValues : new Map(Object.entries(config.inputValues||{}));
@@ -59,18 +91,14 @@ export class Agent extends BaseEntity {
         this.agentSetUrl = config.agentSetUrl;
         this.status = AgentStatus.INITIALIZING;
         this.dependencies = config.dependencies || [];
-        // Initialize missionContext. Prefer the explicit context, but fall back to the 'goal' input.
-        // This is critical for the replanFromFailure loop to have the original goal.
         if (config.missionContext && config.missionContext.trim() !== '') {
             this.missionContext = config.missionContext;
         } else if (this.inputValues?.has('goal')) {
             const goalInput = this.inputValues.get('goal');
             if (goalInput?.value && typeof goalInput.value === 'string') {
                 this.missionContext = goalInput.value;
-                // console.log(`[Agent Constructor] Initialized missionContext from 'goal' input for agent ${this.id}.`);
             }
         }
-        // Handle role and roleCustomizations if they exist in the config
         if ('role' in config && typeof config.role === 'string') {
             this.role = config.role;
         }
@@ -81,7 +109,6 @@ export class Agent extends BaseEntity {
             console.log('Agent Line 95 - Missing required property "actionVerb" in agent config');
             throw new Error(`Missing required property 'actionVerb' in agent config`);
         }
-        // Create initial step using the new Step class
         const initialStep = new Step({
             actionVerb: config.actionVerb,
             missionId: this.missionId,
@@ -93,7 +120,6 @@ export class Agent extends BaseEntity {
         });
         this.steps.push(initialStep);
 
-        // Log agent creation event
         this.logEvent({
             eventType: 'agent_created',
             agentId: this.id,
@@ -103,12 +129,14 @@ export class Agent extends BaseEntity {
             timestamp: new Date().toISOString()
         });
 
+        this.initRabbitMQ(); // Call init RabbitMQ
+
         this.initializeAgent().then(() => {
-            // console.log(`Agent ${this.id} initialized successfully. Status: ${this.status}. Commencing main execution loop.`);
             this.say(`Agent ${this.id} initialized and commencing operations.`);
             this.runUntilDone();
-        }).catch((error) => { // Added error parameter
+        }).catch((error) => {
             this.status = AgentStatus.ERROR;
+            this.publishAgentStatus();
             const errorMessage = error instanceof Error ? error.message : String(error);
             console.error(`Agent ${this.id} failed during initialization or before starting execution loop. Error: ${errorMessage}`);
             this.say(`Agent ${this.id} failed to initialize or start. Error: ${errorMessage}`);
@@ -116,6 +144,26 @@ export class Agent extends BaseEntity {
                  console.error(`Agent ${this.id} failed to notify TrafficManager about initialization error:`, notifyError);
             });
         });
+    }
+
+    private async initRabbitMQ(): Promise<void> {
+        try {
+            const rabbitmqUrl = process.env.RABBITMQ_URL || 'amqp://stage7:stage7password@rabbitmq:5672';
+            this.connection = amqp_connection_manager.connect([rabbitmqUrl]);
+
+            this.connection.on('connect', () => console.log(`Agent ${this.id} connected to RabbitMQ!`));
+            this.connection.on('disconnect', err => console.log(`Agent ${this.id} disconnected from RabbitMQ.`, err));
+
+            this.channel = this.connection.createChannel({
+                json: true,
+                setup: async (channel: amqp.Channel) => {
+                    await channel.assertExchange('agent.events', 'topic', { durable: true });
+                    console.log(`Agent ${this.id} asserted 'agent.events' exchange.`);
+                },
+            });
+        } catch (error) {
+            console.error(`Error initializing RabbitMQ for Agent ${this.id}:`, error);
+        }
     }
 
     async cleanup(): Promise<void> {
@@ -174,6 +222,7 @@ export class Agent extends BaseEntity {
             this.trafficManagerUrl = trafficManagerUrl;
             this.librarianUrl = librarianUrl;
             this.status = AgentStatus.RUNNING;
+            this.publishAgentStatus(); // Publish RUNNING status
 
             if (this.missionContext && this.steps[0]?.actionVerb === 'ACCOMPLISH') {
                 await this.prepareOpeningInstruction();
@@ -182,6 +231,7 @@ export class Agent extends BaseEntity {
         } catch (error) { analyzeError(error as Error);
             console.error('Error initializing agent:', error instanceof Error ? error.message : error);
             this.status = AgentStatus.ERROR;
+            this.publishAgentStatus(); // Publish ERROR status
             return false;
         }
     }
