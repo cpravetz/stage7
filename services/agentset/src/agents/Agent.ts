@@ -1703,28 +1703,7 @@ Explanation: ${resolution.explanation}`);
                         recipientId = createAgentResponse.data.agentId;
                         console.log(`Created new agent ${recipientId} with role ${step.recommendedRole}`);
                         
-                        let agentReady = false;
-                        const maxWaitTime = 30000; // 30 seconds
-                        const pollInterval = 2000; // 2 seconds
-                        const startTime = Date.now();
 
-                        while (Date.now() - startTime < maxWaitTime) {
-                            try {
-                                const agentStatusResponse = await this.authenticatedApi.get(`http://${this.agentSetUrl}/agent/${recipientId}`);
-                                if (agentStatusResponse.data && agentStatusResponse.data.status === AgentStatus.RUNNING) {
-                                    agentReady = true;
-                                    break;
-                                }
-                            } catch (e) {
-                                // Ignore errors, just retry
-                            }
-                            await new Promise(resolve => setTimeout(resolve, pollInterval));
-                        }
-
-                        if (!agentReady) {
-                            console.error(`Agent ${recipientId} did not become ready in time.`);
-                            return { success: false, result: null };
-                        }
                     } else {
                         console.error(`Failed to create specialized agent with role ${step.recommendedRole}`);
                         return { success: false, result: null };

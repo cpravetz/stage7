@@ -102,13 +102,41 @@ export class TaskDelegation {
         return this.forwardTaskDelegation(delegatorId, recipientId, request, agentLocation);
       }
 
-      // Check if recipient agent is available
+      // Check if recipient agent is available, and wait if it's still initializing
       if (recipientAgent.getStatus() !== AgentStatus.RUNNING) {
-        return {
-          taskId: request.taskId,
-          accepted: false,
-          reason: `Agent ${recipientId} is not running (status: ${recipientAgent.getStatus()})`
-        };
+        const maxWaitTime = 60000; // 60 seconds
+        const pollInterval = 5000; // 5 seconds
+        const startTime = Date.now();
+
+        while (Date.now() - startTime < maxWaitTime) {
+          try {
+            // Re-fetch agent status to ensure it's up-to-date
+            const currentStatus = recipientAgent.getStatus(); // Assuming getStatus is synchronous or cached
+            if (currentStatus === AgentStatus.RUNNING) {
+              break; // Agent is ready, proceed
+            } else if (currentStatus === AgentStatus.ERROR || currentStatus === AgentStatus.ABORTED) {
+              // Agent is in a terminal error state, no point waiting
+              return {
+                taskId: request.taskId,
+                accepted: false,
+                reason: `Agent ${recipientId} is in a terminal state (${currentStatus})`
+              };
+            }
+          } catch (e) {
+            analyzeError(e as Error);
+            console.warn(`Error polling agent ${recipientId} status in TaskDelegation: ${e instanceof Error ? e.message : String(e)}. Retrying...`);
+          }
+          await new Promise(resolve => setTimeout(resolve, pollInterval));
+        }
+
+        // If loop finishes and agent is still not running
+        if (recipientAgent.getStatus() !== AgentStatus.RUNNING) {
+          return {
+            taskId: request.taskId,
+            accepted: false,
+            reason: `Agent ${recipientId} did not become ready in time (status: ${recipientAgent.getStatus()})`
+          };
+        }
       }
 
       // Create task

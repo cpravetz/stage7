@@ -176,30 +176,18 @@ export class PluginExecutor {
 
 
             
+            // Add Google and LangSearch API keys to the environment passed to the plugin
             if (process.env.GOOGLE_SEARCH_API_KEY) {
-                executionInputs.set('__google_search_api_key', {
-                    inputName: '__google_search_api_key',
-                    value: process.env.GOOGLE_SEARCH_API_KEY,
-                    valueType: PluginParameterType.STRING,
-                    args: {}
-                });
-                console.log(`[${trace_id}] ${source_component}: Added __google_search_api_key to plugin inputs.`);
+                currentEnv.GOOGLE_API_KEY = process.env.GOOGLE_SEARCH_API_KEY; // Corrected variable name
+                console.log(`[${trace_id}] ${source_component}: Added GOOGLE_API_KEY to plugin environment.`);
             }
             if (process.env.GOOGLE_CSE_ID) {
-                executionInputs.set('__google_cse_id', {
-                    inputName: '__google_cse_id',
-                    value: process.env.GOOGLE_CSE_ID,
-                    valueType: PluginParameterType.STRING,
-                    args: {}
-                });
+                currentEnv.GOOGLE_SEARCH_ENGINE_ID = process.env.GOOGLE_CSE_ID; // Corrected variable name
+                console.log(`[${trace_id}] ${source_component}: Added GOOGLE_SEARCH_ENGINE_ID to plugin environment.`);
             }
             if (process.env.LANGSEARCH_API_KEY) {
-                executionInputs.set('__langsearch_api_key', {
-                    inputName: '__langsearch_api_key',
-                    value: process.env.LANGSEARCH_API_KEY,
-                    valueType: PluginParameterType.STRING,
-                    args: {}
-                });
+                currentEnv.LANGSEARCH_API_KEY = process.env.LANGSEARCH_API_KEY;
+                console.log(`[${trace_id}] ${source_component}: Added LANGSEARCH_API_KEY to plugin environment.`);
             }
             const executionContext: ExecutionContext = {
                 inputValues: executionInputs,

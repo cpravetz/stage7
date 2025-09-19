@@ -194,6 +194,8 @@ class LangsearchSearchProvider(SearchProvider):
         self.base_url = os.getenv('LANGSEARCH_API_URL', 'https://api.langsearch.com')
         self.rate_limit_seconds = 1
         self.last_request_time = 0
+        self.backoff_time = 5 # Initial backoff time in seconds
+        self.max_backoff_time = 60 # Maximum backoff time
 
     def search(self, search_term: str, **kwargs) -> List[Dict[str, str]]:
         """Execute semantic search using LangSearch API."""
@@ -252,6 +254,16 @@ class LangsearchSearchProvider(SearchProvider):
             logger.info(f"LangSearch found {len(results)} results")
             return results
             
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 429:
+                logger.warning(f"LangSearch instance rate limited (429) - sleeping for {self.backoff_time} seconds.")
+                time.sleep(self.backoff_time)
+                self.backoff_time = min(self.backoff_time * 2, self.max_backoff_time) # Exponential backoff with cap
+                raise # Re-raise to trigger retry in execute_search
+            else:
+                logger.error(f"LangSearch API request failed: {str(e)}")
+                self.update_performance(success=False)
+                raise
         except requests.exceptions.RequestException as e:
             logger.error(f"LangSearch API request failed: {str(e)}")
             self.update_performance(success=False)
@@ -341,7 +353,16 @@ class SearxNGSearchProvider(SearchProvider):
                     headers={'User-Agent': 'Mozilla/5.0 Stage7SearchBot/1.0'}
                 )
                 response.raise_for_status()
-                data = response.json()
+                try:
+                    data = response.json()
+                except json.JSONDecodeError as json_e:
+                    error_msg = f"SearxNG instance {searxng_url} failed: JSONDecodeError: {json_e}. Raw response: {response.text}"
+                    logger.warning(error_msg)
+                    errors.append(error_msg)
+                    # Continue to next instance in the loop
+                    self.current_url_index = (self.current_url_index + 1) % len(self.base_urls)
+                    continue # Skip to the next iteration of the for loop
+
                 results = []
                 for item in data.get("results", []):
                     results.append({"title": item.get("title"), "url": item.get("url"), "snippet": item.get("content")})

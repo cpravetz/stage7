@@ -399,7 +399,7 @@ CRITICAL: The actionVerb for each step MUST be a valid, existing plugin actionVe
             if "direct_answer" in response_data:
                 return json.dumps([{
                     "success": True,
-                    "name": "answer",
+                    "name": "reflection_results",
                     "resultType": "string",
                     "result": response_data["direct_answer"],
                     "resultDescription": "Reflection analysis complete",
@@ -414,7 +414,7 @@ CRITICAL: The actionVerb for each step MUST be a valid, existing plugin actionVe
                 
                 return json.dumps([{
                     "success": True,
-                    "name": "plan",
+                    "name": "reflection_results",
                     "resultType": "plan",
                     "result": validated_plan,
                     "resultDescription": "Generated new plan based on mission progress",
@@ -425,7 +425,7 @@ CRITICAL: The actionVerb for each step MUST be a valid, existing plugin actionVe
                 # Fallback for unexpected response
                 return json.dumps([{
                     "success": True,
-                    "name": "answer",
+                    "name": "reflection_results",
                     "resultType": "string",
                     "result": json.dumps(response_data),
                     "resultDescription": "Unexpected but valid response format",
