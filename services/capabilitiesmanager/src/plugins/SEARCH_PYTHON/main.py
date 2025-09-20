@@ -323,6 +323,7 @@ class SearxNGSearchProvider(SearchProvider):
     def __init__(self):
         super().__init__("SearxNG", performance_score=60)
         self.base_urls = [
+            'http://localhost:8888',
             'https://searx.stream/',
             'https://search.inetol.net/',
             'https://search.rhscz.eu/',

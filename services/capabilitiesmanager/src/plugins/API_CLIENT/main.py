@@ -123,9 +123,7 @@ def execute_plugin(inputs):
         except json.JSONDecodeError:
             response_body = response.text
 
-        output = {
-            "success": True,
-            "outputs": [
+        output_list = [
                 {
                     "name": "status_code",
                     "value": response.status_code,
@@ -142,12 +140,11 @@ def execute_plugin(inputs):
                     "type": "object" if isinstance(response_body, dict) else "string"
                 }
             ]
-        }
         # Strict output validation
-        if not isinstance(output, dict) or "outputs" not in output:
-            raise ValueError("Output schema validation failed: must be dict with 'outputs' field.")
+        if not isinstance(output_list, list):
+            raise ValueError("Output schema validation failed: must be a list of outputs.")
 
-        return output
+        return output_list
     except Exception as e:
         # Log the error locally and return a structured error output
         logger.error(f"Error in execute_plugin: {e}")
