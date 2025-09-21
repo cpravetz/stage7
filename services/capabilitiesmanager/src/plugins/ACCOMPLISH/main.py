@@ -373,7 +373,7 @@ class RobustMissionPlanner:
             "inputs": reflect_inputs,
             "outputs": {
                 "plan": "A detailed, step-by-step plan to achieve the goal. Each step in the plan should be a concrete action that can be executed by another plugin. The plan should be comprehensive and sufficient to fully accomplish the goal.",
-                "answer": "A direct answer or result, to be used only if the goal can be fully accomplished in a single step without requiring a plan."
+                "answer": "A direct answer or result, to be used only when a new plan is not necessary because the goal has been met."
             }
         }
         

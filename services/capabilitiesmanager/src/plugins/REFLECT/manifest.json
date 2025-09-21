@@ -3,7 +3,7 @@
     "name": "REFLECT",
     "verb": "REFLECT",
     "actionVerb": "REFLECT",
-    "description": "Reflects on the current state of a mission to evaluate progress and determine next steps.",
+    "description": "Reflects on the current state of a mission to evaluate progress and determine next steps. Use only when a step back is appropriate, not excessively.",
     "inputDefinitions": [
         {
             "name": "missionId",
@@ -26,6 +26,12 @@
         {
             "name": "question",
             "description": "The specific question to reflect on.",
+            "type": "string",
+            "required": true
+        },
+        {
+            "name": "final_output",
+            "description": "A reference to a final outut of the plan.",
             "type": "string",
             "required": true
         }

@@ -136,10 +136,21 @@ class BrainSearchProvider(SearchProvider):
 
 class GoogleWebSearchProvider(SearchProvider):
     """Search provider that uses Google Custom Search API."""
-    def __init__(self):
+    def __init__(self, inputs: Dict[str, Any] = {}):
         super().__init__("GoogleWebSearch", performance_score=95) # High priority
         self.api_key = os.getenv('GOOGLE_API_KEY')
         self.search_engine_id = os.getenv('GOOGLE_SEARCH_ENGINE_ID')
+
+        if not self.api_key and '__google_api_key' in inputs:
+            key_data = inputs['__google_api_key']
+            if isinstance(key_data, dict) and 'value' in key_data:
+                self.api_key = key_data['value']
+        
+        if not self.search_engine_id and '__google_search_engine_id' in inputs:
+            key_data = inputs['__google_search_engine_id']
+            if isinstance(key_data, dict) and 'value' in key_data:
+                self.search_engine_id = key_data['value']
+
         self.base_url = "https://www.googleapis.com/customsearch/v1"
 
     def search(self, search_term: str, **kwargs) -> List[Dict[str, str]]:
@@ -323,7 +334,7 @@ class SearxNGSearchProvider(SearchProvider):
     def __init__(self):
         super().__init__("SearxNG", performance_score=60)
         self.base_urls = [
-            'http://localhost:8888',
+            'http://searxng:8888',
             'https://searx.stream/',
             'https://search.inetol.net/',
             'https://search.rhscz.eu/',
@@ -410,7 +421,7 @@ class SearchPlugin:
         
         # 1. GoogleWebSearch as primary provider (using the built-in tool)
         logger.info("Initializing GoogleWebSearch as primary search provider")
-        providers.append(GoogleWebSearchProvider())
+        providers.append(GoogleWebSearchProvider(self.inputs))
 
         # 2. LangSearch as second provider (if available)
         langsearch_api_key = None

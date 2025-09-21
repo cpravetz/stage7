@@ -18,6 +18,34 @@ def send_to_errorhandler(error, context=None):
 
 _seen_hashes = set()
 
+def parse_inputs(inputs_str: str) -> Dict[str, Any]:
+    """Parse and validate inputs"""
+    try:
+        logger.info(f"Parsing input string ({len(inputs_str)} chars)")
+        
+        input_list = json.loads(inputs_str)
+        
+        inputs = {}
+        for item in input_list:
+            if isinstance(item, list) and len(item) == 2:
+                key, raw_value = item # Renamed 'value' to 'raw_value' for clarity
+                
+                # If raw_value is an InputValue object, retain the whole object
+                if isinstance(raw_value, dict):
+                    inputs[key] = raw_value
+                else:
+                    # Otherwise, use raw_value directly (for non-InputValue types)
+                    inputs[key] = raw_value
+            else:
+                logger.warning(f"Skipping invalid input item: {item}")
+        
+        logger.info(f"Successfully parsed {len(inputs)} input fields")
+        return inputs
+        
+    except Exception as e:
+        logger.error(f"Input parsing failed: {e}")
+        raise Exception(f"Input validation failed: {e}")
+
 def robust_execute_plugin(inputs_str):
     temp_dir = None
     try:
@@ -40,8 +68,11 @@ def robust_execute_plugin(inputs_str):
         temp_dir = tempfile.mkdtemp(prefix="file_ops_python_")
         os.environ["FILE_OPS_PYTHON_TEMP_DIR"] = temp_dir
 
+        # Parse the input string
+        inputs = parse_inputs(inputs_str)
+
         # Call the original plugin logic
-        result = FileOperationPlugin().execute(inputs_str)
+        result = FileOperationPlugin().execute(inputs)
 
         # Strict output validation: must be a JSON string of a list
         try:
