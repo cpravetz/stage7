@@ -314,6 +314,31 @@ export class ModelManager {
 
 
 
+    getAvailableAndNotBlacklistedModels(conversationType: LLMConversationType): BaseModel[] {
+        return Array.from(this.models.values())
+            .filter(model => {
+                if (!model.contentConversation.includes(conversationType)) {
+                    return false;
+                }
+
+                const interfaceInstance = interfaceManager.getInterface(model.interfaceName);
+                if (!interfaceInstance) {
+                    return false;
+                }
+
+                const service = serviceManager.getService(model.serviceName);
+                if (!service || !service.isAvailable()) {
+                    return false;
+                }
+
+                if (this.performanceTracker.isModelBlacklisted(model.name, conversationType)) {
+                    return false;
+                }
+
+                return true;
+            });
+    }
+
     /**
      * Get the interface manager
      * @returns The interface manager

@@ -989,7 +989,7 @@ export class PostOffice extends BaseEntity {
     // Add this method to PostOffice
     private async sendUserInputRequest(req: express.Request, res: express.Response) {
         try {
-            const { question, answerType, choices } = req.body;
+            const { question, answerType, choices, clientId } = req.body;
             const request_id = require('uuid').v4();
 
             // Store the request metadata
@@ -1011,14 +1011,26 @@ export class PostOffice extends BaseEntity {
                 // Notify the agent system about the response
                 await this.notifyAgentOfUserResponse(request_id, response);
             });
-            // Broadcast to all connected clients (or filter by mission/user as needed)
-            this.webSocketHandler.broadcastToClients({
-                type: 'USER_INPUT_REQUEST',
-                request_id,
-                question,
-                answerType: answerType || 'text',
-                choices: choices || null
-            });
+
+            if (clientId) {
+                this.webSocketHandler.sendToClient(clientId, {
+                    type: 'USER_INPUT_REQUEST',
+                    request_id,
+                    question,
+                    answerType: answerType || 'text',
+                    choices: choices || null
+                });
+            } else {
+                // Fallback to broadcasting to all connected clients if no clientId is provided
+                this.webSocketHandler.broadcastToClients({
+                    type: 'USER_INPUT_REQUEST',
+                    request_id,
+                    question,
+                    answerType: answerType || 'text',
+                    choices: choices || null
+                });
+            }
+
             res.status(200).json({ request_id });
         } catch (error) {
             res.status(500).json({ error: 'Failed to send user input request' });

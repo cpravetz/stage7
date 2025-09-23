@@ -267,7 +267,7 @@ export class Brain extends BaseEntity {
                     console.log(`[Brain Chat] Attempt ${attempt}: ${lastError}`);
 
                     // Check if we have any available models left
-                    const availableModels = this.getAvailableModels();
+                    const availableModels = this.modelManager.getAvailableAndNotBlacklistedModels(thread.conversationType || LLMConversationType.TextToText);
                     if (availableModels.length === 0) {
                         console.error(`[Brain Chat] No available models left after ${attempt} attempts`);
                         break;

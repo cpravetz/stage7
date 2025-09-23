@@ -174,7 +174,8 @@ class PlanValidator:
         Resolves a placeholder string (e.g., "{output_name}" or "[output_name]") to a tuple
         of (output_name, source_step_number, value_type) by searching previous steps.
         """
-        match = re.match(r"[{[]([a-zA-Z0-9_]+)[}]\]", placeholder_string)
+        # Match either {name} or [name] patterns
+        match = re.match(r"[{[]([a-zA-Z0-9_]+)[}\]]", placeholder_string)
         if not match:
             return None
         
@@ -196,6 +197,59 @@ class PlanValidator:
         
         return None
 
+    def _find_embedded_references(self, value: str) -> Set[str]:
+        """
+        Find all embedded references in a string value (e.g., {output_name} or [output_name]).
+        Returns a set of output names that are referenced.
+        """
+        # Match both {name} and [name] patterns
+        matches = re.findall(r'[{[]([a-zA-Z0-9_]+)[}\]]', value)
+        return set(matches)
+    
+    def _validate_embedded_references(self, step: Dict[str, Any], inputs: Dict[str, Any], available_outputs: Dict[int, Set[str]], errors: List[str]):
+        """
+        Validate that all embedded references in input values are properly declared as inputs.
+        """
+        step_number = step.get('number', 0)
+
+        for input_name, input_def in inputs.items():
+            # Only check string values for embedded references
+            if not isinstance(input_def, dict) or 'value' not in input_def:
+                continue
+
+            value = input_def.get('value')
+            if not isinstance(value, str):
+                continue
+
+            # Find all embedded references in the value
+            referenced_outputs = self._find_embedded_references(value)
+            
+            # Check each referenced output is properly declared as an input
+            for ref_output in referenced_outputs:
+                # Skip if this output name is already properly declared as an input
+                if ref_output in inputs and (
+                    ('outputName' in inputs[ref_output] and 'sourceStep' in inputs[ref_output]) or
+                    ('value' in inputs[ref_output] and 'valueType' in inputs[ref_output])
+                ):
+                    continue
+
+                # Find which previous step produces this output
+                found_source = False
+                for source_step in range(step_number - 1, -1, -1):
+                    if source_step in available_outputs and ref_output in available_outputs[source_step]:
+                        errors.append(
+                            f"Step {step_number}: Input '{input_name}' contains embedded reference '{{{ref_output}}}' " +
+                            f"which must be explicitly declared as an input with sourceStep: {source_step}"
+                        )
+                        found_source = True
+                        break
+
+                if not found_source and source_step != 0:  # Allow sourceStep 0 without validation
+                    errors.append(
+                        f"Step {step_number}: Input '{input_name}' contains embedded reference '{{{ref_output}}}' " +
+                        "but no previous step produces this output"
+                    )
+
     def _repair_plan_code_based(self, plan: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Automatically repair common schema violations in the plan."""
         logger.info("[Repair] Starting code-based repair...")
@@ -215,12 +269,17 @@ class PlanValidator:
                 continue
 
             # Ensure 'number' is an integer
-            if 'number' in step and not isinstance(step['number'], int):
-                try:
-                    step['number'] = int(step['number'])
-                except (ValueError, TypeError):
-                    logger.warning(f"Failed to convert step number '{step['number']}' to integer. Removing.")
-                    del step['number']
+            if 'number' in step:
+                if not isinstance(step['number'], int):
+                    try:
+                        # Attempt conversion to integer
+                        converted_number = int(step['number'])
+                        step['number'] = converted_number
+                    except (ValueError, TypeError) as e:
+                        logger.warning(f"Failed to convert step number '{step['number']}' to integer: {e}. Setting to None.")
+                        step['number'] = None # Set to None instead of deleting
+                # If it's already an int, do nothing.
+                # If it's None (from a previous failed conversion), it will be handled by _validate_plan
 
             # Repair inputs
             if 'inputs' in step and isinstance(step['inputs'], dict):
@@ -519,9 +578,13 @@ Return the corrected JSON object for the step."""
 
     def _validate_step_inputs(self, step: Dict[str, Any], plugin_def: Dict[str, Any], available_outputs: Dict[int, Set[str]], errors: List[str]):
         """Validate inputs for a single step against the plugin definition."""
+        logger.info(f"_validate_step_inputs: Validating step: {step}")
         step_number = step['number']
         inputs = step.get('inputs', {})
         input_definitions = plugin_def.get('inputDefinitions', [])
+
+        # First validate embedded references in input values
+        self._validate_embedded_references(step, inputs, available_outputs, errors)
 
         # Create map of required inputs
         required_inputs = {inp['name']: inp for inp in input_definitions if inp.get('required', False)}

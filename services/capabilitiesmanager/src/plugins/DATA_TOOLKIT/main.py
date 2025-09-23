@@ -40,7 +40,10 @@ def query_json(inputs):
     query = inputs.get("query")
 
     if not isinstance(json_object, list):
-        return PluginOutput(False, "query_json_error", "error", None, "JSON object must be a list of dictionaries.", "JSON object must be a list of dictionaries.").to_dict()
+        if isinstance(json_object, dict):
+            json_object = [json_object] # Convert single object to a list containing it
+        else:
+            return PluginOutput(False, "query_json_error", "error", None, "JSON object must be a list of dictionaries or a single dictionary.", "JSON object must be a list of dictionaries or a single dictionary.").to_dict()
 
     if not isinstance(query, dict):
         return PluginOutput(False, "query_json_error", "error", None, "Query must be a dictionary of key-value pairs.", "Query must be a dictionary of key-value pairs.").to_dict()

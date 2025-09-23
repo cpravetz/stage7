@@ -92,6 +92,7 @@ class GetUserInputPlugin:
             question = None
             choices = None
             answer_type = 'text'
+            clientId = None
 
             for key, value in inputs_map.items():
                 if key == 'question':
@@ -109,6 +110,11 @@ class GetUserInputPlugin:
                         answer_type = value['value']
                     else:
                         answer_type = value
+                elif key == 'clientId':
+                    if isinstance(value, dict) and 'value' in value:
+                        clientId = value['value']
+                    else:
+                        clientId = value
 
             if not question:
                 return [{
@@ -129,7 +135,8 @@ class GetUserInputPlugin:
             # Prepare request data
             request_data = {
                 "question": question,
-                "answerType": answer_type or 'text'
+                "answerType": answer_type or 'text',
+                "clientId": clientId
             }
 
             # Add choices if provided

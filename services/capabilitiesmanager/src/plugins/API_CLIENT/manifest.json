@@ -1,8 +1,8 @@
 {
   "id": "plugin-API_CLIENT",
   "verb": "API_CLIENT",
-  "description": "A generic interface for interacting with third-party RESTful APIs.",
-  "explanation": "This plugin provides a command to make HTTP requests to any RESTful API, handling various authentication methods and returning the full HTTP response.  You are responsible for providing any keys, IDs or required request parameters needed to use the API.",
+  "description": "A generic interface for interacting with third-party RESTful APIs. Use this plugin only when you have a complete and valid URL, method, and any required authentication details. Do not use this for general web browsing or if you are unsure about the API's specifics.",
+  "explanation": "This plugin provides a command to make HTTP requests to any RESTful API, handling various authentication methods and returning the full HTTP response. You are responsible for providing any keys, IDs or required request parameters needed to use the API. This plugin will fail if the endpoint is invalid or the request is not properly formatted, but the failure will not stop the parent agent.",
   "inputDefinitions": [
     {
       "name": "method",
@@ -14,7 +14,7 @@
       "name": "url",
       "required": true,
       "type": "string",
-      "description": "The API endpoint URL."
+      "description": "The API endpoint URL. This must be a full, valid, and accessible URL."
     },
     {
       "name": "headers",
@@ -35,7 +35,7 @@
       "description": "Authentication details (e.g., API key, bearer token)."
     }
   ],
-  "inputGuidance":"Required inputs inlcude 'method' and 'url.",
+  "inputGuidance":"Required inputs include 'method' and 'url'. The URL must be a complete and valid API endpoint. This tool is not for general web browsing. If you do not have a specific API endpoint to call, use a different tool. The user is responsible for providing all necessary information to make a valid API call.",
     
   "outputDefinitions": [
     {

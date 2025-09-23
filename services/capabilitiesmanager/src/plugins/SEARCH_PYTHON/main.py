@@ -200,13 +200,11 @@ class GoogleWebSearchProvider(SearchProvider):
 class LangsearchSearchProvider(SearchProvider):
     """Search provider for Langsearch with advanced semantic search capabilities."""
     def __init__(self, api_key: str):
-        super().__init__("Langsearch", performance_score=100)  # Start with highest priority
+        super().__init__("Langsearch", performance_score=100)  
         self.api_key = api_key
         self.base_url = os.getenv('LANGSEARCH_API_URL', 'https://api.langsearch.com')
         self.rate_limit_seconds = 1
         self.last_request_time = 0
-        self.backoff_time = 5 # Initial backoff time in seconds
-        self.max_backoff_time = 60 # Maximum backoff time
 
     def search(self, search_term: str, **kwargs) -> List[Dict[str, str]]:
         """Execute semantic search using LangSearch API."""
@@ -267,22 +265,21 @@ class LangsearchSearchProvider(SearchProvider):
             
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 429:
-                logger.warning(f"LangSearch instance rate limited (429) - sleeping for {self.backoff_time} seconds.")
-                time.sleep(self.backoff_time)
-                self.backoff_time = min(self.backoff_time * 2, self.max_backoff_time) # Exponential backoff with cap
-                raise # Re-raise to trigger retry in execute_search
+                logger.warning(f"LangSearch rate limited (429). Returning empty results to allow fallback.")
+                self.update_performance(success=False)
+                return []  # Return empty results instead of raising
             else:
                 logger.error(f"LangSearch API request failed: {str(e)}")
                 self.update_performance(success=False)
-                raise
+                return []  # Return empty results instead of raising
         except requests.exceptions.RequestException as e:
             logger.error(f"LangSearch API request failed: {str(e)}")
             self.update_performance(success=False)
-            raise
+            return []  # Return empty results instead of raising
         except Exception as e:
             logger.error(f"LangSearch processing failed: {str(e)}")
             self.update_performance(success=False)
-            raise
+            return []  # Return empty results instead of raising
         finally:
             self.last_request_time = time.time()
 
@@ -485,26 +482,44 @@ class SearchPlugin:
                 
                 search_successful = False
                 for provider in sorted_providers:
-                    try:
-                        logger.info(f"Attempting search with {provider.name} provider (score: {provider.performance_score}) for term: '{term}'")
-                        results = provider.search(term)
-                        
-                        if results:
-                            logger.info(f"Successfully found {len(results)} results for '{term}' using {provider.name}")
-                            term_results.extend(results)
-                            provider.update_performance(success=True)
-                            search_successful = True
-                            break  # Move to the next search term
-                        else:
-                            logger.warning(f"{provider.name} found no results for '{term}' - trying next provider")
-                            # Only slightly penalize for no results
-                            provider.performance_score = max(0, provider.performance_score - 5)
-                            time.sleep(1) # Add a small delay to avoid overwhelming services
-                    except Exception as e:
-                        error_msg = f"{provider.name} search failed for '{term}': {e}"
-                        logger.error(error_msg)
-                        term_errors.append(error_msg)
-                        provider.update_performance(success=False)
+                    retries = 3
+                    backoff_time = 5
+                    for attempt in range(retries):
+                        try:
+                            logger.info(f"Attempting search with {provider.name} provider (score: {provider.performance_score}) for term: '{term}'")
+                            results = provider.search(term)
+                            
+                            if results:
+                                logger.info(f"Successfully found {len(results)} results for '{term}' using {provider.name}")
+                                term_results.extend(results)
+                                provider.update_performance(success=True)
+                                search_successful = True
+                                break  # Move to the next provider
+                            else:
+                                logger.warning(f"{provider.name} found no results for '{term}' - trying next provider")
+                                # Only slightly penalize for no results
+                                provider.performance_score = max(0, provider.performance_score - 5)
+                                time.sleep(1) # Add a small delay to avoid overwhelming services
+                        except requests.exceptions.HTTPError as e:
+                            if e.response.status_code == 429 and attempt < retries - 1:
+                                logger.warning(f"{provider.name} rate limited. Retrying in {backoff_time} seconds...")
+                                time.sleep(backoff_time)
+                                backoff_time *= 2 # Exponential backoff
+                                continue
+                            else:
+                                error_msg = f"{provider.name} search failed for '{term}': {e}"
+                                logger.error(error_msg)
+                                term_errors.append(error_msg)
+                                provider.update_performance(success=False)
+                                break
+                        except Exception as e:
+                            error_msg = f"{provider.name} search failed for '{term}': {e}"
+                            logger.error(error_msg)
+                            term_errors.append(error_msg)
+                            provider.update_performance(success=False)
+                            break
+                    if search_successful:
+                        break
                 
                 if search_successful:
                     break # Break the generalization loop if search is successful

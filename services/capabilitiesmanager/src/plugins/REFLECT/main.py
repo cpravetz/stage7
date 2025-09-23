@@ -226,7 +226,7 @@ class ReflectHandler:
     """Handles reflection requests by generating schema-compliant plans"""
 
     def __init__(self):
-        self.validator = PlanValidator(call_brain)
+        self.validator = PlanValidator(brain_call=call_brain)
 
     def handle(self, inputs: Dict[str, Any]) -> str:
         try:
@@ -347,6 +347,17 @@ Plan Schema
     - Use `sourceStep: 0` ONLY for inputs that are explicitly provided in the "PARENT STEP INPUTS" section above.
     - For any other input, it MUST be the `outputName` from a *preceding step* in this plan, and `sourceStep` MUST be the `number` of that preceding step.
     - Every input in your plan MUST be resolvable either from a given constant value, a "PARENT STEP" (using `sourceStep: 0`) or from an output of a previous step in the plan.
+    - CRITICAL: If you use placeholders like {'{output_name}'} or [output_name] within a longer string value (e.g., a prompt that references previous outputs), you MUST also declare each referenced output_name as a separate input with proper sourceStep and outputName. Example:
+        {{\\"inputs\\": {{
+            \\"prompt\\": {{
+                \\"value\\": \\"Analyze the competitor data: {'{competitor_details}'}\\",
+                \\"valueType\\": \\"string\\"
+            }},
+            \\"competitor_details\\": {{
+                \\"outputName\\": \\"competitor_details\\",
+                \\"sourceStep\\": 2
+            }}
+        }}}}
 - **Mapping Outputs to Inputs:** When the output of one step is used as the input to another, the `outputName` in the input of the second step must match the `name` of the output of the first step.
 
 CRITICAL: The actionVerb for each step MUST be a valid, existing plugin actionVerb (from the provided list) or a descriptive, new actionVerb (e.g., 'ANALYZE_DATA', 'GENERATE_REPORT'). It MUST NOT be 'UNKNOWN' or 'NOVEL_VERB'.
@@ -384,72 +395,94 @@ CRITICAL: The actionVerb for each step MUST be a valid, existing plugin actionVe
 
         return response
 
-    def _format_response(self, brain_response: Any, reflection_info: Dict[str, Any], inputs: Dict[str, Any]) -> str:
+    def _format_response(self, brain_response: Any, verb_info: Dict[str, Any], inputs: Dict[str, Any]) -> str:
         """Format the Brain response into the expected output format"""
         try:
-            # If brain_response is already a parsed JSON object
-            if isinstance(brain_response, dict):
-                response_data = brain_response
+            # If brain_response is already a parsed JSON object/array, use it directly
+            # Otherwise, attempt to parse it as JSON
+            if isinstance(brain_response, (dict, list)):
+                data = brain_response
             else:
-                # Clean and parse the response
-                cleaned_response = self._clean_brain_response(brain_response)
-                response_data = json.loads(cleaned_response)
+                # Attempt to clean and parse if it's a string
+                cleaned_response = self._clean_brain_response(str(brain_response))
+                data = json.loads(cleaned_response)
 
-            # Handle direct answer
-            if "direct_answer" in response_data:
-                return json.dumps([{
+            if isinstance(data, list): # This is a plan
+                # Validate and repair the plan
+                validated_plan = self.validator.validate_and_repair(data, verb_info['mission_goal'], inputs)
+                
+                # Save the generated plan to Librarian
+                # self._save_plan_to_librarian(verb_info['verb'], validated_plan, inputs)
+
+                return json.dumps([{ 
                     "success": True,
-                    "name": "reflection_results",
-                    "resultType": "string",
-                    "result": response_data["direct_answer"],
-                    "resultDescription": "Reflection analysis complete",
+                    "name": "plan",
+                    "resultType": "plan",
+                    "resultDescription": f"Plan created from reflection",
+                    "result": validated_plan,
+                    "mimeType": "application/json"
+                }])
+            elif isinstance(data, dict): # Could be direct answer or plugin recommendation
+                if "direct_answer" in data:
+                    return json.dumps([{ 
+                        "success": True,
+                        "name": "direct_answer",
+                        "resultType": "direct_answer",
+                        "resultDescription": f"Direct answer from reflection",
+                        "result": data["direct_answer"],
+                        "mimeType": "application/json"
+                    }])
+                elif "plugin" in data:
+                    plugin_data = data["plugin"]
+                    return json.dumps([{ 
+                        "success": True,
+                        "name": "plugin",
+                        "resultType": "plugin",
+                        "resultDescription": f"Plugin recommended: {plugin_data.get('id', 'unknown')}",
+                        "result": plugin_data,
+                        "mimeType": "application/json"
+                    }])
+                # If the dictionary is a single step, treat it as a plan with one step
+                elif "actionVerb" in data and "number" in data:
+                    validated_plan = self.validator.validate_and_repair([data], verb_info['mission_goal'], inputs)
+                    # self._save_plan_to_librarian(verb_info['verb'], validated_plan, inputs)
+                    return json.dumps([{"success": True,
+                        "name": "plan",
+                        "resultType": "plan",
+                        "resultDescription": f"Plan created for novel verb '{verb_info['verb']}'",
+                        "result": validated_plan,
+                        "mimeType": "application/json"
+                    }])
+                else:
+                    # Unexpected dictionary format
+                    return json.dumps([{ 
+                        "success": False,
+                        "name": "error",
+                        "resultType": "error",
+                        "resultDescription": "Unexpected Brain response format (dictionary)",
+                        "result": data,
+                        "mimeType": "application/json"
+                    }])
+            else:
+                # Truly unexpected format (e.g., non-JSON string that wasn't caught by _clean_brain_response)
+                return json.dumps([{ 
+                    "success": False,
+                    "name": "error",
+                    "resultType": "error",
+                    "resultDescription": "Unexpected Brain response format (non-JSON or unhandled type)",
+                    "result": str(brain_response),
                     "mimeType": "text/plain"
                 }])
 
-            # Handle plan
-            elif isinstance(response_data, list) and len(response_data) > 0:
-                # Validate and repair the plan
-                goal = reflection_info['mission_goal']
-                validated_plan = self.validator.validate_and_repair(response_data, goal, inputs)
-                
-                return json.dumps([{
-                    "success": True,
-                    "name": "reflection_results",
-                    "resultType": "plan",
-                    "result": validated_plan,
-                    "resultDescription": "Generated new plan based on mission progress",
-                    "mimeType": "application/json"
-                }])
-
-            else:
-                # Fallback for unexpected response
-                return json.dumps([{
-                    "success": True,
-                    "name": "reflection_results",
-                    "resultType": "string",
-                    "result": json.dumps(response_data),
-                    "resultDescription": "Unexpected but valid response format",
-                    "mimeType": "application/json"
-                }])
-
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse Brain response as JSON: {e}")
-            return json.dumps([{
+        except (json.JSONDecodeError, TypeError) as e:
+            logger.error(f"Failed to parse or process Brain response in _format_response: {e}")
+            logger.error(f"Raw Brain response (type: {type(brain_response)}): {str(brain_response)[:500]}...")
+            return json.dumps([{ 
                 "success": False,
                 "name": "error",
                 "resultType": "error",
-                "result": f"Invalid JSON response: {str(e)}",
-                "resultDescription": "Brain response parsing failed",
-                "mimeType": "text/plain"
-            }])
-        except Exception as e:
-            logger.error(f"Response formatting failed: {e}")
-            return json.dumps([{
-                "success": False,
-                "name": "error",
-                "resultType": "error",
-                "result": str(e),
-                "resultDescription": "Response formatting failed",
+                "resultDescription": f"Failed to process Brain response: {str(e)}",
+                "result": str(brain_response),
                 "mimeType": "text/plain"
             }])
 

@@ -46,58 +46,6 @@ const INTERNAL_VERBS: PluginManifest[] = [
         },
     },
     {
-        id: 'internal-REFLECT',
-        verb: 'REFLECT',
-        version: '1.0.0',
-        description: 'Allows the agent to reflect on its mission, plan, and work products.',
-        language: 'internal',
-        inputDefinitions: [
-            {
-                name: 'missionId',
-                description: 'The ID of the current mission.',
-                type: PluginParameterType.STRING,
-                required: true,
-            },
-            {
-                name: 'plan_history',
-                description: 'The history of executed steps in the plan.',
-                type: PluginParameterType.STRING,
-                required: true,
-            },
-            {
-                name: 'work_products',
-                description: 'A manifest of data artifacts created during the mission.',
-                type: PluginParameterType.STRING,
-                required: true,
-            },
-            {
-                name: 'question',
-                description: 'The question or prompt for the agent to reflect upon.',
-                type: PluginParameterType.STRING,
-                required: true,
-            },
-        ],
-        outputDefinitions: [
-            {
-                name: 'reflection_results',
-                description: 'The results of the reflection process.',
-                type: PluginParameterType.STRING,
-                required: true,
-            },
-        ],
-        repository: {
-            type: 'internal',
-            url: 'internal',
-        },
-        security: {
-            permissions: [],
-            sandboxOptions: {allowEval: true, timeout: 30000, memory: 256, allowedAPIs: [], allowedModules: []},
-            trust: {
-                signature: 'internal',
-            },
-        },
-    },
-    {
         id: 'internal-GENERATE',
         verb: 'GENERATE',
         version: '1.0.0',

@@ -65,8 +65,14 @@ def execute_plugin(inputs):
     """
     Execute the CHAT plugin with the given inputs.
     """
-    message = inputs.get("message", "")
+    message_input = inputs.get("message", "")
     mission_id = inputs.get("missionId", "") # Assuming missionId is passed as an input
+
+    # Extract the 'value' property from the message input if it's a JSON object
+    if isinstance(message_input, dict) and 'value' in message_input:
+        message = message_input['value']
+    else:
+        message = message_input
 
     if not message:
         return [
@@ -99,7 +105,7 @@ def execute_plugin(inputs):
 
         logger.info(f"Sending chat message to PostOffice: {message}")
         response = requests.post(
-            f"{postoffice_url}/sendMessage",
+            f"{postoffice_url}/message",
             json=payload,
             headers=headers,
             timeout=15

@@ -29,7 +29,7 @@ export class DeepSeekR1Model extends BaseModel {
             modelName: "deepseek-ai/DeepSeek-R1",
             interfaceName: "huggingface",
             serviceName: "HFService",
-            tokenLimit: 8192, // Adjust this value if needed
+            tokenLimit: 64000, // Adjust this value if needed
             scoresByConversationType: scoresByConversationType,
             contentConversation: [LLMConversationType.CodeToText, LLMConversationType.TextToCode, LLMConversationType.TextToJSON]
         });

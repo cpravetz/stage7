@@ -271,7 +271,7 @@ export class ModelPerformanceTracker {
     // Fatal errors that suggest the model/service is down, misconfigured, or unresponsive
     const fatalPatterns = [
       'timeout', 'timed out', 'econnreset', 'econnrefused', 'enotfound',
-      'network error', '500', '502', '503', '504', '429', '401', '403'
+      'network error', '500', '502', '503', '504', '401', '403'
     ];
     if (fatalPatterns.some(p => lowerError.includes(p))) {
       return 'FATAL';
@@ -279,7 +279,7 @@ export class ModelPerformanceTracker {
 
     // Errors that might be fixed by retrying or changing the prompt (e.g., a flawed response)
     const retryablePatterns = [
-      'invalid json', 'malformed json', 'json parse error', 'syntax error', '400'
+      'invalid json', 'malformed json', 'json parse error', 'syntax error', '400', '429'
     ];
     if (retryablePatterns.some(p => lowerError.includes(p))) {
       return 'RETRYABLE';
@@ -695,7 +695,6 @@ export class ModelPerformanceTracker {
 
     // If the model has no blacklistedUntil date, it's not blacklisted
     if (!metrics.blacklistedUntil) {
-        // console.log(`[isModelBlacklisted] ${modelName}/${conversationType}: No blacklist date.`);
         return false;
     }
 
@@ -705,15 +704,12 @@ export class ModelPerformanceTracker {
 
     if (now > blacklistedUntil) {
       // Blacklist period has expired, clear the blacklist
-      console.log(`[isModelBlacklisted] ${modelName}/${conversationType}: Blacklist expired at ${metrics.blacklistedUntil}.`);
       const modelData = this.performanceData.get(modelName);
       if (modelData && modelData.metrics[conversationType]) {
         modelData.metrics[conversationType].blacklistedUntil = null;
       }
       return false;
     }
-
-    console.log(`[isModelBlacklisted] ${modelName}/${conversationType}: Blacklisted until ${metrics.blacklistedUntil}.`);
     // Model is still blacklisted
     return true;
   }

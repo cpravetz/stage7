@@ -260,6 +260,10 @@ services:
       - ./shared/keys:/usr/src/app/shared/keys
     ports:
       - "5060:5060"
+    deploy:
+      resources:
+        limits:
+          memory: 2G
 
   librarian:
     build:
@@ -414,6 +418,15 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+    restart: unless-stopped
+
+  searxng:
+    image: searxng/searxng:latest
+    ports:
+      - "8888:8080"
+    volumes:
+      - "./searxng/config:/etc/searxng/"
+      - "./searxng/data/:/var/cache/searxng/"
     restart: unless-stopped
 
   # OpenWebUI is using an external server, not a local container

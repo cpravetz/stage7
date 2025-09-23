@@ -242,6 +242,11 @@ class FileOperationPlugin:
     def _list_operation(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         path = self._get_input_value(inputs, 'path', '.')
         secure_path = self._get_secure_path(path)
+        if not os.path.exists(secure_path):
+            return {
+                "success": True, "name": "files", "resultType": "array",
+                "resultDescription": f"Directory {path} does not exist", "result": []
+            }
         files = os.listdir(secure_path)
         return {
             "success": True, "name": "files", "resultType": "array",

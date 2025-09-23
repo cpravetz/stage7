@@ -474,30 +474,6 @@ CRITICAL: The actionVerb for each step MUST be a valid, existing plugin actionVe
 
         plugin_guidance = self._create_detailed_plugin_guidance(inputs)
         schema_json = json.dumps(PLAN_ARRAY_SCHEMA, indent=2)
-
-        example_plan = [
-            {
-                "number": 1,
-                "actionVerb": "RESEARCH",
-                "inputs": {
-                    "topic": {"value": "latest AI trends", "valueType": "string"}
-                },
-                "description": "Research current trends in AI.",
-                "outputs": {"research_results": "Summary of AI trends"},
-                "recommendedRole": "Researcher"
-            },
-            {
-                "number": 2,
-                "actionVerb": "ANALYZE",
-                "inputs": {
-                    "data": {"outputName": "research_results", "sourceStep": 1}
-                },
-                "description": "Analyze the research findings.",
-                "outputs": {"analysis_report": "Report on key findings"},
-                "recommendedRole": "Analyst"
-            }
-        ]
-        example_plan_json = json.dumps(example_plan, indent=2)
         
         full_goal = f"MISSION: {mission_goal}\n\nTASK: {goal}" if mission_goal and mission_goal != goal else goal
         prompt = f"""You are an expert system for converting prose plans into structured JSON according to a strict schema.
@@ -517,12 +493,7 @@ CRITICAL: The actionVerb for each step MUST be a valid, existing plugin actionVe
 {schema_json}
 ---
 
-**4. EXAMPLE OF A VALID MULTI-STEP PLAN:**
----
-{example_plan_json}
----
-
-**5. YOUR TASK:**
+**4. YOUR TASK:**
 Follow these steps to create the final JSON output:
 
 **STEP A: Internal Analysis & Self-Correction (Your Internal Monologue)**
@@ -706,6 +677,17 @@ Plan Schema
     - For any other input, it MUST be the `outputName` from a *preceding step* in this plan, and `sourceStep` MUST be the `number` of that preceding step.
     - Every input in your plan MUST be resolvable either from a given constant value, a "PARENT STEP INPUT" (using `sourceStep: 0`) or from an output of a previous step in the plan.
 - **Mapping Outputs to Inputs:** When the output of one step is used as the input to another, the `outputName` in the input of the second step must match the `name` of the output of the first step.
+- **CRITICAL: Embedded References in Input Values:** If you use placeholders like {'{output_name}'} or [output_name] within a longer string value (e.g., a prompt that references previous outputs), you MUST also declare each referenced output_name as a separate input with proper sourceStep and outputName. Example:
+        {{\\"inputs\\": {{
+            \\"prompt\\": {{
+                \\"value\\": \\"Analyze the competitor data: {'{competitor_details}'}\\",
+                \\"valueType\\": \\"string\\"
+            }},
+            \\"competitor_details\\": {{
+                \\"outputName\\": \\"competitor_details\\",
+                \\"sourceStep\\": 2
+            }}
+        }}}}
 
 CRITICAL: The actionVerb for each step MUST be a valid, existing plugin actionVerb (from the provided list) or a descriptive, new actionVerb (e.g., 'ANALYZE_DATA', 'GENERATE_REPORT'). It MUST NOT be 'UNKNOWN' or 'NOVEL_VERB'.
 """
@@ -756,7 +738,7 @@ CRITICAL: The actionVerb for each step MUST be a valid, existing plugin actionVe
 
             if isinstance(data, list): # This is a plan
                 # Validate and repair the plan
-                validated_plan = self.validator.validate_and_repair(data, verb_info['description'], inputs)
+                validated_plan = self.validator.validate_and_repair(data, verb_info['mission_goal'], inputs)
                 
                 # Save the generated plan to Librarian
                 # self._save_plan_to_librarian(verb_info['verb'], validated_plan, inputs)
@@ -791,7 +773,7 @@ CRITICAL: The actionVerb for each step MUST be a valid, existing plugin actionVe
                     }])
                 # If the dictionary is a single step, treat it as a plan with one step
                 elif "actionVerb" in data and "number" in data:
-                    validated_plan = self.validator.validate_and_repair([data], verb_info['description'], inputs)
+                    validated_plan = self.validator.validate_and_repair([data], verb_info['mission_goal'], inputs)
                     # self._save_plan_to_librarian(verb_info['verb'], validated_plan, inputs)
                     return json.dumps([{"success": True,
                         "name": "plan",
