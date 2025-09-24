@@ -43,10 +43,10 @@ def query_json(inputs):
         if isinstance(json_object, dict):
             json_object = [json_object] # Convert single object to a list containing it
         else:
-            return PluginOutput(False, "query_json_error", "error", None, "JSON object must be a list of dictionaries or a single dictionary.", "JSON object must be a list of dictionaries or a single dictionary.").to_dict()
+            return [PluginOutput(False, "query_json_error", "error", None, "JSON object must be a list of dictionaries or a single dictionary.", "JSON object must be a list of dictionaries or a single dictionary.").to_dict()]
 
     if not isinstance(query, dict):
-        return PluginOutput(False, "query_json_error", "error", None, "Query must be a dictionary of key-value pairs.", "Query must be a dictionary of key-value pairs.").to_dict()
+        return [PluginOutput(False, "query_json_error", "error", None, "Query must be a dictionary of key-value pairs.", "Query must be a dictionary of key-value pairs.").to_dict()]
 
     def matches(item, query):
         for key, value in query.items():
@@ -55,16 +55,16 @@ def query_json(inputs):
         return True
 
     results = [item for item in json_object if isinstance(item, dict) and matches(item, query)]
-    return PluginOutput(True, "query_results", "array", results, "Results of JSON query.").to_dict()
+    return [PluginOutput(True, "query_results", "array", results, "Results of JSON query.").to_dict()]
 
 def validate_json(inputs):
     """Validates a JSON string."""
     json_string = inputs.get("json_string")
     try:
         json.loads(json_string)
-        return PluginOutput(True, "validation_result", "object", {"is_valid": True, "error": None}, "JSON validation successful.").to_dict()
+        return [PluginOutput(True, "validation_result", "object", {"is_valid": True, "error": None}, "JSON validation successful.").to_dict()]
     except json.JSONDecodeError as e:
-        return PluginOutput(False, "validation_result", "object", {"is_valid": False, "error": str(e)}, "JSON validation failed.", str(e)).to_dict()
+        return [PluginOutput(False, "validation_result", "object", {"is_valid": False, "error": str(e)}, "JSON validation failed.", str(e)).to_dict()]
 
 def csv_to_json(inputs):
     """Converts CSV data to a JSON array of objects."""
@@ -73,24 +73,24 @@ def csv_to_json(inputs):
         csv_file = io.StringIO(csv_data)
         reader = csv.DictReader(csv_file)
         json_data = list(reader)
-        return PluginOutput(True, "json_data", "array", json_data, "CSV data converted to JSON.").to_dict()
+        return [PluginOutput(True, "json_data", "array", json_data, "CSV data converted to JSON.").to_dict()]
     except Exception as e:
-        return PluginOutput(False, "csv_to_json_error", "error", None, "Failed to convert CSV to JSON.", str(e)).to_dict()
+        return [PluginOutput(False, "csv_to_json_error", "error", None, "Failed to convert CSV to JSON.", str(e)).to_dict()]
 
 def json_to_csv(inputs):
     """Converts a JSON array of objects to CSV data."""
     json_data = inputs.get("json_data")
     if not json_data:
-        return PluginOutput(True, "csv_data", "string", "", "Empty JSON data, returning empty CSV.").to_dict()
+        return [PluginOutput(True, "csv_data", "string", "", "Empty JSON data, returning empty CSV.").to_dict()]
     
     try:
         output = io.StringIO()
         writer = csv.DictWriter(output, fieldnames=json_data[0].keys())
         writer.writeheader()
         writer.writerows(json_data)
-        return PluginOutput(True, "csv_data", "string", output.getvalue(), "JSON data converted to CSV.").to_dict()
+        return [PluginOutput(True, "csv_data", "string", output.getvalue(), "JSON data converted to CSV.").to_dict()]
     except Exception as e:
-        return PluginOutput(False, "json_to_csv_error", "error", None, "Failed to convert JSON to CSV.", str(e)).to_dict()
+        return [PluginOutput(False, "json_to_csv_error", "error", None, "Failed to convert JSON to CSV.", str(e)).to_dict()]
 
 def execute_plugin(operation, inputs):
     """
@@ -104,7 +104,7 @@ def execute_plugin(operation, inputs):
     }
 
     if operation not in operations:
-        return PluginOutput(False, "operation_error", "error", None, f"Operation '{operation}' not supported.", f"Operation '{operation}' not supported.").to_dict()
+        return [PluginOutput(False, "operation_error", "error", None, f"Operation '{operation}' not supported.", f"Operation '{operation}' not supported.").to_dict()]
 
     result = operations[operation](inputs)
 

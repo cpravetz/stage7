@@ -395,7 +395,9 @@ Please consider this context and the available plugins when planning and executi
                     this.say('Reflection did not provide a clear plan or answer. Continuing with the current plan.');
                 }
             } else if (result[0]?.resultType === PluginParameterType.PLAN) {
-                const planningStepResult = result[0]?.result;
+                // Apply custom output name mapping for PLAN results
+                const mappedResult = step.mapPluginOutputsToCustomNames(result);
+                const planningStepResult = mappedResult[0]?.result;
                 let actualPlanArray: ActionVerbTask[] | undefined = undefined;
 
                 if (Array.isArray(planningStepResult)) {
@@ -433,16 +435,16 @@ Please consider this context and the available plugins when planning and executi
 
     private async runAgent() {
         try {
-            console.log(`[Agent ${this.id}] runAgent: Agent status: ${this.status}`);
+            //console.log(`[Agent ${this.id}] runAgent: Agent status: ${this.status}`);
             if (this.status !== AgentStatus.RUNNING) {
                 return;
             }
 
             const pendingSteps = this.steps.filter(step => step.status === StepStatus.PENDING);
-            console.log(`[Agent ${this.id}] runAgent: Pending steps: ${pendingSteps.map(s => `${s.id} (${s.actionVerb}, ${s.status})`).join(', ') || 'None'}`);
+            //console.log(`[Agent ${this.id}] runAgent: Pending steps: ${pendingSteps.map(s => `${s.id} (${s.actionVerb}, ${s.status})`).join(', ') || 'None'}`);
 
             const executableSteps = pendingSteps.filter(step => step.areDependenciesSatisfied(this.steps));
-            console.log(`[Agent ${this.id}] runAgent: Executable steps: ${executableSteps.map(s => `${s.id} (${s.actionVerb}, ${s.status})`).join(', ') || 'None'}`);
+            //console.log(`[Agent ${this.id}] runAgent: Executable steps: ${executableSteps.map(s => `${s.id} (${s.actionVerb}, ${s.status})`).join(', ') || 'None'}`);
 
             if (executableSteps.length > 0) {
                 console.log(`[Agent ${this.id}] runAgent: Executing ${executableSteps.length} steps.`);
@@ -944,7 +946,7 @@ Please consider this context and the available plugins when planning and executi
             };
         }
 
-        console.log(`[Agent ${this.id}] useBrainForReasoning: Sending request to Brain /${brainEndpoint}`);
+        console.log(`[Agent ${this.id} ${actionVerb}] useBrainForReasoning: Sending request to Brain /${brainEndpoint}`);
 
         try {
             const response = await this.authenticatedApi.post(`http://${this.brainUrl}/${brainEndpoint}`, brainRequestBody);
@@ -1054,7 +1056,7 @@ Please consider this context and the available plugins when planning and executi
      */
     private resolvePlaceholdersInString(text: string): string {
         // Find all placeholders in the format [outputName]
-        const placeholderRegex = /\[([^\]]+)\]/g;
+        const placeholderRegex = /\{([^\}]+)\}/g;
         let resolvedText = text;
         let match;
 
@@ -2313,7 +2315,6 @@ Explanation: ${resolution.explanation}`);
                 error: step.lastError.message,
                 timestamp: new Date().toISOString()
             });
-            await this.replanFromFailure(step);
         } else if (errorType === StepErrorType.TRANSIENT && step.retryCount < step.maxRetries) {
             step.retryCount++;
             step.status = StepStatus.PENDING;
@@ -2393,6 +2394,7 @@ Explanation: ${resolution.explanation}`);
 
     public async replanFromFailure(failedStep: Step): Promise<void> {
         if (this.lastFailedStep && this.lastFailedStep.id === failedStep.id) {
+            console.log(`[Agent ${this.id}] Detected repeated failure of step ${failedStep.id}. Aborting to prevent infinite loop.`);
             this.say(`Step ${failedStep.actionVerb} failed again. Aborting mission to prevent infinite loop.`);
             this.status = AgentStatus.ERROR;
             await this.notifyTrafficManager();
@@ -2464,10 +2466,9 @@ Explanation: ${resolution.explanation}`);
             this.say(`Schema validation failure in planning system. This requires system-level debugging. Mission aborted.`);
             return;
         }
-
+        console.log(`[Agent ${this.id}] Replanning from failure of step ${failedStep.id} (${failedStep.actionVerb}). Error: ${errorMsg}`);
         // For other errors, use simpler recovery based on error type
         // Always use THINK for recovery to prevent recursive ACCOMPLISH loops
-        // This is safer and prevents the memory issues we've been seeing
         await this.createThinkRecoveryStep(failedStep, errorMsg, workProductsSummary);
     }
 

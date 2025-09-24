@@ -141,18 +141,24 @@ export class Step {
     }
 
     populateInputsFromDependencies(allSteps: Step[]): void {
+        console.log(`[Step ${this.id}] populateInputsFromDependencies: Populating inputs from dependencies...`);
         this.dependencies.forEach(dep => {
             const sourceStep = allSteps.find(s => s.id === dep.sourceStepId);
             if (sourceStep?.result) {
                 const output = sourceStep.result.find(r => r.name === dep.outputName);
                 if (output) {
+                    console.log(`[Step ${this.id}]   - Populating '${dep.inputName}' from dependency '${dep.sourceStepId}.${dep.outputName}' with value:`, output.result);
                     this.inputValues.set(dep.inputName, {
                         inputName: dep.inputName,
                         value: output.result,
                         valueType: output.resultType,
                         args: {}
                     });
+                } else {
+                    console.log(`[Step ${this.id}]   - Dependency '${dep.sourceStepId}.${dep.outputName}' not found in source step result.`);
                 }
+            } else {
+                console.log(`[Step ${this.id}]   - Source step '${dep.sourceStepId}' not found or has no result.`);
             }
         });
     }
@@ -352,10 +358,12 @@ export class Step {
         askAction: (inputValues: Map<string, InputValue>) => Promise<PluginOutput[]>,
         allSteps?: Step[]
     ): Promise<PluginOutput[]> {
+        console.log(`[Step ${this.id}] execute: Executing step ${this.actionVerb}...`);
         this.populateInputsFromReferences();
         if (allSteps) {
             this.populateInputsFromDependencies(allSteps);
         }
+        console.log(`[Step ${this.id}] execute: Input values after population:`, this.inputValues);
         this.status = StepStatus.RUNNING;
         try {
             let result: PluginOutput[];
@@ -419,17 +427,17 @@ export class Step {
                     stepNo: this.stepNo,
                     actionVerb: this.actionVerb,
                     status: this.status,
-                    result: result,
+                    result: this.result,
                     dependencies: this.dependencies,
                     timestamp: new Date().toISOString()
                 });
 
                 await this.persistenceManager.saveWorkProduct({
                     agentId: this.id.split('_')[0], stepId: this.id,
-                    data: result
+                    data: this.result
                 });
             }
-            return result;
+            return this.result;
         } catch (error) {
             this.status = StepStatus.ERROR;
             const errorResult = [{
@@ -1195,9 +1203,11 @@ export class Step {
     }
 
     public populateInputsFromReferences(): void {
+        console.log(`[Step ${this.id}] populateInputsFromReferences: Populating inputs from references...`);
         if (!this.inputValues) this.inputValues = new Map<string, InputValue>();
         this.inputReferences.forEach((inputRef, key) => {
             if (!this.inputValues.has(key) && inputRef.value !== undefined) {
+                console.log(`[Step ${this.id}]   - Populating '${key}' from reference with value:`, inputRef.value);
                 this.inputValues.set(key, {
                     inputName: key,
                     value: inputRef.value,
@@ -1212,7 +1222,7 @@ export class Step {
      * Maps plugin output names to step-defined custom output names.
      * This ensures that when other steps reference outputs, they can use the custom names.
      */
-    private mapPluginOutputsToCustomNames(pluginOutputs: PluginOutput[]): PluginOutput[] {
+    public mapPluginOutputsToCustomNames(pluginOutputs: PluginOutput[]): PluginOutput[] {
         if (!this.outputs || this.outputs.size === 0) {
             // No custom output names defined, return plugin outputs as-is
             return pluginOutputs;

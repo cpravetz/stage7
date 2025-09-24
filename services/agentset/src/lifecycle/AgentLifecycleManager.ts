@@ -535,26 +535,7 @@ export class AgentLifecycleManager {
           // Create checkpoint for unhealthy agent
           await this.createCheckpoint(agentId);
 
-          // If agent is in error state, try to recover
-          if (agent.getStatus() === AgentStatus.ERROR) {
-            console.warn(`Attempting to recover agent ${agentId} from error state`);
-            const failedStep = agent.getLastFailedStep();
-            if (failedStep) {
-              try {
-                await agent.replanFromFailure(failedStep);
-              } catch (replanError) {
-                console.error(`Failed to replan for agent ${agentId}:`, replanError);
-                // If replanning fails, fall back to the old restore logic
-                const versions = this.agentVersions.get(agentId) || [];
-                if (versions.length > 1) {
-                  const previousVersion = versions[versions.length - 2].version;
-                  await this.restoreVersion(agentId, previousVersion);
-                }
-              }
-            } else {
-                console.warn(`Agent ${agentId} is in error state but no failed step was found.`);
-            }
-          }
+          //Do we need an error handler here?
         }
       } catch (error) {
         analyzeError(error as Error);

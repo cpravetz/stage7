@@ -2,3 +2,4 @@
 # This plugin uses only Python standard library modules
 # Adding minimal dependency to ensure virtual environment creation for security
 setuptools>=65.0.0
+requests
