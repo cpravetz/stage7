@@ -208,7 +208,7 @@ class PlanValidator:
     
     def _validate_embedded_references(self, step: Dict[str, Any], inputs: Dict[str, Any], available_outputs: Dict[int, Set[str]], errors: List[str]):
         """
-        Validate that all embedded references in input values are properly declared as inputs.
+        Handle embedded references in input values: add missing inputs if source is known, otherwise error.
         """
         step_number = step.get('number', 0)
 
@@ -223,7 +223,7 @@ class PlanValidator:
 
             # Find all embedded references in the value
             referenced_outputs = self._find_embedded_references(value)
-            
+
             # Check each referenced output is properly declared as an input
             for ref_output in referenced_outputs:
                 # Skip if this output name is already properly declared as an input
@@ -237,17 +237,15 @@ class PlanValidator:
                 found_source = False
                 for source_step in range(step_number - 1, -1, -1):
                     if source_step in available_outputs and ref_output in available_outputs[source_step]:
-                        errors.append(
-                            f"Step {step_number}: Input '{input_name}' contains embedded reference '{{{ref_output}}}' " +
-                            f"which must be explicitly declared as an input with sourceStep: {source_step}"
-                        )
+                        if ref_output not in inputs:
+                            inputs[ref_output] = {"outputName": ref_output, "sourceStep": source_step}
                         found_source = True
                         break
 
-                if not found_source and source_step != 0:  # Allow sourceStep 0 without validation
+                if not found_source:
                     errors.append(
                         f"Step {step_number}: Input '{input_name}' contains embedded reference '{{{ref_output}}}' " +
-                        "but no previous step produces this output"
+                        f"but cannot find the source of {ref_output} and that's what the LLM needs to help with"
                     )
 
     def _repair_plan_code_based(self, plan: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -312,6 +310,38 @@ class PlanValidator:
                                 logger.warning(f"Input '{input_name}' has 'sourceStep' but no 'outputName'. Removing.")
                                 del step['inputs'][input_name]
                                 
+
+            # Repair 'steps' input for SEQUENCE, WHILE, UNTIL, FOREACH verbs
+            if step.get('actionVerb') in ['SEQUENCE', 'WHILE', 'UNTIL', 'FOREACH'] and \
+               'steps' in step.get('inputs', {}) and \
+               isinstance(step['inputs']['steps'], dict) and \
+               'value' in step['inputs']['steps'] and \
+               isinstance(step['inputs']['steps']['value'], str):
+                
+                steps_input = step['inputs']['steps']
+                original_value = steps_input['value']
+                
+                try:
+                    # Attempt to parse as JSON array
+                    parsed_steps = json.loads(original_value)
+                    if isinstance(parsed_steps, list):
+                        steps_input['value'] = parsed_steps
+                        steps_input['valueType'] = "array"
+                        logger.info(f"[Repair] Step {current_step_number}: Converted 'steps' input from JSON string to array for {step.get('actionVerb')}.")
+                    else:
+                        raise ValueError("Not a JSON array")
+                except (json.JSONDecodeError, ValueError):
+                    # If not a valid JSON array, wrap it in a THINK step
+                    logger.warning(f"[Repair] Step {current_step_number}: 'steps' input for {step.get('actionVerb')} is a non-JSON string. Wrapping in THINK step.")
+                    steps_input['value'] = [{
+                        "number": float(f"{current_step_number}.1"), # Use float for sub-step numbering
+                        "actionVerb": "THINK",
+                        "description": original_value,
+                        "inputs": {},
+                        "outputs": {},
+                        "recommendedRole": "Coordinator" # Default role
+                    }]
+                    steps_input['valueType'] = "array"
 
             # Recursively repair sub-plans
             if 'steps' in step and isinstance(step['steps'], list):

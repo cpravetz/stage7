@@ -211,6 +211,13 @@ export class Agent extends BaseEntity {
         this.runUntilDone().catch(error => {
             console.error(`Error running agent ${this.id}:`, error instanceof Error ? error.message : error);
             this.status = AgentStatus.ERROR;
+            this.logEvent({
+                eventType: 'agent_error',
+                agentId: this.id,
+                missionId: this.missionId,
+                status: this.status,
+                timestamp: new Date().toISOString()
+            });
         });
     }
 
@@ -221,8 +228,15 @@ export class Agent extends BaseEntity {
             this.brainUrl = brainUrl;
             this.trafficManagerUrl = trafficManagerUrl;
             this.librarianUrl = librarianUrl;
-            this.status = AgentStatus.RUNNING;
-            this.publishAgentStatus(); // Publish RUNNING status
+        this.status = AgentStatus.RUNNING;
+        this.logEvent({
+            eventType: 'agent_initialized',
+            agentId: this.id,
+            missionId: this.missionId,
+            status: this.status,
+            timestamp: new Date().toISOString()
+        });
+        this.publishAgentStatus(); // Publish RUNNING status
 
             if (this.missionContext && this.steps[0]?.actionVerb === 'ACCOMPLISH') {
                 await this.prepareOpeningInstruction();
@@ -230,9 +244,16 @@ export class Agent extends BaseEntity {
             return true;
         } catch (error) { analyzeError(error as Error);
             console.error('Error initializing agent:', error instanceof Error ? error.message : error);
-            this.status = AgentStatus.ERROR;
-            this.publishAgentStatus(); // Publish ERROR status
-            return false;
+        this.status = AgentStatus.ERROR;
+        this.logEvent({
+            eventType: 'agent_initialization_failed',
+            agentId: this.id,
+            missionId: this.missionId,
+            status: this.status,
+            timestamp: new Date().toISOString()
+        });
+        this.publishAgentStatus(); // Publish ERROR status
+        return false;
         }
     }
 
@@ -339,6 +360,13 @@ Please consider this context and the available plugins when planning and executi
                     }
 
                     this.status = AgentStatus.WAITING_FOR_USER_INPUT;
+                    this.logEvent({
+                        eventType: 'agent_waiting_for_user_input',
+                        agentId: this.id,
+                        missionId: this.missionId,
+                        status: this.status,
+                        timestamp: new Date().toISOString()
+                    });
                     step.status = StepStatus.WAITING;
                     this.waitingSteps.set(requestId, step.id);
                     console.log(`[Agent ${this.id}] Stored waiting step for requestId: ${requestId}, stepId: ${step.id}. Current waitingSteps size: ${this.waitingSteps.size}`);
@@ -470,6 +498,13 @@ Please consider this context and the available plugins when planning and executi
                 }
             } else if (!this.hasActiveWork()) {
                 this.status = AgentStatus.COMPLETED;
+                this.logEvent({
+                    eventType: 'agent_completed',
+                    agentId: this.id,
+                    missionId: this.missionId,
+                    status: this.status,
+                    timestamp: new Date().toISOString()
+                });
                 const finalStep = this.steps.filter(s => s.status === StepStatus.COMPLETED).pop();
                 if (finalStep) {
                     this.output = await this.agentPersistenceManager.loadWorkProduct(this.id, finalStep.id);
@@ -482,6 +517,13 @@ Please consider this context and the available plugins when planning and executi
         } catch (error) {
             console.error('Error in agent main loop:', error instanceof Error ? error.message : error);
             this.status = AgentStatus.ERROR;
+            this.logEvent({
+                eventType: 'agent_error',
+                agentId: this.id,
+                missionId: this.missionId,
+                status: this.status,
+                timestamp: new Date().toISOString()
+            });
             this.say(`Error in agent execution: ${error instanceof Error ? error.message : String(error)}`);
             await this.notifyTrafficManager();
         }
@@ -571,6 +613,13 @@ Please consider this context and the available plugins when planning and executi
                         }];
                         step.status = StepStatus.COMPLETED;
                         this.status = AgentStatus.RUNNING;
+                        this.logEvent({
+                            eventType: 'agent_resumed_from_waiting',
+                            agentId: this.id,
+                            missionId: this.missionId,
+                            status: this.status,
+                            timestamp: new Date().toISOString()
+                        });
                         this.waitingSteps.delete(requestId);
                         console.log(`[Agent ${this.id}] Processed user input for requestId: ${requestId}. New waitingSteps size: ${this.waitingSteps.size}`);
                         await this.notifyTrafficManager();
@@ -1355,12 +1404,26 @@ Please consider this context and the available plugins when planning and executi
             console.log(`Agent ${this.id} current question resolved due to pause.`);
         }
         this.status = AgentStatus.PAUSED;
+        this.logEvent({
+            eventType: 'agent_paused',
+            agentId: this.id,
+            missionId: this.missionId,
+            status: this.status,
+            timestamp: new Date().toISOString()
+        });
         await this.notifyTrafficManager();
         await this.saveAgentState();
     }
 
     async abort() {
         this.status = AgentStatus.ABORTED;
+        this.logEvent({
+            eventType: 'agent_aborted',
+            agentId: this.id,
+            missionId: this.missionId,
+            status: this.status,
+            timestamp: new Date().toISOString()
+        });
         await this.notifyTrafficManager();
         await this.saveAgentState();
         // if (this.status === AgentStatus.ABORTED) {
@@ -1383,6 +1446,13 @@ Please consider this context and the available plugins when planning and executi
     async resume() {
         if (this.status === AgentStatus.PAUSED || this.status === AgentStatus.INITIALIZING) {
             this.status = AgentStatus.RUNNING;
+            this.logEvent({
+                eventType: 'agent_resumed',
+                agentId: this.id,
+                missionId: this.missionId,
+                status: this.status,
+                timestamp: new Date().toISOString()
+            });
             this.setupCheckpointing(15); // Re-setup checkpointing interval, assuming 15 minutes
             console.log(`Agent ${this.id} re-setup checkpoint interval due to resume.`);
             await this.notifyTrafficManager();
@@ -2397,6 +2467,13 @@ Explanation: ${resolution.explanation}`);
             console.log(`[Agent ${this.id}] Detected repeated failure of step ${failedStep.id}. Aborting to prevent infinite loop.`);
             this.say(`Step ${failedStep.actionVerb} failed again. Aborting mission to prevent infinite loop.`);
             this.status = AgentStatus.ERROR;
+            this.logEvent({
+                eventType: 'agent_error',
+                agentId: this.id,
+                missionId: this.missionId,
+                status: this.status,
+                timestamp: new Date().toISOString()
+            });
             await this.notifyTrafficManager();
             return;
         }
@@ -2405,6 +2482,13 @@ Explanation: ${resolution.explanation}`);
         if (this.replanDepth >= this.maxReplanDepth) {
             console.warn(`[Agent ${this.id}] Maximum replanning depth (${this.maxReplanDepth}) reached. Aborting further replanning to prevent infinite recursion.`);
             this.status = AgentStatus.ERROR;
+            this.logEvent({
+                eventType: 'agent_error',
+                agentId: this.id,
+                missionId: this.missionId,
+                status: this.status,
+                timestamp: new Date().toISOString()
+            });
             this.say(`Maximum replanning depth reached. This suggests a fundamental issue that cannot be resolved through replanning. Mission aborted.`);
             return;
         }
@@ -2440,6 +2524,13 @@ Explanation: ${resolution.explanation}`);
         if (this.replannedSteps.has(failedStepId) || recentFailures.length >= 2) {
             console.warn(`[Agent ${this.id}] Multiple failures detected for action verb '${failedVerb}' or step already replanned. Aborting further replanning to prevent loop.`);
             this.status = AgentStatus.ERROR;
+            this.logEvent({
+                eventType: 'agent_error',
+                agentId: this.id,
+                missionId: this.missionId,
+                status: this.status,
+                timestamp: new Date().toISOString()
+            });
             this.say(`Multiple failures for action verb '${failedVerb}'. This suggests a fundamental issue that cannot be resolved through replanning. Mission aborted.`);
             return;
         }
@@ -2463,6 +2554,13 @@ Explanation: ${resolution.explanation}`);
             // For schema failures, the issue is likely in the ACCOMPLISH plugin itself
             console.error(`[Agent ${this.id}] Schema validation failure suggests a bug in the ACCOMPLISH plugin. Error: ${errorMsg}`);
             this.status = AgentStatus.ERROR;
+            this.logEvent({
+                eventType: 'agent_error',
+                agentId: this.id,
+                missionId: this.missionId,
+                status: this.status,
+                timestamp: new Date().toISOString()
+            });
             this.say(`Schema validation failure in planning system. This requires system-level debugging. Mission aborted.`);
             return;
         }
