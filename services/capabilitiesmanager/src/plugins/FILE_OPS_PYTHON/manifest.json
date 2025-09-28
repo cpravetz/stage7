@@ -10,12 +10,16 @@
       "required": false,
       "type": "string",
       "description": "The path for the filename to read, write, or append content (relative paths only for security)"
+    ,
+      "aliases": ["filePath", "fileName", "filename", "pathName"]
     },
     {
       "name": "fileId",
       "required": false,
       "type": "string",
       "description": "File ID from MissionFile system (alternative to path). When provided, the file will be read from the Librarian service using this ID."
+    ,
+      "aliases": ["file_id", "id", "missionFileId"]
     },
     {
       "name": "operation",
@@ -28,6 +32,8 @@
       "required": false,
       "type": "string",
       "description": "For write and append operations, the content to write or append"
+    ,
+      "aliases": ["body", "text", "data", "fileContent"]
     }
   ],
   "outputDefinitions": [

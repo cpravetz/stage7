@@ -76,9 +76,14 @@ async function transformInputsWithBrain(
                 Inputs Provided (from the user/previous steps):
                 ${JSON.stringify(Object.fromEntries(providedInputs), null, 2)}
 
+                IMPORTANT BEHAVIOR RULES (please follow exactly):
+                1) If a required input is missing but there already exists another provided input whose name and value clearly correspond to the missing input (for example camelCase vs snake_case, synonyms like filePath vs path, or identical values), RENAME that existing provided input to the required input name instead of adding a new duplicate input. Prefer renaming over adding a new input when it preserves intent and types match.
+                2) If multiple candidate provided inputs could be the intended source, choose the one with the closest string similarity and matching value type, and document your choice in a top-level field '_repair_note' in the returned JSON (this field will be ignored by the system but is useful for auditing).
+                3) If you must add a new input (no candidate exists), add it with appropriate 'value' and 'valueType' or as 'outputName'/'sourceStep' if you can determine it.
+                4) RETURN ONLY A SINGLE JSON OBJECT mapping final input names to values. Do NOT include explanatory text or markdown. If you include '_repair_note', it must be a string field in the same object.
+
                 Your Goal: Create a JSON object where keys are the input names and values are the corresponding transformed values.
                 This object MUST include every required input with non-empty values.
-                Return ONLY the transformed JSON object.
             `;
 
             const response = await authenticatedApi.post(
@@ -187,15 +192,27 @@ export const validateAndStandardizeInputs = async (
         // First pass: Match and standardize inputs
         for (const inputDef of inputDefinitions) {
             const inputName = inputDef.name;
+            // Find an input key that matches the input definition name or any declared aliases.
             const inputKey = Array.from(sanitizedInputs.keys()).find(key => {
-                if (typeof key !== 'string') {
-                    return false;
-                }
+                if (typeof key !== 'string') return false;
                 const lowerKey = key.toLowerCase();
                 const lowerInputName = inputName.toLowerCase();
-                return lowerKey === lowerInputName || 
-                       lowerKey === lowerInputName + 's' || 
-                       (lowerInputName.endsWith('s') && lowerKey + 's' === lowerInputName);
+
+                // Direct match or simple pluralization handling
+                if (lowerKey === lowerInputName || lowerKey === lowerInputName + 's' || (lowerInputName.endsWith('s') && lowerKey + 's' === lowerInputName)) {
+                    return true;
+                }
+
+                // Check manifest-declared aliases if present
+                const aliases: string[] = (inputDef as any).aliases || [];
+                for (const a of aliases) {
+                    if (typeof a === 'string' && lowerKey === a.toLowerCase()) return true;
+                }
+
+                // CamelCase vs snake_case normalization: strip underscores and compare
+                if (lowerKey.replace(/_/g, '') === lowerInputName.replace(/_/g, '')) return true;
+
+                return false;
             });
 
             if (inputKey) {

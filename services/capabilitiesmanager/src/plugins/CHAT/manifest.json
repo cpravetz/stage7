@@ -9,7 +9,8 @@
       "name": "message",
       "type": "string",
       "description": "The message to send to the user",
-      "required": true
+      "required": true,
+      "aliases": ["msg","text","body"]
     }
   ],
   "outputDefinitions": [

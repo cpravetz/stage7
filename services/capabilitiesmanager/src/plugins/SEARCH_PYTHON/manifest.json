@@ -8,7 +8,8 @@
       "name": "searchTerm",
       "required": true,
       "type": "string",
-      "description": "The term to search for using intelligent provider fallback"
+      "description": "The term to search for using intelligent provider fallback",
+      "aliases": ["query","keywords","terms","q"]
     }
   ],
   "outputDefinitions": [

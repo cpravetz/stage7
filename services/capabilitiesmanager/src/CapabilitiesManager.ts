@@ -14,6 +14,7 @@ import { PluginExecutor } from './utils/pluginExecutor';
 
 export class CapabilitiesManager extends BaseEntity {
     private librarianUrl: string = process.env.LIBRARIAN_URL || 'librarian:5040';
+    private missionControlUrl: string = process.env.MISSIONCONTROL_URL || 'missioncontrol:5030';
     private server: any;
     private configManager!: ConfigManager;
     private pluginRegistry!: PluginRegistry;
@@ -136,7 +137,7 @@ export class CapabilitiesManager extends BaseEntity {
 
 
             // Initialize PluginExecutor after ConfigManager is available
-            this.pluginExecutor = new PluginExecutor(this.configManager, this.containerManager, this.librarianUrl, this.securityManagerUrl);
+            this.pluginExecutor = new PluginExecutor(this.configManager, this.containerManager, this.librarianUrl, this.securityManagerUrl, this.missionControlUrl);
             console.log(`[${trace_id}] ${source_component}: PluginExecutor initialized.`);
 
             await this.start(trace_id);

@@ -14,7 +14,6 @@ describe('Step', () => {
         mockPersistenceManager.logEvent = jest.fn().mockResolvedValue(undefined);
         mockPersistenceManager.saveWorkProduct = jest.fn().mockResolvedValue(undefined);
     });
-
     describe('handleForeach', () => {
         const mockExecuteAction = jest.fn();
         const mockThinkAction = jest.fn();
@@ -202,6 +201,7 @@ describe('Step', () => {
         });
     });
 
+
     describe('getOutputType', () => {
         it('should return PLAN if the step result contains a plan', () => {
             const step = new Step({
@@ -296,4 +296,48 @@ describe('Step', () => {
             const newSteps = result[0].result as any[];
             expect(newSteps[0].actionVerb).toBe('FALSE_ACTION');
         });
+
+        it('should auto-map a single output from a producer when consumer expects a different output name and emit remap event', async () => {
+            // Create a producer step that completed with a single output named 'answer'
+            const producer = new Step({
+                missionId: 'm1',
+                actionVerb: 'GENERATE',
+                stepNo: 1,
+                persistenceManager: mockPersistenceManager,
+                status: StepStatus.COMPLETED,
+                result: [{ name: 'answer', resultType: PluginParameterType.STRING, result: 'The poem', success: true, resultDescription: 'generated answer' }]
+            });
+
+            // Consumer step depends on producer.outputName 'poem'
+            const consumer = new Step({
+                missionId: 'm1',
+                actionVerb: 'FILE_OPERATION',
+                stepNo: 2,
+                persistenceManager: mockPersistenceManager,
+                dependencies: [{ sourceStepId: producer.id, outputName: 'poem', inputName: 'content' }],
+                inputValues: new Map()
+            });
+
+            const allSteps: Step[] = [producer, consumer];
+
+            // Ensure areDependenciesSatisfied treats this as satisfied due to single producer output
+            expect(consumer.areDependenciesSatisfied(allSteps)).toBe(true);
+
+            // Populate inputs from dependencies and verify auto-mapping happened
+            consumer.populateInputsFromDependencies(allSteps);
+            const populated = consumer.inputValues.get('content');
+            expect(populated).toBeDefined();
+            expect(populated!.value).toBe('The poem');
+            expect(populated!.args).toBeDefined();
+            expect(populated!.args!.auto_mapped_from).toBe('answer');
+
+            // Verify an event was logged for dependency_auto_remap
+            expect(mockPersistenceManager.logEvent).toHaveBeenCalled();
+            const calls = (mockPersistenceManager.logEvent as jest.Mock).mock.calls;
+            const remapCall = calls.find(c => c[0]?.eventType === 'dependency_auto_remap');
+            expect(remapCall).toBeDefined();
+            expect(remapCall[0].dependency).toContain(`${producer.id}.poem`);
+            expect(remapCall[0].mappedFrom).toBe('answer');
+        });
     });
+});

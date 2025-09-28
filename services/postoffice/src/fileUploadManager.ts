@@ -3,6 +3,7 @@ import multer from 'multer';
 import { MissionFile } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { FileUploadService } from './fileUploadService';
+import path from 'path';
 import { AxiosInstance } from 'axios';
 
 export class FileUploadManager {
@@ -128,6 +129,85 @@ export class FileUploadManager {
                     error: 'Internal server error deleting file',
                     message: error instanceof Error ? error.message : 'Unknown error'
                 });
+            }
+        });
+
+        // Import an existing file from the shared filesystem into PostOffice-managed storage
+        app.post('/missions/:missionId/files/import', express.json(), async (req, res) => {
+            try {
+                const { sourcePath, originalName, mimeType, description, uploadedBy } = req.body || {};
+                if (!sourcePath || !originalName) {
+                    return res.status(400).json({ error: 'sourcePath and originalName are required' });
+                }
+
+                // Sanity: ensure sourcePath is absolute
+                if (!path.isAbsolute(sourcePath)) {
+                    return res.status(400).json({ error: 'sourcePath must be an absolute path' });
+                }
+
+                // Validate that the sourcePath is within an allowed directory for security.
+                // Accept files either from PostOffice's own storage base or from the
+                // shared files folder (used by FILE_OPS plugin). This supports the
+                // case where plugins write to a shared mount and PostOffice imports it.
+                const missionBase = process.env.MISSION_FILES_STORAGE_PATH || path.join(process.cwd(), 'mission-files');
+                const sharedBase = process.env.SHARED_FILES_PATH || '/usr/src/app/shared/mission-files/';
+                const normalizedMissionBase = path.resolve(missionBase);
+                const normalizedSharedBase = path.resolve(sharedBase);
+                const normalizedSource = path.resolve(sourcePath);
+
+                const allowedBases = [normalizedMissionBase, normalizedSharedBase];
+                const isAllowed = allowedBases.some(b => normalizedSource.startsWith(b));
+                if (!isAllowed) {
+                    return res.status(403).json({ error: 'sourcePath is outside of allowed storage areas' });
+                }
+
+                const user = (req as any).user;
+                const importer = uploadedBy || user?.componentType || 'plugin';
+
+                // Import the file into PostOffice-managed storage
+                const uploadedFile = await this.fileUploadService.uploadFileFromPath(
+                    normalizedSource,
+                    originalName,
+                    mimeType,
+                    importer,
+                    { description }
+                );
+
+                const missionResponse = await this.authenticatedApi.get(`http://${this.getComponentUrl('Librarian')}/loadData/${req.params.missionId}`, {
+                    params: { collection: 'missions', storageType: 'mongo' }
+                });
+
+                const mission = missionResponse.data.data;
+                const existingFiles = mission.attachedFiles || [];
+                const missionFile = this.fileUploadService.convertToMissionFile(uploadedFile);
+
+                const updatedMission = {
+                    ...mission,
+                    attachedFiles: [...existingFiles, missionFile],
+                    updatedAt: new Date()
+                };
+
+                await this.authenticatedApi.post(`http://${this.getComponentUrl('Librarian')}/storeData`, {
+                    id: req.params.missionId,
+                    data: updatedMission,
+                    collection: 'missions',
+                    storageType: 'mongo'
+                });
+
+                res.status(200).json({
+                    message: 'Imported file into mission',
+                    uploadedFiles: [{
+                        id: missionFile.id,
+                        originalName: missionFile.originalName,
+                        size: missionFile.size,
+                        mimeType: missionFile.mimeType,
+                        uploadedAt: missionFile.uploadedAt
+                    }]
+                });
+
+            } catch (error) {
+                console.error('Error importing file to mission:', error);
+                res.status(500).json({ error: 'Failed to import file', message: error instanceof Error ? error.message : 'Unknown error' });
             }
         });
     }

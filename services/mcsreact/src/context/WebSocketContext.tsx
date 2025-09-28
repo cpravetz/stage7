@@ -4,9 +4,12 @@ import { v4 as uuidv4 } from 'uuid';
 import axios from 'axios';
 import { SecurityClient } from '../SecurityClient';
 import { MapSerializer } from '../shared-browser';
+// Reuse shared types for Mission where possible to keep types consistent across packages
+import { Mission as SharedMission, MissionFile as SharedMissionFile } from '@cktmcs/shared';
 import { API_BASE_URL, WS_URL } from '../config';
 
-export interface MissionFile {
+// Local lightweight MissionFile used by the frontend. Prefer the shared MissionFile when available.
+export interface LocalMissionFile {
   id: string;
   originalName: string;
   size: number;
@@ -15,6 +18,9 @@ export interface MissionFile {
   uploadedBy: string;
   description?: string;
 }
+
+// Backwards-compatible export: other modules import { MissionFile } from this context
+export type MissionFile = LocalMissionFile;
 
 // Split context into smaller, focused contexts to prevent unnecessary re-renders
 interface WebSocketContextType {
@@ -28,7 +34,7 @@ interface WebSocketContextType {
   handleControlAction: (action: string) => Promise<void>;
   handleLoadMission: (missionId: string) => Promise<void>;
   listMissions: () => Promise<void>;
-  missions: Partial<Mission>[];
+  missions: Partial<SharedMission>[];
   pendingUserInput?: {
     request_id: string;
     question: string;
@@ -48,7 +54,7 @@ interface MissionContextType {
 
 interface DataContextType {
   workProducts: { type: 'Interim' | 'Final' | 'Plan', name: string, url: string, workproduct: any }[];
-  sharedFiles: MissionFile[];
+  sharedFiles: LocalMissionFile[];
   statistics: any;
   agentStatistics: Map<string, Array<any>>;
   agentDetails: any[];
@@ -75,11 +81,11 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [activeMissionId, setActiveMissionId] = useState<string | null>(null);
   const [isPaused, setIsPaused] = useState<boolean>(false);
   const [missionStatus, setMissionStatus] = useState<any>(null);
-  const [missions, setMissions] = useState<Partial<Mission>[]>([]);
+  const [missions, setMissions] = useState<Partial<SharedMission>[]>([]);
   
   // Data state
   const [workProducts, setWorkProducts] = useState<{ type: 'Interim' | 'Final' | 'Plan', name: string, url: string, workproduct: any }[]>([]);
-  const [sharedFiles, setSharedFiles] = useState<MissionFile[]>([]);
+  const [sharedFiles, setSharedFiles] = useState<LocalMissionFile[]>([]);
   const [agentDetails, setAgentDetails] = useState<any[]>([]);
   const [statistics, setStatistics] = useState<any>({
     llmCalls: 0,
@@ -125,7 +131,10 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       STATISTICS: "agentStatistics",
       STATUS_UPDATE: "statusUpdate",
       AGENT_UPDATE: "agentUpdate",
-      SHARED_FILES_UPDATE: "shared_files_update"
+      LIST_MISSIONS: "listMissions",
+      // Backwards/forwards compatible: backend currently sends 'sharedFilesUpdate' (camelCase)
+      // but older frontend code expected 'shared_files_update'. Accept both when handling.
+      SHARED_FILES_UPDATE: "sharedFilesUpdate"
     };
 
     console.log('Processing WebSocket message:', data.type);
@@ -180,6 +189,39 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             return [...prev, newProduct];
           }
         });
+        // If the backend included attachedFiles with this work product, merge them into the
+        // sharedFiles state so the Files tab shows newly created/attached files immediately.
+        try {
+          const attached = data.content && (data.content.attachedFiles || data.content.attached_files || []);
+          if (attached && Array.isArray(attached) && attached.length > 0) {
+            setSharedFiles((prev: LocalMissionFile[]) => {
+              const map = new Map<string, LocalMissionFile>();
+              // seed with existing files
+              for (const f of prev) map.set(f.id, f);
+
+              // normalize and upsert attached files
+              for (const af of attached) {
+                const id = af.id || af.storageId || af.storage_id || uuidv4();
+                const normalized: LocalMissionFile = {
+                  id,
+                  originalName: af.originalName || af.filename || af.name || 'file',
+                  size: af.size || af.size_bytes || 0,
+                  mimeType: af.mimeType || af.mime_type || 'application/octet-stream',
+                  uploadedAt: af.uploadedAt || af.uploaded_at || new Date().toISOString(),
+                  uploadedBy: af.uploadedBy || af.uploaded_by || 'system',
+                  description: af.description || af.desc || undefined
+                };
+                map.set(id, normalized);
+              }
+
+              const merged = Array.from(map.values());
+              if (JSON.stringify(prev) === JSON.stringify(merged)) return prev;
+              return merged;
+            });
+          }
+        } catch (e) {
+          console.error('Failed to merge attachedFiles from work product update', e);
+        }
         break;
         
       case MessageType.STATISTICS:
@@ -272,9 +314,20 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         break;
         
       case MessageType.SHARED_FILES_UPDATE:
-        setSharedFiles((prev: MissionFile[]) => {
-          const newFiles = data.payload.files || [];
+        setSharedFiles((prev: LocalMissionFile[]) => {
+          // Backend may send the files either in `content` (current BaseEntity.sendMessage uses `content`)
+          // or in `payload` (older code paths). Read both for robustness.
+          const newFiles = (data.payload && data.payload.files) || (data.content && data.content.files) || [];
           // Only update if files actually changed
+          if (JSON.stringify(prev) === JSON.stringify(newFiles)) return prev;
+          return newFiles;
+        });
+        break;
+
+      // Also accept legacy/alternate snake_case message type just in case
+      case 'shared_files_update':
+        setSharedFiles((prev: LocalMissionFile[]) => {
+          const newFiles = (data.payload && data.payload.files) || (data.content && data.content.files) || [];
           if (JSON.stringify(prev) === JSON.stringify(newFiles)) return prev;
           return newFiles;
         });

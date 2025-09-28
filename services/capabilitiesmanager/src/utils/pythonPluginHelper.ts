@@ -189,13 +189,35 @@ export function validatePythonOutput(stdout: string, pluginDefinition: PluginDef
             if (typeof output !== 'object' || output === null) {
                 throw new Error("Each output must be an object");
             }
-            const requiredFields = ['success', 'name', 'resultType', 'result', 'resultDescription'];
+        }
+
+        // Validate presence of required fields except 'result' which may be omitted for error outputs.
+        // We'll normalize missing 'result' below based on the resultType.
+        for (const output of result) {
+            const requiredFields = ['success', 'name', 'resultType', 'resultDescription'];
             for (const field of requiredFields) {
                 if (!(field in output)) {
                     throw new Error(`Missing required field: ${field}`);
                 }
             }
         }
+
+        // The 'result' field is expected for successful/non-error outputs.
+        // Some plugins may return an error object that omits 'result' entirely.
+        // Normalize such cases by ensuring 'result' exists and is null when resultType indicates an error.
+        for (const output of result) {
+            if (!('result' in output)) {
+                const lowerType = String(output.resultType).toLowerCase();
+                if (lowerType === 'error' || output.resultType === PluginParameterType.ERROR) {
+                    // normalize missing result on error outputs
+                    (output as any).result = null;
+                } else {
+                    // For non-error outputs, missing 'result' is a validation failure
+                    throw new Error(`Missing required field: result`);
+                }
+            }
+        }
+
         return result;
     } catch (error: any) {
         console.error(`[${trace_id}] ${source_component}: Invalid Python plugin output for ${pluginDefinition.verb} v${pluginDefinition.version}: JSON parsing failed. Error: ${error.message}`);

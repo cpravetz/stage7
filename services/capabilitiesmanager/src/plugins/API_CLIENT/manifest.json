@@ -9,30 +9,40 @@
       "required": true,
       "type": "string",
       "description": "The HTTP method (e.g., GET, POST, PUT, DELETE)."
+    ,
+      "aliases": ["httpMethod","verb","http_method"]
     },
     {
       "name": "url",
       "required": true,
       "type": "string",
       "description": "The API endpoint URL. This must be a full, valid, and accessible URL."
+    ,
+      "aliases": ["endpoint","uri"]
     },
     {
       "name": "headers",
       "required": false,
       "type": "object",
       "description": "A dictionary of HTTP headers."
+    ,
+      "aliases": ["http_headers","hdrs","header"]
     },
     {
       "name": "body",
       "required": false,
       "type": "object",
       "description": "The request body for methods like POST or PUT."
+    ,
+      "aliases": ["payload","data"]
     },
     {
       "name": "auth",
       "required": false,
       "type": "object",
       "description": "Authentication details (e.g., API key, bearer token)."
+    ,
+      "aliases": ["authentication","credentials","auth_info"]
     }
   ],
   "inputGuidance":"Required inputs include 'method' and 'url'. The URL must be a complete and valid API endpoint. This tool is not for general web browsing. If you do not have a specific API endpoint to call, use a different tool. The user is responsible for providing all necessary information to make a valid API call.",

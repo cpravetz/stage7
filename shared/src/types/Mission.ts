@@ -9,6 +9,7 @@ export interface MissionFile {
     uploadedBy: string;
     storagePath: string;
     description?: string;
+    preview?: string; // small text preview (optional, truncated)
 }
 
 export interface Mission {

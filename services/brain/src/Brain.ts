@@ -141,14 +141,19 @@ export class Brain extends BaseEntity {
 
     async generate(req: express.Request, res: express.Response) {
         // No retry limit - keep trying until we find a working model
-        const modelName = req.body.modelName;
-        const optimization = req.body.optimization;
-        const conversationType = req.body.conversationType;
-        const convertParams = req.body.convertParams;
+    const modelName = req.body.modelName;
+    const optimization = req.body.optimization || 'accuracy';
+    const conversationType = req.body.conversationType || LLMConversationType.TextToText;
+    const convertParams = req.body.convertParams;
+
+    console.log(`[Brain Generate] Request params - modelName: ${modelName || 'none'}, optimization: ${optimization}, conversationType: ${conversationType}`);
 
         let attempt = 0;
         let lastError: string = '';
         let lastModelName: string | null = null;
+
+        // Maintain an excluded models list so we don't retry the same failing provider
+        const excludedModels: string[] = [];
 
         while (true) { // Infinite retry until success or no models available
             attempt++;
@@ -158,7 +163,7 @@ export class Brain extends BaseEntity {
             try {
                 selectedModel = modelName && attempt === 1 ?
                     this.modelManager.getModel(modelName) :
-                    this.modelManager.selectModel(optimization, conversationType);
+                    this.modelManager.selectModel(optimization, conversationType, excludedModels);
 
                 if (!selectedModel || !selectedModel.isAvailable() || !selectedModel.service) {
                     if (attempt === 1) {
@@ -216,10 +221,18 @@ export class Brain extends BaseEntity {
                     } else {
                         this.modelTimeoutCounts[selectedModel.name] = 0;
                     }
+
+                    // Exclude this model from further selection attempts for this request
+                    try {
+                        excludedModels.push(selectedModel.name);
+                        console.log(`[Brain Generate] Excluding model ${selectedModel.name} from subsequent attempts`);
+                    } catch (e) {
+                        console.warn('[Brain Generate] Failed to exclude model from retries', e);
+                    }
                 }
 
-                // Check if we have any available models left
-                const availableModels = this.getAvailableModels();
+                // Check if we have any available models left (not blacklisted/unavailable)
+                const availableModels = this.modelManager.getAvailableAndNotBlacklistedModels(conversationType || LLMConversationType.TextToText);
                 if (availableModels.length === 0) {
                     console.error(`[Brain Generate] No available models left after ${attempt} attempts. Last error: ${lastError}`);
                     res.status(500).json({ error: `No available models. Last error: ${lastError}` });
@@ -228,6 +241,8 @@ export class Brain extends BaseEntity {
 
                 const retryDelay = Math.min(Math.pow(2, Math.min(attempt, 10)) * 1000, 30000); // Cap at 30s
                 console.log(`[Brain Generate] Attempting retry ${attempt + 1} in ${retryDelay / 1000}s (${availableModels.length} models available)`);
+                // Clear selection cache to avoid repeated cached picks
+                this.modelManager.clearModelSelectionCache();
                 await new Promise(resolve => setTimeout(resolve, retryDelay));
             }
         }

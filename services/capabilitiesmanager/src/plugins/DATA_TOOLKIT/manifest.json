@@ -24,22 +24,31 @@
       "description": "The JSON object to query. Must be a valid JSON object. Used with 'query_json'."
     },
     {
+      "name": "json_string",
+      "type": "string",
+      "required": false,
+      "description": "Legacy alias: use json_object instead.",
+      "aliases": ["jsonObject","jsonStr","json"]
+    },
+    {
       "name": "query",
       "type": "object",
       "required": false,
       "description": "A dictionary of key-value pairs to filter a list of JSON objects. Used with 'query_json'."
     },
     {
-      "name": "json_string",
+      "name": "json_string_validate",
       "type": "string",
       "required": false,
-      "description": "The JSON string to validate. Used with 'validate_json'."
+      "description": "The JSON string to validate. Used with 'validate_json'.",
+      "aliases": ["jsonStringToValidate","jsonToValidate"]
     },
     {
       "name": "csv_data",
       "type": "string",
       "required": false,
-      "description": "The CSV data as a string. Used with 'csv_to_json'."
+      "description": "The CSV data as a string. Used with 'csv_to_json'.",
+      "aliases": ["csv","csvString","csvStringData"]
     },
     {
       "name": "json_data",

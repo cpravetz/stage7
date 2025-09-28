@@ -33,12 +33,14 @@ export class PluginExecutor {
     private containerManager: ContainerManager;
     private librarianUrl: string;
     private securityManagerUrl: string;
+    private missionControlUrl: string;  
 
-    constructor(configManager: ConfigManager, containerManager: ContainerManager, librarianUrl: string, securityManagerUrl: string) {
+    constructor(configManager: ConfigManager, containerManager: ContainerManager, librarianUrl: string, securityManagerUrl: string, missionControlUrl: string) {
         this.configManager = configManager;
         this.containerManager = containerManager;
         this.librarianUrl = librarianUrl;
         this.securityManagerUrl = securityManagerUrl;
+        this.missionControlUrl = missionControlUrl;
     }
 
     public async execute(pluginToExecute: PluginDefinition, inputsForPlugin: Map<string, InputValue>, actualPluginRootPath: string, trace_id: string): Promise<PluginOutput[]> {
@@ -158,6 +160,17 @@ export class PluginExecutor {
                     inputsForPlugin.set('librarian_url', {
                         inputName: 'librarian_url',
                         value: librarianUrlEnv,
+                        valueType: PluginParameterType.STRING,
+                        args: {}
+                    });
+                }
+            }
+            if (!inputsForPlugin.has('missioncontrol_url')) {
+                const missionControlUrlEnv = process.env.MISSIONCONTROL_URL || this.missionControlUrl || null;
+                if (missionControlUrlEnv) {
+                    inputsForPlugin.set('missioncontrol_url', {
+                        inputName: 'missioncontrol_url',
+                        value: missionControlUrlEnv,
                         valueType: PluginParameterType.STRING,
                         args: {}
                     });

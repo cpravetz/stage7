@@ -8,19 +8,24 @@
             "name": "goal",
             "required": false,
             "type": "string",
-            "description": "A concise goal for a specific task. If a missionId is provided, this goal is a sub-task within that mission."
+            "description": "A concise goal for a specific task. If a missionId is provided, this goal is a sub-task within that mission.",
+            "aliases": ["objective","task","aim"]
         },
         {
             "name": "missionId",
             "required": false,
             "type": "string",
             "description": "The ID of the overall mission. The plugin can use this to fetch the full mission goal from the librarian for context."
+        ,
+            "aliases": ["mission_id","mission","missionID"]
         },
         {
             "name": "novel_actionVerb",
             "required": false,
             "type": "object",
             "description": "Structured information about a novel action verb to be handled, including its original verb, description, inputs, and outputs. Used when ACCOMPLISH is invoked to handle an unknown verb."
+        ,
+            "aliases": ["novelVerb","actionVerbSpec","novel_action_verb"]
         }
     ],
     "outputDefinitions": [

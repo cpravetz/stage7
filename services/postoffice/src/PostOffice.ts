@@ -177,6 +177,10 @@ export class PostOffice extends BaseEntity {
         this.app.get('/brain/performance/rankings', (req, res) => { this.getModelRankings(req, res);});
         this.app.post('/brain/evaluations', (req, res) => { this.submitModelEvaluation(req, res);});
 
+        this.app.delete('/missions/:missionId/files/:fileId', (req, res) => this.deleteMissionFile(req, res));
+
+        this.app.get('/missions/:missionId/files/:fileId/download', (req, res) => this.downloadMissionFile(req, res));
+
         // Setup plugin management routes
         this.pluginManager.setupRoutes(this.app);
 
@@ -983,6 +987,60 @@ export class PostOffice extends BaseEntity {
             analyzeError(error as Error);
             console.error('Error retrieving step details from AgentSet:', error instanceof Error ? error.message : error);
             return res.status(500).json({ error: 'Failed to retrieve step details' });
+        }
+    }
+
+    private async deleteMissionFile(req: express.Request, res: express.Response) {
+        try {
+            const { missionId, fileId } = req.params;
+            const missionControlUrl = this.getComponentUrl('MissionControl');
+            if (!missionControlUrl) {
+                return res.status(503).send({ error: 'MissionControl service not available' });
+            }
+    
+            // Forward the DELETE request to MissionControl
+            const response = await this.authenticatedApi.delete(`http://${missionControlUrl}/missions/${missionId}/files/${fileId}`);
+            
+            res.status(response.status).send(response.data);
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error('Error deleting mission file:', error instanceof Error ? error.message : error);
+            res.status(500).send({ error: 'Failed to delete mission file' });
+        }
+    }
+
+    private async downloadMissionFile(req: express.Request, res: express.Response) {
+        try {
+            const { fileId } = req.params;
+            const librarianUrl = this.getComponentUrl('Librarian');
+            if (!librarianUrl) {
+                return res.status(503).send({ error: 'Librarian service not available' });
+            }
+    
+            const fileInfoResponse = await this.authenticatedApi.get(`http://${librarianUrl}/loadData/step-output-${fileId}`, {
+                params: { collection: 'step-outputs', storageType: 'mongo' }
+            });
+    
+            const fileData = fileInfoResponse.data.data;
+            if (!fileData) {
+                return res.status(404).send({ error: 'File not found' });
+            }
+    
+            const fileName = fileData.originalName || 'download';
+            const mimeType = fileData.mimeType || 'application/octet-stream';
+            const content = fileData.fileContent;
+    
+            res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+            res.setHeader('Content-Type', mimeType);
+            res.send(Buffer.from(content));
+    
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error('Error downloading mission file:', error instanceof Error ? error.message : error);
+            if (axios.isAxiosError(error) && error.response?.status === 404) {
+                return res.status(404).send({ error: 'File not found in storage.' });
+            }
+            res.status(500).send({ error: 'Failed to download mission file' });
         }
     }
 

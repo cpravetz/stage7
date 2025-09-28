@@ -139,6 +139,56 @@ export class FileUploadService {
         }
     }
 
+    /**
+     * Import an existing file from a given absolute path into PostOffice-managed storage.
+     * This reads the sourcePath, validates it, and writes it into the managed storage
+     * so PostOffice can uniformly serve and manage files.
+     */
+    async uploadFileFromPath(
+        sourcePath: string,
+        originalName: string,
+        mimeType: string | undefined,
+        uploadedBy: string,
+        options: FileUploadOptions = {}
+    ): Promise<UploadedFileInfo> {
+        // Ensure source file exists and is accessible
+        try {
+            const stat = await fs.stat(sourcePath);
+            if (!stat.isFile()) throw new Error('Source path is not a file');
+            const size = stat.size;
+
+            // Read the file
+            const fileBuffer = await fs.readFile(sourcePath);
+
+            // Use existing validation and upload path logic
+            this.validateFile(originalName, mimeType || 'application/octet-stream', size, options);
+
+            const fileId = uuidv4();
+            const storagePath = this.generateStoragePath(fileId, originalName);
+            const storageDir = path.dirname(storagePath);
+            await fs.mkdir(storageDir, { recursive: true });
+
+            await fs.writeFile(storagePath, fileBuffer);
+
+            const uploadedFile: UploadedFileInfo = {
+                id: fileId,
+                originalName,
+                mimeType: mimeType || 'application/octet-stream',
+                size,
+                storagePath,
+                uploadedBy,
+                uploadedAt: new Date(),
+                description: options.description
+            };
+
+            console.log(`Imported file from path ${sourcePath} as ${originalName} (${fileId}) by ${uploadedBy}`);
+            return uploadedFile;
+
+        } catch (error) {
+            throw new Error(`Failed to import file from path ${sourcePath}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+    }
+
     async getFile(fileId: string, storagePath: string): Promise<Buffer> {
         try {
             return await fs.readFile(storagePath);

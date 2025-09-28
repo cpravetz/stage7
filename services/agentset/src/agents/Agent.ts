@@ -297,16 +297,15 @@ Please consider this context and the available plugins when planning and executi
         try {
             if (this.status !== AgentStatus.RUNNING) return;
 
-            // console.log(`Executing step ${step.actionVerb} (${step.id})...`);
+            // Populate inputs (possibly hydrating from persistence) before any execution or delegation logic
+            await step.populateInputsFromDependencies(this.steps);
 
             if (step.recommendedRole && step.recommendedRole !== this.role && this.role !== 'coordinator') {
-                // console.log(`Step ${step.id} recommends role ${step.recommendedRole}, but this agent has role ${this.role}`);
                 const delegationResult = await this.delegateStepToSpecializedAgent(step);
                 if (delegationResult.success) {
-                    step.status = StepStatus.COMPLETED; // Mark as completed since it's delegated
+                    step.status = StepStatus.SUB_PLAN_RUNNING; // Mark as waiting for delegation result
                     return;
                 }
-                // console.log(`No specialized agent available, executing step with current agent`);
             }
 
             this.say(`Executing step: ${step.actionVerb} - ${step.description || 'No description'}`);
@@ -424,7 +423,7 @@ Please consider this context and the available plugins when planning and executi
                 }
             } else if (result[0]?.resultType === PluginParameterType.PLAN) {
                 // Apply custom output name mapping for PLAN results
-                const mappedResult = step.mapPluginOutputsToCustomNames(result);
+                const mappedResult = await step.mapPluginOutputsToCustomNames(result);
                 const planningStepResult = mappedResult[0]?.result;
                 let actualPlanArray: ActionVerbTask[] | undefined = undefined;
 
@@ -727,6 +726,8 @@ Please consider this context and the available plugins when planning and executi
         }
     }
 
+
+
     private async saveWorkProductWithClassification(stepId: string, data: PluginOutput[], isAgentEndpoint: boolean, allAgents: Agent[]): Promise<void> {
         if (this.status === AgentStatus.PAUSED || this.status === AgentStatus.ABORTED) {
             console.log(`Agent ${this.id} is in status ${this.status}, skipping saveWorkProduct for step ${stepId}.`);
@@ -757,31 +758,50 @@ Please consider this context and the available plugins when planning and executi
                 scope = 'AgentStep';
             }
 
-            // Upload outputs to shared file space for Final steps AND steps that generate user-referenced data
-            const shouldUploadToSharedSpace = (outputType === 'Final' && data && data.length > 0) ||
-                (data && data.length > 0 && this.stepGeneratesUserReferencedData(stepId, data));
+            // Upload outputs to shared file space for Final steps, steps that generate user-referenced data,
+            // and for explicit FILE_OPERATION outputs or outputs that include filenames/storage paths.
+            // outputType is an enum (OutputType.FINAL), compare accordingly
+            let uploadedFiles: MissionFile[] = [];
+            const outputsHaveFiles = Array.isArray(data) && data.some(o => !!(o as any).fileName || !!(o as any).storagePath);
+            const shouldUploadToSharedSpace = (
+                (outputType === OutputType.FINAL && data && data.length > 0) ||
+                (data && data.length > 0 && this.stepGeneratesUserReferencedData(stepId, data)) ||
+                (step && step.actionVerb === 'FILE_OPERATION') ||
+                outputsHaveFiles
+            );
 
             if (shouldUploadToSharedSpace) {
                 try {
                     const librarianUrl = await this.getServiceUrl('Librarian');
                     if (librarianUrl) {
-                        const uploadedFiles = await this.uploadStepOutputsToSharedSpace(
+                        uploadedFiles = await this.uploadStepOutputsToSharedSpace(
                             step,
                             librarianUrl
                         );
                         if (uploadedFiles.length > 0) {
-                            console.log(`Uploaded ${uploadedFiles.length} final step outputs to shared space for step ${stepId}`);
+                            console.log(`Uploaded ${uploadedFiles.length} step outputs to shared space for step ${stepId}`);
+                            
+                            // Register files with MissionControl
+                            const missionControlUrl = await this.getServiceUrl('MissionControl');
+                            if (missionControlUrl) {
+                                for (const file of uploadedFiles) {
+                                    await this.authenticatedApi.post(`http://${missionControlUrl}/missions/${this.missionId}/files/add`, file);
+                                }
+                                console.log(`Successfully registered ${uploadedFiles.length} files with MissionControl.`);
+                            } else {
+                                console.warn('MissionControl URL not available for registering uploaded files.');
+                            }
                         }
                     } else {
-                        console.warn('Librarian URL not available for uploading final step outputs');
+                        console.warn('Librarian URL not available for uploading step outputs');
                     }
                 } catch (error) {
-                    console.error('Error uploading final step outputs to shared space:', error);
+                    console.error('Error uploading step outputs to shared space:', error);
                     // Don't fail the entire operation if file upload fails
                 }
             }
 
-            const workProductPayload = {
+            const workProductPayload: any = {
                 id: stepId,
                 type: type,
                 scope: scope,
@@ -792,8 +812,12 @@ Please consider this context and the available plugins when planning and executi
                 mimeType: data[0]?.mimeType || 'text/plain',
                 fileName: data[0]?.fileName,
                 workproduct: (type === 'Plan' && data[0]?.result) ?
-                    `Plan with ${Array.isArray(data[0].result) ? data[0].result.length : Object.keys(data[0].result).length} steps` : data[0]?.result     
+                    `Plan with ${Array.isArray(data[0].result) ? data[0].result.length : Object.keys(data[0].result).length} steps` : data[0]?.result
             };
+            // If we uploaded files above, attach their metadata so the UI can list them
+            if (typeof uploadedFiles !== 'undefined' && Array.isArray(uploadedFiles) && uploadedFiles.length > 0) {
+                workProductPayload.attachedFiles = uploadedFiles;
+            }
             console.log('[Agent.ts] WORK_PRODUCT_UPDATE payload:', JSON.stringify(workProductPayload, null, 2));
 
             this.sendMessage(MessageType.WORK_PRODUCT_UPDATE, 'user', workProductPayload);
@@ -1008,19 +1032,52 @@ Please consider this context and the available plugins when planning and executi
                 const mimeType = response.data.mimeType || 'text/plain';
 
                 let resultType: PluginParameterType;
-                let parsedResult = brainResponse;
+                let parsedResult: any = brainResponse;
 
+                // If the request explicitly asked for a PLAN-like JSON response, try to parse
                 if (actionVerb === 'THINK' && (inputs.get('conversationType')?.value as LLMConversationType) === LLMConversationType.TextToCode && mimeType === 'application/json') {
                     try {
-                        parsedResult = JSON.parse(brainResponse);
+                        parsedResult = typeof brainResponse === 'string' ? JSON.parse(brainResponse) : brainResponse;
                         resultType = PluginParameterType.PLAN;
                         console.log(`[Agent ${this.id}] Parsed brainResponse as JSON for plan.`);
                     } catch (e) {
-                        console.warn(`[Agent ${this.id}] Failed to parse brainResponse as JSON, treating as string. Error:`, e);
+                        console.warn(`[Agent ${this.id}] Failed to parse brainResponse as JSON, treating as string. Error:`, e instanceof Error ? e.message : e);
                         resultType = PluginParameterType.STRING;
                     }
                 } else {
                     resultType = PluginParameterType.STRING;
+                }
+
+                // Defensive extraction: ensure string results for STRING resultType
+                if (resultType === PluginParameterType.STRING) {
+                    try {
+                        if (parsedResult === undefined || parsedResult === null) {
+                            // Try to find text in other common fields on the response object
+                            const candidate = response.data?.result || response.data?.text || response.data?.output || response.data?.generated || response.data?.response || response.data?.choices;
+                            if (candidate !== undefined && candidate !== null) {
+                                parsedResult = typeof candidate === 'string' ? candidate : (Array.isArray(candidate) ? JSON.stringify(candidate) : JSON.stringify(candidate));
+                            } else {
+                                parsedResult = '';
+                            }
+                        } else if (typeof parsedResult === 'object') {
+                            // Try common fields inside the object
+                            const fallback = parsedResult.result || parsedResult.text || (parsedResult.choices && parsedResult.choices[0] && (parsedResult.choices[0].text || parsedResult.choices[0].message)) || parsedResult.generated || parsedResult.output;
+                            if (fallback !== undefined && fallback !== null) {
+                                parsedResult = typeof fallback === 'string' ? fallback : JSON.stringify(fallback);
+                            } else {
+                                parsedResult = JSON.stringify(parsedResult);
+                            }
+                        } else {
+                            parsedResult = String(parsedResult);
+                        }
+                    } catch (e) {
+                        console.warn(`[Agent ${this.id}] Error coercing brainResponse to string result:`, e instanceof Error ? e.message : e);
+                        parsedResult = '';
+                    }
+                }
+
+                if (!parsedResult || (typeof parsedResult === 'string' && parsedResult.trim() === '')) {
+                    console.warn(`[Agent ${this.id}] WARNING: Brain returned an empty or missing result for actionVerb=${actionVerb}. Response payload:`, JSON.stringify(response.data || {}, null, 2));
                 }
 
                 return [{
@@ -1248,7 +1305,6 @@ Please consider this context and the available plugins when planning and executi
                 missionId: step.missionId,
                 outputs: step.outputs,
                 inputValues: MapSerializer.transformForSerialization(inputsForExecution),
-                //parentStep: step.parentStep,
                 recommendedRole: step.recommendedRole,
                 status: step.status,
                 stepNo: step.stepNo,
@@ -1256,8 +1312,6 @@ Please consider this context and the available plugins when planning and executi
             };
             console.log(`[Agent ${this.id}] executeActionWithCapabilitiesManager: payload for step ${step.id} (${step.actionVerb}):`, JSON.stringify(payload, null, 2));
             step.storeTempData('payload', payload);
-
-            //console.log('Agent: Executing action with CapabilitiesManager:', JSON.stringify(payload, null, 2));
 
             // Add extended timeout for CapabilitiesManager calls
             const timeout = step.actionVerb === 'ACCOMPLISH' ? 3600000 : 1800000; // 60m for ACCOMPLISH, 30m for others
@@ -1715,7 +1769,7 @@ Please consider this context and the available plugins when planning and executi
         switch (message.type) {
           case CollaborationMessageType.TASK_DELEGATION:
             const task = message.payload as TaskDelegationRequest;
-            console.log(`Agent ${this.id} received delegated task: ${task.description}`);
+            console.log(`Agent ${this.id} received delegated task:`, JSON.stringify(task, null, 2));
             if (!task.taskType) {
                 console.log('Agent Line 1364 - Missing required property "taskType" in task');
                 throw new Error(`Missing required property 'taskType' in task`);
@@ -1723,12 +1777,21 @@ Please consider this context and the available plugins when planning and executi
 
             const deserializedInputs = MapSerializer.transformFromSerialization(task.inputs);
 
+            const outputsAsObject = (task as any).outputs;
+            const deserializedOutputs = new Map<string, string>();
+            if (outputsAsObject && outputsAsObject.entries) {
+                for (const [key, value] of outputsAsObject.entries) {
+                    deserializedOutputs.set(key, value);
+                }
+            }
             const newStep = new Step({
               actionVerb: task.taskType,
               missionId: this.missionId,
               stepNo: this.steps.length + 1,
               inputValues: deserializedInputs,
               description: task.description,
+              dependencies: (task as any).dependencies,
+              outputs: deserializedOutputs,
               status: StepStatus.PENDING,
               persistenceManager: this.agentPersistenceManager
             });
@@ -1746,6 +1809,8 @@ Please consider this context and the available plugins when planning and executi
                 console.log(`Received result for delegated step ${step.id}. Success: ${taskResult.success}`);
                 step.status = taskResult.success ? StepStatus.COMPLETED : StepStatus.ERROR;
                 if (taskResult.success) {
+                  step.result = taskResult.result;
+                  console.log(`Updated step ${step.id} with result:`, JSON.stringify(step.result, null, 2));
                   await this.saveWorkProductWithClassification(step.id, taskResult.result, step.isEndpoint(this.steps), this.getAllAgentsInMission());
                 } else {
                   this.say(`Delegated step ${step.actionVerb} failed. Reason: ${taskResult.error}`);
@@ -1843,6 +1908,8 @@ Explanation: ${resolution.explanation}`);
                     taskType: step.actionVerb,
                     description: step.description || `Execute ${step.actionVerb}`,
                     inputs: MapSerializer.transformForSerialization(step.inputValues),
+                    dependencies: step.dependencies,
+                    outputs: MapSerializer.transformForSerialization(step.outputs),
                     priority: 'normal',
                     context: {
                         sourceAgentId: this.id,
@@ -2149,6 +2216,7 @@ Explanation: ${resolution.explanation}`);
         }
 
         const uploadedFiles: MissionFile[] = [];
+        const missionControlUrl = await this.getServiceUrl('MissionControl');
 
         for (const output of step.result) {
             try {
@@ -2198,10 +2266,9 @@ Explanation: ${resolution.explanation}`);
                     storagePath: `step-outputs/${this.missionId}/${fileName}`,
                     description: `Output from step ${step.stepNo}: ${step.actionVerb} - ${output.resultDescription}`
                 };
-
                 // Store the file content in Librarian
                 await this.authenticatedApi.post(`http://${librarianUrl}/storeData`, {
-                    id: `step-output-${step.id}-${output.name}`,
+                    id: `step-output-${missionFile.id}`,
                     data: {
                         fileContent: fileContent,
                         missionFile: missionFile
@@ -2210,31 +2277,12 @@ Explanation: ${resolution.explanation}`);
                     collection: 'step-outputs'
                 });
 
-                // Load the current mission to update its attached files
-                const missionResponse = await this.authenticatedApi.get(`http://${librarianUrl}/loadData/${this.missionId}`, {
-                    params: { collection: 'missions', storageType: 'mongo' }
-                });
-
-                if (missionResponse.data && missionResponse.data.data) {
-                    const mission = missionResponse.data.data;
-                    const existingFiles = mission.attachedFiles || [];
-                    const updatedMission = {
-                        ...mission,
-                        attachedFiles: [...existingFiles, missionFile],
-                        updatedAt: new Date()
-                    };
-
-                    // Save the updated mission
-                    await this.authenticatedApi.post(`http://${librarianUrl}/storeData`, {
-                        id: this.missionId,
-                        data: updatedMission,
-                        collection: 'missions',
-                        storageType: 'mongo'
-                    });
-
-                    uploadedFiles.push(missionFile);
-                    console.log(`Uploaded step output to shared space: ${fileName}`);
+                if (missionControlUrl) {
+                    await this.authenticatedApi.post(`http://${missionControlUrl}/missions/${this.missionId}/files/add`, missionFile);
                 }
+
+                uploadedFiles.push(missionFile);
+                console.log(`Uploaded step output to shared space: ${fileName}`);
 
             } catch (error) {
                 console.error(`Failed to upload step output to shared space:`, error);

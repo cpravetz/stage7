@@ -285,16 +285,25 @@ class ReflectHandler:
         else:
             question = str(question_input).strip() if question_input is not None else ''
 
+        # final_output is optional; default to empty string if not provided
+        final_output_input = inputs.get('final_output')
+        if isinstance(final_output_input, dict) and 'value' in final_output_input:
+            final_output = str(final_output_input['value']).strip()
+        else:
+            final_output = str(final_output_input).strip() if final_output_input is not None else ''
+
         logger.info(f"DEBUG REFLECT: mission_id = '{mission_id}' (type: {type(mission_id)})") # Add this line
         logger.info(f"DEBUG REFLECT: plan_history = '{plan_history[:50]}...' (type: {type(plan_history)})") # Add this line
         logger.info(f"DEBUG REFLECT: work_products = '{work_products[:50]}...' (type: {type(work_products)})") # Add this line
         logger.info(f"DEBUG REFLECT: question = '{question[:50]}...' (type: {type(question)})") # Add this line
+        logger.info(f"DEBUG REFLECT: final_output present: {'yes' if final_output else 'no'} (length: {len(final_output)})")
 
         return {
             "missionId": mission_id,
             "plan_history": plan_history,
             "work_products": work_products,
             "question": question,
+            "final_output": final_output,
         }
     
     def _ask_brain_for_reflection_handling(self, reflection_info: Dict[str, Any], inputs: Dict[str, Any]) -> str:

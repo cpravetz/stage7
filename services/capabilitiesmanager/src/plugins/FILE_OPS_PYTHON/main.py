@@ -1,58 +1,46 @@
-# --- Robust wrapper for deduplication, temp dir hygiene, and error escalation ---
+#!/usr/bin/env python3
+"""
+FILE_OPERATION Plugin - Secure and Robust Implementation
+Centralized input parsing/validation is handled by helper.py. This wrapper ensures
+deduplication, temp-dir hygiene, and clearer error escalation while keeping plugin
+logic focused on file operations.
+"""
+
+import json
+import sys
+import os
+import logging
+import requests
 import tempfile
 import shutil
 import hashlib
-from typing import Dict, Any
-# Error handler integration (for unexpected/code errors only)
-def send_to_errorhandler(error, context=None):
-    try:
-        import requests
-        errorhandler_url = os.environ.get('ERRORHANDLER_URL', 'errorhandler:5090')
-        payload = {
-            'error': str(error),
-            'context': context or ''
-        }
-        requests.post(f'http://{errorhandler_url}/analyze', json=payload, timeout=10)
-    except Exception as e:
-        print(f"Failed to send error to errorhandler: {e}")
+import uuid
+from datetime import datetime
+from typing import Dict, Any, List, Optional
+try:
+    # If executed as part of a package, use relative import
+    from . import helper
+except Exception:
+    # When running the module as a stand-alone script for testing, fall back to direct import
+    import helper
 
-_seen_hashes = set()
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-def parse_inputs(inputs_str: str) -> Dict[str, Any]:
-    """Parse and validate inputs"""
-    try:
-        logger.info(f"Parsing input string ({len(inputs_str)} chars)")
-        
-        input_list = json.loads(inputs_str)
-        
-        inputs = {}
-        for item in input_list:
-            if isinstance(item, list) and len(item) == 2:
-                key, raw_value = item # Renamed 'value' to 'raw_value' for clarity
-                
-                # If raw_value is an InputValue object, retain the whole object
-                if isinstance(raw_value, dict):
-                    inputs[key] = raw_value
-                else:
-                    # Otherwise, use raw_value directly (for non-InputValue types)
-                    inputs[key] = raw_value
-            else:
-                logger.warning(f"Skipping invalid input item: {item}")
-        
-        logger.info(f"Successfully parsed {len(inputs)} input fields")
-        return inputs
-        
-    except Exception as e:
-        logger.error(f"Input parsing failed: {e}")
-        raise Exception(f"Input validation failed: {e}")
+# Define a secure base path for file operations.
+# This corresponds to a mounted volume shared across services.
+SHARED_FILES_BASE_PATH = os.environ.get('SHARED_FILES_PATH', '/usr/src/app/shared/mission-files/')
 
-def robust_execute_plugin(inputs_str):
+
+def robust_execute_plugin(inputs_str: str) -> str:
     temp_dir = None
     try:
-        # Deduplication: hash the inputs
+        logger.info(f"Received inputs: {inputs_str}")
+        # Deduplication: hash the inputs - Do we really want this?
         hash_input = str(inputs_str)
         input_hash = hashlib.sha256(hash_input.encode()).hexdigest()
-        if input_hash in _seen_hashes:
+        if input_hash in helper._seen_hashes:
             return json.dumps([
                 {
                     "success": False,
@@ -62,16 +50,16 @@ def robust_execute_plugin(inputs_str):
                     "error": "Duplicate input detected."
                 }
             ])
-        _seen_hashes.add(input_hash)
+        helper._seen_hashes.add(input_hash)
 
         # Temp directory hygiene
         temp_dir = tempfile.mkdtemp(prefix="file_ops_python_")
         os.environ["FILE_OPS_PYTHON_TEMP_DIR"] = temp_dir
 
-        # Parse the input string
-        inputs = parse_inputs(inputs_str)
+        # Parse the input string using shared helper (normalizes primitives -> {'value': ...})
+        inputs = helper.parse_inputs(inputs_str)
 
-        # Call the original plugin logic
+        # Call the plugin logic
         result = FileOperationPlugin().execute(inputs)
 
         # Strict output validation: must be a JSON string of a list
@@ -85,7 +73,10 @@ def robust_execute_plugin(inputs_str):
         return result
     except Exception as e:
         # Only escalate to errorhandler for unexpected/code errors
-        send_to_errorhandler(e, context=inputs_str)
+        try:
+            helper.send_to_errorhandler(e, context=inputs_str)
+        except Exception:
+            logger.debug("Failed to send error to errorhandler")
         return json.dumps([
             {
                 "success": False,
@@ -101,27 +92,6 @@ def robust_execute_plugin(inputs_str):
                 shutil.rmtree(temp_dir)
             except Exception as cleanup_err:
                 print(f"Failed to clean up temp dir {temp_dir}: {cleanup_err}")
-#!/usr/bin/env python3
-"""
-This is a placeholder for the FILE_OPERATION plugin.
-It will be replaced with a full implementation.
-FILE_OPERATION Plugin - Secure and Robust Implementation
-"""
-
-import json
-import sys
-import os
-import logging
-import requests
-from typing import Dict, Any, List, Optional
-
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
-
-# Define a secure base path for file operations.
-# This corresponds to a mounted volume shared across services.
-SHARED_FILES_BASE_PATH = os.environ.get('SHARED_FILES_PATH', '/usr/src/app/shared/mission-files/')
 
 class FileOperationPlugin:
     def execute(self, inputs_map: Dict[str, Any]) -> str:
@@ -148,6 +118,11 @@ class FileOperationPlugin:
             else:
                 raise ValueError(f"Unsupported operation: {operation}")
 
+            # _*_ Note: some operation handlers may return a single dict or a list of dicts.
+            # Avoid double-wrapping a list result (which would produce a nested list) by
+            # serializing a list as-is when the handler already returned one.
+            if isinstance(result, list):
+                return json.dumps(result)
             return json.dumps([result])
 
         except Exception as e:
@@ -166,114 +141,205 @@ class FileOperationPlugin:
             return inputs[key].get('value', default)
         return default
 
-    
+    def _get_mission_control_url(self) -> str:
+        return os.environ.get('MISSIONCONTROL_URL')
 
-    
-
-    def _get_secure_path(self, user_path: str) -> str:
-        """Constructs a secure, absolute path within the shared directory."""
-        if not user_path or not isinstance(user_path, str):
-            raise ValueError("Path must be a non-empty string.")
-
-        # Normalize the path to resolve '..' and other redundancies.
-        base_path = os.path.abspath(SHARED_FILES_BASE_PATH)
-        # Prevent absolute paths from escaping the jail by treating them as relative to the root of the jail
-        # os.path.join handles this if user_path starts with '/'
-        full_path = os.path.abspath(os.path.join(base_path, user_path.lstrip('/\\')))
-
-        # Security check: ensure the final path is still within the base directory.
-        if not full_path.startswith(base_path):
-            raise PermissionError(f"Path traversal attempt detected. Access denied for path: {user_path}")
-
-        return full_path
+    def _get_librarian_url(self) -> str:
+        # Helper to get the Librarian URL from environment variables
+        # In a real scenario, this might come from a service discovery mechanism
+        return os.environ.get('LIBRARIAN_URL')
 
     def _read_operation(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         file_id = self._get_input_value(inputs, 'fileId')
         path = self._get_input_value(inputs, 'path')
+        mission_id = self._get_input_value(inputs, 'missionId') or self._get_input_value(inputs, 'mission_id')
+        librarian_url = self._get_librarian_url()
+
+        if not librarian_url:
+            raise ValueError("LIBRARIAN_URL environment variable not set.")
+
+        headers = {}
+        cm_token = os.environ.get('CM_AUTH_TOKEN')
+        if cm_token:
+            headers['Authorization'] = f'Bearer {cm_token}'
 
         if file_id:
-            # TODO: Implement reading from Librarian via fileId
-            content = f"Content for fileId {file_id} would be read from Librarian."
-            return {
-                "success": True, "name": "content", "resultType": "string",
-                "resultDescription": f"Content of file with ID {file_id}", "result": content
-            }
-        elif path:
-            secure_path = self._get_secure_path(path)
-            with open(secure_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            return {
-                "success": True, "name": "content", "resultType": "string",
-                "resultDescription": f"Content of file at {path}", "result": content
-            }
+            # Load file content from Librarian using fileId
+            response = requests.get(f"http://{librarian_url}/loadData/step-output-{file_id}", headers=headers, params={'collection': 'step-outputs', 'storageType': 'mongo'})
+            response.raise_for_status()
+            data = response.json().get('data', {})
+            content = data.get('fileContent', '')
+            return {"success": True, "name": "content", "resultType": "string", "resultDescription": f"Content of file with ID {file_id}", "result": content}
+        
+        elif path and mission_id:
+            # Find file in mission's attachedFiles and load from Librarian
+            mission_response = requests.get(f"http://{librarian_url}/loadData/{mission_id}", headers=headers, params={'collection': 'missions', 'storageType': 'mongo'})
+            mission_response.raise_for_status()
+            mission_data = mission_response.json().get('data', {})
+            attached_files = mission_data.get('attachedFiles', [])
+            
+            found_file = next((f for f in attached_files if f.get('originalName') == path), None)
+
+            if found_file and found_file.get('id'):
+                file_id = found_file['id']
+                # Load file content from Librarian using fileId from the mission file object
+                response = requests.get(f"http://{librarian_url}/loadData/step-output-{file_id}", headers=headers, params={'collection': 'step-outputs', 'storageType': 'mongo'})
+                response.raise_for_status()
+                data = response.json().get('data', {})
+                content = data.get('fileContent', '')
+                return {"success": True, "name": "content", "resultType": "string", "resultDescription": f"Content of file at {path}", "result": content}
+            else:
+                raise FileNotFoundError(f"File not found at path: {path} in mission {mission_id}")
         else:
-            raise ValueError("Either 'fileId' or 'path' is required for 'read' operation.")
+            raise ValueError("Either 'fileId' or both 'path' and 'missionId' are required for 'read' operation.")
 
     def _write_operation(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         path = self._get_input_value(inputs, 'path')
         content = self._get_input_value(inputs, 'content')
-        if path is None or content is None:
-            raise ValueError("'path' and 'content' are required for 'write' operation.")
+        mission_id = self._get_input_value(inputs, 'missionId') or self._get_input_value(inputs, 'mission_id')
+        mission_control_url = self._get_mission_control_url()
+        librarian_url = self._get_librarian_url()
 
-        secure_path = self._get_secure_path(path)
-        os.makedirs(os.path.dirname(secure_path), exist_ok=True)
-        with open(secure_path, 'w', encoding='utf-8') as f:
-            f.write(str(content))
-        return {
-            "success": True, "name": "status", "resultType": "string",
-            "resultDescription": f"Successfully wrote to file {path}", "result": "write_successful"
+        if not all([path, content, mission_id, mission_control_url, librarian_url]):
+            raise ValueError("Missing required parameters: 'path', 'content', 'missionId', MISSIONCONTROL_URL, and LIBRARIAN_URL.")
+
+        headers = {}
+        cm_token = os.environ.get('CM_AUTH_TOKEN')
+        if cm_token:
+            headers['Authorization'] = f'Bearer {cm_token}'
+
+        file_id = str(uuid.uuid4())
+        file_name = os.path.basename(path)
+        mime_type = 'text/plain' # Assuming text for now
+
+        # Store file content in Librarian
+        librarian_payload = {
+            'id': f'step-output-{file_id}',
+            'data': {
+                'fileContent': content,
+                'originalName': file_name,
+                'mimeType': mime_type
+            },
+            'collection': 'step-outputs',
+            'storageType': 'mongo'
         }
+        store_response = requests.post(f"http://{librarian_url}/storeData", json=librarian_payload, headers=headers)
+        store_response.raise_for_status()
+
+        mission_file = {
+            'id': file_id,
+            'originalName': file_name,
+            'mimeType': mime_type,
+            'size': len(content.encode('utf-8')),
+            'uploadedAt': datetime.utcnow().isoformat() + 'Z',
+            'uploadedBy': 'FILE_OPS_PYTHON',
+            'storagePath': f'step-outputs/{mission_id}/{file_name}',
+            'description': f"Output from plugin write: {path}"
+        }
+
+        # Add the file metadata to the mission in MissionControl
+        add_file_response = requests.post(f"http://{mission_control_url}/missions/{mission_id}/files/add", json=mission_file, headers=headers)
+        add_file_response.raise_for_status()
+
+        return {"success": True, "name": "file", "resultType": "object", "resultDescription": f"Successfully wrote to file {path}", "result": mission_file}
 
     def _append_operation(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         path = self._get_input_value(inputs, 'path')
-        content = self._get_input_value(inputs, 'content')
-        if path is None or content is None:
-            raise ValueError("'path' and 'content' are required for 'append' operation.")
+        content_to_append = self._get_input_value(inputs, 'content')
+        mission_id = self._get_input_value(inputs, 'missionId') or self._get_input_value(inputs, 'mission_id')
+        
+        existing_content = ''
+        try:
+            # Read the existing content
+            read_inputs = {
+                'path': {'value': path},
+                'missionId': {'value': mission_id}
+            }
+            existing_content_result = self._read_operation(read_inputs)
+            existing_content = existing_content_result.get('result', '')
 
-        secure_path = self._get_secure_path(path)
-        os.makedirs(os.path.dirname(secure_path), exist_ok=True)
-        with open(secure_path, 'a', encoding='utf-8') as f:
-            f.write(str(content))
-        return {
-            "success": True, "name": "status", "resultType": "string",
-            "resultDescription": f"Successfully appended to file {path}", "result": "append_successful"
+            # If read was successful, file exists. Delete it before we write the new version.
+            delete_inputs = {
+                'path': {'value': path},
+                'missionId': {'value': mission_id}
+            }
+            self._delete_operation(delete_inputs)
+        except FileNotFoundError:
+            # File doesn't exist, so we'll just be creating it.
+            pass
+
+        # Append new content
+        new_content = existing_content + content_to_append
+
+        # Write the full content back as a new file with the same path
+        write_inputs = {
+            'path': {'value': path},
+            'content': {'value': new_content},
+            'missionId': {'value': mission_id}
         }
+        write_result = self._write_operation(write_inputs)
+
+        return {"success": True, "name": "file", "resultType": "object", "resultDescription": f"Successfully appended to file {path}", "result": write_result.get('result')}
 
     def _list_operation(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
-        path = self._get_input_value(inputs, 'path', '.')
-        secure_path = self._get_secure_path(path)
-        if not os.path.exists(secure_path):
-            return {
-                "success": True, "name": "files", "resultType": "array",
-                "resultDescription": f"Directory {path} does not exist", "result": []
-            }
-        files = os.listdir(secure_path)
-        return {
-            "success": True, "name": "files", "resultType": "array",
-            "resultDescription": f"Files and directories in {path}", "result": files
-        }
+        mission_id = self._get_input_value(inputs, 'missionId') or self._get_input_value(inputs, 'mission_id')
+        librarian_url = self._get_librarian_url()
+
+        if not all([mission_id, librarian_url]):
+            raise ValueError("Missing required parameters: 'missionId' and LIBRARIAN_URL.")
+
+        headers = {}
+        cm_token = os.environ.get('CM_AUTH_TOKEN')
+        if cm_token:
+            headers['Authorization'] = f'Bearer {cm_token}'
+
+        mission_response = requests.get(f"http://{librarian_url}/loadData/{mission_id}", headers=headers, params={'collection': 'missions', 'storageType': 'mongo'})
+        mission_response.raise_for_status()
+        mission_data = mission_response.json().get('data', {})
+        attached_files = mission_data.get('attachedFiles', [])
+        
+        file_names = [f.get('originalName') for f in attached_files]
+
+        return {"success": True, "name": "files", "resultType": "array", "resultDescription": f"Files in mission {mission_id}", "result": file_names}
 
     def _delete_operation(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         path = self._get_input_value(inputs, 'path')
-        if not path:
-            raise ValueError("'path' is required for 'delete' operation.")
-        secure_path = self._get_secure_path(path)
-        if os.path.isfile(secure_path):
-            os.remove(secure_path)
-            result_desc = f"Successfully deleted file {path}"
-        elif os.path.isdir(secure_path):
-            if not os.listdir(secure_path):
-                os.rmdir(secure_path)
-                result_desc = f"Successfully deleted empty directory {path}"
-            else:
-                raise ValueError("Directory is not empty. Deletion of non-empty directories is not allowed for safety.")
-        else:
-            raise FileNotFoundError(f"File or directory not found at path: {path}")
+        mission_id = self._get_input_value(inputs, 'missionId') or self._get_input_value(inputs, 'mission_id')
+        mission_control_url = self._get_mission_control_url()
+        librarian_url = self._get_librarian_url()
 
-        return {
-            "success": True, "name": "status", "resultType": "string",
-            "resultDescription": result_desc, "result": "delete_successful"
-        }
+        if not all([path, mission_id, mission_control_url, librarian_url]):
+            raise ValueError("Missing required parameters: 'path', 'missionId', MISSIONCONTROL_URL, and LIBRARIAN_URL.")
+
+        headers = {}
+        cm_token = os.environ.get('CM_AUTH_TOKEN')
+        if cm_token:
+            headers['Authorization'] = f'Bearer {cm_token}'
+
+        # Find the file in the mission's attachedFiles to get the fileId
+        mission_response = requests.get(f"http://{librarian_url}/loadData/{mission_id}", headers=headers, params={'collection': 'missions', 'storageType': 'mongo'})
+        mission_response.raise_for_status()
+        mission_data = mission_response.json().get('data', {})
+        attached_files = mission_data.get('attachedFiles', [])
+        
+        found_file = next((f for f in attached_files if f.get('originalName') == path), None)
+
+        if not found_file:
+            raise FileNotFoundError(f"File not found at path: {path} in mission {mission_id}")
+
+        file_id = found_file['id']
+
+        # Remove the file from the mission in MissionControl
+        remove_file_response = requests.post(f"http://{mission_control_url}/missions/{mission_id}/files/remove", json={'fileId': file_id}, headers=headers)
+        remove_file_response.raise_for_status()
+
+        # Delete the file content from Librarian
+        delete_content_response = requests.delete(f"http://{librarian_url}/deleteData/step-output-{file_id}", headers=headers, params={'collection': 'step-outputs'})
+        if delete_content_response.status_code not in [200, 404]:
+            delete_content_response.raise_for_status()
+
+        return {"success": True, "name": "status", "resultType": "string", "resultDescription": f"Successfully deleted file {path}", "result": "delete_successful"}
+
 
 if __name__ == "__main__":
     inputs_str = sys.stdin.read().strip()

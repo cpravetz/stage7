@@ -78,6 +78,27 @@ class MissionControl extends BaseEntity {
             });
         });
 
+        app.post('/missions/:missionId/files/add', (req, res) => {
+            this.addAttachedFile(req, res).catch((error: any) => {
+                console.error('Error in addAttachedFile:', error);
+                res.status(500).send({ error: 'Internal server error' });
+            });
+        });
+
+        app.delete('/missions/:missionId/files/:fileId', (req, res) => {
+            this.removeAttachedFile(req, res).catch((error: any) => {
+                console.error('Error in removeAttachedFile:', error);
+                res.status(500).send({ error: 'Internal server error' });
+            });
+        });
+
+        app.post('/missions/:missionId/files/remove', (req, res) => {
+            this.removeAttachedFile(req, res).catch((error: any) => {
+                console.error('Error in removeAttachedFile:', error);
+                res.status(500).send({ error: 'Internal server error' });
+            });
+        });
+
         app.listen(this.port, () => {
             console.log(`MissionControl is running on port ${this.port}`);
         });
@@ -772,6 +793,53 @@ class MissionControl extends BaseEntity {
                 this.clientMissions.delete(clientId);
             }
         }
+    }
+
+    private async addAttachedFile(req: express.Request, res: express.Response) {
+        const { missionId } = req.params;
+        const missionFile = req.body;
+
+        const mission = this.missions.get(missionId);
+        if (!mission) {
+            return res.status(404).send({ error: 'Mission not found' });
+        }
+
+        if (!mission.attachedFiles) {
+            mission.attachedFiles = [];
+        }
+
+        // Avoid duplicates
+        if (!mission.attachedFiles.find(f => f.id === missionFile.id)) {
+            mission.attachedFiles.push(missionFile);
+            mission.updatedAt = new Date();
+            await this.saveMissionState(mission);
+            this.sendStatusUpdate(mission, `File ${missionFile.originalName} added`);
+        }
+
+        res.status(200).send({ status: 'File added' });
+    }
+
+    private async removeAttachedFile(req: express.Request, res: express.Response) {
+        const { missionId } = req.params;
+        const fileId = req.params.fileId || req.body.fileId;
+
+        const mission = this.missions.get(missionId);
+        if (!mission) {
+            return res.status(404).send({ error: 'Mission not found' });
+        }
+
+        if (mission.attachedFiles) {
+            const initialLength = mission.attachedFiles.length;
+            const originalFile = mission.attachedFiles.find(f => f.id === fileId);
+            mission.attachedFiles = mission.attachedFiles.filter(f => f.id !== fileId);
+            if (mission.attachedFiles.length < initialLength) {
+                mission.updatedAt = new Date();
+                await this.saveMissionState(mission);
+                this.sendStatusUpdate(mission, `File ${originalFile?.originalName || fileId} removed`);
+            }
+        }
+
+        res.status(200).send({ status: 'File removed' });
     }
 
     private async listMissions(userId: string): Promise<Partial<Mission>[]> {

@@ -9,13 +9,15 @@
             "name": "script",
             "required": true,
             "type": "string",
-            "description": "The Python code snippet to execute for transformation. The code has access to a 'params' variable containing the script_parameters. The script should print its result to stdout rather than returning it."
+            "description": "The Python code snippet to execute for transformation. The code has access to a 'params' variable containing the script_parameters. The script should print its result to stdout rather than returning it.",
+            "aliases": ["code","transform_script","snippet"]
         },
         {
             "name": "script_parameters",
             "required": false,
             "type": "json",
-            "description": "Parameters to be passed to the script. Available as a 'params' variable in the script context. If a JSON object, it should be a valid JSON object."
+            "description": "Parameters to be passed to the script. Available as a 'params' variable in the script context. If a JSON object, it should be a valid JSON object.",
+            "aliases": ["params","parameters","args"]
         }
     ],
     "outputDefinitions":[
