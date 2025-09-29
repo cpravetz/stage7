@@ -513,7 +513,12 @@ After your internal analysis and self-correction is complete, provide ONLY the f
 - **Prioritize autonomous information gathering:** Use tools like SEARCH, SCRAPE, DATA_TOOLKIT, TEXT_ANALYSIS, TRANSFORM, and FILE_OPERATION to gather information and perform tasks.
 - **Avoid unnecessary user interaction:** Only use 'ASK_USER_QUESTION' for decisions, permissions, or clarification. Do NOT use it for seeking advice, delegating research or data collection that the agent can perform.
 - **CHAT vs ASK_USER_QUESTION:** Use ASK_USER_QUESTION for structured questions requiring user input. Use CHAT only for notifications, status updates, or conversational interactions where you're informing the user, not gathering information.
-- **CRITICAL for recommendedRole:** The `recommendedRole` field MUST be one of the following exact values: 'Coordinator', 'Researcher', 'Coder', 'Creative', 'Critic', 'Executor', 'Domain Expert'. Ensure strict adherence to these values.
+**Role Assignment Strategy:**
+- Assign `recommendedRole` at the **deliverable level**, not per-step optimization
+- All steps contributing to a single coherent output (e.g., "research report", "code module", "analysis document") should share the same `recommendedRole`
+- Only change `recommendedRole` when transitioning to a fundamentally different type of deliverable
+- Example: Steps 1-5 all produce research for a report → all get `recommendedRole: "researcher"`
+- Counter-example: Don't switch roles between gathering data (step 1) and formatting it (step 2) if they're part of the same research deliverable
 - **CRITICAL for sourceStep:**
     - Use `sourceStep: 0` ONLY for inputs that are explicitly provided in the initial mission context (the "PARENT STEP INPUTS" section if applicable, or the overall mission goal).
     - For any other input, it MUST be the `outputName` from a *preceding step* in this plan, and `sourceStep` MUST be the `number` of that preceding step.
@@ -688,7 +693,6 @@ Plan Schema
                 \\"sourceStep\\": 2
             }}
         }}}}
-
 CRITICAL: The actionVerb for each step MUST be a valid, existing plugin actionVerb (from the provided list) or a descriptive, new actionVerb (e.g., 'ANALYZE_DATA', 'GENERATE_REPORT'). It MUST NOT be 'UNKNOWN' or 'NOVEL_VERB'.
 """
 

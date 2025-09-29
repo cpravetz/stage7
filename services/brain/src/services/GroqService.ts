@@ -9,7 +9,7 @@ export class GroqService extends BaseService {
         const apiKey = process.env.GROQ_API_KEY || '';
 
         super(
-            'groq',
+            'GroqService',
             apiKey,
             process.env.GROQ_URL || 'https://api.groq.com/openai/v1',
             ['groq']
