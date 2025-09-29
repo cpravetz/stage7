@@ -369,7 +369,12 @@ Plan Schema
         }}}}
 - **Mapping Outputs to Inputs:** When the output of one step is used as the input to another, the `outputName` in the input of the second step must match the `name` of the output of the first step.
 
-CRITICAL: The actionVerb for each step MUST be a valid, existing plugin actionVerb (from the provided list) or a descriptive, new actionVerb (e.g., 'ANALYZE_DATA', 'GENERATE_REPORT'). It MUST NOT be 'UNKNOWN' or 'NOVEL_VERB'.
+**Role Assignment Strategy:**
+- Assign `recommendedRole` at the **deliverable level**, not per-step optimization
+- All steps contributing to a single coherent output (e.g., "research report", "code module", "analysis document") should share the same `recommendedRole`
+- Only change `recommendedRole` when transitioning to a fundamentally different type of deliverable
+- Example: Steps 1-5 all produce research for a report → all get `recommendedRole: "researcher"`
+- Counter-example: Don't switch roles between gathering data (step 1) and formatting it (step 2) if they're part of the same research deliverable
 """
 
         try:
