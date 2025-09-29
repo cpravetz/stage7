@@ -141,22 +141,22 @@ class FileOperationPlugin:
             return inputs[key].get('value', default)
         return default
 
-    def _get_mission_control_url(self) -> str:
-        return os.environ.get('MISSIONCONTROL_URL')
+    def _get_mission_control_url(self, inputs: Dict[str, Any]) -> str:
+        return self._get_input_value(inputs, 'missioncontrol_url') or self._get_input_value(inputs, 'missionControlUrl') or os.environ.get('MISSIONCONTROL_URL')
 
-    def _get_librarian_url(self) -> str:
+    def _get_librarian_url(self, inputs: Dict[str, Any]) -> str:
         # Helper to get the Librarian URL from environment variables
         # In a real scenario, this might come from a service discovery mechanism
-        return os.environ.get('LIBRARIAN_URL')
+        return self._get_input_value(inputs, 'librarian_url') or self._get_input_value(inputs, 'librarianUrl') or os.environ.get('LIBRARIAN_URL')
 
     def _read_operation(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         file_id = self._get_input_value(inputs, 'fileId')
         path = self._get_input_value(inputs, 'path')
         mission_id = self._get_input_value(inputs, 'missionId') or self._get_input_value(inputs, 'mission_id')
-        librarian_url = self._get_librarian_url()
+        librarian_url = self._get_librarian_url(inputs)
 
         if not librarian_url:
-            raise ValueError("LIBRARIAN_URL environment variable not set.")
+            raise ValueError("LIBRARIAN_URL not found in inputs or environment variables.")
 
         headers = {}
         cm_token = os.environ.get('CM_AUTH_TOKEN')
@@ -195,13 +195,29 @@ class FileOperationPlugin:
 
     def _write_operation(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         path = self._get_input_value(inputs, 'path')
-        content = self._get_input_value(inputs, 'content')
+        content_str = self._get_input_value(inputs, 'content')
+        try:
+            # If content is a JSON string, extract the actual content
+            content_data = json.loads(content_str)
+            if isinstance(content_data, dict) and 'content' in content_data:
+                content = content_data['content']
+            else:
+                content = content_str
+        except (json.JSONDecodeError, TypeError):
+            content = content_str
+            
         mission_id = self._get_input_value(inputs, 'missionId') or self._get_input_value(inputs, 'mission_id')
-        mission_control_url = self._get_mission_control_url()
-        librarian_url = self._get_librarian_url()
+        mission_control_url = self._get_mission_control_url(inputs)
+        librarian_url = self._get_librarian_url(inputs)
 
         if not all([path, content, mission_id, mission_control_url, librarian_url]):
-            raise ValueError("Missing required parameters: 'path', 'content', 'missionId', MISSIONCONTROL_URL, and LIBRARIAN_URL.")
+            missing_params = [
+                p for p, v in {
+                    'path': path, 'content': content, 'missionId': mission_id,
+                    'MISSIONCONTROL_URL': mission_control_url, 'LIBRARIAN_URL': librarian_url
+                }.items() if not v
+            ]
+            raise ValueError(f"Missing required parameters: {', '.join(missing_params)}")
 
         headers = {}
         cm_token = os.environ.get('CM_AUTH_TOKEN')
@@ -247,13 +263,16 @@ class FileOperationPlugin:
         path = self._get_input_value(inputs, 'path')
         content_to_append = self._get_input_value(inputs, 'content')
         mission_id = self._get_input_value(inputs, 'missionId') or self._get_input_value(inputs, 'mission_id')
+        mission_control_url = self._get_mission_control_url(inputs)
+        librarian_url = self._get_librarian_url(inputs)
         
         existing_content = ''
         try:
             # Read the existing content
             read_inputs = {
                 'path': {'value': path},
-                'missionId': {'value': mission_id}
+                'missionId': {'value': mission_id},
+                'librarianUrl': {'value': librarian_url}
             }
             existing_content_result = self._read_operation(read_inputs)
             existing_content = existing_content_result.get('result', '')
@@ -261,7 +280,9 @@ class FileOperationPlugin:
             # If read was successful, file exists. Delete it before we write the new version.
             delete_inputs = {
                 'path': {'value': path},
-                'missionId': {'value': mission_id}
+                'missionId': {'value': mission_id},
+                'missionControlUrl': {'value': mission_control_url},
+                'librarianUrl': {'value': librarian_url}
             }
             self._delete_operation(delete_inputs)
         except FileNotFoundError:
@@ -275,7 +296,9 @@ class FileOperationPlugin:
         write_inputs = {
             'path': {'value': path},
             'content': {'value': new_content},
-            'missionId': {'value': mission_id}
+            'missionId': {'value': mission_id},
+            'missionControlUrl': {'value': mission_control_url},
+            'librarianUrl': {'value': librarian_url}
         }
         write_result = self._write_operation(write_inputs)
 
@@ -283,7 +306,7 @@ class FileOperationPlugin:
 
     def _list_operation(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         mission_id = self._get_input_value(inputs, 'missionId') or self._get_input_value(inputs, 'mission_id')
-        librarian_url = self._get_librarian_url()
+        librarian_url = self._get_librarian_url(inputs)
 
         if not all([mission_id, librarian_url]):
             raise ValueError("Missing required parameters: 'missionId' and LIBRARIAN_URL.")
@@ -305,8 +328,8 @@ class FileOperationPlugin:
     def _delete_operation(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         path = self._get_input_value(inputs, 'path')
         mission_id = self._get_input_value(inputs, 'missionId') or self._get_input_value(inputs, 'mission_id')
-        mission_control_url = self._get_mission_control_url()
-        librarian_url = self._get_librarian_url()
+        mission_control_url = self._get_mission_control_url(inputs)
+        librarian_url = self._get_librarian_url(inputs)
 
         if not all([path, mission_id, mission_control_url, librarian_url]):
             raise ValueError("Missing required parameters: 'path', 'missionId', MISSIONCONTROL_URL, and LIBRARIAN_URL.")

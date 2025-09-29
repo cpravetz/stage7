@@ -14,7 +14,6 @@ import { PluginExecutor } from './utils/pluginExecutor';
 
 export class CapabilitiesManager extends BaseEntity {
     private librarianUrl: string = process.env.LIBRARIAN_URL || 'librarian:5040';
-    private missionControlUrl: string = process.env.MISSIONCONTROL_URL || 'missioncontrol:5030';
     private server: any;
     private configManager!: ConfigManager;
     private pluginRegistry!: PluginRegistry;
@@ -135,9 +134,9 @@ export class CapabilitiesManager extends BaseEntity {
                 // Continue without ConfigManager - use default configurations
             }
 
-
+            const missionControlUrl = await this.getServiceUrl('MissionControl') || process.env.MISSIONCONTROL_URL || 'missioncontrol:5030';
             // Initialize PluginExecutor after ConfigManager is available
-            this.pluginExecutor = new PluginExecutor(this.configManager, this.containerManager, this.librarianUrl, this.securityManagerUrl, this.missionControlUrl);
+            this.pluginExecutor = new PluginExecutor(this.configManager, this.containerManager, this.librarianUrl, this.securityManagerUrl, missionControlUrl);
             console.log(`[${trace_id}] ${source_component}: PluginExecutor initialized.`);
 
             await this.start(trace_id);
@@ -552,23 +551,6 @@ export class CapabilitiesManager extends BaseEntity {
             context: output.context || {}
         };
         return normalized;
-    }
-
-    private extractRawInputValues(inputMap: Map<string, InputValue>): Map<string, any> {
-        const rawInputs = new Map<string, any>();
-        inputMap.forEach((inputValue, key) => {
-            // Check if inputValue is an object and has a 'value' property
-            if (inputValue && typeof inputValue === 'object' && inputValue !== null && 'value' in inputValue) {
-                rawInputs.set(key, inputValue.value);
-            } else if (inputValue && typeof inputValue === 'object' && inputValue !== null && 'outputName' in inputValue && 'sourceStep' in inputValue) {
-                // Handle input references, pass them as is for now, validation might handle this later
-                rawInputs.set(key, { outputName: (inputValue as any).outputName, sourceStep: (inputValue as any).sourceStep });
-            } else {
-                // Fallback for unexpected InputValue structure
-                rawInputs.set(key, inputValue);
-            }
-        });
-        return rawInputs;
     }
 
     private async executeActionVerb(req: express.Request, res: express.Response) {

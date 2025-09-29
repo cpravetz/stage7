@@ -765,10 +765,9 @@ Please consider this context and the available plugins when planning and executi
             const outputsHaveFiles = Array.isArray(data) && data.some(o => !!(o as any).fileName || !!(o as any).storagePath);
             const shouldUploadToSharedSpace = (
                 (outputType === OutputType.FINAL && data && data.length > 0) ||
-                (data && data.length > 0 && this.stepGeneratesUserReferencedData(stepId, data)) ||
-                (step && step.actionVerb === 'FILE_OPERATION') ||
-                outputsHaveFiles
-            );
+                            (data && data.length > 0 && this.stepGeneratesUserReferencedData(stepId, data)) ||
+                            (step && step.actionVerb === 'FILE_OPERATION' && false) || // Disable for FILE_OPERATION as it handles its own upload
+                            outputsHaveFiles            );
 
             if (shouldUploadToSharedSpace) {
                 try {

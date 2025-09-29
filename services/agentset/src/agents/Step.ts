@@ -216,6 +216,7 @@ export class Step {
             }
 
             if (sourceStep?.result) {
+                console.log(`[Step ${this.id}]   - Source step ${dep.sourceStepId} result:`, JSON.stringify(sourceStep.result, null, 2));
                 console.log(`[Step ${this.id}]   - Looking up dependency '${dep.inputName}' from source step ${dep.sourceStepId}. Source step result keys:`, sourceStep.result.map(r => r.name));
                 const output = sourceStep.result.find(r => r.name === dep.outputName);
 
