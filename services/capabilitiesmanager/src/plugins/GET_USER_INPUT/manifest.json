@@ -10,6 +10,8 @@
       "required": true,
       "type": "string",
       "description": "The question to ask the user"
+    ,
+      "aliases": ["prompt","msg","text"]
     },
     {
       "name": "choices",

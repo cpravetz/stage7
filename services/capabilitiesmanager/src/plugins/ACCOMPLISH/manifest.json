@@ -8,19 +8,24 @@
             "name": "goal",
             "required": false,
             "type": "string",
-            "description": "A concise goal for a specific task. If a missionId is provided, this goal is a sub-task within that mission."
+            "description": "A concise goal for a specific task. If a missionId is provided, this goal is a sub-task within that mission.",
+            "aliases": ["objective","task","aim"]
         },
         {
             "name": "missionId",
             "required": false,
             "type": "string",
             "description": "The ID of the overall mission. The plugin can use this to fetch the full mission goal from the librarian for context."
+        ,
+            "aliases": ["mission_id","mission","missionID"]
         },
         {
             "name": "novel_actionVerb",
             "required": false,
             "type": "object",
             "description": "Structured information about a novel action verb to be handled, including its original verb, description, inputs, and outputs. Used when ACCOMPLISH is invoked to handle an unknown verb."
+        ,
+            "aliases": ["novelVerb","actionVerbSpec","novel_action_verb"]
         }
     ],
     "outputDefinitions": [
@@ -58,7 +63,9 @@
     "inputGuidance": "Inputs for this plugin must include a goal statement as an input named 'goal'.",
     "security": {
         "permissions": [],
-        "sandboxOptions": {},
+        "sandboxOptions": {
+            "timeout": 360000
+        },
         "trust": {
             "signature": "GEr7jE7Y6GDjfKXD2i1yMrIWPOko7GJxg9jPCNrxCae2pD1pvVXdi0YrTWK4SKGZis1G6GZcoTtrob26xt17Iuu9f8O8gX/Cz433TRKo78Akl5ggnQn8fqj1uQmIco6uGcspMxHF0PuNHTrZF5jKG+jVT2clG7HPkUXEYhRc61kD7Z6MaKAjFmg75JUkyaW5S6hNY1wFnmrTLX37mu017QE+65rZWELHzeGV9nbmataVMzCjPZmcvn583tCZTs+H9sC8iVr8kKwvCJ2Y3grmSnr6/8biKgQLlpIQp9x9vv7TuyMV7obicGkgkfvt6HQquynHZA0ForXKwwYbth3smg=="
         }

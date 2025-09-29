@@ -58,7 +58,7 @@ export class Step {
 
     constructor(params: {
         id?: string,
-        missionId: string,
+        missionId?: string,
         actionVerb: string,
         stepNo: number,
         inputReferences?: Map<string, InputReference>,
@@ -67,22 +67,64 @@ export class Step {
         dependencies?: StepDependency[],
         outputs?: Map<string, string>,
         status?: StepStatus,
+        result?: PluginOutput[],
         recommendedRole?: string,
         persistenceManager: AgentPersistenceManager,
         maxRetries?: number
     }) {
+        console.log(`[Step constructor] params.outputs =`, params.outputs);
         this.id = params.id || uuidv4();
-        this.missionId = params.missionId;
+        this.missionId = params.missionId || 'unknown_mission';
         this.stepNo = params.stepNo;
         this.actionVerb = params.actionVerb;
         this.inputReferences = params.inputReferences || new Map();
         this.inputValues = params.inputValues || new Map();
         this.description = params.description;
         this.dependencies = params.dependencies || [];
-        this.outputs = params.outputs || new Map();
+
+        // Defensive normalization: ensure outputs is always a Map<string, string>
+        try {
+            const rawOutputs: any = params.outputs;
+            if (!rawOutputs) {
+                this.outputs = new Map();
+            } else if (rawOutputs instanceof Map) {
+                this.outputs = rawOutputs as Map<string, string>;
+            } else if (typeof rawOutputs === 'string') {
+                // JSON string — try parse; support either object or serialized Map shape
+                try {
+                    const parsed = JSON.parse(rawOutputs);
+                    if (parsed && parsed._type === 'Map' && Array.isArray(parsed.entries)) {
+                        this.outputs = new Map(parsed.entries);
+                        console.log(`[Step constructor] Deserialized outputs from serialized Map string for step ${this.id}`);
+                    } else if (parsed && typeof parsed === 'object') {
+                        this.outputs = new Map(Object.entries(parsed));
+                        console.log(`[Step constructor] Parsed outputs JSON string into Map for step ${this.id}`);
+                    } else {
+                        this.outputs = new Map();
+                    }
+                } catch (e) {
+                    console.warn(`[Step constructor] Unable to parse outputs string for step ${this.id}:`, e instanceof Error ? e.message : e);
+                    this.outputs = new Map();
+                }
+            } else if (rawOutputs && rawOutputs._type === 'Map' && Array.isArray(rawOutputs.entries)) {
+                this.outputs = new Map(rawOutputs.entries);
+                console.log(`[Step constructor] Transformed serialized Map outputs into Map for step ${this.id}`);
+            } else if (typeof rawOutputs === 'object') {
+                this.outputs = new Map(Object.entries(rawOutputs));
+                console.log(`[Step constructor] Converted outputs object into Map for step ${this.id}`);
+            } else {
+                this.outputs = new Map();
+            }
+        } catch (e) {
+            console.error(`[Step constructor] Error normalizing outputs for step ${this.id}:`, e instanceof Error ? e.message : e);
+            this.outputs = new Map();
+        }
         this.status = params.status || StepStatus.PENDING;
+        if (params.result) {
+            this.result = params.result;
+        }
         this.recommendedRole = params.recommendedRole;
-        this.persistenceManager = params.persistenceManager;
+    this.persistenceManager = params.persistenceManager;
         this.retryCount = 0;
         this.maxRetries = params.maxRetries || 3;
         this.lastError = null;
@@ -140,31 +182,89 @@ export class Step {
         }
     }
 
-    populateInputsFromDependencies(allSteps: Step[]): void {
-       this.inputReferences.forEach((inputReference, name) => {
-            if (inputReference.value) {
-                this.inputValues.set(inputReference.inputName, {
-                    inputName: inputReference.inputName,
-                    value: inputReference.value,
-                    valueType: inputReference.valueType,
-                    args: inputReference.args || {}
-                });
+    async populateInputsFromDependencies(allSteps: Step[]): Promise<void> {
+        console.log(`[Step ${this.id}] populateInputsFromDependencies: Populating inputs from dependencies...`);
+        for (const dep of this.dependencies) {
+            let sourceStep = allSteps.find(s => s.id === dep.sourceStepId);
+
+            // If sourceStep exists but has no result in-memory, attempt to hydrate from persistence.
+            if (sourceStep && (!sourceStep.result || sourceStep.result.length === 0)) {
+                try {
+                    // AgentPersistenceManager stores work products using agentId and full stepId.
+                    // The stepId saved is the full step id; the agentId used was the prefix (if present).
+                    const parts = String(sourceStep.id).split('_');
+                    if (parts.length >= 1) {
+                        const possibleAgentId = parts[0];
+                        const persisted = await this.persistenceManager.loadWorkProduct(possibleAgentId, sourceStep.id);
+                        if (persisted) {
+                            // persisted may already be the data array, or an object containing data.
+                            const persistedData = (persisted && (persisted.data !== undefined)) ? persisted.data : persisted;
+                            try {
+                                const transformed = MapSerializer.transformFromSerialization(persistedData) as PluginOutput[];
+                                if (Array.isArray(transformed) && transformed.length > 0) {
+                                    sourceStep.result = transformed;
+                                    console.log(`[Step ${this.id}]   - Hydrated source step ${sourceStep.id} result from persistence. Keys:`, sourceStep.result.map(r => r.name));
+                                }
+                            } catch (e) {
+                                console.warn(`[Step ${this.id}]   - Failed to transform persisted work product for step ${sourceStep.id}:`, e instanceof Error ? e.message : e);
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.warn(`[Step ${this.id}]   - Error attempting to hydrate source step ${dep.sourceStepId} from persistence:`, e instanceof Error ? e.message : e);
+                }
             }
-        });
-        this.dependencies.forEach(dep => {
-            const sourceStep = allSteps.find(s => s.id === dep.sourceStepId);
+
             if (sourceStep?.result) {
+                console.log(`[Step ${this.id}]   - Source step ${dep.sourceStepId} result:`, JSON.stringify(sourceStep.result, null, 2));
+                console.log(`[Step ${this.id}]   - Looking up dependency '${dep.inputName}' from source step ${dep.sourceStepId}. Source step result keys:`, sourceStep.result.map(r => r.name));
                 const output = sourceStep.result.find(r => r.name === dep.outputName);
-                if (output) {
+
+                if (output && output.result !== undefined && output.result !== null) {
+                    console.log(`[Step ${this.id}]   - Populating '${dep.inputName}' from dependency '${dep.sourceStepId}.${dep.outputName}' with value:`, output.result);
                     this.inputValues.set(dep.inputName, {
                         inputName: dep.inputName,
                         value: output.result,
                         valueType: output.resultType,
                         args: {}
                     });
+                    continue;
                 }
+
+                const successfulOutputs = sourceStep.result.filter(r => r.resultType !== PluginParameterType.ERROR && r.success !== false);
+                if (successfulOutputs.length === 1) {
+                    const single = successfulOutputs[0];
+                    if (single.result !== undefined && single.result !== null) {
+                        console.warn(`[Step ${this.id}]   - Dependency '${dep.sourceStepId}.${dep.outputName}' not found or has no result. Falling back to single available output '${single.name}'.`);
+                        this.inputValues.set(dep.inputName, {
+                            inputName: dep.inputName,
+                            value: single.result,
+                            valueType: single.resultType,
+                            args: { auto_mapped_from: single.name }
+                        });
+                        try {
+                            this.logEvent({
+                                eventType: 'dependency_auto_remap',
+                                stepId: this.id,
+                                missionId: this.missionId,
+                                dependency: `${dep.sourceStepId}.${dep.outputName}`,
+                                mappedFrom: single.name,
+                                mappedTo: dep.inputName,
+                                timestamp: new Date().toISOString()
+                            });
+                        } catch (e) {
+                            console.error('Failed to log dependency_auto_remap event', e instanceof Error ? e.message : e);
+                        }
+                    } else {
+                        console.log(`[Step ${this.id}]   - Dependency '${dep.sourceStepId}.${dep.outputName}' not satisfied. Fallback output has no result.`);
+                    }
+                } else {
+                    console.log(`[Step ${this.id}]   - Dependency '${dep.sourceStepId}.${dep.outputName}' not satisfied. No unique fallback output available.`);
+                }
+            } else {
+                console.log(`[Step ${this.id}]   - Source step '${dep.sourceStepId}' not found or has no result. sourceStep:`, sourceStep);
             }
-        });
+        }
     }
 
     areDependenciesSatisfied(allSteps: Step[]): boolean {
@@ -187,6 +287,12 @@ export class Step {
             // For regular dependencies, the named output must exist in the source step's result.
             const outputExists = sourceStep.result?.some(r => r.name === dep.outputName);
             if (!outputExists) {
+                // Fallback: if the source step produced exactly one successful output, we'll consider the dependency satisfied
+                const successfulOutputs = sourceStep.result?.filter(r => r.resultType !== PluginParameterType.ERROR && r.success !== false) || [];
+                if (successfulOutputs.length === 1) {
+                    console.warn(`[areDependenciesSatisfied] Step ${this.id} dependency '${dep.outputName}' missing from ${sourceStep.id}, but source has single output '${successfulOutputs[0].name}'. Treating as satisfied (will auto-map).`);
+                    return true;
+                }
                 console.warn(`[areDependenciesSatisfied] Step ${this.id} dependency on output '${dep.outputName}' from step ${sourceStep.id} is not met because the output is not in the result.`);
                 return false;
             }
@@ -261,7 +367,44 @@ export class Step {
         }
 
         const inputArray: any[] = arrayInput.value;
-        const subPlanTemplate: ActionVerbTask[] = stepsInput.value;
+        let subPlanTemplate: ActionVerbTask[];
+
+        if (typeof stepsInput.value === 'string') {
+            try {
+                subPlanTemplate = JSON.parse(stepsInput.value);
+            } catch (e) {
+                return [{
+                    success: false,
+                    name: 'error',
+                    resultType: PluginParameterType.ERROR,
+                    resultDescription: '[Step]Error in FOREACH step: Invalid JSON format for steps',
+                    result: `steps.forEach is not a function`,
+                    error: `steps.forEach is not a function`
+                }];
+            }
+        } else if (Array.isArray(stepsInput.value)) {
+            subPlanTemplate = stepsInput.value as ActionVerbTask[];
+        } else {
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: '[Step]Error in FOREACH step: steps must be an array or JSON string',
+                result: `steps.forEach is not a function`,
+                error: `steps.forEach is not a function`
+            }];
+        }
+
+        if (!Array.isArray(subPlanTemplate)) {
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: '[Step]Error in FOREACH step: steps must be an array',
+                result: `steps.forEach is not a function`,
+                error: `steps.forEach is not a function`
+            }];
+        }
         const allGeneratedSteps: ActionVerbTask[] = [];
 
         if (inputArray.length === 0) {
@@ -320,21 +463,22 @@ export class Step {
 
     async execute(
         executeAction: (step: Step) => Promise<PluginOutput[]>,
-        thinkAction: (inputValues: Map<string, InputValue>) => Promise<PluginOutput[]>,
+        thinkAction: (inputValues: Map<string, InputValue>, actionVerb: string) => Promise<PluginOutput[]>,
         delegateAction: (inputValues: Map<string, InputValue>) => Promise<PluginOutput[]>,
         askAction: (inputValues: Map<string, InputValue>) => Promise<PluginOutput[]>,
         allSteps?: Step[]
     ): Promise<PluginOutput[]> {
+        console.log(`[Step ${this.id}] execute: Executing step ${this.actionVerb}...`);
+        console.log(`[Step ${this.id}] execute: step.outputs (custom output names) =`, this.outputs ? Array.from(this.outputs.keys()) : []);
         this.populateInputsFromReferences();
-        if (allSteps) {
-            this.populateInputsFromDependencies(allSteps);
-        }
+        console.log(`[Step ${this.id}] execute: Input values after population:`, this.inputValues);
         this.status = StepStatus.RUNNING;
         try {
             let result: PluginOutput[];
             switch (this.actionVerb) {
                 case 'THINK':
-                    result = await thinkAction(this.inputValues);
+                case 'GENERATE':
+                    result = await thinkAction(this.inputValues, this.actionVerb);
                     break;
                 case 'DELEGATE':
                     result = await this.handleDelegate(executeAction);
@@ -372,16 +516,25 @@ export class Step {
                 result = [result];
             }
 
+            console.log(`[Step ${this.id}] execute: Raw plugin outputs:`, result.map(r => ({ name: r.name, resultType: r.resultType })));
+
             result.forEach(resultItem => {
                 if (!resultItem.mimeType) { resultItem.mimeType = 'text/plain'; }
             });
 
             if (result[0]?.resultType === PluginParameterType.PLAN) {
-                this.status = StepStatus.SUB_PLAN_RUNNING; 
+                this.status = StepStatus.SUB_PLAN_RUNNING;
                 this.result = result;
             } else {
+                // Map plugin output names to step-defined custom names
+                this.result = await this.mapPluginOutputsToCustomNames(result);
+                await this.persistenceManager.saveWorkProduct({
+                    agentId: this.id.split('_')[0], stepId: this.id,
+                    data: this.result
+                });
                 this.status = StepStatus.COMPLETED;
-                this.result = result;
+
+                console.log(`[Step ${this.id}] execute: Mapped plugin outputs to step.result:`, this.result?.map(r => ({ name: r.name, resultType: r.resultType })));
 
                 await this.logEvent({
                     eventType: 'step_result',
@@ -390,17 +543,13 @@ export class Step {
                     stepNo: this.stepNo,
                     actionVerb: this.actionVerb,
                     status: this.status,
-                    result: result,
+                    result: this.result,
                     dependencies: this.dependencies,
                     timestamp: new Date().toISOString()
                 });
 
-                await this.persistenceManager.saveWorkProduct({
-                    agentId: this.id.split('_')[0], stepId: this.id,
-                    data: result
-                });
             }
-            return result;
+            return this.result;
         } catch (error) {
             this.status = StepStatus.ERROR;
             const errorResult = [{
@@ -477,7 +626,57 @@ export class Step {
 
     private async handleRepeat(): Promise<PluginOutput[]> {
         const count = this.inputValues.get('count')?.value as number;
-        const steps = this.inputValues.get('steps')?.value as ActionVerbTask[];
+        const stepsInput = this.inputValues.get('steps');
+
+        if (!stepsInput) {
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: '[Step]Error in REPEAT step',
+                result: null,
+                error: 'Missing required input: steps'
+            }];
+        }
+
+        let steps: ActionVerbTask[];
+
+        if (typeof stepsInput.value === 'string') {
+            try {
+                steps = JSON.parse(stepsInput.value);
+            } catch (e) {
+                return [{
+                    success: false,
+                    name: 'error',
+                    resultType: PluginParameterType.ERROR,
+                    resultDescription: '[Step]Error in REPEAT step: Invalid JSON format for steps',
+                    result: `steps.forEach is not a function`,
+                    error: `steps.forEach is not a function`
+                }];
+            }
+        } else if (Array.isArray(stepsInput.value)) {
+            steps = stepsInput.value as ActionVerbTask[];
+        } else {
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: '[Step]Error in REPEAT step: steps must be an array or JSON string',
+                result: `steps.forEach is not a function`,
+                error: `steps.forEach is not a function`
+            }];
+        }
+
+        if (!Array.isArray(steps)) {
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: '[Step]Error in REPEAT step: steps must be an array',
+                result: `steps.forEach is not a function`,
+                error: `steps.forEach is not a function`
+            }];
+        }
         const newSteps: Step[] = [];
 
         for (let i = 0; i < count; i++) {
@@ -496,7 +695,57 @@ export class Step {
 
     private async handleTimeout(): Promise<PluginOutput[]> {
         const timeoutMs = this.inputValues.get('timeout')?.value as number;
-        const steps = this.inputValues.get('steps')?.value as ActionVerbTask[];
+        const stepsInput = this.inputValues.get('steps');
+
+        if (!stepsInput) {
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: '[Step]Error in TIMEOUT step',
+                result: null,
+                error: 'Missing required input: steps'
+            }];
+        }
+
+        let steps: ActionVerbTask[];
+
+        if (typeof stepsInput.value === 'string') {
+            try {
+                steps = JSON.parse(stepsInput.value);
+            } catch (e) {
+                return [{
+                    success: false,
+                    name: 'error',
+                    resultType: PluginParameterType.ERROR,
+                    resultDescription: '[Step]Error in TIMEOUT step: Invalid JSON format for steps',
+                    result: `steps.forEach is not a function`,
+                    error: `steps.forEach is not a function`
+                }];
+            }
+        } else if (Array.isArray(stepsInput.value)) {
+            steps = stepsInput.value as ActionVerbTask[];
+        } else {
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: '[Step]Error in TIMEOUT step: steps must be an array or JSON string',
+                result: `steps.forEach is not a function`,
+                error: `steps.forEach is not a function`
+            }];
+        }
+
+        if (!Array.isArray(steps)) {
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: '[Step]Error in TIMEOUT step: steps must be an array',
+                result: `steps.forEach is not a function`,
+                error: `steps.forEach is not a function`
+            }];
+        }
         const newSteps = createFromPlan(steps, this.stepNo + 1, this.persistenceManager, this);
 
         newSteps.forEach(step => {
@@ -528,7 +777,44 @@ export class Step {
             }];
         }
 
-        const steps = stepsInput.value as ActionVerbTask[];
+        let steps: ActionVerbTask[];
+
+        if (typeof stepsInput.value === 'string') {
+            try {
+                steps = JSON.parse(stepsInput.value);
+            } catch (e) {
+                return [{
+                    success: false,
+                    name: 'error',
+                    resultType: PluginParameterType.ERROR,
+                    resultDescription: '[Step]Error in WHILE step: Invalid JSON format for steps',
+                    result: `steps.forEach is not a function`,
+                    error: `steps.forEach is not a function`
+                }];
+            }
+        } else if (Array.isArray(stepsInput.value)) {
+            steps = stepsInput.value as ActionVerbTask[];
+        } else {
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: '[Step]Error in WHILE step: steps must be an array or JSON string',
+                result: `steps.forEach is not a function`,
+                error: `steps.forEach is not a function`
+            }];
+        }
+
+        if (!Array.isArray(steps)) {
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: '[Step]Error in WHILE step: steps must be an array',
+                result: `steps.forEach is not a function`,
+                error: `steps.forEach is not a function`
+            }];
+        }
         const condition = conditionInput.value;
 
         let currentIteration = 0;
@@ -606,7 +892,44 @@ export class Step {
             }];
         }
 
-        const steps = stepsInput.value as ActionVerbTask[];
+        let steps: ActionVerbTask[];
+
+        if (typeof stepsInput.value === 'string') {
+            try {
+                steps = JSON.parse(stepsInput.value);
+            } catch (e) {
+                return [{
+                    success: false,
+                    name: 'error',
+                    resultType: PluginParameterType.ERROR,
+                    resultDescription: '[Step]Error in UNTIL step: Invalid JSON format for steps',
+                    result: `steps.forEach is not a function`,
+                    error: `steps.forEach is not a function`
+                }];
+            }
+        } else if (Array.isArray(stepsInput.value)) {
+            steps = stepsInput.value as ActionVerbTask[];
+        } else {
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: '[Step]Error in UNTIL step: steps must be an array or JSON string',
+                result: `steps.forEach is not a function`,
+                error: `steps.forEach is not a function`
+            }];
+        }
+
+        if (!Array.isArray(steps)) {
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: '[Step]Error in UNTIL step: steps must be an array',
+                result: `steps.forEach is not a function`,
+                error: `steps.forEach is not a function`
+            }];
+        }
         const condition = conditionInput.value;
 
         const newSteps: Step[] = [];
@@ -714,14 +1037,53 @@ export class Step {
                 name: 'error',
                 resultType: PluginParameterType.ERROR,
                 resultDescription: '[Step]Error in SEQUENCE step',
-                result: null,
+                result: 'Missing required input: steps',
                 error: 'Missing required input: steps'
             }];
         }
 
-        const steps = stepsInput.value as ActionVerbTask[];
-        const newSteps: Step[] = [];
+        let steps: ActionVerbTask[];
 
+        // Handle different input types
+        if (typeof stepsInput.value === 'string') {
+            try {
+                // Try to parse as JSON
+                steps = JSON.parse(stepsInput.value);
+            } catch (e) {
+                return [{
+                    success: false,
+                    name: 'error',
+                    resultType: PluginParameterType.ERROR,
+                    resultDescription: '[Step]Error in SEQUENCE step: Invalid JSON format for steps',
+                    result: `steps.forEach is not a function`,
+                    error: `steps.forEach is not a function`
+                }];
+            }
+        } else if (Array.isArray(stepsInput.value)) {
+            steps = stepsInput.value as ActionVerbTask[];
+        } else {
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: '[Step]Error in SEQUENCE step: steps must be an array or JSON string',
+                result: `steps.forEach is not a function`,
+                error: `steps.forEach is not a function`
+            }];
+        }
+
+        if (!Array.isArray(steps)) {
+            return [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: '[Step]Error in SEQUENCE step: steps must be an array',
+                result: `steps.forEach is not a function`,
+                error: `steps.forEach is not a function`
+            }];
+        }
+
+        const newSteps: Step[] = [];
         let previousStepId: string | undefined;
 
         steps.forEach((task, index) => {
@@ -774,6 +1136,138 @@ export class Step {
         return this.tempData.get(key);
     }
 
+    public async handleInternalVerb(
+        internalActionVerb: string,
+        internalInputValues: Map<string, InputValue>,
+        internalOutputs: Map<string, string>,
+        executeAction: (step: Step) => Promise<PluginOutput[]>,
+        thinkAction: (inputValues: Map<string, InputValue>, actionVerb: string) => Promise<PluginOutput[]>,
+        delegateAction: (inputValues: Map<string, InputValue>) => Promise<PluginOutput[]>,
+        askAction: (inputValues: Map<string, InputValue>) => Promise<PluginOutput[]>,
+        allSteps?: Step[]
+    ): Promise<void> {
+        // Temporarily update the step's actionVerb, inputValues, and outputs
+        // so the internal handlers can use them.
+        const originalActionVerb = this.actionVerb;
+        const originalInputValues = this.inputValues;
+        const originalOutputs = this.outputs;
+
+        (this as any).actionVerb = internalActionVerb;
+        this.inputValues = internalInputValues;
+        this.outputs = internalOutputs;
+
+        try {
+            let result: PluginOutput[];
+            switch (internalActionVerb) {
+                case 'THINK':
+                case 'GENERATE':
+                    result = await thinkAction(this.inputValues, internalActionVerb);
+                    break;
+                case 'DELEGATE':
+                    result = await this.handleDelegate(executeAction);
+                    break;
+                case 'ASK':
+                case MessageType.REQUEST:
+                    result = await askAction(this.inputValues);
+                    break;
+                case 'IF_THEN':
+                    result = await this.handleDecide();
+                    break;
+                case 'REPEAT':
+                    result = await this.handleRepeat();
+                    break;
+                case 'WHILE':
+                    result = await this.handleWhile();
+                    break;
+                case 'UNTIL':
+                    result = await this.handleUntil();
+                    break;
+                case 'SEQUENCE':
+                    result = await this.handleSequence();
+                    break;
+                case 'TIMEOUT':
+                    result = await this.handleTimeout();
+                    break;
+                case 'FOREACH':
+                    result = await this.handleForeach();
+                    break;
+                default:
+                    // This should ideally not be reached if CapabilitiesManager correctly identifies internal verbs
+                    // and only sends known internal verbs.
+                    console.warn(`[Step] Unknown internal action verb: ${internalActionVerb}. Falling back to external execution.`);
+                    result = await executeAction(this);
+            }
+
+            if (!Array.isArray(result)) {
+                result = [result];
+            }
+
+            result.forEach(resultItem => {
+                if (!resultItem.mimeType) { resultItem.mimeType = 'text/plain'; }
+            });
+
+            if (result[0]?.resultType === PluginParameterType.PLAN) {
+                this.status = StepStatus.SUB_PLAN_RUNNING;
+                this.result = result;
+            } else {
+                // Map plugin output names to step-defined custom names and persist the mapped result
+                this.result = await this.mapPluginOutputsToCustomNames(result);
+                await this.persistenceManager.saveWorkProduct({
+                    agentId: this.id.split('_')[0],
+                    stepId: this.id,
+                    data: this.result
+                });
+                this.status = StepStatus.COMPLETED;
+
+                await this.logEvent({
+                    eventType: 'step_result',
+                    stepId: this.id,
+                    missionId: this.missionId,
+                    stepNo: this.stepNo,
+                    actionVerb: this.actionVerb,
+                    status: this.status,
+                    result: this.result,
+                    dependencies: this.dependencies,
+                    timestamp: new Date().toISOString()
+                });
+
+            }
+        } catch (error) {
+            this.status = StepStatus.ERROR;
+            const errorResult = [{
+                success: false,
+                name: 'error',
+                resultType: PluginParameterType.ERROR,
+                resultDescription: '[Step]Error executing internal step',
+                result: error instanceof Error ? error.message : String(error),
+                error: error instanceof Error ? error.message : String(error)
+            }];
+            this.result = errorResult;
+
+            await this.logEvent({
+                eventType: 'step_result',
+                stepId: this.id,
+                missionId: this.missionId,
+                stepNo: this.stepNo,
+                actionVerb: this.actionVerb,
+                status: this.status,
+                result: errorResult,
+                timestamp: new Date().toISOString()
+            });
+
+            await this.persistenceManager.saveWorkProduct({
+                agentId: this.id.split('_')[0],
+                stepId: this.id,
+                data: errorResult
+            });
+        } finally {
+            // Restore original values
+            (this as any).actionVerb = originalActionVerb;
+            this.inputValues = originalInputValues;
+            this.outputs = originalOutputs;
+        }
+    }
+
     toJSON() {
         return {
             id: this.id,
@@ -822,9 +1316,11 @@ export class Step {
     }
 
     public populateInputsFromReferences(): void {
+        console.log(`[Step ${this.id}] populateInputsFromReferences: Populating inputs from references...`);
         if (!this.inputValues) this.inputValues = new Map<string, InputValue>();
         this.inputReferences.forEach((inputRef, key) => {
             if (!this.inputValues.has(key) && inputRef.value !== undefined) {
+                console.log(`[Step ${this.id}]   - Populating '${key}' from reference with value:`, inputRef.value);
                 this.inputValues.set(key, {
                     inputName: key,
                     value: inputRef.value,
@@ -832,6 +1328,42 @@ export class Step {
                     args: inputRef.args || {}
                 });
             }
+        });
+    }
+
+    /**
+     * Maps plugin output names to step-defined custom output names.
+     * This ensures that when other steps reference outputs, they can use the custom names.
+     */
+    async mapPluginOutputsToCustomNames(pluginOutputs: PluginOutput[]): Promise<PluginOutput[]> {
+        console.log(`[Step ${this.id}] mapPluginOutputsToCustomNames: this.outputs =`, this.outputs);
+        if (!this.outputs || this.outputs.size === 0) {
+            // No custom output names defined, return plugin outputs as-is
+            return pluginOutputs;
+        }
+
+        // For single output plugins, map to the single custom name
+        if (pluginOutputs.length === 1 && this.outputs.size === 1) {
+            const customName = Array.from(this.outputs.keys())[0];
+            const pluginOutput = pluginOutputs[0];
+
+            return [{
+                ...pluginOutput,
+                name: customName  // Replace plugin name with custom name
+            }];
+        }
+
+        // For multiple outputs, try to map by position or keep original names
+        // This is a more complex case that may need enhancement based on actual usage
+        const customNames = Array.from(this.outputs.keys());
+        return pluginOutputs.map((output, index) => {
+            if (index < customNames.length) {
+                return {
+                    ...output,
+                    name: customNames[index]
+                };
+            }
+            return output; // Keep original name if no custom name available
         });
     }
 }
@@ -864,7 +1396,17 @@ export function createFromPlan(
             throw new Error('Cannot create step from plan without a missionId from parentStep or agentContext');
         }
 
-        const inputSource = (task as any).inputs || task.inputReferences;
+        let inputSource = (task as any).inputs || task.inputReferences;
+
+        // FIX: Check if inputSource is a serialized map and deserialize it before processing.
+        if (inputSource && inputSource._type === 'Map' && Array.isArray(inputSource.entries)) {
+            try {
+                inputSource = Object.fromEntries(inputSource.entries);
+            } catch (e) {
+                console.error(`[createFromPlan] Failed to deserialize nested input map for task '${task.actionVerb}'. Inputs may be incorrect.`, e);
+            }
+        }
+
         if (inputSource) {
             for (const [inputName, inputDef] of Object.entries(inputSource as Record<string, any>)) {
                 if (typeof inputDef !== 'object' || inputDef === null) {
@@ -884,13 +1426,19 @@ export function createFromPlan(
                         args: {},
                     });
                 } else if (hasValue) {
+                    let value = inputDef.value;
+                    if (typeof value === 'object' && value !== null) {
+                        value = JSON.stringify(value);
+                    }
                     inputValues.set(inputName, {
                         inputName: inputName,
-                        value: inputDef.value,
+                        value: value,
                         valueType: inputDef.valueType,
                         args: inputDef.args,
                     });
                 } else if (hasOutputName && hasSourceStep) {
+                    console.log(`[createFromPlan] 🔗 Creating dependency: ${inputName} <- step ${inputDef.sourceStep}.${inputDef.outputName} for task '${task.actionVerb}'`);
+
                     if (inputDef.sourceStep === 0) {
                         let resolvedValue: any;
                         let resolvedValueType: PluginParameterType = inputDef.valueType;
@@ -918,6 +1466,7 @@ export function createFromPlan(
                                     sourceStepId: parentStep.id,
                                     inputName: inputName
                                 });
+                                console.log(`[createFromPlan] ✅ Added dependency to parent step: ${inputName} <- ${parentStep.id}.${inputDef.outputName}`);
                             } else {
                                 console.error(`[createFromPlan] 🚨 Unresolved sourceStep 0: Input '${inputDef.outputName}' not found for step '${task.actionVerb}'.`);
                             }
@@ -930,8 +1479,10 @@ export function createFromPlan(
                                 sourceStepId,
                                 inputName: inputName
                             });
+                            console.log(`[createFromPlan] ✅ Added dependency: ${inputName} <- ${sourceStepId}.${inputDef.outputName} (step ${inputDef.sourceStep})`);
                         } else {
                             console.error(`[createFromPlan] 🚨 Unresolved sourceStep ${inputDef.sourceStep} for input '${inputName}' in step '${task.actionVerb}'`);
+                            console.error(`[createFromPlan] Available step numbers:`, Object.keys(stepNumberToUUID));
                         }
                     }
                 } else {
@@ -971,6 +1522,40 @@ export function createFromPlan(
         throw new Error(`Missing required property 'actionVerb' in agent config`);
     }
 
+        // Normalize task.outputs into a Map<string, string> so custom output names
+        // (e.g. 'poem') survive transport/serialization formats. Support three common
+        // shapes that can arrive from persistence or remote planner components:
+        // 1) already a plain object: { poem: 'desc' }
+        // 2) serialized Map shape: { _type: 'Map', entries: [[key, value], ...] }
+        // 3) a JSON string representing either of the above
+        let normalizedOutputs: Map<string, string> | undefined = undefined;
+        try {
+            const rawOutputs = (task as any).outputs;
+            if (!rawOutputs) {
+                normalizedOutputs = undefined;
+            } else if (rawOutputs instanceof Map) {
+                normalizedOutputs = rawOutputs as Map<string, string>;
+            } else if (typeof rawOutputs === 'string') {
+                // JSON string; try to parse
+                try {
+                    const parsed = JSON.parse(rawOutputs);
+                    if (parsed && parsed._type === 'Map' && Array.isArray(parsed.entries)) {
+                        normalizedOutputs = new Map(parsed.entries);
+                    } else if (parsed && typeof parsed === 'object') {
+                        normalizedOutputs = new Map(Object.entries(parsed));
+                    }
+                } catch (e) {
+                    console.warn(`[createFromPlan] Unable to parse string outputs for task ${task.actionVerb}:`, e instanceof Error ? e.message : e);
+                }
+            } else if (rawOutputs && rawOutputs._type === 'Map' && Array.isArray(rawOutputs.entries)) {
+                normalizedOutputs = new Map(rawOutputs.entries);
+            } else if (typeof rawOutputs === 'object') {
+                normalizedOutputs = new Map(Object.entries(rawOutputs));
+            }
+        } catch (e) {
+            console.error('[createFromPlan] Error normalizing task.outputs:', e instanceof Error ? e.message : e);
+        }
+
         const step = new Step({
             id: task.id!,
             missionId: missionId,
@@ -980,10 +1565,13 @@ export function createFromPlan(
             dependencies: dependencies,
             inputReferences: inputReferences,
             inputValues: inputValues,
-            outputs: task.outputs ? new Map(Object.entries(task.outputs)) : undefined,
+            outputs: normalizedOutputs || (task.outputs ? new Map(Object.entries(task.outputs)) : undefined),
             recommendedRole: task.recommendedRole,
             persistenceManager: persistenceManager
         });
+
+        console.log(`[createFromPlan] 📊 Created step ${step.stepNo} (${task.actionVerb}) with ${dependencies.length} dependencies:`,
+            dependencies.map(d => `${d.inputName} <- ${d.sourceStepId}.${d.outputName}`));
         return step;
     });
 

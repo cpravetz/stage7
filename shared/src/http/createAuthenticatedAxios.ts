@@ -144,7 +144,7 @@ export function createAuthenticatedAxios(
 
   // Create a token manager for this service
   const tokenManager = ServiceTokenManager.getInstance(
-    `http://${securityUrl}`,
+    securityUrl,
     serviceId,
     secret
   );
@@ -155,7 +155,7 @@ export function createAuthenticatedAxios(
       'Content-Type': 'application/json',
       'Access-Control-Allow-Origin': '*',
     },
-    timeout: 60000, // 60 second timeout
+    timeout: 120000, // 120 second timeout
   });
 
   // Add request interceptor for authentication

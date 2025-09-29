@@ -17,9 +17,42 @@ import { classifyStepError, StepErrorType } from '../utils/ErrorClassifier';
 import { CollaborationMessage, CollaborationMessageType, ConflictResolution as ConflictResolutionData, ConflictResolutionResponse, TaskDelegationRequest, TaskResult, KnowledgeSharing, ConflictResolutionRequest } from '../collaboration/CollaborationProtocol';
 
 
+import * as amqp from 'amqplib';
+import * as amqp_connection_manager from 'amqp-connection-manager';
+
 export class Agent extends BaseEntity {
+    private async publishAgentStatus(): Promise<void> {
+        try {
+            if (!this.channel) {
+                console.warn(`Agent ${this.id} RabbitMQ channel not available, cannot publish status.`);
+                return;
+            }
+
+            const agentId = this.id || 'unknown-agent-id';
+            const agentStatus = this.status || AgentStatus.UNKNOWN;
+            const routingKey = 'agent.status.update'; // Explicit routing key
+            const exchange = 'agent.events'; // Explicit exchange
+
+            const messageContent = {
+                agentId: agentId,
+                status: agentStatus,
+                missionId: this.missionId,
+                timestamp: new Date().toISOString()
+            };
+
+            console.log(`Agent ${agentId} publishing status update to ${exchange} with routing key ${routingKey}: ${agentStatus}`);
+
+            this.channel.publish(exchange, routingKey, Buffer.from(JSON.stringify(messageContent)));
+        } catch (error) {
+            console.error(`Failed to publish agent status update for ${this.id}:`, error);
+        }
+    }
+
     public lastActivityTime: number = Date.now();
     private cleanupHandlers: Array<() => Promise<void>> = [];
+
+    private connection: amqp_connection_manager.AmqpConnectionManager | null = null;
+    private channel: amqp_connection_manager.ChannelWrapper | null = null;
 
     private missionContext: string = '';
     private agentSetUrl: string;
@@ -39,6 +72,10 @@ export class Agent extends BaseEntity {
     role: string = 'executor'; // Default role
     roleCustomizations?: any;
     private waitingSteps: Map<string, string> = new Map();
+    private lastFailedStep: Step | null = null;
+    private replannedSteps: Set<string> = new Set(); // Track replanned steps per agent
+    private replanDepth: number = 0; // Track replanning depth
+    private maxReplanDepth: number = 3; // Maximum replanning depth
 
     // Properties for lifecycle management
     private checkpointInterval: NodeJS.Timeout | null = null;
@@ -47,7 +84,6 @@ export class Agent extends BaseEntity {
 
     constructor(config: AgentConfig) {
         super(config.id, 'AgentSet', `agentset`, process.env.PORT || '9000');
-        // console.log(`Agent ${config.id} created. missionId=${config.missionId}. Inputs: ${JSON.stringify(config.inputValues)}` );
         this.agentPersistenceManager = new AgentPersistenceManager();
         this.stateManager = new StateManager(config.id, this.agentPersistenceManager);
         this.inputValues = config.inputValues instanceof Map ? config.inputValues : new Map(Object.entries(config.inputValues||{}));
@@ -55,18 +91,14 @@ export class Agent extends BaseEntity {
         this.agentSetUrl = config.agentSetUrl;
         this.status = AgentStatus.INITIALIZING;
         this.dependencies = config.dependencies || [];
-        // Initialize missionContext. Prefer the explicit context, but fall back to the 'goal' input.
-        // This is critical for the replanFromFailure loop to have the original goal.
         if (config.missionContext && config.missionContext.trim() !== '') {
             this.missionContext = config.missionContext;
         } else if (this.inputValues?.has('goal')) {
             const goalInput = this.inputValues.get('goal');
             if (goalInput?.value && typeof goalInput.value === 'string') {
                 this.missionContext = goalInput.value;
-                // console.log(`[Agent Constructor] Initialized missionContext from 'goal' input for agent ${this.id}.`);
             }
         }
-        // Handle role and roleCustomizations if they exist in the config
         if ('role' in config && typeof config.role === 'string') {
             this.role = config.role;
         }
@@ -77,7 +109,6 @@ export class Agent extends BaseEntity {
             console.log('Agent Line 95 - Missing required property "actionVerb" in agent config');
             throw new Error(`Missing required property 'actionVerb' in agent config`);
         }
-        // Create initial step using the new Step class
         const initialStep = new Step({
             actionVerb: config.actionVerb,
             missionId: this.missionId,
@@ -89,7 +120,6 @@ export class Agent extends BaseEntity {
         });
         this.steps.push(initialStep);
 
-        // Log agent creation event
         this.logEvent({
             eventType: 'agent_created',
             agentId: this.id,
@@ -99,12 +129,14 @@ export class Agent extends BaseEntity {
             timestamp: new Date().toISOString()
         });
 
+        this.initRabbitMQ(); // Call init RabbitMQ
+
         this.initializeAgent().then(() => {
-            // console.log(`Agent ${this.id} initialized successfully. Status: ${this.status}. Commencing main execution loop.`);
             this.say(`Agent ${this.id} initialized and commencing operations.`);
             this.runUntilDone();
-        }).catch((error) => { // Added error parameter
+        }).catch((error) => {
             this.status = AgentStatus.ERROR;
+            this.publishAgentStatus();
             const errorMessage = error instanceof Error ? error.message : String(error);
             console.error(`Agent ${this.id} failed during initialization or before starting execution loop. Error: ${errorMessage}`);
             this.say(`Agent ${this.id} failed to initialize or start. Error: ${errorMessage}`);
@@ -112,6 +144,26 @@ export class Agent extends BaseEntity {
                  console.error(`Agent ${this.id} failed to notify TrafficManager about initialization error:`, notifyError);
             });
         });
+    }
+
+    private async initRabbitMQ(): Promise<void> {
+        try {
+            const rabbitmqUrl = process.env.RABBITMQ_URL || 'amqp://stage7:stage7password@rabbitmq:5672';
+            this.connection = amqp_connection_manager.connect([rabbitmqUrl]);
+
+            this.connection.on('connect', () => console.log(`Agent ${this.id} connected to RabbitMQ!`));
+            this.connection.on('disconnect', err => console.log(`Agent ${this.id} disconnected from RabbitMQ.`, err));
+
+            this.channel = this.connection.createChannel({
+                json: true,
+                setup: async (channel: amqp.Channel) => {
+                    await channel.assertExchange('agent.events', 'topic', { durable: true });
+                    console.log(`Agent ${this.id} asserted 'agent.events' exchange.`);
+                },
+            });
+        } catch (error) {
+            console.error(`Error initializing RabbitMQ for Agent ${this.id}:`, error);
+        }
     }
 
     async cleanup(): Promise<void> {
@@ -159,6 +211,13 @@ export class Agent extends BaseEntity {
         this.runUntilDone().catch(error => {
             console.error(`Error running agent ${this.id}:`, error instanceof Error ? error.message : error);
             this.status = AgentStatus.ERROR;
+            this.logEvent({
+                eventType: 'agent_error',
+                agentId: this.id,
+                missionId: this.missionId,
+                status: this.status,
+                timestamp: new Date().toISOString()
+            });
         });
     }
 
@@ -169,7 +228,15 @@ export class Agent extends BaseEntity {
             this.brainUrl = brainUrl;
             this.trafficManagerUrl = trafficManagerUrl;
             this.librarianUrl = librarianUrl;
-            this.status = AgentStatus.RUNNING;
+        this.status = AgentStatus.RUNNING;
+        this.logEvent({
+            eventType: 'agent_initialized',
+            agentId: this.id,
+            missionId: this.missionId,
+            status: this.status,
+            timestamp: new Date().toISOString()
+        });
+        this.publishAgentStatus(); // Publish RUNNING status
 
             if (this.missionContext && this.steps[0]?.actionVerb === 'ACCOMPLISH') {
                 await this.prepareOpeningInstruction();
@@ -177,8 +244,16 @@ export class Agent extends BaseEntity {
             return true;
         } catch (error) { analyzeError(error as Error);
             console.error('Error initializing agent:', error instanceof Error ? error.message : error);
-            this.status = AgentStatus.ERROR;
-            return false;
+        this.status = AgentStatus.ERROR;
+        this.logEvent({
+            eventType: 'agent_initialization_failed',
+            agentId: this.id,
+            missionId: this.missionId,
+            status: this.status,
+            timestamp: new Date().toISOString()
+        });
+        this.publishAgentStatus(); // Publish ERROR status
+        return false;
         }
     }
 
@@ -222,16 +297,15 @@ Please consider this context and the available plugins when planning and executi
         try {
             if (this.status !== AgentStatus.RUNNING) return;
 
-            // console.log(`Executing step ${step.actionVerb} (${step.id})...`);
+            // Populate inputs (possibly hydrating from persistence) before any execution or delegation logic
+            await step.populateInputsFromDependencies(this.steps);
 
             if (step.recommendedRole && step.recommendedRole !== this.role && this.role !== 'coordinator') {
-                // console.log(`Step ${step.id} recommends role ${step.recommendedRole}, but this agent has role ${this.role}`);
                 const delegationResult = await this.delegateStepToSpecializedAgent(step);
                 if (delegationResult.success) {
-                    step.status = StepStatus.COMPLETED; // Mark as completed since it's delegated
+                    step.status = StepStatus.SUB_PLAN_RUNNING; // Mark as waiting for delegation result
                     return;
                 }
-                // console.log(`No specialized agent available, executing step with current agent`);
             }
 
             this.say(`Executing step: ${step.actionVerb} - ${step.description || 'No description'}`);
@@ -248,20 +322,58 @@ Please consider this context and the available plugins when planning and executi
                 const error = new Error(result[0].error || result[0].result || 'Step execution failed');
                 await this.handleStepFailure(step, error);
                 return;
+            } else if (result && result.length > 0 && result[0].name === 'internalVerbExecution') {
+                const internalVerbData = result[0].result;
+                const internalActionVerb = internalVerbData.actionVerb;
+                const internalInputValues = MapSerializer.transformFromSerialization(internalVerbData.inputValues);
+                const internalOutputs = MapSerializer.transformFromSerialization(internalVerbData.outputs);
+
+                console.log(`Agent ${this.id}: Handling internal verb: ${internalActionVerb}`);
+                // Delegate to the Step to handle the internal verb
+                await step.handleInternalVerb(
+                    internalActionVerb,
+                    internalInputValues,
+                    internalOutputs,
+                    this.executeActionWithCapabilitiesManager.bind(this),
+                    this.useBrainForReasoning.bind(this),
+                    this.createSubAgent.bind(this),
+                    this.handleAskStep.bind(this),
+                    this.steps
+                );
+                // After handling, the step's status should be updated by handleInternalVerb
+                return;
             }
 
-            // console.log(`Step ${step.actionVerb} result:`, result);
+            console.log(`[Agent ${this.id}] executeStep: Checking result for pending_user_input. Result: ${JSON.stringify(result)}`);
 
             if (result && result.length > 0 && result[0].name === 'pending_user_input') {
+                console.log(`[Agent ${this.id}] executeStep: Detected pending_user_input. RequestId: ${(result[0] as any).request_id}`);
                 const requestId = (result[0] as any).request_id;
                 if (requestId) {
+                    // Check if the step has unresolved placeholders that we can now resolve
+                    if (this.stepHasUnresolvedPlaceholders(step)) {
+                        console.log(`[Agent ${this.id}] Step ${step.id} has unresolved placeholders, retrying with resolved values`);
+                        // Cancel the pending user input and retry the step
+                        await this.retryStepWithResolvedPlaceholders(step);
+                        return;
+                    }
+
                     this.status = AgentStatus.WAITING_FOR_USER_INPUT;
+                    this.logEvent({
+                        eventType: 'agent_waiting_for_user_input',
+                        agentId: this.id,
+                        missionId: this.missionId,
+                        status: this.status,
+                        timestamp: new Date().toISOString()
+                    });
                     step.status = StepStatus.WAITING;
                     this.waitingSteps.set(requestId, step.id);
+                    console.log(`[Agent ${this.id}] Stored waiting step for requestId: ${requestId}, stepId: ${step.id}. Current waitingSteps size: ${this.waitingSteps.size}`);
                     await this.notifyTrafficManager();
-                    // console.log(`Agent ${this.id} is waiting for user input for step ${step.id} with request ID ${requestId}`);
                     return;
                 }
+            } else {
+                console.log(`[Agent ${this.id}] executeStep: Result is NOT pending_user_input. Actual result: ${JSON.stringify(result)}`);
             }
 
             this.say(`Completed step: ${step.actionVerb}`);
@@ -310,7 +422,9 @@ Please consider this context and the available plugins when planning and executi
                     this.say('Reflection did not provide a clear plan or answer. Continuing with the current plan.');
                 }
             } else if (result[0]?.resultType === PluginParameterType.PLAN) {
-                const planningStepResult = result[0]?.result;
+                // Apply custom output name mapping for PLAN results
+                const mappedResult = await step.mapPluginOutputsToCustomNames(result);
+                const planningStepResult = mappedResult[0]?.result;
                 let actualPlanArray: ActionVerbTask[] | undefined = undefined;
 
                 if (Array.isArray(planningStepResult)) {
@@ -348,15 +462,23 @@ Please consider this context and the available plugins when planning and executi
 
     private async runAgent() {
         try {
+            //console.log(`[Agent ${this.id}] runAgent: Agent status: ${this.status}`);
             if (this.status !== AgentStatus.RUNNING) {
                 return;
             }
 
             const pendingSteps = this.steps.filter(step => step.status === StepStatus.PENDING);
+            //console.log(`[Agent ${this.id}] runAgent: Pending steps: ${pendingSteps.map(s => `${s.id} (${s.actionVerb}, ${s.status})`).join(', ') || 'None'}`);
+
             const executableSteps = pendingSteps.filter(step => step.areDependenciesSatisfied(this.steps));
+            //console.log(`[Agent ${this.id}] runAgent: Executable steps: ${executableSteps.map(s => `${s.id} (${s.actionVerb}, ${s.status})`).join(', ') || 'None'}`);
 
             if (executableSteps.length > 0) {
-                const executionPromises = executableSteps.map(step => this.executeStep(step));
+                console.log(`[Agent ${this.id}] runAgent: Executing ${executableSteps.length} steps.`);
+                const executionPromises = executableSteps.map(step => {
+                    console.log(`[Agent ${this.id}] runAgent: Calling executeStep for step ${step.id} (${step.actionVerb})`);
+                    return this.executeStep(step);
+                });
                 await Promise.all(executionPromises);
             } else if (pendingSteps.length > 0) {
                 // Deadlock detection: pending steps exist, but none are executable.
@@ -375,6 +497,13 @@ Please consider this context and the available plugins when planning and executi
                 }
             } else if (!this.hasActiveWork()) {
                 this.status = AgentStatus.COMPLETED;
+                this.logEvent({
+                    eventType: 'agent_completed',
+                    agentId: this.id,
+                    missionId: this.missionId,
+                    status: this.status,
+                    timestamp: new Date().toISOString()
+                });
                 const finalStep = this.steps.filter(s => s.status === StepStatus.COMPLETED).pop();
                 if (finalStep) {
                     this.output = await this.agentPersistenceManager.loadWorkProduct(this.id, finalStep.id);
@@ -387,6 +516,13 @@ Please consider this context and the available plugins when planning and executi
         } catch (error) {
             console.error('Error in agent main loop:', error instanceof Error ? error.message : error);
             this.status = AgentStatus.ERROR;
+            this.logEvent({
+                eventType: 'agent_error',
+                agentId: this.id,
+                missionId: this.missionId,
+                status: this.status,
+                timestamp: new Date().toISOString()
+            });
             this.say(`Error in agent execution: ${error instanceof Error ? error.message : String(error)}`);
             await this.notifyTrafficManager();
         }
@@ -461,6 +597,7 @@ Please consider this context and the available plugins when planning and executi
                 break;
             case 'USER_INPUT_RESPONSE': // Assuming this is the message type from PostOffice
                 const { requestId, answer } = message.content;
+                console.log(`[Agent ${this.id}] Received USER_INPUT_RESPONSE for requestId: ${requestId}. Current waitingSteps size: ${this.waitingSteps.size}`);
                 const waitingStepId = this.waitingSteps.get(requestId);
                 if (waitingStepId) {
                     const step = this.steps.find(s => s.id === waitingStepId);
@@ -470,15 +607,27 @@ Please consider this context and the available plugins when planning and executi
                             success: true,
                             name: outputName,
                             resultType: PluginParameterType.STRING,
-                            result: answer,
+                            result: answer, // answer can be null
                             resultDescription: 'User response'
                         }];
                         step.status = StepStatus.COMPLETED;
                         this.status = AgentStatus.RUNNING;
+                        this.logEvent({
+                            eventType: 'agent_resumed_from_waiting',
+                            agentId: this.id,
+                            missionId: this.missionId,
+                            status: this.status,
+                            timestamp: new Date().toISOString()
+                        });
                         this.waitingSteps.delete(requestId);
+                        console.log(`[Agent ${this.id}] Processed user input for requestId: ${requestId}. New waitingSteps size: ${this.waitingSteps.size}`);
                         await this.notifyTrafficManager();
                         this.runAgent();
+                    } else {
+                        console.warn(`[Agent ${this.id}] Step with ID ${waitingStepId} not found for requestId ${requestId}.`);
                     }
+                } else {
+                    console.warn(`[Agent ${this.id}] No waiting step found for requestId: ${requestId}. It might have been already processed or is invalid.`);
                 }
                 break;
             default:
@@ -517,7 +666,7 @@ Please consider this context and the available plugins when planning and executi
         let question = input.value || input.args?.question;
         inputs.forEach((value, key) => {
             if (key !== 'question') {
-                const regex = new RegExp(`\{${key}\}`, 'g');
+                const regex = new RegExp(`{${key}}`, 'g');
                 question = question.replace(regex, value.value);
             }
         });
@@ -577,6 +726,8 @@ Please consider this context and the available plugins when planning and executi
         }
     }
 
+
+
     private async saveWorkProductWithClassification(stepId: string, data: PluginOutput[], isAgentEndpoint: boolean, allAgents: Agent[]): Promise<void> {
         if (this.status === AgentStatus.PAUSED || this.status === AgentStatus.ABORTED) {
             console.log(`Agent ${this.id} is in status ${this.status}, skipping saveWorkProduct for step ${stepId}.`);
@@ -607,28 +758,58 @@ Please consider this context and the available plugins when planning and executi
                 scope = 'AgentStep';
             }
 
-            // If this is a final step, upload outputs to shared file space
-            if (outputType === 'Final' && data && data.length > 0) {
-                try {
-                    const librarianUrl = await this.getServiceUrl('Librarian');
-                    if (librarianUrl) {
-                        const uploadedFiles = await this.uploadStepOutputsToSharedSpace(
-                            step,
-                            librarianUrl
-                        );
-                        if (uploadedFiles.length > 0) {
-                            console.log(`Uploaded ${uploadedFiles.length} final step outputs to shared space for step ${stepId}`);
-                        }
-                    } else {
-                        console.warn('Librarian URL not available for uploading final step outputs');
-                    }
-                } catch (error) {
-                    console.error('Error uploading final step outputs to shared space:', error);
-                    // Don't fail the entire operation if file upload fails
-                }
-            }
+            // Upload outputs to shared file space for Final steps, steps that generate user-referenced data,
+            // and for explicit FILE_OPERATION outputs or outputs that include filenames/storage paths.
+            // outputType is an enum (OutputType.FINAL), compare accordingly
+            let uploadedFiles: MissionFile[] = [];
+            const outputsHaveFiles = Array.isArray(data) && data.some(o => !!(o as any).fileName || !!(o as any).storagePath);
+        let shouldUploadToSharedSpace = (
+            (outputType === OutputType.FINAL && data && data.length > 0) ||
+            (data && data.length > 0 && this.stepGeneratesUserReferencedData(stepId, data)) ||
+            outputsHaveFiles
+        );
 
-            const workProductPayload = {
+        if (step && step.actionVerb === 'FILE_OPERATION') {
+            shouldUploadToSharedSpace = false; // Explicitly disable for FILE_OPERATION
+        }
+
+                    if (shouldUploadToSharedSpace) {
+                        try {
+                            const librarianUrl = await this.getServiceUrl('Librarian');
+                            if (librarianUrl) {
+                                uploadedFiles = await this.uploadStepOutputsToSharedSpace(
+                                    step,
+                                    librarianUrl
+                                );
+                                if (uploadedFiles.length > 0) {
+                                    console.log(`Uploaded ${uploadedFiles.length} step outputs to shared space for step ${stepId}`);
+                                    
+                                    // Register files with MissionControl
+                                    const missionControlUrl = await this.getServiceUrl('MissionControl');
+                                    if (missionControlUrl) {
+                                        for (const file of uploadedFiles) {
+                                            await this.authenticatedApi.post(`http://${missionControlUrl}/missions/${this.missionId}/files/add`, file);
+                                        }
+                                        console.log(`Successfully registered ${uploadedFiles.length} files with MissionControl.`);
+                                    } else {
+                                        console.warn('MissionControl URL not available for registering uploaded files.');
+                                    }
+                                }
+                            } else {
+                                console.warn('Librarian URL not available for uploading step outputs');
+                            }
+                        } catch (error) {
+                            console.error('Error uploading step outputs to shared space:', error);
+                            // Don't fail the entire operation if file upload fails
+                        }
+                    } else if (step && step.actionVerb === 'FILE_OPERATION' && data && data.length > 0 && data[0].result) {
+                        // If FILE_OPERATION was executed, and it returned a file, use its result as the attached file
+                        const missionFileResult = data[0].result as MissionFile;
+                        if (missionFileResult && missionFileResult.id && missionFileResult.originalName) {
+                            uploadedFiles.push(missionFileResult);
+                        }
+                    }
+            const workProductPayload: any = {
                 id: stepId,
                 type: type,
                 scope: scope,
@@ -639,8 +820,12 @@ Please consider this context and the available plugins when planning and executi
                 mimeType: data[0]?.mimeType || 'text/plain',
                 fileName: data[0]?.fileName,
                 workproduct: (type === 'Plan' && data[0]?.result) ?
-                    `Plan with ${Array.isArray(data[0].result) ? data[0].result.length : Object.keys(data[0].result).length} steps` : data[0]?.result     
+                    `Plan with ${Array.isArray(data[0].result) ? data[0].result.length : Object.keys(data[0].result).length} steps` : data[0]?.result
             };
+            // If we uploaded files above, attach their metadata so the UI can list them
+            if (typeof uploadedFiles !== 'undefined' && Array.isArray(uploadedFiles) && uploadedFiles.length > 0) {
+                workProductPayload.attachedFiles = uploadedFiles;
+            }
             console.log('[Agent.ts] WORK_PRODUCT_UPDATE payload:', JSON.stringify(workProductPayload, null, 2));
 
             this.sendMessage(MessageType.WORK_PRODUCT_UPDATE, 'user', workProductPayload);
@@ -741,7 +926,7 @@ Please consider this context and the available plugins when planning and executi
         }
     }
 
-    private async useBrainForReasoning(inputs: Map<string, InputValue>): Promise<PluginOutput[]> {
+    private async useBrainForReasoning(inputs: Map<string, InputValue>, actionVerb: string): Promise<PluginOutput[]> {
         if (this.status !== AgentStatus.RUNNING) {
             console.log(`Agent ${this.id} is not RUNNING, aborting useBrainForReasoning.`);
             return [{
@@ -753,61 +938,99 @@ Please consider this context and the available plugins when planning and executi
                 error: 'Agent is not in RUNNING state.'
             }];
         }
-        const prompt = inputs.get('prompt')?.value as string;
-        if (!prompt) {
-            return [{
-                success: false,
-                name: 'error',
-                resultType: PluginParameterType.ERROR,
-                resultDescription: 'Error in useBrainForReasoning',
-                result: null,
-                error: 'Prompt is required for THINK plugin'
-            }];
+
+        let brainEndpoint: string;
+        let brainRequestBody: any;
+        let outputName: string;
+        let outputDescription: string;
+
+        if (actionVerb === 'GENERATE') {
+            brainEndpoint = 'generate';
+            outputName = 'generated_content';
+            outputDescription = 'Content generated by LLM service.';
+
+            const conversationType = inputs.get('conversationType')?.value as LLMConversationType || LLMConversationType.TextToText;
+            const modelName = inputs.get('modelName')?.value;
+            const optimization = inputs.get('optimization')?.value;
+            const prompt = inputs.get('prompt')?.value;
+            const file = inputs.get('file')?.value;
+            const audio = inputs.get('audio')?.value;
+            const video = inputs.get('video')?.value;
+            const image = inputs.get('image')?.value;
+
+            brainRequestBody = {
+                type: conversationType,
+                prompt: prompt,
+                modelName: modelName,
+                optimization: optimization,
+                file: file,
+                audio: audio,
+                video: video,
+                image: image,
+                trace_id: this.id // Assuming agent ID can be used as trace_id
+            };
+        } else { // Default to THINK logic
+            brainEndpoint = 'chat';
+            outputName = 'answer';
+            outputDescription = `Brain reasoning output (${inputs.get('conversationType')?.value || LLMConversationType.TextToText})`; // Use conversationType from inputs
+
+            const prompt = inputs.get('prompt')?.value as string;
+            if (!prompt) {
+                return [{
+                    success: false,
+                    name: 'error',
+                    resultType: PluginParameterType.ERROR,
+                    resultDescription: 'Error in useBrainForReasoning',
+                    result: null,
+                    error: 'Prompt is required for THINK plugin'
+                }];
+            }
+
+            const optimization = (inputs.get('optimization')?.value as string) || 'accuracy';
+            const conversationType = (inputs.get('conversationType')?.value as LLMConversationType) || LLMConversationType.TextToText;
+
+            const validOptimizations = ['cost', 'accuracy', 'creativity', 'speed', 'continuity'];
+            const validConversationTypes = [
+                LLMConversationType.TextToText, 
+                LLMConversationType.TextToImage, 
+                LLMConversationType.TextToAudio, 
+                LLMConversationType.TextToVideo, 
+                LLMConversationType.TextToCode];
+
+            if (!validOptimizations.includes(optimization)) {
+                return [{
+                    success: false,
+                    name: 'error',
+                    resultType: PluginParameterType.ERROR,
+                    resultDescription: 'Error in useBrainForReasoning',
+                    result: null,
+                    error: `Invalid optimization: ${optimization}. Must be one of ${validOptimizations.join(', ')}`
+                }];
+            }
+
+            if (!validConversationTypes.includes(conversationType)) {
+                return [{
+                    success: false,
+                    name: 'error',
+                    resultType: PluginParameterType.ERROR,
+                    resultDescription: 'Error in useBrainForReasoning',
+                    result: null,
+                    error: `Invalid ConversationType: ${conversationType}. Must be one of ${validConversationTypes.join(', ')}`
+                }];
+            }
+
+            brainRequestBody = {
+                exchanges: [...this.conversation, { role: 'user', content: prompt }], // Combine history with current prompt
+                optimization: optimization,
+                conversationType: conversationType,
+                responseType: 'text'
+            };
         }
 
-        const optimization = (inputs.get('optimization')?.value as string) || 'accuracy';
-        const conversationType = (inputs.get('conversationType')?.value as LLMConversationType) || LLMConversationType.TextToText;
-
-        const validOptimizations = ['cost', 'accuracy', 'creativity', 'speed', 'continuity'];
-        const validConversationTypes = [
-            LLMConversationType.TextToText, 
-            LLMConversationType.TextToImage, 
-            LLMConversationType.TextToAudio, 
-            LLMConversationType.TextToVideo, 
-            LLMConversationType.TextToCode];
-
-        if (!validOptimizations.includes(optimization)) {
-            return [{
-                success: false,
-                name: 'error',
-                resultType: PluginParameterType.ERROR,
-                resultDescription: 'Error in useBrainForReasoning',
-                result: null,
-                error: `Invalid optimization: ${optimization}. Must be one of ${validOptimizations.join(', ')}`
-            }];
-        }
-
-        if (!validConversationTypes.includes(conversationType)) {
-            return [{
-                success: false,
-                name: 'error',
-                resultType: PluginParameterType.ERROR,
-                resultDescription: 'Error in useBrainForReasoning',
-                result: null,
-                error: `Invalid ConversationType: ${conversationType}. Must be one of ${validConversationTypes.join(', ')}`
-            }];
-        }
-
-        const reasoningInput = {
-            exchanges: [...this.conversation, { role: 'user', content: prompt }], // Combine history with current prompt
-            optimization: optimization,
-            conversationType: conversationType,
-            responseType: 'text'
-        };
-        console.log(`[Agent ${this.id}] useBrainForReasoning: Sending exchanges to Brain:`, JSON.stringify(reasoningInput.exchanges, null, 2));
+        console.log(`[Agent ${this.id} ${actionVerb}] useBrainForReasoning: Sending request to Brain /${brainEndpoint}`);
 
         try {
-            const response = await this.authenticatedApi.post(`http://${this.brainUrl}/chat`, reasoningInput);
+            const response = await this.authenticatedApi.post(`http://${this.brainUrl}/${brainEndpoint}`, brainRequestBody);
             const confidence = response.data.confidence || 1.0;
             const confidenceThreshold = (inputs.get('confidenceThreshold')?.value as number) || 0.75;
 
@@ -817,28 +1040,60 @@ Please consider this context and the available plugins when planning and executi
                 const mimeType = response.data.mimeType || 'text/plain';
 
                 let resultType: PluginParameterType;
-                let parsedResult = brainResponse;
+                let parsedResult: any = brainResponse;
 
-                if (conversationType === LLMConversationType.TextToCode && mimeType === 'application/json') {
+                // If the request explicitly asked for a PLAN-like JSON response, try to parse
+                if (actionVerb === 'THINK' && (inputs.get('conversationType')?.value as LLMConversationType) === LLMConversationType.TextToCode && mimeType === 'application/json') {
                     try {
-                        parsedResult = JSON.parse(brainResponse);
+                        parsedResult = typeof brainResponse === 'string' ? JSON.parse(brainResponse) : brainResponse;
                         resultType = PluginParameterType.PLAN;
                         console.log(`[Agent ${this.id}] Parsed brainResponse as JSON for plan.`);
                     } catch (e) {
-                        console.warn(`[Agent ${this.id}] Failed to parse brainResponse as JSON, treating as string. Error:`, e);
+                        console.warn(`[Agent ${this.id}] Failed to parse brainResponse as JSON, treating as string. Error:`, e instanceof Error ? e.message : e);
                         resultType = PluginParameterType.STRING;
                     }
                 } else {
-                    // ... (existing logic for other conversation types)
                     resultType = PluginParameterType.STRING;
+                }
+
+                // Defensive extraction: ensure string results for STRING resultType
+                if (resultType === PluginParameterType.STRING) {
+                    try {
+                        if (parsedResult === undefined || parsedResult === null) {
+                            // Try to find text in other common fields on the response object
+                            const candidate = response.data?.result || response.data?.text || response.data?.output || response.data?.generated || response.data?.response || response.data?.choices;
+                            if (candidate !== undefined && candidate !== null) {
+                                parsedResult = typeof candidate === 'string' ? candidate : (Array.isArray(candidate) ? JSON.stringify(candidate) : JSON.stringify(candidate));
+                            } else {
+                                parsedResult = '';
+                            }
+                        } else if (typeof parsedResult === 'object') {
+                            // Try common fields inside the object
+                            const fallback = parsedResult.result || parsedResult.text || (parsedResult.choices && parsedResult.choices[0] && (parsedResult.choices[0].text || parsedResult.choices[0].message)) || parsedResult.generated || parsedResult.output;
+                            if (fallback !== undefined && fallback !== null) {
+                                parsedResult = typeof fallback === 'string' ? fallback : JSON.stringify(fallback);
+                            } else {
+                                parsedResult = JSON.stringify(parsedResult);
+                            }
+                        } else {
+                            parsedResult = String(parsedResult);
+                        }
+                    } catch (e) {
+                        console.warn(`[Agent ${this.id}] Error coercing brainResponse to string result:`, e instanceof Error ? e.message : e);
+                        parsedResult = '';
+                    }
+                }
+
+                if (!parsedResult || (typeof parsedResult === 'string' && parsedResult.trim() === '')) {
+                    console.warn(`[Agent ${this.id}] WARNING: Brain returned an empty or missing result for actionVerb=${actionVerb}. Response payload:`, JSON.stringify(response.data || {}, null, 2));
                 }
 
                 return [{
                     success: true,
-                    name: 'answer',
+                    name: outputName,
                     resultType: resultType,
                     result: parsedResult,
-                    resultDescription: `Brain reasoning output (${conversationType})`,
+                    resultDescription: outputDescription,
                     mimeType: mimeType
                 }];
             }
@@ -895,6 +1150,141 @@ Please consider this context and the available plugins when planning and executi
         }
     }
 
+    /**
+     * Resolve placeholders in input values by looking up outputs from completed steps
+     */
+    private resolvePlaceholdersInInputs(inputsForExecution: Map<string, InputValue>): void {
+        for (const [inputName, inputValue] of inputsForExecution.entries()) {
+            if (typeof inputValue.value === 'string') {
+                const resolvedValue = this.resolvePlaceholdersInString(inputValue.value);
+                if (resolvedValue !== inputValue.value) {
+                    console.log(`[Agent ${this.id}] Resolved placeholder in ${inputName}: "${inputValue.value}" -> "${resolvedValue}"`);
+                    inputValue.value = resolvedValue;
+                }
+            }
+        }
+    }
+
+    /**
+     * Resolve placeholders like [userPersonas] in a string by looking up outputs from completed steps
+     */
+    private resolvePlaceholdersInString(text: string): string {
+        // Find all placeholders in the format [outputName]
+        const placeholderRegex = /\{([^\}]+)\}/g;
+        let resolvedText = text;
+        let match;
+
+        while ((match = placeholderRegex.exec(text)) !== null) {
+            const placeholderName = match[1];
+            const fullPlaceholder = match[0]; // e.g., "[userPersonas]"
+
+            // Look for this output in completed steps
+            const outputValue = this.findOutputFromCompletedSteps(placeholderName);
+            if (outputValue !== null) {
+                resolvedText = resolvedText.replace(fullPlaceholder, outputValue);
+                console.log(`[Agent ${this.id}] Resolved placeholder ${fullPlaceholder} with value from completed step`);
+            } else {
+                console.warn(`[Agent ${this.id}] Could not resolve placeholder ${fullPlaceholder} - no matching output found in completed steps`);
+            }
+        }
+
+        return resolvedText;
+    }
+
+    /**
+     * Find an output value from completed steps by output name
+     */
+    private findOutputFromCompletedSteps(outputName: string): string | null {
+        // Search through completed steps in reverse order (most recent first)
+        for (let i = this.steps.length - 1; i >= 0; i--) {
+            const step = this.steps[i];
+            if (step.status === StepStatus.COMPLETED && step.result) {
+                // Look through the step's results for a matching output name
+                for (const result of step.result) {
+                    if (result.name === outputName && result.result) {
+                        // Convert the result to a string representation
+                        if (typeof result.result === 'string') {
+                            return result.result;
+                        } else if (typeof result.result === 'object') {
+                            return JSON.stringify(result.result, null, 2);
+                        } else {
+                            return String(result.result);
+                        }
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Check if a step has unresolved placeholders that can now be resolved
+     */
+    private stepHasUnresolvedPlaceholders(step: Step): boolean {
+        for (const [inputName, inputValue] of step.inputValues.entries()) {
+            if (typeof inputValue.value === 'string') {
+                const placeholderRegex = /\[([^\]]+)\]/g;
+                let match;
+                while ((match = placeholderRegex.exec(inputValue.value)) !== null) {
+                    const placeholderName = match[1];
+                    // Check if we can now resolve this placeholder
+                    const outputValue = this.findOutputFromCompletedSteps(placeholderName);
+                    if (outputValue !== null) {
+                        console.log(`[Agent ${this.id}] Found resolvable placeholder [${placeholderName}] in step ${step.id} input ${inputName}`);
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Retry a step with resolved placeholders
+     */
+    private async retryStepWithResolvedPlaceholders(step: Step): Promise<void> {
+        console.log(`[Agent ${this.id}] Retrying step ${step.id} (${step.actionVerb}) with resolved placeholders`);
+
+        // Reset the step status
+        step.status = StepStatus.PENDING;
+        step.result = undefined;
+
+        // Clear any waiting state
+        for (const [requestId, stepId] of this.waitingSteps.entries()) {
+            if (stepId === step.id) {
+                this.waitingSteps.delete(requestId);
+                break;
+            }
+        }
+
+        // Resume agent execution which will pick up the pending step
+        this.status = AgentStatus.RUNNING;
+        await this.runAgent();
+    }
+
+    /**
+     * Check if agent is stuck waiting for user input with unresolved placeholders and fix it
+     */
+    public async checkAndFixStuckUserInput(): Promise<boolean> {
+        if (this.status !== AgentStatus.WAITING_FOR_USER_INPUT) {
+            return false;
+        }
+
+        // Find the step that's waiting for user input
+        for (const [requestId, stepId] of this.waitingSteps.entries()) {
+            const step = this.steps.find(s => s.id === stepId);
+            if (step && step.status === StepStatus.WAITING) {
+                if (this.stepHasUnresolvedPlaceholders(step)) {
+                    console.log(`[Agent ${this.id}] Found stuck step ${step.id} with unresolved placeholders, fixing...`);
+                    await this.retryStepWithResolvedPlaceholders(step);
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
     private async executeActionWithCapabilitiesManager(step: Step): Promise<PluginOutput[]> {
         try {
             if (step.actionVerb === 'ASK') {
@@ -903,6 +1293,9 @@ Please consider this context and the available plugins when planning and executi
 
             // Create a mutable copy of inputValues to inject the missionId
             const inputsForExecution = new Map(step.inputValues);
+
+            // Resolve any placeholders in input values before execution
+            this.resolvePlaceholdersInInputs(inputsForExecution);
 
             // Ensure missionId is always present for the capabilities manager
             if (!inputsForExecution.has('missionId')) {
@@ -915,12 +1308,18 @@ Please consider this context and the available plugins when planning and executi
 
             // Create a payload with a standard JSON-serializable format for inputs
             const payload = {
-                ...step,
-                inputValues: [...inputsForExecution] // Convert Map to array of [key, value] pairs
+                actionVerb: step.actionVerb,
+                description: step.description,
+                missionId: step.missionId,
+                outputs: step.outputs,
+                inputValues: MapSerializer.transformForSerialization(inputsForExecution),
+                recommendedRole: step.recommendedRole,
+                status: step.status,
+                stepNo: step.stepNo,
+                id: step.id
             };
+            console.log(`[Agent ${this.id}] executeActionWithCapabilitiesManager: payload for step ${step.id} (${step.actionVerb}):`, JSON.stringify(payload, null, 2));
             step.storeTempData('payload', payload);
-
-            //console.log('Agent: Executing action with CapabilitiesManager:', JSON.stringify(payload, null, 2));
 
             // Add extended timeout for CapabilitiesManager calls
             const timeout = step.actionVerb === 'ACCOMPLISH' ? 3600000 : 1800000; // 60m for ACCOMPLISH, 30m for others
@@ -932,6 +1331,7 @@ Please consider this context and the available plugins when planning and executi
             );
 
             // The response should be standard JSON, no custom deserialization needed here
+            console.log(`[Agent ${this.id}] executeActionWithCapabilitiesManager: Returning data: ${JSON.stringify(response.data)}`);
             return response.data;
         } catch (error) {
             console.error('Error executing action with CapabilitiesManager:', error instanceof Error ? error.message : error);
@@ -946,7 +1346,13 @@ Please consider this context and the available plugins when planning and executi
 
             // Pass the specific error to handleStepFailure
             const stepError = error instanceof Error ? error : new Error(`Unknown error occurred ${error}`);
-            await this.handleStepFailure(step, stepError);
+            try {
+                await this.handleStepFailure(step, stepError);
+            } catch (replanError) {
+                console.error(`[Agent ${this.id}] CRITICAL: Failed to handle step failure and replan. Mission may be stalled. Error:`, replanError);
+                this.status = AgentStatus.ERROR;
+                await this.notifyTrafficManager();
+            }
 
             return [{
                 success: false,
@@ -1060,12 +1466,26 @@ Please consider this context and the available plugins when planning and executi
             console.log(`Agent ${this.id} current question resolved due to pause.`);
         }
         this.status = AgentStatus.PAUSED;
+        this.logEvent({
+            eventType: 'agent_paused',
+            agentId: this.id,
+            missionId: this.missionId,
+            status: this.status,
+            timestamp: new Date().toISOString()
+        });
         await this.notifyTrafficManager();
         await this.saveAgentState();
     }
 
     async abort() {
         this.status = AgentStatus.ABORTED;
+        this.logEvent({
+            eventType: 'agent_aborted',
+            agentId: this.id,
+            missionId: this.missionId,
+            status: this.status,
+            timestamp: new Date().toISOString()
+        });
         await this.notifyTrafficManager();
         await this.saveAgentState();
         // if (this.status === AgentStatus.ABORTED) {
@@ -1088,6 +1508,13 @@ Please consider this context and the available plugins when planning and executi
     async resume() {
         if (this.status === AgentStatus.PAUSED || this.status === AgentStatus.INITIALIZING) {
             this.status = AgentStatus.RUNNING;
+            this.logEvent({
+                eventType: 'agent_resumed',
+                agentId: this.id,
+                missionId: this.missionId,
+                status: this.status,
+                timestamp: new Date().toISOString()
+            });
             this.setupCheckpointing(15); // Re-setup checkpointing interval, assuming 15 minutes
             console.log(`Agent ${this.id} re-setup checkpoint interval due to resume.`);
             await this.notifyTrafficManager();
@@ -1097,6 +1524,16 @@ Please consider this context and the available plugins when planning and executi
 
     getStatus(): string {
         return this.status;
+    }
+
+    isWaitingForUserInput(requestId?: string): boolean {
+        if (this.status !== AgentStatus.WAITING_FOR_USER_INPUT) {
+            return false;
+        }
+        if (requestId) {
+            return this.waitingSteps.has(requestId);
+        }
+        return this.waitingSteps.size > 0;
     }
 
     async getStatistics(globalStepMap?: Map<string, { agentId: string, step: any }>, allStepsForMission?: Step[]): Promise<AgentStatistics> {
@@ -1276,7 +1713,8 @@ Please consider this context and the available plugins when planning and executi
                 missionId: this.missionId,
                 dependencies: Array.isArray(this.dependencies) ? this.dependencies : [],
                 conversation: Array.isArray(this.conversation) ? this.conversation : [],
-                role: this.role || 'executor'
+                role: this.role || 'executor',
+                lastFailedStep: this.lastFailedStep
             };
             await this.stateManager.saveState(stateToSave);
         } catch (error) {
@@ -1339,18 +1777,29 @@ Please consider this context and the available plugins when planning and executi
         switch (message.type) {
           case CollaborationMessageType.TASK_DELEGATION:
             const task = message.payload as TaskDelegationRequest;
-            console.log(`Agent ${this.id} received delegated task: ${task.description}`);
+            console.log(`Agent ${this.id} received delegated task:`, JSON.stringify(task, null, 2));
             if (!task.taskType) {
                 console.log('Agent Line 1364 - Missing required property "taskType" in task');
                 throw new Error(`Missing required property 'taskType' in task`);
             }
 
+            const deserializedInputs = MapSerializer.transformFromSerialization(task.inputs);
+
+            const outputsAsObject = (task as any).outputs;
+            const deserializedOutputs = new Map<string, string>();
+            if (outputsAsObject && outputsAsObject.entries) {
+                for (const [key, value] of outputsAsObject.entries) {
+                    deserializedOutputs.set(key, value);
+                }
+            }
             const newStep = new Step({
               actionVerb: task.taskType,
               missionId: this.missionId,
               stepNo: this.steps.length + 1,
-              inputValues: new Map(Object.entries(task.inputs)),
+              inputValues: deserializedInputs,
               description: task.description,
+              dependencies: (task as any).dependencies,
+              outputs: deserializedOutputs,
               status: StepStatus.PENDING,
               persistenceManager: this.agentPersistenceManager
             });
@@ -1368,6 +1817,8 @@ Please consider this context and the available plugins when planning and executi
                 console.log(`Received result for delegated step ${step.id}. Success: ${taskResult.success}`);
                 step.status = taskResult.success ? StepStatus.COMPLETED : StepStatus.ERROR;
                 if (taskResult.success) {
+                  step.result = taskResult.result;
+                  console.log(`Updated step ${step.id} with result:`, JSON.stringify(step.result, null, 2));
                   await this.saveWorkProductWithClassification(step.id, taskResult.result, step.isEndpoint(this.steps), this.getAllAgentsInMission());
                 } else {
                   this.say(`Delegated step ${step.actionVerb} failed. Reason: ${taskResult.error}`);
@@ -1447,28 +1898,7 @@ Explanation: ${resolution.explanation}`);
                         recipientId = createAgentResponse.data.agentId;
                         console.log(`Created new agent ${recipientId} with role ${step.recommendedRole}`);
                         
-                        let agentReady = false;
-                        const maxWaitTime = 30000; // 30 seconds
-                        const pollInterval = 2000; // 2 seconds
-                        const startTime = Date.now();
 
-                        while (Date.now() - startTime < maxWaitTime) {
-                            try {
-                                const agentStatusResponse = await this.authenticatedApi.get(`http://${this.agentSetUrl}/agent/${recipientId}`);
-                                if (agentStatusResponse.data && agentStatusResponse.data.status === AgentStatus.RUNNING) {
-                                    agentReady = true;
-                                    break;
-                                }
-                            } catch (e) {
-                                // Ignore errors, just retry
-                            }
-                            await new Promise(resolve => setTimeout(resolve, pollInterval));
-                        }
-
-                        if (!agentReady) {
-                            console.error(`Agent ${recipientId} did not become ready in time.`);
-                            return { success: false, result: null };
-                        }
                     } else {
                         console.error(`Failed to create specialized agent with role ${step.recommendedRole}`);
                         return { success: false, result: null };
@@ -1486,6 +1916,8 @@ Explanation: ${resolution.explanation}`);
                     taskType: step.actionVerb,
                     description: step.description || `Execute ${step.actionVerb}`,
                     inputs: MapSerializer.transformForSerialization(step.inputValues),
+                    dependencies: step.dependencies,
+                    outputs: MapSerializer.transformForSerialization(step.outputs),
                     priority: 'normal',
                     context: {
                         sourceAgentId: this.id,
@@ -1792,6 +2224,7 @@ Explanation: ${resolution.explanation}`);
         }
 
         const uploadedFiles: MissionFile[] = [];
+        const missionControlUrl = await this.getServiceUrl('MissionControl');
 
         for (const output of step.result) {
             try {
@@ -1841,10 +2274,9 @@ Explanation: ${resolution.explanation}`);
                     storagePath: `step-outputs/${this.missionId}/${fileName}`,
                     description: `Output from step ${step.stepNo}: ${step.actionVerb} - ${output.resultDescription}`
                 };
-
                 // Store the file content in Librarian
                 await this.authenticatedApi.post(`http://${librarianUrl}/storeData`, {
-                    id: `step-output-${step.id}-${output.name}`,
+                    id: `step-output-${missionFile.id}`,
                     data: {
                         fileContent: fileContent,
                         missionFile: missionFile
@@ -1853,31 +2285,12 @@ Explanation: ${resolution.explanation}`);
                     collection: 'step-outputs'
                 });
 
-                // Load the current mission to update its attached files
-                const missionResponse = await this.authenticatedApi.get(`http://${librarianUrl}/loadData/${this.missionId}`, {
-                    params: { collection: 'missions', storageType: 'mongo' }
-                });
-
-                if (missionResponse.data && missionResponse.data.data) {
-                    const mission = missionResponse.data.data;
-                    const existingFiles = mission.attachedFiles || [];
-                    const updatedMission = {
-                        ...mission,
-                        attachedFiles: [...existingFiles, missionFile],
-                        updatedAt: new Date()
-                    };
-
-                    // Save the updated mission
-                    await this.authenticatedApi.post(`http://${librarianUrl}/storeData`, {
-                        id: this.missionId,
-                        data: updatedMission,
-                        collection: 'missions',
-                        storageType: 'mongo'
-                    });
-
-                    uploadedFiles.push(missionFile);
-                    console.log(`Uploaded step output to shared space: ${fileName}`);
+                if (missionControlUrl) {
+                    await this.authenticatedApi.post(`http://${missionControlUrl}/missions/${this.missionId}/files/add`, missionFile);
                 }
+
+                uploadedFiles.push(missionFile);
+                console.log(`Uploaded step output to shared space: ${fileName}`);
 
             } catch (error) {
                 console.error(`Failed to upload step output to shared space:`, error);
@@ -1886,6 +2299,42 @@ Explanation: ${resolution.explanation}`);
         }
 
         return uploadedFiles;
+    }
+
+    /**
+     * Determines if a step generates data that will be referenced by user-facing steps
+     */
+    private stepGeneratesUserReferencedData(stepId: string, data: PluginOutput[]): boolean {
+        // Check if any future ASK_USER_QUESTION steps reference this step's outputs
+        const futureAskSteps = this.steps.filter(step =>
+            step.actionVerb === 'ASK_USER_QUESTION' &&
+            step.stepNo > (this.steps.find(s => s.id === stepId)?.stepNo || 0)
+        );
+
+        for (const askStep of futureAskSteps) {
+            // Check if the ASK step's choices reference any of this step's output names
+            const choicesInput = askStep.inputValues?.get('choices');
+            if (choicesInput && typeof choicesInput.value === 'string') {
+                // Check if the choices value matches any output names from this step
+                for (const output of data) {
+                    if (choicesInput.value.includes(output.name) ||
+                        choicesInput.value.includes(output.resultDescription || '')) {
+                        console.log(`Step ${stepId} generates data referenced by ASK_USER_QUESTION step ${askStep.id}`);
+                        return true;
+                    }
+                }
+            }
+        }
+
+        // Also check for common patterns that indicate user-referenced data
+        const hasListOrEnhancementData = data.some(output =>
+            output.name.toLowerCase().includes('list') ||
+            output.name.toLowerCase().includes('enhancement') ||
+            output.resultDescription?.toLowerCase().includes('list') ||
+            output.resultDescription?.toLowerCase().includes('enhancement')
+        );
+
+        return hasListOrEnhancementData;
     }
 
     /**
@@ -1933,11 +2382,20 @@ Explanation: ${resolution.explanation}`);
     private async handleStepSuccess(step: Step, result: PluginOutput[]): Promise<void> {
         const isAgentEndpoint = step.isEndpoint(this.steps);
         await this.saveWorkProductWithClassification(step.id, result, isAgentEndpoint, this.getAllAgentsInMission());
+
+        // Reset replan depth on successful step completion to allow future replanning
+        // This prevents the system from getting stuck after a few failures
+        if (this.replanDepth > 0) {
+            this.replanDepth = Math.max(0, this.replanDepth - 1);
+            console.log(`[Agent ${this.id}] Step ${step.actionVerb} completed successfully. Reduced replan depth to ${this.replanDepth}`);
+        }
+
         await this.notifyTrafficManager();
         await this.pruneSteps();
     }
 
     private async handleStepFailure(step: Step, error: Error): Promise<void> {
+        this.lastFailedStep = step;
         step.lastError = error;
         const errorType = classifyStepError(step.lastError);
 
@@ -1983,7 +2441,6 @@ Explanation: ${resolution.explanation}`);
                 error: step.lastError.message,
                 timestamp: new Date().toISOString()
             });
-            await this.replanFromFailure(step);
         } else if (errorType === StepErrorType.TRANSIENT && step.retryCount < step.maxRetries) {
             step.retryCount++;
             step.status = StepStatus.PENDING;
@@ -2007,8 +2464,11 @@ Explanation: ${resolution.explanation}`);
         await this.notifyTrafficManager();
     }
 
+    public getLastFailedStep(): Step | null {
+        return this.lastFailedStep;
+    }
+
     private async pruneSteps(): Promise<void> {
-        const stepsToKeep: Step[] = [];
         const activeStepIds = new Set(this.steps.filter(s => 
             s.status === StepStatus.PENDING || 
             s.status === StepStatus.RUNNING || 
@@ -2038,15 +2498,9 @@ Explanation: ${resolution.explanation}`);
                     // This step can be pruned. Clear its data to free memory.
                     step.clearTempData(); // Clears result and tempData
                     console.log(`[Agent ${this.id}] Pruned completed step ${step.id} (${step.actionVerb}).`);
-                    // Do not add to stepsToKeep
-                } else {
-                    stepsToKeep.push(step);
                 }
-            } else {
-                stepsToKeep.push(step);
             }
         }
-        this.steps = stepsToKeep;
     }
 
     private async getCompletedWorkProductsSummary(): Promise<string> {
@@ -2064,9 +2518,37 @@ Explanation: ${resolution.explanation}`);
         return summary;
     }
 
-    private static replannedSteps: WeakSet<Step> = new WeakSet();
+    public async replanFromFailure(failedStep: Step): Promise<void> {
+        if (this.lastFailedStep && this.lastFailedStep.id === failedStep.id) {
+            console.log(`[Agent ${this.id}] Detected repeated failure of step ${failedStep.id}. Aborting to prevent infinite loop.`);
+            this.say(`Step ${failedStep.actionVerb} failed again. Aborting mission to prevent infinite loop.`);
+            this.status = AgentStatus.ERROR;
+            this.logEvent({
+                eventType: 'agent_error',
+                agentId: this.id,
+                missionId: this.missionId,
+                status: this.status,
+                timestamp: new Date().toISOString()
+            });
+            await this.notifyTrafficManager();
+            return;
+        }
 
-    private async replanFromFailure(failedStep: Step): Promise<void> {
+        // Check replanning depth to prevent infinite recursion
+        if (this.replanDepth >= this.maxReplanDepth) {
+            console.warn(`[Agent ${this.id}] Maximum replanning depth (${this.maxReplanDepth}) reached. Aborting further replanning to prevent infinite recursion.`);
+            this.status = AgentStatus.ERROR;
+            this.logEvent({
+                eventType: 'agent_error',
+                agentId: this.id,
+                missionId: this.missionId,
+                status: this.status,
+                timestamp: new Date().toISOString()
+            });
+            this.say(`Maximum replanning depth reached. This suggests a fundamental issue that cannot be resolved through replanning. Mission aborted.`);
+            return;
+        }
+
         const failedStepId = failedStep.id;
         const dependentSteps = this.steps.filter(step =>
             step.dependencies.some(dep => dep.sourceStepId === failedStepId)
@@ -2094,13 +2576,25 @@ Explanation: ${resolution.explanation}`);
             s.id !== failedStep.id
         );
 
-        if (Agent.replannedSteps.has(failedStep) || recentFailures.length >= 2) {
-            console.warn(`[Agent ${this.id}] Multiple failures detected for action verb '${failedVerb}'. Aborting further replanning to prevent loop.`);
+        // Check if this step has already been replanned or if there are too many failures
+        if (this.replannedSteps.has(failedStepId) || recentFailures.length >= 2) {
+            console.warn(`[Agent ${this.id}] Multiple failures detected for action verb '${failedVerb}' or step already replanned. Aborting further replanning to prevent loop.`);
             this.status = AgentStatus.ERROR;
+            this.logEvent({
+                eventType: 'agent_error',
+                agentId: this.id,
+                missionId: this.missionId,
+                status: this.status,
+                timestamp: new Date().toISOString()
+            });
             this.say(`Multiple failures for action verb '${failedVerb}'. This suggests a fundamental issue that cannot be resolved through replanning. Mission aborted.`);
             return;
         }
-        Agent.replannedSteps.add(failedStep);
+
+        // Mark this step as replanned and increment depth
+        this.replannedSteps.add(failedStepId);
+        this.replanDepth++;
+        this.lastFailedStep = failedStep;
 
         const errorMsg = failedStep.lastError?.message || 'Unknown error';
         const workProductsSummary = await this.getCompletedWorkProductsSummary();
@@ -2116,38 +2610,20 @@ Explanation: ${resolution.explanation}`);
             // For schema failures, the issue is likely in the ACCOMPLISH plugin itself
             console.error(`[Agent ${this.id}] Schema validation failure suggests a bug in the ACCOMPLISH plugin. Error: ${errorMsg}`);
             this.status = AgentStatus.ERROR;
+            this.logEvent({
+                eventType: 'agent_error',
+                agentId: this.id,
+                missionId: this.missionId,
+                status: this.status,
+                timestamp: new Date().toISOString()
+            });
             this.say(`Schema validation failure in planning system. This requires system-level debugging. Mission aborted.`);
             return;
         }
-
-        // For other errors, create a focused recovery plan
-        const recoveryGoal = `
-**Recovery Task:** The step "${failedStep.actionVerb}" failed.
-
-** Step Details:** ${JSON.stringify(failedStep)}
-
-**Original Mission:** ${this.missionContext}
-
-**Completed Work:** ${workProductsSummary}
-
-**Instructions:** Create an alternative approach to accomplish what the failed step was trying to do. Your new plan should use the step inputs and produce the step outputs. Do not repeat the failed approach.
-        `;
-
-        const recoveryStep = new Step({
-            actionVerb: 'ACCOMPLISH',
-            missionId: this.missionId,
-            stepNo: this.steps.length + 1,
-            inputValues: new Map([
-                ['goal', { inputName: 'goal', value: recoveryGoal, valueType: PluginParameterType.STRING, args: {} }],
-                ['missionId', { inputName: 'missionId', value: this.missionId, valueType: PluginParameterType.STRING, args: {} }]
-            ]),
-            description: `Recovery plan for failed step: ${failedStep.actionVerb}`,
-            persistenceManager: this.agentPersistenceManager
-        });
-
-        this.steps.push(recoveryStep);
-        await this.logEvent({ eventType: 'step_created', ...recoveryStep.toJSON() });
-        console.log(`[Agent ${this.id}] Created focused recovery step ${recoveryStep.id} for failed step ${failedStep.actionVerb}.`);
+        console.log(`[Agent ${this.id}] Replanning from failure of step ${failedStep.id} (${failedStep.actionVerb}). Error: ${errorMsg}`);
+        // For other errors, use simpler recovery based on error type
+        // Always use THINK for recovery to prevent recursive ACCOMPLISH loops
+        await this.createThinkRecoveryStep(failedStep, errorMsg, workProductsSummary);
     }
 
     private async handleNovelVerbFailure(failedStep: Step, errorMsg: string): Promise<void> {
@@ -2181,4 +2657,86 @@ Explanation: ${resolution.explanation}`);
         await this.logEvent({ eventType: 'step_created', ...breakdownStep.toJSON() });
         console.log(`[Agent ${this.id}] Created manual breakdown step ${breakdownStep.id} for novel verb failure.`);
     }
+
+    private async createThinkRecoveryStep(failedStep: Step, errorMsg: string, workProductsSummary: string): Promise<void> {
+        console.log(`[Agent ${this.id}] Creating THINK recovery step for: ${failedStep.actionVerb}`);
+
+        const thinkPrompt = `
+**RECOVERY TASK:** The step "${failedStep.actionVerb}" failed with error: ${errorMsg}
+
+**STEP DETAILS:**
+- Action: ${failedStep.actionVerb}
+- Description: ${failedStep.description}
+- Inputs: ${JSON.stringify(Array.from(failedStep.inputValues?.entries() || []))}
+- Expected Outputs: ${JSON.stringify(Array.from(failedStep.outputs?.entries() || []))}
+
+**MISSION CONTEXT:** ${this.missionContext}
+
+**COMPLETED WORK:** ${workProductsSummary}
+
+**RECOVERY INSTRUCTIONS:**
+1. Analyze the root cause of this failure using logical reasoning
+2. Determine if this is a technical issue (missing inputs, service connectivity) or a logical issue (invalid approach)
+3. Provide a direct solution using ONLY available data and existing capabilities
+4. DO NOT suggest external searches or information gathering - work with what we have
+5. If the step cannot be completed, suggest how to proceed with the mission without it
+6. Focus on practical, immediate solutions that can be implemented with current resources
+
+**CRITICAL:** Your response should be a direct analysis and solution, NOT a plan for further research or data gathering.
+
+**Input Value Formatting:** For all inputs, the 'value' field must be a primitive type (string, number, or boolean). Do not use complex objects or nested structures for input values.
+        `;
+
+        const recoveryStep = new Step({
+            actionVerb: 'THINK',
+            missionId: this.missionId,
+            stepNo: this.steps.length + 1,
+            inputValues: new Map([
+                ['prompt', { inputName: 'prompt', value: thinkPrompt, valueType: PluginParameterType.STRING, args: {} }]
+            ]),
+            description: `Analyze failure and suggest recovery approach for: ${failedStep.actionVerb}`,
+            persistenceManager: this.agentPersistenceManager
+        });
+
+        this.steps.push(recoveryStep);
+        await this.logEvent({ eventType: 'step_created', ...recoveryStep.toJSON() });
+        console.log(`[Agent ${this.id}] Created THINK recovery step ${recoveryStep.id} for failed step ${failedStep.actionVerb}.`);
+        await this.notifyTrafficManager();
+    }
+
+    private async createAccomplishRecoveryStep(failedStep: Step, errorMsg: string, workProductsSummary: string): Promise<void> {
+        console.log(`[Agent ${this.id}] Creating ACCOMPLISH recovery step for: ${failedStep.actionVerb}`);
+
+        const recoveryGoal = `
+**Recovery Task:** The step "${failedStep.actionVerb}" failed.
+
+** Step Details:** ${JSON.stringify(failedStep)}
+
+**Original Mission:** ${this.missionContext}
+
+**Completed Work:** ${workProductsSummary}
+
+**Instructions:** Create an alternative approach to accomplish what the failed step was trying to do. Your new plan should use the step inputs and produce the step outputs. Do not repeat the failed approach.
+
+**Input Value Formatting:** For all inputs, the 'value' field must be a primitive type (string, number, or boolean). Do not use complex objects or nested structures for input values.
+        `;
+
+        const recoveryStep = new Step({
+            actionVerb: 'ACCOMPLISH',
+            missionId: this.missionId,
+            stepNo: this.steps.length + 1,
+            inputValues: new Map([
+                ['goal', { inputName: 'goal', value: recoveryGoal, valueType: PluginParameterType.STRING, args: {} }],
+                ['missionId', { inputName: 'missionId', value: this.missionId, valueType: PluginParameterType.STRING, args: {} }]
+            ]),
+            description: `Recovery plan for failed step: ${failedStep.actionVerb}`,
+            persistenceManager: this.agentPersistenceManager
+        });
+
+        this.steps.push(recoveryStep);
+        await this.logEvent({ eventType: 'step_created', ...recoveryStep.toJSON() });
+        console.log(`[Agent ${this.id}] Created ACCOMPLISH recovery step ${recoveryStep.id} for failed step ${failedStep.actionVerb}.`);
+        await this.notifyTrafficManager();
+    }
+
 }

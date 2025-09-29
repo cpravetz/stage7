@@ -74,6 +74,8 @@ services:
 
       MISSIONCONTROL_CLIENT_SECRET: *sharedSecret
       CLIENT_SECRET: *sharedSecret
+    ports:
+      - "5030:5030"
     volumes:
       - ./shared/keys:/usr/src/app/shared/keys
 
@@ -132,6 +134,10 @@ services:
       - ./services/brain/.env:/usr/src/app/services/brain/.env
     ports:
       - "5070:5070"
+    deploy:
+      resources:
+        limits:
+          memory: 2G
 
   agentset:
     build:
@@ -158,6 +164,10 @@ services:
       - ./shared/keys:/usr/src/app/shared/keys
     ports:
       - "5100:5100"
+    deploy:
+      resources:
+        limits:
+          memory: 2G
 
   engineer:
     build:
@@ -250,6 +260,10 @@ services:
       - ./shared/keys:/usr/src/app/shared/keys
     ports:
       - "5060:5060"
+    deploy:
+      resources:
+        limits:
+          memory: 2G
 
   librarian:
     build:
@@ -280,6 +294,10 @@ services:
       - ./shared/keys:/usr/src/app/shared/keys
     ports:
       - "5040:5040"
+    deploy:
+      resources:
+        limits:
+          memory: 2G
     healthcheck:
       # Use /healthy endpoint which should always respond regardless of RabbitMQ status
       test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:5040/health"]
@@ -400,6 +418,15 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+    restart: unless-stopped
+
+  searxng:
+    image: searxng/searxng:latest
+    ports:
+      - "8888:8080"
+    volumes:
+      - "./searxng/config:/etc/searxng/"
+      - "./searxng/data/:/var/cache/searxng/"
     restart: unless-stopped
 
   # OpenWebUI is using an external server, not a local container

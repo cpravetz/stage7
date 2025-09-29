@@ -10,6 +10,7 @@ import { BaseEntity } from '../BaseEntity';
  * Standard paths that should bypass authentication
  * Note: /health is kept for backward compatibility but redirects to /ready?detail=full
  * Note: /chat is included to allow the Brain service to be accessed without authentication
+ * Note: /admin paths are included for administrative operations
  */
 export const HEALTH_CHECK_PATHS = ['/healthy', '/ready', '/health', '/status', '/chat'];
 
@@ -31,6 +32,11 @@ export function isHealthCheckEndpoint(path: string): boolean {
 
   // Check if the path is /ready with query parameters
   if (path.startsWith('/ready?')) {
+    return true;
+  }
+
+  // Check if the path starts with /admin/ (administrative endpoints)
+  if (path.startsWith('/admin/')) {
     return true;
   }
 

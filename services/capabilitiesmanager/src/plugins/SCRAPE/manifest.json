@@ -8,13 +8,15 @@
       "name": "url",
       "required": true,
       "type": "string",
-      "description": "The URL to scrape content from"
+      "description": "The URL to scrape content from",
+      "aliases": ["website","link","endpoint"]
     },
     {
       "name": "selector",
       "required": false,
       "type": "string",
-      "description": "CSS selector to target specific elements (optional)"
+      "description": "CSS selector to target specific elements (optional)",
+      "aliases": ["css","query","css_selector"]
     },
     {
       "name": "attribute",
@@ -26,7 +28,8 @@
       "name": "limit",
       "required": false,
       "type": "number",
-      "description": "Maximum number of results to return (optional)"
+      "description": "Maximum number of results to return (optional)",
+      "aliases": ["max","max_results","limit_results"]
     }
   ],
   "outputDefinitions": [

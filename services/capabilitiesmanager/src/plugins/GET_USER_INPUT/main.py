@@ -29,6 +29,7 @@ class GetUserInputPlugin:
     def __init__(self):
         self.postoffice_url = os.getenv('POSTOFFICE_URL', 'postoffice:5020')
         self.security_manager_url = os.getenv('SECURITYMANAGER_URL', 'securitymanager:5010')
+        self.brain_url = os.getenv('BRAIN_URL', 'brain:5070')
         self.client_secret = os.getenv('CLIENT_SECRET', 'stage7AuthSecret')
         self.token = None
         
@@ -80,6 +81,10 @@ class GetUserInputPlugin:
             logger.error(f"Failed to send user input request: {e}")
             return None
 
+
+
+
+
     def execute(self, inputs_map: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Execute the ASK_USER_QUESTION plugin asynchronously"""
         try:
@@ -87,6 +92,7 @@ class GetUserInputPlugin:
             question = None
             choices = None
             answer_type = 'text'
+            clientId = None
 
             for key, value in inputs_map.items():
                 if key == 'question':
@@ -104,6 +110,11 @@ class GetUserInputPlugin:
                         answer_type = value['value']
                     else:
                         answer_type = value
+                elif key == 'clientId':
+                    if isinstance(value, dict) and 'value' in value:
+                        clientId = value['value']
+                    else:
+                        clientId = value
 
             if not question:
                 return [{
@@ -115,6 +126,8 @@ class GetUserInputPlugin:
                     "error": "No question provided to ASK_USER_QUESTION plugin"
                 }]
 
+
+
             # Add condition: if question includes 'upload', set answerType to 'File'
             if 'upload' in question.lower():
                 answer_type = 'file'
@@ -122,7 +135,8 @@ class GetUserInputPlugin:
             # Prepare request data
             request_data = {
                 "question": question,
-                "answerType": answer_type or 'text'
+                "answerType": answer_type or 'text',
+                "clientId": clientId
             }
 
             # Add choices if provided

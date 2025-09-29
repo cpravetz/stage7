@@ -19,6 +19,7 @@ export interface AgentState {
     missionContext: string;
     role?: string;
     roleCustomizations?: any;
+    lastFailedStep?: any;
 }
 
 export interface StepEvent {
@@ -67,8 +68,12 @@ export class AgentPersistenceManager {
             return;
         }
 
-        // Apply MapSerializer to the entire agent object to ensure all nested Maps are handled
         const stateToSave = MapSerializer.transformForSerialization(agent);
+
+        // Exclude the steps array from the main agent document to prevent it from getting too large
+        if (stateToSave.steps) {
+            delete stateToSave.steps;
+        }
 
         try {
             await this.authenticatedApi.post(`http://${this.librarianUrl}/storeData`, {
@@ -127,6 +132,32 @@ export class AgentPersistenceManager {
         } catch (error) {
             analyzeError(error as Error);
             console.error(`Error deleting agent ${agentId}:`, error instanceof Error ? error.message : error);
+        }
+    }
+
+    async loadStepsForAgent(agentId: string): Promise<any[]> {
+        try {
+            const response = await this.authenticatedApi.get(`http://${this.librarianUrl}/queryData`, {
+                params: {
+                    storageType: 'mongo',
+                    collection: 'events',
+                    query: {
+                        agentId: agentId,
+                        eventType: 'step_created'
+                    },
+                    options: {
+                        sort: { timestamp: 1 } // Sort by timestamp to maintain order
+                    }
+                }
+            });
+            if (response.data && Array.isArray(response.data.data)) {
+                return response.data.data;
+            }
+            return [];
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error(`Error loading steps for agent ${agentId}:`, error instanceof Error ? error.message : error);
+            return [];
         }
     }
 

@@ -11,7 +11,7 @@ export class MistralService extends BaseService {
 
     isAvailable(): boolean {
         const available = !!this.apiKey && this.apiKey.length > 0;
-        console.log(`MistralService availability check: ${available ? 'Available' : 'Not available'}`);
+        //console.log(`MistralService availability check: ${available ? 'Available' : 'Not available'}`);
         if (!available) {
             console.error('MistralService is not available. Check MISTRAL_API_KEY environment variable.');
         } else {

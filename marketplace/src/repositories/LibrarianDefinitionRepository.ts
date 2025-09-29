@@ -17,6 +17,7 @@ import { analyzeError } from '@cktmcs/errorhandler';
 export interface LibrarianDefinitionRepositoryConfig extends RepositoryConfig {
     type: 'librarian-definition';
     librarianUrl: string;
+    securityManagerUrl: string;
     openApiToolsCollection?: string;
     mcpToolsCollection?: string;
     actionHandlersCollection?: string;
@@ -38,9 +39,10 @@ export class LibrarianDefinitionRepository implements PluginRepository {
 
     constructor(config: RepositoryConfig) {
         this.config = config as LibrarianDefinitionRepositoryConfig;
+        
         this.authenticatedApi = createAuthenticatedAxios({
             serviceId: 'LibrarianDefinitionRepository',
-            securityManagerUrl: this.config.librarianUrl || 'librarian:5040',
+            securityManagerUrl: this.config.securityManagerUrl,
             clientSecret: process.env.CLIENT_SECRET || 'stage7AuthSecret'
         });
         this.openApiCollectionName = this.config.openApiToolsCollection || 'openApiTools';

@@ -3,6 +3,8 @@ import { analyzeError } from '@cktmcs/errorhandler';
 import axios from 'axios';
 import { Agent } from '../agents/Agent';
 import { CollaborationMessageType, TaskDelegationRequest, TaskDelegationResponse, TaskResult, createCollaborationMessage } from './CollaborationProtocol';
+import * as amqp from 'amqplib';
+import * as amqp_connection_manager from 'amqp-connection-manager';
 import { ServiceTokenManager } from '@cktmcs/shared';
 
 
@@ -55,6 +57,10 @@ export class TaskDelegation {
   private trafficManagerUrl: string;
   private tokenManager: ServiceTokenManager;
 
+  private connection: amqp_connection_manager.AmqpConnectionManager | null = null;
+  private channel: amqp_connection_manager.ChannelWrapper | null = null;
+  private pendingDelegations: Map<string, { request: TaskDelegationRequest, delegatorId: string, recipientId: string, resolve: (response: TaskDelegationResponse) => void, reject: (error: Error) => void, timeout: NodeJS.Timeout }> = new Map(); // Map<taskId, delegationInfo>
+
   constructor(agents: Map<string, Agent>, trafficManagerUrl: string) {
     this.agents = agents;
     this.trafficManagerUrl = trafficManagerUrl;
@@ -68,6 +74,71 @@ export class TaskDelegation {
         serviceId,
         serviceSecret
     );
+
+    // Initialize RabbitMQ
+    this.initRabbitMQ();
+  }
+
+  private async initRabbitMQ(): Promise<void> {
+    try {
+      const rabbitmqUrl = process.env.RABBITMQ_URL || 'amqp://stage7:stage7password@rabbitmq:5672';
+      this.connection = amqp_connection_manager.connect([rabbitmqUrl]);
+
+      this.connection.on('connect', () => console.log('TaskDelegation connected to RabbitMQ!'));
+      this.connection.on('disconnect', err => console.log('TaskDelegation disconnected from RabbitMQ.', err));
+
+      this.channel = this.connection.createChannel({
+        json: true,
+        setup: async (channel: amqp.Channel) => {
+          await channel.assertExchange('agent.events', 'topic', { durable: true });
+          const queue = await channel.assertQueue('', { exclusive: true });
+          await channel.bindQueue(queue.queue, 'agent.events', 'agent.status.update');
+          await channel.consume(queue.queue, this.handleAgentStatusUpdate.bind(this), { noAck: true });
+          console.log('TaskDelegation subscribed to agent.status.update events.');
+        },
+      });
+    } catch (error) {
+      console.error('Error initializing RabbitMQ for TaskDelegation:', error);
+    }
+  }
+
+  private async handleAgentStatusUpdate(msg: amqp.ConsumeMessage | null): Promise<void> {
+    if (!msg) return;
+
+    try {
+      const content = JSON.parse(msg.content.toString());
+      const { agentId, status } = content;
+
+      console.log(`TaskDelegation received status update for agent ${agentId}: ${status}`);
+
+      if (status === AgentStatus.RUNNING) {
+        // Check for pending delegations for this agent
+        const pendingDelegation = this.pendingDelegations.get(agentId);
+        if (pendingDelegation) {
+          console.log(`Agent ${agentId} is RUNNING. Processing pending delegation.`);
+          this.pendingDelegations.delete(agentId); // Remove from pending
+          clearTimeout(pendingDelegation.timeout); // Clear timeout
+
+          // Now, actually delegate the task
+          try {
+            const response = await this.performDelegation(pendingDelegation.delegatorId, pendingDelegation.recipientId, pendingDelegation.request);
+            pendingDelegation.resolve(response);
+          } catch (error) {
+            pendingDelegation.reject(error as Error);
+          }
+        }
+      } else if (status === AgentStatus.ERROR || status === AgentStatus.ABORTED) {
+        const pendingDelegation = this.pendingDelegations.get(agentId);
+        if (pendingDelegation) {
+          console.log(`Agent ${agentId} is in a terminal state (${status}). Rejecting pending delegation.`);
+          this.pendingDelegations.delete(agentId);
+          clearTimeout(pendingDelegation.timeout);
+          pendingDelegation.reject(new Error(`Agent ${agentId} is in a terminal state (${status}).`));
+        }
+      }
+    } catch (error) {
+      console.error('Error processing agent status update message:', error);
+    }
   }
 
   /**
@@ -83,87 +154,100 @@ export class TaskDelegation {
     request: TaskDelegationRequest
   ): Promise<TaskDelegationResponse> {
     try {
-      // Check if recipient agent exists
       const recipientAgent = this.agents.get(recipientId);
 
       if (!recipientAgent) {
-        // Try to find agent in other agent sets
         const agentLocation = await this.findAgentLocation(recipientId);
-
         if (!agentLocation) {
-          return {
-            taskId: request.taskId,
-            accepted: false,
-            reason: `Agent ${recipientId} not found`
-          };
+          return { taskId: request.taskId, accepted: false, reason: `Agent ${recipientId} not found` };
         }
-
-        // Forward task delegation to the agent's location
         return this.forwardTaskDelegation(delegatorId, recipientId, request, agentLocation);
       }
 
-      // Check if recipient agent is available
-      if (recipientAgent.getStatus() !== AgentStatus.RUNNING) {
-        return {
-          taskId: request.taskId,
-          accepted: false,
-          reason: `Agent ${recipientId} is not running (status: ${recipientAgent.getStatus()})`
-        };
+      // If agent is already running, delegate immediately
+      if (recipientAgent.getStatus() === AgentStatus.RUNNING) {
+        return this.performDelegation(delegatorId, recipientId, request);
       }
 
-      // Create task
-      const task: DelegatedTask = {
-        id: request.taskId || uuidv4(),
-        taskType: request.taskType,
-        description: request.description,
-        inputs: request.inputs,
-        delegatedBy: delegatorId,
-        delegatedTo: recipientId,
-        status: TaskStatus.PENDING,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        deadline: request.deadline,
-        priority: request.priority || 'normal'
-      };
+      // If agent is not running, store as pending and wait for status update
+      return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          this.pendingDelegations.delete(recipientId);
+          reject(new Error(`Delegation to agent ${recipientId} timed out. Agent status: ${recipientAgent.getStatus()}`));
+        }, 60000); // 60 seconds timeout
 
-      // Store task
-      this.tasks.set(task.id, task);
-
-      // Send task to recipient agent
-      const message = {
-        type: CollaborationMessageType.TASK_DELEGATION,
-        sender: delegatorId,
-        recipient: recipientId,
-        content: task
-      };
-
-      const properTaskMessage = createCollaborationMessage(
-        message.type,
-        message.sender,
-        message.recipient,
-        message.content
-      );
-      await recipientAgent.handleCollaborationMessage(properTaskMessage);
-
-      // Update task status
-      task.status = TaskStatus.ACCEPTED;
-      task.updatedAt = new Date().toISOString();
-
-      return {
-        taskId: task.id,
-        accepted: true,
-        estimatedCompletion: this.estimateCompletionTime(task)
-      };
+        this.pendingDelegations.set(recipientId, { request, delegatorId, recipientId, resolve, reject, timeout });
+        console.log(`Delegation to agent ${recipientId} is pending. Current status: ${recipientAgent.getStatus()}`);
+      });
     } catch (error) {
       analyzeError(error as Error);
       console.error('Error delegating task:', error);
-
       return {
         taskId: request.taskId,
         accepted: false,
         reason: error instanceof Error ? error.message : String(error)
       };
     }
+  }
+
+  // New private method to perform the actual delegation
+  private async performDelegation(delegatorId: string, recipientId: string, request: TaskDelegationRequest): Promise<TaskDelegationResponse> {
+    const recipientAgent = this.agents.get(recipientId);
+
+    if (!recipientAgent) {
+      // This should ideally not happen if the agent was found earlier,
+      // but it's a safeguard against the agent being removed between checks.
+      console.error(`Agent ${recipientId} not found in agents map during performDelegation.`);
+      return {
+        taskId: request.taskId,
+        accepted: false,
+        reason: `Agent ${recipientId} not found in agents map for delegation.`
+      };
+    }
+
+    // Create task
+    const task: DelegatedTask = {
+      id: request.taskId || uuidv4(),
+      taskType: request.taskType,
+      description: request.description,
+      inputs: request.inputs,
+      delegatedBy: delegatorId,
+      delegatedTo: recipientId,
+      status: TaskStatus.PENDING,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      deadline: request.deadline,
+      priority: request.priority || 'normal'
+    };
+
+    // Store task
+    this.tasks.set(task.id, task);
+
+    // Send task to recipient agent
+    const message = {
+      type: CollaborationMessageType.TASK_DELEGATION,
+      sender: delegatorId,
+      recipient: recipientId,
+      content: task
+    };
+
+    const properTaskMessage = createCollaborationMessage(
+      message.type,
+      message.sender,
+      message.recipient,
+      message.content
+    );
+    await recipientAgent.handleCollaborationMessage(properTaskMessage);
+
+    // Update task status
+    task.status = TaskStatus.ACCEPTED;
+    task.updatedAt = new Date().toISOString();
+
+    return {
+      taskId: task.id,
+      accepted: true,
+      estimatedCompletion: this.estimateCompletionTime(task)
+    };
   }
 
   /**

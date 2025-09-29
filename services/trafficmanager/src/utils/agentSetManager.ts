@@ -46,7 +46,7 @@ class AgentSetManager {
         const serviceId = 'TrafficManager';
         const serviceSecret = process.env.CLIENT_SECRET || 'stage7AuthSecret';
         this.tokenManager = ServiceTokenManager.getInstance(
-            `http://${this.securityManagerUrl}`,
+            `${this.securityManagerUrl}`,
             serviceId,
             serviceSecret
         );
@@ -505,10 +505,10 @@ class AgentSetManager {
                     }
                     console.log(`[AgentSetManager] Requesting statistics from AgentSet at ${agentSet.url} for missionId: ${missionId}`);
                     const response = await this.apiCall('get', `http://${agentSet.url}/statistics/${encodeURIComponent(missionId)}`);
-                    console.log(`[AgentSetManager] Response from AgentSet at ${agentSet.url}:`, JSON.stringify(response.data));
+                    //console.log(`[AgentSetManager] Response from AgentSet at ${agentSet.url}:`, JSON.stringify(response.data));
                     const serializedStats = response.data;
                     serializedStats.agentsByStatus = MapSerializer.transformFromSerialization(serializedStats.agentsByStatus);
-                    console.log(`AgentSetManager:AgentSet `,agentSet.url,` stats: `, serializedStats);
+                    //console.log(`AgentSetManager:AgentSet `,agentSet.url,` stats: `, serializedStats);
                     stats.totalAgentsCount += serializedStats.agentsCount;
 
                     // Merge agentsByStatus maps properly

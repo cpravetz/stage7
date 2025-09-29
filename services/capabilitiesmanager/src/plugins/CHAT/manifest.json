@@ -1,15 +1,16 @@
 {
   "id": "plugin-CHAT",
   "verb": "CHAT",
-  "description": "Manages interactive chat sessions with the user.",
-  "explanation": "This plugin allows for starting, conducting, and ending a chat session to gather information or provide assistance.",
+  "description": "Sends a message to the user and waits for their response. Use ASK_USER_QUESTION instead for questions requiring user input. CHAT is primarily for notifications, status updates, or conversational interactions where you need to inform the user of something.",
+  "explanation": "This plugin sends a message to the user and returns their response. However, for structured questions or when you need specific user input, use ASK_USER_QUESTION instead. CHAT is better suited for conversational interactions, notifications, or status updates.",
   "language": "python",
   "inputDefinitions": [
     {
       "name": "message",
       "type": "string",
       "description": "The message to send to the user",
-      "required": true
+      "required": true,
+      "aliases": ["msg","text","body"]
     }
   ],
   "outputDefinitions": [

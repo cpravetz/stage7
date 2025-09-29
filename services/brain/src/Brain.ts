@@ -53,18 +53,22 @@ export class Brain extends BaseEntity {
     }
 
     init() {
-        app.use(bodyParser.json());
+        app.use(bodyParser.json({limit: '15mb'}));
 
+        // Use BaseEntity's verifyToken method which already handles health check bypassing
         app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
-            if (req.path === '/health' || req.path === '/chat' || req.path === '/feedback') {
+            // Allow admin endpoints, chat, and feedback without authentication
+            if (req.path === '/chat' || req.path === '/feedback' || req.path.startsWith('/admin/')) {
                 return next();
             }
+            // BaseEntity.verifyToken already handles health check endpoints
             this.verifyToken(req, res, next);
         });
 
         app.get('/health', (_req: express.Request, res: express.Response) => {
             res.json({ status: 'ok', message: 'Brain service is running' });
         });
+
 
         app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
             console.error('Express error in Brain:', err instanceof Error ? err.message : String(err));
@@ -136,17 +140,22 @@ export class Brain extends BaseEntity {
     private modelTimeoutCounts: Record<string, number> = {};
 
     async generate(req: express.Request, res: express.Response) {
-        const maxRetries = 5;
-        const modelName = req.body.modelName;
-        const optimization = req.body.optimization;
-        const conversationType = req.body.conversationType;
-        const convertParams = req.body.convertParams;
+        // No retry limit - keep trying until we find a working model
+    const modelName = req.body.modelName;
+    const optimization = req.body.optimization || 'accuracy';
+    const conversationType = req.body.conversationType || LLMConversationType.TextToText;
+    const convertParams = req.body.convertParams;
+
+    console.log(`[Brain Generate] Request params - modelName: ${modelName || 'none'}, optimization: ${optimization}, conversationType: ${conversationType}`);
 
         let attempt = 0;
         let lastError: string = '';
         let lastModelName: string | null = null;
 
-        while (attempt < maxRetries) {
+        // Maintain an excluded models list so we don't retry the same failing provider
+        const excludedModels: string[] = [];
+
+        while (true) { // Infinite retry until success or no models available
             attempt++;
             let selectedModel: any = null;
             let trackingRequestId: string = '';
@@ -154,7 +163,7 @@ export class Brain extends BaseEntity {
             try {
                 selectedModel = modelName && attempt === 1 ?
                     this.modelManager.getModel(modelName) :
-                    this.modelManager.selectModel(optimization, conversationType);
+                    this.modelManager.selectModel(optimization, conversationType, excludedModels);
 
                 if (!selectedModel || !selectedModel.isAvailable() || !selectedModel.service) {
                     if (attempt === 1) {
@@ -212,25 +221,38 @@ export class Brain extends BaseEntity {
                     } else {
                         this.modelTimeoutCounts[selectedModel.name] = 0;
                     }
+
+                    // Exclude this model from further selection attempts for this request
+                    try {
+                        excludedModels.push(selectedModel.name);
+                        console.log(`[Brain Generate] Excluding model ${selectedModel.name} from subsequent attempts`);
+                    } catch (e) {
+                        console.warn('[Brain Generate] Failed to exclude model from retries', e);
+                    }
                 }
 
-                if (attempt < maxRetries) {
-                    const retryDelay = Math.pow(2, attempt) * 1000; // Exponential backoff: 2s, 4s, 8s, 16s
-                    console.log(`[Brain Generate] Attempting retry ${attempt + 1}/${maxRetries} in ${retryDelay / 1000}s`);
-                    await new Promise(resolve => setTimeout(resolve, retryDelay)); // Add delay
+                // Check if we have any available models left (not blacklisted/unavailable)
+                const availableModels = this.modelManager.getAvailableAndNotBlacklistedModels(conversationType || LLMConversationType.TextToText);
+                if (availableModels.length === 0) {
+                    console.error(`[Brain Generate] No available models left after ${attempt} attempts. Last error: ${lastError}`);
+                    res.status(500).json({ error: `No available models. Last error: ${lastError}` });
+                    return;
                 }
+
+                const retryDelay = Math.min(Math.pow(2, Math.min(attempt, 10)) * 1000, 30000); // Cap at 30s
+                console.log(`[Brain Generate] Attempting retry ${attempt + 1} in ${retryDelay / 1000}s (${availableModels.length} models available)`);
+                // Clear selection cache to avoid repeated cached picks
+                this.modelManager.clearModelSelectionCache();
+                await new Promise(resolve => setTimeout(resolve, retryDelay));
             }
         }
-
-        console.error(`[Brain Generate] All ${maxRetries} attempts failed. Last error: ${lastError}`);
-        res.status(500).json({ error: `All model attempts failed. Last error: ${lastError}` });
     }
 
     async chat(req: express.Request, res: express.Response) {
         const requestId = uuidv4();
         console.log(`[Brain Chat] Request ${requestId} received`);
 
-        const maxRetries = 3;
+        // No retry limit - keep trying until we find a working model
         const thread = this.createThreadFromRequest(req);
 
         // Estimate token count (heuristic: 1 token ~= 4 characters)
@@ -240,8 +262,9 @@ export class Brain extends BaseEntity {
         let lastError: string = '';
         let lastModelName: string | null = null;
         const excludedModels: string[] = [];
+        let repairAttempted = false;
 
-        while (attempt < maxRetries) {
+        while (true) { // Infinite retry until success or no models available
             attempt++;
             let selectedModel: any = null;
             let trackingRequestId: string = '';
@@ -257,7 +280,11 @@ export class Brain extends BaseEntity {
                 if (!selectedModel || !selectedModel.isAvailable()) {
                     lastError = `No suitable model found for ${thread.optimization}/${thread.conversationType}`;
                     console.log(`[Brain Chat] Attempt ${attempt}: ${lastError}`);
-                    if (attempt === maxRetries) {
+
+                    // Check if we have any available models left
+                    const availableModels = this.modelManager.getAvailableAndNotBlacklistedModels(thread.conversationType || LLMConversationType.TextToText);
+                    if (availableModels.length === 0) {
+                        console.error(`[Brain Chat] No available models left after ${attempt} attempts`);
                         break;
                     }
                     continue;
@@ -291,14 +318,6 @@ export class Brain extends BaseEntity {
                 if (selectedModel && selectedModel.name && errorMessage.includes('context window')) {
                     console.log(`[Brain Chat] Context window error detected for model ${selectedModel.name}. Excluding it from retries.`);
                     excludedModels.push(selectedModel.name);
-                }
-
-                // Check if this is a JSON error and if we should attempt a repair
-                else if (thread.conversationType === LLMConversationType.TextToJSON && /json/i.test(errorMessage) && attempt < maxRetries) {
-                    console.log(`[Brain Chat] JSON error detected. Attempting to repair with a new model.`);
-                    // Modify the thread to include the repair instructions
-                    const lastExchange = thread.exchanges[thread.exchanges.length - 1];
-                    lastExchange.content = `The previous model failed to produce valid JSON. Please fix the following output to be a single, valid JSON object. Do not include any explanations, markdown, or code blocks - just the raw JSON object.\n\nBROKEN OUTPUT:\n${lastError.replace('JSON_RECOVERY_FAILED: Could not repair or extract valid JSON from: ', '')}`;
                 } else if (selectedModel && selectedModel.name) {
                     const isTimeout = /timeout|system_error|connection error/i.test(errorMessage);
                     const isJsonError = /json|parse|invalid format/i.test(errorMessage);
@@ -327,17 +346,20 @@ export class Brain extends BaseEntity {
                     }
                 }
 
-                if (attempt < maxRetries) {
-                    const retryDelay = Math.pow(2, attempt) * 1000; // Exponential backoff: 2s, 4s, 8s
-                    console.log(`[Brain Chat] Clearing model selection cache and retrying in ${retryDelay / 1000}s...`);
-                    this.modelManager.clearModelSelectionCache();
-                    await new Promise(resolve => setTimeout(resolve, retryDelay)); // Add delay
+                // Check if we have any available models left
+                const availableModels = this.getAvailableModels();
+                if (availableModels.length === 0) {
+                    console.error(`[Brain Chat] No available models left after ${attempt} attempts. Last error: ${lastError}`);
+                    res.status(500).json({ error: `No available models. Last error: ${lastError}` });
+                    return;
                 }
+
+                const retryDelay = Math.min(Math.pow(2, Math.min(attempt, 10)) * 1000, 30000); // Cap at 30s
+                console.log(`[Brain Chat] Clearing model selection cache and retrying in ${retryDelay / 1000}s... (${availableModels.length} models available)`);
+                this.modelManager.clearModelSelectionCache();
+                await new Promise(resolve => setTimeout(resolve, retryDelay));
             }
         }
-
-        console.error(`[Brain Chat] All ${maxRetries} attempts failed. Last error: ${lastError}`);
-        res.status(500).json({ error: `All model attempts failed. Last error: ${lastError}` });
     }
 
     private async _chatWithModel(selectedModel: any, thread: any, res: express.Response, requestId: string): Promise<void> {

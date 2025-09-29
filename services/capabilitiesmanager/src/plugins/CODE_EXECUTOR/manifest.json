@@ -9,12 +9,16 @@
       "required": true,
       "type": "string",
       "description": "The programming language of the code snippet. Supported: 'python', 'javascript'."
+    ,
+      "aliases": ["lang","languageName"]
     },
     {
       "name": "code",
       "required": true,
       "type": "string",
       "description": "The code snippet to execute."
+    ,
+      "aliases": ["snippet","program","source"]
     }
   ],
   "outputDefinitions": [

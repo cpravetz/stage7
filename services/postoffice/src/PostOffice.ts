@@ -27,6 +27,7 @@ export class PostOffice extends BaseEntity {
     private clients: Map<string, WebSocket> = new Map();
     private userInputRequests: Map<string, (response: any) => void> = new Map();
     private userInputRequestMetadata: Map<string, { answerType: string; question: string; choices?: string[] }> = new Map();
+    private userInputResponses: Map<string, { status: string; answer?: any; timestamp: number }> = new Map();
     private messageQueue: Map<string, Message[]> = new Map();
     private messageRouter: MessageRouter;
     private clientMessageQueue: Map<string, Message[]> = new Map(); // Queue for messages to clients without active connections
@@ -140,7 +141,6 @@ export class PostOffice extends BaseEntity {
                 req.path === '/registerComponent' ||
                 req.path === '/securityManager/refresh-token' ||
                 req.path === '/securityManager/auth/refresh-token') {
-                console.log(`[PostOffice] Skipping authentication for exempt path: ${req.path}`);
                 return next();
             }
 
@@ -167,6 +167,7 @@ export class PostOffice extends BaseEntity {
         this.app.get('/getServices', (req, res) => this.getServices(req, res));
         this.app.post('/submitUserInput', this.fileUploadManager.getUploadMiddleware(), (req, res) => { this.submitUserInput(req, res)});
         this.app.post('/sendUserInputRequest', (req, res) => this.sendUserInputRequest(req, res));
+        this.app.get('/getUserInputResponse/:requestId', (req, res) => this.getUserInputResponse(req, res));
         this.app.post('/createMission', (req, res) => this.createMission(req, res));
         this.app.post('/loadMission', (req, res) => this.loadMission(req, res));
         this.app.get('/librarian/retrieve/:id', (req, res) => this.retrieveWorkProduct(req, res));
@@ -175,6 +176,10 @@ export class PostOffice extends BaseEntity {
         this.app.get('/brain/performance', (req, res) => { this.getModelPerformance(req, res)});
         this.app.get('/brain/performance/rankings', (req, res) => { this.getModelRankings(req, res);});
         this.app.post('/brain/evaluations', (req, res) => { this.submitModelEvaluation(req, res);});
+
+        this.app.delete('/missions/:missionId/files/:fileId', (req, res) => this.deleteMissionFile(req, res));
+
+        this.app.get('/missions/:missionId/files/:fileId/download', (req, res) => this.downloadMissionFile(req, res));
 
         // Setup plugin management routes
         this.pluginManager.setupRoutes(this.app);
@@ -616,7 +621,7 @@ export class PostOffice extends BaseEntity {
 
     private async submitUserInput(req: express.Request, res: express.Response) {
         try {
-            const { requestId, response } = req.body;
+            const { requestId, response, cancel } = req.body;
             const files = req.files as Express.Multer.File[];
 
             const resolver = this.userInputRequests.get(requestId);
@@ -628,6 +633,24 @@ export class PostOffice extends BaseEntity {
 
             if (!metadata) {
                 return res.status(404).send({ error: 'User input request metadata not found' });
+            }
+
+            // Handle cancellation
+            if (cancel === true) {
+                // Clean up the request without resolving
+                this.userInputRequests.delete(requestId);
+                this.userInputRequestMetadata.delete(requestId);
+
+                // Store cancelled status for polling
+                this.userInputResponses.set(requestId, {
+                    status: 'cancelled',
+                    timestamp: Date.now()
+                });
+
+                // Notify agents of cancellation
+                await this.notifyAgentOfUserResponse(requestId, null); // Send null to indicate cancellation
+
+                return res.status(200).send({ message: 'User input cancelled' });
             }
 
             let finalResponse = response;
@@ -668,6 +691,13 @@ export class PostOffice extends BaseEntity {
                     return res.status(500).send({ error: 'Failed to upload file' });
                 }
             }
+
+            // Store the response for polling
+            this.userInputResponses.set(requestId, {
+                status: 'completed',
+                answer: finalResponse,
+                timestamp: Date.now()
+            });
 
             // Resolve the request with the response (either text response or file ID)
             resolver(finalResponse);
@@ -873,17 +903,18 @@ export class PostOffice extends BaseEntity {
         console.log('Request body:', req.body);
 
         const securityManagerPath = req.originalUrl.split('/securityManager')[1] || '/';
-        const fullUrl = `http://${this.securityManagerUrl}${securityManagerPath}`;
+        const fullUrl = `${this.securityManagerUrl}${securityManagerPath}`;
         console.log(`Forwarding request to SecurityManager: ${fullUrl}`);
 
         try {
+            const securityManagerUrlObject = new URL(this.securityManagerUrl);
             const requestConfig = {
                 method: req.method as any,
                 url: fullUrl,
                 data: req.body,
                 headers: {
                     ...req.headers,
-                    host: this.securityManagerUrl.split(':')[0],
+                    host: securityManagerUrlObject.host,
                     'Content-Type': 'application/json'
                 },
                 params: req.query,
@@ -959,10 +990,64 @@ export class PostOffice extends BaseEntity {
         }
     }
 
+    private async deleteMissionFile(req: express.Request, res: express.Response) {
+        try {
+            const { missionId, fileId } = req.params;
+            const missionControlUrl = this.getComponentUrl('MissionControl');
+            if (!missionControlUrl) {
+                return res.status(503).send({ error: 'MissionControl service not available' });
+            }
+    
+            // Forward the DELETE request to MissionControl
+            const response = await this.authenticatedApi.delete(`http://${missionControlUrl}/missions/${missionId}/files/${fileId}`);
+            
+            res.status(response.status).send(response.data);
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error('Error deleting mission file:', error instanceof Error ? error.message : error);
+            res.status(500).send({ error: 'Failed to delete mission file' });
+        }
+    }
+
+    private async downloadMissionFile(req: express.Request, res: express.Response) {
+        try {
+            const { fileId } = req.params;
+            const librarianUrl = this.getComponentUrl('Librarian');
+            if (!librarianUrl) {
+                return res.status(503).send({ error: 'Librarian service not available' });
+            }
+    
+            const fileInfoResponse = await this.authenticatedApi.get(`http://${librarianUrl}/loadData/step-output-${fileId}`, {
+                params: { collection: 'step-outputs', storageType: 'mongo' }
+            });
+    
+            const fileData = fileInfoResponse.data.data;
+            if (!fileData) {
+                return res.status(404).send({ error: 'File not found' });
+            }
+    
+            const fileName = fileData.originalName || 'download';
+            const mimeType = fileData.mimeType || 'application/octet-stream';
+            const content = fileData.fileContent;
+    
+            res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+            res.setHeader('Content-Type', mimeType);
+            res.send(Buffer.from(content));
+    
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error('Error downloading mission file:', error instanceof Error ? error.message : error);
+            if (axios.isAxiosError(error) && error.response?.status === 404) {
+                return res.status(404).send({ error: 'File not found in storage.' });
+            }
+            res.status(500).send({ error: 'Failed to download mission file' });
+        }
+    }
+
     // Add this method to PostOffice
     private async sendUserInputRequest(req: express.Request, res: express.Response) {
         try {
-            const { question, answerType, choices } = req.body;
+            const { question, answerType, choices, clientId } = req.body;
             const request_id = require('uuid').v4();
 
             // Store the request metadata
@@ -972,22 +1057,95 @@ export class PostOffice extends BaseEntity {
                 choices
             });
 
+            // Initialize response status as pending
+            this.userInputResponses.set(request_id, {
+                status: 'pending',
+                timestamp: Date.now()
+            });
+
             // Store the request for later resolution
-            this.userInputRequests.set(request_id, (response: any) => {
+            this.userInputRequests.set(request_id, async (response: any) => {
                 // This callback will be called when the user responds
-                // You may want to notify the agent system here
+                // Notify the agent system about the response
+                await this.notifyAgentOfUserResponse(request_id, response);
             });
-            // Broadcast to all connected clients (or filter by mission/user as needed)
-            this.webSocketHandler.broadcastToClients({
-                type: 'USER_INPUT_REQUEST',
-                request_id,
-                question,
-                answerType: answerType || 'text',
-                choices: choices || null
-            });
+
+            if (clientId) {
+                this.webSocketHandler.sendToClient(clientId, {
+                    type: 'USER_INPUT_REQUEST',
+                    request_id,
+                    question,
+                    answerType: answerType || 'text',
+                    choices: choices || null
+                });
+            } else {
+                // Fallback to broadcasting to all connected clients if no clientId is provided
+                this.webSocketHandler.broadcastToClients({
+                    type: 'USER_INPUT_REQUEST',
+                    request_id,
+                    question,
+                    answerType: answerType || 'text',
+                    choices: choices || null
+                });
+            }
+
             res.status(200).json({ request_id });
         } catch (error) {
             res.status(500).json({ error: 'Failed to send user input request' });
+        }
+    }
+
+    private async getUserInputResponse(req: express.Request, res: express.Response) {
+        try {
+            const { requestId } = req.params;
+
+            if (!requestId) {
+                return res.status(400).json({ error: 'Request ID is required' });
+            }
+
+            const response = this.userInputResponses.get(requestId);
+
+            if (!response) {
+                return res.status(404).json({ error: 'Request not found' });
+            }
+
+            // Clean up old completed responses (older than 1 hour)
+            const oneHourAgo = Date.now() - (60 * 60 * 1000);
+            if (response.status === 'completed' && response.timestamp < oneHourAgo) {
+                this.userInputResponses.delete(requestId);
+                return res.status(404).json({ error: 'Request expired' });
+            }
+
+            res.status(200).json(response);
+        } catch (error) {
+            res.status(500).json({ error: 'Failed to get user input response' });
+        }
+    }
+
+    private async notifyAgentOfUserResponse(requestId: string, response: any): Promise<void> {
+        try {
+            // Find all agents that might be waiting for this response
+            // We need to broadcast to all AgentSet instances since we don't know which one is waiting
+            const agentSetComponents = this.componentsByType.get('agentset') || new Set();
+
+            for (const agentSetId of agentSetComponents) {
+                const component = this.components.get(agentSetId);
+                if (component) {
+                    try {
+                        const messageContent = {
+                            requestId: requestId,
+                            answer: response
+                        };
+
+                        await this.sendMessage('USER_INPUT_RESPONSE', agentSetId, messageContent, false);
+                        console.log(`Notified AgentSet ${agentSetId} of user response for request ${requestId}`);
+                    } catch (error) {
+                        console.error(`Failed to notify AgentSet ${agentSetId} of user response:`, error);
+                    }
+                }
+            }
+        } catch (error) {
+            console.error(`Error notifying agents of user response for request ${requestId}:`, error);
         }
     }
 }

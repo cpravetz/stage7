@@ -18,7 +18,7 @@ export class GLlama4Model extends BaseModel {
             }],
             [LLMConversationType.TextToJSON, {
                 costScore: 100,
-                accuracyScore: 100,
+                accuracyScore: 20,
                 creativityScore: 80,
                 speedScore: 80
             }]

@@ -33,12 +33,14 @@ export class PluginExecutor {
     private containerManager: ContainerManager;
     private librarianUrl: string;
     private securityManagerUrl: string;
+    private missionControlUrl: string;  
 
-    constructor(configManager: ConfigManager, containerManager: ContainerManager, librarianUrl: string, securityManagerUrl: string) {
+    constructor(configManager: ConfigManager, containerManager: ContainerManager, librarianUrl: string, securityManagerUrl: string, missionControlUrl: string) {
         this.configManager = configManager;
         this.containerManager = containerManager;
         this.librarianUrl = librarianUrl;
         this.securityManagerUrl = securityManagerUrl;
+        this.missionControlUrl = missionControlUrl;
     }
 
     public async execute(pluginToExecute: PluginDefinition, inputsForPlugin: Map<string, InputValue>, actualPluginRootPath: string, trace_id: string): Promise<PluginOutput[]> {
@@ -96,14 +98,14 @@ export class PluginExecutor {
             let token = null;
             let brainToken = null;
             const tokenManager = new ServiceTokenManager(
-                `http://${this.securityManagerUrl}`,
+                this.securityManagerUrl,
                 'CapabilitiesManager',
                 process.env.CLIENT_SECRET || 'stage7AuthSecret'
             );
             token = await tokenManager.getToken();
 
             const brainTokenManager = new ServiceTokenManager(
-                `http://${this.securityManagerUrl}`,
+                this.securityManagerUrl,
                 'Brain',
                 process.env.CLIENT_SECRET || 'stage7AuthSecret'
             );
@@ -163,6 +165,17 @@ export class PluginExecutor {
                     });
                 }
             }
+            if (!inputsForPlugin.has('missioncontrol_url')) {
+                const missionControlUrlEnv = process.env.MISSIONCONTROL_URL || this.missionControlUrl || null;
+                if (missionControlUrlEnv) {
+                    inputsForPlugin.set('missioncontrol_url', {
+                        inputName: 'missioncontrol_url',
+                        value: missionControlUrlEnv,
+                        valueType: PluginParameterType.STRING,
+                        args: {}
+                    });
+                }
+            }
 
             const executionInputs = new Map(inputsForPlugin);
             if (brainToken) {
@@ -173,31 +186,21 @@ export class PluginExecutor {
                     args: { token: brainToken }
                 });
             }
+
+
             
+            // Add Google and LangSearch API keys to the environment passed to the plugin
             if (process.env.GOOGLE_SEARCH_API_KEY) {
-                executionInputs.set('__google_search_api_key', {
-                    inputName: '__google_search_api_key',
-                    value: process.env.GOOGLE_SEARCH_API_KEY,
-                    valueType: PluginParameterType.STRING,
-                    args: {}
-                });
-                console.log(`[${trace_id}] ${source_component}: Added __google_search_api_key to plugin inputs.`);
+                currentEnv.GOOGLE_API_KEY = process.env.GOOGLE_SEARCH_API_KEY; // Corrected variable name
+                console.log(`[${trace_id}] ${source_component}: Added GOOGLE_API_KEY to plugin environment.`);
             }
             if (process.env.GOOGLE_CSE_ID) {
-                executionInputs.set('__google_cse_id', {
-                    inputName: '__google_cse_id',
-                    value: process.env.GOOGLE_CSE_ID,
-                    valueType: PluginParameterType.STRING,
-                    args: {}
-                });
+                currentEnv.GOOGLE_SEARCH_ENGINE_ID = process.env.GOOGLE_CSE_ID; // Corrected variable name
+                console.log(`[${trace_id}] ${source_component}: Added GOOGLE_SEARCH_ENGINE_ID to plugin environment.`);
             }
             if (process.env.LANGSEARCH_API_KEY) {
-                executionInputs.set('__langsearch_api_key', {
-                    inputName: '__langsearch_api_key',
-                    value: process.env.LANGSEARCH_API_KEY,
-                    valueType: PluginParameterType.STRING,
-                    args: {}
-                });
+                currentEnv.LANGSEARCH_API_KEY = process.env.LANGSEARCH_API_KEY;
+                console.log(`[${trace_id}] ${source_component}: Added LANGSEARCH_API_KEY to plugin environment.`);
             }
             const executionContext: ExecutionContext = {
                 inputValues: executionInputs,

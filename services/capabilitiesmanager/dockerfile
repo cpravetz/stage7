@@ -30,6 +30,7 @@ COPY services/capabilitiesmanager ./services/capabilitiesmanager
 COPY templates ./templates
 COPY examples ./examples
 COPY tools ./tools
+COPY shared/python /usr/src/app/shared/python
 
 # Build the TypeScript code
 RUN cd shared && npm run build
@@ -37,12 +38,39 @@ RUN cd errorhandler && npm run build
 RUN cd marketplace && npm run build
 RUN npm run build --workspace=services/capabilitiesmanager
 
+# Create the plugins directory in dist if it doesn't exist
+RUN mkdir -p services/capabilitiesmanager/dist/plugins
+
 # Copy the local plugins from the source 'src/plugins' to the build output 'dist/plugins'
 # The source path is relative to the build context root (/usr/src/app)
-COPY services/capabilitiesmanager/src/plugins ./services/capabilitiesmanager/dist/plugins/
+COPY services/capabilitiesmanager/src/plugins/ ./services/capabilitiesmanager/dist/plugins/
+
+# --- Start Python Plugin Venv Pre-building ---
+WORKDIR /usr/src/app/services/capabilitiesmanager/dist/plugins
+
+# List of Python plugins to pre-build venvs for
+# These names correspond to the directory names under dist/plugins
+ENV PYTHON_PLUGINS="ACCOMPLISH SEARCH_PYTHON CHAT API_CLIENT CODE_EXECUTOR DATA_TOOLKIT FILE_OPS_PYTHON GET_USER_INPUT REFLECT SCRAPE TEXT_ANALYSIS TRANSFORM"
+
+RUN for plugin_name in $PYTHON_PLUGINS; do \
+    echo "Pre-building venv for $plugin_name..."; \
+    cd "$plugin_name" && \
+    python3 -m venv venv && \
+    . venv/bin/activate && \
+    pip install --no-cache-dir -e /usr/src/app/shared/python && \
+    if [ -f "requirements.txt" ]; then \
+        pip install --no-cache-dir -r requirements.txt; \
+    fi && \
+    deactivate && \
+    cd ..; \
+done
+
+# --- End Python Plugin Venv Pre-building ---
 
 # Make Python CLI tool executable
-RUN chmod +x tools/python-plugin-cli.py
+
+
+RUN chmod +x /usr/src/app/tools/python-plugin-cli.py
 
 # Set the working directory to the service
 WORKDIR /usr/src/app/services/capabilitiesmanager

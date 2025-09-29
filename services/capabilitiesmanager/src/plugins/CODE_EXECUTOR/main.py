@@ -1,77 +1,4 @@
-def execute_plugin(inputs):
-    """
-    Executes the CODE_EXECUTOR plugin.
-    """
-    language = inputs.get("language")
-    code = inputs.get("code")
 
-    if not language or not code:
-        return json.dumps({
-            "stdout": "",
-            "stderr": "Language and code are required.",
-            "exit_code": 1
-        })
-
-    if language not in ["python", "javascript"]:
-        return json.dumps({
-            "stdout": "",
-            "stderr": f"Language '{language}' is not supported.",
-            "exit_code": 1
-        })
-
-    try:
-        client = docker.from_env()
-        image_tag = f"code-executor-{language}"
-        dockerfile_path = os.path.join(os.path.dirname(__file__), f"Dockerfile.{language}")
-
-        # Build the Docker image
-        try:
-            client.images.get(image_tag)
-        except docker.errors.ImageNotFound:
-            client.images.build(
-                path=os.path.dirname(__file__),
-                dockerfile=f"Dockerfile.{language}",
-                tag=image_tag
-            )
-
-        # Run the Docker container
-        container = client.containers.run(
-            image=image_tag,
-            command=["sh", "-c", "python -c 'import sys; exec(sys.stdin.read())'" if language == "python" else "node -e \"const fs = require('fs'); const code = fs.readFileSync(0, 'utf-8'); eval(code);\""],
-            stdin_open=True,
-            detach=True
-        )
-
-        # Write code to container's stdin
-        sock = container.attach_socket()
-        sock._sock.sendall(code.encode('utf-8'))
-        sock._sock.close()
-        
-        result = container.wait()
-        
-        stdout = container.logs(stdout=True, stderr=False).decode('utf-8')
-        stderr = container.logs(stdout=False, stderr=True).decode('utf-8')
-        
-        container.remove()
-
-        return json.dumps({
-            "stdout": stdout,
-            "stderr": stderr,
-            "exit_code": result['StatusCode']
-        })
-
-    except docker.errors.DockerException as e:
-        return json.dumps({
-            "stdout": "",
-            "stderr": f"Docker error: {str(e)}",
-            "exit_code": 1
-        })
-    except Exception as e:
-        return json.dumps({
-            "stdout": "",
-            "stderr": f"An unexpected error occurred: {str(e)}",
-            "exit_code": 1
-        })
 
 import sys
 import json
@@ -204,8 +131,13 @@ if __name__ == "__main__":
         if isinstance(inputs_list, list):
             for item in inputs_list:
                 if isinstance(item, list) and len(item) == 2:
-                    key, val = item
-                    inputs_dict[key] = val
+                    key, raw_value = item
+                    # If raw_value is an InputValue object, extract its 'value' property
+                    if isinstance(raw_value, dict) and 'value' in raw_value:
+                        inputs_dict[key] = raw_value['value']
+                    else:
+                        # Otherwise, use raw_value directly (for non-InputValue types)
+                        inputs_dict[key] = raw_value
                 else:
                     # Log a warning if an item is not a valid [key, value] pair
                     sys.stderr.write(f"Warning: Skipping invalid input item: {item}\n")

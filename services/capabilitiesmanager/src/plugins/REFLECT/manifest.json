@@ -3,7 +3,7 @@
     "name": "REFLECT",
     "verb": "REFLECT",
     "actionVerb": "REFLECT",
-    "description": "Reflects on the current state of a mission to evaluate progress and determine next steps.",
+    "description": "Reflects on the current state of a mission to evaluate progress and determine next steps. Use only when a step back is appropriate, not excessively.",
     "inputDefinitions": [
         {
             "name": "missionId",
@@ -21,13 +21,22 @@
             "name": "work_products",
             "description": "A JSON string representing a manifest of data artifacts created by the plan.",
             "type": "string",
-            "required": false
+            "required": false,
+            "aliases": ["workProducts","artifacts","files"]
         },
         {
             "name": "question",
             "description": "The specific question to reflect on.",
             "type": "string",
-            "required": true
+            "required": true,
+            "aliases": ["prompt","question_text","q"]
+        },
+        {
+            "name": "final_output",
+            "description": "A reference to a final outut of the plan.",
+            "type": "string",
+            "required": false,
+            "aliases": ["finalOutput","final_result","output"]
         }
     ],
     "outputDefinitions": [
@@ -53,6 +62,9 @@
     },
     "entryPoint": {
         "main": "main.py"
+    },
+    "repository": {
+        "type": "local"
     },
     "version": "1.0.0"
 }

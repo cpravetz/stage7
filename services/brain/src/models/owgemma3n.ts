@@ -14,7 +14,7 @@ export class KNLLMModel extends BaseModel {
 
         super({
             name: "openweb/gemma3n",
-            modelName: "gemma3n:latest", // This is the model name that will be sent to the OpenWebUI API
+            modelName: "gemma3n:e4b", // This is the model name that will be sent to the OpenWebUI API
             interfaceName: "openwebui", // Must match the interface name in OpenWebUIInterface.ts
             serviceName: "OWService", // Must match the service name in OWService.ts
             tokenLimit: 32000,

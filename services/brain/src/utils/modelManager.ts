@@ -216,11 +216,11 @@ export class ModelManager {
                 const serviceAvailable = service ? service.isAvailable() : false;
                 const isBlacklisted = this.performanceTracker.isModelBlacklisted(model.name, conversationType);
 
-                console.log(`Model ${model.name}:`);
-                console.log(`  - Supports ${conversationType}: ${supportsConversation}`);
-                console.log(`  - Interface available: ${!!interfaceInstance}`);
-                console.log(`  - Service available: ${serviceAvailable}`);
-                console.log(`  - Blacklisted: ${isBlacklisted}`);
+                //console.log(`Model ${model.name}:`);
+                //console.log(`  - Supports ${conversationType}: ${supportsConversation}`);
+                //console.log(`  - Interface available: ${!!interfaceInstance}`);
+                //console.log(`  - Service available: ${serviceAvailable}`);
+                //console.log(`  - Blacklisted: ${isBlacklisted}`);
             });
 
             return null;
@@ -312,12 +312,31 @@ export class ModelManager {
         return Array.from(this.models.keys());
     }
 
-    /**
-     * Get all models
-     * @returns Map of all models
-     */
-    getAllModels(): Map<string, BaseModel> {
-        return this.models;
+
+
+    getAvailableAndNotBlacklistedModels(conversationType: LLMConversationType): BaseModel[] {
+        return Array.from(this.models.values())
+            .filter(model => {
+                if (!model.contentConversation.includes(conversationType)) {
+                    return false;
+                }
+
+                const interfaceInstance = interfaceManager.getInterface(model.interfaceName);
+                if (!interfaceInstance) {
+                    return false;
+                }
+
+                const service = serviceManager.getService(model.serviceName);
+                if (!service || !service.isAvailable()) {
+                    return false;
+                }
+
+                if (this.performanceTracker.isModelBlacklisted(model.name, conversationType)) {
+                    return false;
+                }
+
+                return true;
+            });
     }
 
     /**
@@ -521,6 +540,14 @@ export class ModelManager {
      */
     getActiveRequestsCount(): number {
         return this.activeRequests.size;
+    }
+
+    /**
+     * Get all loaded models
+     * @returns Array of all models
+     */
+    getAllModels(): BaseModel[] {
+        return Array.from(this.models.values());
     }
 
     /**

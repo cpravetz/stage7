@@ -8,19 +8,22 @@
       "name": "text",
       "required": true,
       "type": "string",
-      "description": "The text content to analyze"
+      "description": "The text content to analyze",
+      "aliases": ["content","body","message"]
     },
     {
       "name": "analysis_type",
       "required": false,
       "type": "string",
-      "description": "Type of analysis to perform: 'all', 'statistics', 'keywords', or 'sentiment' (default: 'all')"
+      "description": "Type of analysis to perform: 'all', 'statistics', 'keywords', or 'sentiment' (default: 'all')",
+      "aliases": ["analysisType","type","mode"]
     },
     {
       "name": "keyword_count",
       "required": false,
       "type": "number",
-      "description": "Number of top keywords to extract (default: 10)"
+      "description": "Number of top keywords to extract (default: 10)",
+      "aliases": ["num_keywords","top_k","keywordsCount"]
     }
   ],
   "outputDefinitions": [
@@ -81,6 +84,9 @@
       "publisher": "stage7-examples",
       "signature": null
     }
+  },
+  "repository": {
+    "type": "local"
   },
   "version": "1.0.0",
   "metadata": {

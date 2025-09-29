@@ -7,7 +7,7 @@ export type AnswerType = 'text' | 'number' | 'boolean' | 'multipleChoice' | 'fil
 
 interface UserInputModalProps {
     requestId: string;
-    question: string;
+    question: any;
     choices?: string[];
     answerType: AnswerType;
     onSubmit: (requestId: string, response: any) => void;
@@ -59,6 +59,25 @@ const UserInputModal: React.FC<UserInputModalProps> = ({ requestId, question, ch
             console.error('Error submitting user input:', error instanceof Error ? error.message : error);
         } finally {
             setIsSubmitting(false);
+        }
+    };
+
+    const handleCancel = async () => {
+        try {
+            // Send cancellation request to backend
+            const securityClient = SecurityClient.getInstance(API_BASE_URL);
+            const apiClient = securityClient.getApi();
+
+            await apiClient.post('/submitUserInput', {
+                requestId: requestId,
+                cancel: true
+            });
+
+            onClose();
+        } catch (error) {
+            console.error('Error cancelling user input:', error instanceof Error ? error.message : error);
+            // Still close the modal even if cancellation fails
+            onClose();
         }
     };
 
@@ -166,13 +185,13 @@ const UserInputModal: React.FC<UserInputModalProps> = ({ requestId, question, ch
         <div className={`modal user-input-modal${darkMode ? ' dark' : ''}`}>
             <div className="modal-content">
                 <h2>User Input Required</h2>
-                <p className="modal-question">{question}</p>
+                <p className="modal-question">{question && typeof question === 'object' && 'value' in question ? question.value : question}</p>
                 <div className="modal-input">{renderInput()}</div>
                 <div className="modal-actions">
                     <button className="modal-submit" onClick={handleSubmit} disabled={isSubmitting}>
                         {isSubmitting ? 'Submitting...' : 'Submit'}
                     </button>
-                    <button className="modal-cancel" onClick={onClose} disabled={isSubmitting}>Cancel</button>
+                    <button className="modal-cancel" onClick={handleCancel} disabled={isSubmitting}>Cancel</button>
                 </div>
             </div>
             <div className="modal-backdrop" onClick={onClose}></div>

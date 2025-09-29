@@ -23,18 +23,6 @@ logger = logging.getLogger(__name__)
 
 # --- Data Classes ---
 
-class InputValue:
-    """Represents a plugin input parameter."""
-    def __init__(self, inputName: str, value: Any, valueType: str, args: Dict[str, Any] = None):
-        self.inputName = inputName
-        self.value = value
-        self.valueType = valueType
-        self.args = args or {}
-
-
-
-
-
 class PluginOutput:
     """Represents a plugin output result."""
     def __init__(self, success: bool, name: str, result_type: str,
@@ -88,7 +76,7 @@ class BrainSearchProvider(SearchProvider):
 
     def search(self, search_term: str, **kwargs) -> List[Dict[str, str]]:
         logger.warning("All primary search providers failed. Using BrainSearchProvider as a last resort. Results may be hallucinated.")
-        prompt = f"Perform a web search for '{search_term}' and return the top 5 results as a JSON array of objects, where each object has 'title', 'url', and 'snippet' keys."
+        prompt = f"Perform a web search for '{search_term}' and return the top 5 results as a JSON array of objects, where each object has 'name', 'url', and 'snippet' keys."
         try:
             raw_response = self._call_brain(prompt, "json")
             results = json.loads(raw_response)
@@ -104,7 +92,7 @@ class BrainSearchProvider(SearchProvider):
     def _call_brain(self, prompt: str, response_type: str) -> str:
         auth_token = self._get_auth_token()
         brain_url_input = self.inputs.get('brain_url')
-        brain_url = brain_url_input.value if brain_url_input and brain_url_input.value else 'brain:5070'
+        brain_url = brain_url_input if brain_url_input else 'brain:5070'
         
         payload = {
             "messages": [{"role": "system", "content": "You are a helpful assistant that outputs JSON."},
@@ -113,7 +101,7 @@ class BrainSearchProvider(SearchProvider):
             "temperature": 0.1
         }
         headers = {'Content-Type': 'application/json', 'Authorization': f'Bearer {auth_token}'}
-        response = requests.post(f"http://{brain_url}/chat", json=payload, headers=headers, timeout=60)
+        response = requests.post(f"http://{brain_url}/chat", json=payload, headers=headers, timeout=120)
         response.raise_for_status()
         result = response.json()
         if 'result' not in result:
@@ -131,7 +119,7 @@ class BrainSearchProvider(SearchProvider):
             # Then check inputs
             token_input = self.inputs.get('__brain_auth_token')
             if token_input:
-                token_data = token_input.value
+                token_data = token_input
                 if isinstance(token_data, dict):
                     if 'value' in token_data:
                         logger.info("Found Brain auth token in inputs['__brain_auth_token'].value['value']")
@@ -146,42 +134,83 @@ class BrainSearchProvider(SearchProvider):
             logger.error(f"Failed to get Brain auth token: {str(e)}")
             raise
 
-class GoogleSearchProvider(SearchProvider):
-    """Search provider for Google Custom Search."""
-    def __init__(self, api_key: str, cse_id: str):
-        super().__init__("Google")
-        self.api_key = api_key
-        self.cse_id = cse_id
+class GoogleWebSearchProvider(SearchProvider):
+    """Search provider that uses Google Custom Search API."""
+    def __init__(self, inputs: Dict[str, Any] = {}):
+        super().__init__("GoogleWebSearch", performance_score=95) # High priority
+        self.api_key = os.getenv('GOOGLE_API_KEY')
+        self.search_engine_id = os.getenv('GOOGLE_SEARCH_ENGINE_ID')
+
+        if not self.api_key and '__google_api_key' in inputs:
+            key_data = inputs['__google_api_key']
+            if isinstance(key_data, dict) and 'value' in key_data:
+                self.api_key = key_data['value']
+        
+        if not self.search_engine_id and '__google_search_engine_id' in inputs:
+            key_data = inputs['__google_search_engine_id']
+            if isinstance(key_data, dict) and 'value' in key_data:
+                self.search_engine_id = key_data['value']
+
+        self.base_url = "https://www.googleapis.com/customsearch/v1"
 
     def search(self, search_term: str, **kwargs) -> List[Dict[str, str]]:
-        url = "https://www.googleapis.com/customsearch/v1"
-        params = {"key": self.api_key, "cx": self.cse_id, "q": search_term}
-        response = requests.get(url, params=params, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        return [{"title": item.get("title"), "url": item.get("link")} for item in data.get("items", [])]
+        try:
+            if not self.api_key or not self.search_engine_id:
+                logger.warning("Google Custom Search API key or Search Engine ID not configured. Skipping Google search.")
+                self.update_performance(success=False)
+                raise Exception("Google API credentials not configured")
+
+            params = {
+                'key': self.api_key,
+                'cx': self.search_engine_id,
+                'q': search_term,
+                'num': 10,  # Number of results to return (max 10 per request)
+                'safe': 'medium',  # Safe search setting
+                'fields': 'items(title,link,snippet)'  # Only return fields we need
+            }
+
+            logger.info(f"Calling Google Custom Search API for: {search_term}")
+            response = requests.get(self.base_url, params=params, timeout=15)
+            response.raise_for_status()
+
+            data = response.json()
+            results = []
+
+            if 'items' in data:
+                for item in data['items']:
+                    results.append({
+                        'title': item.get('title', item.get('name', '')),
+                        'url': item.get('link', ''),
+                        'snippet': item.get('snippet', '')
+                    })
+
+            logger.info(f"Google Custom Search found {len(results)} results for '{search_term}'")
+            self.update_performance(success=True)
+            return results
+
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Google Custom Search API request failed: {str(e)}")
+            self.update_performance(success=False)
+            raise
+        except Exception as e:
+            logger.error(f"GoogleWebSearch failed: {str(e)}")
+            self.update_performance(success=False)
+            raise
 
 class LangsearchSearchProvider(SearchProvider):
     """Search provider for Langsearch with advanced semantic search capabilities."""
     def __init__(self, api_key: str):
-        super().__init__("Langsearch", performance_score=100)  # Start with highest priority
+        super().__init__("Langsearch", performance_score=100)  
         self.api_key = api_key
         self.base_url = os.getenv('LANGSEARCH_API_URL', 'https://api.langsearch.com')
         self.rate_limit_seconds = 1
-        self.timestamp_file = "/tmp/langsearch_ratelimit.txt"
+        self.last_request_time = 0
 
     def search(self, search_term: str, **kwargs) -> List[Dict[str, str]]:
         """Execute semantic search using LangSearch API."""
         # --- Rate Limiting Logic ---
-        last_request_time = 0
-        try:
-            with open(self.timestamp_file, 'r') as f:
-                last_request_time = float(f.read())
-        except (FileNotFoundError, ValueError):
-            pass # File doesn't exist or is invalid, proceed
-
         current_time = time.time()
-        time_since_last_request = current_time - last_request_time
+        time_since_last_request = current_time - self.last_request_time
 
         if time_since_last_request < self.rate_limit_seconds:
             sleep_duration = self.rate_limit_seconds - time_since_last_request
@@ -216,7 +245,7 @@ class LangsearchSearchProvider(SearchProvider):
             results = []
             if "webPages" in data and "value" in data["webPages"]:
                 for item in data["webPages"]["value"]:
-                    if item.get("title") and item.get("url"):
+                    if item.get("name") and item.get("url"):
                         results.append({"title": item.get("name", ""), "url": item.get("url", ""), "snippet": item.get("snippet", "")})
             elif "results" in data and isinstance(data["results"], list):
                 for item in data["results"]:
@@ -234,17 +263,25 @@ class LangsearchSearchProvider(SearchProvider):
             logger.info(f"LangSearch found {len(results)} results")
             return results
             
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 429:
+                logger.warning(f"LangSearch rate limited (429). Returning empty results to allow fallback.")
+                self.update_performance(success=False)
+                return []  # Return empty results instead of raising
+            else:
+                logger.error(f"LangSearch API request failed: {str(e)}")
+                self.update_performance(success=False)
+                return []  # Return empty results instead of raising
         except requests.exceptions.RequestException as e:
             logger.error(f"LangSearch API request failed: {str(e)}")
             self.update_performance(success=False)
-            raise
+            return []  # Return empty results instead of raising
         except Exception as e:
             logger.error(f"LangSearch processing failed: {str(e)}")
             self.update_performance(success=False)
-            raise
+            return []  # Return empty results instead of raising
         finally:
-            with open(self.timestamp_file, 'w') as f:
-                f.write(str(time.time()))
+            self.last_request_time = time.time()
 
 class DuckDuckGoSearchProvider(SearchProvider):
     """Search provider for DuckDuckGo."""
@@ -294,6 +331,7 @@ class SearxNGSearchProvider(SearchProvider):
     def __init__(self):
         super().__init__("SearxNG", performance_score=60)
         self.base_urls = [
+            'http://searxng:8080',
             'https://searx.stream/',
             'https://search.inetol.net/',
             'https://search.rhscz.eu/',
@@ -301,6 +339,8 @@ class SearxNGSearchProvider(SearchProvider):
             'https://search.hbubli.cc/'
         ]
         self.current_url_index = 0
+        self.backoff_time = 5 # Increased initial backoff time in seconds
+        self.max_backoff_time = 60 # Maximum backoff time
 
     def search(self, search_term: str, **kwargs) -> List[Dict[str, str]]:
         errors = []
@@ -322,15 +362,35 @@ class SearxNGSearchProvider(SearchProvider):
                     headers={'User-Agent': 'Mozilla/5.0 Stage7SearchBot/1.0'}
                 )
                 response.raise_for_status()
-                data = response.json()
+                try:
+                    data = response.json()
+                except json.JSONDecodeError as json_e:
+                    error_msg = f"SearxNG instance {searxng_url} failed: JSONDecodeError: {json_e}. Raw response: {response.text}"
+                    logger.warning(error_msg)
+                    errors.append(error_msg)
+                    # Continue to next instance in the loop
+                    self.current_url_index = (self.current_url_index + 1) % len(self.base_urls)
+                    continue # Skip to the next iteration of the for loop
+
                 results = []
                 for item in data.get("results", []):
                     results.append({"title": item.get("title"), "url": item.get("url"), "snippet": item.get("content")})
 
                 if results:
                     logger.info(f"Successfully retrieved {len(results)} results from SearxNG instance {self.base_urls[self.current_url_index]}")
+                    self.backoff_time = 5 # Reset backoff time on success
                     return results
                     
+            except requests.exceptions.HTTPError as e:
+                if e.response.status_code == 429:
+                    error_msg = f"SearxNG instance {searxng_url} failed: 429 Client Error: Too Many Requests for url: {searxng_url}"
+                    logger.warning(f"SearxNG instance rate limited (429) - sleeping for {self.backoff_time} seconds.")
+                    time.sleep(self.backoff_time)
+                    self.backoff_time = min(self.backoff_time * 2, self.max_backoff_time) # Exponential backoff with cap
+                else:
+                    error_msg = f"SearxNG instance {searxng_url} failed: {str(e)}"
+                    logger.warning(error_msg)
+                errors.append(error_msg)
             except requests.exceptions.RequestException as e:
                 error_msg = f"SearxNG instance {searxng_url} failed: {str(e)}"
                 logger.warning(error_msg)
@@ -348,7 +408,7 @@ class SearxNGSearchProvider(SearchProvider):
 
 class SearchPlugin:
     """Manages search providers and executes the search."""
-    def __init__(self, inputs: Dict[str, InputValue]):
+    def __init__(self, inputs: Dict[str, Any]):
         self.inputs = inputs
         self.providers = self._initialize_providers()
 
@@ -356,10 +416,12 @@ class SearchPlugin:
         """Initializes all available search providers in priority order."""
         providers = []
         
-        # 1. LangSearch as primary provider (if available)
+        # 1. GoogleWebSearch as primary provider (using the built-in tool)
+        logger.info("Initializing GoogleWebSearch as primary search provider")
+        providers.append(GoogleWebSearchProvider(self.inputs))
+
+        # 2. LangSearch as second provider (if available)
         langsearch_api_key = None
-        
-        # Try getting API key from multiple sources
         if 'LANGSEARCH_API_KEY' in os.environ:
             langsearch_api_key = os.environ['LANGSEARCH_API_KEY']
             logger.info("Found LangSearch API key in environment")
@@ -370,7 +432,7 @@ class SearchPlugin:
                 logger.info("Found LangSearch API key in inputs")
                 
         if langsearch_api_key:
-            logger.info("Initializing LangSearch as primary search provider")
+            logger.info("Initializing LangSearch as secondary search provider")
             try:
                 provider = LangsearchSearchProvider(api_key=langsearch_api_key)
                 providers.append(provider)
@@ -379,35 +441,11 @@ class SearchPlugin:
         else:
             logger.warning("LangSearch API key not found in any expected location - semantic search will not be available")
 
-        # 2. Google CSE as first fallback
-        google_api_key = None
-        google_cse_id = None
-        if 'GOOGLE_SEARCH_API_KEY' in os.environ:
-            google_api_key = os.getenv('GOOGLE_SEARCH_API_KEY')
-            logger.info("Found Google API key in environment")
-        elif '__google_search_api_key' in self.inputs:
-            key_data = self.inputs['__google_search_api_key']
-            if isinstance(key_data, dict) and 'value' in key_data:
-                google_api_key = key_data['value']
-                logger.info("Found Google API key in inputs")
-        if 'GOOGLE_CSE_ID' in os.environ:
-            google_cse_id = os.getenv('GOOGLE_CSE_ID')
-            logger.info("Found Google CSE ID in environment")
-        elif '__google_cse_id' in self.inputs:
-            key_data = self.inputs['__google_cse_id']
-            if isinstance(key_data, dict) and 'value' in key_data:
-                google_cse_id = key_data['value']
-                logger.info("Found Google CSE key in inputs")
-        if google_api_key and google_cse_id:
-            logger.info("Initializing Google Custom Search")
-            providers.append(GoogleSearchProvider(api_key=google_api_key, cse_id=google_cse_id))
-            logger.info("Successfully initialized Google Custom Search")
-
         # 3. DuckDuckGo as third fallback
         logger.info("Initializing DuckDuckGo search provider")
         providers.append(DuckDuckGoSearchProvider())
 
-        # 4. SearxNG as second fallback
+        # 4. SearxNG as fourth fallback
         logger.info("Initializing SearxNG search provider")
         providers.append(SearxNGSearchProvider())
         
@@ -434,45 +472,76 @@ class SearchPlugin:
         all_errors = []
 
         for term in search_terms:
-            term_results = []
-            term_errors = []
-            
-            # Sort providers by performance score, highest first
-            sorted_providers = sorted(self.providers, key=lambda p: p.performance_score, reverse=True)
-            
-            search_successful = False
-            for provider in sorted_providers:
-                try:
-                    logger.info(f"Attempting search with {provider.name} provider (score: {provider.performance_score})")
-                    results = provider.search(term)
-                    
-                    if results:
-                        logger.info(f"Successfully found {len(results)} results for '{term}' using {provider.name}")
-                        term_results.extend(results)
-                        provider.update_performance(success=True)
-                        search_successful = True
-                        break  # Move to the next search term
+            original_term = term
+            for i in range(3): # Try up to 3 times (original + 2 generalizations)
+                term_results = []
+                term_errors = []
+                
+                # Sort providers by performance score, highest first
+                sorted_providers = sorted(self.providers, key=lambda p: p.performance_score, reverse=True)
+                
+                search_successful = False
+                for provider in sorted_providers:
+                    retries = 3
+                    backoff_time = 5
+                    for attempt in range(retries):
+                        try:
+                            logger.info(f"Attempting search with {provider.name} provider (score: {provider.performance_score}) for term: '{term}'")
+                            results = provider.search(term)
+                            
+                            if results:
+                                logger.info(f"Successfully found {len(results)} results for '{term}' using {provider.name}")
+                                term_results.extend(results)
+                                provider.update_performance(success=True)
+                                search_successful = True
+                                break  # Move to the next provider
+                            else:
+                                logger.warning(f"{provider.name} found no results for '{term}' - trying next provider")
+                                # Only slightly penalize for no results
+                                provider.performance_score = max(0, provider.performance_score - 5)
+                                time.sleep(1) # Add a small delay to avoid overwhelming services
+                        except requests.exceptions.HTTPError as e:
+                            if e.response.status_code == 429 and attempt < retries - 1:
+                                logger.warning(f"{provider.name} rate limited. Retrying in {backoff_time} seconds...")
+                                time.sleep(backoff_time)
+                                backoff_time *= 2 # Exponential backoff
+                                continue
+                            else:
+                                error_msg = f"{provider.name} search failed for '{term}': {e}"
+                                logger.error(error_msg)
+                                term_errors.append(error_msg)
+                                provider.update_performance(success=False)
+                                break
+                        except Exception as e:
+                            error_msg = f"{provider.name} search failed for '{term}': {e}"
+                            logger.error(error_msg)
+                            term_errors.append(error_msg)
+                            provider.update_performance(success=False)
+                            break
+                    if search_successful:
+                        break
+                
+                if search_successful:
+                    break # Break the generalization loop if search is successful
+                else:
+                    # Generalize the search term by removing the last word
+                    term_parts = term.split()
+                    if len(term_parts) > 1:
+                        term = " ".join(term_parts[:-1])
+                        logger.info(f"Generalizing search term to: '{term}'")
                     else:
-                        logger.warning(f"{provider.name} found no results for '{term}' - trying next provider")
-                        # Only slightly penalize for no results
-                        provider.performance_score = max(0, provider.performance_score - 5)
-                        time.sleep(1) # Add a small delay to avoid overwhelming services
-                except Exception as e:
-                    error_msg = f"{provider.name} search failed for '{term}': {e}"
-                    logger.error(error_msg)
-                    term_errors.append(error_msg)
-                    provider.update_performance(success=False)
-            
+                        break # Cannot generalize further
+
             if not search_successful:
-                logger.error(f"All providers failed for search term: {term}")
+                logger.error(f"All providers failed for search term: {original_term}")
                 # Try brain search as a last resort if it's not already tried
                 brain_provider = next((p for p in self.providers if isinstance(p, BrainSearchProvider)), None)
                 if brain_provider:
                     try:
                         logger.info("Attempting final fallback to BrainSearchProvider")
-                        results = brain_provider.search(term)
+                        results = brain_provider.search(original_term)
                         if results:
-                            logger.info(f"Successfully found {len(results)} results for '{term}' using BrainSearchProvider fallback")
+                            logger.info(f"Successfully found {len(results)} results for '{original_term}' using BrainSearchProvider fallback")
                             term_results.extend(results)
                             search_successful = True
                     except Exception as e:
@@ -487,14 +556,14 @@ class SearchPlugin:
         
         return all_results, all_errors
 
-def execute_plugin(inputs: Dict[str, InputValue]) -> List[Dict[str, Any]]:
+def execute_plugin(inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Main plugin execution function."""
     try:
         search_term_input = inputs.get('searchTerm')
         if not search_term_input:
             return [PluginOutput(False, "error", "error", None, "Missing required input: searchTerm").to_dict()]
 
-        search_terms_raw = search_term_input.value
+        search_terms_raw = search_term_input
         if isinstance(search_terms_raw, str):
             search_terms = [search_terms_raw.strip()]
         elif isinstance(search_terms_raw, list):
@@ -519,50 +588,39 @@ def execute_plugin(inputs: Dict[str, InputValue]) -> List[Dict[str, Any]]:
         return [PluginOutput(False, "error", "error", None, f"An unexpected error occurred: {e}").to_dict()]
 
 # --- Main Execution ---
+def parse_inputs(inputs_str: str) -> Dict[str, Any]:
+    """Parse and validate inputs"""
+    try:
+        logger.info(f"Parsing input string ({len(inputs_str)} chars)")
+        
+        input_list = json.loads(inputs_str)
+        
+        inputs = {}
+        for item in input_list:
+            if isinstance(item, list) and len(item) == 2:
+                key, raw_value = item # Renamed 'value' to 'raw_value' for clarity
+                
+                # If raw_value is an InputValue object, extract its 'value' property
+                if isinstance(raw_value, dict) and 'value' in raw_value:
+                    inputs[key] = raw_value['value']
+                else:
+                    # Otherwise, use raw_value directly (for non-InputValue types)
+                    inputs[key] = raw_value
+            else:
+                logger.warning(f"Skipping invalid input item: {item}")
+        
+        logger.info(f"Successfully parsed {len(inputs)} input fields")
+        return inputs
+        
+    except Exception as e:
+        logger.error(f"Input parsing failed: {e}")
+        raise Exception(f"Input validation failed: {e}")
 
 def main():
     """Main entry point for the plugin."""
     try:
-        input_data = sys.stdin.read().strip()
-        # Temporary debug logging
-        with open("/tmp/search_plugin_input.log", "a") as f:
-            f.write(input_data + "\n")
-
-        if not input_data:
-            raise ValueError("No input data provided")
-
-        input_list_of_pairs = json.loads(input_data)
-        if not isinstance(input_list_of_pairs, list):
-            raise ValueError("Input data should be a JSON array of [key, value] pairs.")
-
-        inputs: Dict[str, InputValue] = {}
-        for item in input_list_of_pairs:
-            if not (isinstance(item, (list, tuple)) and len(item) == 2):
-                raise ValueError(f"Each item in the input array should be a [key, value] pair. Found: {item}")
-            key, raw_value = item # Renamed value_dict to raw_value for clarity
-            
-            # Create InputValue object from the raw_value
-            # We assume the type is string for simplicity, or infer if possible
-            inferred_value_type = 'string'
-            if isinstance(raw_value, bool):
-                inferred_value_type = 'boolean'
-            elif isinstance(raw_value, (int, float)):
-                inferred_value_type = 'number'
-            elif isinstance(raw_value, list):
-                inferred_value_type = 'array'
-            elif isinstance(raw_value, dict):
-                # If it's a dict, it could be a complex object or an output reference
-                if 'outputName' in raw_value and 'sourceStep' in raw_value:
-                    inferred_value_type = 'reference' # Custom type for internal handling
-                else:
-                    inferred_value_type = 'object'
-
-            inputs[key] = InputValue(
-                inputName=key,
-                value=raw_value,
-                valueType=inferred_value_type,
-                args={} # No args provided in the raw input
-            )
+        input_data = sys.stdin.read()
+        inputs = parse_inputs(input_data)
 
         outputs = execute_plugin(inputs)
         print(json.dumps(outputs, indent=2))
