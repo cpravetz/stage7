@@ -763,43 +763,52 @@ Please consider this context and the available plugins when planning and executi
             // outputType is an enum (OutputType.FINAL), compare accordingly
             let uploadedFiles: MissionFile[] = [];
             const outputsHaveFiles = Array.isArray(data) && data.some(o => !!(o as any).fileName || !!(o as any).storagePath);
-            const shouldUploadToSharedSpace = (
-                (outputType === OutputType.FINAL && data && data.length > 0) ||
-                            (data && data.length > 0 && this.stepGeneratesUserReferencedData(stepId, data)) ||
-                            (step && step.actionVerb === 'FILE_OPERATION' && false) || // Disable for FILE_OPERATION as it handles its own upload
-                            outputsHaveFiles            );
+        let shouldUploadToSharedSpace = (
+            (outputType === OutputType.FINAL && data && data.length > 0) ||
+            (data && data.length > 0 && this.stepGeneratesUserReferencedData(stepId, data)) ||
+            outputsHaveFiles
+        );
 
-            if (shouldUploadToSharedSpace) {
-                try {
-                    const librarianUrl = await this.getServiceUrl('Librarian');
-                    if (librarianUrl) {
-                        uploadedFiles = await this.uploadStepOutputsToSharedSpace(
-                            step,
-                            librarianUrl
-                        );
-                        if (uploadedFiles.length > 0) {
-                            console.log(`Uploaded ${uploadedFiles.length} step outputs to shared space for step ${stepId}`);
-                            
-                            // Register files with MissionControl
-                            const missionControlUrl = await this.getServiceUrl('MissionControl');
-                            if (missionControlUrl) {
-                                for (const file of uploadedFiles) {
-                                    await this.authenticatedApi.post(`http://${missionControlUrl}/missions/${this.missionId}/files/add`, file);
+        if (step && step.actionVerb === 'FILE_OPERATION') {
+            shouldUploadToSharedSpace = false; // Explicitly disable for FILE_OPERATION
+        }
+
+                    if (shouldUploadToSharedSpace) {
+                        try {
+                            const librarianUrl = await this.getServiceUrl('Librarian');
+                            if (librarianUrl) {
+                                uploadedFiles = await this.uploadStepOutputsToSharedSpace(
+                                    step,
+                                    librarianUrl
+                                );
+                                if (uploadedFiles.length > 0) {
+                                    console.log(`Uploaded ${uploadedFiles.length} step outputs to shared space for step ${stepId}`);
+                                    
+                                    // Register files with MissionControl
+                                    const missionControlUrl = await this.getServiceUrl('MissionControl');
+                                    if (missionControlUrl) {
+                                        for (const file of uploadedFiles) {
+                                            await this.authenticatedApi.post(`http://${missionControlUrl}/missions/${this.missionId}/files/add`, file);
+                                        }
+                                        console.log(`Successfully registered ${uploadedFiles.length} files with MissionControl.`);
+                                    } else {
+                                        console.warn('MissionControl URL not available for registering uploaded files.');
+                                    }
                                 }
-                                console.log(`Successfully registered ${uploadedFiles.length} files with MissionControl.`);
                             } else {
-                                console.warn('MissionControl URL not available for registering uploaded files.');
+                                console.warn('Librarian URL not available for uploading step outputs');
                             }
+                        } catch (error) {
+                            console.error('Error uploading step outputs to shared space:', error);
+                            // Don't fail the entire operation if file upload fails
                         }
-                    } else {
-                        console.warn('Librarian URL not available for uploading step outputs');
+                    } else if (step && step.actionVerb === 'FILE_OPERATION' && data && data.length > 0 && data[0].result) {
+                        // If FILE_OPERATION was executed, and it returned a file, use its result as the attached file
+                        const missionFileResult = data[0].result as MissionFile;
+                        if (missionFileResult && missionFileResult.id && missionFileResult.originalName) {
+                            uploadedFiles.push(missionFileResult);
+                        }
                     }
-                } catch (error) {
-                    console.error('Error uploading step outputs to shared space:', error);
-                    // Don't fail the entire operation if file upload fails
-                }
-            }
-
             const workProductPayload: any = {
                 id: stepId,
                 type: type,
