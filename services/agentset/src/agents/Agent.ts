@@ -1649,19 +1649,6 @@ Please consider this context and the available plugins when planning and executi
                 missionId: missionId,
                 timestamp: new Date().toISOString()
             });
-
-            // Also notify AgentSet via HTTP
-            // Ensure this.agentSetUrl is defined and this.authenticatedApi is available and configured
-            if (this.agentSetUrl && this.authenticatedApi) {
-                await this.authenticatedApi.post(`http://${this.agentSetUrl}/updateFromAgent`, {
-                    agentId: agentId,
-                    status: agentStatus,
-                    statistics: stats // Ensure stats is serializable if needed by this endpoint
-                });
-                console.log(`Successfully notified AgentSet at ${this.agentSetUrl}`);
-            } else {
-                console.warn(`[Agent ${agentId}] Could not notify AgentSet: agentSetUrl or authenticatedApi is undefined.`);
-            }
         } catch (error) {
             // Use analyzeError or a similar structured logging for errors
             const agentIdForError = this.id || 'unknown-agent-id';
@@ -1902,41 +1889,45 @@ Explanation: ${resolution.explanation}`);
      * @param step Step to delegate
      * @returns Result of delegation
      */
+    private async _getOrCreateSpecializedAgent(roleId: string): Promise<string | null> {
+        try {
+            const response = await this.authenticatedApi.post(`http://${this.agentSetUrl}/findAgentWithRole`, {
+                roleId: roleId,
+                missionId: this.missionId
+            });
+
+            if (response.data && response.data.agentId && response.data.status !== AgentStatus.ERROR) {
+                console.log(`Found active agent ${response.data.agentId} with role ${roleId}`);
+                return response.data.agentId;
+            } else {
+                if (response.data && response.data.agentId) {
+                    console.log(`Found agent ${response.data.agentId} with role ${roleId}, but it is in error state. Creating a new one.`);
+                }
+                console.log(`No active agent found with role ${roleId}, creating a new one.`);
+                const createAgentResponse = await this.authenticatedApi.post(`http://${this.agentSetUrl}/createSpecializedAgent`, {
+                    roleId: roleId,
+                    missionId: this.missionId
+                });
+
+                if (createAgentResponse.data && createAgentResponse.data.agentId) {
+                    console.log(`Created new agent ${createAgentResponse.data.agentId} with role ${roleId}`);
+                    return createAgentResponse.data.agentId;
+                } else {
+                    console.error(`Failed to create specialized agent with role ${roleId}`);
+                    return null;
+                }
+            }
+        } catch (error) {
+            console.error(`Error finding or creating agent with role ${roleId}:`, error);
+            return null;
+        }
+    }
+
     private async delegateStepToSpecializedAgent(step: Step): Promise<{ success: boolean, result: any }> {
         try {
             console.log(`Attempting to delegate step ${step.id} to an agent with role ${step.recommendedRole}`);
 
-            // Find an agent with the appropriate role
-            let recipientId: string | null = null;
-            try {
-                const response = await this.authenticatedApi.post(`http://${this.agentSetUrl}/findAgentWithRole`, {
-                    roleId: step.recommendedRole,
-                    missionId: this.missionId
-                });
-
-                if (response.data && response.data.agentId) {
-                    recipientId = response.data.agentId;
-                    console.log(`Found agent ${recipientId} with role ${step.recommendedRole}`);
-                } else {
-                    console.log(`No agent found with role ${step.recommendedRole}, creating a new one.`);
-                    const createAgentResponse = await this.authenticatedApi.post(`http://${this.agentSetUrl}/createSpecializedAgent`, {
-                        roleId: step.recommendedRole,
-                        missionId: this.missionId
-                    });
-                    if (createAgentResponse.data && createAgentResponse.data.agentId) {
-                        recipientId = createAgentResponse.data.agentId;
-                        console.log(`Created new agent ${recipientId} with role ${step.recommendedRole}`);
-                        
-
-                    } else {
-                        console.error(`Failed to create specialized agent with role ${step.recommendedRole}`);
-                        return { success: false, result: null };
-                    }
-                }
-            } catch (error) {
-                console.error(`Error finding or creating agent with role ${step.recommendedRole}:`, error);
-                return { success: false, result: null };
-            }
+            const recipientId = await this._getOrCreateSpecializedAgent(step.recommendedRole!);
 
             if (recipientId) {
                 // Create a task delegation request

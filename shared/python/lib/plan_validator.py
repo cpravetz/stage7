@@ -212,7 +212,7 @@ class PlanValidator:
         """
         step_number = step.get('number', 0)
 
-        for input_name, input_def in inputs.items():
+        for input_name, input_def in list(inputs.items()):
             # Only check string values for embedded references
             if not isinstance(input_def, dict) or 'value' not in input_def:
                 continue
