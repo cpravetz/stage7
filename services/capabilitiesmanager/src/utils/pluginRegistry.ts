@@ -297,6 +297,40 @@ const INTERNAL_VERBS: PluginManifest[] = [
             },
         },
     },
+    {
+        id: 'internal-CHAT',
+        verb: 'CHAT',
+        version: '1.0.0',
+        description: 'Sends a message to the user without expecting a response.',
+        language: 'internal',
+        inputDefinitions: [
+            {
+                name: 'message',
+                description: 'The message to send to the user.',
+                type: PluginParameterType.STRING,
+                required: true,
+            },
+        ],
+        outputDefinitions: [
+            {
+                name: 'success',
+                description: 'Indicates if the message was sent successfully.',
+                type: PluginParameterType.BOOLEAN,
+                required: true,
+            },
+        ],
+        repository: {
+            type: 'internal',
+            url: 'internal',
+        },
+        security: {
+            permissions: [],
+            sandboxOptions: {allowEval: false, timeout: 1000, memory: 64, allowedAPIs: [], allowedModules: []},
+            trust: {
+                signature: 'internal',
+            },
+        },
+    },
 ];
 
 

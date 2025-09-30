@@ -483,6 +483,7 @@ export class Step {
                 case 'DELEGATE':
                     result = await this.handleDelegate(executeAction);
                     break;
+                case 'CHAT':
                 case 'ASK':
                 case MessageType.REQUEST:
                     result = await askAction(this.inputValues);
@@ -1166,6 +1167,7 @@ export class Step {
                 case 'DELEGATE':
                     result = await this.handleDelegate(executeAction);
                     break;
+                case 'CHAT':
                 case 'ASK':
                 case MessageType.REQUEST:
                     result = await askAction(this.inputValues);

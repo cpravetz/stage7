@@ -310,7 +310,7 @@ export class PluginExecutor {
 
                 pythonProcess.on('close', (code) => {
                     if (code !== 0) {
-                        const error = new Error(`Python script exited with code ${code}. Stderr: ${stderr}`);
+                        const error = new Error(`Python script exited with code ${code === null ? 'null (terminated by signal)' : code}. Stderr: ${stderr}`);
                         (error as any).stdout = stdout;
                         (error as any).stderr = stderr;
                         reject(error);

@@ -651,6 +651,35 @@ Please consider this context and the available plugins when planning and executi
                 error: 'Agent is not in RUNNING state.'
             }];
         }
+
+        // Handle CHAT verb by checking for 'message' input
+        if (inputs.has('message')) {
+            const messageInput = inputs.get('message');
+            const message = messageInput?.value;
+
+            if (typeof message === 'string' && message) {
+                this.say(message);
+                return [{
+                    success: true,
+                    name: 'success',
+                    resultType: PluginParameterType.BOOLEAN,
+                    resultDescription: 'Message sent to user.',
+                    result: true
+                }];
+            } else {
+                this.logAndSay('Error in CHAT: message is empty or not a string.');
+                return [{
+                    success: false,
+                    name: 'error',
+                    resultType: PluginParameterType.ERROR,
+                    resultDescription: 'Error in CHAT: message is empty or not a string.',
+                    result: null,
+                    error: 'CHAT requires a non-empty string "message" input.'
+                }];
+            }
+        }
+
+        // Handle ASK verb (existing logic)
         const input = inputs.get('question');
         if (!input) {
             this.logAndSay('Question is required for ASK plugin');
@@ -2701,41 +2730,6 @@ Explanation: ${resolution.explanation}`);
         this.steps.push(recoveryStep);
         await this.logEvent({ eventType: 'step_created', ...recoveryStep.toJSON() });
         console.log(`[Agent ${this.id}] Created THINK recovery step ${recoveryStep.id} for failed step ${failedStep.actionVerb}.`);
-        await this.notifyTrafficManager();
-    }
-
-    private async createAccomplishRecoveryStep(failedStep: Step, errorMsg: string, workProductsSummary: string): Promise<void> {
-        console.log(`[Agent ${this.id}] Creating ACCOMPLISH recovery step for: ${failedStep.actionVerb}`);
-
-        const recoveryGoal = `
-**Recovery Task:** The step "${failedStep.actionVerb}" failed.
-
-** Step Details:** ${JSON.stringify(failedStep)}
-
-**Original Mission:** ${this.missionContext}
-
-**Completed Work:** ${workProductsSummary}
-
-**Instructions:** Create an alternative approach to accomplish what the failed step was trying to do. Your new plan should use the step inputs and produce the step outputs. Do not repeat the failed approach.
-
-**Input Value Formatting:** For all inputs, the 'value' field must be a primitive type (string, number, or boolean). Do not use complex objects or nested structures for input values.
-        `;
-
-        const recoveryStep = new Step({
-            actionVerb: 'ACCOMPLISH',
-            missionId: this.missionId,
-            stepNo: this.steps.length + 1,
-            inputValues: new Map([
-                ['goal', { inputName: 'goal', value: recoveryGoal, valueType: PluginParameterType.STRING, args: {} }],
-                ['missionId', { inputName: 'missionId', value: this.missionId, valueType: PluginParameterType.STRING, args: {} }]
-            ]),
-            description: `Recovery plan for failed step: ${failedStep.actionVerb}`,
-            persistenceManager: this.agentPersistenceManager
-        });
-
-        this.steps.push(recoveryStep);
-        await this.logEvent({ eventType: 'step_created', ...recoveryStep.toJSON() });
-        console.log(`[Agent ${this.id}] Created ACCOMPLISH recovery step ${recoveryStep.id} for failed step ${failedStep.actionVerb}.`);
         await this.notifyTrafficManager();
     }
 
