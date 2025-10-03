@@ -539,7 +539,7 @@ Return the corrected JSON object for the step."""
                 plugin_def = plugin_map.get(action_verb)
                 if plugin_def:
                     # Validate inputs against plugin definition
-                    self._validate_step_inputs(step, plugin_def, available_outputs, errors)
+                    self._validate_step_inputs(step, plugin_def, available_outputs, errors, plan, plugin_map)
                 else:
                     # For novel verbs, we can't validate inputs strictly
                     logger.info(f"Step {step_number}: actionVerb '{action_verb}' not found in plugin_map. Skipping strict input validation.")
@@ -606,7 +606,7 @@ Return the corrected JSON object for the step."""
                     logger.info(f"Step {step.get('number')}: Updating input '{input_name}' to reference output '{new_output_name}' instead of '{old_output_name}'")
                     input_def['outputName'] = new_output_name
 
-    def _validate_step_inputs(self, step: Dict[str, Any], plugin_def: Dict[str, Any], available_outputs: Dict[int, Set[str]], errors: List[str]):
+    def _validate_step_inputs(self, step: Dict[str, Any], plugin_def: Dict[str, Any], available_outputs: Dict[int, Set[str]], errors: List[str], plan: List[Dict[str, Any]], plugin_map: Dict[str, Any]):
         """Validate inputs for a single step against the plugin definition."""
         logger.info(f"_validate_step_inputs: Validating step: {step}")
         step_number = step['number']
@@ -646,11 +646,47 @@ Return the corrected JSON object for the step."""
 
             # Validate sourceStep references
             if has_source_step:
-                source_step = input_def['sourceStep']
-                if source_step != 0:  # 0 means parent input
-                    if source_step not in available_outputs:
-                        errors.append(f"Step {step_number}: Input '{input_name}' references sourceStep {source_step} which does not exist or has no outputs")
+                source_step_num = input_def['sourceStep']
+                if source_step_num != 0:  # 0 means parent input
+                    if source_step_num not in available_outputs:
+                        errors.append(f"Step {step_number}: Input '{input_name}' references sourceStep {source_step_num} which does not exist or has no outputs")
                     elif has_output_name:
                         output_name = input_def['outputName']
-                        if source_step in available_outputs and output_name not in available_outputs[source_step]:
-                            errors.append(f"Step {step_number}: Input '{input_name}' references output '{output_name}' from step {source_step} which does not exist")
+                        if source_step_num in available_outputs and output_name not in available_outputs[source_step_num]:
+                            errors.append(f"Step {step_number}: Input '{input_name}' references output '{output_name}' from step {source_step_num} which does not exist")
+            
+            # Enforce Type Compatibility
+            if has_source_step and has_output_name:
+                source_step_number = input_def['sourceStep']
+                source_output_name = input_def['outputName']
+
+                # Find destination input definition from the current plugin
+                dest_input_def = next((inp for inp in input_definitions if inp.get('name') == input_name), None)
+
+                if dest_input_def:
+                    dest_input_type = dest_input_def.get('valueType')
+
+                    # Find source step from the plan
+                    source_step = next((s for s in plan if s.get('number') == source_step_number), None)
+
+                    if source_step:
+                        source_action_verb = source_step.get('actionVerb')
+                        source_plugin_def = plugin_map.get(source_action_verb)
+
+                        if source_plugin_def:
+                            source_output_definitions = source_plugin_def.get('outputDefinitions', [])
+                            source_output_def = next((out for out in source_output_definitions if out.get('name') == source_output_name), None)
+
+                            if source_output_def:
+                                source_output_type = source_output_def.get('type')
+
+                                # Now, compare the types
+                                if dest_input_type and source_output_type and dest_input_type != source_output_type:
+                                    # Allow 'any' type to be compatible with anything
+                                    if dest_input_type != 'any' and source_output_type != 'any':
+                                        errors.append(
+                                            f"Step {step_number}: Input '{input_name}' for actionVerb '{step['actionVerb']}' "
+                                            f"expects type '{dest_input_type}', but received incompatible type "
+                                            f"'{source_output_type}' from output '{source_output_name}' of step {source_step_number}."
+                                        )
+

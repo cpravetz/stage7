@@ -699,6 +699,15 @@ export class AgentSet extends BaseEntity {
         const newAgent = new Agent(agentConfig);
         this.agents.set(newAgent.id, newAgent);
 
+        // AWAIT THE INITIALIZATION PROMISE
+        const initializedSuccessfully = await newAgent.initialized;
+        if (!initializedSuccessfully) {
+            // Handle initialization failure
+            console.error(`Agent ${newAgent.id} failed to initialize.`);
+            res.status(500).send({ error: `Agent ${newAgent.id} failed to initialize.` });
+            return;
+        }
+
         // Set up automatic checkpointing
         newAgent.setupCheckpointing(15); // Checkpoint every 15 minutes
 
@@ -799,33 +808,16 @@ export class AgentSet extends BaseEntity {
             const newAgent = new Agent(agentConfig);
             this.agents.set(newAgent.id, newAgent);
 
+            // AWAIT THE INITIALIZATION PROMISE
+            const initializedSuccessfully = await newAgent.initialized;
+            if (!initializedSuccessfully) {
+                throw new Error(`Agent ${newAgent.id} failed to initialize.`);
+            }
+
             // Set up automatic checkpointing
             newAgent.setupCheckpointing(15); // Checkpoint every 15 minutes
 
             // If a role is specified, assign it to the agent
-            if (roleId) {
-                try {
-                    await this.specializationFramework.assignRole(agentId, roleId, roleCustomizations);
-                    console.log(`Assigned role ${roleId} to agent ${agentId}`);
-                } catch (error) {
-                    console.error(`Failed to assign role ${roleId} to agent ${agentId}:`, error);
-                    // Continue anyway, don't fail the agent creation
-                }
-            } else {
-                // Assign default role based on action verb
-                const defaultRoleId = this.determineDefaultRole(actionVerb);
-                if (defaultRoleId) {
-                    try {
-                        await this.specializationFramework.assignRole(newAgent.id, defaultRoleId);
-                        console.log(`Assigned default role ${defaultRoleId} to agent ${newAgent.id}`);
-                    } catch (error) {
-                        console.error(`Error assigning default role to agent ${newAgent.id}:`, error);
-                    }
-                }
-            }
-
-            // Start the agent
-            newAgent.start();
 
             return agentId;
         } catch (error) {

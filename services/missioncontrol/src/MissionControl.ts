@@ -704,8 +704,8 @@ class MissionControl extends BaseEntity {
 
             const inputValues = new Map<string, InputValue>();
             inputValues.set('missionId', { inputName: 'missionId', value: mission.id, valueType: PluginParameterType.STRING, args: {} });
-            inputValues.set('plan_history', { inputName: 'plan_history', value: JSON.stringify(planHistory), valueType: PluginParameterType.STRING, args: {} });
-            inputValues.set('work_products', { inputName: 'work_products', value: workProductsSummary, valueType: PluginParameterType.STRING, args: {} });
+            inputValues.set('plan_history', { inputName: 'plan_history', value: planHistory, valueType: PluginParameterType.ARRAY, args: {} });
+            inputValues.set('work_products', { inputName: 'work_products', value: { summary: workProductsSummary }, valueType: PluginParameterType.OBJECT, args: {} });
             inputValues.set('question', { inputName: 'question', value: 'Given the original mission goal and the work completed, is the mission fully accomplished? If not, what is the next logical step?', valueType: PluginParameterType.STRING, args: {} });
 
             const serializedInputs = MapSerializer.transformForSerialization(inputValues);

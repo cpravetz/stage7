@@ -6,6 +6,7 @@ import { exec } from 'child_process';
 import fs from 'fs/promises';
 import * as fsSync from 'fs';
 import { PluginMarketplace } from '@cktmcs/marketplace';
+import { ensurePythonDependencies } from './pythonPluginHelper';
 
 const execAsync = promisify(exec);
 
@@ -265,8 +266,9 @@ const INTERNAL_VERBS: PluginManifest[] = [
         id: 'internal-FOREACH',
         verb: 'FOREACH',
         version: '1.0.0',
-        description: 'Iterate over an array and execute steps for each item.',
+        description: 'Used to have a set of steps address the individual elements of an array.',
         language: 'internal',
+        inputGuidance: "Use this verb to iterate over the elements of an array output from a previous step. The 'array' input should be the output of the previous step. The 'steps' input should be a sub-plan to be executed for each item in the array.",
         inputDefinitions: [
             { name: 'array', type: PluginParameterType.ARRAY, required: true, description: 'Array to iterate over.' },
             { name: 'steps', type: PluginParameterType.ARRAY, required: true, description: 'A plan of steps to execute for each item.' }
@@ -443,6 +445,12 @@ export class PluginRegistry {
 
             const pluginRootPath = path.join(cacheDir, manifest.packageSource.subPath || '');
             console.log(`Plugin root path for ${manifest.id}: ${pluginRootPath}`);
+
+            // Ensure Python dependencies are met for git plugins
+            if (manifest.language === 'python') {
+                await ensurePythonDependencies(pluginRootPath, manifest.id);
+            }
+
             return { pluginRootPath, effectiveManifest: manifest };
         } else {
             // Handle 'inline' plugins or plugins without packageSource (legacy)
@@ -475,6 +483,12 @@ export class PluginRegistry {
             }
 
             console.log(`Using inline plugin path for ${manifest.id} (${manifest.verb}): ${pluginRootPath}`);
+
+            // Ensure Python dependencies are met for inline plugins
+            if (manifest.language === 'python') {
+                await ensurePythonDependencies(pluginRootPath, manifest.id);
+            }
+
             return { pluginRootPath, effectiveManifest: manifest };
         }
     }

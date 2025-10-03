@@ -269,7 +269,7 @@ export class PluginExecutor {
         console.log(`[${trace_id}] ${source_component}: Python execution - Main file path: ${mainFilePath}, Root path: ${pluginRootPath}`);
         
         try {
-            await ensurePythonDependencies(pluginRootPath, trace_id);
+            // await ensurePythonDependencies(pluginRootPath, trace_id); // Removed as it's now handled during plugin preparation
 
             const isWindows = process.platform === 'win32';
             const venvBinDir = isWindows ? path.join(pluginRootPath, 'venv', 'Scripts') : path.join(pluginRootPath, 'venv', 'bin');

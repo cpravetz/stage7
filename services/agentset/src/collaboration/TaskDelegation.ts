@@ -165,6 +165,9 @@ export class TaskDelegation {
       }
 
       // If agent is already running, delegate immediately
+      if (recipientAgent.getStatus() === AgentStatus.ERROR || recipientAgent.getStatus() === AgentStatus.ABORTED) {
+        return { taskId: request.taskId, accepted: false, reason: `Recipient agent ${recipientId} is in a terminal state (${recipientAgent.getStatus()}).` };
+      }
       if (recipientAgent.getStatus() === AgentStatus.RUNNING) {
         return this.performDelegation(delegatorId, recipientId, request);
       }

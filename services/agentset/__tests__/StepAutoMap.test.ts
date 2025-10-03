@@ -30,7 +30,7 @@ describe('Step auto-mapping fallback', () => {
 
         expect(consumer.areDependenciesSatisfied(allSteps)).toBe(true);
 
-        consumer.populateInputsFromDependencies(allSteps);
+                consumer.dereferenceInputs(allSteps);
 
         const populated = consumer.inputValues.get('content');
         expect(populated).toBeDefined();

@@ -324,7 +324,7 @@ describe('Step', () => {
             expect(consumer.areDependenciesSatisfied(allSteps)).toBe(true);
 
             // Populate inputs from dependencies and verify auto-mapping happened
-            consumer.populateInputsFromDependencies(allSteps);
+            consumer.dereferenceInputs(allSteps);
             const populated = consumer.inputValues.get('content');
             expect(populated).toBeDefined();
             expect(populated!.value).toBe('The poem');

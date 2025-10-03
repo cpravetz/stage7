@@ -73,10 +73,18 @@ def get_mission_goal(mission_id: str, inputs: Dict[str, Any]) -> Optional[str]:
 
 def _extract_json_from_string(text: str) -> Optional[str]:
     """
-    Extracts a JSON object or array string from a given text.
-    Assumes the JSON is the primary content and attempts to find the outermost JSON structure.
+    Extracts a JSON object or array string from a given text, handling markdown code blocks.
     """
+    if not text:
+        return None
+
+    # Strip markdown code blocks
     text = text.strip()
+    # Use a regex to find the json block
+    match = re.search(r"```(json)?\s*([\s\S]*?)\s*```", text)
+    if match:
+        text = match.group(2).strip()
+    
     if not text:
         return None
 
@@ -86,7 +94,28 @@ def _extract_json_from_string(text: str) -> Optional[str]:
     last_brace = text.rfind('}')
     last_bracket = text.rfind(']')
 
+    # Determine the most likely JSON structure based on outermost delimiters
+    # Prioritize array if both are present and valid, as plans are arrays
+    if first_bracket != -1 and last_bracket != -1 and first_bracket < last_bracket:
+        # Check if a brace-delimited object is fully contained within the brackets
+        if first_brace != -1 and last_brace != -1 and first_brace > first_bracket and last_brace < last_bracket:
+            # If so, it's likely an array containing an object, so we still target the array
+            pass
+        else:
+            # It's likely a JSON array
+            start_index = first_bracket
+            end_index = last_bracket
+    elif first_brace != -1 and last_brace != -1 and first_brace < last_brace:
+        # It's likely a JSON object
+        start_index = first_brace
+        end_index = last_brace
+    else:
+        return None # No valid JSON delimiters found
+
     # Determine the start and end of the JSON string
+    start_index = -1
+    end_index = -1
+
     if first_bracket != -1 and last_bracket != -1 and first_bracket < last_bracket:
         # It's likely a JSON array
         start_index = first_bracket
@@ -95,17 +124,18 @@ def _extract_json_from_string(text: str) -> Optional[str]:
         # It's likely a JSON object
         start_index = first_brace
         end_index = last_brace
-    else:
+    
+    if start_index == -1:
         return None # No valid JSON found
 
     json_candidate = text[start_index : end_index + 1]
 
     # Basic validation: check if the candidate string is likely JSON
-    if not (json_candidate.startswith('{') and json_candidate.endswith('}')) and \
-       not (json_candidate.startswith('[') and json_candidate.endswith(']')):
+    try:
+        json.loads(json_candidate)
+        return json_candidate
+    except json.JSONDecodeError:
         return None
-
-    return json_candidate
 
 def call_brain(prompt: str, inputs: Dict[str, Any], response_type: str = "json") -> str:
     """Call Brain service with proper authentication and conversation type"""
@@ -224,6 +254,38 @@ def parse_inputs(inputs_str: str) -> Dict[str, Any]:
         logger.error(f"Input parsing failed: {e}")
         raise AccomplishError(f"Input validation failed: {e}", "input_error")
 
+def _create_detailed_plugin_guidance(inputs: Dict[str, Any]) -> str:
+    """Create a detailed list of available plugins with input specs and descriptions."""
+    available_plugins_input = inputs.get('availablePlugins', {})
+    available_plugins = available_plugins_input.get('value', []) if isinstance(available_plugins_input, dict) else available_plugins_input
+    if not available_plugins:
+        return "No plugins are available for use in the plan."
+
+    guidance_lines = ["Available Plugins & Input Specifications:"]
+    for plugin in available_plugins:
+        if isinstance(plugin, dict): # Defensive check
+            action_verb = plugin.get('actionVerb', 'UNKNOWN')
+            description = plugin.get('description', 'No description available.')
+            input_definitions = plugin.get('inputDefinitions', [])
+            input_guidance = plugin.get('inputGuidance', '')
+
+            guidance_lines.append(f"\nPlugin: {action_verb}")
+            guidance_lines.append(f"  Description: {description}")
+            if input_definitions:
+                guidance_lines.append("  Inputs:")
+                for input_def in input_definitions:
+                    input_name = input_def.get('name', 'UNKNOWN')
+                    input_desc = input_def.get('description', 'No description.')
+                    value_type = input_def.get('valueType', 'any')
+                    guidance_lines.append(f"    - {input_name} (type: {value_type}){ ' (REQUIRED)' if input_def.get('required') else ''}: {input_desc}")
+            else:
+                guidance_lines.append("  Inputs: None required.")
+            guidance_lines.append(f"{input_guidance}")
+        else:
+            # Handle case where plugin is not a dictionary (e.g., a string)
+            guidance_lines.append(f"\nPlugin: {plugin} (Details not available - unexpected format)")
+    return "\n".join(guidance_lines)
+
 class RobustMissionPlanner:
     """Streamlined LLM-driven mission planner"""
     
@@ -280,38 +342,6 @@ class RobustMissionPlanner:
 
         return json.dumps([plugin_output], indent=2)
 
-    def _create_detailed_plugin_guidance(self, inputs: Dict[str, Any]) -> str:
-        """Create a detailed list of available plugins with input specs and descriptions."""
-        available_plugins_input = inputs.get('availablePlugins', {})
-        available_plugins = available_plugins_input.get('value', []) if isinstance(available_plugins_input, dict) else available_plugins_input
-        if not available_plugins:
-            return "No plugins are available for use in the plan."
-
-        guidance_lines = ["Available Plugins & Input Specifications:"]
-        for plugin in available_plugins:
-            if isinstance(plugin, dict): # Defensive check
-                action_verb = plugin.get('actionVerb', 'UNKNOWN')
-                description = plugin.get('description', 'No description available.')
-                input_definitions = plugin.get('inputDefinitions', [])
-                input_guidance = plugin.get('inputGuidance', '')
-
-                guidance_lines.append(f"\nPlugin: {action_verb}")
-                guidance_lines.append(f"  Description: {description}")
-                if input_definitions:
-                    guidance_lines.append("  Inputs:")
-                    for input_def in input_definitions:
-                        input_name = input_def.get('name', 'UNKNOWN')
-                        input_desc = input_def.get('description', 'No description.')
-                        value_type = input_def.get('valueType', 'any')
-                        guidance_lines.append(f"    - {input_name} (type: {value_type}){ ' (REQUIRED)' if input_def.get('required') else ''}: {input_desc}")
-                else:
-                    guidance_lines.append("  Inputs: None required.")
-                guidance_lines.append(f"{input_guidance}")
-            else:
-                # Handle case where plugin is not a dictionary (e.g., a string)
-                guidance_lines.append(f"\nPlugin: {plugin} (Details not available - unexpected format)")
-        return "\n".join(guidance_lines)
-
     def _inject_progress_checks(self, plan: List[Dict[str, Any]], goal: str, mission_id: Optional[str], inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
         if not plan:
             return []
@@ -353,18 +383,16 @@ class RobustMissionPlanner:
             "question": {"value": reflection_question, "valueType": "string"}
         }
 
-        # Add dependency on the last step's primary output to ensure proper sequencing
-        if last_step_outputs:
-            # Use the first output of the last step as a dependency to ensure REFLECT runs after it
-            primary_output = last_step_outputs[0]
-            reflect_inputs["work_products"] = {
-                "outputName": primary_output,
-                "sourceStep": len(plan),
-                "valueType": "string"
-            }
+        plan_history_from_inputs = inputs.get('plan_history', '[]')
+        if isinstance(plan_history_from_inputs, dict) and 'value' in plan_history_from_inputs:
+            plan_history_str = plan_history_from_inputs['value']
         else:
-            # Fallback to static value if no outputs available
-            reflect_inputs["work_products"] = {"value": completed_steps_summary, "valueType": "string"}
+            plan_history_str = plan_history_from_inputs
+
+        reflect_inputs["work_products"] = {
+            "value": plan_history_str,
+            "valueType": "string"
+        }
 
         check_step = {
             "number": len(plan) + 1,
@@ -409,7 +437,12 @@ class RobustMissionPlanner:
             raise AccomplishError(f"Could not validate or repair the plan: {e}", "validation_error")
 
         try:
-            mission_id_for_check = inputs.get('missionId') # Direct get
+            mission_id_input = inputs.get('missionId')
+            mission_id_for_check = None
+            if isinstance(mission_id_input, dict) and 'value' in mission_id_input:
+                mission_id_for_check = mission_id_input['value']
+            else:
+                mission_id_for_check = mission_id_input
             plan_with_checks = self._inject_progress_checks(validated_plan, goal, mission_id_for_check, inputs)
             logger.info(f"✅ Successfully injected progress checks, new plan has {len(plan_with_checks)} steps")
             return plan_with_checks
@@ -422,7 +455,7 @@ class RobustMissionPlanner:
         """Phase 1: Get a well-thought prose plan from LLM with retries."""
         logger.info("🧠 Phase 1: Requesting prose plan from LLM...")
 
-        plugin_guidance = self._create_detailed_plugin_guidance(inputs)
+        plugin_guidance = _create_detailed_plugin_guidance(inputs)
         context_input = inputs.get('context')
         context = context_input if context_input is not None else ''
         full_goal = f"MISSION: {mission_goal}\n\nTASK: {goal}" if mission_goal and mission_goal != goal else goal
@@ -472,7 +505,7 @@ CRITICAL: The actionVerb for each step MUST be a valid, existing plugin actionVe
         """Phase 2: Convert prose plan to structured JSON with retries."""
         logger.info("🔧 Phase 2: Converting to structured JSON...")
 
-        plugin_guidance = self._create_detailed_plugin_guidance(inputs)
+        plugin_guidance = _create_detailed_plugin_guidance(inputs)
         schema_json = json.dumps(PLAN_ARRAY_SCHEMA, indent=2)
         
         full_goal = f"MISSION: {mission_goal}\n\nTASK: {goal}" if mission_goal and mission_goal != goal else goal
@@ -645,6 +678,7 @@ class NovelVerbHandler:
         description = verb_info.get('description', 'No description provided')
         context = verb_info.get('context', description)
         schema_json = json.dumps(PLAN_ARRAY_SCHEMA, indent=2)
+        plugin_guidance = _create_detailed_plugin_guidance(inputs)
 
         prompt = f"""You are an expert system analyst. A user wants to use a novel action verb "{verb}" that is not currently supported.
 
@@ -694,6 +728,8 @@ Plan Schema
             }}
         }}}}
 CRITICAL: The actionVerb for each step MUST be a valid, existing plugin actionVerb (from the provided list) or a descriptive, new actionVerb (e.g., 'ANALYZE_DATA', 'GENERATE_REPORT'). It MUST NOT be 'UNKNOWN' or 'NOVEL_VERB'.
+
+{plugin_guidance}
 """
 
         try:

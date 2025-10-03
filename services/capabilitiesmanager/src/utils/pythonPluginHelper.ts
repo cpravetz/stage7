@@ -53,6 +53,36 @@ async function waitForLock(lockFilePath: string, trace_id: string): Promise<void
     throw new Error(`Timed out waiting for lock on ${lockFilePath} after ${LOCK_TIMEOUT_MS / 1000} seconds.`);
 }
 
+async function hashDirectory(directoryPath: string): Promise<string> {
+    const hash = crypto.createHash('md5');
+    const files = await fs.promises.readdir(directoryPath);
+    files.sort(); // for consistent order
+    for (const file of files) {
+        const filePath = path.join(directoryPath, file);
+        const stat = await fs.promises.stat(filePath);
+        if (stat.isDirectory()) {
+            hash.update(await hashDirectory(filePath));
+        } else {
+            hash.update(await fs.promises.readFile(filePath));
+        }
+    }
+    return hash.digest('hex');
+}
+
+export async function calculatePythonDependenciesHash(pluginRootPath: string): Promise<string> {
+    const requirementsPath = path.join(pluginRootPath, 'requirements.txt');
+    const sharedPackagePath = path.resolve(__dirname, '../../../../shared/python');
+
+    const requirementsHash = fs.existsSync(requirementsPath)
+        ? crypto.createHash('md5').update(fs.readFileSync(requirementsPath, 'utf8')).digest('hex')
+        : '';
+
+    const sharedCodeHash = fs.existsSync(sharedPackagePath)
+        ? await hashDirectory(sharedPackagePath)
+        : '';
+    
+    return crypto.createHash('md5').update(requirementsHash + sharedCodeHash).digest('hex');
+}
 
 export async function ensurePythonDependencies(pluginRootPath: string, trace_id: string): Promise<void> {
     const source_component = "pythonPluginHelper.ensurePythonDependencies";
@@ -60,10 +90,7 @@ export async function ensurePythonDependencies(pluginRootPath: string, trace_id:
 
     if (!await acquireLock(lockFilePath, trace_id)) {
         await waitForLock(lockFilePath, trace_id);
-        // After waiting, assume the other process set everything up.
-        // A more robust implementation could re-verify dependencies here.
-        console.log(`[${trace_id}] Lock acquired by other process. Assuming dependencies are now installed.`);
-        return;
+        console.log(`[${trace_id}] Lock acquired by other process. Re-verifying dependencies.`);
     }
 
     try {
@@ -107,22 +134,42 @@ export async function ensurePythonDependencies(pluginRootPath: string, trace_id:
             throw new Error('No python3 or python executable found in PATH');
         };
 
-        const requirementsHash = fs.existsSync(requirementsPath)
-            ? crypto.createHash('md5').update(fs.readFileSync(requirementsPath, 'utf8')).digest('hex')
-            : null;
+        const checkVenvFunctionality = async (): Promise<boolean> => {
+            try {
+                await execAsync(`"${venvPythonPath}" -c "import requests"`, { cwd: pluginRootPath, timeout: 10000 });
+                console.log(`[${trace_id}] ${source_component}: Existing venv is functional.`);
+                return true;
+            } catch (e: any) {
+                console.warn(`[${trace_id}] ${source_component}: Existing venv is not functional: ${e.message}`);
+                return false;
+            }
+        };
+
+        const sharedPackagePath = path.resolve(__dirname, '../../../../shared/python');
+
+        const combinedHash = await calculatePythonDependenciesHash(pluginRootPath);
+        
+
 
         const pythonCmd = await checkPythonExecutable();
         let shouldRecreateVenv = false;
 
         if (!fs.existsSync(venvPath) || !venvHealthy()) {
             console.log(`[${trace_id}] ${source_component}: Venv missing or broken. Recreating.`);
-            await deleteVenvWithRetries(5, 1000); // Increased retries and delay
+            await deleteVenvWithRetries(5, 1000);
             shouldRecreateVenv = true;
-        } else if (requirementsHash) {
-            if (!fs.existsSync(markerPath) || fs.readFileSync(markerPath, 'utf8') !== requirementsHash) {
-                console.log(`[${trace_id}] ${source_component}: Requirements changed or marker missing. Recreating venv.`);
-                await deleteVenvWithRetries(5, 1000); // Increased retries and delay
-                shouldRecreateVenv = true;
+        } else {
+            if (!fs.existsSync(markerPath) || fs.readFileSync(markerPath, 'utf8') !== combinedHash) {
+                console.log(`[${trace_id}] ${source_component}: Dependencies changed or marker missing. Verifying existing venv functionality.`);
+                if (await checkVenvFunctionality()) {
+                    console.log(`[${trace_id}] ${source_component}: Existing venv is functional despite outdated marker. Updating marker.`);
+                    fs.writeFileSync(markerPath, combinedHash); // Update marker without recreating venv
+                    shouldRecreateVenv = false;
+                } else {
+                    console.log(`[${trace_id}] ${source_component}: Existing venv is not functional. Recreating.`);
+                    await deleteVenvWithRetries(5, 1000);
+                    shouldRecreateVenv = true;
+                }
             } else {
                 console.log(`[${trace_id}] ${source_component}: Existing venv is healthy and up to date.`);
             }
@@ -136,17 +183,17 @@ export async function ensurePythonDependencies(pluginRootPath: string, trace_id:
             await execAsync(pipUpgradeCmd, { cwd: pluginRootPath, timeout: 60000 });
 
             console.log(`[${trace_id}] ${source_component}: Installing shared ckt_plan_validator package.`);
-            const sharedPackagePath = path.resolve(__dirname, '../../../../shared/python');
             const installSharedCmd = `"${venvPipPath}" install "${sharedPackagePath}"`;
             await execAsync(installSharedCmd, { cwd: pluginRootPath, timeout: 60000 });
 
-            if (requirementsHash) {
+            if (fs.existsSync(requirementsPath)) {
                 console.log(`[${trace_id}] ${source_component}: Installing requirements from requirements.txt.`);
                 const installReqsCmd = `"${venvPipPath}" install -r "${requirementsPath}"`;
                 await execAsync(installReqsCmd, { cwd: pluginRootPath, timeout: 120000 });
-                fs.writeFileSync(markerPath, requirementsHash);
-                console.log(`[${trace_id}] ${source_component}: Dependencies installed and marker file created.`);
             }
+
+            fs.writeFileSync(markerPath, combinedHash);
+            console.log(`[${trace_id}] ${source_component}: Dependencies installed and marker file created.`);
 
             // Verify 'requests' is importable
             try {

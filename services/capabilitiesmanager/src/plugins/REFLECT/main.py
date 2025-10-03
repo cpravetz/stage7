@@ -25,6 +25,39 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+def _create_detailed_plugin_guidance(inputs: Dict[str, Any]) -> str:
+    """Create a detailed list of available plugins with input specs and descriptions."""
+    available_plugins_input = inputs.get('availablePlugins', {})
+    available_plugins = available_plugins_input.get('value', []) if isinstance(available_plugins_input, dict) else available_plugins_input
+    if not available_plugins:
+        return "No plugins are available for use in the plan."
+
+    guidance_lines = ["Available Plugins & Input Specifications:"]
+    for plugin in available_plugins:
+        if isinstance(plugin, dict): # Defensive check
+            action_verb = plugin.get('actionVerb', 'UNKNOWN')
+            description = plugin.get('description', 'No description available.')
+            input_definitions = plugin.get('inputDefinitions', [])
+            input_guidance = plugin.get('inputGuidance', '')
+
+            guidance_lines.append(f"\nPlugin: {action_verb}")
+            guidance_lines.append(f"  Description: {description}")
+            if input_definitions:
+                guidance_lines.append("  Inputs:")
+                for input_def in input_definitions:
+                    input_name = input_def.get('name', 'UNKNOWN')
+                    input_desc = input_def.get('description', 'No description.')
+                    value_type = input_def.get('valueType', 'any')
+                    guidance_lines.append(f"    - {input_name} (type: {value_type}){ ' (REQUIRED)' if input_def.get('required') else ''}: {input_desc}")
+            else:
+                guidance_lines.append("  Inputs: None required.")
+            guidance_lines.append(f"{input_guidance}")
+        else:
+            # Handle case where plugin is not a dictionary (e.g., a string)
+            guidance_lines.append(f"\nPlugin: {plugin} (Details not available - unexpected format)")
+    return "\n".join(guidance_lines)
+
+
 class ProgressTracker:
     def __init__(self):
         self.start_time = time.time()
@@ -73,10 +106,18 @@ def get_mission_goal(mission_id: str, inputs: Dict[str, Any]) -> Optional[str]:
 
 def _extract_json_from_string(text: str) -> Optional[str]:
     """
-    Extracts a JSON object or array string from a given text.
-    Assumes the JSON is the primary content and attempts to find the outermost JSON structure.
+    Extracts a JSON object or array string from a given text, handling markdown code blocks.
     """
+    if not text:
+        return None
+
+    # Strip markdown code blocks
     text = text.strip()
+    # Use a regex to find the json block
+    match = re.search(r"```(json)?\s*([\s\S]*?)\s*```", text)
+    if match:
+        text = match.group(2).strip()
+    
     if not text:
         return None
 
@@ -86,7 +127,28 @@ def _extract_json_from_string(text: str) -> Optional[str]:
     last_brace = text.rfind('}')
     last_bracket = text.rfind(']')
 
+    # Determine the most likely JSON structure based on outermost delimiters
+    # Prioritize array if both are present and valid, as plans are arrays
+    if first_bracket != -1 and last_bracket != -1 and first_bracket < last_bracket:
+        # Check if a brace-delimited object is fully contained within the brackets
+        if first_brace != -1 and last_brace != -1 and first_brace > first_bracket and last_brace < last_bracket:
+            # If so, it's likely an array containing an object, so we still target the array
+            pass
+        else:
+            # It's likely a JSON array
+            start_index = first_bracket
+            end_index = last_bracket
+    elif first_brace != -1 and last_brace != -1 and first_brace < last_brace:
+        # It's likely a JSON object
+        start_index = first_brace
+        end_index = last_brace
+    else:
+        return None # No valid JSON delimiters found
+
     # Determine the start and end of the JSON string
+    start_index = -1
+    end_index = -1
+
     if first_bracket != -1 and last_bracket != -1 and first_bracket < last_bracket:
         # It's likely a JSON array
         start_index = first_bracket
@@ -95,17 +157,18 @@ def _extract_json_from_string(text: str) -> Optional[str]:
         # It's likely a JSON object
         start_index = first_brace
         end_index = last_brace
-    else:
+    
+    if start_index == -1:
         return None # No valid JSON found
 
     json_candidate = text[start_index : end_index + 1]
 
     # Basic validation: check if the candidate string is likely JSON
-    if not (json_candidate.startswith('{') and json_candidate.endswith('}')) and \
-       not (json_candidate.startswith('[') and json_candidate.endswith(']')):
+    try:
+        json.loads(json_candidate)
+        return json_candidate
+    except json.JSONDecodeError:
         return None
-
-    return json_candidate
 
 def call_brain(prompt: str, inputs: Dict[str, Any], response_type: str = "json") -> str:
     """Call Brain service with proper authentication and conversation type"""
@@ -313,6 +376,7 @@ class ReflectHandler:
         work_products = reflection_info['work_products']
         question = reflection_info['question']
         mission_id = reflection_info['missionId']
+        plugin_guidance = _create_detailed_plugin_guidance(inputs)
 
         PLAN_ARRAY_SCHEMA = {
             "type": "array",
@@ -375,6 +439,9 @@ Plan Schema
 - Only change `recommendedRole` when transitioning to a fundamentally different type of deliverable
 - Example: Steps 1-5 all produce research for a report → all get `recommendedRole: "researcher"`
 - Counter-example: Don't switch roles between gathering data (step 1) and formatting it (step 2) if they're part of the same research deliverable
+
+**Existing ActionVerbs**
+{plugin_guidance}
 """
 
         try:
