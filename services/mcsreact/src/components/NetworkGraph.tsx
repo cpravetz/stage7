@@ -342,11 +342,11 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics, zoo
         if (networkRef.current) {
             networkRef.current.setOptions(options);
             networkRef.current.setData({ nodes, edges });
-            networkRef.current.moveTo({ scale: zoom, position: pan });
-            console.log('[NetworkGraph] Network updated with preserved view state');
+            networkRef.current.fit(); // Fit the network to the view
+            console.log('[NetworkGraph] Network updated and fitted to view');
         } else {
             networkRef.current = new Network(containerRef.current, { nodes, edges }, options);
-            networkRef.current.moveTo({ scale: zoom, position: pan });
+            networkRef.current.fit(); // Fit the network on initial load
             isInitializedRef.current = true;
             
             const securityClient = SecurityClient.getInstance(API_BASE_URL);
@@ -403,7 +403,7 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics, zoo
             });
             
         }
-    }, [nodes, edges, dataHash, stepOverviewOpen, zoom, pan, setZoom, setPan]);
+    }, [nodes, edges, dataHash, stepOverviewOpen, setZoom, setPan]);
 
     // Cleanup on unmount
     useEffect(() => {

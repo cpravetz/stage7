@@ -583,7 +583,6 @@ export class CapabilitiesManager extends BaseEntity {
         } as Step;
 
 
-
         if (!step.actionVerb || typeof step.actionVerb !== 'string') {
             const sError = generateStructuredError({
                 error_code: GlobalErrorCodes.CAPABILITIES_MANAGER_INVALID_REQUEST_GENERIC,
@@ -602,6 +601,7 @@ export class CapabilitiesManager extends BaseEntity {
             // Redirect 'ACCOMPLISH' to executeAccomplishPlugin
             if (step.actionVerb === 'ACCOMPLISH' && step.inputValues) {
                 const result = await this.executeAccomplishPlugin(step.inputValues, trace_id);
+                console.log(`[${trace_id}] ${source_component}: Result from executeAccomplishPlugin - typeof: ${typeof result}, isArray: ${Array.isArray(result)}`);
                 await this.commitTransaction(opId);
                 res.status(200).send(MapSerializer.transformForSerialization(result.map(r => this.normalizePluginOutput(r))));
                 return;
@@ -715,23 +715,6 @@ export class CapabilitiesManager extends BaseEntity {
                         const { pluginRootPath, effectiveManifest } = await this.pluginRegistry.preparePluginForExecution(manifest);
                         const result = await this.pluginExecutor.execute(effectiveManifest, validatedInputs.inputs, pluginRootPath, trace_id);
                         res.status(200).send(MapSerializer.transformForSerialization(result));
-                        return;
-                    } else if (manifest.language === 'internal') {
-                        console.log(`[${trace_id}] ${source_component}: Internal verb '${step.actionVerb}' detected. Signaling agent for internal handling.`);
-                        res.status(200).send(MapSerializer.transformForSerialization([
-                            {
-                                success: true,
-                                name: 'internalVerbExecution',
-                                resultType: PluginParameterType.OBJECT,
-                                result: {
-                                    actionVerb: step.actionVerb,
-                                    inputValues: MapSerializer.transformForSerialization(step.inputValues),
-                                    outputs: MapSerializer.transformForSerialization(step.outputs)
-                                },
-                                resultDescription: `Internal verb '${step.actionVerb}' to be handled by agent.`,
-                                mimeType: 'application/json'
-                            }
-                        ]));
                         return;
                     } else {
                         console.warn(`[${trace_id}] ${source_component}: Unknown handler language/type '${manifest.language}' for verb '${step.actionVerb}'. Falling back.`);

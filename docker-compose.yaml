@@ -401,7 +401,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
-      start_period: 90s  # Increased to allow more time for RabbitMQ to fully initialize
+      start_period: 75s  # Increased to allow more time for RabbitMQ to fully initialize
     restart: unless-stopped
 
   consul:

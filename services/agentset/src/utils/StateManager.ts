@@ -86,6 +86,7 @@ export class StateManager {
                     return new Step({
                         id: event.stepId,
                         missionId: event.missionId,
+                        ownerAgentId: agent.id,
                         actionVerb: event.actionVerb,
                         stepNo: event.stepNo,
                         inputValues: deserializedInputValues,

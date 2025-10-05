@@ -208,80 +208,88 @@ class LangsearchSearchProvider(SearchProvider):
 
     def search(self, search_term: str, **kwargs) -> List[Dict[str, str]]:
         """Execute semantic search using LangSearch API."""
-        # --- Rate Limiting Logic ---
-        current_time = time.time()
-        time_since_last_request = current_time - self.last_request_time
+        retries = 3
+        backoff_factor = 0.5
 
-        if time_since_last_request < self.rate_limit_seconds:
-            sleep_duration = self.rate_limit_seconds - time_since_last_request
-            logger.info(f"LangSearch rate limit: sleeping for {sleep_duration:.2f} seconds.")
-            time.sleep(sleep_duration)
-        # --- End Rate Limiting ---
+        for attempt in range(retries):
+            # --- Rate Limiting Logic ---
+            current_time = time.time()
+            time_since_last_request = current_time - self.last_request_time
 
-        try:
-            url = f"{self.base_url}/v1/web-search"
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-                "Accept": "application/json"
-            }
-            
-            payload = {
-                "query": search_term,
-                "count": 10
-            }
-            if 'freshness' in kwargs:
-                payload['freshness'] = kwargs['freshness']
-            if 'summary' in kwargs:
-                payload['summary'] = kwargs['summary']
-            
-            logger.info(f"Calling LangSearch API at {url}")
-            response = requests.post(url, headers=headers, json=payload, timeout=15)
-            response.raise_for_status()
-            
-            full_response = response.json()
-            data = full_response.get("data", full_response)
+            if time_since_last_request < self.rate_limit_seconds:
+                sleep_duration = self.rate_limit_seconds - time_since_last_request
+                logger.info(f"LangSearch rate limit: sleeping for {sleep_duration:.2f} seconds.")
+                time.sleep(sleep_duration)
+            # --- End Rate Limiting ---
 
-            results = []
-            if "webPages" in data and "value" in data["webPages"]:
-                for item in data["webPages"]["value"]:
-                    if item.get("name") and item.get("url"):
-                        results.append({"title": item.get("name", ""), "url": item.get("url", ""), "snippet": item.get("snippet", "")})
-            elif "results" in data and isinstance(data["results"], list):
-                for item in data["results"]:
-                    if item.get("title") and item.get("url"):
-                        results.append({"title": item.get("title", ""), "url": item.get("url", ""), "snippet": item.get("snippet", "")})
-            elif "items" in data and isinstance(data["items"], list):
-                for item in data["items"]:
-                    if item.get("title") and item.get("url"):
-                        results.append({"title": item.get("title", ""), "url": item.get("url", ""), "snippet": item.get("snippet", "")})
-            elif isinstance(data, list):
-                for item in data:
-                    if item.get("title") and item.get("url"):
-                        results.append({"title": item.get("title", ""), "url": item.get("url", ""), "snippet": item.get("snippet", "")})
-            
-            logger.info(f"LangSearch found {len(results)} results")
-            return results
-            
-        except requests.exceptions.HTTPError as e:
-            if e.response.status_code == 429:
-                logger.warning(f"LangSearch rate limited (429). Returning empty results to allow fallback.")
-                self.update_performance(success=False)
-                return []  # Return empty results instead of raising
-            else:
+            try:
+                url = f"{self.base_url}/v1/web-search"
+                headers = {
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                    "Accept": "application/json"
+                }
+                
+                payload = {
+                    "query": search_term,
+                    "count": 10
+                }
+                if 'freshness' in kwargs:
+                    payload['freshness'] = kwargs['freshness']
+                if 'summary' in kwargs:
+                    payload['summary'] = kwargs['summary']
+                
+                logger.info(f"Calling LangSearch API at {url} (Attempt {attempt + 1}/{retries})")
+                response = requests.post(url, headers=headers, json=payload, timeout=15)
+                response.raise_for_status()
+                
+                full_response = response.json()
+                data = full_response.get("data", full_response)
+
+                results = []
+                if "webPages" in data and "value" in data["webPages"]:
+                    for item in data["webPages"]["value"]:
+                        if item.get("name") and item.get("url"):
+                            results.append({"title": item.get("name", ""), "url": item.get("url", ""), "snippet": item.get("snippet", "")})
+                elif "results" in data and isinstance(data["results"], list):
+                    for item in data["results"]:
+                        if item.get("title") and item.get("url"):
+                            results.append({"title": item.get("title", ""), "url": item.get("url", ""), "snippet": item.get("snippet", "")})
+                elif "items" in data and isinstance(data["items"], list):
+                    for item in data["items"]:
+                        if item.get("title") and item.get("url"):
+                            results.append({"title": item.get("title", ""), "url": item.get("url", ""), "snippet": item.get("snippet", "")})
+                elif isinstance(data, list):
+                    for item in data:
+                        if item.get("title") and item.get("url"):
+                            results.append({"title": item.get("title", ""), "url": item.get("url", ""), "snippet": item.get("snippet", "")})
+                
+                logger.info(f"LangSearch found {len(results)} results")
+                return results
+                
+            except requests.exceptions.HTTPError as e:
+                if e.response.status_code == 429 and attempt < retries - 1:
+                    sleep_time = backoff_factor * (2 ** attempt)
+                    logger.warning(f"LangSearch rate limited (429). Retrying in {sleep_time:.2f} seconds...")
+                    time.sleep(sleep_time)
+                    continue
+                else:
+                    logger.error(f"LangSearch API request failed: {str(e)}")
+                    self.update_performance(success=False)
+                    return []  # Return empty results instead of raising
+            except requests.exceptions.RequestException as e:
                 logger.error(f"LangSearch API request failed: {str(e)}")
                 self.update_performance(success=False)
                 return []  # Return empty results instead of raising
-        except requests.exceptions.RequestException as e:
-            logger.error(f"LangSearch API request failed: {str(e)}")
-            self.update_performance(success=False)
-            return []  # Return empty results instead of raising
-        except Exception as e:
-            logger.error(f"LangSearch processing failed: {str(e)}")
-            self.update_performance(success=False)
-            return []  # Return empty results instead of raising
-        finally:
-            self.last_request_time = time.time()
+            except Exception as e:
+                logger.error(f"LangSearch processing failed: {str(e)}")
+                self.update_performance(success=False)
+                return []  # Return empty results instead of raising
+            finally:
+                self.last_request_time = time.time()
+        
+        logger.error(f"LangSearch search failed after {retries} retries.")
+        return []
 
 class DuckDuckGoSearchProvider(SearchProvider):
     """Search provider for DuckDuckGo."""
@@ -482,42 +490,26 @@ class SearchPlugin:
                 
                 search_successful = False
                 for provider in sorted_providers:
-                    retries = 3
-                    backoff_time = 5
-                    for attempt in range(retries):
-                        try:
-                            logger.info(f"Attempting search with {provider.name} provider (score: {provider.performance_score}) for term: '{term}'")
-                            results = provider.search(term)
-                            
-                            if results:
-                                logger.info(f"Successfully found {len(results)} results for '{term}' using {provider.name}")
-                                term_results.extend(results)
-                                provider.update_performance(success=True)
-                                search_successful = True
-                                break  # Move to the next provider
-                            else:
-                                logger.warning(f"{provider.name} found no results for '{term}' - trying next provider")
-                                # Only slightly penalize for no results
-                                provider.performance_score = max(0, provider.performance_score - 5)
-                                time.sleep(1) # Add a small delay to avoid overwhelming services
-                        except requests.exceptions.HTTPError as e:
-                            if e.response.status_code == 429 and attempt < retries - 1:
-                                logger.warning(f"{provider.name} rate limited. Retrying in {backoff_time} seconds...")
-                                time.sleep(backoff_time)
-                                backoff_time *= 2 # Exponential backoff
-                                continue
-                            else:
-                                error_msg = f"{provider.name} search failed for '{term}': {e}"
-                                logger.error(error_msg)
-                                term_errors.append(error_msg)
-                                provider.update_performance(success=False)
-                                break
-                        except Exception as e:
-                            error_msg = f"{provider.name} search failed for '{term}': {e}"
-                            logger.error(error_msg)
-                            term_errors.append(error_msg)
-                            provider.update_performance(success=False)
-                            break
+                    try:
+                        logger.info(f"Attempting search with {provider.name} provider (score: {provider.performance_score}) for term: '{term}'")
+                        results = provider.search(term)
+                        
+                        if results:
+                            logger.info(f"Successfully found {len(results)} results for '{term}' using {provider.name}")
+                            term_results.extend(results)
+                            provider.update_performance(success=True)
+                            search_successful = True
+                            break  # Move to the next provider
+                        else:
+                            logger.warning(f"{provider.name} found no results for '{term}' - trying next provider")
+                            # Only slightly penalize for no results
+                            provider.performance_score = max(0, provider.performance_score - 5)
+                    except Exception as e:
+                        error_msg = f"{provider.name} search failed for '{term}': {e}"
+                        logger.error(error_msg)
+                        term_errors.append(error_msg)
+                        provider.update_performance(success=False)
+
                     if search_successful:
                         break
                 

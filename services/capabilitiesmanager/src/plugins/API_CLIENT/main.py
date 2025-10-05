@@ -123,28 +123,19 @@ def execute_plugin(inputs):
         except json.JSONDecodeError:
             response_body = response.text
 
-        output_list = [
-                {
-                    "name": "status_code",
-                    "value": response.status_code,
-                    "type": "number"
+        return [
+            {
+                "success": True,
+                "name": "api_response",
+                "resultType": "object",
+                "result": {
+                    "status_code": response.status_code,
+                    "headers": dict(response.headers),
+                    "body": response_body
                 },
-                {
-                    "name": "headers",
-                    "value": dict(response.headers),
-                    "type": "object"
-                },
-                {
-                    "name": "body",
-                    "value": response_body,
-                    "type": "object" if isinstance(response_body, dict) else "string"
-                }
-            ]
-        # Strict output validation
-        if not isinstance(output_list, list):
-            raise ValueError("Output schema validation failed: must be a list of outputs.")
-
-        return output_list
+                "resultDescription": "The response from the API call."
+            }
+        ]
     except Exception as e:
         # Log the error locally and return a structured error output
         logger.error(f"Error in execute_plugin: {e}")
@@ -154,8 +145,7 @@ def execute_plugin(inputs):
             "resultType": "error",
             "result": str(e),
             "resultDescription": f"Unexpected error during API request execution",
-            "mimeType": "text/plain",
-            "error": str(e)
+            "mimeType": "text/plain"
         }]
     finally:
         if temp_dir and os.path.exists(temp_dir):

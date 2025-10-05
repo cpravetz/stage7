@@ -105,7 +105,7 @@ export class WebSocketHandler {
         console.log(`All queued messages sent to client ${clientId}`);
       }
 
-      ws.on('message', (message: string) => {
+      ws.on('message', async (message: string) => {
         try {
           const parsedMessage = JSON.parse(message.toString());
           console.log(`Received WebSocket message from client ${clientId}:`, parsedMessage);
@@ -136,8 +136,33 @@ export class WebSocketHandler {
                     this.missionClients.set(missionId, new Set());
                 }
                 this.missionClients.get(missionId)!.add(clientId!);
-                
-                // Optionally, send a confirmation to the client
+
+                // Resume the mission since the client has reconnected
+                try {
+                  const missionControlUrl = this.getComponentUrl('MissionControl');
+                  if (missionControlUrl) {
+                    await this.authenticatedApi.post(`http://${missionControlUrl}/message`, {
+                      type: MessageType.RESUME,
+                      sender: 'PostOffice',
+                      recipient: 'MissionControl',
+                      content: {
+                        type: 'resume',
+                        action: 'resume',
+                        missionId: missionId,
+                        reason: 'Client reconnected'
+                      },
+                      timestamp: new Date().toISOString()
+                    });
+                    console.log(`Successfully resumed mission ${missionId} due to client ${clientId} reconnection`);
+                  } else {
+                    console.error(`Could not resume mission ${missionId}: MissionControl not found`);
+                  }
+                } catch (error) {
+                  analyzeError(error as Error);
+                  console.error(`Failed to resume mission ${missionId}:`, error instanceof Error ? error.message : error);
+                }
+
+                // Send a confirmation to the client
                 ws.send(JSON.stringify({ type: 'RECONNECT_SUCCESS', missionId }));
             }
           } else {

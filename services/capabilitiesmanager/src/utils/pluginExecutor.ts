@@ -269,7 +269,7 @@ export class PluginExecutor {
         console.log(`[${trace_id}] ${source_component}: Python execution - Main file path: ${mainFilePath}, Root path: ${pluginRootPath}`);
         
         try {
-            await ensurePythonDependencies(pluginRootPath, trace_id);
+            // await ensurePythonDependencies(pluginRootPath, trace_id); // Removed as it's now handled during plugin preparation
 
             const isWindows = process.platform === 'win32';
             const venvBinDir = isWindows ? path.join(pluginRootPath, 'venv', 'Scripts') : path.join(pluginRootPath, 'venv', 'bin');
@@ -310,7 +310,7 @@ export class PluginExecutor {
 
                 pythonProcess.on('close', (code) => {
                     if (code !== 0) {
-                        const error = new Error(`Python script exited with code ${code}. Stderr: ${stderr}`);
+                        const error = new Error(`Python script exited with code ${code === null ? 'null (terminated by signal)' : code}. Stderr: ${stderr}`);
                         (error as any).stdout = stdout;
                         (error as any).stderr = stderr;
                         reject(error);
