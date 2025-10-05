@@ -440,6 +440,8 @@ Plan Schema
 - Example: Steps 1-5 all produce research for a report → all get `recommendedRole: "researcher"`
 - Counter-example: Don't switch roles between gathering data (step 1) and formatting it (step 2) if they're part of the same research deliverable
 
+CRITICAL: The actionVerb for each step MUST be a valid, existing plugin actionVerb (from the provided list) or a descriptive, new actionVerb (e.g., 'ANALYZE_DATA', 'GENERATE_REPORT'). It MUST NOT be 'UNKNOWN' or 'NOVEL_VERB'.
+
 **Existing ActionVerbs**
 {plugin_guidance}
 """

@@ -122,30 +122,47 @@ class PlanValidator:
         """Phase 3: Validate and repair plan if needed, with retries."""
         logger.info("Phase 3: Validating and repairing plan...")
 
-        # Store the plan for dependent input updates
-        self._current_plan = plan
-
-        # Initial code-based repair
-        plan = self._repair_plan_code_based(plan)
-
-        # Update the stored plan reference
-        self._current_plan = plan
-
-        available_plugins_raw = inputs.get('availablePlugins', [])
-        if isinstance(available_plugins_raw, str):
-            try:
-                available_plugins_raw = json.loads(available_plugins_raw)
-            except json.JSONDecodeError:
-                available_plugins_raw = []
-        if isinstance(available_plugins_raw, dict):
-            available_plugins = available_plugins_raw.get('value', [])
-        else:
-            available_plugins = available_plugins_raw if isinstance(available_plugins_raw, list) else []
-
         previous_errors = []
         for attempt in range(self.max_retries):
+            # Always run code-based repair first
+            plan = self._repair_plan_code_based(plan)
+            self._current_plan = plan
+
+            available_plugins_raw = inputs.get('availablePlugins', [])
+            if isinstance(available_plugins_raw, str):
+                try:
+                    available_plugins_raw = json.loads(available_plugins_raw)
+                except json.JSONDecodeError:
+                    available_plugins_raw = []
+            if isinstance(available_plugins_raw, dict):
+                available_plugins = available_plugins_raw.get('value', [])
+            else:
+                available_plugins = available_plugins_raw if isinstance(available_plugins_raw, list) else []
+
             validation_result = self._validate_plan(plan, available_plugins)
 
+            # Handle wrappable errors first
+            wrappable_errors = validation_result.get('wrappable_errors', [])
+            if wrappable_errors:
+                logger.info(f"Found {len(wrappable_errors)} steps that can be wrapped in a FOREACH loop. Applying transformations...")
+                for error in wrappable_errors:
+                    step_to_wrap = next((s for s in plan if s.get('number') == error['step_number']), None)
+                    if step_to_wrap:
+                        plan = self._wrap_step_in_foreach(
+                            plan,
+                            step_to_wrap,
+                            error['source_step_number'],
+                            error['source_output_name'],
+                            error['target_input_name']
+                        )
+                # After wrapping, re-number and re-validate in the next loop iteration
+                for i, step in enumerate(plan):
+                    step['number'] = i + 1
+                self._current_plan = plan
+                logger.info("Re-validating plan after FOREACH wrapping...")
+                continue # Restart the validation loop
+
+            # Handle other validation errors
             if validation_result['valid']:
                 logger.info("Plan validation successful")
                 return plan
@@ -156,9 +173,7 @@ class PlanValidator:
                 logger.info("Attempting to repair plan with LLM...")
                 try:
                     plan = self._repair_plan_with_llm(plan, validation_result['errors'], goal, inputs, previous_errors)
-                    plan = self._repair_plan_code_based(plan)  # Repair again after LLM changes
-                    self._current_plan = plan  # Update stored plan reference
-                    previous_errors = validation_result['errors']  # Update previous_errors for next iteration
+                    previous_errors = validation_result['errors']
                 except Exception as e:
                     logger.error(f"Plan repair failed on attempt {attempt + 1}: {e}")
             else:
@@ -506,19 +521,17 @@ Return the corrected JSON object for the step."""
     def _validate_plan(self, plan: List[Dict[str, Any]], available_plugins: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Validate the plan against the schema and plugin requirements."""
         errors = []
+        wrappable_errors = [] # New list for FOREACH candidates
 
         if not isinstance(plan, list):
             errors.append("Plan must be a list of steps")
-            return {'valid': False, 'errors': errors}
+            return {'valid': False, 'errors': errors, 'wrappable_errors': []}
 
         if len(plan) == 0:
-            errors.append("Plan cannot be empty")
-            return {'valid': False, 'errors': errors}
+            # An empty sub-plan is valid
+            return {'valid': True, 'errors': [], 'wrappable_errors': []}
 
-        # Create a map of plugins for quick lookup
         plugin_map = {plugin.get('actionVerb'): plugin for plugin in available_plugins}
-
-        # Track outputs from previous steps
         available_outputs = {}  # step_number -> set of output names
 
         for i, step in enumerate(plan):
@@ -527,28 +540,22 @@ Return the corrected JSON object for the step."""
                 errors.append(f"Step {i+1}: Missing 'number' field")
                 continue
 
-            # Validate required fields
             required_fields = ['actionVerb', 'description', 'inputs', 'outputs']
             for field in required_fields:
                 if field not in step:
                     errors.append(f"Step {step_number}: Missing required field '{field}'")
 
-            # Validate actionVerb
             action_verb = step.get('actionVerb')
             if action_verb:
                 plugin_def = plugin_map.get(action_verb)
                 if plugin_def:
-                    # Validate inputs against plugin definition
-                    self._validate_step_inputs(step, plugin_def, available_outputs, errors, plan, plugin_map)
+                    self._validate_step_inputs(step, plugin_def, available_outputs, errors, wrappable_errors, plan, plugin_map)
                 else:
-                    # For novel verbs, we can't validate inputs strictly
                     logger.info(f"Step {step_number}: actionVerb '{action_verb}' not found in plugin_map. Skipping strict input validation.")
 
-            # Validate outputs against plugin definitions (allowing custom names)
             outputs = step.get('outputs', {})
             if isinstance(outputs, dict):
                 if action_verb and plugin_def:
-                    # Allow custom output names - just log what we're allowing
                     validated_outputs = self._fix_step_outputs(step, plugin_def, outputs)
                     step_outputs = set(validated_outputs.keys())
                 else:
@@ -557,16 +564,25 @@ Return the corrected JSON object for the step."""
             else:
                 errors.append(f"Step {step_number}: 'outputs' must be a dictionary")
 
-            # Validate recommendedRole
-            recommended_role = step.get('recommendedRole')
-            if recommended_role:
-                allowed_roles = ['Coordinator', 'Researcher', 'Coder', 'Creative', 'Critic', 'Executor', 'Domain Expert']
-                if recommended_role not in allowed_roles:
-                    # Drop the recommendedRole if it's not in the allowed list
-                    logger.warning(f"Step {step_number}: Invalid 'recommendedRole' '{recommended_role}'. Dropping it.")
-                    del step['recommendedRole']
+            # Recursive validation for control flow verbs
+            control_flow_verbs = ['WHILE', 'SEQUENCE', 'IF_THEN', 'UNTIL', 'FOREACH', 'REPEAT']
+            if action_verb in control_flow_verbs:
+                sub_plan = None
+                # The sub-plan can be in 'steps' directly or inside inputs
+                if 'steps' in step and isinstance(step['steps'], list):
+                    sub_plan = step['steps']
+                elif 'steps' in step.get('inputs', {}) and isinstance(step['inputs']['steps'], dict) and 'value' in step['inputs']['steps'] and isinstance(step['inputs']['steps']['value'], list):
+                    sub_plan = step['inputs']['steps']['value']
 
-        return {'valid': len(errors) == 0, 'errors': errors}
+                if sub_plan:
+                    logger.info(f"Recursively validating sub-plan for step {step_number} ({action_verb})")
+                    sub_validation_result = self._validate_plan(sub_plan, available_plugins)
+                    if not sub_validation_result['valid']:
+                        errors.extend(f"Sub-plan of step {step_number} ({action_verb}): {e}" for e in sub_validation_result['errors'])
+                    if sub_validation_result.get('wrappable_errors'):
+                         errors.extend(f"Sub-plan of step {step_number} has wrappable error: {e}" for e in sub_validation_result['wrappable_errors'])
+
+        return {'valid': len(errors) == 0 and len(wrappable_errors) == 0, 'errors': errors, 'wrappable_errors': wrappable_errors}
 
     def _fix_step_outputs(self, step: Dict[str, Any], plugin_def: Dict[str, Any], current_outputs: Dict[str, str]) -> Dict[str, str]:
         """Allow custom output names - just validate basic structure."""
@@ -606,7 +622,50 @@ Return the corrected JSON object for the step."""
                     logger.info(f"Step {step.get('number')}: Updating input '{input_name}' to reference output '{new_output_name}' instead of '{old_output_name}'")
                     input_def['outputName'] = new_output_name
 
-    def _validate_step_inputs(self, step: Dict[str, Any], plugin_def: Dict[str, Any], available_outputs: Dict[int, Set[str]], errors: List[str], plan: List[Dict[str, Any]], plugin_map: Dict[str, Any]):
+    def _wrap_step_in_foreach(self, plan: List[Dict[str, Any]], step_to_wrap: Dict[str, Any], source_step_number: int, source_output_name: str, target_input_name: str) -> List[Dict[str, Any]]:
+        """Wraps a step that expects a single item in a FOREACH loop."""
+        logger.info(f"Wrapping step {step_to_wrap['number']} in a FOREACH loop for input '{target_input_name}'.")
+
+        original_step_number = step_to_wrap['number']
+        
+        # The step inside the loop will have a new number, e.g., 3.1
+        # We don't renumber here, we just move the step. Renumbering happens after all wraps.
+        
+        # Update the input of the wrapped step to get its value from the loop item
+        step_to_wrap['inputs'][target_input_name] = {
+            "outputName": "item",
+            "sourceStep": original_step_number # The FOREACH step itself
+        }
+
+        # The original step is now a sub-step. We need to re-evaluate its dependencies in the new context.
+        # For now, we assume simple wrapping.
+        step_to_wrap['number'] = 1 # It's the first (and only) step in the sub-plan
+
+        foreach_step = {
+            "number": original_step_number,
+            "actionVerb": "FOREACH",
+            "description": f"Iterate over the '{source_output_name}' list and for each item, execute the sub-plan.",
+            "inputs": {
+                "list": {
+                    "outputName": source_output_name,
+                    "sourceStep": source_step_number
+                }
+            },
+            "outputs": {
+                f"{step_to_wrap.get('actionVerb', 'step').lower()}_results": "Aggregated results from the loop."
+            },
+            "steps": [step_to_wrap] # The original step is now inside the loop
+        }
+
+        # Find the index of the original step and replace it with the FOREACH step
+        for i, step in enumerate(plan):
+            if step.get('number') == original_step_number:
+                plan[i] = foreach_step
+                break
+                
+        return plan
+
+    def _validate_step_inputs(self, step: Dict[str, Any], plugin_def: Dict[str, Any], available_outputs: Dict[int, Set[str]], errors: List[str], wrappable_errors: List[Dict[str, Any]], plan: List[Dict[str, Any]], plugin_map: Dict[str, Any]):
         """Validate inputs for a single step against the plugin definition."""
         logger.info(f"_validate_step_inputs: Validating step: {step}")
         step_number = step['number']
@@ -626,6 +685,22 @@ Return the corrected JSON object for the step."""
 
         # Validate each input
         for input_name, input_def in inputs.items():
+            # Special handling for control flow verbs
+            control_flow_verbs = ['WHILE', 'SEQUENCE', 'IF_THEN', 'UNTIL', 'FOREACH', 'REPEAT']
+            if step.get('actionVerb') in control_flow_verbs and input_name == 'steps':
+                # The 'steps' for a control flow verb can be a direct list of step objects,
+                # or it can be a standard input object with a 'value' that is a list of steps.
+                is_direct_list = isinstance(input_def, list)
+                is_wrapped_list = isinstance(input_def, dict) and 'value' in input_def and isinstance(input_def['value'], list)
+
+                if is_direct_list or is_wrapped_list:
+                    # It's a valid structure for control flow steps.
+                    # A more robust implementation could recursively call _validate_plan here.
+                    pass
+                else:
+                    errors.append(f"Step {step_number}: Input 'steps' for '{step.get('actionVerb')}' must be an array of steps.")
+                continue  # Skip generic input validation for the 'steps' block
+
             if not isinstance(input_def, dict):
                 errors.append(f"Step {step_number}: Input '{input_name}' must be a dictionary")
                 continue
@@ -677,13 +752,27 @@ Return the corrected JSON object for the step."""
                             source_output_definitions = source_plugin_def.get('outputDefinitions', [])
                             source_output_def = next((out for out in source_output_definitions if out.get('name') == source_output_name), None)
 
+                            # If direct lookup fails, and there's only one output, assume it's the one.
+                            if not source_output_def and len(source_output_definitions) == 1:
+                                source_output_def = source_output_definitions[0]
+                                logger.info(f"Step {step_number}: Inferring type for custom output '{source_output_name}' from the sole plugin output '{source_output_def.get('name')}'.")
+
                             if source_output_def:
                                 source_output_type = source_output_def.get('type')
 
                                 # Now, compare the types
-                                if dest_input_type and source_output_type and dest_input_type != source_output_type:
-                                    # Allow 'any' type to be compatible with anything
-                                    if dest_input_type != 'any' and source_output_type != 'any':
+                                if dest_input_type and source_output_type:
+                                    is_mismatch = dest_input_type != source_output_type and dest_input_type != 'any' and source_output_type != 'any'
+                                    is_wrappable = dest_input_type in ['string', 'number', 'object'] and source_output_type in ['array', 'list']
+
+                                    if is_wrappable:
+                                        wrappable_errors.append({
+                                            "step_number": step_number,
+                                            "source_step_number": source_step_number,
+                                            "source_output_name": source_output_name,
+                                            "target_input_name": input_name
+                                        })
+                                    elif is_mismatch:
                                         errors.append(
                                             f"Step {step_number}: Input '{input_name}' for actionVerb '{step['actionVerb']}' "
                                             f"expects type '{dest_input_type}', but received incompatible type "

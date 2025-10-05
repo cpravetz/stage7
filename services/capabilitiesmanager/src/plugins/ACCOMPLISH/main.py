@@ -455,7 +455,6 @@ class RobustMissionPlanner:
         """Phase 1: Get a well-thought prose plan from LLM with retries."""
         logger.info("🧠 Phase 1: Requesting prose plan from LLM...")
 
-        plugin_guidance = _create_detailed_plugin_guidance(inputs)
         context_input = inputs.get('context')
         context = context_input if context_input is not None else ''
         full_goal = f"MISSION: {mission_goal}\n\nTASK: {goal}" if mission_goal and mission_goal != goal else goal
@@ -463,23 +462,13 @@ class RobustMissionPlanner:
 
 GOAL: {full_goal}
 
-{plugin_guidance}
-
 CONTEXT:
 {context}
 
-Write a concise prose plan (1-2 paragraphs) that explains the strategic approach.
-
-CRITICAL PLANNING_PRINCIPLES:
-- **Autonomous Execution:** Your primary role is to complete tasks independently. Prioritize autonomous information gathering using SEARCH, SCRAPE, API_CLIENT, and other research tools.
-- **Strategic Use of User Questions:** Use the ASK_USER_QUESTION verb *only* when information is truly unobtainable through your own tools (e.g., subjective opinions, personal preferences, or explicit permissions). Do NOT use it to ask the user for information you can find yourself or to delegate tasks back to them.
-- **Distinction between CHAT and ASK_USER_QUESTION:** The CHAT verb is for sending notifications or updates to the user. It is NOT for asking questions. Use ASK_USER_QUESTION for any structured input required from the user.
-- Design plans that can execute independently without requiring user input for factual information.
-- Use available tools and APIs to gather data rather than asking users to provide it.
+Write a concise prose plan (5 to 10 logical steps) that explains the strategic approach.
 
 IMPORTANT: Return ONLY plain text for the plan. NO markdown formatting, NO code blocks, NO special formatting.
 
-CRITICAL: The actionVerb for each step MUST be a valid, existing plugin actionVerb (from the provided list) or a descriptive, new actionVerb (e.g., 'ANALYZE_DATA', 'GENERATE_REPORT'). It MUST NOT be 'UNKNOWN' or 'NOVEL_VERB'.
 """
 
         for attempt in range(self.max_retries):
@@ -533,14 +522,16 @@ Follow these steps to create the final JSON output:
 1.  **Analyze:** Read the Goal and Prose Plan to fully understand the user's intent and the required sequence of actions.
 2.  **Verify Schema:** Carefully study the JSON SCHEMA. Your output must follow it perfectly.
 3.  **Restate the Plan as Explicit Steps:** Identify a list of steps that will be taken to achieve the Goal. Each Step should be a clear, actionable task with one or more outputs.
-4.  **Check Dependencies:** For each step, ensure its `inputs` that depend on previous steps correctly reference the `outputName` and `sourceStep`.
-5.  **Validate Inputs:** Ensure every input for each step is properly defined and has either a static literal `value` or a dynamic `outputName` and `sourceStep` reference from a prior step.
+4.  **Check Dependencies & Data Types:** For each step, ensure its `inputs` correctly reference the `outputName` and `sourceStep`. Crucially, verify that the `valueType` of the source output matches the expected `valueType` of the target input.
+5.  **Handle Mismatches:** If there is a type mismatch (e.g., a step outputs an `array` but the next step needs a `string`), insert a `TRANSFORM` step to correctly process the data (e.g., extract an element, join a list). Do NOT simply create an invalid dependency.
 6.  **Final Check:** Before generating the output, perform a final check to ensure the entire JSON structure is valid and fully compliant with the schema.
 
 **STEP B: Generate Final JSON (Your Final Output)**
 After your internal analysis and self-correction is complete, provide ONLY the final, valid JSON array of steps.
 
 **CRITICAL DEPENDENCY RULES:**
+- **Data Type Integrity:** The `valueType` of an output used as an input for a subsequent step MUST match the `valueType` expected by that subsequent step. If they do not match, you MUST insert a `TRANSFORM` step to convert the data to the correct type or format.
+- **Handling Lists (Arrays):** If a step requires a single item (e.g., a URL as a string) but a previous step provides a list of items (an array), you MUST use a `FOREACH` loop to iterate over the list or a `TRANSFORM` step to extract a specific item (e.g., the first one). Do not pass an entire array to an input that expects a single string.
 - **Multi-step plans are essential:** Break down complex goals into multiple, sequential steps.
 - **Dependencies are crucial for flow:** Every step that uses an output from a previous step MUST declare that dependency in its `inputs` object using `outputName` and `sourceStep`.
 - **Prioritize autonomous information gathering:** Use tools like SEARCH, SCRAPE, DATA_TOOLKIT, TEXT_ANALYSIS, TRANSFORM, and FILE_OPERATION to gather information and perform tasks.
@@ -561,7 +552,15 @@ After your internal analysis and self-correction is complete, provide ONLY the f
 - **Iterative Processes/Feedback Loops:** If the prose plan describes a continuous feedback loop, iterative process, or any form of repetition, you MUST translate this into an appropriate looping construct (e.g., using 'WHILE', 'REPEAT', or 'FOREACH' actionVerbs) within the JSON plan. Do not simply list the steps once if they are intended to be repeated.
 - **VERY IMPORTANT**: For each step, you MUST examine the `inputDefinitions` for the corresponding `actionVerb` and ensure that all `required` inputs are present in the step's `inputs` object.
 
+CRITICAL: The actionVerb for each step MUST be a valid, existing plugin actionVerb (from the provided list) or a descriptive, new actionVerb (e.g., 'ANALYZE_DATA', 'GENERATE_REPORT'). It MUST NOT be 'UNKNOWN' or 'NOVEL_VERB'.
+
 {plugin_guidance}
+
+CRITICAL PLANNING_PRINCIPLES:
+- **Autonomous Execution:** Your primary role is to complete tasks independently. Prioritize autonomous information gathering using SEARCH, SCRAPE, API_CLIENT, and other research tools.
+- **Strategic Use of User Questions:** Use the ASK_USER_QUESTION verb *only* when information is truly unobtainable through your own tools (e.g., subjective opinions, personal preferences, or explicit permissions). Do NOT use it to ask the user for information you can find yourself or to delegate tasks back to them.
+- Design plans that can execute independently without requiring user input for factual information.
+- Use available tools and APIs to gather data rather than asking users to provide it.
 """
 
         for attempt in range(self.max_retries):

@@ -84,21 +84,25 @@ export class Agent extends BaseEntity {
         if ('roleCustomizations' in config && config.roleCustomizations) {
             this.roleCustomizations = config.roleCustomizations;
         }
-        if (!config.actionVerb) {
-            console.log('Agent Line 95 - Missing required property "actionVerb" in agent config');
-            throw new Error(`Missing required property 'actionVerb' in agent config`);
+
+        // Only create an initial ACCOMPLISH step if this is a root agent (no parent dependency)
+        if (this.dependencies.length === 0) {
+            if (!config.actionVerb) {
+                throw new Error(`Missing required property 'actionVerb' for root agent config`);
+            }
+            const initialStep = new Step({
+                actionVerb: config.actionVerb,
+                missionId: this.missionId,
+                ownerAgentId: this.id,
+                stepNo: 1,
+                inputValues: this.inputValues,
+                description: 'Initial mission step',
+                status: StepStatus.PENDING,
+                persistenceManager: this.agentPersistenceManager
+            });
+            this.steps.push(initialStep);
         }
-        const initialStep = new Step({
-            actionVerb: config.actionVerb,
-            missionId: this.missionId,
-            ownerAgentId: this.id,
-            stepNo: 1,
-            inputValues: this.inputValues,
-            description: 'Initial mission step',
-            status: StepStatus.PENDING,
-            persistenceManager: this.agentPersistenceManager
-        });
-        this.steps.push(initialStep);
+        
         this.setAgentStatus(this.status, {eventType: 'agent_created', inputValues: MapSerializer.transformForSerialization(this.inputValues)});
 
         this.initRabbitMQ(); // Call init RabbitMQ
@@ -480,17 +484,55 @@ Please consider this context and the available plugins when planning and executi
             //console.log(`[Agent ${this.id}] runAgent: Pending steps: ${pendingSteps.map(s => `${s.id} (${s.actionVerb}, ${s.status})`).join(', ') || 'None'}`);
 
             const executableSteps = pendingSteps.filter(step => step.areDependenciesSatisfied(this.steps));
-            //console.log(`[Agent ${this.id}] runAgent: Executable steps: ${executableSteps.map(s => `${s.id} (${s.actionVerb}, ${s.status})`).join(', ') || 'None'}`);
 
             if (executableSteps.length > 0) {
-                console.log(`[Agent ${this.id}] runAgent: Executing ${executableSteps.length} steps.`);
-                const executionPromises = executableSteps.map(step => {
-                    console.log(`[Agent ${this.id}] runAgent: Calling executeStep for step ${step.id} (${step.actionVerb})`);
-                    return this.executeStep(step);
-                });
-                await Promise.all(executionPromises);
+                const stepsToDelegate = new Map<string, Step[]>();
+                const stepsToExecuteLocally: Step[] = [];
+
+                // Group steps by role for batch delegation
+                for (const step of executableSteps) {
+                    const role = step.recommendedRole;
+                    if (role && role !== this.role && this.role !== 'coordinator') {
+                        if (!stepsToDelegate.has(role)) {
+                            stepsToDelegate.set(role, []);
+                        }
+                        stepsToDelegate.get(role)!.push(step);
+                    } else {
+                        stepsToExecuteLocally.push(step);
+                    }
+                }
+
+                const allPromises: Promise<any>[] = [];
+
+                // Create and execute delegation promises
+                for (const [role, steps] of stepsToDelegate.entries()) {
+                    const delegationPromise = (async () => {
+                        console.log(`[Agent ${this.id}] Found ${steps.length} steps to delegate to role: ${role}`);
+                        const recipientId = await this._getOrCreateSpecializedAgent(role);
+                        if (recipientId) {
+                            for (const step of steps) {
+                                // Pass recipientId to avoid re-finding the agent for each step in the batch
+                                await this.delegateStepToSpecializedAgent(step, recipientId);
+                            }
+                        } else {
+                            console.error(`[Agent ${this.id}] Could not find or create agent for role ${role}. Moving ${steps.length} steps to local execution.`);
+                            stepsToExecuteLocally.push(...steps);
+                        }
+                    })();
+                    allPromises.push(delegationPromise);
+                }
+
+                // Create local execution promises
+                if (stepsToExecuteLocally.length > 0) {
+                    console.log(`[Agent ${this.id}] Executing ${stepsToExecuteLocally.length} steps locally.`);
+                    const localExecutionPromises = stepsToExecuteLocally.map(step => this.executeStep(step));
+                    allPromises.push(...localExecutionPromises);
+                }
+                
+                await Promise.all(allPromises);
+
             } else if (pendingSteps.length > 0) {
-                // Deadlock detection: pending steps exist, but none are executable.
+                // Deadlock detection
                 for (const step of pendingSteps) {
                     if (step.areDependenciesPermanentlyUnsatisfied(this.steps)) {
                         step.status = StepStatus.CANCELLED;
@@ -1653,7 +1695,18 @@ Please consider this context and the available plugins when planning and executi
                 throw new Error(`Missing required property 'taskType' in task`);
             }
 
-            const deserializedInputs = MapSerializer.transformFromSerialization(task.inputs);
+            const deserializedInputs = MapSerializer.transformFromSerialization(task.inputs) as Map<string, InputValue>;
+            const inputReferences = new Map<string, InputReference>();
+            if (deserializedInputs) {
+                for (const [key, inputValue] of deserializedInputs.entries()) {
+                    inputReferences.set(key, {
+                        inputName: key,
+                        value: inputValue.value,
+                        valueType: inputValue.valueType,
+                        args: inputValue.args
+                    });
+                }
+            }
 
             const outputsAsObject = (task as any).outputs;
             const deserializedOutputs = new Map<string, string>();
@@ -1667,7 +1720,7 @@ Please consider this context and the available plugins when planning and executi
               missionId: this.missionId,
               ownerAgentId: this.id,
               stepNo: this.steps.length + 1,
-              inputValues: deserializedInputs,
+              inputReferences: inputReferences,
               description: task.description,
               dependencies: (task as any).dependencies,
               outputs: deserializedOutputs,
@@ -1800,13 +1853,12 @@ Explanation: ${resolution.explanation}`);
         }
     }
 
-    private async delegateStepToSpecializedAgent(step: Step): Promise<{ success: boolean, result: any }> {
+    private async delegateStepToSpecializedAgent(step: Step, recipientId?: string): Promise<{ success: boolean, result: any }> {
         try {
-            console.log(`Attempting to delegate step ${step.id} to an agent with role ${step.recommendedRole}`);
+            const finalRecipientId = recipientId || await this._getOrCreateSpecializedAgent(step.recommendedRole!);
 
-            const recipientId = await this._getOrCreateSpecializedAgent(step.recommendedRole!);
-
-            if (recipientId) {
+            if (finalRecipientId) {
+                console.log(`Attempting to delegate step ${step.id} to agent ${finalRecipientId} with role ${step.recommendedRole}`);
                 // Create a task delegation request
                 const delegationRequest = {
                     taskId: uuidv4(),
@@ -1826,25 +1878,26 @@ Explanation: ${resolution.explanation}`);
                 // Delegate the task to the specialized agent
                 const delegationResponse = await this.authenticatedApi.post(`http://${this.agentSetUrl}/delegateTask`, {
                     delegatorId: this.id,
-                    recipientId: recipientId,
+                    recipientId: finalRecipientId,
                     request: delegationRequest
                 });
 
                 if (delegationResponse.data && delegationResponse.data.accepted) {
-                    console.log(`Successfully delegated step ${step.id} to agent ${recipientId}`);
+                    console.log(`Successfully delegated step ${step.id} to agent ${finalRecipientId}`);
                     // Store the mapping from the delegated task ID to our internal step ID
                     this.delegatedSteps.set(delegationResponse.data.taskId, step.id);
+                    step.status = StepStatus.SUB_PLAN_RUNNING; // Mark as waiting for delegation result
 
                     return {
                         success: true,
                         result: {
                             taskId: delegationResponse.data.taskId,
-                            recipientId: recipientId,
+                            recipientId: finalRecipientId,
                             estimatedCompletion: delegationResponse.data.estimatedCompletion
                         }
                     };
                 } else {
-                    console.log(`Agent ${recipientId} rejected delegation: ${delegationResponse.data.reason}`);
+                    console.log(`Agent ${finalRecipientId} rejected delegation: ${delegationResponse.data.reason}`);
                     return { success: false, result: null };
                 }
             } else {
