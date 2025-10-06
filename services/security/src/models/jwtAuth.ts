@@ -68,6 +68,12 @@ const serviceRegistry: Record<string, ServiceCredential> = {
     secret: process.env.SECURITYMANAGER_SECRET || 'stage7AuthSecret',
     roles: ['user:manage', 'token:manage', 'auth:manage']
   },
+  'TestClient': {
+    id: 'TestClient',
+    secret: 'stage7AuthSecret',
+    roles: ['test:run']
+  },
+  
   
 };
 

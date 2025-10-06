@@ -16,7 +16,7 @@
             "name": "script_parameters",
             "required": false,
             "type": "json",
-            "description": "Parameters to be passed to the script. Available as a 'params' variable in the script context. If a JSON object, it should be a valid JSON object.",
+            "description": "Parameters to be passed to the script. Available as a 'params' variable in the script context. The 'value' for this input MUST be a valid JSON string. If referencing outputs from previous steps, embed them as JSON-encoded values within this string. For example, to pass 'metrics' from sourceStep 4: '{\"metrics\": {\"outputName\": \"metrics\", \"sourceStep\": 4}}'. The TRANSFORM plugin will parse this JSON string and make its contents available to the Python script via the 'params' dictionary.",
             "aliases": ["params","parameters","args"]
         }
     ],

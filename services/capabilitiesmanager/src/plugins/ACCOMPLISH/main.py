@@ -523,15 +523,79 @@ Follow these steps to create the final JSON output:
 2.  **Verify Schema:** Carefully study the JSON SCHEMA. Your output must follow it perfectly.
 3.  **Restate the Plan as Explicit Steps:** Identify a list of steps that will be taken to achieve the Goal. Each Step should be a clear, actionable task with one or more outputs.
 4.  **Check Dependencies & Data Types:** For each step, ensure its `inputs` correctly reference the `outputName` and `sourceStep`. Crucially, verify that the `valueType` of the source output matches the expected `valueType` of the target input.
-5.  **Handle Mismatches:** If there is a type mismatch (e.g., a step outputs an `array` but the next step needs a `string`), insert a `TRANSFORM` step to correctly process the data (e.g., extract an element, join a list). Do NOT simply create an invalid dependency.
+5.  **CRITICAL - Ensure Globally Unique Step Numbers:** Every step must have a globally unique step number across the entire plan including all sub-plans at any nesting level. Do not reuse step numbers anywhere in the plan.
 6.  **Final Check:** Before generating the output, perform a final check to ensure the entire JSON structure is valid and fully compliant with the schema.
 
 **STEP B: Generate Final JSON (Your Final Output)**
 After your internal analysis and self-correction is complete, provide ONLY the final, valid JSON array of steps.
 
-**CRITICAL DEPENDENCY RULES:**
-- **Data Type Integrity:** The `valueType` of an output used as an input for a subsequent step MUST match the `valueType` expected by that subsequent step. If they do not match, you MUST insert a `TRANSFORM` step to convert the data to the correct type or format.
-- **Handling Lists (Arrays):** If a step requires a single item (e.g., a URL as a string) but a previous step provides a list of items (an array), you MUST use a `FOREACH` loop to iterate over the list or a `TRANSFORM` step to extract a specific item (e.g., the first one). Do not pass an entire array to an input that expects a single string.
+---
+**CRITICAL DEPENDENCY RULES (STRICTLY ENFORCED):**
+---
+
+**CRITICAL: GLOBALLY UNIQUE STEP NUMBERS - Every step must have a globally unique step number across the entire plan including all sub-plans at any nesting level. Do not reuse step numbers anywhere in the plan.**
+
+**THE GOLDEN RULE OF DEPENDENCIES: A step can ONLY depend on the outputs of PRECEDING steps. A step can NEVER depend on itself.**
+
+**INVALID EXAMPLE (DO NOT DO THIS):**
+{{
+  "number": 2,
+  "actionVerb": "SCRAPE",
+  "inputs": {{
+    "url": {{ "outputName": "item", "sourceStep": 2 }} // ERROR: sourceStep is the same as the step's own number.
+  }}
+}}
+
+**CORRECT EXAMPLE:**
+{{
+  "number": 2,
+  "actionVerb": "SCRAPE",
+  "inputs": {{
+    "url": {{ "outputName": "some_url_list", "sourceStep": 1 }} // CORRECT: Depends on step 1.
+  }}
+}}
+
+- **Data Type Integrity (MANDATORY):** The `valueType` of an output from a `sourceStep` MUST EXACTLY MATCH the `valueType` expected by the consuming input. There are no exceptions. If a `SEARCH` step outputs an `array` of results, and a `SCRAPE` step expects a `string` for its `url` input, you MUST insert a `FOREACH` loop to iterate the array. Do not create an invalid plan assuming the system will fix it.
+- **Handling Lists (Arrays) - CRITICAL FOREACH USAGE:**
+    - If a step (e.g., `SCRAPE`) requires a single item (e.g., a URL as a `string`) but a previous step (e.g., `SEARCH`) provides a list of items (an `array`), you MUST use a `FOREACH` loop.
+    - The `FOREACH` step's `list` input MUST depend on the array output from the source step (e.g., `sourceStep: 1`, `outputName: "competitorList"`).
+    - The step(s) inside the `FOREACH`'s `steps` sub-array that consume the individual items MUST reference the `FOREACH` step itself as their `sourceStep` and `item` as their `outputName`.
+    - **Example of correct FOREACH structure with globally unique step numbers:**
+        ```json
+        [
+          {{
+            "number": 1,
+            "actionVerb": "SEARCH",
+            "outputs": {{ "competitorList": "array of URLs" }}
+          }},
+          {{
+            "number": 2,
+            "actionVerb": "FOREACH",
+            "inputs": {{
+              "list": {{ "outputName": "competitorList", "sourceStep": 1 }}
+            }},
+            "outputs": {{ "scrapedResults": "aggregated results" }},
+            "steps": [
+              {{
+                "number": 3, // CRITICAL: Globally unique step number (NOT 1)
+                "actionVerb": "SCRAPE",
+                "inputs": {{
+                  "url": {{ "outputName": "item", "sourceStep": 2 }} // sourceStep refers to the FOREACH step (number 2)
+                }},
+                "outputs": {{ "pageContent": "string" }}
+              }},
+              {{
+                "number": 4, // CRITICAL: Globally unique step number (NOT 2)
+                "actionVerb": "TEXT_ANALYSIS",
+                "inputs": {{
+                  "text": {{ "outputName": "pageContent", "sourceStep": 3 }} // sourceStep refers to the SCRAPE step (number 3)
+                }},
+                "outputs": {{ "analysis": "object" }}
+              }}
+            ]
+          }}
+        ]
+        ```
 - **Multi-step plans are essential:** Break down complex goals into multiple, sequential steps.
 - **Dependencies are crucial for flow:** Every step that uses an output from a previous step MUST declare that dependency in its `inputs` object using `outputName` and `sourceStep`.
 - **Prioritize autonomous information gathering:** Use tools like SEARCH, SCRAPE, DATA_TOOLKIT, TEXT_ANALYSIS, TRANSFORM, and FILE_OPERATION to gather information and perform tasks.

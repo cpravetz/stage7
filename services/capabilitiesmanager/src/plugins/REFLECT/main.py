@@ -404,6 +404,7 @@ Your task is to reflect on the mission progress and determine the best course of
 - You are an autonomous agent. Your primary goal is to solve problems independently.
 - Do not use the `ASK_USER_QUESTION` verb to seek information from the user that can be found using other tools like `SEARCH` or `SCRAPE`. Your goal is to be resourceful and autonomous.
 - If creating a plan, ensure it builds upon the existing plan history and work products.
+- **CRITICAL: GLOBALLY UNIQUE STEP NUMBERS** - Every step must have a globally unique step number across the entire plan including all sub-plans at any nesting level. Do not reuse step numbers anywhere in the plan.
 
 **RESPONSE FORMATS:**
 

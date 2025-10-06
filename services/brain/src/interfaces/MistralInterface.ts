@@ -74,8 +74,21 @@ export class MistralInterface extends BaseInterface {
                 throw new Error('Unexpected response format from Mistral');
             }
         } catch (error) {
-            console.error('Error in Mistral interface:', error instanceof Error ? error.message : String(error));
-            throw error;
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            console.error('Error in Mistral interface:', errorMessage);
+
+            // Handle specific error types for better model management
+            if (errorMessage.includes('429') || errorMessage.includes('rate limit')) {
+                throw new Error(`Mistral rate limit error: ${errorMessage}`);
+            } else if (errorMessage.includes('401') || errorMessage.includes('403')) {
+                throw new Error(`Mistral authentication error: ${errorMessage}`);
+            } else if (errorMessage.includes('timeout') || errorMessage.includes('ECONNREFUSED') || errorMessage.includes('ENOTFOUND')) {
+                throw new Error(`Mistral connection error: ${errorMessage}`);
+            } else if (errorMessage.includes('404')) {
+                throw new Error(`Mistral model not found: ${errorMessage}`);
+            } else {
+                throw new Error(`Mistral API error: ${errorMessage}`);
+            }
         }
     }
 

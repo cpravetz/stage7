@@ -169,11 +169,23 @@ export class Agent extends BaseEntity {
         // Send initial status update to TrafficManager
         await this.updateStatus();
 
-        while (this.status === AgentStatus.RUNNING) {
+        while (this.hasActiveWork()) {
             await this.runAgent();
             // A short delay to prevent tight, CPU-intensive loops when the agent is truly idle but not yet completed.
             await new Promise(resolve => setTimeout(resolve, 1000));
         }
+
+        // Once there is no more active work, set the final agent status
+        if (this.status === AgentStatus.RUNNING) { // Only change status if it was still running
+            this.setAgentStatus(AgentStatus.COMPLETED, {eventType: 'agent_completed'});
+            const finalStep = this.steps.filter(s => s.status === StepStatus.COMPLETED).pop();
+            if (finalStep) {
+                this.output = await this.agentPersistenceManager.loadWorkProduct(this.id, finalStep.id);
+            }
+            console.log(`Agent ${this.id} has completed all active work.`);
+            this.say(`Agent ${this.id} has completed its work.`);
+        }
+
         return this.status;
     }
 
@@ -368,11 +380,10 @@ Please consider this context and the available plugins when planning and executi
                         return;
                     }
 
-                    this.setAgentStatus(AgentStatus.WAITING_FOR_USER_INPUT, {eventType: 'agent_waiting_for_user_input'});
                     step.status = StepStatus.WAITING;
                     this.waitingSteps.set(requestId, step.id);
-                    console.log(`[Agent ${this.id}] Stored waiting step for requestId: ${requestId}, stepId: ${step.id}. Current waitingSteps size: ${this.waitingSteps.size}`);
-                    await this.updateStatus();
+                    console.log(`[Agent ${this.id}] Step ${step.id} is now WAITING for user input with requestId: ${requestId}.`);
+                    // No longer changing agent status, allowing the runAgent loop to continue for other steps.
                     return;
                 }
             } else {
@@ -646,10 +657,9 @@ Please consider this context and the available plugins when planning and executi
                             resultDescription: 'User response'
                         }];
                         step.status = StepStatus.COMPLETED;
-                        this.setAgentStatus(AgentStatus.RUNNING,{eventType: 'agent_resumed_from_waiting'});
                         this.waitingSteps.delete(requestId);
-                        console.log(`[Agent ${this.id}] Processed user input for requestId: ${requestId}. New waitingSteps size: ${this.waitingSteps.size}`);
-                        this.runAgent();
+                        console.log(`[Agent ${this.id}] Processed user input for requestId: ${requestId}. Step ${step.id} is now COMPLETED.`);
+                        // The runAgent loop will now pick up this completed step and process its dependents.
                     } else {
                         console.warn(`[Agent ${this.id}] Step with ID ${waitingStepId} not found for requestId ${requestId}.`);
                     }
@@ -1258,10 +1268,6 @@ Please consider this context and the available plugins when planning and executi
      * Check if agent is stuck waiting for user input with unresolved placeholders and fix it
      */
     public async checkAndFixStuckUserInput(): Promise<boolean> {
-        if (this.status !== AgentStatus.WAITING_FOR_USER_INPUT) {
-            return false;
-        }
-
         // Find the step that's waiting for user input
         for (const [requestId, stepId] of this.waitingSteps.entries()) {
             const step = this.steps.find(s => s.id === stepId);
@@ -1488,9 +1494,6 @@ Please consider this context and the available plugins when planning and executi
     }
 
     isWaitingForUserInput(requestId?: string): boolean {
-        if (this.status !== AgentStatus.WAITING_FOR_USER_INPUT) {
-            return false;
-        }
         if (requestId) {
             return this.waitingSteps.has(requestId);
         }

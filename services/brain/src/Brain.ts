@@ -211,6 +211,8 @@ export class Brain extends BaseEntity {
 
                 if (selectedModel && selectedModel.name) {
                     const isTimeout = /timeout|system_error/i.test(errorMessage);
+                    const isRateLimit = /rate limit|429/i.test(errorMessage);
+
                     if (isTimeout) {
                         this.modelTimeoutCounts[selectedModel.name] = (this.modelTimeoutCounts[selectedModel.name] || 0) + 1;
                         if (this.modelTimeoutCounts[selectedModel.name] >= 3) {
@@ -218,6 +220,13 @@ export class Brain extends BaseEntity {
                             this.modelManager.blacklistModel(selectedModel.name, new Date(Date.now() + 3600 * 1000));
                             this.modelTimeoutCounts[selectedModel.name] = 0;
                         }
+                    } else if (isRateLimit) {
+                        // Handle rate limiting by notifying the service
+                        console.warn(`[Brain Generate] Rate limit detected for model ${selectedModel.name}. Notifying service.`);
+                        if (selectedModel.service && typeof selectedModel.service.handleRateLimitError === 'function') {
+                            selectedModel.service.handleRateLimitError(error);
+                        }
+                        // Don't blacklist immediately for rate limits, let the service handle availability
                     } else {
                         this.modelTimeoutCounts[selectedModel.name] = 0;
                     }
@@ -321,12 +330,20 @@ export class Brain extends BaseEntity {
                 } else if (selectedModel && selectedModel.name) {
                     const isTimeout = /timeout|system_error|connection error/i.test(errorMessage);
                     const isJsonError = /json|parse|invalid format/i.test(errorMessage);
-                    
+                    const isRateLimit = /rate limit|429/i.test(errorMessage);
+
                     if (!this.modelFailureCounts[selectedModel.name]) {
                         this.modelFailureCounts[selectedModel.name] = { timeout: 0, json: 0, other: 0 };
                     }
-                    
-                    if (isTimeout) {
+
+                    if (isRateLimit) {
+                        // Handle rate limiting by notifying the service
+                        console.warn(`[Brain Chat] Rate limit detected for model ${selectedModel.name}. Notifying service.`);
+                        if (selectedModel.service && typeof selectedModel.service.handleRateLimitError === 'function') {
+                            selectedModel.service.handleRateLimitError(error);
+                        }
+                        // Don't count rate limits as failures, let the service handle availability
+                    } else if (isTimeout) {
                         this.modelFailureCounts[selectedModel.name].timeout++;
                     } else if (isJsonError) {
                         this.modelFailureCounts[selectedModel.name].json++;
