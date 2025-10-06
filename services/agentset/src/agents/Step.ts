@@ -389,122 +389,97 @@ export class Step {
     private async handleForeach(): Promise<PluginOutput[]> {
         const arrayInput = this.inputValues.get('array');
         const stepsInput = this.inputValues.get('steps');
-
-        if (!arrayInput || !Array.isArray(arrayInput.value)) {
+    
+        // Validation: Check for a valid iterable instead of just an array
+        if (!arrayInput || !arrayInput.value || typeof arrayInput.value[Symbol.iterator] !== 'function') {
             return [{
-                success: false,
-                name: 'error',
-                resultType: PluginParameterType.ERROR,
-                resultDescription: '[Step]Error in FOREACH step: "array" input is missing or not an array.',
+                success: false, name: 'error', resultType: PluginParameterType.ERROR,
+                resultDescription: '[Step]Error in FOREACH step: "array" input is missing or not an iterable.',
                 result: null,
-                error: 'FOREACH requires an "array" input of type array.'
+                error: 'FOREACH requires an "array" input that is iterable (e.g., an array, a map, a set).'
             }];
         }
-
+    
         if (!stepsInput || !Array.isArray(stepsInput.value)) {
             return [{
-                success: false,
-                name: 'error',
-                resultType: PluginParameterType.ERROR,
+                success: false, name: 'error', resultType: PluginParameterType.ERROR,
                 resultDescription: '[Step]Error in FOREACH step: "steps" input is missing or not a plan (array of tasks).',
                 result: null,
                 error: 'FOREACH requires a "steps" input of type plan.'
             }];
         }
-
-        const inputArray: any[] = arrayInput.value;
-        let subPlanTemplate: ActionVerbTask[];
-
-        if (typeof stepsInput.value === 'string') {
-            try {
-                subPlanTemplate = JSON.parse(stepsInput.value);
-            } catch (e) {
-                return [{
-                    success: false,
-                    name: 'error',
-                    resultType: PluginParameterType.ERROR,
-                    resultDescription: '[Step]Error in FOREACH step: Invalid JSON format for steps',
-                    result: `steps.forEach is not a function`,
-                    error: `steps.forEach is not a function`
-                }];
-            }
-        } else if (Array.isArray(stepsInput.value)) {
-            subPlanTemplate = stepsInput.value as ActionVerbTask[];
-        } else {
-            return [{
-                success: false,
-                name: 'error',
-                resultType: PluginParameterType.ERROR,
-                resultDescription: '[Step]Error in FOREACH step: steps must be an array or JSON string',
-                result: `steps.forEach is not a function`,
-                error: `steps.forEach is not a function`
-            }];
-        }
-
-        if (!Array.isArray(subPlanTemplate)) {
-            return [{
-                success: false,
-                name: 'error',
-                resultType: PluginParameterType.ERROR,
-                resultDescription: '[Step]Error in FOREACH step: steps must be an array',
-                result: `steps.forEach is not a function`,
-                error: `steps.forEach is not a function`
-            }];
-        }
-        const allGeneratedSteps: ActionVerbTask[] = [];
-
+    
+        // Convert any iterable to an array to allow for indexing and length properties
+        const inputArray: any[] = Array.from(arrayInput.value);
+        const subPlanTemplate: ActionVerbTask[] = stepsInput.value;
+    
         if (inputArray.length === 0) {
             return [{
-                success: true,
-                name: 'loop_skipped',
-                resultType: PluginParameterType.STRING,
-                resultDescription: 'FOREACH loop skipped as input array was empty.',
-                result: 'Empty array, no iterations.'
+                success: true, name: 'loop_skipped', resultType: PluginParameterType.STRING,
+                resultDescription: 'FOREACH loop skipped as input iterable was empty.',
+                result: 'Empty iterable, no iterations.'
             }];
         }
-
+    
+        const allGeneratedSteps: ActionVerbTask[] = [];
+    
         for (let i = 0; i < inputArray.length; i++) {
             const item = inputArray[i];
+            // Deep copy the sub-plan template for each iteration
             const itemSteps: ActionVerbTask[] = JSON.parse(JSON.stringify(subPlanTemplate));
-
+    
             itemSteps.forEach(task => {
-                if (!task.inputReferences) {
-                    task.inputReferences = new Map<string, InputReference>();
+                // Update description for context
+                task.description = `(Item ${i + 1}/${inputArray.length}) ${task.description || ''}`;
+    
+                const inputs = (task as any).inputs || {};
+                let inputModified = false;
+    
+                for (const inputName in inputs) {
+                    const inputDef = inputs[inputName];
+                    // Check if this input is the one that depends on the loop item
+                    if (inputDef.outputName === 'item') {
+                        console.log(`[handleForeach] Modifying input '${inputName}' in task '${task.actionVerb}'. Replacing 'item' dependency with actual value.`);
+                        
+                        // Replace dependency with direct value
+                        inputDef.value = item;
+                        // Infer valueType from the item
+                        if (typeof item === 'string') {
+                            inputDef.valueType = PluginParameterType.STRING;
+                        } else if (typeof item === 'number') {
+                            inputDef.valueType = PluginParameterType.NUMBER;
+                        } else if (typeof item === 'boolean') {
+                            inputDef.valueType = PluginParameterType.BOOLEAN;
+                        } else if (Array.isArray(item)) {
+                            inputDef.valueType = PluginParameterType.ARRAY;
+                        } else if (typeof item === 'object' && item !== null) {
+                            inputDef.valueType = PluginParameterType.OBJECT;
+                        } else {
+                            inputDef.valueType = PluginParameterType.ANY;
+                        }
+                        
+                        // Remove the properties that defined it as a dependency
+                        delete inputDef.outputName;
+                        delete inputDef.sourceStep;
+                        inputModified = true;
+                    }
                 }
-                task.description = `(Item ${i + 1}/${inputArray.length}: ${JSON.stringify(item)}) ${task.description || ''}`;
-                task.inputReferences.set('loopItem', {
-                    inputName: 'loopItem',
-                    value: item,
-                    valueType: PluginParameterType.ANY,
-                    args: { fromForeach: true }
-                });
-                task.inputReferences.set('loopIndex', {
-                    inputName: 'loopIndex',
-                    value: i,
-                    valueType: PluginParameterType.NUMBER,
-                    args: { fromForeach: true }
-                });
+    
+                if (!inputModified) {
+                    console.warn(`[handleForeach] Task '${task.actionVerb}' in sub-plan did not have an input depending on 'item'. The loop item was not injected.`);
+                }
             });
+    
             allGeneratedSteps.push(...itemSteps);
         }
-
-        if (allGeneratedSteps.length > 0) {
-            return [{
-                success: true,
-                name: 'steps',
-                resultType: PluginParameterType.PLAN,
-                resultDescription: `[Step] FOREACH generated ${allGeneratedSteps.length} steps.`,
-                result: allGeneratedSteps
-            }];
-        } else {
-            return [{
-                success: true,
-                name: 'no_steps_generated',
-                resultType: PluginParameterType.STRING,
-                resultDescription: 'FOREACH loop completed without generating steps (e.g. empty input array).',
-                result: 'No steps generated.'
-            }];
-        }
+    
+        return [{
+            success: true,
+            name: 'steps',
+            resultType: PluginParameterType.PLAN,
+            resultDescription: `[Step] FOREACH generated ${allGeneratedSteps.length} steps.`,
+            result: allGeneratedSteps
+        }];
     }
 
     async execute(
