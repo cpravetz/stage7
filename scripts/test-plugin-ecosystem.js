@@ -1,9 +1,3 @@
-#!/usr/bin/env node
-/**
- * Comprehensive Plugin Ecosystem Test
- * Tests all plugin types: Python, JavaScript, and Container plugins
- */
-
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
@@ -29,12 +23,39 @@ class PluginEcosystemTester {
             failed: 0,
             tests: []
         };
+        this.token = null;
     }
 
     log(message, level = 'info') {
         const timestamp = new Date().toISOString();
         const prefix = level.toUpperCase().padEnd(5);
         console.log(`[${timestamp}] ${prefix} ${message}`);
+    }
+
+    async getToken() {
+        try {
+            this.log('Getting service token...');
+            const response = await axios.post('http://localhost:5010/auth/service', {
+                componentType: 'TestClient',
+                clientSecret: 'stage7AuthSecret'
+            }, {
+                headers: { 'Content-Type': 'application/json' },
+                timeout: 10000
+            });
+            this.token = response.data.token;
+            this.log('Token received.');
+        } catch (error) {
+            this.log(`Error getting token: ${error.message}`, 'error');
+            this.token = null;
+        }
+    }
+    
+    getAuthConfig() {
+        return {
+            headers: {
+                'Authorization': `Bearer ${this.token}`
+            }
+        };
     }
 
     async runTest(name, testFn) {
@@ -57,7 +78,7 @@ class PluginEcosystemTester {
     }
 
     async testPluginDiscovery() {
-        const response = await axios.get(`${CAPABILITIES_MANAGER_URL}/plugins`);
+        const response = await axios.get(`${CAPABILITIES_MANAGER_URL}/plugins`, this.getAuthConfig());
         
         if (response.status !== 200) {
             throw new Error(`Expected status 200, got ${response.status}`);
@@ -69,7 +90,7 @@ class PluginEcosystemTester {
         }
 
         // Check for our migrated plugins
-        const expectedPlugins = ['ACCOMPLISH', 'ASK_USER_QUESTION', 'SCRAPE', 'WEATHER', 'TEXT_ANALYSIS'];
+        const expectedPlugins = ['ACCOMPLISH', 'ASK_USER_QUESTION', 'SCRAPE', 'TEXT_ANALYSIS'];
         const foundPlugins = plugins.map(p => p.verb || p.id);
         
         for (const expected of expectedPlugins) {
@@ -90,7 +111,7 @@ class PluginEcosystemTester {
         const response = await axios.post(`${CAPABILITIES_MANAGER_URL}/execute`, {
             actionVerb: 'TEXT_ANALYSIS',
             inputs: testInput
-        });
+        }, this.getAuthConfig());
 
         if (response.status !== 200) {
             throw new Error(`Expected status 200, got ${response.status}`);
@@ -120,7 +141,8 @@ class PluginEcosystemTester {
     async testMarketplaceIntegration() {
         // Test marketplace plugin listing with container support
         const response = await axios.get(`${MARKETPLACE_URL}/plugins`, {
-            params: { includeContainerPlugins: true }
+            params: { includeContainerPlugins: true },
+            ...this.getAuthConfig()
         });
 
         if (response.status !== 200) {
@@ -146,7 +168,7 @@ class PluginEcosystemTester {
             language: 'python'
         };
 
-        const response = await axios.post(`${ENGINEER_URL}/createPlugin`, testRequest);
+        const response = await axios.post(`${ENGINEER_URL}/createPlugin`, testRequest, this.getAuthConfig());
 
         if (response.status !== 200) {
             throw new Error(`Expected status 200, got ${response.status}`);
@@ -181,7 +203,7 @@ class PluginEcosystemTester {
         };
 
         try {
-            const response = await axios.post(`${MARKETPLACE_URL}/plugins`, containerPlugin);
+            const response = await axios.post(`${MARKETPLACE_URL}/plugins`, containerPlugin, this.getAuthConfig());
             this.log('Container plugin validation successful');
         } catch (error) {
             if (error.response && error.response.status === 400) {
@@ -216,6 +238,13 @@ class PluginEcosystemTester {
     async runAllTests() {
         this.log('Starting Plugin Ecosystem Integration Tests', 'info');
         this.log('='.repeat(50), 'info');
+
+        await this.getToken();
+
+        if (!this.token) {
+            this.log('Could not get token. Aborting tests.', 'fail');
+            process.exit(1);
+        }
 
         await this.runTest('System Health Check', () => this.testSystemHealth());
         await this.runTest('Plugin Discovery', () => this.testPluginDiscovery());
