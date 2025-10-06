@@ -1023,6 +1023,10 @@ Return the corrected JSON object for the step."""
             sub_plan.append(new_step)
 
         # 4. Create the FOREACH step
+        # Copy the outputs from the step being wrapped so dependent steps can reference them
+        original_step = steps_to_move_into_subplan_map[step_to_wrap_original_number]
+        foreach_outputs = copy.deepcopy(original_step.get('outputs', {}))
+
         foreach_step = {
             "number": foreach_step_number,
             "actionVerb": "FOREACH",
@@ -1037,9 +1041,7 @@ Return the corrected JSON object for the step."""
                                             "valueType": "array" # Assuming sub_plan is an array of steps
                                         }
                                     },
-                                    "outputs": {
-                                        f"{original_step.get('actionVerb').lower()}_results": "Aggregated results from the loop."
-                                    },
+                                    "outputs": foreach_outputs,  # Use the same outputs as the wrapped step
                                     "recommendedRole": "Coordinator"        }
 
         # 5. Reconstruct the main plan
@@ -1056,7 +1058,19 @@ Return the corrected JSON object for the step."""
             else:
                 # This step is not moved, keep it in the main plan with its original number
                 new_plan.append(s)
-        
+
+        # 6. Update any remaining steps that reference the wrapped step to reference the FOREACH step instead
+        for step in new_plan:
+            if step['number'] == foreach_step_number:
+                continue  # Skip the FOREACH step itself
+
+            for input_name, input_def in step.get('inputs', {}).items():
+                if isinstance(input_def, dict) and 'sourceStep' in input_def:
+                    # If this input references the original wrapped step, update it to reference the FOREACH step
+                    if input_def['sourceStep'] == step_to_wrap_original_number:
+                        logger.info(f"Updating step {step['number']} input '{input_name}' to reference FOREACH step {foreach_step_number} instead of wrapped step {step_to_wrap_original_number}")
+                        input_def['sourceStep'] = foreach_step_number
+
         return new_plan
 
     def _validate_step_inputs(self, step: Dict[str, Any], plugin_def: Dict[str, Any], available_outputs: Dict[int, Set[str]], errors: List[str], wrappable_errors: List[Dict[str, Any]], plan: List[Dict[str, Any]], plugin_map: Dict[str, Any]):

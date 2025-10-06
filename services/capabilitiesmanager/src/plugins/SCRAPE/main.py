@@ -92,6 +92,7 @@ class ScrapePlugin:
             
         except requests.exceptions.RequestException as e:
             logger.error(f"Failed to fetch HTML from {url}: {e}")
+            # Instead of raising, we'll let the caller handle this
             raise Exception(f"Failed to fetch HTML from {url}: {str(e)}")
 
     def scrape_content(self, html: str, config: Dict[str, Any]) -> List[str]:
@@ -224,10 +225,48 @@ class ScrapePlugin:
         except ValueError:
             return False
 
+    def _extract_url_from_input(self, url_input: Any) -> Optional[str]:
+        """Extract URL from various input formats"""
+        if isinstance(url_input, str):
+            url_stripped = url_input.strip()
+            if not url_stripped:
+                return None
+
+            # Check if it's a JSON string containing a URL object
+            if url_stripped.startswith('{') and url_stripped.endswith('}'):
+                try:
+                    parsed = json.loads(url_stripped)
+                    if isinstance(parsed, dict):
+                        return self._extract_url_from_input(parsed)
+                except (json.JSONDecodeError, TypeError):
+                    pass  # Not JSON, treat as regular string
+
+            return url_stripped
+        elif isinstance(url_input, dict):
+            # Check for common URL properties
+            for url_key in ['url', 'link', 'website', 'href', 'src']:
+                if url_key in url_input and url_input[url_key]:
+                    url_value = url_input[url_key]
+                    if isinstance(url_value, str):
+                        return url_value.strip() if url_value.strip() else None
+            # If it's a JSON string, try to parse it
+            if len(url_input) == 1:
+                # Single key-value pair, might be a JSON string
+                for key, value in url_input.items():
+                    if isinstance(value, str):
+                        try:
+                            parsed = json.loads(value)
+                            if isinstance(parsed, dict):
+                                return self._extract_url_from_input(parsed)
+                        except (json.JSONDecodeError, TypeError):
+                            # Not JSON, treat as regular string
+                            return value.strip() if value.strip() else None
+        return None
+
     def execute(self, inputs_map: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Execute the SCRAPE plugin"""
         try:
-            # Extract URL directly
+            # Extract URL with enhanced handling
             url_input = self._get_input_value(inputs_map, 'url') or self._get_input_value(inputs_map, 'websites')
 
             if not url_input:
@@ -241,49 +280,103 @@ class ScrapePlugin:
                 }]
 
             urls_to_scrape = []
+
+            # Handle different input formats
             if isinstance(url_input, str):
-                urls_to_scrape.append(url_input)
+                extracted_url = self._extract_url_from_input(url_input)
+                if extracted_url:
+                    urls_to_scrape.append(extracted_url)
             elif isinstance(url_input, list):
-                urls_to_scrape.extend(url_input)
+                for item in url_input:
+                    extracted_url = self._extract_url_from_input(item)
+                    if extracted_url:
+                        urls_to_scrape.append(extracted_url)
+            elif isinstance(url_input, dict):
+                extracted_url = self._extract_url_from_input(url_input)
+                if extracted_url:
+                    urls_to_scrape.append(extracted_url)
+
+            # If no valid URLs were extracted, return a failure result but don't throw exception
+            if not urls_to_scrape:
+                return [{
+                    "success": False,
+                    "name": "error",
+                    "resultType": PluginParameterType.ERROR,
+                    "resultDescription": f"No valid URLs found in input: {url_input}",
+                    "result": None,
+                    "error": f"Could not extract valid URL from input: {type(url_input).__name__} - {str(url_input)[:100]}"
+                }]
 
             all_scraped_data = []
+            failed_urls = []
+            successful_urls = []
+
             for url in urls_to_scrape:
                 try:
                     # Validate and convert URL
                     full_url = self.convert_to_full_url(url, 'https')
-                    
+
                     # Add stricter URL validation
                     if not self._is_valid_url(full_url):
                         logger.warning(f"Skipping invalid or unresolvable URL: {url} (converted to: {full_url})")
+                        failed_urls.append(f"Invalid URL: {url}")
                         continue
 
                     # Parse configuration
                     config = self.parse_config(inputs_map)
                     # Fetch HTML content
                     html = self.fetch_html(full_url)
-                    
+
                     # Scrape content
                     scraped_data = self.scrape_content(html, config)
                     all_scraped_data.extend(scraped_data)
+                    successful_urls.append(url)
+
                 except Exception as e:
                     logger.error(f"Failed to scrape {url}: {e}")
+                    failed_urls.append(f"Failed to scrape {url}: {str(e)}")
 
-            return [{
-                "success": True,
-                "name": "content",
-                "resultType": PluginParameterType.ARRAY,
-                "resultDescription": f"Scraped content from {len(urls_to_scrape)} URL(s)",
-                "result": all_scraped_data,
-                "mimeType": "application/json"
-            }]
+            # Return results based on success/failure ratio
+            if successful_urls:
+                # At least some URLs were successful
+                result_description = f"Scraped content from {len(successful_urls)} URL(s)"
+                if failed_urls:
+                    result_description += f" ({len(failed_urls)} failed)"
+
+                return [{
+                    "success": True,
+                    "name": "content",
+                    "resultType": PluginParameterType.ARRAY,
+                    "resultDescription": result_description,
+                    "result": all_scraped_data,
+                    "mimeType": "application/json"
+                }]
+            else:
+                # All URLs failed
+                return [{
+                    "success": False,
+                    "name": "error",
+                    "resultType": PluginParameterType.ERROR,
+                    "resultDescription": f"Failed to scrape any of the {len(urls_to_scrape)} provided URL(s)",
+                    "result": None,
+                    "error": "; ".join(failed_urls)
+                }]
 
         except Exception as e:
             logger.error(f"SCRAPE plugin execution failed: {e}")
+            # Get URL for error description safely
+            try:
+                url_for_error = self._get_input_value(inputs_map, 'url', 'undefined URL')
+                if isinstance(url_for_error, (dict, list)):
+                    url_for_error = str(url_for_error)[:50] + "..." if len(str(url_for_error)) > 50 else str(url_for_error)
+            except:
+                url_for_error = "undefined URL"
+
             return [{
                 "success": False,
                 "name": "error",
                 "resultType": PluginParameterType.ERROR,
-                "resultDescription": f"Error scraping {self._get_input_value(inputs_map, 'url', 'undefined URL')}", # Direct access
+                "resultDescription": f"Error scraping {url_for_error}",
                 "result": None,
                 "error": str(e)
             }]
