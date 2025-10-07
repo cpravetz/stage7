@@ -243,15 +243,23 @@ class ScrapePlugin:
 
             return url_stripped
         elif isinstance(url_input, dict):
-            # Check for common URL properties
-            for url_key in ['url', 'link', 'website', 'href', 'src']:
+            # Check for common URL properties (including all aliases from manifest)
+            for url_key in ['url', 'website', 'link', 'endpoint', 'href', 'src']:
                 if url_key in url_input and url_input[url_key]:
                     url_value = url_input[url_key]
                     if isinstance(url_value, str):
                         return url_value.strip() if url_value.strip() else None
-            # If it's a JSON string, try to parse it
+
+            # Check for 'value' property (common in InputValue objects)
+            if 'value' in url_input and url_input['value']:
+                value = url_input['value']
+                if isinstance(value, str):
+                    return value.strip() if value.strip() else None
+                elif isinstance(value, dict):
+                    return self._extract_url_from_input(value)
+
+            # If it's a single key-value pair, might be a JSON string
             if len(url_input) == 1:
-                # Single key-value pair, might be a JSON string
                 for key, value in url_input.items():
                     if isinstance(value, str):
                         try:
@@ -261,22 +269,35 @@ class ScrapePlugin:
                         except (json.JSONDecodeError, TypeError):
                             # Not JSON, treat as regular string
                             return value.strip() if value.strip() else None
+        elif isinstance(url_input, list) and len(url_input) > 0:
+            # If it's a list, try to extract from the first item
+            return self._extract_url_from_input(url_input[0])
         return None
 
     def execute(self, inputs_map: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Execute the SCRAPE plugin"""
         try:
-            # Extract URL with enhanced handling
-            url_input = self._get_input_value(inputs_map, 'url') or self._get_input_value(inputs_map, 'websites')
+            # Extract URL with enhanced handling - check all aliases from manifest
+            url_input = (self._get_input_value(inputs_map, 'url') or
+                        self._get_input_value(inputs_map, 'website') or
+                        self._get_input_value(inputs_map, 'link') or
+                        self._get_input_value(inputs_map, 'endpoint') or
+                        self._get_input_value(inputs_map, 'websites'))
 
             if not url_input:
+                # Debug: Log what inputs were actually provided
+                available_inputs = list(inputs_map.keys())
+                logger.error(f"SCRAPE plugin: No URL input found. Available inputs: {available_inputs}")
+                for key, value in inputs_map.items():
+                    logger.debug(f"SCRAPE plugin input '{key}': {type(value).__name__} = {str(value)[:100]}")
+
                 return [{
                     "success": False,
                     "name": "error",
                     "resultType": PluginParameterType.ERROR,
-                    "resultDescription": "URL is required for SCRAPE plugin",
+                    "resultDescription": f"URL is required for SCRAPE plugin. Available inputs: {available_inputs}",
                     "result": None,
-                    "error": "No URL provided to SCRAPE plugin"
+                    "error": f"No URL provided to SCRAPE plugin. Checked: url, website, link, endpoint, websites. Available: {available_inputs}"
                 }]
 
             urls_to_scrape = []

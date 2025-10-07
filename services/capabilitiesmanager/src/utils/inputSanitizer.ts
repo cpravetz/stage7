@@ -61,7 +61,16 @@ export function sanitizeInputValue(
         switch (input.valueType) {
             case PluginParameterType.STRING:
                 if (typeof sanitizedValue !== 'string') {
-                    sanitizedValue = String(sanitizedValue);
+                    // Handle objects and arrays properly instead of converting to "[object Object]"
+                    if (typeof sanitizedValue === 'object' && sanitizedValue !== null) {
+                        try {
+                            sanitizedValue = JSON.stringify(sanitizedValue);
+                        } catch (e) {
+                            sanitizedValue = String(sanitizedValue);
+                        }
+                    } else {
+                        sanitizedValue = String(sanitizedValue);
+                    }
                 }
                 // Only remove null bytes, which are a common source of issues.
                 sanitizedValue = sanitizedValue.replace(/\x00/g, '');

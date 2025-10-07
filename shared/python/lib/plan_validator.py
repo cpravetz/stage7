@@ -415,31 +415,50 @@ class PlanValidator:
                         continue
     
                     dest_input_type = dest_input_def.get('valueType')
-    
+
                     source_step = next((s for s in plan if s.get('number') == source_step_number), None)
                     if not source_step:
                         continue
-    
+
                     source_action_verb = source_step.get('actionVerb')
                     source_plugin_def = plugin_map.get(source_action_verb)
                     if not source_plugin_def:
                         continue
-    
+
                     source_output_definitions = source_plugin_def.get('outputDefinitions', [])
                     source_output_def = next((out for out in source_output_definitions if out.get('name') == source_output_name), None)
-    
+
                     if not source_output_def and len(source_output_definitions) == 1:
                         source_output_def = source_output_definitions[0]
-    
+
                     if not source_output_def:
                         continue
-    
-                    source_output_type = source_output_def.get('type')
-    
+
+                    source_output_type = source_output_def.get('valueType')
+
+                    # Debug type information
+                    logger.debug(f"Type check: Step {step.get('number')} input '{input_name}' expects {dest_input_type}, Step {source_step_number} output '{source_output_name}' provides {source_output_type}")
+
                     # Only insert TRANSFORM if it's NOT an array/list type mismatch (handled by FOREACH)
                     if dest_input_type and source_output_type and dest_input_type != source_output_type and dest_input_type != 'any' and source_output_type != 'any' and source_output_type not in ['array', 'list']:
                         # Mismatch detected, insert TRANSFORM step
-                        logger.info(f"Type mismatch detected: {source_output_type} -> {dest_input_type}, inserting TRANSFORM step")
+                        logger.info(f"Type mismatch detected: Step {step.get('number')} input '{input_name}' expects {dest_input_type} but Step {source_step_number} output '{source_output_name}' provides {source_output_type}, inserting TRANSFORM step")
+                    else:
+                        # Log why TRANSFORM was not inserted
+                        if not dest_input_type:
+                            logger.debug(f"No TRANSFORM: dest_input_type is None for Step {step.get('number')} input '{input_name}'")
+                        elif not source_output_type:
+                            logger.debug(f"No TRANSFORM: source_output_type is None for Step {source_step_number} output '{source_output_name}'")
+                        elif dest_input_type == source_output_type:
+                            logger.debug(f"No TRANSFORM: types match ({dest_input_type}) for Step {step.get('number')} input '{input_name}'")
+                        elif dest_input_type == 'any' or source_output_type == 'any':
+                            logger.debug(f"No TRANSFORM: 'any' type involved for Step {step.get('number')} input '{input_name}'")
+                        elif source_output_type in ['array', 'list']:
+                            logger.debug(f"No TRANSFORM: source is array/list type for Step {step.get('number')} input '{input_name}' (should use FOREACH)")
+                        else:
+                            logger.debug(f"No TRANSFORM: unknown reason for Step {step.get('number')} input '{input_name}'")
+
+                    if dest_input_type and source_output_type and dest_input_type != source_output_type and dest_input_type != 'any' and source_output_type != 'any' and source_output_type not in ['array', 'list']:
     
                         transform_step_number = self._find_max_step_number(plan) + 1 # Get a truly new, unused ID
                         new_output_name = f"{source_output_name}_as_{dest_input_type}"
@@ -563,6 +582,12 @@ class PlanValidator:
                     inputs[new_name] = inputs.pop(old_name)
                 else:
                     logger.warning(f"Step {step.get('number')}: Cannot resolve alias '{old_name}' -> '{new_name}' because '{new_name}' already exists")
+
+            # Debug: Log if any aliases were found for this step
+            if inputs_to_rename:
+                logger.info(f"Step {step.get('number')}: Applied {len(inputs_to_rename)} alias resolutions for {action_verb}")
+            elif action_verb in plugin_map:
+                logger.debug(f"Step {step.get('number')}: No alias resolutions needed for {action_verb}")
 
         return plan
 
@@ -1167,7 +1192,7 @@ Return ONLY the corrected JSON plan, no explanations."""
                                 logger.info(f"Step {step_number}: Inferring type for custom output '{source_output_name}' from the sole plugin output '{source_output_def.get('name')}'.")
 
                             if source_output_def:
-                                source_output_type = source_output_def.get('type')
+                                source_output_type = source_output_def.get('valueType')
 
                                 # Now, compare the types
                                 if dest_input_type and source_output_type:
