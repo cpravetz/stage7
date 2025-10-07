@@ -641,19 +641,25 @@ Please consider this context and the available plugins when planning and executi
             case MessageType.USER_MESSAGE:
                 this.addToConversation('user', message.content.message);
                 break;
-            case 'USER_INPUT_RESPONSE': // Assuming this is the message type from PostOffice
-                const { requestId, answer } = message.content;
+            case 'USER_INPUT_RESPONSE': { // Assuming this is the message type from PostOffice
+                const { requestId, response } = message.content;
                 console.log(`[Agent ${this.id}] Received USER_INPUT_RESPONSE for requestId: ${requestId}. Current waitingSteps size: ${this.waitingSteps.size}`);
                 const waitingStepId = this.waitingSteps.get(requestId);
                 if (waitingStepId) {
                     const step = this.steps.find(s => s.id === waitingStepId);
                     if (step) {
                         const outputName = step.outputs?.keys().next().value || 'answer';
+                        
+                        let finalAnswer = response;
+                        if (typeof response === 'object' && response !== null && (response as any).text) {
+                            finalAnswer = (response as any).text;
+                        }
+
                         step.result = [{
                             success: true,
                             name: outputName,
                             resultType: PluginParameterType.STRING,
-                            result: answer, // answer can be null
+                            result: finalAnswer, // answer can be null
                             resultDescription: 'User response'
                         }];
                         step.status = StepStatus.COMPLETED;
@@ -667,6 +673,7 @@ Please consider this context and the available plugins when planning and executi
                     console.warn(`[Agent ${this.id}] No waiting step found for requestId: ${requestId}. It might have been already processed or is invalid.`);
                 }
                 break;
+            }
             default:
                 break;
         }
