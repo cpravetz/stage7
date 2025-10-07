@@ -11,3 +11,39 @@
     width: 100%;
     overflow: auto;
 }
+
+/* Dark Mode styles */
+.dark-mode .network-graph {
+    background-color: #2c2c2c;
+    border-color: #444;
+}
+
+.dark-mode .step-overview-modal {
+    background-color: rgba(0, 0, 0, 0.8);
+}
+
+.dark-mode .step-overview-content {
+    background-color: #333;
+    color: #f1f1f1;
+    border: 1px solid #555;
+}
+
+.dark-mode .step-overview-content .close-btn {
+    color: #f1f1f1;
+}
+
+.dark-mode .stepbox pre {
+    background-color: #2c2c2c;
+    border: 1px solid #444;
+    color: #f1f1f1;
+}
+
+.dark-mode button {
+    background-color: #555;
+    color: #f1f1f1;
+    border: 1px solid #777;
+}
+
+.dark-mode button:hover {
+    background-color: #666;
+}
