@@ -101,23 +101,7 @@ class PlanValidator:
         self.max_retries = max_retries
         self.brain_call = brain_call
 
-    def _standardize_input_name(self, input_name: str, plugin_input_definitions: Dict[str, Any]) -> str:
-        """Heuristic to map a given input name to a known plugin input name."""
-        known_names = list(plugin_input_definitions.keys())
-        if input_name in known_names:
-            return input_name
-        
-        # Check for pluralization
-        if input_name.endswith('s') and input_name[:-1] in known_names:
-            return input_name[:-1]
-        
-        # Check for a more general case like 'tool_name' -> 'toolname'
-        if input_name.replace('_', '') in [name.replace('_', '') for name in known_names]:
-            for name in known_names:
-                if input_name.replace('_', '') == name.replace('_', ''):
-                    return name
-        
-        return input_name
+
         
     def _find_max_step_number(self, plan: List[Dict[str, Any]]) -> int:
         max_num = 0
@@ -201,6 +185,8 @@ class PlanValidator:
         else:
             available_plugins = available_plugins_raw if isinstance(available_plugins_raw, list) else []
 
+
+
         validation_result = self._validate_plan(current_plan, available_plugins)
 
         # Handle wrappable errors first
@@ -251,33 +237,7 @@ class PlanValidator:
                 "validation_error"
             )
         
-    def _resolve_placeholder_to_reference(self, current_plan: List[Dict[str, Any]], current_step_number: int, placeholder_string: str) -> Optional[tuple[str, int, str]]:
-        """
-        Resolves a placeholder string (e.g., "{output_name}" or "[output_name]") to a tuple
-        of (output_name, source_step_number, value_type) by searching previous steps.
-        """
-        # Match either {name} or [name] patterns
-        match = re.match(r"[{[]([a-zA-Z0-9_]+)[}\]]", placeholder_string)
-        if not match:
-            return None
-        
-        output_name = match.group(1)
-        
-        # Search backward through the plan for the output
-        for i in range(current_step_number - 1, -1, -1):
-            if i == 0: # Special case for parent input
-                # We can't determine the parent's output type here, assume string for now
-                # This might need more sophisticated handling if parent inputs have diverse types
-                return (output_name, 0, "string") 
 
-            prev_step = current_plan[i-1] # Adjust index for 0-based list
-            if 'outputs' in prev_step and output_name in prev_step['outputs']:
-                # Found the output in a previous step
-                # The actual valueType would be from the plugin's outputDefinition,
-                # but we don't have that here. Default to 'string' or 'any'.
-                return (output_name, prev_step['number'], "string") 
-        
-        return None
 
     def _find_embedded_references(self, value: str) -> Set[str]:
         """
@@ -338,6 +298,11 @@ class PlanValidator:
             logger.warning("Plan is not a list. Cannot repair.")
             return []
 
+        # Create a map of the plan by step number for easy lookup during repair
+        plan_map = {s.get('number'): s for s in plan if isinstance(s, dict) and s.get('number') is not None}
+
+        steps_to_remove = set()
+
         for i, step in enumerate(plan):
             if not isinstance(step, dict):
                 logger.warning("Step is not a dictionary. Skipping.")
@@ -349,110 +314,71 @@ class PlanValidator:
                 continue
 
             # Ensure 'number' is an integer
-            if 'number' in step:
-                if not isinstance(step['number'], int):
-                    try:
-                        # Attempt conversion to integer
-                        converted_number = int(step['number'])
-                        step['number'] = converted_number
-                    except (ValueError, TypeError) as e:
-                        logger.warning(f"Failed to convert step number '{step['number']}' to integer: {e}. Setting to None.")
-                        step['number'] = None # Set to None instead of deleting
-                # If it's already an int, do nothing.
-                # If it's None (from a previous failed conversion), it will be handled by _validate_plan
+            if 'number' in step and not isinstance(step['number'], int):
+                try:
+                    step['number'] = int(step['number'])
+                except (ValueError, TypeError):
+                    step['number'] = None
 
-            # Repair inputs
+            # Repair inputs for ambiguity
             if 'inputs' in step and isinstance(step['inputs'], dict):
                 for input_name, input_def in step['inputs'].items():
                     if isinstance(input_def, dict):
-                        has_output_name = 'outputName' in input_def
-                        has_source_step = 'sourceStep' in input_def
-                        has_value = 'value' in input_def
+                        if 'outputName' in input_def and 'sourceStep' in input_def and 'value' in input_def:
+                            logger.info(f"[Repair] Input '{input_name}' has both value and source. Preferring source.")
+                            del input_def['value']
 
-                        if has_output_name and has_source_step:
-                            # Dependent input: only allow outputName, sourceStep, and args
-                            allowed_keys = ['outputName', 'sourceStep', 'args', 'valueType'] # Keep valueType for dependent inputs
-                            keys_to_delete = [key for key in list(input_def.keys()) if key not in allowed_keys]
-                            for key in keys_to_delete:
-                                logger.info(f"[Repair] Dependent input '{input_name}': Deleting extraneous key '{key}'")
-                                del input_def[key]
-                        elif has_value:
-                            # Constant input: only allow value, valueType, and args
-                            allowed_keys = ['value', 'valueType', 'args']
-                            keys_to_delete = [key for key in list(input_def.keys()) if key not in allowed_keys]
-                            for key in keys_to_delete:
-                                logger.info(f"[Repair] Constant input '{input_name}': Deleting extraneous key '{key}'")
-                                del input_def[key]
-                        else:
-                            # Malformed input def, try to make sense of it
-                            if has_output_name:
-                                logger.warning(f"Input '{input_name}' has 'outputName' but no 'sourceStep'. Adding sourceStep: 0 as a guess.")
-                                input_def['sourceStep'] = 0
-                            elif has_source_step:
-                                logger.warning(f"Input '{input_name}' has 'sourceStep' but no 'outputName'. Removing.")
-                                del step['inputs'][input_name]
-                                
-
-            # Repair 'steps' input for SEQUENCE, WHILE, UNTIL, FOREACH verbs
+            # Repair 'steps' input for control flow verbs if it's a string
             if step.get('actionVerb') in ['SEQUENCE', 'WHILE', 'UNTIL', 'FOREACH'] and \
                'steps' in step.get('inputs', {}) and \
                isinstance(step['inputs']['steps'], dict) and \
                'value' in step['inputs']['steps'] and \
                isinstance(step['inputs']['steps']['value'], str):
-                
-                steps_input = step['inputs']['steps']
-                original_value = steps_input['value']
-                
                 try:
-                    # Attempt to parse as JSON array
-                    parsed_steps = json.loads(original_value)
+                    parsed_steps = json.loads(step['inputs']['steps']['value'])
                     if isinstance(parsed_steps, list):
-                        steps_input['value'] = parsed_steps
-                        steps_input['valueType'] = "array"
-                        logger.info(f"[Repair] Step {current_step_number}: Converted 'steps' input from JSON string to array for {step.get('actionVerb')}.")
-                    else:
-                        raise ValueError("Not a JSON array")
+                        step['inputs']['steps']['value'] = parsed_steps
+                        step['inputs']['steps']['valueType'] = "array"
                 except (json.JSONDecodeError, ValueError):
-                    # If not a valid JSON array, wrap it in a THINK step
-                    logger.warning(f"[Repair] Step {current_step_number}: 'steps' input for {step.get('actionVerb')} is a non-JSON string. Wrapping in THINK step.")
-                    steps_input['value'] = [{
-                        "number": float(f"{current_step_number}.1"), # Use float for sub-step numbering
-                        "actionVerb": "THINK",
-                        "description": original_value,
-                        "inputs": {},
-                        "outputs": {},
-                        "recommendedRole": "Coordinator" # Default role
-                    }]
-                    steps_input['valueType'] = "array"
+                    logger.warning(f"[Repair] Could not parse 'steps' JSON string for {step.get('actionVerb')}.")
 
-            # Handle control flow steps with direct 'steps' property (should be in inputs.steps.value)
-            if (step.get('actionVerb') in ['SEQUENCE', 'WHILE', 'UNTIL', 'FOREACH'] and
-                'steps' in step and isinstance(step['steps'], list)):
-
-                logger.info(f"[Repair] Step {current_step_number}: Moving direct 'steps' property to 'inputs.steps.value' for {step.get('actionVerb')}.")
-
-                # Ensure inputs exists
-                if 'inputs' not in step:
-                    step['inputs'] = {}
-
-                # Move steps to proper location
-                step['inputs']['steps'] = {
-                    'value': step['steps'],
-                    'valueType': 'array'
-                }
-
-                # Remove the direct steps property
+            # Handle control flow steps with direct 'steps' property
+            if step.get('actionVerb') in ['SEQUENCE', 'WHILE', 'UNTIL', 'FOREACH'] and \
+               'steps' in step and isinstance(step['steps'], list):
+                logger.info(f"[Repair] Step {current_step_number}: Moving direct 'steps' property to 'inputs.steps.value'.")
+                if 'inputs' not in step: step['inputs'] = {}
+                step['inputs']['steps'] = {'value': step['steps'], 'valueType': 'array'}
                 del step['steps']
 
+            # Special repair for SEQUENCE with integer array
+            if step.get('actionVerb') == 'SEQUENCE':
+                inputs = step.get('inputs', {})
+                if 'steps' in inputs and isinstance(inputs['steps'], dict):
+                    steps_value = inputs['steps'].get('value')
+                    if isinstance(steps_value, list) and all(isinstance(item, int) for item in steps_value):
+                        logger.info(f"[Repair] Step {current_step_number}: Resolving SEQUENCE with integer array to full step objects.")
+                        repaired_sub_plan = []
+                        for step_num in steps_value:
+                            if step_num in plan_map:
+                                repaired_sub_plan.append(copy.deepcopy(plan_map[step_num]))
+                                steps_to_remove.add(step_num)
+                            else:
+                                logger.warning(f"[Repair] Could not find step object for number: {step_num} in SEQUENCE.")
+                        step['inputs']['steps']['value'] = repaired_sub_plan
+
             # Recursively repair sub-plans
-            if 'steps' in step and isinstance(step['steps'], list):
-                logger.info(f"[Repair] Recursively repairing sub-plan in step {step.get('number')}")
-                step['steps'] = self._repair_plan_code_based(step['steps'])
-            elif 'inputs' in step and 'steps' in step['inputs'] and isinstance(step['inputs']['steps'], dict) and 'value' in step['inputs']['steps'] and isinstance(step['inputs']['steps']['value'], list):
+            if 'inputs' in step and 'steps' in step['inputs'] and isinstance(step['inputs']['steps'], dict) and \
+               'value' in step['inputs']['steps'] and isinstance(step['inputs']['steps']['value'], list):
                 logger.info(f"[Repair] Recursively repairing sub-plan in step {step.get('number')} inputs.steps.value")
                 step['inputs']['steps']['value'] = self._repair_plan_code_based(step['inputs']['steps']['value'])
-                
-        logger.info(f"[Repair] Finished code-based repair.")
+
+        # Filter out steps that were moved into SEQUENCE blocks
+        if steps_to_remove:
+            final_plan = [step for step in plan if step.get('number') not in steps_to_remove]
+            logger.info(f"[Repair] Finished code-based repair. Removed {len(steps_to_remove)} steps that were moved into SEQUENCE blocks.")
+            return final_plan
+        
+        logger.info(f"[Repair] Finished code-based repair. No steps removed.")
         return plan
 
     def _repair_data_type_mismatches(self, plan: List[Dict[str, Any]], plugin_map: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -572,6 +498,90 @@ class PlanValidator:
             i += 1
         return plan
 
+
+
+
+
+    def _classify_error_type(self, error: str) -> str:
+        """Classify validation errors into categories for focused repair prompts"""
+        error_lower = error.lower()
+
+        if 'missing required input' in error_lower:
+            return 'missing_input'
+        elif 'invalid reference' in error_lower or 'sourceStep' in error_lower:
+            return 'invalid_reference'
+        elif 'type mismatch' in error_lower or 'expected' in error_lower and 'got' in error_lower:
+            return 'type_mismatch'
+        elif 'missing required field' in error_lower:
+            return 'missing_field'
+        else:
+            return 'generic'
+
+    def _create_focused_repair_prompt(self, step_to_repair: Dict[str, Any], errors: List[str], plugin_definition: Dict[str, Any] = None) -> str:
+        """Create a focused repair prompt based on error type"""
+
+        # Classify the primary error type
+        primary_error_type = self._classify_error_type(errors[0]) if errors else 'generic'
+
+        step_json = json.dumps(step_to_repair, indent=2)
+        errors_text = '\n'.join([f"- {error}" for error in errors])
+
+        if primary_error_type == 'missing_input':
+            # Extract the missing input name from the error
+            missing_input = None
+            for error in errors:
+                match = re.search(r"Missing required input '([^']+)'", error)
+                if match:
+                    missing_input = match.group(1)
+                    break
+
+            plugin_info = ""
+            if plugin_definition and missing_input:
+                input_defs = plugin_definition.get('inputDefinitions', [])
+                for input_def in input_defs:
+                    if input_def.get('name') == missing_input:
+                        plugin_info = f"\nRequired input '{missing_input}' definition:\n- Type: {input_def.get('type', 'unknown')}\n- Description: {input_def.get('description', 'No description')}\n- Required: {input_def.get('required', False)}"
+                        break
+
+            return f"""Fix the missing required input in this JSON step object.
+
+ERROR: {errors_text}
+
+STEP TO FIX:
+{step_json}
+{plugin_info}
+
+TASK: Add the missing required input '{missing_input}' to the inputs object. The input should either:
+1. Have a "value" and "valueType" (for constants)
+2. Have an "outputName" and "sourceStep" (to reference output from another step)
+
+Return ONLY the corrected JSON step object, no explanations."""
+
+        elif primary_error_type == 'invalid_reference':
+            return f"""Fix the invalid step reference in this JSON step object.
+
+ERROR: {errors_text}
+
+STEP TO FIX:
+{step_json}
+
+TASK: Correct the sourceStep and/or outputName references to point to valid steps and outputs.
+
+Return ONLY the corrected JSON step object, no explanations."""
+
+        else:
+            # Fall back to a shorter generic prompt
+            return f"""Fix the validation errors in this JSON step object.
+
+ERRORS: {errors_text}
+
+STEP TO FIX:
+{step_json}
+
+TASK: Correct the errors while preserving the step's intent.
+
+Return ONLY the corrected JSON step object, no explanations."""
+
     def _repair_plan_with_llm(self, plan: List[Dict[str, Any]], errors: List[str], goal: str, inputs: Dict[str, Any], previous_errors: List[str]) -> List[Dict[str, Any]]:
         """Ask LLM to repair the plan based on validation errors"""
 
@@ -634,68 +644,20 @@ class PlanValidator:
             plugin_map = {plugin.get('actionVerb'): plugin for plugin in available_plugins}
             plugin_definition = plugin_map.get(action_verb)
 
-            plugin_guidance = ""
-            if plugin_definition:
-                guidance_lines = [f"Plugin Schema for '{action_verb}':"]
-                description = plugin_definition.get('description', 'No description available.')
-                input_definitions = plugin_definition.get('inputDefinitions', [])
-                guidance_lines.append(f"  Description: {description}")
-                if input_definitions:
-                    guidance_lines.append("  Inputs:")
-                    for input_def in input_definitions:
-                        input_name = input_def.get('name', 'UNKNOWN')
-                        input_desc = input_def.get('description', 'No description.')
-                        value_type = input_def.get('valueType', 'any')
-                        required = ' (required)' if input_def.get('required') else ''
-                        guidance_lines.append(f"    - {input_name} (type: {value_type}){required}: {input_desc}")
-                else:
-                    guidance_lines.append("  Inputs: None required.")
-                plugin_guidance = "\n".join(guidance_lines)
-            else:
-                plugin_guidance = f"No specific plugin schema found for action verb '{action_verb}'."
+        # Use focused repair prompt for single steps
+        if prompt_type == "single_step":
+            prompt = self._create_focused_repair_prompt(step_to_repair_copy, errors, plugin_definition)
+        else:
+            # Fall back to generic prompt for full plan repairs
+            errors_text = '\n'.join([f"- {error}" for error in errors])
+            prompt = f"""Fix the validation errors in this plan.
 
-        errors_text = '\n'.join([f"- {error}" for error in errors])
-        previous_errors_text = '\n'.join([f"- {error}" for error in previous_errors]) if previous_errors else "(None)"
+ERRORS: {errors_text}
 
-        prompt = f"""You are an expert system for correcting JSON data that fails to conform to a schema.
-
-1. THE GOAL:
-{goal}
-
-2. THE INVALID JSON OBJECT:
+PLAN TO FIX:
 {step_to_repair_json}
 
-3. PLUGIN DEFINITION:
-{plugin_guidance}
-
-4. THE CURRENT VALIDATION ERRORS:
-{errors_text}
-
-5. PREVIOUS VALIDATION ERRORS (if any):
-{previous_errors_text}
-
-6. THE SCHEMA FOR STEPS:
-{json.dumps(PLAN_STEP_SCHEMA)}
-
-7. YOUR TASK:
-Your task is to fix the JSON object provided in section 2 to make it valid.
-- Analyze the error: Understand the current validation errors, and consider the previous errors to identify persistent or new issues.
-- Consult the schema: Ensure your fix adheres strictly to the PLAN_STEP_SCHEMA and the PLUGIN DEFINITION for the actionVerb.
-- Examine the invalid object: Identify where the missing inputs should be added or where existing inputs need correction.
-- Correct the object: Add the missing required inputs to the inputs object of the step. For each added input, ensure it has either:
-    - A value and valueType (if it's a constant).
-    - An outputName and sourceStep (if it's referencing an output from a previous step). If sourceStep is 0, it refers to an input from the parent step. Otherwise, it must refer to a preceding step in the plan.
-- Source Inputs Properly: If an input is missing and it's expected to come from a previous step, ensure you correctly identify the sourceStep and outputName.
-
-CRITICAL REQUIREMENTS:
-- JSON ONLY: Your entire response MUST be a single, valid JSON object for the step.
-- NO EXTRA TEXT: Do NOT include explanations, comments, or markdown like ```json.
-- PRESERVE INTENT: Fix ONLY the specific errors while preserving the plan's original intent.
-- STEP STRUCTURE: Return the complete step object with number, actionVerb, description, inputs, outputs, etc. Do NOT return just sub-arrays or partial data.
-- CONTROL FLOW: For control flow verbs (FOREACH, WHILE, etc.), ensure sub-steps are properly placed in inputs.steps.value, not as a separate 'steps' property.
-- IMPORTANT: If an input has both value and outputName/sourceStep, choose the outputName and sourceStep if the sourceStep does produce the outputName.
-
-Return the corrected JSON object for the step."""
+Return ONLY the corrected JSON plan, no explanations."""
 
         logger.info(f"Attempting to repair {prompt_type} with {len(errors)} validation errors...")
 
@@ -914,24 +876,7 @@ Return the corrected JSON object for the step."""
         # Return outputs as-is - dependency validation will ensure references work
         return current_outputs
 
-    def _update_dependent_inputs(self, source_step_number: int, old_output_name: str, new_output_name: str):
-        """Update inputs in dependent steps that reference a renamed output.
 
-        Note: This method is preserved for potential future use but is no longer called
-        since we now allow custom output names without forced renaming.
-        """
-        if not hasattr(self, '_current_plan'):
-            return
-
-        for step in self._current_plan:
-            step_inputs = step.get('inputs', {})
-            for input_name, input_def in step_inputs.items():
-                if (isinstance(input_def, dict) and
-                    input_def.get('sourceStep') == source_step_number and
-                    input_def.get('outputName') == old_output_name):
-
-                    logger.info(f"Step {step.get('number')}: Updating input '{input_name}' to reference output '{new_output_name}' instead of '{old_output_name}'")
-                    input_def['outputName'] = new_output_name
 
     def _wrap_step_in_foreach(self, plan: List[Dict[str, Any]], step_to_wrap: Dict[str, Any], source_step_number: int, source_output_name: str, target_input_name: str) -> List[Dict[str, Any]]:
         """Wraps a step that expects a single item in a FOREACH loop, including all its dependent steps."""
@@ -1086,9 +1031,12 @@ Return the corrected JSON object for the step."""
         # Create map of required inputs
         required_inputs = {inp['name']: inp for inp in input_definitions if inp.get('required', False)}
 
+
+
         # Check required inputs are present
         for req_name in required_inputs.keys():
             if req_name not in inputs:
+                logger.warning(f"Step {step_number}: Missing required input '{req_name}' for actionVerb '{step['actionVerb']}' - Available inputs: {list(inputs.keys())}")
                 errors.append(f"Step {step_number}: Missing required input '{req_name}' for actionVerb '{step['actionVerb']}'")
 
         # Validate each input
