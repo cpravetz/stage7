@@ -185,7 +185,8 @@ class PlanValidator:
         else:
             available_plugins = available_plugins_raw if isinstance(available_plugins_raw, list) else []
 
-
+        # Apply input alias resolution before validation
+        current_plan = self._resolve_input_aliases(current_plan, available_plugins)
 
         validation_result = self._validate_plan(current_plan, available_plugins)
 
@@ -438,6 +439,7 @@ class PlanValidator:
                     # Only insert TRANSFORM if it's NOT an array/list type mismatch (handled by FOREACH)
                     if dest_input_type and source_output_type and dest_input_type != source_output_type and dest_input_type != 'any' and source_output_type != 'any' and source_output_type not in ['array', 'list']:
                         # Mismatch detected, insert TRANSFORM step
+                        logger.info(f"Type mismatch detected: {source_output_type} -> {dest_input_type}, inserting TRANSFORM step")
     
                         transform_step_number = self._find_max_step_number(plan) + 1 # Get a truly new, unused ID
                         new_output_name = f"{source_output_name}_as_{dest_input_type}"
@@ -516,6 +518,53 @@ class PlanValidator:
             return 'missing_field'
         else:
             return 'generic'
+
+    def _resolve_input_aliases(self, plan: List[Dict[str, Any]], available_plugins: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Resolve input aliases for all steps based on plugin definitions"""
+        # Create plugin map for quick lookup
+        plugin_map = {plugin.get('actionVerb'): plugin for plugin in available_plugins}
+
+        for step in plan:
+            action_verb = step.get('actionVerb')
+            plugin_def = plugin_map.get(action_verb)
+
+            if not plugin_def:
+                continue
+
+            inputs = step.get('inputs', {})
+            input_definitions = plugin_def.get('inputDefinitions', [])
+
+            # Create alias map: alias -> canonical_name
+            alias_map = {}
+            for input_def in input_definitions:
+                canonical_name = input_def.get('name')
+                aliases = input_def.get('aliases', [])
+
+                # Add the canonical name to itself
+                alias_map[canonical_name] = canonical_name
+
+                # Add all aliases pointing to canonical name
+                for alias in aliases:
+                    alias_map[alias] = canonical_name
+
+            # Check for inputs that need alias resolution
+            inputs_to_rename = {}
+            for input_name in list(inputs.keys()):
+                if input_name in alias_map:
+                    canonical_name = alias_map[input_name]
+                    if input_name != canonical_name:
+                        # This input uses an alias, rename it to canonical
+                        inputs_to_rename[input_name] = canonical_name
+
+            # Apply the renames
+            for old_name, new_name in inputs_to_rename.items():
+                if new_name not in inputs:  # Only rename if canonical name doesn't already exist
+                    logger.info(f"Step {step.get('number')}: Resolving input alias '{old_name}' -> '{new_name}' for actionVerb '{action_verb}'")
+                    inputs[new_name] = inputs.pop(old_name)
+                else:
+                    logger.warning(f"Step {step.get('number')}: Cannot resolve alias '{old_name}' -> '{new_name}' because '{new_name}' already exists")
+
+        return plan
 
     def _create_focused_repair_prompt(self, step_to_repair: Dict[str, Any], errors: List[str], plugin_definition: Dict[str, Any] = None) -> str:
         """Create a focused repair prompt based on error type"""

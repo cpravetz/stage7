@@ -20,6 +20,7 @@ export interface PluginParameter {
     mimeType?: string;
     defaultValue?: any;
     args?: Record<string, any>; // Added field
+    aliases?: string[];
 }
 
 export interface EntryPointType {
