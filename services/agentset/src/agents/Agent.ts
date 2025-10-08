@@ -1431,6 +1431,9 @@ Please consider this context and the available plugins when planning and executi
 
     // Update the cleanupFailedStep method to include proper error handling
     private async cleanupFailedStep(step: Step): Promise<void> {
+        if (step.status === StepStatus.ERROR || step.status === StepStatus.CANCELLED) {
+            return; // Already cleaned up or in a terminal error state
+        }
         try {
             console.log(`Starting cleanup for failed step ${step.id}`);
 

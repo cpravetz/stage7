@@ -258,38 +258,9 @@ export class Step {
                                 args: { auto_mapped_from: single.name }
                             });
                         }
-                    }
-                }
-
-                const successfulOutputs = sourceStep.result.filter(r => r.resultType !== PluginParameterType.ERROR && r.success !== false);
-                if (successfulOutputs.length === 1) {
-                    const single = successfulOutputs[0];
-                    if (single.result !== undefined && single.result !== null) {
-                        console.warn(`[Step ${this.id}]   - Dependency '${dep.sourceStepId}.${dep.outputName}' not found or has no result. Falling back to single available output '${single.name}'.`);
-                        inputRunValues.set(dep.inputName, {
-                            inputName: dep.inputName,
-                            value: single.result,
-                            valueType: single.resultType,
-                            args: { auto_mapped_from: single.name }
-                        });
-                        try {
-                            await this.logEvent({
-                                eventType: 'dependency_auto_remap',
-                                stepId: this.id,
-                                missionId: this.missionId,
-                                dependency: `${dep.sourceStepId}.${dep.outputName}`,
-                                mappedFrom: single.name,
-                                mappedTo: dep.inputName,
-                                timestamp: new Date().toISOString()
-                            });
-                        } catch (e) {
-                            console.error('Failed to log dependency_auto_remap event', e instanceof Error ? e.message : e);
-                        }
                     } else {
-                        console.log(`[Step ${this.id}]   - Dependency '${dep.sourceStepId}.${dep.outputName}' not satisfied. Fallback output has no result.`);
+                        console.log(`[Step ${this.id}]   - Dependency '${dep.sourceStepId}.${dep.outputName}' not satisfied. No unique fallback output available.`);
                     }
-                } else {
-                    console.log(`[Step ${this.id}]   - Dependency '${dep.sourceStepId}.${dep.outputName}' not satisfied. No unique fallback output available.`);
                 }
             } else {
                 console.log(`[Step ${this.id}]   - Source step '${dep.sourceStepId}' not found or has no result. sourceStep:`, sourceStep);

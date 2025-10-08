@@ -537,26 +537,7 @@ After your internal analysis and self-correction is complete, provide ONLY the f
 
 **THE GOLDEN RULE OF DEPENDENCIES: A step can ONLY depend on the outputs of PRECEDING steps. A step can NEVER depend on itself.**
 
-**INVALID EXAMPLE (DO NOT DO THIS):**
-{{
-  "number": 2,
-  "actionVerb": "SCRAPE",
-  "inputs": {{
-    "url": {{ "outputName": "item", "sourceStep": 2 }} // ERROR: sourceStep is the same as the step's own number.
-  }}
-}}
-
-**CORRECT EXAMPLE:**
-{{
-  "number": 2,
-  "actionVerb": "SCRAPE",
-  "inputs": {{
-    "url": {{ "outputName": "some_url_list", "sourceStep": 1 }} // CORRECT: Depends on step 1.
-  }}
-}}
-
-- **Data Type Integrity (MANDATORY):** The `valueType` of an output from a `sourceStep` MUST EXACTLY MATCH the `valueType` expected by the consuming input. There are no exceptions. If a `SEARCH` step outputs an `array` of results, and a `SCRAPE` step expects a `string` for its `url` input, you MUST insert a `FOREACH` loop to iterate the array. Do not create an invalid plan assuming the system will fix it.
-- **Handling Lists (Arrays) - CRITICAL FOREACH USAGE:**
+**Handling Lists (Arrays) - CRITICAL FOREACH USAGE:**
     - If a step (e.g., `SCRAPE`) requires a single item (e.g., a URL as a `string`) but a previous step (e.g., `SEARCH`) provides a list of items (an `array`), you MUST use a `FOREACH` loop.
     - The `FOREACH` step's `list` input MUST depend on the array output from the source step (e.g., `sourceStep: 1`, `outputName: "competitorList"`).
     - The step(s) inside the `FOREACH`'s `steps` sub-array that consume the individual items MUST reference the `FOREACH` step itself as their `sourceStep` and `item` as their `outputName`.

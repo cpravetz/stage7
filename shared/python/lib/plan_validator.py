@@ -1257,7 +1257,10 @@ Return ONLY the corrected JSON plan, no explanations."""
 
                                 # Now, compare the types
                                 if dest_input_type and source_output_type:
-                                    is_mismatch = dest_input_type != source_output_type and dest_input_type != 'any' and source_output_type != 'any'
+                                    if dest_input_type == 'array' and source_output_type == 'string':
+                                        is_mismatch = False
+                                    else:
+                                        is_mismatch = dest_input_type != source_output_type and dest_input_type != 'any' and source_output_type != 'any'
                                     is_wrappable = dest_input_type in ['string', 'number', 'object'] and source_output_type in ['array', 'list']
 
                                     if is_wrappable:
