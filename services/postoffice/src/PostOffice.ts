@@ -1124,9 +1124,8 @@ export class PostOffice extends BaseEntity {
 
     private async notifyAgentOfUserResponse(requestId: string, response: any): Promise<void> {
         try {
-            // Find all agents that might be waiting for this response
-            // We need to broadcast to all AgentSet instances since we don't know which one is waiting
-            const agentSetComponents = this.componentsByType.get('agentset') || new Set();
+            const agentSetComponents = this.componentsByType.get('AgentSet') || new Set<string>();
+            console.log(`Found ${agentSetComponents.size} AgentSet components to notify.`);
 
             for (const agentSetId of agentSetComponents) {
                 const component = this.components.get(agentSetId);
@@ -1137,7 +1136,15 @@ export class PostOffice extends BaseEntity {
                             answer: response
                         };
 
-                        await this.sendMessage('USER_INPUT_RESPONSE', agentSetId, messageContent, false);
+                        const message: Message = {
+                            type: MessageType.USER_INPUT_RESPONSE,
+                            content: messageContent,
+                            sender: this.id,
+                            recipient: agentSetId,
+                            timestamp: new Date().toISOString()
+                        };
+
+                        await this.messageRouter.routeMessage(message);
                         console.log(`Notified AgentSet ${agentSetId} of user response for request ${requestId}`);
                     } catch (error) {
                         console.error(`Failed to notify AgentSet ${agentSetId} of user response:`, error);

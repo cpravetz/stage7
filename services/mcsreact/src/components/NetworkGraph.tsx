@@ -14,6 +14,7 @@ interface NetworkGraphProps {
     setZoom: (zoom: number) => void;
     pan: { x: number, y: number };
     setPan: (pan: { x: number, y: number }) => void;
+    theme: 'light' | 'dark';
 }
 
 const getStepStatusBorderColor = (status: string): string => {
@@ -62,7 +63,7 @@ function getContrastYIQ(hexcolor: string): string {
     return yiq >= 128 ? '#222' : '#fff';
 }
 
-export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics, zoom, setZoom, pan, setPan }) => {
+export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics, zoom, setZoom, pan, setPan, theme }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const networkRef = useRef<Network | null>(null);
     
@@ -92,6 +93,7 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics, zoo
 
     // Memoize the processed data and create a hash to detect real changes
     const { nodes, edges, dataHash } = useMemo(() => {
+        const isDarkMode = theme === 'dark';
         console.log('[NetworkGraph] Processing agentStatistics...');
 
         let statsMap: Map<string, Array<AgentStatistics>>;
@@ -134,6 +136,16 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics, zoo
         const stepIdToStep: Record<string, any> = {};
         const agentIdToSteps: Record<string, any[]> = {};
         const stepIdToDependents: Record<string, Set<string>> = {};
+
+        const inputNodeColor = isDarkMode 
+            ? { background: '#424242', border: '#90a4ae' } 
+            : { background: '#f5f5f5', border: '#607d8b' };
+        const inputFontColor = isDarkMode ? '#f5f5f5' : '#222';
+
+        const outputNodeColor = isDarkMode
+            ? { background: '#385739', border: '#66bb6a' }
+            : { background: '#e8f5e9', border: '#388e3c' };
+        const outputFontColor = isDarkMode ? '#f5f5f5' : '#222';
 
         // Create nodes and build lookup tables
         for (const [statusCategory, agents] of statsMap.entries()) {
@@ -196,9 +208,9 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics, zoo
                         newNodes.add({
                             id: inputId,
                             label: `AGENT INPUT\n${inputId}`,
-                            color: { background: '#f5f5f5', border: '#607d8b' },
+                            color: inputNodeColor,
                             borderWidth: 2,
-                            font: { color: '#222' },
+                            font: { color: inputFontColor },
                             group: agent.agentId,
                             shape: 'ellipse',
                         });
@@ -211,9 +223,9 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics, zoo
                         newNodes.add({
                             id: outputId,
                             label: `AGENT OUTPUT\n${outputId}`,
-                            color: { background: '#e8f5e9', border: '#388e3c' },
+                            color: outputNodeColor,
                             borderWidth: 2,
-                            font: { color: '#222' },
+                            font: { color: outputFontColor },
                             group: agent.agentId,
                             shape: 'ellipse',
                         });
@@ -270,7 +282,7 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics, zoo
         }
 
         return { nodes: newNodes, edges: newEdges, dataHash };
-    }, [agentStatistics]);
+    }, [agentStatistics, theme]);
 
     // Initialize or update the network only when data actually changes
     useEffect(() => {
@@ -441,7 +453,7 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics, zoo
     );
 
     return (
-        <div style={{ position: 'relative', width: '100%' }}>
+        <div style={{ position: 'relative', width: '100%' }} className={theme === 'dark' ? 'dark-mode' : ''}>
             {stepOverviewOpen ? (
                 <StepOverviewDialog />
             ) : (

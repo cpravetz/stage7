@@ -267,10 +267,13 @@ const INTERNAL_VERBS: PluginManifest[] = [
         verb: 'FOREACH',
         version: '1.0.0',
         description: 'Used to have a set of steps address the individual elements of an array.',
-        language: 'internal',
+        language: 'internal',   
         inputGuidance: "Use this verb to iterate over the elements of an array output from a previous step. The 'array' input should be the output of the previous step. The 'steps' input should be a sub-plan to be executed for each item in the array.",
         inputDefinitions: [
-            { name: 'array', type: PluginParameterType.ARRAY, required: true, description: 'Array to iterate over.' },
+            { name: 'array', 
+              type: PluginParameterType.ARRAY, 
+              required: true, description: 'Array to iterate over.', 
+              aliases: ['list'] },
             { name: 'steps', type: PluginParameterType.ARRAY, required: true, description: 'A plan of steps to execute for each item.' }
         ],
         outputDefinitions: [

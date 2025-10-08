@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import './UserInputModal.css';
 import { SecurityClient } from '../SecurityClient';
 import { API_BASE_URL } from '../config';
@@ -10,17 +10,36 @@ interface UserInputModalProps {
     question: any;
     choices?: string[];
     answerType: AnswerType;
-    onSubmit: (requestId: string, response: any) => void;
     onClose: () => void;
     darkMode?: boolean;
 }
 
-const UserInputModal: React.FC<UserInputModalProps> = ({ requestId, question, choices, answerType, onSubmit, onClose, darkMode }) => {
+const UserInputModal: React.FC<UserInputModalProps> = ({ requestId, question, choices, answerType, onClose, darkMode }) => {
     const [response, setResponse] = useState<string | number | boolean>('');
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
     const [dragOver, setDragOver] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
+
+    // Reset form state when requestId changes (new question)
+    useEffect(() => {
+        setResponse('');
+        setSelectedFile(null);
+        setDragOver(false);
+        setIsSubmitting(false);
+    }, [requestId]);
+
+    const submitData = async (data: FormData | object) => {
+        const securityClient = SecurityClient.getInstance(API_BASE_URL);
+        const apiClient = securityClient.getApi();
+        const isFormData = data instanceof FormData;
+
+        await apiClient.post('/submitUserInput', data, {
+            headers: {
+                ...(isFormData && { 'Content-Type': 'multipart/form-data' }),
+            },
+        });
+    };
 
     const handleSubmit = async () => {
         setIsSubmitting(true);
@@ -31,30 +50,14 @@ const UserInputModal: React.FC<UserInputModalProps> = ({ requestId, question, ch
                     setIsSubmitting(false);
                     return;
                 }
-
-                // Create FormData for file upload
                 const formData = new FormData();
                 formData.append('requestId', requestId);
                 formData.append('files', selectedFile);
-
-                // Use SecurityClient's axios instance for authenticated request
-                const securityClient = SecurityClient.getInstance(API_BASE_URL);
-                const apiClient = securityClient.getApi();
-
-                // Submit file upload
-                const response = await apiClient.post('/submitUserInput', formData, {
-                    headers: { 'Content-Type': 'multipart/form-data' }
-                });
-
-                if (response.status !== 200) {
-                    throw new Error('Failed to upload file');
-                }
-
-                onClose();
+                await submitData(formData);
             } else {
-                await onSubmit(requestId, response);
-                onClose();
+                await submitData({ requestId, response });
             }
+            onClose();
         } catch (error) {
             console.error('Error submitting user input:', error instanceof Error ? error.message : error);
         } finally {
@@ -64,15 +67,7 @@ const UserInputModal: React.FC<UserInputModalProps> = ({ requestId, question, ch
 
     const handleCancel = async () => {
         try {
-            // Send cancellation request to backend
-            const securityClient = SecurityClient.getInstance(API_BASE_URL);
-            const apiClient = securityClient.getApi();
-
-            await apiClient.post('/submitUserInput', {
-                requestId: requestId,
-                cancel: true
-            });
-
+            await submitData({ requestId: requestId, cancel: true });
             onClose();
         } catch (error) {
             console.error('Error cancelling user input:', error instanceof Error ? error.message : error);
