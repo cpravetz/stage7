@@ -105,9 +105,11 @@ class PlanValidator:
         
     def _find_max_step_number(self, plan: List[Dict[str, Any]]) -> int:
         max_num = 0
+        step_numbers = []
         for step in plan:
             if isinstance(step, dict):
                 num = step.get('number', 0)
+                step_numbers.append(num)
                 if num > max_num:
                     max_num = num
 
@@ -121,6 +123,7 @@ class PlanValidator:
                     sub_max = self._find_max_step_number(sub_plan)
                     if sub_max > max_num:
                         max_num = sub_max
+        logger.info(f"_find_max_step_number: step_numbers={step_numbers}, max_num={max_num}")
         return int(max_num)
 
     def _collect_all_step_numbers(self, plan: List[Dict[str, Any]]) -> Dict[int, int]:
@@ -203,7 +206,8 @@ class PlanValidator:
                     step_to_wrap,
                     error_to_fix['source_step_number'],
                     error_to_fix['source_output_name'],
-                    error_to_fix['target_input_name']
+                    error_to_fix['target_input_name'],
+                    plugin_map
                 )
                 
                 logger.info("Re-validating plan after FOREACH wrapping...")
@@ -952,13 +956,15 @@ Return ONLY the corrected JSON plan, no explanations."""
 
 
 
-    def _wrap_step_in_foreach(self, plan: List[Dict[str, Any]], step_to_wrap: Dict[str, Any], source_step_number: int, source_output_name: str, target_input_name: str) -> List[Dict[str, Any]]:
+    def _wrap_step_in_foreach(self, plan: List[Dict[str, Any]], step_to_wrap: Dict[str, Any], source_step_number: int, source_output_name: str, target_input_name: str, plugin_map: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Wraps a step that expects a single item in a FOREACH loop, including all its dependent steps."""
         logger.info(f"Wrapping step {step_to_wrap['number']} in a FOREACH loop for input '{target_input_name}'.")
 
         # 1. Determine the FOREACH step number (next unused)
-        foreach_step_number = self._find_max_step_number(plan) + 1
-        
+        max_step_number = self._find_max_step_number(plan)
+        foreach_step_number = max_step_number + 1
+        logger.info(f"Max step number in plan: {max_step_number}, assigning FOREACH step number: {foreach_step_number}")
+
         step_to_wrap_original_number = step_to_wrap['number']
 
         # 2. Identify all steps that need to be moved into the subplan
@@ -1018,50 +1024,88 @@ Return ONLY the corrected JSON plan, no explanations."""
                         moved_original_step_numbers.add(current_step_num)
                         break 
 
-        # 3. Create the subplan (steps retain their original numbers)
+        # 3. Create the subplan (keep original step numbers for global uniqueness)
         sub_plan = []
-        
+
         # Sort steps by their original number to maintain order in subplan
         sorted_steps_to_move = sorted(steps_to_move_into_subplan_map.values(), key=lambda x: x['number'])
 
+        logger.info(f"Creating sub-plan with {len(sorted_steps_to_move)} steps, keeping original step numbers for global uniqueness")
+
         for original_step in sorted_steps_to_move:
             new_step = copy.deepcopy(original_step) # Work on a copy
-            # new_step['number'] remains original_step['number'] as per user's clarification
+            # Keep original step number for global uniqueness across entire plan
+            # new_step['number'] remains original_step['number']
+            logger.info(f"Adding step {new_step['number']} ({new_step['actionVerb']}) to sub-plan")
             
             # Update inputs within the subplan
             for input_name, input_def in new_step.get('inputs', {}).items():
                 if isinstance(input_def, dict) and 'sourceStep' in input_def:
                     original_input_source_step = input_def['sourceStep']
-                    
+
                     if original_input_source_step == source_step_number and input_name == target_input_name and original_step['number'] == step_to_wrap_original_number:
                         # This is the specific input that caused the wrapping in the original step_to_wrap
+                        # The FOREACH execution expects this input to have outputName = "item" to inject the loop item
                         input_def['outputName'] = "item"
                         input_def['sourceStep'] = foreach_step_number # Reference the FOREACH step itself
-                    # Else: sourceStep remains original_input_source_step (no remapping to relative subplan numbers)
+                        logger.info(f"Updated input '{input_name}' in step {new_step['number']} to reference FOREACH item")
+                    else:
+                        # For other inputs that reference steps within the sub-plan, we need to ensure
+                        # they use the actual output names from the plugin manifests, not the expected names
+                        if 'outputName' in input_def and original_input_source_step in steps_to_move_into_subplan_map:
+                            source_step = steps_to_move_into_subplan_map[original_input_source_step]
+                            source_action_verb = source_step.get('actionVerb')
+
+                            # Get the plugin definition for the source step
+                            if source_action_verb and source_action_verb in plugin_map:
+                                source_plugin_def = plugin_map[source_action_verb]
+                                output_definitions = source_plugin_def.get('outputDefinitions', [])
+
+                                # If the source plugin has only one output, use that output name
+                                if len(output_definitions) == 1:
+                                    actual_output_name = output_definitions[0].get('name')
+                                    if actual_output_name and actual_output_name != input_def['outputName']:
+                                        logger.info(f"Updating output reference in step {new_step['number']} input '{input_name}': '{input_def['outputName']}' -> '{actual_output_name}'")
+                                        input_def['outputName'] = actual_output_name
+                    # All other sourceStep references remain unchanged since step numbers are globally unique
 
             sub_plan.append(new_step)
+
+        # Debug: Log the final sub-plan structure
+        logger.info(f"Created sub-plan with {len(sub_plan)} steps (keeping original step numbers):")
+        for step in sub_plan:
+            logger.info(f"  Step {step['number']}: {step['actionVerb']} - inputs: {list(step.get('inputs', {}).keys())}")
+            for input_name, input_def in step.get('inputs', {}).items():
+                if isinstance(input_def, dict) and 'sourceStep' in input_def:
+                    logger.info(f"    Input '{input_name}' references step {input_def['sourceStep']}, output '{input_def.get('outputName')}'")
 
         # 4. Create the FOREACH step
         # Copy the outputs from the step being wrapped so dependent steps can reference them
         original_step = steps_to_move_into_subplan_map[step_to_wrap_original_number]
         foreach_outputs = copy.deepcopy(original_step.get('outputs', {}))
 
+        # Create FOREACH step with explicit number assignment to avoid any reference issues
+        foreach_step_number_final = int(foreach_step_number)  # Ensure it's an integer, not a reference
+
         foreach_step = {
-            "number": foreach_step_number,
+            "number": foreach_step_number_final,
             "actionVerb": "FOREACH",
             "description": f"Iterate over the '{source_output_name}' list from step {source_step_number} and for each item, execute the sub-plan.",
-                                    "inputs": {
-                                        "array": {  # Changed 'list' to 'array'
-                                            "outputName": source_output_name,
-                                            "sourceStep": source_step_number
-                                        },
-                                        "steps": { # steps is an input
-                                            "value": sub_plan,
-                                            "valueType": "array" # Assuming sub_plan is an array of steps
-                                        }
-                                    },
-                                    "outputs": foreach_outputs,  # Use the same outputs as the wrapped step
-                                    "recommendedRole": "Coordinator"        }
+            "inputs": {
+                "array": {  # Changed 'list' to 'array'
+                    "outputName": source_output_name,
+                    "sourceStep": source_step_number
+                },
+                "steps": { # steps is an input
+                    "value": sub_plan,
+                    "valueType": "array" # Assuming sub_plan is an array of steps
+                }
+            },
+            "outputs": foreach_outputs,  # Use the same outputs as the wrapped step
+            "recommendedRole": "Coordinator"
+        }
+        logger.info(f"Created FOREACH step with number {foreach_step_number}, replacing original step {step_to_wrap_original_number}")
+        logger.info(f"FOREACH step immediately after creation: number={foreach_step['number']}, actionVerb={foreach_step['actionVerb']}")
 
         # 5. Reconstruct the main plan
         new_plan = []
@@ -1071,11 +1115,21 @@ Return ONLY the corrected JSON plan, no explanations."""
                 # This step has been moved into the subplan
                 if s['number'] == step_to_wrap_original_number and not inserted_foreach:
                     # Insert the FOREACH step at the position of the first moved step (step_to_wrap)
+                    # CRITICAL: Ensure the FOREACH step keeps its assigned unique number
+                    if foreach_step['number'] != foreach_step_number_final:
+                        logger.error(f"CRITICAL BUG: FOREACH step number changed from {foreach_step_number_final} to {foreach_step['number']}!")
+                        foreach_step['number'] = foreach_step_number_final  # Force correct number
+
+                    logger.info(f"Inserting FOREACH step with number {foreach_step['number']} at position of original step {s['number']}")
+                    logger.info(f"FOREACH step before insertion: {json.dumps(foreach_step, indent=2)}")
                     new_plan.append(foreach_step)
                     inserted_foreach = True
+                    logger.info(f"FOREACH step after insertion: {json.dumps(new_plan[-1], indent=2)}")
                 # Skip adding this step to the new_plan as it's now in the subplan
+                logger.info(f"Skipping original step {s['number']} ({s.get('actionVerb')}) - moved to sub-plan")
             else:
                 # This step is not moved, keep it in the main plan with its original number
+                logger.info(f"Keeping original step {s['number']} ({s.get('actionVerb')}) in main plan")
                 new_plan.append(s)
 
         # 6. Update any remaining steps that reference the wrapped step to reference the FOREACH step instead
@@ -1089,6 +1143,13 @@ Return ONLY the corrected JSON plan, no explanations."""
                     if input_def['sourceStep'] == step_to_wrap_original_number:
                         logger.info(f"Updating step {step['number']} input '{input_name}' to reference FOREACH step {foreach_step_number} instead of wrapped step {step_to_wrap_original_number}")
                         input_def['sourceStep'] = foreach_step_number
+
+        # Debug: Log the final plan structure
+        logger.info(f"Final plan after FOREACH wrapping has {len(new_plan)} steps:")
+        for step in new_plan:
+            logger.info(f"  Step {step['number']}: {step['actionVerb']}")
+            if step['actionVerb'] == 'FOREACH':
+                logger.info(f"  FOREACH step details: {json.dumps(step, indent=4)}")
 
         return new_plan
 

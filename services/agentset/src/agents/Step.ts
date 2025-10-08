@@ -245,7 +245,20 @@ export class Step {
                         valueType: output.resultType,
                         args: {}
                     });
-                    continue;
+                } else {
+                    const successfulOutputs = sourceStep.result.filter(r => r.resultType !== PluginParameterType.ERROR && r.success !== false);
+                    if (successfulOutputs.length === 1) {
+                        const single = successfulOutputs[0];
+                        if (single.result !== undefined && single.result !== null) {
+                            console.warn(`[Step ${this.id}]   - Dependency '${dep.sourceStepId}.${dep.outputName}' not found or has no result. Falling back to single available output '${single.name}'.`);
+                            inputRunValues.set(dep.inputName, {
+                                inputName: dep.inputName,
+                                value: single.result,
+                                valueType: single.resultType,
+                                args: { auto_mapped_from: single.name }
+                            });
+                        }
+                    }
                 }
 
                 const successfulOutputs = sourceStep.result.filter(r => r.resultType !== PluginParameterType.ERROR && r.success !== false);
@@ -389,7 +402,19 @@ export class Step {
     private async handleForeach(): Promise<PluginOutput[]> {
         const arrayInput = this.inputValues.get('array');
         const stepsInput = this.inputValues.get('steps');
-    
+
+        // Debug: Log the inputs received
+        console.log(`[handleForeach] Array input:`, arrayInput);
+        console.log(`[handleForeach] Steps input:`, stepsInput);
+        if (arrayInput?.value) {
+            console.log(`[handleForeach] Array value type: ${typeof arrayInput.value}, length: ${Array.isArray(arrayInput.value) ? arrayInput.value.length : 'N/A'}`);
+            if (Array.isArray(arrayInput.value) && arrayInput.value.length <= 10) {
+                console.log(`[handleForeach] Array contents:`, arrayInput.value);
+            } else if (Array.isArray(arrayInput.value)) {
+                console.log(`[handleForeach] Array first 5 items:`, arrayInput.value.slice(0, 5));
+            }
+        }
+
         // Validation: Check for a valid iterable instead of just an array
         if (!arrayInput || !arrayInput.value || typeof arrayInput.value[Symbol.iterator] !== 'function') {
             return [{
@@ -412,7 +437,7 @@ export class Step {
         // Convert any iterable to an array to allow for indexing and length properties
         const inputArray: any[] = Array.from(arrayInput.value);
         const subPlanTemplate: ActionVerbTask[] = stepsInput.value;
-    
+
         if (inputArray.length === 0) {
             return [{
                 success: true, name: 'loop_skipped', resultType: PluginParameterType.STRING,
@@ -420,66 +445,167 @@ export class Step {
                 result: 'Empty iterable, no iterations.'
             }];
         }
-    
-        const allGeneratedSteps: ActionVerbTask[] = [];
-    
-        for (let i = 0; i < inputArray.length; i++) {
-            const item = inputArray[i];
-            // Deep copy the sub-plan template for each iteration
-            const itemSteps: ActionVerbTask[] = JSON.parse(JSON.stringify(subPlanTemplate));
-    
-            itemSteps.forEach(task => {
-                // Update description for context
-                task.description = `(Item ${i + 1}/${inputArray.length}) ${task.description || ''}`;
-    
-                const inputs = (task as any).inputs || {};
-                let inputModified = false;
-    
-                for (const inputName in inputs) {
-                    const inputDef = inputs[inputName];
-                    // Check if this input is the one that depends on the loop item
-                    if (inputDef.outputName === 'item') {
-                        console.log(`[handleForeach] Modifying input '${inputName}' in task '${task.actionVerb}'. Replacing 'item' dependency with actual value.`);
-                        
-                        // Replace dependency with direct value
-                        inputDef.value = item;
-                        // Infer valueType from the item
-                        if (typeof item === 'string') {
-                            inputDef.valueType = PluginParameterType.STRING;
-                        } else if (typeof item === 'number') {
-                            inputDef.valueType = PluginParameterType.NUMBER;
-                        } else if (typeof item === 'boolean') {
-                            inputDef.valueType = PluginParameterType.BOOLEAN;
-                        } else if (Array.isArray(item)) {
-                            inputDef.valueType = PluginParameterType.ARRAY;
-                        } else if (typeof item === 'object' && item !== null) {
-                            inputDef.valueType = PluginParameterType.OBJECT;
-                        } else {
-                            inputDef.valueType = PluginParameterType.ANY;
-                        }
-                        
-                        // Remove the properties that defined it as a dependency
-                        delete inputDef.outputName;
-                        delete inputDef.sourceStep;
-                        inputModified = true;
-                    }
-                }
-    
-                if (!inputModified) {
-                    console.warn(`[handleForeach] Task '${task.actionVerb}' in sub-plan did not have an input depending on 'item'. The loop item was not injected.`);
-                }
-            });
-    
-            allGeneratedSteps.push(...itemSteps);
+
+        // Safety check: prevent system overload from too many iterations
+        const maxIterations = 100; // Reasonable limit
+        if (inputArray.length > maxIterations) {
+            console.error(`[handleForeach] Array too large: ${inputArray.length} items. Limiting to ${maxIterations} items.`);
+            console.error(`[handleForeach] First few items: ${JSON.stringify(inputArray.slice(0, 5))}`);
+            console.error(`[handleForeach] This suggests the array was incorrectly parsed. Check input sanitization.`);
+
+            return [{
+                success: false, name: 'error', resultType: PluginParameterType.ERROR,
+                resultDescription: `FOREACH array too large: ${inputArray.length} items (max: ${maxIterations}). This suggests incorrect array parsing.`,
+                result: null,
+                error: `Array contains ${inputArray.length} items, which exceeds the safety limit of ${maxIterations}. First few items: ${JSON.stringify(inputArray.slice(0, 5))}. Check if the array was incorrectly split character by character.`
+            }];
         }
     
+        // Execute sub-plan for each item and collect results
+        const allResults: any[] = [];
+
+        for (let i = 0; i < inputArray.length; i++) {
+            const item = inputArray[i];
+            console.log(`[handleForeach] Processing item ${i + 1}/${inputArray.length}:`, item);
+
+            // Execute the sub-plan for this item
+            const itemResult = await this.executeSubPlanForItem(item, subPlanTemplate, i);
+            if (itemResult) {
+                allResults.push(itemResult);
+            }
+        }
+
         return [{
             success: true,
-            name: 'steps',
-            resultType: PluginParameterType.PLAN,
-            resultDescription: `[Step] FOREACH generated ${allGeneratedSteps.length} steps.`,
-            result: allGeneratedSteps
+            name: 'results',
+            resultType: PluginParameterType.ARRAY,
+            resultDescription: `[Step] FOREACH processed ${inputArray.length} items and collected ${allResults.length} results.`,
+            result: allResults
         }];
+    }
+
+    private async executeSubPlanForItem(item: any, subPlanTemplate: ActionVerbTask[], itemIndex: number): Promise<any> {
+        try {
+            // Deep copy the sub-plan template for this iteration
+            const itemSteps: (ActionVerbTask & { number?: number })[] = JSON.parse(JSON.stringify(subPlanTemplate));
+
+            // Create Step objects from the sub-plan
+            const stepObjects: Step[] = [];
+            const stepOutputs = new Map<number, PluginOutput[]>();
+
+            // Process each step in the sub-plan sequentially
+            for (let stepIndex = 0; stepIndex < itemSteps.length; stepIndex++) {
+                const task = itemSteps[stepIndex];
+                console.log(`[executeSubPlanForItem] Executing step ${stepIndex + 1}/${itemSteps.length}: ${task.actionVerb} for item ${itemIndex + 1}`);
+
+                // Create a temporary Step object for execution
+                const tempStep = new Step({
+                    actionVerb: task.actionVerb,
+                    missionId: this.missionId,
+                    ownerAgentId: this.ownerAgentId,
+                    stepNo: this.stepNo + stepIndex + 1,
+                    inputReferences: new Map(),
+                    inputValues: new Map(),
+                    description: `(Item ${itemIndex + 1}) ${task.description || ''}`,
+                    persistenceManager: this.persistenceManager
+                });
+
+                // Resolve inputs for this step
+                const inputs = (task as any).inputs || {};
+                for (const inputName in inputs) {
+                    const inputDef = inputs[inputName];
+
+                    if (inputDef.outputName === 'item') {
+                        // This input depends on the loop item
+                        tempStep.inputValues.set(inputName, {
+                            inputName: inputName,
+                            value: item,
+                            valueType: this.inferValueType(item)
+                        });
+                        console.log(`[executeSubPlanForItem] Set input '${inputName}' to loop item:`, item);
+                    } else if (inputDef.sourceStep && stepOutputs.has(inputDef.sourceStep)) {
+                        // This input depends on a previous step in the sub-plan
+                        const sourceOutputs = stepOutputs.get(inputDef.sourceStep)!;
+                        const sourceOutput = sourceOutputs.find(o => o.name === inputDef.outputName);
+                        if (sourceOutput) {
+                            tempStep.inputValues.set(inputName, {
+                                inputName: inputName,
+                                value: sourceOutput.result,
+                                valueType: sourceOutput.resultType as PluginParameterType
+                            });
+                            console.log(`[executeSubPlanForItem] Set input '${inputName}' from step ${inputDef.sourceStep} output '${inputDef.outputName}'`);
+                        } else {
+                            console.error(`[executeSubPlanForItem] Could not find output '${inputDef.outputName}' from step ${inputDef.sourceStep}`);
+                            console.error(`[executeSubPlanForItem] Available outputs from step ${inputDef.sourceStep}:`, sourceOutputs.map(o => `${o.name}(${o.resultType})`));
+                        }
+                    } else if (inputDef.sourceStep) {
+                        console.error(`[executeSubPlanForItem] Step ${inputDef.sourceStep} not found in stepOutputs. Available steps:`, Array.from(stepOutputs.keys()));
+                        console.error(`[executeSubPlanForItem] Could not find output '${inputDef.outputName}' from step ${inputDef.sourceStep}`);
+                    } else if (inputDef.value !== undefined) {
+                        // This input has a direct value
+                        tempStep.inputValues.set(inputName, {
+                            inputName: inputName,
+                            value: inputDef.value,
+                            valueType: inputDef.valueType as PluginParameterType
+                        });
+                        console.log(`[executeSubPlanForItem] Set input '${inputName}' to direct value:`, inputDef.value);
+                    }
+                }
+
+                // Execute the step
+                const result = await tempStep.execute(
+                    async (step: Step) => {
+                        // Use the parent step's execution context
+                        const response = await fetch(`${process.env.CAPABILITIES_MANAGER_URL || 'http://capabilitiesmanager:5060'}/executeAction`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                actionVerb: step.actionVerb,
+                                inputs: Object.fromEntries(step.inputValues.entries())
+                            })
+                        });
+                        const data = await response.json();
+                        return Array.isArray(data) ? data : [data];
+                    },
+                    async () => [], // thinkAction - not used in sub-plans
+                    async () => [], // delegateAction - not used in sub-plans
+                    async () => [], // askAction - not used in sub-plans
+                    [] // allSteps - empty for sub-plan execution
+                );
+
+                // Store the result for potential use by subsequent steps
+                const taskNumber = task.number || stepIndex + 1;
+                stepOutputs.set(taskNumber, result);
+                stepObjects.push(tempStep);
+
+                console.log(`[executeSubPlanForItem] Step ${task.actionVerb} completed with ${result.length} outputs`);
+                console.log(`[executeSubPlanForItem] Stored outputs for step ${taskNumber}:`, result.map(r => `${r.name}(${r.resultType})`));
+            }
+
+            // Return the final result from the last step
+            if (stepObjects.length > 0) {
+                const lastTask = itemSteps[itemSteps.length - 1];
+                const lastTaskNumber = lastTask.number || itemSteps.length;
+                const lastStepResult = stepOutputs.get(lastTaskNumber);
+                if (lastStepResult && lastStepResult.length > 0) {
+                    return lastStepResult[0].result;
+                }
+            }
+
+            return null;
+        } catch (error) {
+            console.error(`[executeSubPlanForItem] Error executing sub-plan for item ${itemIndex + 1}:`, error);
+            return null;
+        }
+    }
+
+    private inferValueType(value: any): PluginParameterType {
+        if (typeof value === 'string') return PluginParameterType.STRING;
+        if (typeof value === 'number') return PluginParameterType.NUMBER;
+        if (typeof value === 'boolean') return PluginParameterType.BOOLEAN;
+        if (Array.isArray(value)) return PluginParameterType.ARRAY;
+        if (typeof value === 'object' && value !== null) return PluginParameterType.OBJECT;
+        return PluginParameterType.ANY;
     }
 
     async execute(

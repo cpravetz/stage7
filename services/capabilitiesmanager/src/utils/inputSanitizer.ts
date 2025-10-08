@@ -12,8 +12,8 @@ const VALIDATION_PATTERNS = {
     URL: /^https?:\/\/\S+$/i,
     // Path format (supports both Unix and Windows)
     PATH: /^[a-zA-Z0-9/_\-\.:\\]+$/,
-    // JSON string
-    JSON_STRING: /^\s*[\{\[]/,
+    // JSON string - more precise matching for objects and arrays
+    JSON_STRING: /^\s*[\{\[].*[\}\]]\s*$/,
     // Numeric string
     NUMERIC: /^-?\d*\.?\d+$/
 };
@@ -102,16 +102,27 @@ export function sanitizeInputValue(
 
             case PluginParameterType.ARRAY:
                 if (typeof sanitizedValue === 'string') {
+                    // First try to parse as JSON array
                     if (VALIDATION_PATTERNS.JSON_STRING.test(sanitizedValue)) {
                         try {
                             const parsed = JSON.parse(sanitizedValue);
-                            sanitizedValue = Array.isArray(parsed) ? parsed : [sanitizedValue];
+                            sanitizedValue = Array.isArray(parsed) ? parsed : [parsed];
+                            console.log(`[${trace_id}] ${source_component}: Successfully parsed JSON array for ${inputName}`);
                         } catch (e) {
+                            console.warn(`[${trace_id}] ${source_component}: Failed to parse JSON array for ${inputName}, treating as single item`);
                             sanitizedValue = [sanitizedValue];
                         }
                     } else {
-                        // Split by common delimiters if it's a plain string
-                        sanitizedValue = sanitizedValue.split(/[,;\n]/).map(s => s.trim()).filter(Boolean);
+                        // For non-JSON strings, only split if they contain delimiters
+                        // Avoid splitting single URLs or other single values
+                        if (sanitizedValue.includes(',') || sanitizedValue.includes(';') || sanitizedValue.includes('\n')) {
+                            sanitizedValue = sanitizedValue.split(/[,;\n]/).map(s => s.trim()).filter(Boolean);
+                            console.log(`[${trace_id}] ${source_component}: Split delimited string into array for ${inputName}`);
+                        } else {
+                            // Single value, wrap in array
+                            sanitizedValue = [sanitizedValue];
+                            console.log(`[${trace_id}] ${source_component}: Wrapped single value in array for ${inputName}`);
+                        }
                     }
                 }
                 break;

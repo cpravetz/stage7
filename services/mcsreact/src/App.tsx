@@ -107,25 +107,6 @@ const MainApp: React.FC = () => {
     }
   };
 
-  // Handler for submitting user input from modal
-  const handleUserInputSubmit = async (requestId: string, response: any) => {
-    try {
-      const authHeader = securityClient.getAuthHeader();
-      await fetch('http://localhost:5020/submitUserInput', {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          ...authHeader
-        },
-        body: JSON.stringify({ requestId, response })
-      });
-      if (setPendingUserInput) setPendingUserInput(null);
-    } catch (error) {
-      console.error('Failed to submit user input:', error);
-    }
-  };
-
-  // Use the sendMessage function from WebSocketContext
   const handleSendMessage = async (message: string) => {
     await contextSendMessage(message);
   };
@@ -312,7 +293,6 @@ const MainApp: React.FC = () => {
             question={pendingUserInput.question}
             choices={pendingUserInput.choices}
             answerType={pendingUserInput.answerType as AnswerType}
-            onSubmit={handleUserInputSubmit}
             onClose={() => {
               if (setPendingUserInput) setPendingUserInput(null);
             }}

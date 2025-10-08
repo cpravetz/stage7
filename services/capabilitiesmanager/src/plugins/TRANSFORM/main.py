@@ -57,7 +57,6 @@ except Exception as e:
 import json
 import sys
 
-params = {json.dumps(params)}
 {script}
 """
 

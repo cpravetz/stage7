@@ -1725,6 +1725,16 @@ Please consider this context and the available plugins when planning and executi
                     deserializedOutputs.set(key, value);
                 }
             }
+            const taskDependencies = (task as any).dependencies;
+            let dependencies: any[] = [];
+            if (Array.isArray(taskDependencies)) {
+                dependencies = taskDependencies.map(dep => ({
+                    outputName: dep.outputName,
+                    sourceStepId: dep.sourceStepId,
+                    inputName: dep.inputName
+                }));
+            }
+
             const newStep = new Step({
               actionVerb: task.taskType,
               missionId: this.missionId,
@@ -1732,7 +1742,7 @@ Please consider this context and the available plugins when planning and executi
               stepNo: this.steps.length + 1,
               inputReferences: inputReferences,
               description: task.description,
-              dependencies: (task as any).dependencies,
+              dependencies: dependencies,
               outputs: deserializedOutputs,
               recommendedRole: this.role,
               status: StepStatus.PENDING,
