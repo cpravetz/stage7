@@ -2,7 +2,10 @@
 
 import json
 import pytest
-from plan_validator import PlanValidator, AccomplishError
+try:
+    from stage7_shared_lib import PlanValidator, AccomplishError
+except ImportError:
+    from plan_validator import PlanValidator, AccomplishError
 
 # Mock the call_brain function as it's not needed for this test
 def mock_call_brain(prompt: str, inputs: dict, response_type: str = "json") -> str:

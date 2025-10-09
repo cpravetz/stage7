@@ -19,3 +19,11 @@ export interface PluginCapabilities {
         };
     };
 }
+
+export interface TaskPerformanceMetrics {
+    successRate: number;
+    taskCount: number;
+    averageTaskDuration: number;
+    lastEvaluation: string;
+    qualityScore: number;
+}

@@ -626,6 +626,41 @@ describe('CapabilitiesManager Core Functionality', () => {
             expect(mockRes.status).toHaveBeenCalledWith(200);
             expect(mockRes.send).toHaveBeenCalledWith(MapSerializer.transformForSerialization([{ success: true, name: 'transactionId', resultType: PluginParameterType.STRING, result: 'txn-123' }]));
         });
+
+        it('should handle internal verbs by returning special response', async () => {
+            const mockReq: any = {
+                body: {
+                    actionVerb: 'CHAT',
+                    inputValues: MapSerializer.transformForSerialization(new Map([['message', { value: 'Hello user!', valueType: 'string' }]])),
+                },
+                trace_id: 'trace-internal'
+            };
+            const mockRes: any = {
+                status: jest.fn().mockReturnThis(),
+                send: jest.fn(),
+                json: jest.fn()
+            };
+
+            const mockInternalManifest = {
+                id: 'internal-CHAT',
+                verb: 'CHAT',
+                language: 'internal',
+                inputDefinitions: [{ name: 'message', type: PluginParameterType.STRING, required: true }]
+            };
+            mockPluginRegistry.prototype.fetchOneByVerb.mockResolvedValueOnce(mockInternalManifest);
+
+            await (capabilitiesManager as any).executeActionVerb(mockReq, mockRes);
+
+            expect(mockRes.status).toHaveBeenCalledWith(200);
+            expect(mockRes.send).toHaveBeenCalledWith(MapSerializer.transformForSerialization([{
+                success: true,
+                name: 'internal_verb_detected',
+                resultType: PluginParameterType.STRING,
+                resultDescription: "Internal verb 'CHAT' should be handled by Agent",
+                result: 'INTERNAL_VERB',
+                mimeType: 'text/plain'
+            }]));
+        });
     });
 
     describe('handleUnknownVerb', () => {

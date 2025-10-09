@@ -273,6 +273,63 @@ export class AgentSet extends BaseEntity {
             }
         });
 
+        // Update an agent's system prompt with a lesson learned
+        this.app.post('/agent/:agentId/updatePrompt', async (req: express.Request, res: express.Response): Promise<void> => {
+            try {
+                const { agentId } = req.params;
+                const { lessonLearned } = req.body;
+
+                if (!lessonLearned) {
+                    res.status(400).send({ error: 'lessonLearned is required' });
+                    return;
+                }
+
+                const specialization = await this.specializationFramework.updateSystemPrompt(agentId, lessonLearned);
+
+                if (!specialization) {
+                    res.status(404).send({ error: `Agent ${agentId} not found or has no specialization` });
+                    return;
+                }
+
+                res.status(200).send({
+                    success: true,
+                    message: 'System prompt updated successfully',
+                    specialization
+                });
+            } catch (error) {
+                analyzeError(error as Error);
+                if (!res.headersSent) {
+                    res.status(500).send({ error: error instanceof Error ? error.message : String(error) });
+                }
+            }
+        });
+
+        // Get agent performance data
+        this.app.get('/agent/:agentId/performance', async (req: express.Request, res: express.Response): Promise<void> => {
+            try {
+                const { agentId } = req.params;
+                const performanceData = this.specializationFramework.getAgentPerformanceData(agentId);
+
+                if (!performanceData) {
+                    res.status(404).send({ error: `Agent ${agentId} not found or has no performance data` });
+                    return;
+                }
+
+                // Convert Map to object for JSON serialization
+                const performanceObject = Object.fromEntries(performanceData);
+
+                res.status(200).send({
+                    agentId,
+                    performanceData: performanceObject
+                });
+            } catch (error) {
+                analyzeError(error as Error);
+                if (!res.headersSent) {
+                    res.status(500).send({ error: error instanceof Error ? error.message : String(error) });
+                }
+            }
+        });
+
         // Get agent specialization
        this.app.get('/agent/:agentId/specialization', (req: express.Request, res: express.Response): void => {
             try {

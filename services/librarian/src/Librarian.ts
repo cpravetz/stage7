@@ -10,6 +10,7 @@ import { WorkProduct } from './types/WorkProduct';
 import { BaseEntity, MapSerializer } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { v4 as uuidv4 } from 'uuid';
+import { knowledgeStore } from './knowledgeStore';
 
 const LARGE_ASSET_PATH = process.env.LARGE_ASSET_PATH || '/usr/src/app/shared/librarian-assets';
 
@@ -96,6 +97,8 @@ export class Librarian extends BaseEntity {
         this.app.get('/loadAllWorkProducts/:agentId', (req, res) => this.loadAllWorkProducts(req, res));
         this.app.get('/getSavedMissions', (req, res) => this.getSavedMissions(req, res));
         this.app.delete('/deleteCollection', (req, res) => this.deleteCollection(req, res));
+        this.app.post('/knowledge/save', (req, res) => this.saveKnowledge(req, res));
+        this.app.post('/knowledge/query', (req, res) => this.queryKnowledge(req, res));
       }
 
       private startServer() {
@@ -489,6 +492,38 @@ export class Librarian extends BaseEntity {
         } catch (error) { analyzeError(error as Error);
             console.error(`Error loading work products for agent ${agentId}:`, error instanceof Error ? error.message : String(error));
             res.status(500).send({ error: 'Failed to load work products', details: error instanceof Error ? error.message : String(error) });
+        }
+    }
+
+    private async saveKnowledge(req: express.Request, res: express.Response) {
+        const { collectionName, content, metadata } = req.body;
+
+        if (!collectionName || !content) {
+            return res.status(400).send({ error: 'collectionName and content are required' });
+        }
+
+        try {
+            await knowledgeStore.save(collectionName, content, metadata);
+            res.status(200).send({ status: 'Knowledge saved successfully' });
+        } catch (error) {
+            console.error('Error in saveKnowledge:', error instanceof Error ? error.message : error);
+            res.status(500).send({ error: 'Failed to save knowledge', details: error instanceof Error ? error.message : String(error) });
+        }
+    }
+
+    private async queryKnowledge(req: express.Request, res: express.Response) {
+        const { collectionName, queryText, maxResults } = req.body;
+
+        if (!collectionName || !queryText) {
+            return res.status(400).send({ error: 'collectionName and queryText are required' });
+        }
+
+        try {
+            const results = await knowledgeStore.query(collectionName, queryText, maxResults);
+            res.status(200).send({ data: results });
+        } catch (error) {
+            console.error('Error in queryKnowledge:', error instanceof Error ? error.message : error);
+            res.status(500).send({ error: 'Failed to query knowledge', details: error instanceof Error ? error.message : String(error) });
         }
     }
 }

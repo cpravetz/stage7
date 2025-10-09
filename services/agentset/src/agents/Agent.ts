@@ -183,7 +183,6 @@ export class Agent extends BaseEntity {
                 this.output = await this.agentPersistenceManager.loadWorkProduct(this.id, finalStep.id);
             }
             console.log(`Agent ${this.id} has completed all active work.`);
-            this.say(`Agent ${this.id} has completed its work.`);
         }
 
         return this.status;
@@ -564,7 +563,6 @@ Please consider this context and the available plugins when planning and executi
                     this.output = await this.agentPersistenceManager.loadWorkProduct(this.id, finalStep.id);
                 }
                 console.log(`Agent ${this.id} has completed its work.`);
-                this.say(`Agent ${this.id} has completed its work.`);
                 this.say(`Result: ${JSON.stringify(this.output)}`);
             }
         } catch (error) {
@@ -700,6 +698,7 @@ Please consider this context and the available plugins when planning and executi
         if (inputs.has('message')) {
             const messageInput = inputs.get('message');
             const message = messageInput?.value;
+            console.log(`[Agent ${this.id}] Sending CHAT message to user: ${message} from input: ${JSON.stringify(messageInput)}`);
 
             if (typeof message === 'string' && message) {
                 this.say(message);
@@ -1321,6 +1320,8 @@ Please consider this context and the available plugins when planning and executi
                     { timeout }
                 );
 
+
+
                 return response.data;
             } catch (error) {
                 console.error(`[Attempt ${attempt + 1}/${MAX_RETRIES}] Error executing action with CapabilitiesManager:`, error instanceof Error ? error.message : error);
@@ -1367,6 +1368,8 @@ Please consider this context and the available plugins when planning and executi
             error: 'Failed to execute action after multiple retries.'
         }];
     }
+
+
 
     // Add new method to handle cleanup
     private async notifyDependents(failedStepId: string, status: StepStatus): Promise<void> {

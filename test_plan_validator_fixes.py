@@ -7,10 +7,13 @@ import sys
 import os
 import json
 
-# Add the shared/python/lib directory to the path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'shared', 'python', 'lib'))
-
-from plan_validator import PlanValidator
+# Import from the installed shared library package
+try:
+    from stage7_shared_lib import PlanValidator
+except ImportError:
+    # Fallback to direct import for development/testing
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'shared', 'python', 'lib'))
+    from plan_validator import PlanValidator
 
 def test_unique_step_numbers():
     """Test that duplicate step numbers are detected."""

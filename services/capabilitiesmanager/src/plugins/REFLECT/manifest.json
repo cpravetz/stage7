@@ -37,6 +37,13 @@
             "type": "string",
             "required": false,
             "aliases": ["finalOutput","final_result","output"]
+        },
+        {
+            "name": "agentId",
+            "description": "The ID of the agent performing the reflection (for self-correction).",
+            "type": "string",
+            "required": false,
+            "aliases": ["agent_id"]
         }
     ],
     "outputDefinitions": [

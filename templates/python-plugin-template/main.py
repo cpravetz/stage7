@@ -21,14 +21,71 @@ import json
 import os
 from typing import Dict, List, Any, Optional
 
+# Import from the installed shared library package
+try:
+    from stage7_shared_lib import PlanValidator, AccomplishError, PLAN_STEP_SCHEMA, PLAN_ARRAY_SCHEMA
+except ImportError:
+    # Fallback to direct import for development/testing
+    plugin_dir = os.path.dirname(os.path.realpath(__file__))
+    shared_lib_path = os.path.abspath(os.path.join(plugin_dir, '../../shared/python/lib'))
+    if shared_lib_path not in sys.path:
+        sys.path.insert(0, shared_lib_path)
+    try:
+        from plan_validator import PlanValidator, AccomplishError, PLAN_STEP_SCHEMA, PLAN_ARRAY_SCHEMA
+    except ImportError:
+        # If shared library is not available, define dummy functions
+        class PlanValidator:
+            """Dummy plan validator for template"""
+            pass
+
+        class AccomplishError(Exception):
+            """Dummy error class for template"""
+            pass
+
+        # Dummy schema constants
+        PLAN_STEP_SCHEMA = {}
+        PLAN_ARRAY_SCHEMA = {}
+
+def get_auth_token(inputs: Dict[str, Any]) -> str:
+    """Get authentication token from inputs"""
+    # Try CapabilitiesManager token first (for calling Librarian, PostOffice, etc.)
+    if '__auth_token' in inputs:
+        token_data = inputs['__auth_token']
+        if isinstance(token_data, dict) and 'value' in token_data:
+            return token_data['value']
+        elif isinstance(token_data, str):
+            return token_data
+    # Fallback to Brain token if available
+    if '__brain_auth_token' in inputs:
+        token_data = inputs['__brain_auth_token']
+        if isinstance(token_data, dict) and 'value' in token_data:
+            return token_data['value']
+        elif isinstance(token_data, str):
+            return token_data
+    raise ValueError("No authentication token found in inputs")
+
+def get_brain_auth_token(inputs: Dict[str, Any]) -> str:
+    """Get Brain authentication token specifically for calling Brain service"""
+    if '__brain_auth_token' in inputs:
+        token_data = inputs['__brain_auth_token']
+        if isinstance(token_data, dict) and 'value' in token_data:
+            return token_data['value']
+        elif isinstance(token_data, str):
+            return token_data
+    raise ValueError("No Brain authentication token found in inputs")
+
 
 class InputValue:
     """Represents a plugin input parameter in the new format"""
-    def __init__(self, inputName: str, value: Any, valueType: str, args: Dict[str, Any] = None):
-        self.inputName = inputName
+    def __init__(self, value: Any, valueType: str = "string", args: Dict[str, Any] = None):
         self.value = value
         self.valueType = valueType
         self.args = args or {}
+
+    @property
+    def input_value(self):
+        """Backward compatibility property"""
+        return self.value
 
 
 class PluginOutput:
@@ -135,7 +192,7 @@ def main():
         inputs = {}
         for key, value in raw_inputs.items():
             if isinstance(value, dict) and 'value' in value:
-                inputs[key] = InputValue(value['value'], value.get('args', {}))
+                inputs[key] = InputValue(value['value'], value.get('valueType', 'string'), value.get('args', {}))
             else:
                 inputs[key] = InputValue(value)
         

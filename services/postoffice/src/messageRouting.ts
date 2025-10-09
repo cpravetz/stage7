@@ -88,7 +88,6 @@ export class MessageRouter {
 
     // If clientId is provided, send directly to that client
     if (clientId) {
-      console.log(`Routing statistics update to client: ${clientId}`);
       this.webSocketHandler.sendToClient(clientId, message);
       return;
     }
@@ -99,7 +98,6 @@ export class MessageRouter {
       const clientsForMission = this.missionClients.get(missionId);
 
       if (clientsForMission && clientsForMission.size > 0) {
-        console.log(`Routing statistics update for mission ${missionId} to ${clientsForMission.size} clients`);
         clientsForMission.forEach(cId => {
           this.webSocketHandler.sendToClient(cId, message);
         });

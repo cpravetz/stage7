@@ -110,10 +110,11 @@ export class PluginExecutor {
                 process.env.CLIENT_SECRET || 'stage7AuthSecret'
             );
             brainToken = await brainTokenManager.getToken();
+            console.log(`[${trace_id}] ${source_component}: Brain token retrieved: ${brainToken ? 'SUCCESS' : 'FAILED'}`);
 
             const currentEnv = { ...process.env };
-            if (token) currentEnv.CM_AUTH_TOKEN = token;
-            if (brainToken) currentEnv.BRAIN_AUTH_TOKEN = brainToken;
+            if (token) currentEnv.S7_CM_TOKEN = token;
+            if (brainToken) currentEnv.S7_BRAIN_TOKEN = brainToken;
 
             const environment: environmentType = {
                 env: currentEnv,
@@ -178,6 +179,21 @@ export class PluginExecutor {
             }
 
             const executionInputs = new Map(inputsForPlugin);
+
+            // Add CapabilitiesManager token for calling other services (Librarian, PostOffice, etc.)
+            if (token) {
+                executionInputs.set('__auth_token', {
+                    inputName: '__auth_token',
+                    value: token,
+                    valueType: PluginParameterType.STRING,
+                    args: { token: token }
+                });
+                console.log(`[${trace_id}] ${source_component}: Added __auth_token to plugin inputs`);
+            } else {
+                console.log(`[${trace_id}] ${source_component}: WARNING - No CapabilitiesManager token available, __auth_token not added to plugin inputs`);
+            }
+
+            // Add Brain token for calling Brain service directly
             if (brainToken) {
                 executionInputs.set('__brain_auth_token', {
                     inputName: '__brain_auth_token',
@@ -185,6 +201,9 @@ export class PluginExecutor {
                     valueType: PluginParameterType.STRING,
                     args: { token: brainToken }
                 });
+                console.log(`[${trace_id}] ${source_component}: Added __brain_auth_token to plugin inputs`);
+            } else {
+                console.log(`[${trace_id}] ${source_component}: WARNING - No brain token available, __brain_auth_token not added to plugin inputs`);
             }
 
 
@@ -286,18 +305,16 @@ export class PluginExecutor {
             const inputsJsonString = JSON.stringify(inputsArray);
 
             return new Promise<PluginOutput[]>((resolve, reject) => {
-                const pythonProcess = spawn(pythonExecutable, [mainFilePath, pluginRootPath], {
-                    cwd: pluginRootPath,
-                    env: {
-                        ...environment.env,
-                        PYTHONPATH: pluginRootPath,
-                        PYTHONUNBUFFERED: '1',
-                        PYTHONDONTWRITEBYTECODE: '1'
-                    },
-                    timeout: pluginDefinition.security?.sandboxOptions?.timeout || 60000
-                });
-
-                let stdout = '';
+                                        const pythonProcess = spawn(pythonExecutable, [mainFilePath, pluginRootPath], {
+                                            cwd: pluginRootPath,
+                                            env: {
+                                                ...environment.env,
+                                                PYTHONPATH: `${pluginRootPath}:${path.join(__dirname, '..', '..', '..', '..', 'shared', 'python')}`,
+                                                PYTHONUNBUFFERED: '1',
+                                                PYTHONDONTWRITEBYTECODE: '1'
+                                            },
+                                            timeout: pluginDefinition.security?.sandboxOptions?.timeout || 60000
+                                        });                let stdout = '';
                 let stderr = '';
 
                 pythonProcess.stdout.on('data', (data) => {

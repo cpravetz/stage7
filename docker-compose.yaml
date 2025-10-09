@@ -1,4 +1,3 @@
-
 services:
   postoffice:
     build:
@@ -429,6 +428,17 @@ services:
       - "./searxng/data/:/var/cache/searxng/"
     restart: unless-stopped
 
+  chromadb:
+    image: chromadb/chroma:latest
+    volumes:
+      - chromadb_data:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+      - PERSIST_DIRECTORY=/chroma/chroma
+      - ANONYMIZED_TELEMETRY=FALSE
+    ports:
+      - "8000:8000"
+
   # OpenWebUI is using an external server, not a local container
 
 volumes:
@@ -438,6 +448,7 @@ volumes:
   consul_data:
   config_data:
   security_keys:
+  chromadb_data:
 
 networks:
   default:

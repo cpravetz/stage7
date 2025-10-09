@@ -1,0 +1,110 @@
+{
+  "id": "plugin-SAVE_TO_KNOWLEDGE_BASE",
+  "verb": "SAVE_TO_KNOWLEDGE_BASE",
+  "description": "Save content to a knowledge base collection using semantic embeddings",
+  "explanation": "This plugin takes content and saves it to a specified knowledge base collection in the Librarian service. The content is automatically embedded using semantic vectors for later retrieval. This enables agents to build and share collective knowledge.",
+  "inputDefinitions": [
+    {
+      "name": "domain",
+      "required": true,
+      "type": "string",
+      "description": "The knowledge domain/collection name to save to (e.g., 'ai_development', 'research_findings')",
+      "aliases": ["collectionName", "collection"]
+    },
+    {
+      "name": "keywords",
+      "required": true,
+      "type": "array",
+      "description": "Array of keywords that describe the content for better categorization",
+      "aliases": ["tags"]
+    },
+    {
+      "name": "content",
+      "required": true,
+      "type": "string",
+      "description": "The actual content to save to the knowledge base"
+    },
+    {
+      "name": "metadata",
+      "required": false,
+      "type": "object",
+      "description": "Additional metadata to associate with the content (optional)"
+    }
+  ],
+  "outputDefinitions": [
+    {
+      "name": "status",
+      "required": true,
+      "type": "string",
+      "description": "Status message indicating success or failure of the save operation"
+    },
+    {
+      "name": "id",
+      "required": false,
+      "type": "string",
+      "description": "Unique identifier assigned to the saved content"
+    }
+  ],
+  "inputGuidance": "Use 'domain' for the collection name, 'keywords' for categorization tags, and 'content' for the actual text to save",
+  "language": "python",
+  "entryPoint": {
+    "main": "main.py",
+    "function": "execute_plugin"
+  },
+  "repository": {
+    "type": "local"
+  },
+  "security": {
+    "permissions": [
+      "net.fetch"
+    ],
+    "sandboxOptions": {
+      "allowEval": false,
+      "timeout": 10000,
+      "memory": 67108864,
+      "allowedModules": [
+        "json",
+        "sys",
+        "os",
+        "typing",
+        "requests",
+        "urllib3"
+      ],
+      "allowedAPIs": [
+        "print"
+      ]
+    },
+    "trust": {
+      "publisher": "stage7-core",
+      "signature": null
+    }
+  },
+  "version": "1.0.0",
+  "metadata": {
+    "author": "Stage7 Development Team",
+    "tags": [
+      "knowledge",
+      "storage",
+      "semantic",
+      "learning"
+    ],
+    "category": "knowledge-management",
+    "license": "MIT",
+    "documentation": "README.md"
+  },
+  "configuration": [
+    {
+      "name": "timeout",
+      "type": "number",
+      "description": "Request timeout in milliseconds",
+      "defaultValue": 10000,
+      "required": false
+    }
+  ],
+  "distribution": {
+    "downloads": 0,
+    "rating": 0
+  },
+  "createdAt": "2024-12-01T00:00:00Z",
+  "updatedAt": "2024-12-01T00:00:00Z"
+}
