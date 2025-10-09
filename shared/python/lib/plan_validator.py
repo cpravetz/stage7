@@ -84,7 +84,7 @@ PLAN_STEP_SCHEMA = {
             "description": "Suggested role type for the agent executing this step. Allowed values are Coordinator, Researcher, Coder, Creative, Critic, Executor, and Domain Expert"
         }
     },
-    "required": ["number", "actionVerb", "inputs", "description", "outputs"],
+    "required": ["number", "actionVerb", "inputs", "outputs"],
     "additionalProperties": False
     }
 }
@@ -890,7 +890,7 @@ Return ONLY the corrected JSON plan, no explanations."""
                 errors.append(f"Step {i+1}: Missing 'number' field")
                 continue
 
-            required_fields = ['actionVerb', 'description', 'inputs', 'outputs']
+            required_fields = ['actionVerb', 'inputs', 'outputs']
             for field in required_fields:
                 if field not in step:
                     errors.append(f"Step {step_number}: Missing required field '{field}'")

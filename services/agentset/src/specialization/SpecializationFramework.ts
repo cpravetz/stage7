@@ -2,17 +2,10 @@ import { v4 as uuidv4 } from 'uuid';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { Agent } from '../agents/Agent';
 import { AgentStatus } from '../utils/agentStatus';
-import { AgentRole, PredefinedRoles, AuthenticatedApiClient } from '@cktmcs/shared';
+import { AgentRole, PredefinedRoles, AuthenticatedApiClient, TaskPerformanceMetrics } from '@cktmcs/shared';
 
 
 
-export interface TaskPerformanceMetrics {
-    successRate: number;
-    taskCount: number;
-    averageTaskDuration: number;
-    lastEvaluation: string;
-    qualityScore: number;
-}
 
 /**
  * Agent specialization
@@ -553,6 +546,66 @@ export class SpecializationFramework {
    */
   getAllKnowledgeDomains(): KnowledgeDomain[] {
     return Array.from(this.knowledgeDomains.values());
+  }
+
+  /**
+   * Update an agent's system prompt with a new lesson learned
+   * @param agentId Agent ID
+   * @param lessonLearned The lesson to append to the system prompt
+   * @returns Updated specialization
+   */
+  async updateSystemPrompt(
+    agentId: string,
+    lessonLearned: string
+  ): Promise<AgentSpecialization | null> {
+    const specialization = this.specializations.get(agentId);
+
+    if (!specialization) {
+      console.warn(`No specialization found for agent ${agentId}`);
+      return null;
+    }
+
+    const role = this.roles.get(specialization.roleId);
+    if (!role) {
+      console.warn(`Role ${specialization.roleId} not found for agent ${agentId}`);
+      return null;
+    }
+
+    // Initialize customizations if they don't exist
+    if (!specialization.customizations) {
+      specialization.customizations = {};
+    }
+
+    // Get current system prompt (from customizations or role default)
+    const currentPrompt = specialization.customizations.systemPrompt || role.systemPrompt;
+
+    // Append the lesson learned to the system prompt
+    const updatedPrompt = `${currentPrompt}\n\nLesson Learned: ${lessonLearned}`;
+
+    // Update the customizations
+    specialization.customizations.systemPrompt = updatedPrompt;
+
+    // Apply the updated prompt to the agent
+    const agent = this.agents.get(agentId);
+    if (agent) {
+      agent.setSystemPrompt(updatedPrompt);
+    }
+
+    // Save the updated specialization
+    await this.saveSpecializations();
+
+    console.log(`Updated system prompt for agent ${agentId} with lesson: ${lessonLearned}`);
+    return specialization;
+  }
+
+  /**
+   * Get performance data for an agent
+   * @param agentId Agent ID
+   * @returns Performance data by task
+   */
+  getAgentPerformanceData(agentId: string): Map<string, TaskPerformanceMetrics> | null {
+    const specialization = this.specializations.get(agentId);
+    return specialization ? specialization.performanceByTask : null;
   }
 
   /**

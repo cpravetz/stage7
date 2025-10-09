@@ -144,10 +144,6 @@ export class PostOffice extends BaseEntity {
                 return next();
             }
 
-            // Log authentication attempt for debugging
-            console.log(`[PostOffice] Authenticating request to ${req.path}`);
-            console.log(`[PostOffice] Auth header present: ${!!req.headers.authorization}`);
-
             return this.verifyToken(req, res, next);
         });
 
@@ -574,9 +570,12 @@ export class PostOffice extends BaseEntity {
                 return;
             }
 
-            console.log('Looking for client:', parsedMessage.recipient);
-            const recipientUrl = await this.serviceDiscoveryManager.discoverService(parsedMessage.recipient || '');
-            if (!recipientUrl) {
+                    console.log('Looking for client:', parsedMessage.recipient);
+                    if (!parsedMessage.recipient) {
+                        console.log('Message received without recipient, not routing.');
+                        return;
+                    }
+                    const recipientUrl = await this.serviceDiscoveryManager.discoverService(parsedMessage.recipient || '');            if (!recipientUrl) {
                 console.error(`(ws)Recipient not found for ${JSON.stringify(parsedMessage)}`);
                 return;
             }

@@ -618,6 +618,8 @@ export class CapabilitiesManager extends BaseEntity {
                     const manifest = handler; // Could be DefinitionManifest or PluginManifest
                     console.log(`[${trace_id}] ${source_component}: Found plugin handler for '${step.actionVerb}'. Language: '${manifest.language}', ID: '${manifest.id}'. Attempting direct execution.`);
 
+
+
                     if (manifest.language === DefinitionType.OPENAPI) {
                         const definitionManifest = manifest as DefinitionManifest;
                         if (definitionManifest.toolDefinition && (definitionManifest.toolDefinition as OpenAPITool).specUrl) {

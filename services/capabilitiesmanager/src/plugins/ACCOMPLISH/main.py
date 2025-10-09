@@ -13,10 +13,13 @@ import sys
 import os
 from typing import Dict, Any, List, Optional, Set
 
-# Add the shared library to the Python path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', '..', 'shared', 'python', 'lib')))
-
-from plan_validator import PlanValidator, AccomplishError, PLAN_STEP_SCHEMA, PLAN_ARRAY_SCHEMA
+# Import from the installed shared library package
+try:
+    from stage7_shared_lib import PlanValidator, AccomplishError, PLAN_STEP_SCHEMA, PLAN_ARRAY_SCHEMA
+except ImportError:
+    # Fallback to direct import for development/testing
+    sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', '..', 'shared', 'python', 'lib')))
+    from plan_validator import PlanValidator, AccomplishError, PLAN_STEP_SCHEMA, PLAN_ARRAY_SCHEMA
 
 # Configure logging
 logging.basicConfig(
@@ -541,47 +544,12 @@ After your internal analysis and self-correction is complete, provide ONLY the f
     - If a step (e.g., `SCRAPE`) requires a single item (e.g., a URL as a `string`) but a previous step (e.g., `SEARCH`) provides a list of items (an `array`), you MUST use a `FOREACH` loop.
     - The `FOREACH` step's `list` input MUST depend on the array output from the source step (e.g., `sourceStep: 1`, `outputName: "competitorList"`).
     - The step(s) inside the `FOREACH`'s `steps` sub-array that consume the individual items MUST reference the `FOREACH` step itself as their `sourceStep` and `item` as their `outputName`.
-    - **Example of correct FOREACH structure with globally unique step numbers:**
-        ```json
-        [
-          {{
-            "number": 1,
-            "actionVerb": "SEARCH",
-            "outputs": {{ "competitorList": "array of URLs" }}
-          }},
-          {{
-            "number": 2,
-            "actionVerb": "FOREACH",
-            "inputs": {{
-              "list": {{ "outputName": "competitorList", "sourceStep": 1 }}
-            }},
-            "outputs": {{ "scrapedResults": "aggregated results" }},
-            "steps": [
-              {{
-                "number": 3, // CRITICAL: Globally unique step number (NOT 1)
-                "actionVerb": "SCRAPE",
-                "inputs": {{
-                  "url": {{ "outputName": "item", "sourceStep": 2 }} // sourceStep refers to the FOREACH step (number 2)
-                }},
-                "outputs": {{ "pageContent": "string" }}
-              }},
-              {{
-                "number": 4, // CRITICAL: Globally unique step number (NOT 2)
-                "actionVerb": "TEXT_ANALYSIS",
-                "inputs": {{
-                  "text": {{ "outputName": "pageContent", "sourceStep": 3 }} // sourceStep refers to the SCRAPE step (number 3)
-                }},
-                "outputs": {{ "analysis": "object" }}
-              }}
-            ]
-          }}
-        ]
-        ```
 - **Multi-step plans are essential:** Break down complex goals into multiple, sequential steps.
 - **Dependencies are crucial for flow:** Every step that uses an output from a previous step MUST declare that dependency in its `inputs` object using `outputName` and `sourceStep`.
 - **Prioritize autonomous information gathering:** Use tools like SEARCH, SCRAPE, DATA_TOOLKIT, TEXT_ANALYSIS, TRANSFORM, and FILE_OPERATION to gather information and perform tasks.
 - **Avoid unnecessary user interaction:** Only use 'ASK_USER_QUESTION' for decisions, permissions, or clarification. Do NOT use it for seeking advice, delegating research or data collection that the agent can perform.
-- **CHAT vs ASK_USER_QUESTION:** Use ASK_USER_QUESTION for structured questions requiring user input. Use CHAT only for notifications, status updates, or conversational interactions where you're informing the user, not gathering information.
+- **CHAT vs ASK_USER_QUESTION:** Use ASK_USER_QUESTION for structured questions requiring user input. Use CHAT sparingly and only when you need to communicate critical information, final results, or important decisions to the user. Avoid routine status updates or progress notifications.
+- **Avoid repetitive steps:** Do not create multiple identical or nearly identical steps. Each step should serve a distinct purpose in achieving the goal.
 **Role Assignment Strategy:**
 - Assign `recommendedRole` at the **deliverable level**, not per-step optimization
 - All steps contributing to a single coherent output (e.g., "research report", "code module", "analysis document") should share the same `recommendedRole`
@@ -822,7 +790,8 @@ CRITICAL: The actionVerb for each step MUST be a valid, existing plugin actionVe
 
             if isinstance(data, list): # This is a plan
                 # Validate and repair the plan
-                validated_plan = self.validator.validate_and_repair(data, verb_info['mission_goal'], inputs)
+                mission_goal = verb_info.get('mission_goal', verb_info.get('description', ''))
+                validated_plan = self.validator.validate_and_repair(data, mission_goal, inputs)
                 
                 # Save the generated plan to Librarian
                 # self._save_plan_to_librarian(verb_info['verb'], validated_plan, inputs)
@@ -857,7 +826,8 @@ CRITICAL: The actionVerb for each step MUST be a valid, existing plugin actionVe
                     }])
                 # If the dictionary is a single step, treat it as a plan with one step
                 elif "actionVerb" in data and "number" in data:
-                    validated_plan = self.validator.validate_and_repair([data], verb_info['mission_goal'], inputs)
+                    mission_goal = verb_info.get('mission_goal', verb_info.get('description', ''))
+                    validated_plan = self.validator.validate_and_repair([data], mission_goal, inputs)
                     # self._save_plan_to_librarian(verb_info['verb'], validated_plan, inputs)
                     return json.dumps([{"success": True,
                         "name": "plan",
@@ -999,7 +969,7 @@ def main():
 
         # Output result
         print(result)
-        progress.checkpoint("execution_complete")
+        progress.checkpoint("plan_creation_complete")
 
     except json.JSONDecodeError as e:
         logger.error(f"ACCOMPLISH plugin failed due to JSON decoding error: {e}")

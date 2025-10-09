@@ -17,6 +17,25 @@ import hashlib
 import uuid
 from datetime import datetime
 from typing import Dict, Any, List, Optional
+
+def get_auth_token(inputs: Dict[str, Any]) -> str:
+    """Get authentication token from inputs"""
+    # Try CapabilitiesManager token first (for calling Librarian)
+    if '__auth_token' in inputs:
+        token_data = inputs['__auth_token']
+        if isinstance(token_data, dict) and 'value' in token_data:
+            return token_data['value']
+        elif isinstance(token_data, str):
+            return token_data
+    # Fallback to Brain token if available
+    if '__brain_auth_token' in inputs:
+        token_data = inputs['__brain_auth_token']
+        if isinstance(token_data, dict) and 'value' in token_data:
+            return token_data['value']
+        elif isinstance(token_data, str):
+            return token_data
+    raise ValueError("No authentication token found in inputs")
+
 try:
     # If executed as part of a package, use relative import
     from . import helper
@@ -159,9 +178,11 @@ class FileOperationPlugin:
             raise ValueError("LIBRARIAN_URL not found in inputs or environment variables.")
 
         headers = {}
-        cm_token = os.environ.get('CM_AUTH_TOKEN')
-        if cm_token:
+        try:
+            cm_token = get_auth_token(inputs)
             headers['Authorization'] = f'Bearer {cm_token}'
+        except ValueError:
+            pass # Continue without auth header if token not found
 
         if file_id:
             # Load file content from Librarian using fileId
@@ -220,9 +241,11 @@ class FileOperationPlugin:
             raise ValueError(f"Missing required parameters: {', '.join(missing_params)}")
 
         headers = {}
-        cm_token = os.environ.get('CM_AUTH_TOKEN')
-        if cm_token:
+        try:
+            cm_token = get_auth_token(inputs)
             headers['Authorization'] = f'Bearer {cm_token}'
+        except ValueError:
+            pass # Continue without auth header if token not found
 
         file_id = str(uuid.uuid4())
         file_name = os.path.basename(path)
@@ -312,9 +335,11 @@ class FileOperationPlugin:
             raise ValueError("Missing required parameters: 'missionId' and LIBRARIAN_URL.")
 
         headers = {}
-        cm_token = os.environ.get('CM_AUTH_TOKEN')
-        if cm_token:
+        try:
+            cm_token = get_auth_token(inputs)
             headers['Authorization'] = f'Bearer {cm_token}'
+        except ValueError:
+            pass # Continue without auth header if token not found
 
         mission_response = requests.get(f"http://{librarian_url}/loadData/{mission_id}", headers=headers, params={'collection': 'missions', 'storageType': 'mongo'})
         mission_response.raise_for_status()
@@ -335,9 +360,11 @@ class FileOperationPlugin:
             raise ValueError("Missing required parameters: 'path', 'missionId', MISSIONCONTROL_URL, and LIBRARIAN_URL.")
 
         headers = {}
-        cm_token = os.environ.get('CM_AUTH_TOKEN')
-        if cm_token:
+        try:
+            cm_token = get_auth_token(inputs)
             headers['Authorization'] = f'Bearer {cm_token}'
+        except ValueError:
+            pass # Continue without auth header if token not found
 
         # Find the file in the mission's attachedFiles to get the fileId
         mission_response = requests.get(f"http://{librarian_url}/loadData/{mission_id}", headers=headers, params={'collection': 'missions', 'storageType': 'mongo'})

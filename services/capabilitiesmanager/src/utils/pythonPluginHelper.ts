@@ -186,6 +186,14 @@ export async function ensurePythonDependencies(pluginRootPath: string, trace_id:
             const installSharedCmd = `"${venvPipPath}" install "${sharedPackagePath}"`;
             await execAsync(installSharedCmd, { cwd: pluginRootPath, timeout: 60000 });
 
+            // Install the shared Python library containing token_provider and plan_validator
+            const sharedLibPath = path.resolve(__dirname, '../../../../shared/python/lib');
+            if (fs.existsSync(sharedLibPath)) {
+                console.log(`[${trace_id}] ${source_component}: Installing shared Python library with token_provider.`);
+                const installSharedLibCmd = `"${venvPipPath}" install -e "${sharedLibPath}"`;
+                await execAsync(installSharedLibCmd, { cwd: pluginRootPath, timeout: 60000 });
+            }
+
             if (fs.existsSync(requirementsPath)) {
                 console.log(`[${trace_id}] ${source_component}: Installing requirements from requirements.txt.`);
                 const installReqsCmd = `"${venvPipPath}" install -r "${requirementsPath}"`;

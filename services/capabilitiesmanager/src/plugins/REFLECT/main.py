@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-REFLECT Plugin - Rewritten to create schema-compliant plans
-Handles reflection on mission progress and generates plans for next steps.
+REFLECT Plugin - Enhanced with self-correction capabilities
+Handles reflection on mission progress, generates plans for next steps, and learns from performance data.
 """
 
 import json
@@ -13,10 +13,14 @@ import re
 import os
 from typing import Dict, Any, List, Optional, Set
 
-# Add the shared library to the Python path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', '..', 'shared', 'python', 'lib')))
-
-from plan_validator import PlanValidator, AccomplishError as ReflectError, PLAN_STEP_SCHEMA, PLAN_ARRAY_SCHEMA
+# Import from the installed shared library package
+try:
+    from stage7_shared_lib import PlanValidator, AccomplishError, PLAN_STEP_SCHEMA, PLAN_ARRAY_SCHEMA
+    ReflectError = AccomplishError
+except ImportError:
+    # Fallback to direct import for development/testing
+    sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', '..', 'shared', 'python', 'lib')))
+    from plan_validator import PlanValidator, AccomplishError as ReflectError, PLAN_STEP_SCHEMA, PLAN_ARRAY_SCHEMA
 
 # Configure logging
 logging.basicConfig(
@@ -305,6 +309,11 @@ class ReflectHandler:
 
             reflection_info["mission_goal"] = mission_goal
 
+            # Self-correction: Analyze performance and generate lessons learned
+            agent_id = reflection_info.get("agentId")
+            if agent_id:
+                self._perform_self_correction(agent_id, reflection_info, inputs)
+
             # Ask Brain for reflection handling approach
             brain_response = self._ask_brain_for_reflection_handling(reflection_info, inputs)
 
@@ -361,12 +370,20 @@ class ReflectHandler:
         logger.info(f"DEBUG REFLECT: question = '{question[:50]}...' (type: {type(question)})") # Add this line
         logger.info(f"DEBUG REFLECT: final_output present: {'yes' if final_output else 'no'} (length: {len(final_output)})")
 
+        # Extract agent ID for self-correction
+        agent_id_input = inputs.get('agentId')
+        if isinstance(agent_id_input, dict) and 'value' in agent_id_input:
+            agent_id = str(agent_id_input['value']).strip()
+        else:
+            agent_id = str(agent_id_input).strip() if agent_id_input is not None else ''
+
         return {
             "missionId": mission_id,
             "plan_history": plan_history,
             "work_products": work_products,
             "question": question,
             "final_output": final_output,
+            "agentId": agent_id,
         }
     
     def _ask_brain_for_reflection_handling(self, reflection_info: Dict[str, Any], inputs: Dict[str, Any]) -> str:
@@ -402,7 +419,10 @@ Your task is to reflect on the mission progress and determine the best course of
 
 **CRITICAL CONSTRAINTS:**
 - You are an autonomous agent. Your primary goal is to solve problems independently.
-- Do not use the `ASK_USER_QUESTION` verb to seek information from the user that can be found using other tools like `SEARCH` or `SCRAPE`. Your goal is to be resourceful and autonomous.
+- **Prioritize autonomous information gathering:** Use tools like SEARCH, SCRAPE, DATA_TOOLKIT, TEXT_ANALYSIS, TRANSFORM, and FILE_OPERATION to gather information and perform tasks.
+- **Avoid unnecessary user interaction:** Only use 'ASK_USER_QUESTION' for decisions, permissions, or clarification. Do NOT use it for seeking advice, delegating research or data collection that the agent can perform.
+- **CHAT vs ASK_USER_QUESTION:** Use ASK_USER_QUESTION for structured questions requiring user input. Use CHAT sparingly and only when you need to communicate critical information, final results, or important decisions to the user. Avoid routine status updates or progress notifications.
+- **Avoid repetitive steps:** Do not create multiple identical or nearly identical steps. Each step should serve a distinct purpose in achieving the goal.
 - If creating a plan, ensure it builds upon the existing plan history and work products.
 - **CRITICAL: GLOBALLY UNIQUE STEP NUMBERS** - Every step must have a globally unique step number across the entire plan including all sub-plans at any nesting level. Do not reuse step numbers anywhere in the plan.
 
@@ -570,6 +590,74 @@ CRITICAL: The actionVerb for each step MUST be a valid, existing plugin actionVe
                 "mimeType": "text/plain"
             }])
 
+    def _perform_self_correction(self, agent_id: str, reflection_info: Dict[str, Any], inputs: Dict[str, Any]) -> None:
+        """
+        Perform self-correction by analyzing performance and updating system prompt if needed.
+
+        Args:
+            agent_id: The ID of the agent to perform self-correction for
+            reflection_info: Information about the current reflection
+            inputs: All plugin inputs
+        """
+        try:
+            logger.info(f"Performing self-correction for agent {agent_id}")
+
+            # Get agent performance data
+            performance_data = get_agent_performance_data(agent_id, inputs)
+            if not performance_data:
+                logger.info(f"No performance data available for agent {agent_id}, skipping self-correction")
+                return
+
+            # Parse plan history to extract recent step results
+            plan_history = []
+            plan_history_str = reflection_info.get("plan_history", "")
+            if plan_history_str:
+                try:
+                    plan_history = json.loads(plan_history_str) if isinstance(plan_history_str, str) else plan_history_str
+                    if not isinstance(plan_history, list):
+                        plan_history = []
+                except json.JSONDecodeError:
+                    logger.warning("Could not parse plan history for self-correction")
+                    plan_history = []
+
+            # Determine current task from the reflection question or context
+            current_task = "REFLECT"  # Default to current task
+            question = inputs.get('question', {})
+            if isinstance(question, dict) and 'value' in question:
+                question_text = question['value']
+            else:
+                question_text = str(question) if question else ""
+
+            # Try to extract task context from question
+            if "code" in question_text.lower() or "programming" in question_text.lower():
+                current_task = "CODE_EXECUTOR"
+            elif "search" in question_text.lower():
+                current_task = "SEARCH"
+            elif "scrape" in question_text.lower():
+                current_task = "SCRAPE"
+            elif "analysis" in question_text.lower():
+                current_task = "TEXT_ANALYSIS"
+
+            # Generate lesson learned
+            lesson = generate_lesson_learned(agent_id, current_task, performance_data, plan_history)
+
+            if lesson:
+                logger.info(f"Generated lesson for agent {agent_id}: {lesson}")
+
+                # Update agent's system prompt with the lesson
+                success = update_agent_system_prompt(agent_id, lesson, inputs)
+                if success:
+                    logger.info(f"Successfully applied self-correction lesson to agent {agent_id}")
+                else:
+                    logger.warning(f"Failed to apply self-correction lesson to agent {agent_id}")
+            else:
+                logger.info(f"No self-correction lesson needed for agent {agent_id}")
+
+        except Exception as e:
+            logger.error(f"Error during self-correction for agent {agent_id}: {e}")
+            # Don't fail the entire reflection if self-correction fails
+            pass
+
 def reflect(inputs: Dict[str, Any]) -> str:
     """Main reflection logic."""
     try:
@@ -604,6 +692,132 @@ def main():
             "mimeType": "text/plain"
         }])
         print(error_output)
+
+
+def get_agent_performance_data(agent_id: str, inputs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """
+    Fetch agent performance data from the AgentSet service.
+
+    Args:
+        agent_id: The ID of the agent to get performance data for
+        inputs: The plugin inputs, containing the auth token.
+
+    Returns:
+        Performance data dictionary or None if not available
+    """
+    try:
+        auth_token = get_auth_token(inputs)
+        headers = {'Authorization': f'Bearer {auth_token}'}
+        agentset_url = os.environ.get('AGENTSET_URL', 'http://agentset:5100')
+        response = requests.get(f"{agentset_url}/agent/{agent_id}/performance", headers=headers, timeout=10)
+
+        if response.status_code == 200:
+            return response.json().get('performanceData', {})
+        else:
+            logger.warning(f"Could not fetch performance data for agent {agent_id}: {response.status_code}")
+            return None
+    except Exception as e:
+        logger.error(f"Error fetching performance data for agent {agent_id}: {e}")
+        return None
+
+
+def update_agent_system_prompt(agent_id: str, lesson_learned: str, inputs: Dict[str, Any]) -> bool:
+    """
+    Update an agent's system prompt with a lesson learned.
+
+    Args:
+        agent_id: The ID of the agent to update
+        lesson_learned: The lesson to add to the system prompt
+        inputs: The plugin inputs, containing the auth token.
+
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        auth_token = get_auth_token(inputs)
+        headers = {'Authorization': f'Bearer {auth_token}'}
+        agentset_url = os.environ.get('AGENTSET_URL', 'http://agentset:5100')
+        response = requests.post(
+            f"{agentset_url}/agent/{agent_id}/updatePrompt",
+            json={"lessonLearned": lesson_learned},
+            headers=headers,
+            timeout=10
+        )
+
+        if response.status_code == 200:
+            logger.info(f"Successfully updated system prompt for agent {agent_id}")
+            return True
+        else:
+            logger.warning(f"Failed to update system prompt for agent {agent_id}: {response.status_code}")
+            return False
+    except Exception as e:
+        logger.error(f"Error updating system prompt for agent {agent_id}: {e}")
+        return False
+
+
+def generate_lesson_learned(agent_id: str, current_task: str, performance_data: Dict[str, Any], plan_history: List[Dict]) -> Optional[str]:
+    """
+    Generate a lesson learned based on agent performance and recent failures.
+
+    Args:
+        agent_id: The agent ID
+        current_task: The current task being performed
+        performance_data: Performance metrics by task
+        plan_history: History of executed steps
+
+    Returns:
+        Lesson learned string or None if no lesson needed
+    """
+    try:
+        # Extract recent failures from plan history
+        recent_failures = []
+        for step in plan_history[-5:]:  # Look at last 5 steps
+            if isinstance(step, dict) and not step.get('success', True):
+                action_verb = step.get('actionVerb', 'UNKNOWN')
+                error = step.get('error', 'Unknown error')
+                recent_failures.append(f"{action_verb}: {error}")
+
+        # Analyze performance data
+        if not performance_data:
+            if recent_failures:
+                return f"Implement proper error handling and validation for {recent_failures[0].split(':')[0]} tasks to prevent similar failures."
+            return None
+
+        # Find tasks with low success rates
+        low_performance_tasks = []
+        for task, metrics in performance_data.items():
+            if isinstance(metrics, dict):
+                success_rate = metrics.get('successRate', 100)
+                task_count = metrics.get('taskCount', 0)
+                if success_rate < 70 and task_count > 2:
+                    low_performance_tasks.append((task, success_rate))
+
+        # Generate lesson based on analysis
+        if recent_failures:
+            # Priority 1: Address recent failures
+            failure = recent_failures[0]
+            action_verb, error = failure.split(':', 1)
+
+            if 'timeout' in error.lower():
+                return f"When executing {action_verb} tasks, implement proper timeout handling and retry logic for network operations."
+            elif 'missing' in error.lower() or 'required' in error.lower():
+                return f"Before executing {action_verb} tasks, validate that all required inputs are present and properly formatted."
+            elif 'format' in error.lower() or 'parse' in error.lower():
+                return f"When working with {action_verb} tasks, ensure data is properly formatted and validated before processing."
+            else:
+                return f"Improve error handling in {action_verb} tasks by implementing comprehensive validation and providing clear error messages."
+
+        elif low_performance_tasks:
+            # Priority 2: Address low performance tasks
+            task, success_rate = low_performance_tasks[0]
+            return f"Improve {task} task execution by implementing more thorough input validation and breaking complex operations into smaller steps. Current success rate: {success_rate:.1f}%"
+
+        # No specific lesson needed
+        return None
+
+    except Exception as e:
+        logger.error(f"Error generating lesson learned: {e}")
+        return None
 
 
 if __name__ == "__main__":

@@ -593,6 +593,26 @@ export class Step {
         // which calls prepareInputValuesForExecution. This avoids duplicate processing.
         console.log(`[Step ${this.id}] execute: Input values before execution:`, this.inputValues);
         this.status = StepStatus.RUNNING;
+
+        // Phase 1: Query knowledge base before execution (for research tasks)
+        let knowledgeResults: PluginOutput[] | null = null;
+        if (this.shouldQueryKnowledgeBase()) {
+            knowledgeResults = await this.queryKnowledgeBase(executeAction);
+            if (knowledgeResults && knowledgeResults.length > 0) {
+                // Add knowledge context to step inputs if relevant information was found
+                const knowledgeContent = knowledgeResults[0].result;
+                if (knowledgeContent && Array.isArray(knowledgeContent) && knowledgeContent.length > 0) {
+                    const relevantInfo = knowledgeContent.map(item => item.document).join('\n\n');
+                    this.inputValues.set('knowledgeContext', {
+                        inputName: 'knowledgeContext',
+                        value: `Relevant knowledge from previous work:\n${relevantInfo}`,
+                        valueType: PluginParameterType.STRING
+                    });
+                    console.log(`[Step ${this.id}] Added knowledge context from ${knowledgeContent.length} previous results`);
+                }
+            }
+        }
+
         try {
             let result: PluginOutput[];
             switch (this.actionVerb) {
@@ -644,8 +664,17 @@ export class Step {
             });
 
             if (result[0]?.resultType === PluginParameterType.PLAN) {
-                this.status = StepStatus.SUB_PLAN_RUNNING;
+                // Mark step as completed since the plan will be handled by the Agent
+                this.status = StepStatus.COMPLETED;
                 this.result = result;
+
+                // Save the plan result
+                await this.persistenceManager.saveWorkProduct({
+                    agentId: this.id.split('_')[0], stepId: this.id,
+                    data: result
+                });
+
+                console.log(`[Step ${this.id}] execute: Plan result will be processed by Agent for execution`);
             } else {
                 // Map plugin output names to step-defined custom names
                 this.result = await this.mapPluginOutputsToCustomNames(result);
@@ -656,6 +685,16 @@ export class Step {
                 this.status = StepStatus.COMPLETED;
 
                 console.log(`[Step ${this.id}] execute: Mapped plugin outputs to step.result:`, this.result?.map(r => ({ name: r.name, resultType: r.resultType })));
+
+                // Phase 2: Save results to knowledge base after successful execution
+                if (this.shouldSaveToKnowledgeBase()) {
+                    await this.saveToKnowledgeBase(executeAction);
+                }
+
+                // Phase 3: Trigger reflection for self-correction on complex tasks
+                if (this.shouldTriggerReflection()) {
+                    await this.triggerReflection(executeAction);
+                }
 
                 await this.logEvent({
                     eventType: 'step_result',
@@ -700,6 +739,11 @@ export class Step {
                 data: errorResult
             });
 
+            // Phase 3: Trigger reflection for self-correction on errors or complex tasks
+            if (this.shouldTriggerReflection()) {
+                await this.triggerReflection(executeAction);
+            }
+
             return errorResult;
         }
     }
@@ -717,6 +761,298 @@ export class Step {
             result: result,
             timestamp: new Date().toISOString()
         });
+    }
+
+    /**
+     * Check if this step should query the knowledge base before execution
+     */
+    private shouldQueryKnowledgeBase(): boolean {
+        const researchTasks = ['SEARCH', 'SCRAPE', 'TEXT_ANALYSIS', 'ACCOMPLISH'];
+        return researchTasks.includes(this.actionVerb);
+    }
+
+    /**
+     * Check if this step should save results to the knowledge base after execution
+     */
+    private shouldSaveToKnowledgeBase(): boolean {
+        const knowledgeGeneratingTasks = ['SEARCH', 'SCRAPE', 'TEXT_ANALYSIS', 'ACCOMPLISH'];
+        return knowledgeGeneratingTasks.includes(this.actionVerb) && this.status === StepStatus.COMPLETED;
+    }
+
+    /**
+     * Check if this step should trigger reflection for self-correction
+     */
+    private shouldTriggerReflection(): boolean {
+        // Trigger reflection for complex tasks or when there are errors
+        const complexTasks = ['ACCOMPLISH', 'CODE_EXECUTOR', 'DELEGATE'];
+        return complexTasks.includes(this.actionVerb) || this.status === StepStatus.ERROR;
+    }
+
+    /**
+     * Determine the knowledge domain for this step based on context
+     */
+    private determineKnowledgeDomain(): string {
+        // Extract domain from step description or use action verb as fallback
+        const description = this.description?.toLowerCase() || '';
+
+        if (description.includes('ai') || description.includes('artificial intelligence') || description.includes('machine learning')) {
+            return 'ai_development';
+        } else if (description.includes('research') || description.includes('analysis') || description.includes('study')) {
+            return 'research_findings';
+        } else if (description.includes('code') || description.includes('programming') || description.includes('development')) {
+            return 'software_development';
+        } else if (description.includes('data') || description.includes('database') || description.includes('analytics')) {
+            return 'data_analysis';
+        } else {
+            // Use action verb as domain
+            return this.actionVerb.toLowerCase() + '_results';
+        }
+    }
+
+    /**
+     * Extract keywords from step description and inputs
+     */
+    private extractKeywords(): string[] {
+        const keywords: string[] = [];
+
+        // Add action verb as a keyword
+        keywords.push(this.actionVerb.toLowerCase());
+
+        // Extract keywords from description
+        if (this.description) {
+            const words = this.description.toLowerCase()
+                .replace(/[^\w\s]/g, ' ')
+                .split(/\s+/)
+                .filter(word => word.length > 3);
+            keywords.push(...words.slice(0, 5)); // Take first 5 meaningful words
+        }
+
+        // Extract keywords from input values
+        this.inputValues.forEach((inputValue, inputName) => {
+            if (typeof inputValue.value === 'string' && inputValue.value.length < 100) {
+                const inputWords = inputValue.value.toLowerCase()
+                    .replace(/[^\w\s]/g, ' ')
+                    .split(/\s+/)
+                    .filter(word => word.length > 3);
+                keywords.push(...inputWords.slice(0, 3)); // Take first 3 words from each input
+            }
+        });
+
+        // Remove duplicates and return
+        return [...new Set(keywords)];
+    }
+
+    /**
+     * Query the knowledge base before executing this step
+     */
+    private async queryKnowledgeBase(executeAction: (step: Step) => Promise<PluginOutput[]>): Promise<PluginOutput[] | null> {
+        try {
+            console.log(`[Step ${this.id}] Querying knowledge base before execution...`);
+
+            const domain = this.determineKnowledgeDomain();
+            const keywords = this.extractKeywords();
+            const queryText = keywords.join(' ');
+
+            // Create a temporary step for querying knowledge base
+            const queryStep = new Step({
+                id: `${this.id}_kb_query`,
+                actionVerb: 'QUERY_KNOWLEDGE_BASE',
+                description: `Query knowledge base for relevant information about ${queryText}`,
+                missionId: this.missionId,
+                stepNo: this.stepNo - 0.1, // Slightly before current step
+                dependencies: [],
+                persistenceManager: this.persistenceManager
+            });
+
+            // Set up inputs for the query
+            queryStep.inputValues.set('queryText', {
+                inputName: 'queryText',
+                value: queryText,
+                valueType: PluginParameterType.STRING
+            });
+
+            queryStep.inputValues.set('domains', {
+                inputName: 'domains',
+                value: [domain],
+                valueType: PluginParameterType.ARRAY
+            });
+
+            queryStep.inputValues.set('maxResults', {
+                inputName: 'maxResults',
+                value: 3,
+                valueType: PluginParameterType.NUMBER
+            });
+
+            // Execute the query
+            const queryResult = await executeAction(queryStep);
+
+            if (queryResult && queryResult.length > 0 && queryResult[0].success) {
+                console.log(`[Step ${this.id}] Found relevant knowledge in domain '${domain}'`);
+                return queryResult;
+            } else {
+                console.log(`[Step ${this.id}] No relevant knowledge found in domain '${domain}'`);
+                return null;
+            }
+        } catch (error) {
+            console.warn(`[Step ${this.id}] Error querying knowledge base:`, error);
+            return null; // Don't fail the main step if knowledge query fails
+        }
+    }
+
+    /**
+     * Save results to the knowledge base after successful execution
+     */
+    private async saveToKnowledgeBase(executeAction: (step: Step) => Promise<PluginOutput[]>): Promise<void> {
+        try {
+            if (!this.result || this.result.length === 0 || !this.result[0].success) {
+                console.log(`[Step ${this.id}] Skipping knowledge base save - no successful results`);
+                return;
+            }
+
+            console.log(`[Step ${this.id}] Saving results to knowledge base...`);
+
+            const domain = this.determineKnowledgeDomain();
+            const keywords = this.extractKeywords();
+
+            // Prepare content to save
+            let content = '';
+            if (this.result[0].resultDescription) {
+                content = this.result[0].resultDescription;
+            } else if (typeof this.result[0].result === 'string') {
+                content = this.result[0].result;
+            } else {
+                content = JSON.stringify(this.result[0].result);
+            }
+
+            // Limit content length for storage
+            if (content.length > 2000) {
+                content = content.substring(0, 2000) + '... [truncated]';
+            }
+
+            // Create a temporary step for saving to knowledge base
+            const saveStep = new Step({
+                id: `${this.id}_kb_save`,
+                actionVerb: 'SAVE_TO_KNOWLEDGE_BASE',
+                description: `Save results from ${this.actionVerb} to knowledge base`,
+                missionId: this.missionId,
+                stepNo: this.stepNo + 0.1, // Slightly after current step
+                dependencies: [],
+                persistenceManager: this.persistenceManager
+            });
+
+            // Set up inputs for saving
+            saveStep.inputValues.set('domain', {
+                inputName: 'domain',
+                value: domain,
+                valueType: PluginParameterType.STRING
+            });
+
+            saveStep.inputValues.set('keywords', {
+                inputName: 'keywords',
+                value: keywords,
+                valueType: PluginParameterType.ARRAY
+            });
+
+            saveStep.inputValues.set('content', {
+                inputName: 'content',
+                value: content,
+                valueType: PluginParameterType.STRING
+            });
+
+            saveStep.inputValues.set('metadata', {
+                inputName: 'metadata',
+                value: {
+                    sourceStep: this.actionVerb,
+                    stepId: this.id,
+                    missionId: this.missionId,
+                    timestamp: new Date().toISOString()
+                },
+                valueType: PluginParameterType.OBJECT
+            });
+
+            // Execute the save
+            const saveResult = await executeAction(saveStep);
+
+            if (saveResult && saveResult.length > 0 && saveResult[0].success) {
+                console.log(`[Step ${this.id}] Successfully saved results to knowledge base domain '${domain}'`);
+            } else {
+                console.warn(`[Step ${this.id}] Failed to save results to knowledge base`);
+            }
+        } catch (error) {
+            console.warn(`[Step ${this.id}] Error saving to knowledge base:`, error);
+            // Don't fail the main step if knowledge save fails
+        }
+    }
+
+    /**
+     * Trigger reflection for self-correction after complex tasks or errors
+     */
+    private async triggerReflection(executeAction: (step: Step) => Promise<PluginOutput[]>): Promise<void> {
+        try {
+            console.log(`[Step ${this.id}] Triggering reflection for self-correction...`);
+
+            // Create a temporary step for reflection
+            const reflectStep = new Step({
+                id: `${this.id}_reflect`,
+                actionVerb: 'REFLECT',
+                description: `Reflect on ${this.actionVerb} execution for self-correction`,
+                missionId: this.missionId,
+                stepNo: this.stepNo + 0.2, // After knowledge save
+                dependencies: [],
+                persistenceManager: this.persistenceManager
+            });
+
+            // Set up inputs for reflection
+            reflectStep.inputValues.set('missionId', {
+                inputName: 'missionId',
+                value: this.missionId,
+                valueType: PluginParameterType.STRING
+            });
+
+            // Create a simplified plan history for this step
+            const stepHistory = [{
+                stepNo: this.stepNo,
+                actionVerb: this.actionVerb,
+                description: this.description,
+                success: this.status === StepStatus.COMPLETED,
+                error: this.status === StepStatus.ERROR ? (this.result?.[0]?.error || 'Unknown error') : undefined,
+                result: this.result?.[0]?.resultDescription || 'No result description'
+            }];
+
+            reflectStep.inputValues.set('plan_history', {
+                inputName: 'plan_history',
+                value: JSON.stringify(stepHistory),
+                valueType: PluginParameterType.STRING
+            });
+
+            reflectStep.inputValues.set('question', {
+                inputName: 'question',
+                value: this.status === StepStatus.ERROR
+                    ? `What went wrong with the ${this.actionVerb} step and how can it be improved?`
+                    : `How can the ${this.actionVerb} step execution be optimized for better performance?`,
+                valueType: PluginParameterType.STRING
+            });
+
+            // Add agent ID for self-correction if available
+            const agentId = this.id.split('_')[0]; // Extract agent ID from step ID
+            reflectStep.inputValues.set('agentId', {
+                inputName: 'agentId',
+                value: agentId,
+                valueType: PluginParameterType.STRING
+            });
+
+            // Execute the reflection
+            const reflectResult = await executeAction(reflectStep);
+
+            if (reflectResult && reflectResult.length > 0 && reflectResult[0].success) {
+                console.log(`[Step ${this.id}] Reflection completed successfully for agent ${agentId}`);
+            } else {
+                console.warn(`[Step ${this.id}] Reflection failed or returned no results`);
+            }
+        } catch (error) {
+            console.warn(`[Step ${this.id}] Error during reflection:`, error);
+            // Don't fail the main step if reflection fails
+        }
     }
 
     private async handleDecide(): Promise<PluginOutput[]> {
@@ -1295,6 +1631,7 @@ export class Step {
                 case 'CHAT':
                 case 'ASK':
                 case MessageType.REQUEST:
+                    console.log('Using askAction for '+ internalActionVerb);
                     result = await askAction(this.inputValues);
                     break;
                 case 'IF_THEN':
@@ -1334,8 +1671,18 @@ export class Step {
             });
 
             if (result[0]?.resultType === PluginParameterType.PLAN) {
-                this.status = StepStatus.SUB_PLAN_RUNNING;
+                // Mark step as completed since the plan will be handled by the Agent
+                this.status = StepStatus.COMPLETED;
                 this.result = result;
+
+                // Save the plan result
+                await this.persistenceManager.saveWorkProduct({
+                    agentId: this.id.split('_')[0],
+                    stepId: this.id,
+                    data: result
+                });
+
+                console.log(`[Step ${this.id}] executeInternalActionVerb: Plan result will be processed by Agent for execution`);
             } else {
                 // Map plugin output names to step-defined custom names and persist the mapped result
                 this.result = await this.mapPluginOutputsToCustomNames(result);
