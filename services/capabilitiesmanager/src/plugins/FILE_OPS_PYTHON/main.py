@@ -91,20 +91,16 @@ def robust_execute_plugin(inputs_str: str) -> str:
 
         return result
     except Exception as e:
-        # Only escalate to errorhandler for unexpected/code errors
-        try:
-            helper.send_to_errorhandler(e, context=inputs_str)
-        except Exception:
-            logger.debug("Failed to send error to errorhandler")
-        return json.dumps([
+        logger.error(f"FILE_OPERATION plugin execution failed: {e}")
+        return [
             {
                 "success": False,
                 "name": "error",
                 "resultType": "error",
-                "resultDescription": f"Error: {str(e)}",
+                "resultDescription": f"FILE_OPERATION plugin execution failed: {str(e)}",
                 "error": str(e)
             }
-        ])
+        ]
     finally:
         if temp_dir and os.path.exists(temp_dir):
             try:

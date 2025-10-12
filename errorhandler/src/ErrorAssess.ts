@@ -184,11 +184,26 @@ export const analyzeError = async (error: Error) => {
     // Mark this error as analyzed
     analyzedErrors.add(errorKey);
 
-    console.log(`\n\n**** REMEDIATION GUIDANCE ****\n\n
-    Error: ${error.message}\n\n
-    Stack: ${stackTrace || 'No stack trace available'}\n\n
-    Remediation Guidance:\n
-    ${remediationGuidance}\n\n*******************************`);
+    // Parse the remediation guidance
+    const librarianUrl = process.env.LIBRARIAN_URL || 'librarian:5040';
+
+    try {
+      await axios.post(`http://${librarianUrl}/collections/code_recommendations/documents`, {
+        serializedError,
+        sourceCode,
+        remediationGuidance,
+        timestamp: new Date().toISOString()
+      }, {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      console.log('New code suggestion logged to Librarian.');
+    } catch (librarianError) {
+      console.error('Error sending code suggestion to Librarian:', librarianError instanceof Error ? librarianError.message : String(librarianError));
+    }
+
     return remediationGuidance;
   } catch (err) {
     console.error('Error analyzing error:', err instanceof Error ? err.message : String(err));

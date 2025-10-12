@@ -62,6 +62,63 @@ def get_librarian_url() -> str:
     """Get the Librarian service URL from environment or use default."""
     return os.environ.get('LIBRARIAN_URL', 'librarian:5040')
 
+def parse_inputs(inputs_str: str) -> Dict[str, Any]:
+    """Parse and normalize the plugin stdin JSON payload into a dict of inputName -> InputValue.
+
+    Plugins should accept inputs formatted as a JSON array of [ [key, value], ... ] where value
+    may be a primitive (string/number/bool), or an object like {"value": ...}. This helper
+    normalizes non-dict raw values into {'value': raw}. It also filters invalid entries.
+    """
+    try:
+        logger.info(f"Parsing input string ({len(inputs_str)} chars)")
+        payload = json.loads(inputs_str)
+        inputs: Dict[str, Any] = {}
+
+        # Case A: payload is a list of [key, value] pairs (legacy / preferred)
+        if isinstance(payload, list):
+            for item in payload:
+                if isinstance(item, list) and len(item) == 2:
+                    key, raw_value = item
+                    if isinstance(raw_value, dict):
+                        inputs[key] = raw_value
+                    else:
+                        inputs[key] = {'value': raw_value}
+                else:
+                    logger.debug(f"Skipping invalid input item in list payload: {item}")
+
+        # Case B: payload is a serialized Map object with entries: [[key, value], ...]
+        elif isinstance(payload, dict) and payload.get('_type') == 'Map' and isinstance(payload.get('entries'), list):
+            for entry in payload.get('entries', []):
+                if isinstance(entry, list) and len(entry) == 2:
+                    key, raw_value = entry
+                    if isinstance(raw_value, dict):
+                        inputs[key] = raw_value
+                    else:
+                        inputs[key] = {'value': raw_value}
+                else:
+                    logger.debug(f"Skipping invalid Map entry: {entry}")
+
+        # Case C: payload is already a dict mapping keys -> values (possibly already normalized)
+        elif isinstance(payload, dict):
+            for key, raw_value in payload.items():
+                # Skip internal meta fields if present
+                if key == '_type' or key == 'entries':
+                    continue
+                if isinstance(raw_value, dict):
+                    inputs[key] = raw_value
+                else:
+                    inputs[key] = {'value': raw_value}
+
+        else:
+            # Unsupported top-level type, provide clear error
+            raise ValueError("Unsupported input format: expected array of pairs, Map with entries, or object mapping")
+
+        logger.info(f"Successfully parsed {len(inputs)} input fields")
+        return inputs
+    except Exception as e:
+        logger.error(f"Input parsing failed: {e}")
+        raise
+
 def save_to_knowledge_base(domain: str, keywords: List[str], content: str, metadata: Optional[Dict] = None, inputs: Dict[str, Any] = {}) -> PluginOutput:
     """
     Save content to the knowledge base via the Librarian service.
@@ -81,19 +138,23 @@ def save_to_knowledge_base(domain: str, keywords: List[str], content: str, metad
         headers = {'Authorization': f'Bearer {auth_token}'}
         librarian_url = 'http://' + get_librarian_url()
         
-        # Prepare the request payload
+        # Prepare the request payload for Librarian /storeData
         payload = {
-            "collectionName": domain,
-            "content": content,
-            "metadata": {
-                "keywords": keywords,
-                **(metadata or {})
-            }
+            "id": f"kb-{domain}-{hash(content)}",  # Unique ID
+            "data": {
+                "content": content,
+                "metadata": {
+                    "keywords": keywords,
+                    **(metadata or {})
+                }
+            },
+            "storageType": "mongo",
+            "collection": "knowledge-base"
         }
-        
+
         # Make the request to the Librarian service
         response = requests.post(
-            f"{librarian_url}/knowledge/save",
+            f"{librarian_url}/storeData",
             json=payload,
             headers=headers,
             timeout=10
@@ -157,22 +218,64 @@ def save_to_knowledge_base(domain: str, keywords: List[str], content: str, metad
             error=error_msg
         )
 
-def execute_plugin(inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
+def execute_plugin(inputs: Any) -> List[Dict[str, Any]]:
     """
     Main plugin execution function.
-    
+
     Args:
-        inputs: Dictionary containing the plugin inputs
-        
+        inputs: Dictionary or list containing the plugin inputs
+
     Returns:
         List of plugin outputs as dictionaries
     """
     try:
+        # Handle flexible input types
+        if isinstance(inputs, list):
+            if len(inputs) == 1 and isinstance(inputs[0], dict):
+                inputs = inputs[0]
+            else:
+                return [PluginOutput(
+                    success=False,
+                    name="error",
+                    result_type="string",
+                    result=None,
+                    result_description="Invalid inputs: list must contain exactly one dictionary",
+                    error="Inputs list must contain exactly one dictionary"
+                ).to_dict()]
+        elif not isinstance(inputs, dict):
+            return [PluginOutput(
+                success=False,
+                name="error",
+                result_type="string",
+                result=None,
+                result_description="Invalid inputs: must be a dictionary or list with one dictionary",
+                error="Inputs must be a dictionary or list with one dictionary"
+            ).to_dict()]
+
         # Extract required inputs
-        domain = inputs.get('domain')
-        keywords = inputs.get('keywords', [])
-        content = inputs.get('content')
-        metadata = inputs.get('metadata', {})
+        domain_input = inputs.get('domain')
+        if isinstance(domain_input, dict) and 'value' in domain_input:
+            domain = domain_input['value']
+        else:
+            domain = domain_input
+
+        keywords_input = inputs.get('keywords', [])
+        if isinstance(keywords_input, dict) and 'value' in keywords_input:
+            keywords = keywords_input['value']
+        else:
+            keywords = keywords_input
+
+        content_input = inputs.get('content')
+        if isinstance(content_input, dict) and 'value' in content_input:
+            content = content_input['value']
+        else:
+            content = content_input
+
+        metadata_input = inputs.get('metadata', {})
+        if isinstance(metadata_input, dict) and 'value' in metadata_input:
+            metadata = metadata_input['value']
+        else:
+            metadata = metadata_input
         
         # Validate required inputs
         if not domain:
@@ -219,12 +322,12 @@ def execute_plugin(inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
         ).to_dict()]
 
 if __name__ == "__main__":
-    # For testing purposes
-    test_inputs = {
-        "domain": "test_domain",
-        "keywords": ["test", "example"],
-        "content": "This is test content for the knowledge base."
-    }
-    
-    result = execute_plugin(test_inputs)
+    input_str = sys.stdin.read()
+    try:
+        inputs = parse_inputs(input_str)
+    except json.JSONDecodeError:
+        # If a raw string is passed, wrap it in a structure that can be parsed
+        inputs = {"content": {"value": input_str.strip()}, "domain": {"value": "default"}}
+
+    result = execute_plugin(inputs)
     print(json.dumps(result, indent=2))

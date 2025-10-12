@@ -113,7 +113,6 @@ class BrainSearchProvider(SearchProvider):
         try:
             # First check environment variable (set by CapabilitiesManager)
             if 'BRAIN_AUTH_TOKEN' in os.environ:
-                logger.info("Found Brain auth token in environment variable.")
                 return os.environ['BRAIN_AUTH_TOKEN']
 
             # Then check inputs
@@ -122,13 +121,10 @@ class BrainSearchProvider(SearchProvider):
                 token_data = token_input
                 if isinstance(token_data, dict):
                     if 'value' in token_data:
-                        logger.info("Found Brain auth token in inputs['__brain_auth_token'].value['value']")
                         return token_data['value']
                     elif 'token' in token_data:
-                        logger.info("Found Brain auth token in inputs['__brain_auth_token'].value['token']")
                         return token_data['token']
                 elif isinstance(token_data, str):
-                    logger.info("Found Brain auth token in inputs['__brain_auth_token'].value")
                     return token_data
         except Exception as e:
             logger.error(f"Failed to get Brain auth token: {str(e)}")
@@ -169,7 +165,6 @@ class GoogleWebSearchProvider(SearchProvider):
                 'fields': 'items(title,link,snippet)'  # Only return fields we need
             }
 
-            logger.info(f"Calling Google Custom Search API for: {search_term}")
             response = requests.get(self.base_url, params=params, timeout=15)
             response.raise_for_status()
 
@@ -184,7 +179,6 @@ class GoogleWebSearchProvider(SearchProvider):
                         'snippet': item.get('snippet', '')
                     })
 
-            logger.info(f"Google Custom Search found {len(results)} results for '{search_term}'")
             self.update_performance(success=True)
             return results
 
@@ -218,7 +212,6 @@ class LangsearchSearchProvider(SearchProvider):
 
             if time_since_last_request < self.rate_limit_seconds:
                 sleep_duration = self.rate_limit_seconds - time_since_last_request
-                logger.info(f"LangSearch rate limit: sleeping for {sleep_duration:.2f} seconds.")
                 time.sleep(sleep_duration)
             # --- End Rate Limiting ---
 
@@ -239,7 +232,6 @@ class LangsearchSearchProvider(SearchProvider):
                 if 'summary' in kwargs:
                     payload['summary'] = kwargs['summary']
                 
-                logger.info(f"Calling LangSearch API at {url} (Attempt {attempt + 1}/{retries})")
                 response = requests.post(url, headers=headers, json=payload, timeout=15)
                 response.raise_for_status()
                 
@@ -264,7 +256,6 @@ class LangsearchSearchProvider(SearchProvider):
                         if item.get("title") and item.get("url"):
                             results.append({"title": item.get("title", ""), "url": item.get("url", ""), "snippet": item.get("snippet", "")})
                 
-                logger.info(f"LangSearch found {len(results)} results")
                 return results
                 
             except requests.exceptions.HTTPError as e:
@@ -385,7 +376,6 @@ class SearxNGSearchProvider(SearchProvider):
                     results.append({"title": item.get("title"), "url": item.get("url"), "snippet": item.get("content")})
 
                 if results:
-                    logger.info(f"Successfully retrieved {len(results)} results from SearxNG instance {self.base_urls[self.current_url_index]}")
                     self.backoff_time = 5 # Reset backoff time on success
                     return results
                     
@@ -425,22 +415,18 @@ class SearchPlugin:
         providers = []
         
         # 1. GoogleWebSearch as primary provider (using the built-in tool)
-        logger.info("Initializing GoogleWebSearch as primary search provider")
         providers.append(GoogleWebSearchProvider(self.inputs))
 
         # 2. LangSearch as second provider (if available)
         langsearch_api_key = None
         if 'LANGSEARCH_API_KEY' in os.environ:
             langsearch_api_key = os.environ['LANGSEARCH_API_KEY']
-            logger.info("Found LangSearch API key in environment")
         elif '__langsearch_api_key' in self.inputs:
             key_data = self.inputs['__langsearch_api_key']
             if isinstance(key_data, dict) and 'value' in key_data:
                 langsearch_api_key = key_data['value']
-                logger.info("Found LangSearch API key in inputs")
                 
         if langsearch_api_key:
-            logger.info("Initializing LangSearch as secondary search provider")
             try:
                 provider = LangsearchSearchProvider(api_key=langsearch_api_key)
                 providers.append(provider)
@@ -450,16 +436,13 @@ class SearchPlugin:
             logger.warning("LangSearch API key not found in any expected location - semantic search will not be available")
 
         # 3. DuckDuckGo as third fallback
-        logger.info("Initializing DuckDuckGo search provider")
         providers.append(DuckDuckGoSearchProvider())
 
         # 4. SearxNG as fourth fallback
-        logger.info("Initializing SearxNG search provider")
         providers.append(SearxNGSearchProvider())
         
         # 5. Brain as final fallback (always available if there's a token)
         if '__brain_auth_token' in self.inputs or 'BRAIN_AUTH_TOKEN' in os.environ:
-            logger.info("Initializing Brain search as final fallback")
             brain_provider = BrainSearchProvider(inputs=self.inputs)
             brain_provider.performance_score = 40  # Lower initial score as it's a fallback
             providers.append(brain_provider)
@@ -468,7 +451,6 @@ class SearchPlugin:
             logger.error("No search providers were successfully initialized!")
             raise RuntimeError("Failed to initialize any search providers")
             
-        logger.info(f"Initialized {len(providers)} search providers in priority order")
         return providers
 
     def execute_search(self, search_terms: List[str]) -> Tuple[List[Dict[str, str]], List[str]]:
@@ -491,11 +473,9 @@ class SearchPlugin:
                 search_successful = False
                 for provider in sorted_providers:
                     try:
-                        logger.info(f"Attempting search with {provider.name} provider (score: {provider.performance_score}) for term: '{term}'")
                         results = provider.search(term)
                         
                         if results:
-                            logger.info(f"Successfully found {len(results)} results for '{term}' using {provider.name}")
                             term_results.extend(results)
                             provider.update_performance(success=True)
                             search_successful = True
@@ -520,7 +500,6 @@ class SearchPlugin:
                     term_parts = term.split()
                     if len(term_parts) > 1:
                         term = " ".join(term_parts[:-1])
-                        logger.info(f"Generalizing search term to: '{term}'")
                     else:
                         break # Cannot generalize further
 
@@ -530,10 +509,8 @@ class SearchPlugin:
                 brain_provider = next((p for p in self.providers if isinstance(p, BrainSearchProvider)), None)
                 if brain_provider:
                     try:
-                        logger.info("Attempting final fallback to BrainSearchProvider")
                         results = brain_provider.search(original_term)
                         if results:
-                            logger.info(f"Successfully found {len(results)} results for '{original_term}' using BrainSearchProvider fallback")
                             term_results.extend(results)
                             search_successful = True
                     except Exception as e:
@@ -555,7 +532,11 @@ def execute_plugin(inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
         if not search_term_input:
             return [PluginOutput(False, "error", "error", None, "Missing required input: searchTerm").to_dict()]
 
-        search_terms_raw = search_term_input
+        # Extract value if it's a dict
+        if isinstance(search_term_input, dict) and 'value' in search_term_input:
+            search_terms_raw = search_term_input['value']
+        else:
+            search_terms_raw = search_term_input
         if isinstance(search_terms_raw, str):
             search_terms = [search_terms_raw.strip()]
         elif isinstance(search_terms_raw, list):
@@ -581,32 +562,59 @@ def execute_plugin(inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 # --- Main Execution ---
 def parse_inputs(inputs_str: str) -> Dict[str, Any]:
-    """Parse and validate inputs"""
+    """Parse and normalize the plugin stdin JSON payload into a dict of inputName -> InputValue.
+
+    Plugins should accept inputs formatted as a JSON array of [ [key, value], ... ] where value
+    may be a primitive (string/number/bool), or an object like {"value": ...}. This helper
+    normalizes non-dict raw values into {'value': raw}. It also filters invalid entries.
+    """
     try:
-        logger.info(f"Parsing input string ({len(inputs_str)} chars)")
-        
-        input_list = json.loads(inputs_str)
-        
-        inputs = {}
-        for item in input_list:
-            if isinstance(item, list) and len(item) == 2:
-                key, raw_value = item # Renamed 'value' to 'raw_value' for clarity
-                
-                # If raw_value is an InputValue object, extract its 'value' property
-                if isinstance(raw_value, dict) and 'value' in raw_value:
-                    inputs[key] = raw_value['value']
+        payload = json.loads(inputs_str)
+        inputs: Dict[str, Any] = {}
+
+        # Case A: payload is a list of [key, value] pairs (legacy / preferred)
+        if isinstance(payload, list):
+            for item in payload:
+                if isinstance(item, list) and len(item) == 2:
+                    key, raw_value = item
+                    if isinstance(raw_value, dict):
+                        inputs[key] = raw_value
+                    else:
+                        inputs[key] = {'value': raw_value}
                 else:
-                    # Otherwise, use raw_value directly (for non-InputValue types)
+                    logger.debug(f"Skipping invalid input item in list payload: {item}")
+
+        # Case B: payload is a serialized Map object with entries: [[key, value], ...]
+        elif isinstance(payload, dict) and payload.get('_type') == 'Map' and isinstance(payload.get('entries'), list):
+            for entry in payload.get('entries', []):
+                if isinstance(entry, list) and len(entry) == 2:
+                    key, raw_value = entry
+                    if isinstance(raw_value, dict):
+                        inputs[key] = raw_value
+                    else:
+                        inputs[key] = {'value': raw_value}
+                else:
+                    logger.debug(f"Skipping invalid Map entry: {entry}")
+
+        # Case C: payload is already a dict mapping keys -> values (possibly already normalized)
+        elif isinstance(payload, dict):
+            for key, raw_value in payload.items():
+                # Skip internal meta fields if present
+                if key == '_type' or key == 'entries':
+                    continue
+                if isinstance(raw_value, dict):
                     inputs[key] = raw_value
-            else:
-                logger.warning(f"Skipping invalid input item: {item}")
-        
-        logger.info(f"Successfully parsed {len(inputs)} input fields")
+                else:
+                    inputs[key] = {'value': raw_value}
+
+        else:
+            # Unsupported top-level type, provide clear error
+            raise ValueError("Unsupported input format: expected array of pairs, Map with entries, or object mapping")
+
         return inputs
-        
     except Exception as e:
         logger.error(f"Input parsing failed: {e}")
-        raise Exception(f"Input validation failed: {e}")
+        raise
 
 def main():
     """Main entry point for the plugin."""

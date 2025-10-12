@@ -162,21 +162,59 @@ def query_knowledge_base(query_text: str, domains: List[str], max_results: int =
     except Exception as e:
         raise e
 
-def execute_plugin(inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
+def execute_plugin(inputs: Any) -> List[Dict[str, Any]]:
     """
     Main plugin execution function.
-    
+
     Args:
-        inputs: Dictionary containing the plugin inputs
-        
+        inputs: Dictionary or list containing the plugin inputs
+
     Returns:
         List of plugin outputs as dictionaries
     """
     try:
+        # Handle flexible input types
+        if isinstance(inputs, list):
+            try:
+                # Attempt to convert list of lists to dict
+                inputs = {item[0]: item[1] for item in inputs}
+            except (TypeError, IndexError):
+                return [PluginOutput(
+                    success=False,
+                    name="error",
+                    result_type="string",
+                    result=None,
+                    result_description="Invalid inputs: list must be a list of key-value pairs",
+                    error="Invalid list format for inputs"
+                ).to_dict()]
+        elif not isinstance(inputs, dict):
+            return [PluginOutput(
+                success=False,
+                name="error",
+                result_type="string",
+                result=None,
+                result_description="Invalid inputs: must be a dictionary or list with one dictionary",
+                error="Inputs must be a dictionary or list with one dictionary"
+            ).to_dict()]
+
         # Extract required inputs
-        query_text = inputs.get('queryText')
-        domains = inputs.get('domains', [])
-        max_results = inputs.get('maxResults', 5)
+        query_text_input = inputs.get('queryText')
+        if isinstance(query_text_input, dict) and 'value' in query_text_input:
+            query_text = query_text_input['value']
+        else:
+            query_text = query_text_input
+
+        domains_input = inputs.get('domains', [])
+        if isinstance(domains_input, dict) and 'value' in domains_input:
+            domains = domains_input['value']
+        else:
+            domains = domains_input
+
+        max_results_input = inputs.get('maxResults', 5)
+        if isinstance(max_results_input, dict) and 'value' in max_results_input:
+            max_results = max_results_input['value']
+        else:
+            max_results = max_results_input
         
         # Validate required inputs
         if not query_text:
@@ -190,14 +228,7 @@ def execute_plugin(inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
             ).to_dict()]
         
         if not domains:
-            return [PluginOutput(
-                success=False,
-                name="error",
-                result_type="string",
-                result=None,
-                result_description="Missing required input: domains",
-                error="At least one domain is required"
-            ).to_dict()]
+            domains = ["knowledge-base"]
         
         # Ensure domains is a list
         if not isinstance(domains, list):
@@ -252,12 +283,12 @@ def execute_plugin(inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
         ).to_dict()]
 
 if __name__ == "__main__":
-    # For testing purposes
-    test_inputs = {
-        "queryText": "artificial intelligence platforms",
-        "domains": ["ai_development", "research_findings"],
-        "maxResults": 3
-    }
+    input_str = sys.stdin.read()
+    try:
+        inputs = json.loads(input_str)
+    except json.JSONDecodeError:
+        # If a raw string is passed, wrap it in a structure that can be parsed
+        inputs = {"queryText": input_str.strip()}
     
-    result = execute_plugin(test_inputs)
+    result = execute_plugin(inputs)
     print(json.dumps(result, indent=2))

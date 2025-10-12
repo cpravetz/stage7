@@ -72,8 +72,33 @@ PLAN_STEP_SCHEMA = {
             "type": "object",
             "patternProperties": {
                 "^[a-zA-Z][a-zA-Z0-9_]*$": {
-                    "type": "string",
-                    "description": "Thorough description of the expected output"
+                    "oneOf": [
+                        {
+                            # Simple string description (current format for backward compatibility)
+                            "type": "string",
+                            "description": "Thorough description of the expected output"
+                        },
+                        {
+                            # Enhanced object format with deliverable properties
+                            "type": "object",
+                            "properties": {
+                                "description": {
+                                    "type": "string",
+                                    "description": "Thorough description of the expected output"
+                                },
+                                "isDeliverable": {
+                                    "type": "boolean",
+                                    "description": "Whether this output is a final deliverable for the user"
+                                },
+                                "filename": {
+                                    "type": "string",
+                                    "description": "User-friendly filename for the deliverable"
+                                }
+                            },
+                            "required": ["description"],
+                            "additionalProperties": False
+                        }
+                    ]
                 }
             },
             "additionalProperties": False,
@@ -155,10 +180,10 @@ class PlanValidator:
         logger.info(f"--- Starting Validation Attempt {attempt}/{self.max_retries} ---")
 
         if attempt > self.max_retries:
-            raise AccomplishError(
-                f"Plan validation failed after {self.max_retries} attempts. Last errors: {previous_errors}",
-                "validation_error"
+            logger.warning(
+                f"Plan validation failed after {self.max_retries} attempts. Last errors: {previous_errors}. Returning potentially invalid plan."
             )
+            return plan # Return the last known plan, even if invalid
 
         # Always run code-based repair first
         current_plan = self._repair_plan_code_based(plan)
@@ -235,12 +260,8 @@ class PlanValidator:
             # After LLM repair, re-validate recursively
             return self.validate_and_repair(repaired_plan, goal, inputs, attempt + 1, actual_errors)
         except Exception as e:
-            logger.error(f"LLM repair failed on attempt {attempt}: {e}")
-            # If LLM repair fails, we still raise the final exception outside the loop
-            raise AccomplishError(
-                f"Plan validation failed after {self.max_retries} attempts. Last errors: {actual_errors}",
-                "validation_error"
-            )
+            logger.error(f"LLM repair failed on attempt {attempt}: {e}. Returning current plan.")
+            return current_plan # Return the current plan even if LLM repair fails
         
 
 
@@ -252,7 +273,37 @@ class PlanValidator:
         # Match both {name} and [name] patterns
         matches = re.findall(r'[{[]([a-zA-Z0-9_]+)[}\]]', value)
         return set(matches)
-    
+
+    def _validate_deliverable_outputs(self, step: Dict[str, Any]) -> List[str]:
+        """Validate deliverable output properties."""
+        errors = []
+        outputs = step.get('outputs', {})
+        step_number = step.get('number', 'unknown')
+
+        for output_name, output_def in outputs.items():
+            if isinstance(output_def, dict):
+                is_deliverable = output_def.get('isDeliverable', False)
+                filename = output_def.get('filename')
+                description = output_def.get('description')
+
+                # Validate required description
+                if not description:
+                    errors.append(f"Step {step_number}: Output '{output_name}' object format requires 'description' field")
+
+                # Validate deliverable filename requirement
+                if is_deliverable and not filename:
+                    errors.append(f"Step {step_number}: Output '{output_name}' marked as deliverable but missing 'filename'")
+
+                # Validate filename format if provided
+                if filename:
+                    if not isinstance(filename, str) or not filename.strip():
+                        errors.append(f"Step {step_number}: Output '{output_name}' filename must be a non-empty string")
+                    elif not is_deliverable:
+                        # Warn but don't error - filename without isDeliverable is allowed
+                        logger.warning(f"Step {step_number}: Output '{output_name}' has filename but not marked as deliverable")
+
+        return errors
+
     def _validate_embedded_references(self, step: Dict[str, Any], inputs: Dict[str, Any], available_outputs: Dict[int, Set[str]], errors: List[str]):
         """
         Handle embedded references in input values: add missing inputs if source is known, otherwise error.
@@ -442,6 +493,9 @@ class PlanValidator:
 
                     # Debug type information
                     logger.debug(f"Type check: Step {step.get('number')} input '{input_name}' expects {dest_input_type}, Step {source_step_number} output '{source_output_name}' provides {source_output_type}")
+                    logger.debug(f"  dest_input_def: {dest_input_def}")
+                    logger.debug(f"  source_plugin_def: {source_plugin_def}")
+                    logger.debug(f"  source_output_def: {source_output_def}")
 
                     # Only insert TRANSFORM if it's NOT an array/list type mismatch (handled by FOREACH)
                     if dest_input_type and source_output_type and dest_input_type != source_output_type and dest_input_type != 'any' and source_output_type != 'any' and source_output_type not in ['array', 'list']:
@@ -449,7 +503,9 @@ class PlanValidator:
                         logger.info(f"Type mismatch detected: Step {step.get('number')} input '{input_name}' expects {dest_input_type} but Step {source_step_number} output '{source_output_name}' provides {source_output_type}, inserting TRANSFORM step")
                     else:
                         # Log why TRANSFORM was not inserted
-                        if not dest_input_type:
+                        if not dest_input_def:
+                            logger.debug(f"No TRANSFORM: dest_input_def is None for Step {step.get('number')} input '{input_name}'")
+                        elif not dest_input_type:
                             logger.debug(f"No TRANSFORM: dest_input_type is None for Step {step.get('number')} input '{input_name}'")
                         elif not source_output_type:
                             logger.debug(f"No TRANSFORM: source_output_type is None for Step {source_step_number} output '{source_output_name}'")
@@ -462,62 +518,6 @@ class PlanValidator:
                         else:
                             logger.debug(f"No TRANSFORM: unknown reason for Step {step.get('number')} input '{input_name}'")
 
-                    if dest_input_type and source_output_type and dest_input_type != source_output_type and dest_input_type != 'any' and source_output_type != 'any' and source_output_type not in ['array', 'list']:
-    
-                        transform_step_number = self._find_max_step_number(plan) + 1 # Get a truly new, unused ID
-                        new_output_name = f"{source_output_name}_as_{dest_input_type}"
-    
-                        # Construct the script based on target_type
-                        script_value = ""
-                        if dest_input_type == "string":
-                            script_value = "print(str(params['source']))"
-                        elif dest_input_type == "number":
-                            script_value = "print(float(params['source']))" # or int()
-                        elif dest_input_type == "boolean":
-                            script_value = "print(bool(params['source']))"
-                        elif dest_input_type == "object":
-                            script_value = "import json; print(json.dumps(params['source']))" # Assume source is already object-like or can be JSON-ified
-                        else: # Default to string conversion if unknown type
-                            script_value = "print(str(params['source']))"
-    
-    
-                        transform_step = {
-                            "number": transform_step_number, # Assign the new unique ID
-                            "actionVerb": "TRANSFORM",
-                            "description": f"Transform '{source_output_name}' from {source_output_type} to {dest_input_type}.",
-                            "inputs": {
-                                "source": {
-                                    "outputName": source_output_name,
-                                    "sourceStep": source_step_number
-                                },
-                                "target_type": {
-                                    "value": dest_input_type,
-                                    "valueType": "string"
-                                },
-                                "script": { # Add the script input
-                                    "value": script_value,
-                                    "valueType": "string"
-                                },
-                                "script_parameters": { # Add script_parameters for the source
-                                    "value": "{\"source\": params['source']}", # This needs to be a string representation of the dict
-                                    "valueType": "object"
-                                }
-                            },
-                            "outputs": {
-                                new_output_name: f"The transformed {dest_input_type}."
-                            }
-                        }
-   
-                        # Insert the transform step
-                        plan.insert(i, transform_step)
-   
-                        # Update the original step's input to reference the new TRANSFORM step
-                        input_def['outputName'] = new_output_name
-                        input_def['sourceStep'] = transform_step_number # Use the new unique ID
-   
-                        # Restart validation
-                        i = -1
-                        break
             if i == -1:
                 break
             i += 1
@@ -535,6 +535,8 @@ class PlanValidator:
             return 'missing_input'
         elif 'invalid reference' in error_lower or 'sourceStep' in error_lower:
             return 'invalid_reference'
+        elif 'cannot find the source' in error_lower:
+            return 'unsourced_reference'
         elif 'type mismatch' in error_lower or 'expected' in error_lower and 'got' in error_lower:
             return 'type_mismatch'
         elif 'missing required field' in error_lower:
@@ -646,6 +648,29 @@ STEP TO FIX:
 TASK: Correct the sourceStep and/or outputName references to point to valid steps and outputs.
 
 Return ONLY the corrected JSON step object, no explanations."""
+
+        elif primary_error_type == 'unsourced_reference':
+            # Extract the variable name from the error
+            variable = None
+            for error in errors:
+                match = re.search(r"contains embedded reference '\{([^}]+)\}'", error)
+                if match:
+                    variable = match.group(1)
+                    break
+
+            return f"""Fix the unsourced embedded reference in this JSON step object.
+
+ERROR: {errors_text}
+
+STEP TO FIX:
+{step_json}
+
+TASK: The step contains a reference to '{{{variable}}}' but no source is found. Determine how to provide this variable:
+1. Add a preceding step that outputs this variable.
+2. Replace the reference with a constant value if appropriate.
+3. Use a different input method.
+
+Return ONLY the corrected JSON step object or plan segment, no explanations."""
 
         else:
             # Fall back to a shorter generic prompt
@@ -839,11 +864,11 @@ Return ONLY the corrected JSON plan, no explanations."""
         if not isinstance(plan, list):
             errors.append("Plan must be a list of steps")
             return {'valid': False, 'errors': errors, 'wrappable_errors': []}
-
+    
         if len(plan) == 0:
             # An empty sub-plan is valid
             return {'valid': True, 'errors': [], 'wrappable_errors': []}
-
+    
         plugin_map = {plugin.get('actionVerb'): plugin for plugin in available_plugins}
         # Initialize available_outputs with the context from the parent, if any
         available_outputs = parent_outputs.copy() if parent_outputs else {}
@@ -854,14 +879,33 @@ Return ONLY the corrected JSON plan, no explanations."""
         if duplicate_numbers:
             for dup_num in duplicate_numbers:
                 errors.append(f"Duplicate step number {dup_num} found. All step numbers must be globally unique across the entire plan including sub-plans.")
-
+    
         # First pass to populate available_outputs for the current plan level
         for step in plan:
             step_number = step.get('number')
             if step_number is None: continue
-            
+                
             step_outputs = set()
             outputs_from_plan = step.get('outputs', {})
+        
+            # Repair list to dict
+            if isinstance(outputs_from_plan, list):
+                repaired_outputs = {}
+                for i, item in enumerate(outputs_from_plan):
+                    if isinstance(item, dict) and 'description' in item:
+                        # Try to create a name from the description
+                        description = item['description']
+                        # Sanitize the description to make it a valid variable name
+                        base_name = re.sub(r'[^a-zA-Z0-9_]', '', description.split(' ')[0]).lower()
+                        if not base_name:
+                            base_name = "output"
+                        output_name = f"{base_name}_{i}"
+                        repaired_outputs[output_name] = item
+                    else:
+                        repaired_outputs[f"output_{i}"] = {'description': str(item)}
+                step['outputs'] = repaired_outputs
+                outputs_from_plan = repaired_outputs    
+
             if isinstance(outputs_from_plan, dict):
                 for output_name_in_plan in outputs_from_plan.keys():
                     step_outputs.add(output_name_in_plan) # Add the declared output name
@@ -873,28 +917,28 @@ Return ONLY the corrected JSON plan, no explanations."""
                         output_definitions = plugin_def.get('outputDefinitions', [])
                         # Check if the declared output name matches a plugin output
                         direct_match = next((out for out in output_definitions if out.get('name') == output_name_in_plan), None)
-                        
+                            
                         if not direct_match and len(output_definitions) == 1:
                             # If no direct match and only one plugin output, infer
                             inferred_output_name = output_definitions[0].get('name')
                             if inferred_output_name:
                                 step_outputs.add(inferred_output_name) # Add the inferred name
                                 logger.info(f"Step {step_number}: Inferring output '{output_name_in_plan}' maps to plugin output '{inferred_output_name}'.")
-            
+                
             available_outputs[step_number] = step_outputs
-
+    
         # Second pass to validate
         for i, step in enumerate(plan):
             step_number = step.get('number')
             if step_number is None:
                 errors.append(f"Step {i+1}: Missing 'number' field")
                 continue
-
+    
             required_fields = ['actionVerb', 'inputs', 'outputs']
             for field in required_fields:
                 if field not in step:
                     errors.append(f"Step {step_number}: Missing required field '{field}'")
-
+    
             action_verb = step.get('actionVerb')
             if action_verb:
                 plugin_def = plugin_map.get(action_verb)
@@ -902,7 +946,11 @@ Return ONLY the corrected JSON plan, no explanations."""
                     self._validate_step_inputs(step, plugin_def, available_outputs, errors, wrappable_errors, plan, plugin_map)
                 else:
                     logger.info(f"Step {step_number}: actionVerb '{action_verb}' not found in plugin_map. Skipping strict input validation.")
-
+    
+            # Validate deliverable outputs
+            deliverable_errors = self._validate_deliverable_outputs(step)
+            errors.extend(deliverable_errors)
+    
             # Recursive validation for control flow verbs
             control_flow_verbs = ['WHILE', 'SEQUENCE', 'IF_THEN', 'UNTIL', 'FOREACH', 'REPEAT']
             if action_verb in control_flow_verbs:
@@ -918,21 +966,21 @@ Return ONLY the corrected JSON plan, no explanations."""
                     if action_verb == 'FOREACH':
                         # The FOREACH step itself provides 'item' and 'index' for its sub-plan
                         sub_plan_context[step_number] = {'item', 'index'}
-                    
+                        
                     sub_validation_result = self._validate_plan(sub_plan, available_plugins, sub_plan_context)
-                    
+                        
                     if not sub_validation_result['valid']:
                         errors.extend(f"Sub-plan of step {step_number} ({action_verb}): {e}" for e in sub_validation_result['errors'])
                     if sub_validation_result.get('wrappable_errors'):
                          wrappable_errors.extend(sub_validation_result['wrappable_errors'])
-
+    
             recommended_role = step.get('recommendedRole')
             if recommended_role:
                 allowed_roles = ['Coordinator', 'Researcher', 'Coder', 'Creative', 'Critic', 'Executor', 'Domain Expert']
                 if recommended_role not in allowed_roles:
                     logger.warning(f"Step {step_number}: Invalid 'recommendedRole' '{recommended_role}'. Dropping it.")
                     del step['recommendedRole']
-
+    
         return {'valid': len(errors) == 0 and len(wrappable_errors) == 0, 'errors': errors, 'wrappable_errors': wrappable_errors}
 
     def _fix_step_outputs(self, step: Dict[str, Any], plugin_def: Dict[str, Any], current_outputs: Dict[str, str]) -> Dict[str, str]:
@@ -971,28 +1019,14 @@ Return ONLY the corrected JSON plan, no explanations."""
         steps_to_move_into_subplan_map = {} # Key: original step number, Value: step object
         steps_to_move_into_subplan_map[step_to_wrap_original_number] = copy.deepcopy(step_to_wrap)
 
-        # Find the index of step_to_wrap in the original plan
-        start_index_of_step_to_wrap = -1
-        for idx, step in enumerate(plan):
-            if step.get('number') == step_to_wrap_original_number:
-                start_index_of_step_to_wrap = idx
-                break
-        
-        if start_index_of_step_to_wrap == -1:
-            logger.error(f"Original step {step_to_wrap_original_number} not found in plan during FOREACH wrapping.")
-            return plan # Should not happen if validation is correct
-
-        # Collect candidate steps that are after step_to_wrap in the original plan
-        candidate_steps_after_wrap = [copy.deepcopy(s) for s in plan[start_index_of_step_to_wrap + 1:]]
-        
         # Set of original step numbers that are part of the subplan
         moved_original_step_numbers = {step_to_wrap_original_number}
         
-        # Loop to find all transitive dependencies on steps already moved to subplan
+        # Loop to find all steps that are transitively dependent on the step being wrapped
         new_dependencies_found = True
         while new_dependencies_found:
             new_dependencies_found = False
-            for current_step in candidate_steps_after_wrap:
+            for current_step in plan:
                 current_step_num = current_step.get('number')
                 if current_step_num in moved_original_step_numbers:
                     continue # Already moved
@@ -1005,24 +1039,9 @@ Return ONLY the corrected JSON plan, no explanations."""
                             break
                 
                 if is_dependent:
-                    steps_to_move_into_subplan_map[current_step_num] = current_step
+                    steps_to_move_into_subplan_map[current_step_num] = copy.deepcopy(current_step)
                     moved_original_step_numbers.add(current_step_num)
-                    new_dependencies_found = True
-
-        # Now, add steps that depend on source_step_number (step1's array output)
-        # and are after step_to_wrap, and not yet in the subplan.
-        # This handles the "dependent on step1" part of the prompt.
-        for current_step in plan[start_index_of_step_to_wrap + 1:]:
-            current_step_num = current_step.get('number')
-            if current_step_num in moved_original_step_numbers:
-                continue
-
-            for input_name, input_def in current_step.get('inputs', {}).items():
-                if isinstance(input_def, dict) and 'sourceStep' in input_def and 'outputName' in input_def:
-                    if input_def['sourceStep'] == source_step_number and input_def['outputName'] == source_output_name:
-                        steps_to_move_into_subplan_map[current_step_num] = copy.deepcopy(current_step)
-                        moved_original_step_numbers.add(current_step_num)
-                        break 
+                    new_dependencies_found = True 
 
         # 3. Create the subplan (keep original step numbers for global uniqueness)
         sub_plan = []
@@ -1080,9 +1099,19 @@ Return ONLY the corrected JSON plan, no explanations."""
                     logger.info(f"    Input '{input_name}' references step {input_def['sourceStep']}, output '{input_def.get('outputName')}'")
 
         # 4. Create the FOREACH step
-        # Copy the outputs from the step being wrapped so dependent steps can reference them
-        original_step = steps_to_move_into_subplan_map[step_to_wrap_original_number]
-        foreach_outputs = copy.deepcopy(original_step.get('outputs', {}))
+        # Collect all outputs from the sub-plan steps to propagate them through FOREACH
+        sub_plan_outputs = {}
+        for step_in_sub in sub_plan:
+            for out_name, out_desc in step_in_sub.get('outputs', {}).items():
+                if isinstance(out_desc, dict):
+                    sub_plan_outputs[out_name] = {
+                        "description": out_desc.get("description", f"Output {out_name} from sub-plan"),
+                        "isDeliverable": out_desc.get("isDeliverable", False),
+                        "filename": out_desc.get("filename")
+                    }
+                else:
+                    sub_plan_outputs[out_name] = out_desc
+        foreach_outputs = copy.deepcopy(sub_plan_outputs)
 
         # Create FOREACH step with explicit number assignment to avoid any reference issues
         foreach_step_number_final = int(foreach_step_number)  # Ensure it's an integer, not a reference
@@ -1132,16 +1161,16 @@ Return ONLY the corrected JSON plan, no explanations."""
                 logger.info(f"Keeping original step {s['number']} ({s.get('actionVerb')}) in main plan")
                 new_plan.append(s)
 
-        # 6. Update any remaining steps that reference the wrapped step to reference the FOREACH step instead
+        # 6. Update any remaining steps that reference any moved steps to reference the FOREACH step instead
         for step in new_plan:
             if step['number'] == foreach_step_number:
                 continue  # Skip the FOREACH step itself
 
             for input_name, input_def in step.get('inputs', {}).items():
                 if isinstance(input_def, dict) and 'sourceStep' in input_def:
-                    # If this input references the original wrapped step, update it to reference the FOREACH step
-                    if input_def['sourceStep'] == step_to_wrap_original_number:
-                        logger.info(f"Updating step {step['number']} input '{input_name}' to reference FOREACH step {foreach_step_number} instead of wrapped step {step_to_wrap_original_number}")
+                    if input_def['sourceStep'] in moved_original_step_numbers:
+                        old_source = input_def['sourceStep']
+                        logger.info(f"Updating step {step['number']} input '{input_name}' to reference FOREACH step {foreach_step_number} instead of moved step {old_source}")
                         input_def['sourceStep'] = foreach_step_number
 
         # Debug: Log the final plan structure
@@ -1170,6 +1199,10 @@ Return ONLY the corrected JSON plan, no explanations."""
 
         # Check required inputs are present
         for req_name in required_inputs.keys():
+            # Special handling for missionId: assume it's always injected by the runtime
+            if req_name == 'missionId':
+                continue
+
             if req_name not in inputs:
                 logger.warning(f"Step {step_number}: Missing required input '{req_name}' for actionVerb '{step['actionVerb']}' - Available inputs: {list(inputs.keys())}")
                 errors.append(f"Step {step_number}: Missing required input '{req_name}' for actionVerb '{step['actionVerb']}'")
@@ -1257,7 +1290,10 @@ Return ONLY the corrected JSON plan, no explanations."""
 
                                 # Now, compare the types
                                 if dest_input_type and source_output_type:
-                                    if dest_input_type == 'array' and source_output_type == 'string':
+                                    # Allow implicit conversion to string for any non-array/list type
+                                    if dest_input_type == 'string' and source_output_type not in ['array', 'list']:
+                                        is_mismatch = False
+                                    elif dest_input_type == 'array' and source_output_type == 'string':
                                         is_mismatch = False
                                     else:
                                         is_mismatch = dest_input_type != source_output_type and dest_input_type != 'any' and source_output_type != 'any'
@@ -1275,9 +1311,4 @@ Return ONLY the corrected JSON plan, no explanations."""
                                                 "target_input_name": input_name
                                             })
                                     elif is_mismatch:
-                                        errors.append(
-                                            f"Step {step_number}: Input '{input_name}' for actionVerb '{step['actionVerb']}' "
-                                            f"expects type '{dest_input_type}', but received incompatible type "
-                                            f"'{source_output_type}' from output '{source_output_name}' of step {source_step_number}."
-                                        )
-
+                                        errors.append(f"Step {step_number}: Input '{input_name}' for actionVerb '{step['actionVerb']}' expects type '{dest_input_type}', but received incompatible type '{source_output_type}' from output '{source_output_name}' of step {source_step_number}.")

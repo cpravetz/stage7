@@ -93,17 +93,21 @@ import sys
 if __name__ == "__main__":
     try:
         input_data = sys.stdin.read()
+        logger.info(f"TRANSFORM plugin received raw input: {input_data}")
         logger.info(f"TRANSFORM plugin received input: {len(input_data)} characters")
 
-        inputs_list = json.loads(input_data)
+        inputs_raw = json.loads(input_data)
+        logger.info(f"TRANSFORM plugin parsed inputs_raw: {inputs_raw}")
         
         inputs_dict = {}
-        for item in inputs_list:
-            if isinstance(item, list) and len(item) == 2:
-                key, val = item # val is already the raw value
-                inputs_dict[key] = val
+        for key, val in inputs_raw.items():
+            # Extract value if dict (assuming InputValue structure)
+            if isinstance(val, dict) and 'value' in val:
+                inputs_dict[key] = val['value']
             else:
-                logger.warning(f"Skipping invalid input item: {item}")
+                # This else branch should ideally not be hit if all inputs are InputValue objects
+                logger.warning(f"Skipping invalid input item: {key} with value {val}. Expected InputValue structure.")
+                inputs_dict[key] = val
 
         # Extract script and script_parameters directly from inputs_dict
         # They are already raw values due to the parsing above

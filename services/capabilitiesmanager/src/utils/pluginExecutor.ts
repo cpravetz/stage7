@@ -301,8 +301,11 @@ export class PluginExecutor {
                 pythonExecutable = isWindows ? 'python.exe' : 'python3'; // Fallback to system python
             }
 
-            const inputsArray: [string, InputValue][] = Array.from(inputValues.entries());
-            const inputsJsonString = JSON.stringify(inputsArray);
+            const inputsObject: { [key: string]: InputValue } = {};
+            for (const [key, value] of inputValues.entries()) {
+                inputsObject[key] = value;
+            }
+            const inputsJsonString = JSON.stringify(inputsObject);
 
             return new Promise<PluginOutput[]>((resolve, reject) => {
                                         const pythonProcess = spawn(pythonExecutable, [mainFilePath, pluginRootPath], {

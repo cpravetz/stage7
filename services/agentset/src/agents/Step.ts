@@ -44,6 +44,7 @@ export class Step {
     description?: string;
     dependencies: StepDependency[];
     outputs: Map<string, string>;
+    originalOutputDefinitions?: Map<string, any>; // Store original plan output definitions for deliverable metadata
     status: StepStatus;
     result?: PluginOutput[];
     timeout?: number;
@@ -51,6 +52,8 @@ export class Step {
     awaitsSignal: string;
     retryCount: number;
     maxRetries: number;
+    recoverableRetryCount: number;
+    maxRecoverableRetries: number;
     lastError: any | null;
     errorContext: ErrorContext | null = null;
     private tempData: Map<string, any> = new Map();
@@ -68,11 +71,13 @@ export class Step {
         description?: string,
         dependencies?: StepDependency[],
         outputs?: Map<string, string>,
+        originalOutputDefinitions?: Map<string, any>,
         status?: StepStatus,
         result?: PluginOutput[],
         recommendedRole?: string,
         persistenceManager: AgentPersistenceManager,
-        maxRetries?: number
+        maxRetries?: number,
+        maxRecoverableRetries?: number
     }) {
         console.log(`[Step constructor] params.outputs =`, params.outputs);
         this.id = params.id || uuidv4();
@@ -122,6 +127,10 @@ export class Step {
             console.error(`[Step constructor] Error normalizing outputs for step ${this.id}:`, e instanceof Error ? e.message : e);
             this.outputs = new Map();
         }
+
+        // Store original output definitions for deliverable metadata
+        this.originalOutputDefinitions = params.originalOutputDefinitions;
+
         this.status = params.status || StepStatus.PENDING;
         if (params.result) {
             this.result = params.result;
@@ -130,6 +139,8 @@ export class Step {
     this.persistenceManager = params.persistenceManager;
         this.retryCount = 0;
         this.maxRetries = params.maxRetries || 3;
+        this.recoverableRetryCount = 0;
+        this.maxRecoverableRetries = params.maxRecoverableRetries || 5;
         this.lastError = null;
 
         // Validate and standardize recommendedRole
@@ -267,8 +278,18 @@ export class Step {
             }
         }
 
-        // Phase 3: Resolve placeholders.
-        console.log(`[Step ${this.id}] Phase 3: Resolving placeholders...`);
+        // Phase 3: Ensure missionId is always present.
+        if (!inputRunValues.has('missionId')) {
+            inputRunValues.set('missionId', {
+                inputName: 'missionId',
+                value: missionId,
+                valueType: PluginParameterType.STRING,
+                args: {}
+            });
+        }
+
+        // Phase 4: Resolve placeholders (must be last).
+        console.log(`[Step ${this.id}] Phase 4: Resolving placeholders...`);
         const findOutputFromSteps = (outputName: string): string | null => {
             for (const step of allSteps.slice().reverse()) {
                 if (step.status === StepStatus.COMPLETED && step.result) {
@@ -282,16 +303,6 @@ export class Step {
             return null;
         };
         this.resolvePlaceholdersInInputRunValues(inputRunValues, findOutputFromSteps);
-
-        // Phase 4: Ensure missionId is always present.
-        if (!inputRunValues.has('missionId')) {
-            inputRunValues.set('missionId', {
-                inputName: 'missionId',
-                value: missionId,
-                valueType: PluginParameterType.STRING,
-                args: {}
-            });
-        }
 
         console.log(`[Step ${this.id}] dereferenceInputsForExecution: Completed. Final inputs:`, Array.from(inputRunValues.keys()));
         return inputRunValues;
@@ -486,7 +497,7 @@ export class Step {
                 for (const inputName in inputs) {
                     const inputDef = inputs[inputName];
 
-                    if (inputDef.outputName === 'item') {
+                    if (inputDef.outputName === 'item' || (inputDef.sourceStep === 0 && inputDef.outputName === 'item')) {
                         // This input depends on the loop item
                         tempStep.inputValues.set(inputName, {
                             inputName: inputName,
@@ -1882,6 +1893,60 @@ export class Step {
             return output; // Keep original name if no custom name available
         });
     }
+
+    /**
+     * Check if a specific output is marked as a deliverable
+     */
+    isOutputDeliverable(outputName: string): boolean {
+        if (!this.originalOutputDefinitions) {
+            return false;
+        }
+
+        const outputDef = this.originalOutputDefinitions.get(outputName);
+        return typeof outputDef === 'object' && outputDef !== null && outputDef.isDeliverable === true;
+    }
+
+    /**
+     * Get the filename for a deliverable output
+     */
+    getDeliverableFilename(outputName: string): string | undefined {
+        if (!this.originalOutputDefinitions) {
+            return undefined;
+        }
+
+        const outputDef = this.originalOutputDefinitions.get(outputName);
+        if (typeof outputDef === 'object' && outputDef !== null) {
+            return outputDef.filename;
+        }
+        return undefined;
+    }
+
+    /**
+     * Get the original output definition from the plan
+     */
+    getOriginalOutputDefinition(outputName: string): string | any {
+        if (!this.originalOutputDefinitions) {
+            return this.outputs.get(outputName) || '';
+        }
+
+        return this.originalOutputDefinitions.get(outputName) || this.outputs.get(outputName) || '';
+    }
+
+    /**
+     * Check if this step has any deliverable outputs
+     */
+    hasDeliverableOutputs(): boolean {
+        if (!this.originalOutputDefinitions) {
+            return false;
+        }
+
+        for (const [outputName, _] of this.outputs) {
+            if (this.isOutputDeliverable(outputName)) {
+                return true;
+            }
+        }
+        return false;
+    }
 }
 
 export function createFromPlan(
@@ -2072,6 +2137,32 @@ export function createFromPlan(
             console.error('[createFromPlan] Error normalizing task.outputs:', e instanceof Error ? e.message : e);
         }
 
+        // Store original output definitions for deliverable metadata
+        let originalOutputDefinitions: Map<string, any> | undefined = undefined;
+        try {
+            const rawOutputs = (task as any).outputs;
+            if (rawOutputs && typeof rawOutputs === 'object') {
+                if (rawOutputs instanceof Map) {
+                    originalOutputDefinitions = new Map(rawOutputs);
+                } else if (rawOutputs._type === 'Map' && Array.isArray(rawOutputs.entries)) {
+                    originalOutputDefinitions = new Map(rawOutputs.entries);
+                } else if (typeof rawOutputs === 'string') {
+                    try {
+                        const parsed = JSON.parse(rawOutputs);
+                        if (parsed && typeof parsed === 'object') {
+                            originalOutputDefinitions = new Map(Object.entries(parsed));
+                        }
+                    } catch (e) {
+                        // Ignore parse errors for original definitions
+                    }
+                } else {
+                    originalOutputDefinitions = new Map(Object.entries(rawOutputs));
+                }
+            }
+        } catch (e) {
+            console.warn('[createFromPlan] Error preserving original output definitions:', e instanceof Error ? e.message : e);
+        }
+
         const step = new Step({
             id: task.id!,
             missionId: missionId,
@@ -2083,6 +2174,7 @@ export function createFromPlan(
             inputReferences: inputReferences,
             inputValues: inputValues,
             outputs: normalizedOutputs || (task.outputs ? new Map(Object.entries(task.outputs)) : undefined),
+            originalOutputDefinitions: originalOutputDefinitions,
             recommendedRole: task.recommendedRole,
             persistenceManager: persistenceManager
         });

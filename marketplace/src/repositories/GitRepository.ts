@@ -30,7 +30,6 @@ export class GitRepository implements PluginRepository {
             return;
         }
     
-        const git: SimpleGit = simpleGit();
         const tempDir = path.join(process.cwd(), 'temp', `plugin-git-${manifest.id}`);
         
         try {
@@ -38,7 +37,7 @@ export class GitRepository implements PluginRepository {
             await fs.mkdir(tempDir, { recursive: true });
             
             // Initialize git repo
-            await git.cwd(tempDir);
+            const git: SimpleGit = simpleGit(tempDir);
             await git.init();
             await git.addRemote('origin', this.authenticatedUrl);
             
@@ -56,7 +55,7 @@ export class GitRepository implements PluginRepository {
             }
             
             // Commit and push
-            await git.add('./*');
+            await git.add('.');
             await git.commit(`Publishing plugin ${manifest.id} - ${manifest.verb}`);
             await git.push('origin', this.config.options?.defaultBranch || 'master', ['--force']);
             
@@ -90,7 +89,7 @@ export class GitRepository implements PluginRepository {
             // Clone repository
             await fs.mkdir(tempDir, { recursive: true });
             await git.clone(this.authenticatedUrl, tempDir);
-            await git.cwd(tempDir);
+            const clonedGit: SimpleGit = simpleGit(tempDir);
 
             // Search for plugin manifest
             const files = await fs.readdir(tempDir, { recursive: true });
@@ -143,7 +142,7 @@ export class GitRepository implements PluginRepository {
             // Clone repository
             await fs.mkdir(tempDir, { recursive: true });
             await git.clone(this.authenticatedUrl, tempDir);
-            await git.cwd(tempDir);
+            const clonedGit: SimpleGit = simpleGit(tempDir);
 
             // Search for plugin manifest
             const files = await fs.readdir(tempDir, { recursive: true });
@@ -192,7 +191,7 @@ export class GitRepository implements PluginRepository {
             // Clone repository
             await fs.mkdir(tempDir, { recursive: true });
             await git.clone(this.authenticatedUrl, tempDir);
-            await git.cwd(tempDir);
+            const clonedGit: SimpleGit = simpleGit(tempDir);
 
             // Find and remove plugin directory
             const files = await fs.readdir(tempDir, { recursive: true });
@@ -219,9 +218,9 @@ export class GitRepository implements PluginRepository {
             await fs.rm(pluginDir, { recursive: true });
 
             // Commit and push changes
-            await git.add('./*');
-            await git.commit(`Deleted plugin ${id}`);
-            await git.push('origin', this.config.options?.defaultBranch || 'master');
+            await clonedGit.add('./*');
+            await clonedGit.commit(`Deleted plugin ${id}`);
+            await clonedGit.push('origin', this.config.options?.defaultBranch || 'master');
         } catch (error) {
             throw new Error(`Failed to delete plugin from Git repository: ${error instanceof Error ? error.message : String(error)}`);
         } finally {
@@ -244,7 +243,7 @@ export class GitRepository implements PluginRepository {
             // Clone repository
             await fs.mkdir(tempDir, { recursive: true });
             await git.clone(this.authenticatedUrl, tempDir);
-            await git.cwd(tempDir);
+            const clonedGit: SimpleGit = simpleGit(tempDir);
 
             // Find all plugin manifests
             const files = await fs.readdir(tempDir, { recursive: true });

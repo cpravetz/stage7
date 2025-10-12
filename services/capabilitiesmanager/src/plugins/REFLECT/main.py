@@ -15,7 +15,7 @@ from typing import Dict, Any, List, Optional, Set
 
 # Import from the installed shared library package
 try:
-    from stage7_shared_lib import PlanValidator, AccomplishError, PLAN_STEP_SCHEMA, PLAN_ARRAY_SCHEMA
+    from plan_validator import PlanValidator, AccomplishError, PLAN_STEP_SCHEMA, PLAN_ARRAY_SCHEMA
     ReflectError = AccomplishError
 except ImportError:
     # Fallback to direct import for development/testing
@@ -115,64 +115,50 @@ def _extract_json_from_string(text: str) -> Optional[str]:
     if not text:
         return None
 
-    # Strip markdown code blocks
     text = text.strip()
-    # Use a regex to find the json block
-    match = re.search(r"```(json)?\s*([\s\S]*?)\s*```", text)
-    if match:
-        text = match.group(2).strip()
-    
-    if not text:
-        return None
 
-    # Find the first and last occurrences of the JSON delimiters
+    # Attempt to parse the entire text as JSON first
+    try:
+        json.loads(text)
+        return text
+    except json.JSONDecodeError:
+        pass # Not a direct JSON string, proceed to extraction logic
+
+    # Use a regex to find the json block (with or without 'json' specifier)
+    match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text)
+    if match:
+        json_candidate = match.group(1).strip()
+        try:
+            json.loads(json_candidate)
+            return json_candidate
+        except json.JSONDecodeError:
+            pass # Extracted block is not valid JSON
+
+    # Fallback: try to find the outermost JSON structure
     first_brace = text.find('{')
     first_bracket = text.find('[')
     last_brace = text.rfind('}')
     last_bracket = text.rfind(']')
 
-    # Determine the most likely JSON structure based on outermost delimiters
-    # Prioritize array if both are present and valid, as plans are arrays
-    if first_bracket != -1 and last_bracket != -1 and first_bracket < last_bracket:
-        # Check if a brace-delimited object is fully contained within the brackets
-        if first_brace != -1 and last_brace != -1 and first_brace > first_bracket and last_brace < last_bracket:
-            # If so, it's likely an array containing an object, so we still target the array
-            pass
-        else:
-            # It's likely a JSON array
-            start_index = first_bracket
-            end_index = last_bracket
-    elif first_brace != -1 and last_brace != -1 and first_brace < last_brace:
-        # It's likely a JSON object
-        start_index = first_brace
-        end_index = last_brace
-    else:
-        return None # No valid JSON delimiters found
-
-    # Determine the start and end of the JSON string
     start_index = -1
     end_index = -1
 
     if first_bracket != -1 and last_bracket != -1 and first_bracket < last_bracket:
-        # It's likely a JSON array
         start_index = first_bracket
         end_index = last_bracket
     elif first_brace != -1 and last_brace != -1 and first_brace < last_brace:
-        # It's likely a JSON object
         start_index = first_brace
         end_index = last_brace
     
-    if start_index == -1:
-        return None # No valid JSON found
+    if start_index != -1:
+        json_candidate = text[start_index : end_index + 1]
+        try:
+            json.loads(json_candidate)
+            return json_candidate
+        except json.JSONDecodeError:
+            pass
 
-    json_candidate = text[start_index : end_index + 1]
-
-    # Basic validation: check if the candidate string is likely JSON
-    try:
-        json.loads(json_candidate)
-        return json_candidate
-    except json.JSONDecodeError:
-        return None
+    return None
 
 def call_brain(prompt: str, inputs: Dict[str, Any], response_type: str = "json") -> str:
     """Call Brain service with proper authentication and conversation type"""
@@ -231,7 +217,6 @@ def call_brain(prompt: str, inputs: Dict[str, Any], response_type: str = "json")
         raw_brain_response = result['result']
 
         if response_type == 'text':
-            logger.info("Response type is TEXT. Not attempting JSON extraction.")
             progress.checkpoint("brain_call_success_text_response")
             return raw_brain_response
 
@@ -242,8 +227,6 @@ def call_brain(prompt: str, inputs: Dict[str, Any], response_type: str = "json")
             try:
                 # Validate that the extracted string is indeed valid JSON
                 json.loads(extracted_json_str)
-                logger.info("Successfully extracted and validated JSON from Brain response.")
-                logger.info(f"Raw JSON response from Brain: {extracted_json_str}")
                 progress.checkpoint("brain_call_success")
                 return extracted_json_str
             except json.JSONDecodeError as e:
@@ -262,32 +245,61 @@ def call_brain(prompt: str, inputs: Dict[str, Any], response_type: str = "json")
         raise ReflectError(f"Brain service call failed: {e}", "brain_error")
 
 def parse_inputs(inputs_str: str) -> Dict[str, Any]:
-    """Parse and validate inputs"""
+    """Parse and normalize the plugin stdin JSON payload into a dict of inputName -> InputValue.
+
+    Plugins should accept inputs formatted as a JSON array of [ [key, value], ... ] where value
+    may be a primitive (string/number/bool), or an object like {"value": ...}. This helper
+    normalizes non-dict raw values into {'value': raw}. It also filters invalid entries.
+    """
     try:
         logger.info(f"Parsing input string ({len(inputs_str)} chars)")
-        
-        input_list = json.loads(inputs_str)
-        
-        inputs = {}
-        for item in input_list:
-            if isinstance(item, list) and len(item) == 2:
-                key, raw_value = item # Renamed 'value' to 'raw_value' for clarity
-                
-                # If raw_value is an InputValue object, extract its 'value' property
-                if isinstance(raw_value, dict) and 'value' in raw_value:
-                    inputs[key] = raw_value['value']
+        payload = json.loads(inputs_str)
+        inputs: Dict[str, Any] = {}
+
+        # Case A: payload is a list of [key, value] pairs (legacy / preferred)
+        if isinstance(payload, list):
+            for item in payload:
+                if isinstance(item, list) and len(item) == 2:
+                    key, raw_value = item
+                    if isinstance(raw_value, dict):
+                        inputs[key] = raw_value
+                    else:
+                        inputs[key] = {'value': raw_value}
                 else:
-                    # Otherwise, use raw_value directly (for non-InputValue types)
+                    logger.debug(f"Skipping invalid input item in list payload: {item}")
+
+        # Case B: payload is a serialized Map object with entries: [[key, value], ...]
+        elif isinstance(payload, dict) and payload.get('_type') == 'Map' and isinstance(payload.get('entries'), list):
+            for entry in payload.get('entries', []):
+                if isinstance(entry, list) and len(entry) == 2:
+                    key, raw_value = entry
+                    if isinstance(raw_value, dict):
+                        inputs[key] = raw_value
+                    else:
+                        inputs[key] = {'value': raw_value}
+                else:
+                    logger.debug(f"Skipping invalid Map entry: {entry}")
+
+        # Case C: payload is already a dict mapping keys -> values (possibly already normalized)
+        elif isinstance(payload, dict):
+            for key, raw_value in payload.items():
+                # Skip internal meta fields if present
+                if key == '_type' or key == 'entries':
+                    continue
+                if isinstance(raw_value, dict):
                     inputs[key] = raw_value
-            else:
-                logger.warning(f"Skipping invalid input item: {item}")
-        
+                else:
+                    inputs[key] = {'value': raw_value}
+
+        else:
+            # Unsupported top-level type, provide clear error
+            raise ValueError("Unsupported input format: expected array of pairs, Map with entries, or object mapping")
+
         logger.info(f"Successfully parsed {len(inputs)} input fields")
         return inputs
-        
     except Exception as e:
         logger.error(f"Input parsing failed: {e}")
-        raise ReflectError(f"Input validation failed: {e}", "input_error")
+        raise AccomplishError(f"Input validation failed: {e}", "input_error")
 
 class ReflectHandler:
     """Handles reflection requests by generating schema-compliant plans"""
@@ -336,46 +348,68 @@ class ReflectHandler:
         mission_id_input = inputs.get('missionId')
         if isinstance(mission_id_input, dict) and 'value' in mission_id_input:
             mission_id = str(mission_id_input['value']).strip()
+        elif isinstance(mission_id_input, str):
+            mission_id = mission_id_input.strip()
         else:
-            mission_id = str(mission_id_input).strip() if mission_id_input is not None else ''
+            mission_id = ''
 
         plan_history_input = inputs.get('plan_history')
+        plan_history = []
         if isinstance(plan_history_input, dict) and 'value' in plan_history_input:
-            plan_history = str(plan_history_input['value']).strip()
+            raw_plan_history = plan_history_input['value']
         else:
-            plan_history = str(plan_history_input).strip() if plan_history_input is not None else ''
+            raw_plan_history = plan_history_input
+
+        if isinstance(raw_plan_history, str):
+            try:
+                plan_history = json.loads(raw_plan_history)
+            except json.JSONDecodeError:
+                logger.warning("Could not parse plan_history string as JSON.")
+                plan_history = []
+        elif isinstance(raw_plan_history, (list, dict)):
+            plan_history = raw_plan_history
+        else:
+            plan_history = []
 
         work_products_input = inputs.get('work_products')
         if isinstance(work_products_input, dict) and 'value' in work_products_input:
             work_products = str(work_products_input['value']).strip()
+        elif isinstance(work_products_input, str):
+            work_products = work_products_input.strip()
         else:
-            work_products = str(work_products_input).strip() if work_products_input is not None else ''
+            work_products = ''
 
         question_input = inputs.get('question')
         if isinstance(question_input, dict) and 'value' in question_input:
             question = str(question_input['value']).strip()
+        elif isinstance(question_input, str):
+            question = question_input.strip()
         else:
-            question = str(question_input).strip() if question_input is not None else ''
+            question = ''
 
         # final_output is optional; default to empty string if not provided
         final_output_input = inputs.get('final_output')
         if isinstance(final_output_input, dict) and 'value' in final_output_input:
             final_output = str(final_output_input['value']).strip()
+        elif isinstance(final_output_input, str):
+            final_output = final_output_input.strip()
         else:
-            final_output = str(final_output_input).strip() if final_output_input is not None else ''
+            final_output = ''
 
         logger.info(f"DEBUG REFLECT: mission_id = '{mission_id}' (type: {type(mission_id)})") # Add this line
-        logger.info(f"DEBUG REFLECT: plan_history = '{plan_history[:50]}...' (type: {type(plan_history)})") # Add this line
-        logger.info(f"DEBUG REFLECT: work_products = '{work_products[:50]}...' (type: {type(work_products)})") # Add this line
-        logger.info(f"DEBUG REFLECT: question = '{question[:50]}...' (type: {type(question)})") # Add this line
-        logger.info(f"DEBUG REFLECT: final_output present: {'yes' if final_output else 'no'} (length: {len(final_output)})")
+        logger.info(f"DEBUG REFLECT: plan_history = '{str(plan_history)[:50]}...' (type: {type(plan_history)})") # Add this line
+        logger.info(f"DEBUG REFLECT: work_products = '{str(work_products)[:50]}...' (type: {type(work_products)})") # Add this line
+        logger.info(f"DEBUG REFLECT: question = '{str(question)[:50]}...' (type: {type(question)})") # Add this line
+        logger.info(f"DEBUG REFLECT: final_output present: {'yes' if final_output else 'no'} (length: {len(str(final_output))})")
 
         # Extract agent ID for self-correction
         agent_id_input = inputs.get('agentId')
         if isinstance(agent_id_input, dict) and 'value' in agent_id_input:
             agent_id = str(agent_id_input['value']).strip()
+        elif isinstance(agent_id_input, str):
+            agent_id = agent_id_input.strip()
         else:
-            agent_id = str(agent_id_input).strip() if agent_id_input is not None else ''
+            agent_id = ''
 
         return {
             "missionId": mission_id,
@@ -402,7 +436,7 @@ class ReflectHandler:
         }
         schema_json = json.dumps(PLAN_ARRAY_SCHEMA, indent=2)
 
-        prompt = f"""You are an expert system analyst for mission reflection and planning. A mission is in progress and needs reflection to determine next steps.
+        prompt = f"""You are a JSON-only reflection and planning assistant. Your task is to analyze the provided mission data and reflection question.
 
 MISSION ID: {mission_id}
 MISSION GOAL: {mission_goal}
@@ -460,6 +494,9 @@ Plan Schema
 - Only change `recommendedRole` when transitioning to a fundamentally different type of deliverable
 - Example: Steps 1-5 all produce research for a report → all get `recommendedRole: "researcher"`
 - Counter-example: Don't switch roles between gathering data (step 1) and formatting it (step 2) if they're part of the same research deliverable
+
+**CRITICAL - LINKING STEPS:** You MUST explicitly connect steps. Any step that uses the output of a previous step MUST declare this in its `inputs` using `sourceStep` and `outputName`. DO NOT simply refer to previous outputs in a `prompt` string without also adding the formal dependency in the `inputs` object. 
+A plan with no connections between steps is invalid and will be rejected.
 
 CRITICAL: The actionVerb for each step MUST be a valid, existing plugin actionVerb (from the provided list) or a descriptive, new actionVerb (e.g., 'ANALYZE_DATA', 'GENERATE_REPORT'). It MUST NOT be 'UNKNOWN' or 'NOVEL_VERB'.
 
@@ -528,12 +565,53 @@ CRITICAL: The actionVerb for each step MUST be a valid, existing plugin actionVe
                 }])
             elif isinstance(data, dict): # Could be direct answer or plugin recommendation
                 if "direct_answer" in data:
+                    # The answer might contain a plan, so we need to parse it.
+                    answer_content = data["direct_answer"]
+                    try:
+                        # Attempt to extract a JSON plan from the answer string
+                        plan_from_answer = _extract_json_from_string(answer_content)
+                        if plan_from_answer:
+                            plan_data = json.loads(plan_from_answer)
+                            validated_plan = self.validator.validate_and_repair(plan_data, verb_info['mission_goal'], inputs)
+                            return json.dumps([{ 
+                                "success": True,
+                                "name": "plan",
+                                "resultType": "plan",
+                                "resultDescription": f"Plan created from reflection",
+                                "result": validated_plan,
+                                "mimeType": "application/json"
+                            }])
+                    except (json.JSONDecodeError, TypeError):
+                        # If parsing fails, treat it as a direct text answer
+                        pass
+
+                    # If no plan is found in the answer, return it as a direct answer
                     return json.dumps([{ 
                         "success": True,
-                        "name": "direct_answer",
-                        "resultType": "direct_answer",
+                        "name": "answer",
+                        "resultType": "string",
                         "resultDescription": f"Direct answer from reflection",
-                        "result": data["direct_answer"],
+                        "result": answer_content,
+                        "mimeType": "application/json"
+                    }])
+                elif "value" in data and "valueType" in data:
+                    # Handle the case where the response is an InputValue-like object
+                    return json.dumps([{ 
+                        "success": True,
+                        "name": "answer",
+                        "resultType": "string",
+                        "resultDescription": f"Direct answer from reflection",
+                        "result": data["value"],
+                        "mimeType": "application/json"
+                    }])
+                elif "value" in data and "valueType" in data:
+                    # Handle the case where the response is an InputValue-like object
+                    return json.dumps([{ 
+                        "success": True,
+                        "name": "answer",
+                        "resultType": "string",
+                        "resultDescription": f"Direct answer from reflection",
+                        "result": data["value"],
                         "mimeType": "application/json"
                     }])
                 elif "plugin" in data:
@@ -553,7 +631,7 @@ CRITICAL: The actionVerb for each step MUST be a valid, existing plugin actionVe
                     return json.dumps([{"success": True,
                         "name": "plan",
                         "resultType": "plan",
-                        "resultDescription": f"Plan created for novel verb '{verb_info['verb']}'",
+                        "resultDescription": f"Plan created from reflection",
                         "result": validated_plan,
                         "mimeType": "application/json"
                     }])

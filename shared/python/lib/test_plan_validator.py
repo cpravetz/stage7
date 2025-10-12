@@ -3,7 +3,7 @@
 import json
 import pytest
 try:
-    from stage7_shared_lib import PlanValidator, AccomplishError
+    from plan_validator import PlanValidator, AccomplishError
 except ImportError:
     from plan_validator import PlanValidator, AccomplishError
 

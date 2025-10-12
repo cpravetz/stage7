@@ -403,32 +403,61 @@ class ScrapePlugin:
             }]
 
 def parse_inputs(inputs_str: str) -> Dict[str, Any]:
-    """Parse and validate inputs"""
+    """Parse and normalize the plugin stdin JSON payload into a dict of inputName -> InputValue.
+
+    Plugins should accept inputs formatted as a JSON array of [ [key, value], ... ] where value
+    may be a primitive (string/number/bool), or an object like {"value": ...}. This helper
+    normalizes non-dict raw values into {'value': raw}. It also filters invalid entries.
+    """
     try:
         logger.info(f"Parsing input string ({len(inputs_str)} chars)")
-        
-        input_list = json.loads(inputs_str)
-        
-        inputs = {}
-        for item in input_list:
-            if isinstance(item, list) and len(item) == 2:
-                key, raw_value = item # Renamed 'value' to 'raw_value' for clarity
-                
-                # If raw_value is an InputValue object, extract its 'value' property
-                if isinstance(raw_value, dict) and 'value' in raw_value:
-                    inputs[key] = raw_value['value']
+        payload = json.loads(inputs_str)
+        inputs: Dict[str, Any] = {}
+
+        # Case A: payload is a list of [key, value] pairs (legacy / preferred)
+        if isinstance(payload, list):
+            for item in payload:
+                if isinstance(item, list) and len(item) == 2:
+                    key, raw_value = item
+                    if isinstance(raw_value, dict):
+                        inputs[key] = raw_value
+                    else:
+                        inputs[key] = {'value': raw_value}
                 else:
-                    # Otherwise, use raw_value directly (for non-InputValue types)
+                    logger.debug(f"Skipping invalid input item in list payload: {item}")
+
+        # Case B: payload is a serialized Map object with entries: [[key, value], ...]
+        elif isinstance(payload, dict) and payload.get('_type') == 'Map' and isinstance(payload.get('entries'), list):
+            for entry in payload.get('entries', []):
+                if isinstance(entry, list) and len(entry) == 2:
+                    key, raw_value = entry
+                    if isinstance(raw_value, dict):
+                        inputs[key] = raw_value
+                    else:
+                        inputs[key] = {'value': raw_value}
+                else:
+                    logger.debug(f"Skipping invalid Map entry: {entry}")
+
+        # Case C: payload is already a dict mapping keys -> values (possibly already normalized)
+        elif isinstance(payload, dict):
+            for key, raw_value in payload.items():
+                # Skip internal meta fields if present
+                if key == '_type' or key == 'entries':
+                    continue
+                if isinstance(raw_value, dict):
                     inputs[key] = raw_value
-            else:
-                logger.warning(f"Skipping invalid input item: {item}")
-        
+                else:
+                    inputs[key] = {'value': raw_value}
+
+        else:
+            # Unsupported top-level type, provide clear error
+            raise ValueError("Unsupported input format: expected array of pairs, Map with entries, or object mapping")
+
         logger.info(f"Successfully parsed {len(inputs)} input fields")
         return inputs
-        
     except Exception as e:
         logger.error(f"Input parsing failed: {e}")
-        raise Exception(f"Input validation failed: {e}")
+        raise
 
 def main():
     """Main entry point for the plugin"""

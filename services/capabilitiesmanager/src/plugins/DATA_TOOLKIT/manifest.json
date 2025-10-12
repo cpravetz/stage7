@@ -19,7 +19,7 @@
     },
     {
       "name": "json_object",
-      "type": "object",
+      "type": "string",
       "required": false,
       "description": "The JSON object to query. Must be a valid JSON object. Used with 'query_json'."
     },

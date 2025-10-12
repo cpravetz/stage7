@@ -279,31 +279,13 @@ export class Agent extends BaseEntity {
     }
 
     private async prepareOpeningInstruction() {
-        const availablePlugins : Array<String> = await this.getAvailablePlugins();
         const openingInstruction = `
 Mission Context: ${this.missionContext}
 
-Available Plugins:
-${availablePlugins.map(plugin => `- ${plugin}`).join('\n')}
-
-Please consider this context and the available plugins when planning and executing the mission. Provide detailed and well-structured responses, and use the most appropriate plugins for each task.
+Please consider this context when planning and executing the mission. Provide detailed and well-structured responses, and use the most appropriate actionVerbs for each task.
         `;
 
         this.addToConversation('system', openingInstruction);
-    }
-
-    private async getAvailablePlugins() {
-        if (this.status !== AgentStatus.RUNNING && this.status !== AgentStatus.INITIALIZING) {
-            console.log(`Agent ${this.id} is not RUNNING or INITIALIZING, skipping getAvailablePlugins.`);
-            return [];
-        }
-        try {
-            const response = await this.authenticatedApi.get(`http://${this.capabilitiesManagerUrl}/availablePlugins`);
-            return response.data;
-        } catch (error) { analyzeError(error as Error);
-            console.error('Error fetching available plugins:', error instanceof Error ? error.message : error);
-            return [];
-        }
     }
 
     private hasActiveWork(): boolean {
@@ -412,11 +394,34 @@ Please consider this context and the available plugins when planning and executi
                     this.addStepsFromPlan(newPlan, step);
                     await this.updateStatus();
                 } else if (directAnswerOutput && directAnswerOutput.result) { // NEW: Handle direct_answer
-                    const reflectionSummary = directAnswerOutput.result;
-                    this.say(`Reflection summary: ${reflectionSummary}`);
-                    this.addToConversation('system', `Reflection Summary: ${reflectionSummary}`); // Add to conversation history
-                    this.say('Reflection completed. Continuing with the current plan.'); // Indicate continuation
-                    // No new plan, just a summary, so continue with existing plan
+                    const directAnswer = directAnswerOutput.result;
+                    this.say(`Reflection provided a direct answer. Creating new ACCOMPLISH step to pursue this direction.`);
+                    this.addToConversation('system', `Reflection Direct Answer: ${directAnswer}`); // Add to conversation history
+
+                    // Cancel all steps that come after the current REFLECT step
+                    const currentStepIndex = this.steps.findIndex(s => s.id === step.id);
+                    if (currentStepIndex !== -1) {
+                        for (let i = currentStepIndex + 1; i < this.steps.length; i++) {
+                            this.steps[i].status = StepStatus.CANCELLED;
+                        }
+                    }
+
+                    // Create new ACCOMPLISH step with the direct answer as goal
+                    const newAccomplishStep = new Step({
+                        actionVerb: 'ACCOMPLISH',
+                        missionId: this.missionId,
+                        ownerAgentId: this.id,
+                        stepNo: this.steps.length + 1,
+                        inputValues: new Map([
+                            ['goal', { inputName: 'goal', value: directAnswer, valueType: PluginParameterType.STRING }]
+                        ]),
+                        description: `Pursue direct answer from reflection: ${directAnswer.substring(0, 100)}${directAnswer.length > 100 ? '...' : ''}`,
+                        status: StepStatus.PENDING,
+                        persistenceManager: this.agentPersistenceManager
+                    });
+
+                    this.steps.push(newAccomplishStep);
+                    await this.updateStatus();
                 } else if (answerOutput && answerOutput.result) {
                     this.say(`Reflection result: ${answerOutput.result}`);
                     try {
@@ -830,57 +835,79 @@ Please consider this context and the available plugins when planning and executi
                 scope = 'AgentStep';
             }
 
-            // Upload outputs to shared file space for Final steps, steps that generate user-referenced data,
-            // and for explicit FILE_OPERATION outputs or outputs that include filenames/storage paths.
-            // outputType is an enum (OutputType.FINAL), compare accordingly
+            // Upload outputs to shared file space based on deliverable flags or fallback to existing logic
             let uploadedFiles: MissionFile[] = [];
             const outputsHaveFiles = Array.isArray(data) && data.some(o => !!(o as any).fileName || !!(o as any).storagePath);
-        let shouldUploadToSharedSpace = (
-            (outputType === OutputType.FINAL && data && data.length > 0) ||
-            (data && data.length > 0 && this.stepGeneratesUserReferencedData(stepId, data)) ||
-            outputsHaveFiles
-        );
 
-        if (step && step.actionVerb === 'FILE_OPERATION') {
-            shouldUploadToSharedSpace = false; // Explicitly disable for FILE_OPERATION
-        }
+            // Check if any outputs are marked as deliverables
+            const hasDeliverables = step && step.hasDeliverableOutputs();
 
-                    if (shouldUploadToSharedSpace) {
-                        try {
-                            const librarianUrl = await this.getServiceUrl('Librarian');
-                            if (librarianUrl) {
-                                uploadedFiles = await this.uploadStepOutputsToSharedSpace(
-                                    step,
-                                    librarianUrl
-                                );
-                                if (uploadedFiles.length > 0) {
-                                    console.log(`Uploaded ${uploadedFiles.length} step outputs to shared space for step ${stepId}`);
-                                    
-                                    // Register files with MissionControl
-                                    const missionControlUrl = await this.getServiceUrl('MissionControl');
-                                    if (missionControlUrl) {
-                                        for (const file of uploadedFiles) {
-                                            await this.authenticatedApi.post(`http://${missionControlUrl}/missions/${this.missionId}/files/add`, file);
-                                        }
-                                        console.log(`Successfully registered ${uploadedFiles.length} files with MissionControl.`);
-                                    } else {
-                                        console.warn('MissionControl URL not available for registering uploaded files.');
+            let shouldUploadToSharedSpace = false;
+
+            if (hasDeliverables) {
+                // New logic: only upload outputs marked as deliverables
+                shouldUploadToSharedSpace = true;
+                console.log(`[Agent.ts] Step ${stepId} has deliverable outputs, will upload deliverables only`);
+            } else {
+                // Fallback to existing logic for backward compatibility
+                shouldUploadToSharedSpace = (
+                    (outputType === OutputType.FINAL && data && data.length > 0) ||
+                    (data && data.length > 0 && this.stepGeneratesUserReferencedData(stepId, data)) ||
+                    outputsHaveFiles
+                );
+                console.log(`[Agent.ts] Step ${stepId} using fallback upload logic: ${shouldUploadToSharedSpace}`);
+            }
+
+            if (step && step.actionVerb === 'FILE_OPERATION') {
+                shouldUploadToSharedSpace = false; // Explicitly disable for FILE_OPERATION
+            }
+
+            if (shouldUploadToSharedSpace) {
+                try {
+                    const librarianUrl = await this.getServiceUrl('Librarian');
+                    if (librarianUrl) {
+                        if (hasDeliverables) {
+                            // Upload only deliverable outputs with custom filenames
+                            uploadedFiles = await this.uploadDeliverablesOnly(step, data, librarianUrl);
+                        } else {
+                            // Fallback to existing upload logic
+                            uploadedFiles = await this.uploadStepOutputsToSharedSpace(
+                                step,
+                                librarianUrl
+                            );
+                        }
+                        if (uploadedFiles.length > 0) {
+                            console.log(`Uploaded ${uploadedFiles.length} step outputs to Librarian for step ${stepId}`);
+
+                            // Register files with MissionControl only for deliverables
+                            if (hasDeliverables) {
+                                const missionControlUrl = await this.getServiceUrl('MissionControl');
+                                if (missionControlUrl) {
+                                    for (const file of uploadedFiles) {
+                                        await this.authenticatedApi.post(`http://${missionControlUrl}/missions/${this.missionId}/files/add`, file);
                                     }
+                                    console.log(`Successfully registered ${uploadedFiles.length} deliverable files with MissionControl.`);
+                                } else {
+                                    console.warn('MissionControl URL not available for registering deliverable files.');
                                 }
                             } else {
-                                console.warn('Librarian URL not available for uploading step outputs');
+                                console.log(`Non-deliverable files uploaded to Librarian only, not registered with MissionControl.`);
                             }
-                        } catch (error) {
-                            console.error('Error uploading step outputs to shared space:', error);
-                            // Don't fail the entire operation if file upload fails
                         }
-                    } else if (step && step.actionVerb === 'FILE_OPERATION' && data && data.length > 0 && data[0].result) {
-                        // If FILE_OPERATION was executed, and it returned a file, use its result as the attached file
-                        const missionFileResult = data[0].result as MissionFile;
-                        if (missionFileResult && missionFileResult.id && missionFileResult.originalName) {
-                            uploadedFiles.push(missionFileResult);
-                        }
+                    } else {
+                        console.warn('Librarian URL not available for uploading step outputs');
                     }
+                } catch (error) {
+                    console.error('Error uploading step outputs to Librarian:', error);
+                    // Don't fail the entire operation if file upload fails
+                }
+            }
+
+            // If FILE_OPERATION was executed, and it returned a file, use its result as the attached file
+            const missionFileResult = data[0].result as MissionFile;
+            if (missionFileResult && missionFileResult.id && missionFileResult.originalName) {
+                uploadedFiles.push(missionFileResult);
+            }
             const workProductPayload: any = {
                 id: stepId,
                 type: type,
@@ -891,6 +918,7 @@ Please consider this context and the available plugins when planning and executi
                 missionId: this.missionId,
                 mimeType: data[0]?.mimeType || 'text/plain',
                 fileName: data[0]?.fileName,
+                isDeliverable: hasDeliverables, // Include deliverable metadata
                 workproduct: (type === 'Plan' && data[0]?.result) ?
                     `Plan with ${Array.isArray(data[0].result) ? data[0].result.length : Object.keys(data[0].result).length} steps` : data[0]?.result
             };
@@ -2130,6 +2158,101 @@ Explanation: ${resolution.explanation}`);
     }
 
     /**
+     * Uploads only outputs marked as deliverables to the shared file space
+     */
+    private async uploadDeliverablesOnly(
+        step: Step,
+        data: PluginOutput[],
+        librarianUrl: string
+    ): Promise<MissionFile[]> {
+        if (!data || data.length === 0) {
+            return [];
+        }
+
+        const uploadedFiles: MissionFile[] = [];
+        const missionControlUrl = await this.getServiceUrl('MissionControl');
+
+        for (const output of data) {
+            try {
+                // Only upload outputs marked as deliverables
+                if (!step.isOutputDeliverable(output.name)) {
+                    console.log(`[Agent.ts] Skipping non-deliverable output: ${output.name}`);
+                    continue;
+                }
+
+                // Only upload outputs that have meaningful content
+                if (!output.result || output.result === '') {
+                    console.log(`[Agent.ts] Skipping empty deliverable output: ${output.name}`);
+                    continue;
+                }
+
+                // Use custom filename from deliverable definition
+                let fileName = step.getDeliverableFilename(output.name);
+                if (!fileName) {
+                    // Fallback to sanitized output name if no custom filename
+                    const sanitizedName = output.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+                    const extension = this.getFileExtensionForOutput(output);
+                    fileName = `${sanitizedName}${extension}`;
+                }
+
+                // Set MIME type
+                const mimeType = output.mimeType || this.getMimeTypeForOutput(output);
+
+                // Convert result to string content
+                let fileContent: string;
+                if (typeof output.result === 'string') {
+                    fileContent = output.result;
+                } else {
+                    // For objects, serialize to JSON
+                    fileContent = JSON.stringify(output.result, null, 2);
+                    if (!fileName.endsWith('.json')) {
+                        fileName = fileName.replace(/\.[^.]*$/, '') + '.json';
+                    }
+                }
+
+                // Create a MissionFile object with deliverable metadata
+                const missionFile: MissionFile = {
+                    id: uuidv4(),
+                    originalName: fileName,
+                    mimeType: mimeType,
+                    size: Buffer.byteLength(fileContent, 'utf8'),
+                    uploadedAt: new Date(),
+                    uploadedBy: `agent-${this.id}`,
+                    storagePath: `deliverables/${this.missionId}/${fileName}`,
+                    description: `Deliverable from step ${step.stepNo}: ${step.actionVerb} - ${output.resultDescription}`,
+                    isDeliverable: true,
+                    stepId: step.id
+                } as any; // Cast to any to add custom properties
+
+                // Store the file content in Librarian
+                await this.authenticatedApi.post(`http://${librarianUrl}/storeData`, {
+                    id: `deliverable-${missionFile.id}`,
+                    data: {
+                        fileContent: fileContent,
+                        missionFile: missionFile
+                    },
+                    storageType: 'mongo',
+                    collection: 'step-outputs'
+                });
+
+                if (missionControlUrl) {
+                    await this.authenticatedApi.post(`http://${missionControlUrl}/missions/${this.missionId}/files/add`, missionFile);
+                }
+
+                uploadedFiles.push(missionFile);
+                console.log(`[Agent.ts] Uploaded deliverable to shared space: ${fileName} (from output: ${output.name})`);
+
+            } catch (error) {
+                console.error(`[Agent.ts] Failed to upload deliverable output ${output.name}:`, error);
+                // Continue with other outputs even if one fails
+            }
+        }
+
+        console.log(`[Agent.ts] Uploaded ${uploadedFiles.length} deliverables from step ${step.stepNo}`);
+        return uploadedFiles;
+    }
+
+    /**
      * Uploads step outputs to the shared file space for final steps
      * This replaces the removed Step.uploadOutputsToSharedSpace method
      */
@@ -2312,6 +2435,30 @@ Explanation: ${resolution.explanation}`);
         await this.pruneSteps();
     }
 
+    private async handleRecoverableFailure(step: Step): Promise<void> {
+        if (step.recoverableRetryCount < step.maxRecoverableRetries) {
+            step.recoverableRetryCount++;
+            step.status = StepStatus.PENDING; // Set back to pending to be picked up again
+            this.say(`Step ${step.actionVerb} failed with a recoverable data error. Retrying with a short delay...`);
+            await this.logEvent({
+                eventType: 'step_retry_recoverable',
+                agentId: this.id,
+                stepId: step.id,
+                retryCount: step.recoverableRetryCount,
+                maxRetries: step.maxRecoverableRetries,
+                error: step.lastError?.message,
+                timestamp: new Date().toISOString()
+            });
+            // Optional: Add a small delay before it's picked up again
+            await new Promise(resolve => setTimeout(resolve, 1000));
+        } else {
+            // If max recoverable retries are exhausted, treat as a permanent failure
+            this.say(`Step ${step.actionVerb} has failed repeatedly with a recoverable error. Escalating to a permanent failure.`);
+            step.status = StepStatus.ERROR;
+            await this.replanFromFailure(step);
+        }
+    }
+
     private async handleStepFailure(step: Step, error: Error): Promise<void> {
         this.lastFailedStep = step;
         step.lastError = error;
@@ -2346,6 +2493,11 @@ Explanation: ${resolution.explanation}`);
                 timestamp: new Date().toISOString()
             });
             return; // Return to allow the retry
+        }
+
+        if (errorType === StepErrorType.RECOVERABLE) {
+            await this.handleRecoverableFailure(step);
+            return; // Return to allow the retry or replan
         }
 
         if (errorType === StepErrorType.VALIDATION) {
@@ -2496,111 +2648,37 @@ Explanation: ${resolution.explanation}`);
         const errorMsg = failedStep.lastError?.message || 'Unknown error';
         const workProductsSummary = await this.getCompletedWorkProductsSummary();
 
-        // Smarter recovery strategy based on error type
-        if (/novel.*verb|unknown.*verb|not.*supported/i.test(errorMsg)) {
-            // For novel verb failures, try to break down the task differently
-            await this.handleNovelVerbFailure(failedStep, errorMsg);
-            return;
-        }
-
-        if (/schema|validation|parse|malformed/i.test(errorMsg)) {
-            // For schema failures, the issue is likely in the ACCOMPLISH plugin itself, log it and move on
-            console.error(`[Agent ${this.id}] Schema validation failure suggests a bug in the ACCOMPLISH plugin. Error: ${errorMsg}`);
-            this.logEvent({
-                eventType: 'agent_error',
-                agentId: this.id,
-                missionId: this.missionId,
-                status: this.status,
-                timestamp: new Date().toISOString()
-            });
-            return;
-        }
-        console.log(`[Agent ${this.id}] Replanning from failure of step ${failedStep.id} (${failedStep.actionVerb}). Error: ${errorMsg}`);
-        // For other errors, use simpler recovery based on error type
-        // Always use THINK for recovery to prevent recursive ACCOMPLISH loops
-        await this.createThinkRecoveryStep(failedStep, errorMsg, workProductsSummary);
+        await this.replanFromFailureWithReflect(failedStep, errorMsg, workProductsSummary);
     }
 
-    private async handleNovelVerbFailure(failedStep: Step, errorMsg: string): Promise<void> {
-        console.log(`[Agent ${this.id}] Handling novel verb failure for: ${failedStep.actionVerb}`);
+    private async replanFromFailureWithReflect(failedStep: Step, errorMsg: string, workProductsSummary: string): Promise<void> {
+        console.log(`[Agent ${this.id}] Creating REFLECT recovery step for: ${failedStep.actionVerb}`);
 
-        // Instead of creating another ACCOMPLISH step, try to break down the task manually
-        const taskBreakdownGoal = `
-**Task:** 
-1. Break down the action "${failedStep.actionVerb}" into concrete steps.
-2. Each step should be specific and actionable
-3. Focus on the core objective of "${failedStep.actionVerb}" and seek a way to achieve it.
+        const reflectPrompt = `
+Context: The step "${failedStep.actionVerb}" failed with the error: "${errorMsg}".
 
-**Context:** ${failedStep.description || 'No additional context provided'}
+Task: Analyze this error and the completed work products to generate a new plan to achieve the original goal. The plan should be a series of actionable steps.
 
-**Available Inputs:** ${JSON.stringify(Array.from(failedStep.inputValues?.keys() || []))}
-
-        `;
-
-        const breakdownStep = new Step({
-            actionVerb: 'THINK',
-            missionId: this.missionId,
-            ownerAgentId: this.id,
-            recommendedRole: this.role,
-            stepNo: this.steps.length + 1,
-            inputValues: new Map([
-                ['prompt', { inputName: 'prompt', value: taskBreakdownGoal, valueType: PluginParameterType.STRING, args: {} }]
-            ]),
-            description: `Manual breakdown of failed novel verb: ${failedStep.actionVerb}`,
-            persistenceManager: this.agentPersistenceManager
-        });
-
-        this.steps.push(breakdownStep);
-        await this.logEvent({ eventType: 'step_created', ...breakdownStep.toJSON() });
-        console.log(`[Agent ${this.id}] Created manual breakdown step ${breakdownStep.id} for novel verb failure.`);
-    }
-
-    private async createThinkRecoveryStep(failedStep: Step, errorMsg: string, workProductsSummary: string): Promise<void> {
-        console.log(`[Agent ${this.id}] Creating THINK recovery step for: ${failedStep.actionVerb}`);
-
-        const thinkPrompt = `
-**RECOVERY TASK:** The step "${failedStep.actionVerb}" failed with error: ${errorMsg}
-
-**STEP DETAILS:**
-- Action: ${failedStep.actionVerb}
-- Description: ${failedStep.description}
-- Inputs: ${JSON.stringify(Array.from(failedStep.inputValues?.entries() || []))}
-- Expected Outputs: ${JSON.stringify(Array.from(failedStep.outputs?.entries() || []))}
-
-**MISSION CONTEXT:** ${this.missionContext}
-
-**COMPLETED WORK:** ${workProductsSummary}
-
-**RECOVERY INSTRUCTIONS:**
-1. Analyze the root cause of this failure using logical reasoning
-2. Determine if this is a technical issue (missing inputs, service connectivity) or a logical issue (invalid approach)
-3. Provide a direct solution using ONLY available data and existing capabilities
-4. DO NOT suggest external searches or information gathering - work with what we have
-5. If the step cannot be completed, suggest how to proceed with the mission without it
-6. Focus on practical, immediate solutions that can be implemented with current resources
-
-**CRITICAL:** Your response should be a direct analysis and solution, NOT a plan for further research or data gathering.
-
-**Input Value Formatting:** For all inputs, the 'value' field must be a primitive type (string, number, or boolean). Do not use complex objects or nested structures for input values.
+Completed Work:
+${workProductsSummary}
         `;
 
         const recoveryStep = new Step({
-            actionVerb: 'THINK',
+            actionVerb: 'REFLECT',
             missionId: this.missionId,
             ownerAgentId: this.id,
-            recommendedRole: this.role,
+            recommendedRole: this.role, // Or a specialized 'planner' or 'critic' role
             stepNo: this.steps.length + 1,
             inputValues: new Map([
-                ['prompt', { inputName: 'prompt', value: thinkPrompt, valueType: PluginParameterType.STRING, args: {} }]
+                ['prompt', { inputName: 'prompt', value: reflectPrompt, valueType: PluginParameterType.STRING, args: {} }]
             ]),
-            description: `Analyze failure and suggest recovery approach for: ${failedStep.actionVerb}`,
+            description: `Reflect on the failure of step "${failedStep.actionVerb}" and create a new plan.`, 
             persistenceManager: this.agentPersistenceManager
         });
 
         this.steps.push(recoveryStep);
         await this.logEvent({ eventType: 'step_created', ...recoveryStep.toJSON() });
-        console.log(`[Agent ${this.id}] Created THINK recovery step ${recoveryStep.id} for failed step ${failedStep.actionVerb}.`);
+        console.log(`[Agent ${this.id}] Created REFLECT recovery step ${recoveryStep.id} for failed step ${failedStep.actionVerb}.`);
         await this.updateStatus();
     }
-
 }

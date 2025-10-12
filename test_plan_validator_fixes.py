@@ -9,7 +9,7 @@ import json
 
 # Import from the installed shared library package
 try:
-    from stage7_shared_lib import PlanValidator
+    from plan_validator import PlanValidator
 except ImportError:
     # Fallback to direct import for development/testing
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'shared', 'python', 'lib'))

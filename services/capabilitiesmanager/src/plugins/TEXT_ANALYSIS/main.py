@@ -1,20 +1,6 @@
-# --- Robust wrapper for deduplication, temp dir hygiene, and error escalation ---
 import tempfile
 import shutil
 import hashlib
-
-# Error handler integration (for unexpected/code errors only)
-def send_to_errorhandler(error, context=None):
-    try:
-        import requests
-        errorhandler_url = os.environ.get('ERRORHANDLER_URL', 'errorhandler:5090')
-        payload = {
-            'error': str(error),
-            'context': context or ''
-        }
-        requests.post(f'http://{errorhandler_url}/analyze', json=payload, timeout=10)
-    except Exception as e:
-        print(f"Failed to send error to errorhandler: {e}")
 
 _seen_hashes = set()
 
@@ -49,8 +35,8 @@ def robust_execute_plugin(script_parameters):
 
         return result
     except Exception as e:
-        # Only escalate to errorhandler for unexpected/code errors
-        send_to_errorhandler(e, context=json.dumps(script_parameters))
+        # Log the error internally
+        print(f"TEXT_ANALYSIS plugin encountered an error: {e}")
         return [
             {
                 "success": False,
@@ -203,7 +189,7 @@ def extract_keywords(text: str, top_n: int = 10) -> List[Dict[str, Any]]:
         List of keyword dictionaries with word and frequency
     """
     # Convert to lowercase and remove punctuation
-    clean_text = re.sub(r'[\w\s]', '', text.lower())
+    clean_text = re.sub(r\'[^\w\\s]\', \'\', text.lower())
     
     # Split into words
     words = clean_text.split()
@@ -367,20 +353,26 @@ def main():
         # Convert to InputValue objects for compatibility
         script_parameters = {}
         for key, raw_value in inputs_map.items(): # Use raw_value here
-            # Infer valueType based on raw_value
+            # Extract value if it's a dict
+            if isinstance(raw_value, dict) and 'value' in raw_value:
+                actual_value = raw_value['value']
+            else:
+                actual_value = raw_value
+
+            # Infer valueType based on actual_value
             inferred_value_type = 'string'
-            if isinstance(raw_value, bool):
+            if isinstance(actual_value, bool):
                 inferred_value_type = 'boolean'
-            elif isinstance(raw_value, (int, float)):
+            elif isinstance(actual_value, (int, float)):
                 inferred_value_type = 'number'
-            elif isinstance(raw_value, list):
+            elif isinstance(actual_value, list):
                 inferred_value_type = 'array'
-            elif isinstance(raw_value, dict):
+            elif isinstance(actual_value, dict):
                 inferred_value_type = 'object'
 
             script_parameters[key] = InputValue(
                 inputName=key, # Assuming inputName is the same as key
-                value=raw_value,
+                value=actual_value,
                 valueType=inferred_value_type,
                 args={} # No args provided in the raw input
             )
