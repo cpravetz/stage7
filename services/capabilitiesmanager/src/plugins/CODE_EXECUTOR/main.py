@@ -1,106 +1,66 @@
 
 
-import sys
 import json
-import docker
+import logging
 import os
+import sys
+import subprocess
 import tempfile
 import shutil
 import hashlib
+from typing import Dict, Any, List, Optional
 
-# Error handler integration
-def send_to_errorhandler(error, context=None):
-    try:
-        import requests
-        errorhandler_url = os.environ.get('ERRORHANDLER_URL', 'errorhandler:5090')
-        payload = {
-            'error': str(error),
-            'context': context or ''
-        }
-        requests.post(f'http://{errorhandler_url}/analyze', json=payload, timeout=10)
-    except Exception as e:
-        print(f"Failed to send error to errorhandler: {e}")
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - [%(funcName)s:%(lineno)d] - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
-seen_hashes = set()
+_seen_hashes = set()
 
-def execute_plugin(inputs):
-    """
-    Executes the CODE_EXECUTOR plugin with robust error handling, deduplication, temp dir hygiene, and error escalation.
-    """
+def robust_execute_plugin(script_parameters):
     temp_dir = None
     try:
-        # Deduplication: hash the inputs
-        hash_input = json.dumps(inputs, sort_keys=True)
+        # Deduplication: hash the script_parameters
+        hash_input = json.dumps(script_parameters, sort_keys=True)
         input_hash = hashlib.sha256(hash_input.encode()).hexdigest()
-        if input_hash in seen_hashes:
-            raise Exception("Duplicate input detected. This input combination has already failed. Aborting to prevent infinite loop.")
-        seen_hashes.add(input_hash)
+        if input_hash in _seen_hashes:
+            return [
+                {
+                    "success": False,
+                    "name": "error",
+                    "resultType": "error",
+                    "resultDescription": "Duplicate input detected. This input combination has already failed. Aborting to prevent infinite loop.",
+                    "error": "Duplicate input detected."
+                }
+            ]
+        _seen_hashes.add(input_hash)
 
         # Temp directory hygiene
         temp_dir = tempfile.mkdtemp(prefix="code_executor_")
         os.environ["CODE_EXECUTOR_TEMP_DIR"] = temp_dir
 
-        language = inputs.get("language")
-        code = inputs.get("code")
+        # Call the original plugin logic
+        result = execute_plugin(script_parameters)
 
-        if not language or not code:
-            raise ValueError("Language and code are required.")
+        # Strict output validation: must be a list or dict
+        if not isinstance(result, (list, dict)):
+            raise ValueError("Output schema validation failed: must be a list or dict.")
 
-        if language not in ["python", "javascript"]:
-            raise ValueError(f"Language '{language}' is not supported.")
-
-        client = docker.from_env()
-        image_tag = f"code-executor-{language}"
-        dockerfile_path = os.path.join(os.path.dirname(__file__), f"Dockerfile.{language}")
-
-        # Build the Docker image
-        try:
-            client.images.get(image_tag)
-        except docker.errors.ImageNotFound:
-            client.images.build(
-                path=os.path.dirname(__file__),
-                dockerfile=f"Dockerfile.{language}",
-                tag=image_tag
-            )
-
-        # Run the Docker container
-        container = client.containers.run(
-            image=image_tag,
-            command=["sh", "-c", "python -c 'import sys; exec(sys.stdin.read())'" if language == "python" else "node -e \"const fs = require('fs'); const code = fs.readFileSync(0, 'utf-8'); eval(code);\""],
-            stdin_open=True,
-            detach=True
-        )
-
-        # Write code to container's stdin
-        sock = container.attach_socket()
-        sock._sock.sendall(code.encode('utf-8'))
-        sock._sock.close()
-
-        result = container.wait()
-
-        stdout = container.logs(stdout=True, stderr=False).decode('utf-8')
-        stderr = container.logs(stdout=False, stderr=True).decode('utf-8')
-
-        container.remove()
-
-        # Strict output schema validation
-        output = {
-            "stdout": stdout,
-            "stderr": stderr,
-            "exit_code": result['StatusCode']
-        }
-        if not isinstance(output["stdout"], str) or not isinstance(output["stderr"], str) or not isinstance(output["exit_code"], int):
-            raise ValueError("Output schema validation failed: stdout/stderr must be strings, exit_code must be int.")
-
-        return json.dumps(output)
-
+        return result
     except Exception as e:
-        send_to_errorhandler(e, context=json.dumps(inputs))
-        return json.dumps({
-            "stdout": "",
-            "stderr": f"Error: {str(e)}",
-            "exit_code": 1
-        })
+        # Log the error internally
+        print(f"CODE_EXECUTOR plugin encountered an error: {e}")
+        return [
+            {
+                "success": False,
+                "name": "error",
+                "resultType": "error",
+                "resultDescription": f"Error: {str(e)}",
+                "error": str(e)
+            }
+        ]
     finally:
         if temp_dir and os.path.exists(temp_dir):
             try:
@@ -149,16 +109,26 @@ if __name__ == "__main__":
     except json.JSONDecodeError as e:
         # If JSON decoding still fails, log the error and return a structured error output
         error_message = f"JSONDecodeError: {e}. Raw input: {raw_input_str[:200]}..."
-        send_to_errorhandler(error_message, context={"raw_input": raw_input_str})
+        logger.error(error_message)
         print(json.dumps({
             "stdout": "",
             "stderr": f"Error: Invalid JSON input to CODE_EXECUTOR plugin: {e}",
-            "exit_code": 1
+            "exit_code": 1,
+            "success": False,
+            "name": "error",
+            "resultType": "error",
+            "resultDescription": error_message,
+            "error": error_message
         }))
     except Exception as e:
-        send_to_errorhandler(e, context=json.dumps({"raw_input": raw_input_str}))
+        logger.error(f"An unexpected error occurred during input processing: {str(e)}")
         print(json.dumps({
             "stdout": "",
             "stderr": f"An unexpected error occurred during input processing: {str(e)}",
-            "exit_code": 1
+            "exit_code": 1,
+            "success": False,
+            "name": "error",
+            "resultType": "error",
+            "resultDescription": f"An unexpected error occurred during input processing: {str(e)}",
+            "error": str(e)
         }))

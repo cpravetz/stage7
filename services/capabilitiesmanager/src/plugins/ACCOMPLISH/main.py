@@ -15,7 +15,7 @@ from typing import Dict, Any, List, Optional, Set
 
 # Import from the installed shared library package
 try:
-    from stage7_shared_lib import PlanValidator, AccomplishError, PLAN_STEP_SCHEMA, PLAN_ARRAY_SCHEMA
+    from plan_validator import PlanValidator, AccomplishError, PLAN_STEP_SCHEMA, PLAN_ARRAY_SCHEMA
 except ImportError:
     # Fallback to direct import for development/testing
     sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', '..', 'shared', 'python', 'lib')))
@@ -36,7 +36,6 @@ class ProgressTracker:
     def checkpoint(self, name: str):
         elapsed = time.time() - self.start_time
         self.checkpoints.append((name, elapsed))
-        logger.info(f"CHECKPOINT: {name} at {elapsed:.2f}s")
 
 progress = ProgressTracker()
 
@@ -81,64 +80,50 @@ def _extract_json_from_string(text: str) -> Optional[str]:
     if not text:
         return None
 
-    # Strip markdown code blocks
     text = text.strip()
-    # Use a regex to find the json block
-    match = re.search(r"```(json)?\s*([\s\S]*?)\s*```", text)
-    if match:
-        text = match.group(2).strip()
-    
-    if not text:
-        return None
 
-    # Find the first and last occurrences of the JSON delimiters
+    # Attempt to parse the entire text as JSON first
+    try:
+        json.loads(text)
+        return text
+    except json.JSONDecodeError:
+        pass # Not a direct JSON string, proceed to extraction logic
+
+    # Use a regex to find the json block (with or without 'json' specifier)
+    match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text)
+    if match:
+        json_candidate = match.group(1).strip()
+        try:
+            json.loads(json_candidate)
+            return json_candidate
+        except json.JSONDecodeError:
+            pass # Extracted block is not valid JSON
+
+    # Fallback: try to find the outermost JSON structure
     first_brace = text.find('{')
     first_bracket = text.find('[')
     last_brace = text.rfind('}')
     last_bracket = text.rfind(']')
 
-    # Determine the most likely JSON structure based on outermost delimiters
-    # Prioritize array if both are present and valid, as plans are arrays
-    if first_bracket != -1 and last_bracket != -1 and first_bracket < last_bracket:
-        # Check if a brace-delimited object is fully contained within the brackets
-        if first_brace != -1 and last_brace != -1 and first_brace > first_bracket and last_brace < last_bracket:
-            # If so, it's likely an array containing an object, so we still target the array
-            pass
-        else:
-            # It's likely a JSON array
-            start_index = first_bracket
-            end_index = last_bracket
-    elif first_brace != -1 and last_brace != -1 and first_brace < last_brace:
-        # It's likely a JSON object
-        start_index = first_brace
-        end_index = last_brace
-    else:
-        return None # No valid JSON delimiters found
-
-    # Determine the start and end of the JSON string
     start_index = -1
     end_index = -1
 
     if first_bracket != -1 and last_bracket != -1 and first_bracket < last_bracket:
-        # It's likely a JSON array
         start_index = first_bracket
         end_index = last_bracket
     elif first_brace != -1 and last_brace != -1 and first_brace < last_brace:
-        # It's likely a JSON object
         start_index = first_brace
         end_index = last_brace
     
-    if start_index == -1:
-        return None # No valid JSON found
+    if start_index != -1:
+        json_candidate = text[start_index : end_index + 1]
+        try:
+            json.loads(json_candidate)
+            return json_candidate
+        except json.JSONDecodeError:
+            pass
 
-    json_candidate = text[start_index : end_index + 1]
-
-    # Basic validation: check if the candidate string is likely JSON
-    try:
-        json.loads(json_candidate)
-        return json_candidate
-    except json.JSONDecodeError:
-        return None
+    return None
 
 def call_brain(prompt: str, inputs: Dict[str, Any], response_type: str = "json") -> str:
     """Call Brain service with proper authentication and conversation type"""
@@ -179,7 +164,6 @@ def call_brain(prompt: str, inputs: Dict[str, Any], response_type: str = "json")
             'Authorization': f'Bearer {auth_token}'
         }
 
-        logger.info(f"Calling Brain at: http://{brain_url}/chat (type: {conversation_type})")
         response = requests.post(
             f"http://{brain_url}/chat",
             json=payload,
@@ -197,11 +181,8 @@ def call_brain(prompt: str, inputs: Dict[str, Any], response_type: str = "json")
         raw_brain_response = result['result']
 
         if response_type == 'text':
-            logger.info("Response type is TEXT. Not attempting JSON extraction.")
             progress.checkpoint("brain_call_success_text_response")
             return raw_brain_response
-
-        logger.info(f"Raw Brain response (before extraction): {raw_brain_response[:500]}...") # Log raw response
 
         # Attempt to extract clean JSON from the raw response
         extracted_json_str = _extract_json_from_string(raw_brain_response)
@@ -210,8 +191,6 @@ def call_brain(prompt: str, inputs: Dict[str, Any], response_type: str = "json")
             try:
                 # Validate that the extracted string is indeed valid JSON
                 json.loads(extracted_json_str)
-                logger.info("Successfully extracted and validated JSON from Brain response.")
-                logger.info(f"Raw JSON response from Brain (extracted): {extracted_json_str}")
                 progress.checkpoint("brain_call_success")
                 return extracted_json_str
             except json.JSONDecodeError as e:
@@ -230,29 +209,57 @@ def call_brain(prompt: str, inputs: Dict[str, Any], response_type: str = "json")
         raise AccomplishError(f"Brain service call failed: {e}", "brain_error")
 
 def parse_inputs(inputs_str: str) -> Dict[str, Any]:
-    """Parse and validate inputs"""
+    """Parse and normalize the plugin stdin JSON payload into a dict of inputName -> InputValue.
+
+    Plugins should accept inputs formatted as a JSON array of [ [key, value], ... ] where value
+    may be a primitive (string/number/bool), or an object like {"value": ...}. This helper
+    normalizes non-dict raw values into {'value': raw}. It also filters invalid entries.
+    """
     try:
-        logger.info(f"Parsing input string ({len(inputs_str)} chars)")
-        
-        input_list = json.loads(inputs_str)
-        
-        inputs = {}
-        for item in input_list:
-            if isinstance(item, list) and len(item) == 2:
-                key, raw_value = item # Renamed 'value' to 'raw_value' for clarity
-                
-                # If raw_value is an InputValue object, extract its 'value' property
-                if isinstance(raw_value, dict) and 'value' in raw_value:
-                    inputs[key] = raw_value['value']
+        payload = json.loads(inputs_str)
+        inputs: Dict[str, Any] = {}
+
+        # Case A: payload is a list of [key, value] pairs (legacy / preferred)
+        if isinstance(payload, list):
+            for item in payload:
+                if isinstance(item, list) and len(item) == 2:
+                    key, raw_value = item
+                    if isinstance(raw_value, dict):
+                        inputs[key] = raw_value
+                    else:
+                        inputs[key] = {'value': raw_value}
                 else:
-                    # Otherwise, use raw_value directly (for non-InputValue types)
+                    logger.debug(f"Skipping invalid input item in list payload: {item}")
+
+        # Case B: payload is a serialized Map object with entries: [[key, value], ...]
+        elif isinstance(payload, dict) and payload.get('_type') == 'Map' and isinstance(payload.get('entries'), list):
+            for entry in payload.get('entries', []):
+                if isinstance(entry, list) and len(entry) == 2:
+                    key, raw_value = entry
+                    if isinstance(raw_value, dict):
+                        inputs[key] = raw_value
+                    else:
+                        inputs[key] = {'value': raw_value}
+                else:
+                    logger.debug(f"Skipping invalid Map entry: {entry}")
+
+        # Case C: payload is already a dict mapping keys -> values (possibly already normalized)
+        elif isinstance(payload, dict):
+            for key, raw_value in payload.items():
+                # Skip internal meta fields if present
+                if key == '_type' or key == 'entries':
+                    continue
+                if isinstance(raw_value, dict):
                     inputs[key] = raw_value
-            else:
-                logger.warning(f"Skipping invalid input item: {item}")
-        
-        logger.info(f"Successfully parsed {len(inputs)} input fields")
+                else:
+                    inputs[key] = {'value': raw_value}
+
+        else:
+            # Unsupported top-level type, provide clear error
+            raise ValueError("Unsupported input format: expected array of pairs, Map with entries, or object mapping")
+
         return inputs
-        
+
     except Exception as e:
         logger.error(f"Input parsing failed: {e}")
         raise AccomplishError(f"Input validation failed: {e}", "input_error")
@@ -311,9 +318,6 @@ class RobustMissionPlanner:
         else:
             mission_id = mission_id_input if mission_id_input is not None else None
 
-        logger.info(f"DEBUG: goal = '{goal}...'") 
-        logger.info(f"DEBUG: mission_id = '{mission_id}'") 
-
         mission_goal = get_mission_goal(mission_id, inputs)
 
         if not goal and mission_goal:
@@ -332,7 +336,7 @@ class RobustMissionPlanner:
                 logger.error(f"Mission Id:{mission_id}")
                 raise AccomplishError("Missing required 'goal' or a valid 'missionId' that resolves to a goal.", "input_error")
         
-        plan = self.create_plan(goal, mission_goal, inputs)
+        plan = self.create_plan(goal, mission_goal, mission_id, inputs)
 
         plugin_output = {
             "success": True,
@@ -353,7 +357,6 @@ class RobustMissionPlanner:
         available_plugins = available_plugins_input.get('value', []) if isinstance(available_plugins_input, dict) else available_plugins_input
         plugin_map = {plugin.get('actionVerb'): plugin for plugin in available_plugins}
         if 'REFLECT' not in plugin_map:
-            logger.info("REFLECT plugin not available, skipping progress check injection.")
             return plan
 
         all_outputs = set()
@@ -415,10 +418,9 @@ class RobustMissionPlanner:
 
         return plan
 
-    def create_plan(self, goal: str, mission_goal: Optional[str], inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def create_plan(self, goal: str, mission_goal: Optional[str], mission_id: Optional[str], inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Create a robust plan using a decoupled, multi-phase LLM approach with retries."""
         progress.checkpoint("planning_start")
-        logger.info(f"🎯 Creating plan for goal: {goal[:100]}...")
 
         try:
             prose_plan = self._get_prose_plan(goal, mission_goal, inputs)
@@ -427,14 +429,13 @@ class RobustMissionPlanner:
             raise AccomplishError(f"Could not generate a prose plan: {e}", "prose_plan_error")
 
         try:
-            structured_plan = self._convert_to_structured_plan(prose_plan, goal, mission_goal, inputs)
+            structured_plan = self._convert_to_structured_plan(prose_plan, goal, mission_goal, mission_id, inputs)
         except Exception as e:
             logger.exception(f"❌ Failed to convert prose plan to structured JSON after all retries: {e}")
             raise AccomplishError(f"Could not convert prose to structured plan: {e}", "json_conversion_error")
 
         try:
             validated_plan = self.validator.validate_and_repair(structured_plan, goal, inputs)
-            logger.info(f"✅ Successfully created and validated plan with {len(validated_plan)} steps")
         except Exception as e:
             logger.exception(f"❌ Failed to validate and repair the plan after all retries: {e}")
             raise AccomplishError(f"Could not validate or repair the plan: {e}", "validation_error")
@@ -447,7 +448,6 @@ class RobustMissionPlanner:
             else:
                 mission_id_for_check = mission_id_input
             plan_with_checks = self._inject_progress_checks(validated_plan, goal, mission_id_for_check, inputs)
-            logger.info(f"✅ Successfully injected progress checks, new plan has {len(plan_with_checks)} steps")
             return plan_with_checks
         except Exception as e:
             logger.exception(f"❌ Failed to inject progress checks: {e}")
@@ -456,7 +456,6 @@ class RobustMissionPlanner:
 
     def _get_prose_plan(self, goal: str, mission_goal: Optional[str], inputs: Dict[str, Any]) -> str:
         """Phase 1: Get a well-thought prose plan from LLM with retries."""
-        logger.info("🧠 Phase 1: Requesting prose plan from LLM...")
 
         context_input = inputs.get('context')
         context = context_input if context_input is not None else ''
@@ -484,7 +483,6 @@ IMPORTANT: Return ONLY plain text for the plan. NO markdown formatting, NO code 
                 # Truncate the prose plan to a maximum of 16000 characters
                 # Increased truncation limit to 128000 characters to avoid cutting off the plan
                 truncated_response = response.strip()[:128000]
-                logger.info(f"✅ Received and truncated prose plan to {len(truncated_response)} chars")
                 return truncated_response
             except Exception as e:
                 logger.warning(f"Attempt {attempt + 1} to get prose plan failed: {e}")
@@ -493,9 +491,8 @@ IMPORTANT: Return ONLY plain text for the plan. NO markdown formatting, NO code 
         
         raise AccomplishError("Could not generate a valid prose plan after multiple attempts.", "prose_plan_error")
     
-    def _convert_to_structured_plan(self, prose_plan: str, goal: str, mission_goal: Optional[str], inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def _convert_to_structured_plan(self, prose_plan: str, goal: str, mission_goal: Optional[str], mission_id: Optional[str], inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Phase 2: Convert prose plan to structured JSON with retries."""
-        logger.info("🔧 Phase 2: Converting to structured JSON...")
 
         plugin_guidance = _create_detailed_plugin_guidance(inputs)
         schema_json = json.dumps(PLAN_ARRAY_SCHEMA, indent=2)
@@ -542,8 +539,10 @@ After your internal analysis and self-correction is complete, provide ONLY the f
 
 **Handling Lists (Arrays) - CRITICAL FOREACH USAGE:**
     - If a step (e.g., `SCRAPE`) requires a single item (e.g., a URL as a `string`) but a previous step (e.g., `SEARCH`) provides a list of items (an `array`), you MUST use a `FOREACH` loop.
-    - The `FOREACH` step's `list` input MUST depend on the array output from the source step (e.g., `sourceStep: 1`, `outputName: "competitorList"`).
+    - The `FOREACH` step's `array` input MUST depend on the array output from the source step (e.g., `sourceStep: 1`, `outputName: "competitorList"`).
     - The step(s) inside the `FOREACH`'s `steps` sub-array that consume the individual items MUST reference the `FOREACH` step itself as their `sourceStep` and `item` as their `outputName`.
+    - **VERY IMPORTANT**: The `item` provided by `FOREACH` is a SINGLE item from the list. The `valueType` for an input consuming `item` should be the type of that single item (e.g., `string`), NOT `array`.
+    - **CRITICAL for FILE_OPERATION content:** The `content` input for `FILE_OPERATION` MUST always be a `string`. Do NOT use boolean outputs (e.g., `success` from `CHAT` verbs) as content for `FILE_OPERATION`.
 - **Multi-step plans are essential:** Break down complex goals into multiple, sequential steps.
 - **Dependencies are crucial for flow:** Every step that uses an output from a previous step MUST declare that dependency in its `inputs` object using `outputName` and `sourceStep`.
 - **Prioritize autonomous information gathering:** Use tools like SEARCH, SCRAPE, DATA_TOOLKIT, TEXT_ANALYSIS, TRANSFORM, and FILE_OPERATION to gather information and perform tasks.
@@ -556,6 +555,41 @@ After your internal analysis and self-correction is complete, provide ONLY the f
 - Only change `recommendedRole` when transitioning to a fundamentally different type of deliverable
 - Example: Steps 1-5 all produce research for a report → all get `recommendedRole: "researcher"`
 - Counter-example: Don't switch roles between gathering data (step 1) and formatting it (step 2) if they're part of the same research deliverable
+
+**DELIVERABLE IDENTIFICATION:**
+When defining outputs, identify which ones are final deliverables that the user will want to see:
+- For outputs that represent final results, reports, or completed work products, use the enhanced format:
+  ```json
+  "outputs": {{
+    "final_report": {{
+      "description": "A comprehensive analysis report",
+      "isDeliverable": true,
+      "filename": "market_analysis_2025.md"
+    }}
+  }}
+  ```
+- For intermediate outputs used only by subsequent steps, use the simple string format:
+  ```json
+  "outputs": {{
+    "research_data": "Raw research data for analysis"
+  }}
+  ```
+- Guidelines for deliverable filenames:
+  * Use descriptive, professional names
+  * Include relevant dates or versions when appropriate
+  * Use appropriate file extensions (.md, .txt, .json, .csv, .pdf, etc.)
+  * Avoid generic names like "output.txt" or "result.json"
+  * Examples: "quarterly_sales_report_2025.md", "competitor_analysis.json", "user_survey_results.csv"
+- Mark outputs as deliverables when they are:
+  * Final reports or analyses
+  * Completed documents or files
+  * Summary results that users will reference
+  * Data exports or processed datasets
+- Do NOT mark as deliverables:
+  * Intermediate data used only by subsequent steps
+  * Temporary processing results
+  * Internal state or configuration data
+
 - **CRITICAL for sourceStep:**
     - Use `sourceStep: 0` ONLY for inputs that are explicitly provided in the initial mission context (the "PARENT STEP INPUTS" section if applicable, or the overall mission goal).
     - For any other input, it MUST be the `outputName` from a *preceding step* in this plan, and `sourceStep` MUST be the `number` of that preceding step.
@@ -566,6 +600,9 @@ After your internal analysis and self-correction is complete, provide ONLY the f
 - **VERY IMPORTANT**: For each step, you MUST examine the `inputDefinitions` for the corresponding `actionVerb` and ensure that all `required` inputs are present in the step's `inputs` object.
 
 CRITICAL: The actionVerb for each step MUST be a valid, existing plugin actionVerb (from the provided list) or a descriptive, new actionVerb (e.g., 'ANALYZE_DATA', 'GENERATE_REPORT'). It MUST NOT be 'UNKNOWN' or 'NOVEL_VERB'.
+
+**CRITICAL - LINKING STEPS:** You MUST explicitly connect steps. Any step that uses the output of a previous step MUST declare this in its `inputs` using `sourceStep` and `outputName`. DO NOT simply refer to previous outputs in a `prompt` string without also adding the formal dependency in the `inputs` object. 
+A plan with no connections between steps is invalid and will be rejected.
 
 {plugin_guidance}
 
@@ -594,11 +631,10 @@ CRITICAL PLANNING_PRINCIPLES:
                     
                     if is_numeric_keyed_object:
                         logger.warning(f"Attempt {attempt + 1}: LLM returned a JSON object with numeric keys. Converting to array.")
-                        plan = converted_plan_list
+                        plan = converted_plan_list # Assign the converted list to plan
 
-                if isinstance(plan, list):
-                    logger.info(f"✅ Received structured plan with {len(plan)} steps")
-                    return plan
+                if isinstance(plan, list): # Now, if plan is a list (either originally or after conversion)
+                    return plan # Return the processed plan
                 else:
                     logger.warning(f"Attempt {attempt + 1}: Response is not a JSON array. Response: {response}")
                     continue
@@ -613,7 +649,6 @@ CRITICAL PLANNING_PRINCIPLES:
                     raise # Re-raise the last exception
 
         raise AccomplishError("Could not generate a valid structured plan after multiple attempts.", "json_conversion_error")
-    
 
 class NovelVerbHandler:
     """Handles novel action verbs by recommending plugins or providing direct answers"""
@@ -624,7 +659,6 @@ class NovelVerbHandler:
 
     def handle(self, inputs: Dict[str, Any]) -> str:
         try:
-            logger.info("NovelVerbHandler starting...")
 
             # Extract verb information
             verb_info = self._extract_verb_info(inputs)
@@ -721,6 +755,7 @@ Plan Schema
 "{schema_json}"
 
 - **CRITICAL for REQUIRED Inputs:** For each step, you MUST examine the `inputDefinitions` for the corresponding `actionVerb` and ensure that all `required` inputs are present in the step's `inputs` object. If an input is marked `required: true`, it MUST be provided.
+- **CRITICAL for JSON compliance:** Ensure all string literals within the generated JSON, including any nested ones, strictly adhere to JSON standards by using double quotes.
 - **CRITICAL for Plan Inputs, sourceStep:**
     - Step inputs are generally sourced from the outputs of other steps and less often fixed with constant values.
     - All inputs for each step must be explicitly defined either as a constant `value` or by referencing an `outputName` from a `sourceStep` within the plan or from the `PARENT STEP INPUTS`. Do not assume implicit data structures or properties of inputs.
@@ -740,6 +775,30 @@ Plan Schema
             }}
         }}}}
 CRITICAL: The actionVerb for each step MUST be a valid, existing plugin actionVerb (from the provided list) or a descriptive, new actionVerb (e.g., 'ANALYZE_DATA', 'GENERATE_REPORT'). It MUST NOT be 'UNKNOWN' or 'NOVEL_VERB'.
+
+**DELIVERABLE IDENTIFICATION:**
+When defining outputs, identify which ones are final deliverables that the user will want to see:
+- For outputs that represent final results, reports, or completed work products, use the enhanced format:
+  ```json
+  "outputs": {{
+    "final_report": {{
+      "description": "A comprehensive analysis report",
+      "isDeliverable": true,
+      "filename": "market_analysis_2025.md"
+    }}
+  }}
+  ```
+- For intermediate outputs used only by subsequent steps, use the simple string format:
+  ```json
+  "outputs": {{
+    "research_data": "Raw research data for analysis"
+  }}
+  ```
+- Guidelines for deliverable filenames:
+  * Use descriptive, professional names
+  * Include relevant dates or versions when appropriate
+  * Use appropriate file extensions (.md, .txt, .json, .csv, .pdf, etc.)
+  * Avoid generic names like "output.txt" or "result.json"
 
 {plugin_guidance}
 """
@@ -886,7 +945,6 @@ CRITICAL: The actionVerb for each step MUST be a valid, existing plugin actionVe
                 'Authorization': f'Bearer {auth_token}'
             }
             
-            logger.info(f"Attempting to save plan for verb '{verb}' to Librarian at: http://{librarian_url}/storeData")
             response = requests.post(
                 f"http://{librarian_url}/storeData",
                 json=payload,
@@ -911,7 +969,6 @@ class AccomplishOrchestrator:
     def execute(self, inputs_str: str) -> str:
         """Main execution method"""
         progress.checkpoint("orchestrator_execute_start")
-        logger.info("ACCOMPLISH orchestrator starting...")
 
         try:
             # Parse inputs
@@ -920,10 +977,8 @@ class AccomplishOrchestrator:
 
             # Route to appropriate handler
             if self._is_novel_verb_request(inputs):
-                logger.info("Novel verb handling detected. Routing to NovelVerbHandler.")
                 return self.novel_verb_handler.handle(inputs)
             else:
-                logger.info("Mission goal planning detected. Routing to RobustMissionPlanner.")
                 return self.goal_planner.plan(inputs)
 
         except Exception as e:
@@ -947,7 +1002,6 @@ def main():
     Reads input from stdin, executes the orchestrator, and prints the result.
     """
     progress.checkpoint("main_start")
-    logger.info("ACCOMPLISH plugin starting...")
 
     try:
         orchestrator = AccomplishOrchestrator()
@@ -961,8 +1015,6 @@ def main():
         if not input_data:
             logger.warning("Input data is empty. Exiting.")
             return
-
-        logger.info(f"Input received: {len(input_data)} characters")
 
         # Execute
         result = orchestrator.execute(input_data)

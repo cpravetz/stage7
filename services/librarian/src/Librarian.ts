@@ -6,7 +6,7 @@ import fs from 'fs';
 import path from 'path';
 import { storeInRedis, loadFromRedis, deleteFromRedis } from './utils/redisUtils';
 import { storeInMongo, loadFromMongo, loadManyFromMongo, aggregateInMongo, deleteManyFromMongo } from './utils/mongoUtils';
-import { WorkProduct } from './types/WorkProduct';
+import { WorkProduct, Deliverable } from '@cktmcs/shared';
 import { BaseEntity, MapSerializer } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { v4 as uuidv4 } from 'uuid';
@@ -92,9 +92,11 @@ export class Librarian extends BaseEntity {
         this.app.get('/getDataHistory/:id', (req, res) => this.getDataHistory(req, res));
         this.app.post('/searchData', (req, res) => this.searchData(req, res));
         this.app.delete('/deleteData/:id', (req, res) => this.deleteData(req, res));
-        this.app.post('/storeWorkProduct', (req, res) => this.storeWorkProduct(req, res));
-        this.app.get('/loadWorkProduct/:stepId', (req, res) => this.loadWorkProduct(req, res));
-        this.app.get('/loadAllWorkProducts/:agentId', (req, res) => this.loadAllWorkProducts(req, res));
+        this.app.post('/storeOutput', (req, res) => this.storeOutput(req, res));
+        this.app.get('/loadDeliverable/:stepId', (req, res) => this.loadDeliverable(req, res));
+        this.app.get('/loadAllDeliverables/:agentId', (req, res) => this.loadAllDeliverables(req, res));
+        this.app.get('/loadStepOutput/:stepId', (req, res) => this.loadStepWorkProduct(req, res));
+        this.app.get('/loadAllStepOutputs/:agentId', (req, res) => this.loadAllStepOutputs(req, res));
         this.app.get('/getSavedMissions', (req, res) => this.getSavedMissions(req, res));
         this.app.delete('/deleteCollection', (req, res) => this.deleteCollection(req, res));
         this.app.post('/knowledge/save', (req, res) => this.saveKnowledge(req, res));
@@ -262,59 +264,92 @@ export class Librarian extends BaseEntity {
         }
     }
 
-    private async storeWorkProduct(req: express.Request, res: express.Response) {
-        console.log('storeWorkProduct called ');
+    private async storeOutput(req: express.Request, res: express.Response) {
+        console.log('storeOutput called ');
 
-        const { agentId, stepId, data } = req.body;
+        const { agentId, stepId, data, isDeliverable } = req.body;
 
         if (!agentId) {
-            console.log(`storeWorkProduct failed: agentId is ${agentId === undefined ? 'undefined' : 'null'}`);
+            console.log(`storeOutput failed: agentId is ${agentId === undefined ? 'undefined' : 'null'}`);
             return res.status(400).send({ error: 'AgentId is required' });
         }
 
         if (!stepId) {
-            console.log(`storeWorkProduct failed: stepId is ${stepId === undefined ? 'undefined' : 'null'} for agent ${agentId}`);
+            console.log(`storeOutput failed: stepId is ${stepId === undefined ? 'undefined' : 'null'} for agent ${agentId}`);
             return res.status(400).send({ error: 'StepId is required' });
         }
 
-        const workProduct: WorkProduct = {
+        const stepOutput: WorkProduct = {
             id: `${agentId}_${stepId}`,
             agentId,
             stepId,
             data: data || null,
             timestamp: new Date().toISOString()
         };
-        console.log(`Creating work product with ID: ${workProduct.id}, agentId: ${agentId}, stepId: ${stepId}`);
+
         try {
-            const id = await storeInMongo('workProducts', {...workProduct, _id: workProduct.id});
-            res.status(200).send({ status: 'Work product stored', id: id });
+            await storeInMongo('step-outputs', {...stepOutput, _id: stepOutput.id});
+
+            if (isDeliverable) {
+                const deliverable: Deliverable = {
+                    ...stepOutput,
+                    isDeliverable: true
+                };
+                await storeInMongo('deliverables', {...deliverable, _id: deliverable.id});
+            }
+
+            res.status(200).send({ status: 'Output stored' });
         } catch (error) { analyzeError(error as Error);
-            console.error('Error storing work product:', error instanceof Error ? error.message : error);
-            res.status(500).send({ error: 'Failed to store work product', details: error instanceof Error ? error.message : String(error) });
+            console.error('Error storing output:', error instanceof Error ? error.message : error);
+            res.status(500).send({ error: 'Failed to store output', details: error instanceof Error ? error.message : String(error) });
         }
     }
 
-    private async loadWorkProduct(req: express.Request, res: express.Response) {
-        console.log('loadWorkProduct called ');
+    private async loadDeliverable(req: express.Request, res: express.Response) {
+        console.log('loadDeliverable called ');
 
         const { stepId } = req.params;
 
         if (!stepId) {
-            console.log(`loadWorkProduct failed: stepId is ${stepId === undefined ? 'undefined' : 'null'} in params ${JSON.stringify(req.params)}`);
+            console.log(`loadDeliverable failed: stepId is ${stepId === undefined ? 'undefined' : 'null'} in params ${JSON.stringify(req.params)}`);
             return res.status(400).send({ error: 'StepId is required' });
         }
 
         try {
-            const workProduct = await loadFromMongo('workProducts', { stepId: stepId });
+            const deliverable = await loadFromMongo('deliverables', { stepId: stepId });
 
-            if (!workProduct) {
-                return res.status(404).send({ error: 'Work product not found' });
+            if (!deliverable) {
+                return res.status(404).send({ error: 'Deliverable not found' });
             }
 
-            res.status(200).send({ data: workProduct });
+            res.status(200).send({ data: deliverable });
         } catch (error) { 
-            console.error(`Error loading work product for step ${stepId}:`, error instanceof Error ? error.message : String(error));
-            res.status(500).send({ error: 'Failed to load work product', details: error instanceof Error ? error.message : String(error) });
+            console.error(`Error loading deliverable for step ${stepId}:`, error instanceof Error ? error.message : String(error));
+            res.status(500).send({ error: 'Failed to load deliverable', details: error instanceof Error ? error.message : String(error) });
+        }
+    }
+
+    private async loadStepWorkProduct(req: express.Request, res: express.Response) {
+        console.log('loadStepOutput called ');
+
+        const { stepId } = req.params;
+
+        if (!stepId) {
+            console.log(`loadStepOutput failed: stepId is ${stepId === undefined ? 'undefined' : 'null'} in params ${JSON.stringify(req.params)}`);
+            return res.status(400).send({ error: 'StepId is required' });
+        }
+
+        try {
+            const stepOutput = await loadFromMongo('step-outputs', { stepId: stepId });
+
+            if (!stepOutput) {
+                return res.status(404).send({ error: 'Step output not found' });
+            }
+
+            res.status(200).send({ data: stepOutput });
+        } catch (error) { 
+            console.error(`Error loading step output for step ${stepId}:`, error instanceof Error ? error.message : String(error));
+            res.status(500).send({ error: 'Failed to load step output', details: error instanceof Error ? error.message : String(error) });
         }
     }
 
@@ -471,27 +506,51 @@ export class Librarian extends BaseEntity {
         }
     }
 
-    private async loadAllWorkProducts(req: express.Request, res: express.Response) {
-        console.log('loadAllWorkProducts called with params:', req.params);
+    private async loadAllDeliverables(req: express.Request, res: express.Response) {
+        console.log('loadAllDeliverables called with params:', req.params);
 
         const { agentId } = req.params;
 
         if (!agentId) {
-            console.log(`loadAllWorkProducts failed: agentId is ${agentId === undefined ? 'undefined' : 'null'} in params ${JSON.stringify(req.params)}`);
+            console.log(`loadAllDeliverables failed: agentId is ${agentId === undefined ? 'undefined' : 'null'} in params ${JSON.stringify(req.params)}`);
             return res.status(400).send({ error: 'Agent ID is required' });
         }
 
         try {
-            const workProducts = await loadManyFromMongo('workProducts', { agentId: agentId });
+            const deliverables = await loadManyFromMongo('deliverables', { agentId: agentId });
 
-            if (!workProducts || workProducts.length === 0) {
+            if (!deliverables || deliverables.length === 0) {
                 return res.status(200).send([]);
             }
 
-            res.status(200).send(workProducts);
+            res.status(200).send(deliverables);
         } catch (error) { analyzeError(error as Error);
-            console.error(`Error loading work products for agent ${agentId}:`, error instanceof Error ? error.message : String(error));
-            res.status(500).send({ error: 'Failed to load work products', details: error instanceof Error ? error.message : String(error) });
+            console.error(`Error loading deliverables for agent ${agentId}:`, error instanceof Error ? error.message : String(error));
+            res.status(500).send({ error: 'Failed to load deliverables', details: error instanceof Error ? error.message : String(error) });
+        }
+    }
+
+    private async loadAllStepOutputs(req: express.Request, res: express.Response) {
+        console.log('loadAllStepOutputs called with params:', req.params);
+
+        const { agentId } = req.params;
+
+        if (!agentId) {
+            console.log(`loadAllStepOutputs failed: agentId is ${agentId === undefined ? 'undefined' : 'null'} in params ${JSON.stringify(req.params)}`);
+            return res.status(400).send({ error: 'Agent ID is required' });
+        }
+
+        try {
+            const stepOutputs = await loadManyFromMongo('step-outputs', { agentId: agentId });
+
+            if (!stepOutputs || stepOutputs.length === 0) {
+                return res.status(200).send([]);
+            }
+
+            res.status(200).send(stepOutputs);
+        } catch (error) { analyzeError(error as Error);
+            console.error(`Error loading step outputs for agent ${agentId}:`, error instanceof Error ? error.message : String(error));
+            res.status(500).send({ error: 'Failed to load step outputs', details: error instanceof Error ? error.message : String(error) });
         }
     }
 

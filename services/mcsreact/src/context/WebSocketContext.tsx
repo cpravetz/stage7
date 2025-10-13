@@ -17,6 +17,8 @@ export interface LocalMissionFile {
   uploadedAt: string;
   uploadedBy: string;
   description?: string;
+  isDeliverable?: boolean;
+  stepId?: string;
 }
 
 // Backwards-compatible export: other modules import { MissionFile } from this context
@@ -53,7 +55,7 @@ interface MissionContextType {
 }
 
 interface DataContextType {
-  workProducts: { type: 'Interim' | 'Final' | 'Plan', name: string, url: string, workproduct: any }[];
+  workProducts: { type: 'Interim' | 'Final' | 'Plan', name: string, url: string, workproduct: any, isDeliverable?: boolean }[];
   sharedFiles: LocalMissionFile[];
   statistics: any;
   agentStatistics: Map<string, Array<any>>;
@@ -84,7 +86,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [missions, setMissions] = useState<Partial<SharedMission>[]>([]);
   
   // Data state
-  const [workProducts, setWorkProducts] = useState<{ type: 'Interim' | 'Final' | 'Plan', name: string, url: string, workproduct: any }[]>([]);
+  const [workProducts, setWorkProducts] = useState<{ type: 'Interim' | 'Final' | 'Plan', name: string, url: string, workproduct: any, isDeliverable?: boolean }[]>([]);
   const [sharedFiles, setSharedFiles] = useState<LocalMissionFile[]>([]);
   const [agentDetails, setAgentDetails] = useState<any[]>([]);
   const [statistics, setStatistics] = useState<any>({
@@ -176,7 +178,8 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             type: data.content.type,
             name: data.content.name,
             url: `${API_BASE_URL}/librarian/retrieve/${data.content.id}`,
-            workproduct: data.content.workproduct
+            workproduct: data.content.workproduct,
+            isDeliverable: data.content.isDeliverable || false
           };
           
           if (existingIndex !== -1) {

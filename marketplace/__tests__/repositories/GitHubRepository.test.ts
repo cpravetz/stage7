@@ -152,7 +152,7 @@ describe('GitHubRepository', () => {
             await repository.store(mockManifest);
 
             expect((repository as any).createOrUpdateFile).toHaveBeenCalledWith(
-                'plugins/new-plugin/1.0.0/plugin-manifest.json',
+                'plugins/new-plugin/1.0.0/manifest.json',
                 JSON.stringify(mockManifest, null, 2),
                 'Publishing plugin new-plugin v1.0.0 - NEW_VERB',
                 MOCK_BRANCH
@@ -196,7 +196,7 @@ describe('GitHubRepository', () => {
             const manifest = await repository.fetch('fetched-plugin', '1.0.0');
 
             expect((repository as any).getFileContent).toHaveBeenCalledWith(
-                'plugins/fetched-plugin/1.0.0/plugin-manifest.json',
+                'plugins/fetched-plugin/1.0.0/manifest.json',
                 MOCK_BRANCH
             );
             expect(manifest?.id).toBe('fetched-plugin');
@@ -207,7 +207,7 @@ describe('GitHubRepository', () => {
             const manifest = await repository.fetch('fetched-plugin');
 
             expect((repository as any).getFileContent).toHaveBeenCalledWith(
-                'plugins/fetched-plugin/plugin-manifest.json',
+                'plugins/fetched-plugin/manifest.json',
                 MOCK_BRANCH
             );
             expect(manifest?.id).toBe('fetched-plugin');
@@ -232,7 +232,7 @@ describe('GitHubRepository', () => {
                 data: [
                     { type: 'file', name: 'file1.txt' },
                     { type: 'file', name: 'file2.txt' },
-                    { type: 'file', name: 'plugin-manifest.json' }, // Should be filtered out
+                    { type: 'file', name: 'manifest.json' }, // Should be filtered out
                 ],
                 status: 200
             });
@@ -359,7 +359,7 @@ describe('GitHubRepository', () => {
         const mockPluginId = 'plugin-to-delete';
         const mockVersion = '1.0.0';
         const mockFilePath = `plugins/${mockPluginId}/${mockVersion}/file.txt`;
-        const mockManifestPath = `plugins/${mockPluginId}/${mockVersion}/plugin-manifest.json`;
+        const mockManifestPath = `plugins/${mockPluginId}/${mockVersion}/manifest.json`;
 
         beforeEach(() => {
             jest.spyOn(repository as any, '_getEffectiveBranch').mockResolvedValue(MOCK_BRANCH);
@@ -367,7 +367,7 @@ describe('GitHubRepository', () => {
             mockAxios.get.mockResolvedValueOnce({
                 data: [
                     { type: 'file', name: 'file.txt', path: mockFilePath, sha: 'file-sha' },
-                    { type: 'file', name: 'plugin-manifest.json', path: mockManifestPath, sha: 'manifest-sha' },
+                    { type: 'file', name: 'manifest.json', path: mockManifestPath, sha: 'manifest-sha' },
                 ],
                 status: 200
             });

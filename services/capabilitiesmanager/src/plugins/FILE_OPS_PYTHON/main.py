@@ -91,20 +91,16 @@ def robust_execute_plugin(inputs_str: str) -> str:
 
         return result
     except Exception as e:
-        # Only escalate to errorhandler for unexpected/code errors
-        try:
-            helper.send_to_errorhandler(e, context=inputs_str)
-        except Exception:
-            logger.debug("Failed to send error to errorhandler")
-        return json.dumps([
+        logger.error(f"FILE_OPERATION plugin execution failed: {e}")
+        return [
             {
                 "success": False,
                 "name": "error",
                 "resultType": "error",
-                "resultDescription": f"Error: {str(e)}",
+                "resultDescription": f"FILE_OPERATION plugin execution failed: {str(e)}",
                 "error": str(e)
             }
-        ])
+        ]
     finally:
         if temp_dir and os.path.exists(temp_dir):
             try:
@@ -216,25 +212,37 @@ class FileOperationPlugin:
 
     def _write_operation(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         path = self._get_input_value(inputs, 'path')
-        content_str = self._get_input_value(inputs, 'content')
+        content_raw = inputs.get('content') # Get raw content input
+
+        # Ensure content_raw is converted to a string if it's not already
+        if isinstance(content_raw, (dict, list)):
+            content_str = json.dumps(content_raw, indent=4)
+        elif isinstance(content_raw, bool):
+            content_str = str(content_raw)
+        elif not isinstance(content_raw, str):
+            content_str = str(content_raw)
+        else:
+            content_str = content_raw
+
+        # Now content_str is guaranteed to be a string.
+        # The existing logic to extract content from a JSON string can remain.
         try:
-            # If content is a JSON string, extract the actual content
             content_data = json.loads(content_str)
             if isinstance(content_data, dict) and 'content' in content_data:
-                content = content_data['content']
+                content_for_file = content_data['content']
             else:
-                content = content_str
+                content_for_file = content_str
         except (json.JSONDecodeError, TypeError):
-            content = content_str
+            content_for_file = content_str
             
         mission_id = self._get_input_value(inputs, 'missionId') or self._get_input_value(inputs, 'mission_id')
         mission_control_url = self._get_mission_control_url(inputs)
         librarian_url = self._get_librarian_url(inputs)
 
-        if not all([path, content, mission_id, mission_control_url, librarian_url]):
+        if not all([path, content_for_file, mission_id, mission_control_url, librarian_url]):
             missing_params = [
                 p for p, v in {
-                    'path': path, 'content': content, 'missionId': mission_id,
+                    'path': path, 'content': content_for_file, 'missionId': mission_id,
                     'MISSIONCONTROL_URL': mission_control_url, 'LIBRARIAN_URL': librarian_url
                 }.items() if not v
             ]
@@ -255,7 +263,7 @@ class FileOperationPlugin:
         librarian_payload = {
             'id': f'step-output-{file_id}',
             'data': {
-                'fileContent': content,
+                'fileContent': content_for_file,
                 'originalName': file_name,
                 'mimeType': mime_type
             },
@@ -269,7 +277,7 @@ class FileOperationPlugin:
             'id': file_id,
             'originalName': file_name,
             'mimeType': mime_type,
-            'size': len(content.encode('utf-8')),
+            'size': len(content_for_file.encode('utf-8')),
             'uploadedAt': datetime.utcnow().isoformat() + 'Z',
             'uploadedBy': 'FILE_OPS_PYTHON',
             'storagePath': f'step-outputs/{mission_id}/{file_name}',
@@ -284,11 +292,21 @@ class FileOperationPlugin:
 
     def _append_operation(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         path = self._get_input_value(inputs, 'path')
-        content_to_append = self._get_input_value(inputs, 'content')
+        content_to_append_raw = inputs.get('content') # Get raw content input
         mission_id = self._get_input_value(inputs, 'missionId') or self._get_input_value(inputs, 'mission_id')
         mission_control_url = self._get_mission_control_url(inputs)
         librarian_url = self._get_librarian_url(inputs)
         
+        # Convert content to append to string to prevent errors
+        if isinstance(content_to_append_raw, (dict, list)):
+            content_to_append_str = json.dumps(content_to_append_raw, indent=4)
+        elif isinstance(content_to_append_raw, bool):
+            content_to_append_str = str(content_to_append_raw)
+        elif not isinstance(content_to_append_raw, str):
+            content_to_append_str = str(content_to_append_raw)
+        else:
+            content_to_append_str = content_to_append_raw
+
         existing_content = ''
         try:
             # Read the existing content
@@ -313,7 +331,7 @@ class FileOperationPlugin:
             pass
 
         # Append new content
-        new_content = existing_content + content_to_append
+        new_content = existing_content + content_to_append_str
 
         # Write the full content back as a new file with the same path
         write_inputs = {

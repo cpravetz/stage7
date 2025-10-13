@@ -23,7 +23,7 @@ from typing import Dict, List, Any, Optional
 
 # Import from the installed shared library package
 try:
-    from stage7_shared_lib import PlanValidator, AccomplishError, PLAN_STEP_SCHEMA, PLAN_ARRAY_SCHEMA
+    from plan_validator import PlanValidator, AccomplishError, PLAN_STEP_SCHEMA, PLAN_ARRAY_SCHEMA
 except ImportError:
     # Fallback to direct import for development/testing
     plugin_dir = os.path.dirname(os.path.realpath(__file__))

@@ -113,50 +113,6 @@ export class MessageRouter {
   }
 
   /**
-   * Handle messages to users
-   * @param message User message
-   * @param clientId Optional client ID
-   */
-  private async handleUserMessage(message: Message, clientId?: string): Promise<void> {
-    // If clientId is provided, send directly to that client
-    if (clientId) {
-      console.log(`Routing message to client: ${clientId}`);
-      this.webSocketHandler.sendToClient(clientId, message);
-      return;
-    }
-
-    // If this is a say message from an agent, try to find the client for the mission
-    if (message.type && message.type.toString() === 'say' && message.sender) {
-      // Extract the agent ID from the sender (format: "agentId: message")
-      const agentId = message.sender.split(':')[0].trim();
-      console.log(`Processing say message from agent ${agentId}`);
-
-      // Find the mission for this agent by checking all missions
-      let clientsFound = false;
-      for (const [missionId, clients] of this.missionClients.entries()) {
-        if (clients.size > 0) {
-          console.log(`Routing say message from agent ${agentId} to ${clients.size} clients for mission ${missionId}`);
-          clients.forEach(cId => {
-            console.log(`Sending say message to client ${cId}`);
-            this.webSocketHandler.sendToClient(cId, message);
-          });
-          clientsFound = true;
-        }
-      }
-
-      if (!clientsFound) {
-        console.log(`No clients found for agent ${agentId}, broadcasting message to all clients`);
-        this.webSocketHandler.broadcastToClients(message);
-      }
-      return;
-    }
-
-    // If no specific client, broadcast to all connected clients
-    console.log('Broadcasting message to all clients');
-    this.webSocketHandler.broadcastToClients(message);
-  }
-
-  /**
    * Handle messages to services
    * @param message Service message
    * @param recipientId Recipient ID

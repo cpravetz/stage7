@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Box, Tabs, Tab, Typography, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Link, useTheme } from '@mui/material';
+import { Box, Tabs, Tab, Typography, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Link, useTheme, Chip } from '@mui/material';
 import ChatIcon from '@mui/icons-material/Chat';
 import AssessmentIcon from '@mui/icons-material/Assessment';
 import AccountTreeIcon from '@mui/icons-material/AccountTree';
@@ -16,6 +16,7 @@ interface WorkProduct {
   name: string;
   url: string;
   workproduct: any;
+  isDeliverable?: boolean;
 }
 
 interface TabbedPanelProps {
@@ -138,7 +139,19 @@ export const TabbedPanel: React.FC<TabbedPanelProps> = ({
                 ) : (
                   workProducts.map((product, index) => (
                     <TableRow key={index} hover>
-                      <TableCell>{product.type}</TableCell>
+                      <TableCell>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          {product.type}
+                          {product.isDeliverable && (
+                            <Chip
+                              label="Deliverable"
+                              size="small"
+                              color="primary"
+                              variant="outlined"
+                            />
+                          )}
+                        </Box>
+                      </TableCell>
                       <TableCell>
                         <Link component="button" variant="body2" onClick={(e) => handleWorkProductClick(e, product.url)}>
                           {product.name}

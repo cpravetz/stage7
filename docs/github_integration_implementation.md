@@ -43,16 +43,16 @@ Plugins are stored in a GitHub repository with the following structure:
 ```
 plugins/
   ├── plugin-id-1/
-  │   ├── plugin-manifest.json
+  │   ├── manifest.json
   │   └── [plugin files]
   ├── plugin-id-2/
-  │   ├── plugin-manifest.json
+  │   ├── manifest.json
   │   └── [plugin files]
   └── ...
 ```
 
 Each plugin has its own directory containing:
-- `plugin-manifest.json`: Contains plugin metadata, including ID, verb, version, and security information
+- `manifest.json`: Contains plugin metadata, including ID, verb, version, and security information
 - Plugin files: JavaScript, Python, or other files needed for the plugin
 
 ### Plugin Versioning and Compatibility

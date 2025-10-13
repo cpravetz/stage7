@@ -268,7 +268,7 @@ const INTERNAL_VERBS: PluginManifest[] = [
         version: '1.0.0',
         description: 'Used to have a set of steps address the individual elements of an array.',
         language: 'internal',   
-        inputGuidance: "Use this verb to iterate over the elements of an array output from a previous step. The 'array' input should be the output of the previous step. The 'steps' input should be a sub-plan to be executed for each item in the array.",
+        inputGuidance: "Use this verb to iterate over the elements of an array output from a previous step. The 'array' input should be the output of the previous step. The 'steps' input should be a sub-plan to be executed for each item in the array. The `item` provided by `FOREACH` is a SINGLE item from the list. The `valueType` for an input consuming `item` should be the type of that single item (e.g., `string`), NOT `array`.",
         inputDefinitions: [
             { name: 'array', 
               type: PluginParameterType.ARRAY, 
@@ -308,6 +308,7 @@ const INTERNAL_VERBS: PluginManifest[] = [
         version: '1.0.0',
         description: 'Sends a message to the user without expecting a response.',
         language: 'internal',
+        inputGuidance: "Use this verb to send a message to the user. Do not use for status updates or non-essential information.",
         inputDefinitions: [
             {
                 name: 'message',

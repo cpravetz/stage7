@@ -250,14 +250,14 @@ The `Engineer` service's LLM is prompted with detailed specifications for plugin
 *   **Security Considerations**: Mandate secure coding practices: validate/sanitize all inputs, avoid unsafe functions (`eval`, direct OS commands), and handle secrets via environment variables or secure mechanisms (not hardcoded).
 *   **Error Handling and Logging**: Require comprehensive error handling (try-except blocks for I/O, API calls) and informative logging.
 *   **Test Generation**: Request generation of unit tests (using `unittest` or `pytest`) covering happy paths, edge cases, and error handling.
-*   **Manifest File Generation**: Instruct the LLM to generate a complete `plugin-manifest.json` file accurately reflecting the plugin's capabilities.
+*   **Manifest File Generation**: Instruct the LLM to generate a complete `manifest.json` file accurately reflecting the plugin's capabilities.
 *   **Iterative Refinement**: Structure interactions for iterative refinement if the LLM API supports it.
 
 ## 6. Plugin Validation Improvements
 Before a plugin is signed and stored, it undergoes rigorous validation within the `Engineer` service or a dedicated validation pipeline.
 
 ### 6.1. Stricter Manifest Validation
-*   **Proposal**: Implement validation of `plugin-manifest.json` against a predefined JSON schema.
+*   **Proposal**: Implement validation of `manifest.json` against a predefined JSON schema.
 *   **Details**: A comprehensive JSON schema specifies all required fields, their types, formats (e.g., semantic versioning), and allowed values. This catches structural and type errors early.
 
 ### 6.2. Static Code Analysis
@@ -319,7 +319,7 @@ These features are integrated into the CapabilitiesManager for plugin registrati
 When creating a plugin, specify the version and security settings in the manifest. When updating, increment the version number according to SemVer rules and ensure backward compatibility or increment the major version.
 
 ## 9. Plugin Management and Repositories
-A consistent `PluginProvider` interface abstracts the underlying storage mechanisms for plugin artifacts (`plugin-manifest.json` and associated files).
+A consistent `PluginProvider` interface abstracts the underlying storage mechanisms for plugin artifacts (`manifest.json` and associated files).
 
 ### 9.1. Core Principle
 The `PluginManifest.entryPoint.files` array contains relative paths to code/test files. When a component requests a plugin's file, the respective repository implementation fetches the content as a `Buffer` or `ReadableStream`.
@@ -327,7 +327,7 @@ The `PluginManifest.entryPoint.files` array contains relative paths to code/test
 ### 9.2. Repository Types
 *   **`GitHubRepository` / `GitRepository`**: Manifest and files are stored as regular files in a Git repository.
 *   **`LocalRepository`**: Manifest and files are stored as regular files in the local filesystem.
-*   **`MongoRepository`**: The `plugin-manifest.json` content is stored as a document in a MongoDB collection. For file storage, **GridFS is recommended** for scalability, handling files of any size by chunking them, and keeping the main manifest document smaller.
+*   **`MongoRepository`**: The `manifest.json` content is stored as a document in a MongoDB collection. For file storage, **GridFS is recommended** for scalability, handling files of any size by chunking them, and keeping the main manifest document smaller.
 
 ### 9.3. Consistency in `entryPoint.files` Presentation
 Regardless of the backing store, `PluginManifest.entryPoint.files` always contains *relative paths*. Consumers of plugin data are decoupled from storage specifics.

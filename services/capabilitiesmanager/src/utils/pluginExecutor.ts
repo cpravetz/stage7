@@ -301,8 +301,11 @@ export class PluginExecutor {
                 pythonExecutable = isWindows ? 'python.exe' : 'python3'; // Fallback to system python
             }
 
-            const inputsArray: [string, InputValue][] = Array.from(inputValues.entries());
-            const inputsJsonString = JSON.stringify(inputsArray);
+            const inputsObject: { [key: string]: InputValue } = {};
+            for (const [key, value] of inputValues.entries()) {
+                inputsObject[key] = value;
+            }
+            const inputsJsonString = JSON.stringify(inputsObject);
 
             return new Promise<PluginOutput[]>((resolve, reject) => {
                                         const pythonProcess = spawn(pythonExecutable, [mainFilePath, pluginRootPath], {
@@ -327,7 +330,15 @@ export class PluginExecutor {
 
                 pythonProcess.on('close', (code) => {
                     if (code !== 0) {
-                        const error = new Error(`Python script exited with code ${code === null ? 'null (terminated by signal)' : code}. Stderr: ${stderr}`);
+                        let errorMessage = `Python script exited with code ${code === null ? 'null (terminated by signal)' : code}.`;
+                        if (stderr) {
+                            errorMessage += ` Stderr: ${stderr}`;
+                        } else if (stdout) {
+                            errorMessage += ` Stdout: ${stdout}`;
+                        } else {
+                            errorMessage += ' No output to stdout or stderr.';
+                        }
+                        const error = new Error(errorMessage);
                         (error as any).stdout = stdout;
                         (error as any).stderr = stderr;
                         reject(error);

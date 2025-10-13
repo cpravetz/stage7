@@ -128,14 +128,16 @@ if __name__ == "__main__":
             if isinstance(key, dict):
                 sys.stderr.write(f"Warning: Skipping invalid input item with dictionary as key: {item}\n")
                 continue
-            inputs_dict[key] = val
+            # Extract value if dict
+            if isinstance(val, dict) and 'value' in val:
+                inputs_dict[key] = val['value']
+            else:
+                inputs_dict[key] = val
         else:
             sys.stderr.write(f"Warning: Skipping invalid input item: {item}\n")
 
     # Extract the operation from the inputs_dict
     operation = inputs_dict.get("operation")
-    if isinstance(operation, dict):
-        operation = operation.get('value')
         
     if not operation:
         raise ValueError("Missing required input: operation")

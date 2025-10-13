@@ -5,11 +5,7 @@
     "version": "1.0.0",
     "description": "A plugin to scrape content from a given URL."
   },
-  "servers": [
-    {
-      "url": "http://scrape-plugin"
-    }
-  ],
+
   "paths": {
     "/scrape": {
       "post": {

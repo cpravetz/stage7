@@ -38,6 +38,8 @@ interface MissionFile {
   uploadedBy: string;
   description?: string;
   preview?: string;
+  isDeliverable?: boolean;
+  stepId?: string;
 }
 
 interface FileUploadProps {
@@ -228,7 +230,23 @@ const FileUpload: React.FC<FileUploadProps> = ({
                 secondary={(
                   <Box>
                     <Typography variant="caption" display="block">{formatFileSize(file.size)} • {new Date(file.uploadedAt).toLocaleDateString()}</Typography>
-                    {file.description && <Chip label={file.description} size="small" sx={{ mt: 0.5 }} />}
+                    <Box sx={{ display: 'flex', gap: 0.5, mt: 0.5, flexWrap: 'wrap' }}>
+                      {file.isDeliverable && (
+                        <Chip
+                          label="System Deliverable"
+                          size="small"
+                          color="secondary"
+                          sx={{ fontSize: '0.7rem' }}
+                        />
+                      )}
+                      {file.description && (
+                        <Chip
+                          label={file.description}
+                          size="small"
+                          sx={{ fontSize: '0.7rem' }}
+                        />
+                      )}
+                    </Box>
                     {file.preview && (
                       <Paper variant="outlined" sx={{ padding: '8px', marginTop: '8px', maxHeight: 160, overflow: 'auto', whiteSpace: 'pre-wrap' }}>
                         <Typography variant="body2">{file.preview}</Typography>

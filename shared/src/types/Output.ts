@@ -5,3 +5,7 @@ export interface WorkProduct {
     data: any;
     timestamp: string;
 }
+
+export interface Deliverable extends WorkProduct {
+    isDeliverable: true;
+}

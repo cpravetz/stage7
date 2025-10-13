@@ -68,6 +68,9 @@ Many environment variables are shared between containers.  The following variabl
 define.  Any that start with an asterisk (*) are defined in another section of the docker-compose file and
 should not be changed.
 
+**SHORTCUT**: The system will run with just one LLM provider keys set in the Brain service and the JWT key in securitymanager.  The JWT keys should be random. You do not need to worry about the other variables now.  Most are already set for you. 
+
+
   postoffice:
     environment:
       NODE_ENV: production
@@ -223,7 +226,7 @@ should not be changed.
 2. Register a new account through the frontend interface
 3. Start with a simple mission like "Create a basic todo list" to test the system
 4. Monitor the agent creation and task execution through the UI
-5. Review the work products tab to see mission results
+5. Review the Files tab to see the deliverables and shared files
 
 ### Example Missions
 

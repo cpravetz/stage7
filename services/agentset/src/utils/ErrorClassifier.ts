@@ -2,6 +2,7 @@ import { AxiosError } from 'axios';
 
 export enum StepErrorType {
     TRANSIENT = 'transient', // Errors that might resolve on retry (e.g., network timeout, temporary service unavailability)
+    RECOVERABLE = 'recoverable', // Errors related to data or state that might be fixed by LLM intervention without aborting the plan branch
     PERMANENT = 'permanent', // Errors that will not resolve on retry (e.g., invalid input, auth error, bug in plugin)
     VALIDATION = 'validation', // Input validation errors that might be fixable through replanning
 }
@@ -60,7 +61,11 @@ export function classifyStepError(error: any): StepErrorType {
         return StepErrorType.TRANSIENT;
     }
 
-    if (errorMessage.includes('invalid input') || errorMessage.includes('missing required')) {
+    if (errorMessage.includes('missing required')) {
+        return StepErrorType.RECOVERABLE;
+    }
+
+    if (errorMessage.includes('invalid input')) {
         return StepErrorType.VALIDATION;
     }
     

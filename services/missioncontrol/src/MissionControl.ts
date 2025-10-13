@@ -699,8 +699,8 @@ class MissionControl extends BaseEntity {
             }
 
             // Refine work_products
-            const workProductsSummary = `Mission Goal: ${mission.goal}. Current Status: ${mission.status}.`;
-            // TODO: Future enhancement: Fetch actual work products from Librarian based on mission.id or agent.id
+            const workProducts = await this.getWorkProductsForMission(mission.id);
+            const workProductsSummary = workProducts.map(wp => `Step ${wp.stepId}: ${wp.data[0]?.resultDescription}`).join('\n');
 
             const inputValues = new Map<string, InputValue>();
             inputValues.set('missionId', { inputName: 'missionId', value: mission.id, valueType: PluginParameterType.STRING, args: {} });
@@ -724,7 +724,7 @@ class MissionControl extends BaseEntity {
             // 3. Process the result
             if (result.name === 'plan') {
                 console.log(`Reflection resulted in a new plan for mission ${mission.id}.`);
-                // TODO: Implement logic to append the new plan to the mission and resume execution
+                await this.handleNewPlan(mission, result.result);
                 this.sendStatusUpdate(mission, `Reflection complete. New plan generated.`);
                 mission.status = Status.RUNNING; // Or a new status like 'EXTENDING'
             } else if (result.name === 'answer') {
@@ -737,6 +737,18 @@ class MissionControl extends BaseEntity {
             console.error(`Error during reflection for mission ${mission.id}:`, error instanceof Error ? error.message : error);
             mission.status = Status.ERROR;
             this.sendStatusUpdate(mission, 'Reflection process failed.');
+        }
+    }
+
+    private async handleNewPlan(mission: Mission, plan: any) {
+        try {
+            await this.authenticatedApi.post(`http://${this.trafficManagerUrl}/appendPlan`, {
+                missionId: mission.id,
+                plan: plan
+            });
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error(`Error handling new plan for mission ${mission.id}:`, error instanceof Error ? error.message : error);
         }
     }
 
@@ -779,6 +791,17 @@ class MissionControl extends BaseEntity {
         }
     }
 
+    private async getWorkProductsForMission(missionId: string): Promise<any[]> {
+        try {
+            const response = await this.authenticatedApi.get(`http://${this.librarianUrl}/loadAllWorkProducts/${missionId}`);
+            return response.data || [];
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error(`Error fetching work products for mission ${missionId}:`, error instanceof Error ? error.message : error);
+            return [];
+        }
+    }
+
     private addClientMission(clientId: string, missionId: string) {
         if (!this.clientMissions.has(clientId)) {
             this.clientMissions.set(clientId, new Set());
@@ -799,9 +822,14 @@ class MissionControl extends BaseEntity {
         const { missionId } = req.params;
         const missionFile = req.body;
 
-        const mission = this.missions.get(missionId);
+        let mission = this.missions.get(missionId);
         if (!mission) {
-            return res.status(404).send({ error: 'Mission not found' });
+            // Attempt to load the mission from the librarian service
+            mission = await this.loadMissionState(missionId) || undefined;
+            if (!mission) {
+                return res.status(404).send({ error: 'Mission not found' });
+            }
+            this.missions.set(missionId, mission); // Add to in-memory map
         }
 
         if (!mission.attachedFiles) {
@@ -823,9 +851,14 @@ class MissionControl extends BaseEntity {
         const { missionId } = req.params;
         const fileId = req.params.fileId || req.body.fileId;
 
-        const mission = this.missions.get(missionId);
+        let mission = this.missions.get(missionId);
         if (!mission) {
-            return res.status(404).send({ error: 'Mission not found' });
+            // Attempt to load the mission from the librarian service
+            mission = await this.loadMissionState(missionId) || undefined;
+            if (!mission) {
+                return res.status(404).send({ error: 'Mission not found' });
+            }
+            this.missions.set(missionId, mission); // Add to in-memory map
         }
 
         if (mission.attachedFiles) {
