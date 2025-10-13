@@ -34,13 +34,6 @@
       "description": "For write and append operations, the content to write or append"
     ,
       "aliases": ["body", "text", "data", "fileContent"]
-    },
-    {
-      "name": "missionId",
-      "required": true,
-      "type": "string",
-      "description": "The ID of the mission, used for scoping file operations and linking files to the correct mission.",
-      "aliases": ["mission_id"]
     }
   ],
   "outputDefinitions": [

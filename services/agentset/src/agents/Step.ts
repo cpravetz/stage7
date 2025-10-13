@@ -200,6 +200,14 @@ export class Step {
         console.log(`[Step ${this.id}] dereferenceInputsForExecution: Starting consolidated input preparation...`);
         const inputRunValues = new Map<string, InputValue>();
 
+        // Ensure missionId is always present in inputRunValues from the start.
+        inputRunValues.set('missionId', {
+            inputName: 'missionId',
+            value: missionId,
+            valueType: PluginParameterType.STRING,
+            args: {}
+        });
+
         // Phase 1: Populate with all literal values defined in the plan.
         console.log(`[Step ${this.id}] Phase 1: Processing literal inputs from references...`);
         this.inputReferences.forEach((inputRef, key) => {
@@ -275,15 +283,7 @@ export class Step {
             }
         }
 
-        // Phase 3: Ensure missionId is always present.
-        if (!inputRunValues.has('missionId')) {
-            inputRunValues.set('missionId', {
-                inputName: 'missionId',
-                value: missionId,
-                valueType: PluginParameterType.STRING,
-                args: {}
-            });
-        }
+
 
         // Phase 4: Resolve placeholders (must be last).
         console.log(`[Step ${this.id}] Phase 4: Resolving placeholders...`);
@@ -1018,11 +1018,6 @@ export class Step {
             });
 
             // Set up inputs for reflection
-            reflectStep.inputValues.set('missionId', {
-                inputName: 'missionId',
-                value: this.missionId,
-                valueType: PluginParameterType.STRING
-            });
 
             // Create a simplified plan history for this step
             const stepHistory = [{

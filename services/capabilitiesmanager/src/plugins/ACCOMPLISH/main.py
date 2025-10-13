@@ -631,17 +631,10 @@ CRITICAL PLANNING_PRINCIPLES:
                     
                     if is_numeric_keyed_object:
                         logger.warning(f"Attempt {attempt + 1}: LLM returned a JSON object with numeric keys. Converting to array.")
-                        plan = converted_plan_list
+                        plan = converted_plan_list # Assign the converted list to plan
 
-                                if isinstance(plan, list):
-
-                                    # No longer inserting FILE_OPERATION steps here.
-
-                                    # The system's core capabilities manager handles saving deliverables
-
-                                    # based on the 'isDeliverable' flag.
-
-                                    return plan
+                if isinstance(plan, list): # Now, if plan is a list (either originally or after conversion)
+                    return plan # Return the processed plan
                 else:
                     logger.warning(f"Attempt {attempt + 1}: Response is not a JSON array. Response: {response}")
                     continue
@@ -762,6 +755,7 @@ Plan Schema
 "{schema_json}"
 
 - **CRITICAL for REQUIRED Inputs:** For each step, you MUST examine the `inputDefinitions` for the corresponding `actionVerb` and ensure that all `required` inputs are present in the step's `inputs` object. If an input is marked `required: true`, it MUST be provided.
+- **CRITICAL for JSON compliance:** Ensure all string literals within the generated JSON, including any nested ones, strictly adhere to JSON standards by using double quotes.
 - **CRITICAL for Plan Inputs, sourceStep:**
     - Step inputs are generally sourced from the outputs of other steps and less often fixed with constant values.
     - All inputs for each step must be explicitly defined either as a constant `value` or by referencing an `outputName` from a `sourceStep` within the plan or from the `PARENT STEP INPUTS`. Do not assume implicit data structures or properties of inputs.

@@ -21,7 +21,7 @@ export async function connectMongo() {
         console.log(`Successfully connected to MongoDB database: ${dbName}`);
 
         // Create collections if they don't exist
-        const collections = ['agents', 'workProducts', 'mcsdata', 'data_versions', 'knowledge_domains', 'agent_specializations'];
+        const collections = ['agents', 'deliverables', 'step-outputs', 'mcsdata', 'data_versions', 'knowledge_domains', 'agent_specializations'];
         for (const collection of collections) {
             const exists = await db.listCollections({ name: collection }).hasNext();
             if (!exists) {

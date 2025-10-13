@@ -105,7 +105,7 @@ describe('GitRepository', () => {
             expect(mockGitInstance.cwd).toHaveBeenCalledWith(expectedTempDir);
             expect(mockGitInstance.init).toHaveBeenCalledTimes(1);
             expect(mockGitInstance.addRemote).toHaveBeenCalledWith('origin', `https://${MOCK_USERNAME}:${MOCK_TOKEN}@github.com/test-owner/test-repo.git`);
-            expect(mockFs.writeFile).toHaveBeenCalledWith(expectedTempDir + '/plugin-manifest.json', JSON.stringify(mockManifest, null, 2));
+            expect(mockFs.writeFile).toHaveBeenCalledWith(expectedTempDir + '/manifest.json', JSON.stringify(mockManifest, null, 2));
             expect(mockFs.writeFile).toHaveBeenCalledWith(expectedTempDir + '/index.js', 'console.log("hello")');
             expect(mockGitInstance.add).toHaveBeenCalledWith('./*');
             expect(mockGitInstance.commit).toHaveBeenCalledWith('Publishing plugin new-plugin - NEW_VERB');
@@ -146,7 +146,7 @@ describe('GitRepository', () => {
         const expectedTempDir = '/app/temp/fetch-fetched-plugin';
 
         beforeEach(() => {
-            mockFs.readdir.mockResolvedValueOnce(['plugin-manifest.json']);
+            mockFs.readdir.mockResolvedValueOnce(['manifest.json']);
             mockFs.readFile.mockResolvedValueOnce(JSON.stringify(mockManifest));
         });
 
@@ -157,7 +157,7 @@ describe('GitRepository', () => {
             expect(mockGitInstance.clone).toHaveBeenCalledWith(`https://${MOCK_USERNAME}:${MOCK_TOKEN}@github.com/test-owner/test-repo.git`, expectedTempDir);
             expect(mockGitInstance.cwd).toHaveBeenCalledWith(expectedTempDir);
             expect(mockFs.readdir).toHaveBeenCalledWith(expectedTempDir, { recursive: true });
-            expect(mockFs.readFile).toHaveBeenCalledWith(expectedTempDir + '/plugin-manifest.json', 'utf-8');
+            expect(mockFs.readFile).toHaveBeenCalledWith(expectedTempDir + '/manifest.json', 'utf-8');
             expect(result).toEqual(mockManifest);
             expect(mockFs.rm).toHaveBeenCalledWith(expectedTempDir, { recursive: true, force: true });
         });
@@ -189,7 +189,7 @@ describe('GitRepository', () => {
         const expectedTempDir = '/app/temp/fetch-FETCH_VERB';
 
         beforeEach(() => {
-            mockFs.readdir.mockResolvedValueOnce(['plugin-manifest.json']);
+            mockFs.readdir.mockResolvedValueOnce(['manifest.json']);
             mockFs.readFile.mockResolvedValueOnce(JSON.stringify(mockManifest));
         });
 
@@ -200,7 +200,7 @@ describe('GitRepository', () => {
             expect(mockGitInstance.clone).toHaveBeenCalledWith(`https://${MOCK_USERNAME}:${MOCK_TOKEN}@github.com/test-owner/test-repo.git`, expectedTempDir);
             expect(mockGitInstance.cwd).toHaveBeenCalledWith(expectedTempDir);
             expect(mockFs.readdir).toHaveBeenCalledWith(expectedTempDir, { recursive: true });
-            expect(mockFs.readFile).toHaveBeenCalledWith(expectedTempDir + '/plugin-manifest.json', 'utf-8');
+            expect(mockFs.readFile).toHaveBeenCalledWith(expectedTempDir + '/manifest.json', 'utf-8');
             expect(result).toEqual(mockManifest);
             expect(mockFs.rm).toHaveBeenCalledWith(expectedTempDir, { recursive: true, force: true });
         });
@@ -233,7 +233,7 @@ describe('GitRepository', () => {
         const pluginDirToDelete = '/app/temp/delete-plugin-to-delete/plugins/plugin-to-delete';
 
         beforeEach(() => {
-            mockFs.readdir.mockResolvedValueOnce(['plugins/plugin-to-delete/plugin-manifest.json']);
+            mockFs.readdir.mockResolvedValueOnce(['plugins/plugin-to-delete/manifest.json']);
             mockFs.readFile.mockResolvedValueOnce(JSON.stringify(mockManifest));
             mockPath.dirname.mockImplementationOnce(() => pluginDirToDelete);
         });
@@ -292,7 +292,7 @@ describe('GitRepository', () => {
         const expectedTempDir = '/app/temp/list-plugins';
 
         beforeEach(() => {
-            mockFs.readdir.mockResolvedValueOnce(['plugin1/plugin-manifest.json', 'plugin2/plugin-manifest.json']);
+            mockFs.readdir.mockResolvedValueOnce(['plugin1/manifest.json', 'plugin2/manifest.json']);
             mockFs.readFile.mockImplementation((p) => {
                 if (p.includes('plugin1')) return JSON.stringify(mockManifest1);
                 if (p.includes('plugin2')) return JSON.stringify(mockManifest2);
@@ -324,7 +324,7 @@ describe('GitRepository', () => {
         });
 
         it('should handle invalid manifest files during list', async () => {
-            mockFs.readdir.mockResolvedValueOnce(['plugin1/plugin-manifest.json', 'invalid-manifest.json']);
+            mockFs.readdir.mockResolvedValueOnce(['plugin1/manifest.json', 'invalid-manifest.json']);
             mockFs.readFile.mockImplementation((p) => {
                 if (p.includes('plugin1')) return JSON.stringify(mockManifest1);
                 if (p.includes('invalid-manifest')) return 'invalid json';

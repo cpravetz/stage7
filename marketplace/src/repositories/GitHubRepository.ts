@@ -11,9 +11,9 @@ const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
  * --- Assumed GitHub Repository Structure ---
  * Base plugin directory: `this.pluginsDir` (e.g., "plugins/")
  * Plugin ID directory: `plugins/{pluginId}/`
- *  - Default/Latest Manifest (optional): `plugins/{pluginId}/plugin-manifest.json` (used if no version specified in fetch)
+ *  - Default/Latest Manifest (optional): `plugins/{pluginId}/manifest.json` (used if no version specified in fetch)
  * Versioned plugin directory: `plugins/{pluginId}/{versionString}/` (e.g., "plugins/my-plugin/1.0.0/")
- *  - Versioned Manifest: `plugins/{pluginId}/{versionString}/plugin-manifest.json`
+ *  - Versioned Manifest: `plugins/{pluginId}/{versionString}/manifest.json`
  *  - Other plugin files (for inline plugins) are relative to this versioned directory.
  */
 export class GitHubRepository implements PluginRepository {
@@ -209,8 +209,8 @@ export class GitHubRepository implements PluginRepository {
         if (!this.isEnabled) return;
         const branch = await this._getEffectiveBranch();
 
-        // Path includes version: plugins/{pluginId}/{version}/plugin-manifest.json
-        const manifestPath = `${this.pluginsDir}/${manifest.id}/${manifest.version}/plugin-manifest.json`;
+        // Path includes version: plugins/{pluginId}/{version}/manifest.json
+        const manifestPath = `${this.pluginsDir}/${manifest.id}/${manifest.version}/manifest.json`;
         
         await this.createOrUpdateFile(
             manifestPath,
@@ -244,11 +244,11 @@ export class GitHubRepository implements PluginRepository {
         let baseContentFetchingPath: string;
 
         if (version) {
-            manifestPath = `${this.pluginsDir}/${pluginId}/${version}/plugin-manifest.json`;
+            manifestPath = `${this.pluginsDir}/${pluginId}/${version}/manifest.json`;
             baseContentFetchingPath = `${this.pluginsDir}/${pluginId}/${version}`;
         } else {
             // Fallback to default/latest manifest directly under pluginId directory
-            manifestPath = `${this.pluginsDir}/${pluginId}/plugin-manifest.json`;
+            manifestPath = `${this.pluginsDir}/${pluginId}/manifest.json`;
             baseContentFetchingPath = `${this.pluginsDir}/${pluginId}`;
             console.log(`GitHubRepository.fetch: No version specified for pluginId '${pluginId}'. Attempting to fetch from default path: ${manifestPath}`);
         }
@@ -270,7 +270,7 @@ export class GitHubRepository implements PluginRepository {
                     const filesInDirResponse = await this.makeGitHubRequest('GET', `${this.baseContentUrl}/${baseContentFetchingPath}`, undefined, { ref: effectiveBranch });
                     if (filesInDirResponse.status === 200 && Array.isArray(filesInDirResponse.data)) {
                         const filesToFetch = filesInDirResponse.data.filter((item: { type: string; name: string }) =>
-                            item.type === 'file' && item.name !== 'plugin-manifest.json'
+                            item.type === 'file' && item.name !== 'manifest.json'
                         );
                         for (const file of filesToFetch) {
                             const fileContent = await this.getFileContent(`${baseContentFetchingPath}/${file.name}`, effectiveBranch);
