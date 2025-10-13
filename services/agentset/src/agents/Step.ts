@@ -221,10 +221,8 @@ export class Step {
             // If sourceStep exists but has no result in-memory, attempt to hydrate from persistence.
             if (sourceStep && (!sourceStep.result || sourceStep.result.length === 0)) {
                 try {
-                    const parts = String(sourceStep.id).split('_');
-                    if (parts.length >= 1) {
-                        const possibleAgentId = parts[0];
-                        const persisted = await this.persistenceManager.loadWorkProduct(possibleAgentId, sourceStep.id);
+                    const possibleAgentId = sourceStep.ownerAgentId;
+                        const persisted = await this.persistenceManager.loadStepWorkProduct(possibleAgentId, sourceStep.id);
                         if (persisted) {
                             const persistedData = (persisted && (persisted.data !== undefined)) ? persisted.data : persisted;
                             try {
@@ -237,8 +235,7 @@ export class Step {
                                 console.warn(`[Step ${this.id}]   - Failed to transform persisted work product for step ${sourceStep.id}:`, e instanceof Error ? e.message : e);
                             }
                         }
-                    }
-                } catch (e) {
+                    } catch (e) {
                     console.warn(`[Step ${this.id}]   - Error attempting to hydrate source step ${dep.sourceStepId} from persistence:`, e instanceof Error ? e.message : e);
                 }
             }
@@ -681,8 +678,10 @@ export class Step {
 
                 // Save the plan result
                 await this.persistenceManager.saveWorkProduct({
-                    agentId: this.id.split('_')[0], stepId: this.id,
-                    data: result
+                    id: uuidv4(),
+                    agentId: this.ownerAgentId, stepId: this.id,
+                    data: result,
+                    timestamp: new Date().toISOString()
                 });
 
                 console.log(`[Step ${this.id}] execute: Plan result will be processed by Agent for execution`);
@@ -690,8 +689,11 @@ export class Step {
                 // Map plugin output names to step-defined custom names
                 this.result = await this.mapPluginOutputsToCustomNames(result);
                 await this.persistenceManager.saveWorkProduct({
-                    agentId: this.id.split('_')[0], stepId: this.id,
-                    data: this.result
+                    id: uuidv4(),
+                    agentId: this.ownerAgentId, 
+                    stepId: this.id,
+                    data: this.result,
+                    timestamp: new Date().toISOString()
                 });
                 this.status = StepStatus.COMPLETED;
 
@@ -745,9 +747,11 @@ export class Step {
             });
 
             await this.persistenceManager.saveWorkProduct({
-                agentId: this.id.split('_')[0],
+                id: uuidv4(),
+                agentId: this.ownerAgentId,
                 stepId: this.id,
-                data: errorResult
+                data: errorResult,
+                timestamp: new Date().toISOString()
             });
 
             // Phase 3: Trigger reflection for self-correction on errors or complex tasks
@@ -866,7 +870,7 @@ export class Step {
 
             // Create a temporary step for querying knowledge base
             const queryStep = new Step({
-                id: `${this.id}_kb_query`,
+                id: uuidv4(),
                 actionVerb: 'QUERY_KNOWLEDGE_BASE',
                 description: `Query knowledge base for relevant information about ${queryText}`,
                 missionId: this.missionId,
@@ -942,7 +946,7 @@ export class Step {
 
             // Create a temporary step for saving to knowledge base
             const saveStep = new Step({
-                id: `${this.id}_kb_save`,
+                id: uuidv4(),
                 actionVerb: 'SAVE_TO_KNOWLEDGE_BASE',
                 description: `Save results from ${this.actionVerb} to knowledge base`,
                 missionId: this.missionId,
@@ -1004,7 +1008,7 @@ export class Step {
 
             // Create a temporary step for reflection
             const reflectStep = new Step({
-                id: `${this.id}_reflect`,
+                id: uuidv4(),
                 actionVerb: 'REFLECT',
                 description: `Reflect on ${this.actionVerb} execution for self-correction`,
                 missionId: this.missionId,
@@ -1045,7 +1049,7 @@ export class Step {
             });
 
             // Add agent ID for self-correction if available
-            const agentId = this.id.split('_')[0]; // Extract agent ID from step ID
+            const agentId = this.ownerAgentId; // Extract agent ID from step ID
             reflectStep.inputValues.set('agentId', {
                 inputName: 'agentId',
                 value: agentId,
@@ -1688,9 +1692,11 @@ export class Step {
 
                 // Save the plan result
                 await this.persistenceManager.saveWorkProduct({
-                    agentId: this.id.split('_')[0],
+                    id: uuidv4(),
+                    agentId: this.ownerAgentId,
                     stepId: this.id,
-                    data: result
+                    data: result,
+                    timestamp: new Date().toISOString()
                 });
 
                 console.log(`[Step ${this.id}] executeInternalActionVerb: Plan result will be processed by Agent for execution`);
@@ -1698,9 +1704,11 @@ export class Step {
                 // Map plugin output names to step-defined custom names and persist the mapped result
                 this.result = await this.mapPluginOutputsToCustomNames(result);
                 await this.persistenceManager.saveWorkProduct({
-                    agentId: this.id.split('_')[0],
+                    id: uuidv4(),
+                    agentId: this.ownerAgentId,
                     stepId: this.id,
-                    data: this.result
+                    data: this.result,
+                    timestamp: new Date().toISOString()
                 });
                 this.status = StepStatus.COMPLETED;
 
@@ -1741,9 +1749,11 @@ export class Step {
             });
 
             await this.persistenceManager.saveWorkProduct({
-                agentId: this.id.split('_')[0],
+                id: uuidv4(),
+                agentId: this.ownerAgentId,
                 stepId: this.id,
-                data: errorResult
+                data: errorResult,
+                timestamp: new Date().toISOString()
             });
         } finally {
             // Restore original values
@@ -1790,7 +1800,7 @@ export class Step {
             this.updateStatus(modifications.status);
         }
         if (modifications.actionVerb) {
-            console.warn(`Agent ${this.id.split('_')[0]}: Step ${this.id} actionVerb changed from ${this.actionVerb} to ${modifications.actionVerb}. This might have execution implications.`);
+            console.warn(`Agent ${this.ownerAgentId}: Step ${this.id} actionVerb changed from ${this.actionVerb} to ${modifications.actionVerb}. This might have execution implications.`);
             (this as any).actionVerb = modifications.actionVerb;
             this.logEvent({ eventType: 'step_actionVerb_updated', stepId: this.id, oldActionVerb: this.actionVerb, newActionVerb: modifications.actionVerb });
         }

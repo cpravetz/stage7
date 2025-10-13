@@ -1,4 +1,4 @@
-import { WorkProduct } from './WorkProduct';
+import { WorkProduct, Deliverable } from '@cktmcs/shared';
 import { MapSerializer, PluginOutput, createAuthenticatedAxios } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 
@@ -179,25 +179,68 @@ export class AgentPersistenceManager {
                 })
                 : MapSerializer.transformForSerialization(workProduct.data);
 
-            return await this.authenticatedApi.post(`http://${this.librarianUrl}/storeWorkProduct`, {
+            return await this.authenticatedApi.post(`http://${this.librarianUrl}/storeOutput`, {
                 agentId: workProduct.agentId,
                 stepId: workProduct.stepId,
-                data: serializedData
+                data: serializedData,
+                isDeliverable: false
             });
         } catch (error) { analyzeError(error as Error);
             console.error(`Error saving work product for agent ${workProduct.agentId}, step ${workProduct.stepId}:`, error instanceof Error ? error.message : String(error));
         }
     }
 
-    async loadWorkProduct(agentId: string, stepId: string): Promise<WorkProduct | null> {
+    async saveDeliverable(deliverable: Deliverable): Promise<void> {
+        if (!deliverable || !deliverable.agentId || !deliverable.stepId) {
+            console.error('Cannot save deliverable: missing required fields', deliverable);
+            return;
+        }
+
+        console.log(`Saving deliverable for agent ${deliverable.agentId}, step ${deliverable.stepId}`);
+        try {
+            // Ensure data is properly serialized
+            const serializedData = Array.isArray(deliverable.data)
+                ? deliverable.data.map(item => {
+                    if (item && item.result && typeof item.result === 'object') {
+                        return { ...item, result: MapSerializer.transformForSerialization(item.result) };
+                    }
+                    return item;
+                })
+                : MapSerializer.transformForSerialization(deliverable.data);
+
+            return await this.authenticatedApi.post(`http://${this.librarianUrl}/storeOutput`, {
+                agentId: deliverable.agentId,
+                stepId: deliverable.stepId,
+                data: serializedData,
+                isDeliverable: true
+            });
+        } catch (error) { analyzeError(error as Error);
+            console.error(`Error saving deliverable for agent ${deliverable.agentId}, step ${deliverable.stepId}:`, error instanceof Error ? error.message : String(error));
+        }
+    }
+
+    async loadStepWorkProduct(agentId: string, stepId: string): Promise<WorkProduct | null> {
         try {
             const response = await this.authenticatedApi.get(
-                `http://${this.librarianUrl}/loadData/${agentId}_${stepId}`,
-                { params: { storageType: 'mongo', collection: 'work_products' } }
+                `http://${this.librarianUrl}/loadStepOutput/${stepId}`,
+                { params: { storageType: 'mongo' } }
             );
             return response.data.data;
         } catch (error) { analyzeError(error as Error);
-            console.error('Error loading work product:', error instanceof Error ? error.message : error);
+            console.error('Error loading step output:', error instanceof Error ? error.message : error);
+            return null;
+        }
+    }
+
+    async loadDeliverable(agentId: string, stepId: string): Promise<Deliverable | null> {
+        try {
+            const response = await this.authenticatedApi.get(
+                `http://${this.librarianUrl}/loadDeliverable/${stepId}`,
+                { params: { storageType: 'mongo' } }
+            );
+            return response.data.data;
+        } catch (error) { analyzeError(error as Error);
+            console.error('Error loading deliverable:', error instanceof Error ? error.message : error);
             return null;
         }
     }
@@ -268,34 +311,64 @@ export class AgentPersistenceManager {
         }
     }
 
-    async loadAllWorkProducts(agentId: string): Promise<WorkProduct[]> {
+    async loadAllDeliverables(agentId: string): Promise<Deliverable[]> {
         if (!agentId) {
-            console.error('Cannot load work products: missing agent ID');
+            console.error('Cannot load deliverables: missing agent ID');
             return [];
         }
 
         try {
-            console.log(`Loading all work products for agent ${agentId}`);
-            const response = await this.authenticatedApi.get(`http://${this.librarianUrl}/loadAllWorkProducts/${agentId}`);
+            console.log(`Loading all deliverables for agent ${agentId}`);
+            const response = await this.authenticatedApi.get(`http://${this.librarianUrl}/loadAllDeliverables/${agentId}`);
 
             if (!response.data || !Array.isArray(response.data)) {
-                console.error(`No work products found for agent ${agentId}`);
+                console.error(`No deliverables found for agent ${agentId}`);
+                return [];
+            }
+
+            return response.data.map((d: any) => {
+                if (!d || !d.stepId || !d.data) {
+                    console.error(`Invalid deliverable data for agent ${agentId}:`, d);
+                    return null;
+                }
+                return {
+                    ...d,
+                    data: MapSerializer.transformFromSerialization(d.data) as PluginOutput[]
+                } as Deliverable;
+            }).filter((d: Deliverable | null) => d !== null) as Deliverable[];
+        } catch (error) { analyzeError(error as Error);
+            console.error(`Error loading all deliverables for agent ${agentId}:`, error instanceof Error ? error.message : error);
+            return [];
+        }
+    }
+
+    async loadAllStepOutputs(agentId: string): Promise<WorkProduct[]> {
+        if (!agentId) {
+            console.error('Cannot load step outputs: missing agent ID');
+            return [];
+        }
+
+        try {
+            console.log(`Loading all step outputs for agent ${agentId}`);
+            const response = await this.authenticatedApi.get(`http://${this.librarianUrl}/loadAllStepOutputs/${agentId}`);
+
+            if (!response.data || !Array.isArray(response.data)) {
+                console.error(`No step outputs found for agent ${agentId}`);
                 return [];
             }
 
             return response.data.map((wp: any) => {
                 if (!wp || !wp.stepId || !wp.data) {
-                    console.error(`Invalid work product data for agent ${agentId}:`, wp);
+                    console.error(`Invalid step output data for agent ${agentId}:`, wp);
                     return null;
                 }
-                return new WorkProduct(
-                    agentId,
-                    wp.stepId,
-                    MapSerializer.transformFromSerialization(wp.data) as PluginOutput[]
-                );
+                return {
+                    ...wp,
+                    data: MapSerializer.transformFromSerialization(wp.data) as PluginOutput[]
+                } as WorkProduct;
             }).filter((wp: WorkProduct | null) => wp !== null) as WorkProduct[];
         } catch (error) { analyzeError(error as Error);
-            console.error(`Error loading all work products for agent ${agentId}:`, error instanceof Error ? error.message : error);
+            console.error(`Error loading all step outputs for agent ${agentId}:`, error instanceof Error ? error.message : error);
             return [];
         }
     }

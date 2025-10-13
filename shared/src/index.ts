@@ -11,6 +11,7 @@ export * from './types/Mission';
 export * from './types/Status';
 export * from './types/Mission';
 export * from './types/Agent';
+export * from './types/Output';
 export * from './types/AgentRole';
 export * from './types/Statistics';
 export * from './types/PlanTemplate';

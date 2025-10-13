@@ -3,8 +3,7 @@ import express from 'express';
 import axios from 'axios';
 import { AgentStatus } from '../utils/agentStatus';
 import { getServiceUrls } from '../utils/postOfficeInterface';
-import { WorkProduct } from '../utils/WorkProduct';
-import { MapSerializer, BaseEntity, LLMConversationType } from '@cktmcs/shared';
+import { WorkProduct, Deliverable, MapSerializer, BaseEntity, LLMConversationType } from '@cktmcs/shared';
 import { AgentPersistenceManager } from '../utils/AgentPersistenceManager';
 import { PluginOutput, PluginParameterType, InputValue, ExecutionContext as PlanExecutionContext, MissionFile } from '@cktmcs/shared';
 import { ActionVerbTask, InputReference } from '@cktmcs/shared';
@@ -180,7 +179,7 @@ export class Agent extends BaseEntity {
             this.setAgentStatus(AgentStatus.COMPLETED, {eventType: 'agent_completed'});
             const finalStep = this.steps.filter(s => s.status === StepStatus.COMPLETED).pop();
             if (finalStep) {
-                this.output = await this.agentPersistenceManager.loadWorkProduct(this.id, finalStep.id);
+                this.output = await this.agentPersistenceManager.loadStepWorkProduct(this.id, finalStep.id);
             }
             console.log(`Agent ${this.id} has completed all active work.`);
         }
@@ -565,7 +564,7 @@ Please consider this context when planning and executing the mission. Provide de
                 this.setAgentStatus(AgentStatus.COMPLETED, {eventType: 'agent_completed'});
                 const finalStep = this.steps.filter(s => s.status === StepStatus.COMPLETED).pop();
                 if (finalStep) {
-                    this.output = await this.agentPersistenceManager.loadWorkProduct(this.id, finalStep.id);
+                    this.output = await this.agentPersistenceManager.loadStepWorkProduct(this.id, finalStep.id);
                 }
                 console.log(`Agent ${this.id} has completed its work.`);
                 this.say(`Result: ${JSON.stringify(this.output)}`);
@@ -605,7 +604,7 @@ Please consider this context when planning and executing the mission. Provide de
             };
         }
 
-        const finalWorkProduct = await this.agentPersistenceManager.loadWorkProduct(this.id, lastCompletedStep.id);
+        const finalWorkProduct = await this.agentPersistenceManager.loadStepWorkProduct(this.id, lastCompletedStep.id);
 
         if (!finalWorkProduct) {
             return {
@@ -803,22 +802,30 @@ Please consider this context when planning and executing the mission. Provide de
         }
     }
 
-
-
     private async saveWorkProductWithClassification(stepId: string, data: PluginOutput[], isAgentEndpoint: boolean, allAgents: Agent[]): Promise<void> {
         if (this.status in [AgentStatus.PAUSED, AgentStatus.ABORTED]) {
             console.log(`Agent ${this.id} is in status ${this.status}, skipping saveWorkProduct for step ${stepId}.`);
             return;
         }
         const serializedData = MapSerializer.transformForSerialization(data);
-        const workProduct = new WorkProduct(this.id, stepId, serializedData);
+        const workProduct = {
+            id: uuidv4(),
+            agentId: this.id,
+            stepId: stepId,
+            data: serializedData,
+            timestamp: new Date().toISOString()
+        } as WorkProduct;
         try {
-            await this.agentPersistenceManager.saveWorkProduct(workProduct);
-
             const step = this.steps.find(s => s.id === stepId);
             if (!step) {
                 console.error(`Step with id ${stepId} not found in agent ${this.id}`);
                 return;
+            }
+
+            const hasDeliverables = step && step.hasDeliverableOutputs();
+            await this.agentPersistenceManager.saveWorkProduct(workProduct);
+            if(hasDeliverables){
+                await this.agentPersistenceManager.saveDeliverable({...workProduct, isDeliverable: true} as Deliverable);
             }
 
             const outputType = step.getOutputType(this.steps);
@@ -839,23 +846,12 @@ Please consider this context when planning and executing the mission. Provide de
             let uploadedFiles: MissionFile[] = [];
             const outputsHaveFiles = Array.isArray(data) && data.some(o => !!(o as any).fileName || !!(o as any).storagePath);
 
-            // Check if any outputs are marked as deliverables
-            const hasDeliverables = step && step.hasDeliverableOutputs();
-
             let shouldUploadToSharedSpace = false;
 
-            if (hasDeliverables) {
+            if (hasDeliverables || (outputType === OutputType.FINAL && data && data.length > 0)) {
                 // New logic: only upload outputs marked as deliverables
                 shouldUploadToSharedSpace = true;
                 console.log(`[Agent.ts] Step ${stepId} has deliverable outputs, will upload deliverables only`);
-            } else {
-                // Fallback to existing logic for backward compatibility
-                shouldUploadToSharedSpace = (
-                    (outputType === OutputType.FINAL && data && data.length > 0) ||
-                    (data && data.length > 0 && this.stepGeneratesUserReferencedData(stepId, data)) ||
-                    outputsHaveFiles
-                );
-                console.log(`[Agent.ts] Step ${stepId} using fallback upload logic: ${shouldUploadToSharedSpace}`);
             }
 
             if (step && step.actionVerb === 'FILE_OPERATION') {
@@ -866,40 +862,13 @@ Please consider this context when planning and executing the mission. Provide de
                 try {
                     const librarianUrl = await this.getServiceUrl('Librarian');
                     if (librarianUrl) {
-                        if (hasDeliverables) {
-                            // Upload only deliverable outputs with custom filenames
-                            uploadedFiles = await this.uploadDeliverablesOnly(step, data, librarianUrl);
-                        } else {
-                            // Fallback to existing upload logic
-                            uploadedFiles = await this.uploadStepOutputsToSharedSpace(
-                                step,
-                                librarianUrl
-                            );
-                        }
+                        uploadedFiles = await this._uploadOutputs(step, data, librarianUrl);
                         if (uploadedFiles.length > 0) {
-                            console.log(`Uploaded ${uploadedFiles.length} step outputs to Librarian for step ${stepId}`);
-
-                            // Register files with MissionControl only for deliverables
-                            if (hasDeliverables) {
-                                const missionControlUrl = await this.getServiceUrl('MissionControl');
-                                if (missionControlUrl) {
-                                    for (const file of uploadedFiles) {
-                                        await this.authenticatedApi.post(`http://${missionControlUrl}/missions/${this.missionId}/files/add`, file);
-                                    }
-                                    console.log(`Successfully registered ${uploadedFiles.length} deliverable files with MissionControl.`);
-                                } else {
-                                    console.warn('MissionControl URL not available for registering deliverable files.');
-                                }
-                            } else {
-                                console.log(`Non-deliverable files uploaded to Librarian only, not registered with MissionControl.`);
-                            }
+                            console.log(`Uploaded ${uploadedFiles.length} files to Librarian for step ${stepId}`);
                         }
-                    } else {
-                        console.warn('Librarian URL not available for uploading step outputs');
                     }
                 } catch (error) {
                     console.error('Error uploading step outputs to Librarian:', error);
-                    // Don't fail the entire operation if file upload fails
                 }
             }
 
@@ -2157,10 +2126,7 @@ Explanation: ${resolution.explanation}`);
         }
     }
 
-    /**
-     * Uploads only outputs marked as deliverables to the shared file space
-     */
-    private async uploadDeliverablesOnly(
+    private async _uploadOutputs(
         step: Step,
         data: PluginOutput[],
         librarianUrl: string
@@ -2171,140 +2137,43 @@ Explanation: ${resolution.explanation}`);
 
         const uploadedFiles: MissionFile[] = [];
         const missionControlUrl = await this.getServiceUrl('MissionControl');
+        const hasDeliverables = step.hasDeliverableOutputs();
 
         for (const output of data) {
             try {
-                // Only upload outputs marked as deliverables
-                if (!step.isOutputDeliverable(output.name)) {
+                const isDeliverable = step.isOutputDeliverable(output.name);
+
+                if (hasDeliverables && !isDeliverable) {
                     console.log(`[Agent.ts] Skipping non-deliverable output: ${output.name}`);
                     continue;
                 }
 
-                // Only upload outputs that have meaningful content
                 if (!output.result || output.result === '') {
-                    console.log(`[Agent.ts] Skipping empty deliverable output: ${output.name}`);
+                    console.log(`[Agent.ts] Skipping empty output: ${output.name}`);
                     continue;
                 }
 
-                // Use custom filename from deliverable definition
-                let fileName = step.getDeliverableFilename(output.name);
-                if (!fileName) {
-                    // Fallback to sanitized output name if no custom filename
-                    const sanitizedName = output.name.replace(/[^a-zA-Z0-9_-]/g, '_');
-                    const extension = this.getFileExtensionForOutput(output);
-                    fileName = `${sanitizedName}${extension}`;
-                }
-
-                // Set MIME type
-                const mimeType = output.mimeType || this.getMimeTypeForOutput(output);
-
-                // Convert result to string content
-                let fileContent: string;
-                if (typeof output.result === 'string') {
-                    fileContent = output.result;
-                } else {
-                    // For objects, serialize to JSON
-                    fileContent = JSON.stringify(output.result, null, 2);
-                    if (!fileName.endsWith('.json')) {
-                        fileName = fileName.replace(/\.[^.]*$/, '') + '.json';
-                    }
-                }
-
-                // Create a MissionFile object with deliverable metadata
-                const missionFile: MissionFile = {
-                    id: uuidv4(),
-                    originalName: fileName,
-                    mimeType: mimeType,
-                    size: Buffer.byteLength(fileContent, 'utf8'),
-                    uploadedAt: new Date(),
-                    uploadedBy: `agent-${this.id}`,
-                    storagePath: `deliverables/${this.missionId}/${fileName}`,
-                    description: `Deliverable from step ${step.stepNo}: ${step.actionVerb} - ${output.resultDescription}`,
-                    isDeliverable: true,
-                    stepId: step.id
-                } as any; // Cast to any to add custom properties
-
-                // Store the file content in Librarian
-                await this.authenticatedApi.post(`http://${librarianUrl}/storeData`, {
-                    id: `deliverable-${missionFile.id}`,
-                    data: {
-                        fileContent: fileContent,
-                        missionFile: missionFile
-                    },
-                    storageType: 'mongo',
-                    collection: 'step-outputs'
-                });
-
-                if (missionControlUrl) {
-                    await this.authenticatedApi.post(`http://${missionControlUrl}/missions/${this.missionId}/files/add`, missionFile);
-                }
-
-                uploadedFiles.push(missionFile);
-                console.log(`[Agent.ts] Uploaded deliverable to shared space: ${fileName} (from output: ${output.name})`);
-
-            } catch (error) {
-                console.error(`[Agent.ts] Failed to upload deliverable output ${output.name}:`, error);
-                // Continue with other outputs even if one fails
-            }
-        }
-
-        console.log(`[Agent.ts] Uploaded ${uploadedFiles.length} deliverables from step ${step.stepNo}`);
-        return uploadedFiles;
-    }
-
-    /**
-     * Uploads step outputs to the shared file space for final steps
-     * This replaces the removed Step.uploadOutputsToSharedSpace method
-     */
-    private async uploadStepOutputsToSharedSpace(
-        step: Step,
-        librarianUrl: string
-    ): Promise<MissionFile[]> {
-        if (!step.result || step.result.length === 0) {
-            return [];
-        }
-
-        const uploadedFiles: MissionFile[] = [];
-        const missionControlUrl = await this.getServiceUrl('MissionControl');
-
-        for (const output of step.result) {
-            try {
-                // Only upload outputs that have meaningful content
-                if (!output.result || output.result === '') {
-                    continue;
-                }
-
-                // Generate filename based on step and output
                 let fileName: string;
-                let mimeType: string;
-                let fileContent: string;
-
-                if (output.fileName) {
-                    // If output specifies a filename, use it
-                    fileName = output.fileName;
+                if (isDeliverable) {
+                    fileName = step.getDeliverableFilename(output.name) || `${output.name.replace(/[^a-zA-Z0-9_-]/g, '_')}${this.getFileExtensionForOutput(output)}`;
                 } else {
-                    // Generate filename based on step and output
                     const sanitizedName = output.name.replace(/[^a-zA-Z0-9_-]/g, '_');
                     const extension = this.getFileExtensionForOutput(output);
                     fileName = `step_${step.stepNo}_${sanitizedName}${extension}`;
                 }
 
-                // Set MIME type
-                mimeType = output.mimeType || this.getMimeTypeForOutput(output);
+                const mimeType = output.mimeType || this.getMimeTypeForOutput(output);
 
-                // Convert result to string content
+                let fileContent: string;
                 if (typeof output.result === 'string') {
                     fileContent = output.result;
                 } else {
-                    // For objects, serialize to JSON
                     fileContent = JSON.stringify(output.result, null, 2);
                     if (!fileName.endsWith('.json')) {
                         fileName = fileName.replace(/\.[^.]*$/, '') + '.json';
                     }
-                    mimeType = 'application/json';
                 }
 
-                // Create a MissionFile object
                 const missionFile: MissionFile = {
                     id: uuidv4(),
                     originalName: fileName,
@@ -2312,70 +2181,36 @@ Explanation: ${resolution.explanation}`);
                     size: Buffer.byteLength(fileContent, 'utf8'),
                     uploadedAt: new Date(),
                     uploadedBy: `agent-${this.id}`,
-                    storagePath: `step-outputs/${this.missionId}/${fileName}`,
-                    description: `Output from step ${step.stepNo}: ${step.actionVerb} - ${output.resultDescription}`
-                };
-                // Store the file content in Librarian
+                    storagePath: `${isDeliverable ? 'deliverables' : 'step-outputs'}/${this.missionId}/${fileName}`,
+                    description: `Output from step ${step.stepNo}: ${step.actionVerb} - ${output.resultDescription}`,
+                    isDeliverable: isDeliverable,
+                    stepId: step.id
+                } as any;
+
                 await this.authenticatedApi.post(`http://${librarianUrl}/storeData`, {
-                    id: `step-output-${missionFile.id}`,
+                    id: `${isDeliverable ? 'deliverable' : 'step-output'}-${missionFile.id}`,
                     data: {
                         fileContent: fileContent,
                         missionFile: missionFile
                     },
                     storageType: 'mongo',
-                    collection: 'step-outputs'
+                    collection: isDeliverable ? 'deliverables' : 'step-outputs'
                 });
 
-                if (missionControlUrl) {
+                if (isDeliverable && missionControlUrl) {
                     await this.authenticatedApi.post(`http://${missionControlUrl}/missions/${this.missionId}/files/add`, missionFile);
                 }
 
                 uploadedFiles.push(missionFile);
-                console.log(`Uploaded step output to shared space: ${fileName}`);
+                console.log(`[Agent.ts] Uploaded output to shared space: ${fileName} (from output: ${output.name})`);
 
             } catch (error) {
-                console.error(`Failed to upload step output to shared space:`, error);
-                // Continue with other outputs even if one fails
+                console.error(`[Agent.ts] Failed to upload output ${output.name}:`, error);
             }
         }
 
+        console.log(`[Agent.ts] Uploaded ${uploadedFiles.length} files from step ${step.stepNo}`);
         return uploadedFiles;
-    }
-
-    /**
-     * Determines if a step generates data that will be referenced by user-facing steps
-     */
-    private stepGeneratesUserReferencedData(stepId: string, data: PluginOutput[]): boolean {
-        // Check if any future ASK_USER_QUESTION steps reference this step's outputs
-        const futureAskSteps = this.steps.filter(step =>
-            step.actionVerb === 'ASK_USER_QUESTION' &&
-            step.stepNo > (this.steps.find(s => s.id === stepId)?.stepNo || 0)
-        );
-
-        for (const askStep of futureAskSteps) {
-            // Check if the ASK step's choices reference any of this step's output names
-            const choicesInput = askStep.inputValues?.get('choices');
-            if (choicesInput && typeof choicesInput.value === 'string') {
-                // Check if the choices value matches any output names from this step
-                for (const output of data) {
-                    if (choicesInput.value.includes(output.name) ||
-                        choicesInput.value.includes(output.resultDescription || '')) {
-                        console.log(`Step ${stepId} generates data referenced by ASK_USER_QUESTION step ${askStep.id}`);
-                        return true;
-                    }
-                }
-            }
-        }
-
-        // Also check for common patterns that indicate user-referenced data
-        const hasListOrEnhancementData = data.some(output =>
-            output.name.toLowerCase().includes('list') ||
-            output.name.toLowerCase().includes('enhancement') ||
-            output.resultDescription?.toLowerCase().includes('list') ||
-            output.resultDescription?.toLowerCase().includes('enhancement')
-        );
-
-        return hasListOrEnhancementData;
     }
 
     /**

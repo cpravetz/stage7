@@ -157,6 +157,9 @@ services:
       RABBITMQ_URL: *rabbitmqUrl
       TRAFFICMANAGER_URL: *trafficmanagerUrl
       CAPABILITIESMANAGER_URL: &capabilitiesmanagerUrl capabilitiesmanager:5060
+      LIBRARIAN_URL: *librarianUrl
+      MISSIONCONTROL_URL: *missioncontrolUrl
+      BRAIN_URL: *brainUrl
       AGENTSET_CLIENT_SECRET: *sharedSecret
       CLIENT_SECRET: *sharedSecret
     volumes:

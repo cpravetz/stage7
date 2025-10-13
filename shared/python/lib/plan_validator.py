@@ -1290,13 +1290,19 @@ Return ONLY the corrected JSON plan, no explanations."""
 
                                 # Now, compare the types
                                 if dest_input_type and source_output_type:
-                                    # Allow implicit conversion to string for any non-array/list type
-                                    if dest_input_type == 'string' and source_output_type not in ['array', 'list']:
-                                        is_mismatch = False
+                                    is_mismatch = False # Assume no mismatch initially
+
+                                    # Allow implicit conversion of unitary types (boolean, number) to string
+                                    if dest_input_type == 'string' and source_output_type in ['boolean', 'number']:
+                                        is_mismatch = False # Not a mismatch, allow implicit conversion
+                                    elif dest_input_type == 'string' and source_output_type not in ['array', 'list']:
+                                        is_mismatch = False # Already handled, but keep for clarity
                                     elif dest_input_type == 'array' and source_output_type == 'string':
                                         is_mismatch = False
                                     else:
+                                        # For all other cases, check for strict type equality or 'any'
                                         is_mismatch = dest_input_type != source_output_type and dest_input_type != 'any' and source_output_type != 'any'
+
                                     is_wrappable = dest_input_type in ['string', 'number', 'object'] and source_output_type in ['array', 'list']
 
                                     if is_wrappable:

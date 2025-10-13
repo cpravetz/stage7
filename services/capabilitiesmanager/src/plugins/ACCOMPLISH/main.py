@@ -633,45 +633,15 @@ CRITICAL PLANNING_PRINCIPLES:
                         logger.warning(f"Attempt {attempt + 1}: LLM returned a JSON object with numeric keys. Converting to array.")
                         plan = converted_plan_list
 
-                if isinstance(plan, list):
-                    
-                    processed_plan = []
-                    for step in plan:
-                        processed_plan.append(step)
-                        if 'outputs' in step and isinstance(step['outputs'], dict):
-                            # Iterate over a copy of the items to allow modification during iteration
-                            for original_output_name, output_def in list(step['outputs'].items()):
-                                if isinstance(output_def, dict) and output_def.get('isDeliverable'):
-                                    filename = output_def.get('filename')
-                                    if filename:
-                                        file_op_step = {
-                                            "number": len(processed_plan) + 1,
-                                            "actionVerb": "FILE_OPERATION",
-                                            "description": f"Save deliverable '{original_output_name}' to file '{filename}'",
-                                            "inputs": {
-                                                "operation": {"value": "write", "valueType": "string"},
-                                                "path": {"value": filename, "valueType": "string"},
-                                                "content": {
-                                                    "outputName": original_output_name, # Reference the original output name
-                                                    "sourceStep": step['number'],
-                                                    "valueType": output_def.get('valueType', 'string')
-                                                },
-                                                "missionId": {"value": mission_id, "valueType": "string"}
-                                            },
-                                            "outputs": {
-                                                "status": {
-                                                    "description": "Status of the file write operation",
-                                                    "valueType": "string"
-                                                }
-                                            }
-                                        }
-                                        processed_plan.append(file_op_step)
+                                if isinstance(plan, list):
 
-                    # Renumber steps
-                    for i, step in enumerate(processed_plan):
-                        step['number'] = i + 1
-                        
-                    return processed_plan
+                                    # No longer inserting FILE_OPERATION steps here.
+
+                                    # The system's core capabilities manager handles saving deliverables
+
+                                    # based on the 'isDeliverable' flag.
+
+                                    return plan
                 else:
                     logger.warning(f"Attempt {attempt + 1}: Response is not a JSON array. Response: {response}")
                     continue
