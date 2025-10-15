@@ -377,6 +377,16 @@ export class Brain extends BaseEntity {
                 await new Promise(resolve => setTimeout(resolve, retryDelay));
             }
         }
+
+        // If the loop completes without sending a response, it means we failed to find a model.
+        if (!res.headersSent) {
+            console.error(`[Brain Chat] Failed to find a suitable model after all retries. Last error: ${lastError}`);
+            res.status(503).json({
+                error: `Service Unavailable: Could not find a suitable model to handle the request. Last error: ${lastError}`,
+                model: lastModelName,
+                requestId: requestId
+            });
+        }
     }
 
     private async _chatWithModel(selectedModel: any, thread: any, res: express.Response, requestId: string): Promise<void> {
