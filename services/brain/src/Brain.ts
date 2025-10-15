@@ -25,6 +25,7 @@ const port = process.env.PORT || 5070;
 export class Brain extends BaseEntity {
     private modelManager: ModelManager;
     private llmCalls: number = 0;
+    private activeLLMCalls: number = 0;
     private modelFailureCounts: { 
         [key: string]: { 
             timeout: number;
@@ -93,7 +94,7 @@ export class Brain extends BaseEntity {
         });
 
         app.get('/getLLMCalls', (_req: express.Request, res: express.Response) => {
-            res.json({ llmCalls: this.llmCalls });
+            res.json({ llmCalls: this.llmCalls, activeLLMCalls: this.activeLLMCalls});
         });
 
         app.get('/models', (_req: express.Request, res: express.Response) => {
@@ -186,10 +187,11 @@ export class Brain extends BaseEntity {
                 trackingRequestId = this.modelManager.trackModelRequest(selectedModel.name, conversationType, prompt);
 
                 this.llmCalls++;
+                this.activeLLMCalls++;
                 console.log(`[Brain Generate] Attempt ${attempt}: Using model ${selectedModel.modelName}-${conversationType}`);
 
                 const result = await selectedModel.llminterface?.convert(selectedModel.service, conversationType, modelConvertParams);
-
+                this.activeLLMCalls = Math.max(0, this.activeLLMCalls - 1);
                 this.modelManager.trackModelResponse(trackingRequestId, result || '', 0, true);
 
                 if (selectedModel.name in this.modelTimeoutCounts) {
@@ -391,6 +393,7 @@ export class Brain extends BaseEntity {
 
     private async _chatWithModel(selectedModel: any, thread: any, res: express.Response, requestId: string): Promise<void> {
         this.llmCalls++;
+        this.activeLLMCalls++;
         console.log(`[Brain Chat] Using model ${selectedModel.modelName} for request ${requestId}`);
 
         const filteredOptionals = this.filterInternalParameters(thread.optionals || {});
@@ -406,7 +409,7 @@ export class Brain extends BaseEntity {
                 ...filteredOptionals
             }
         );
-
+        this.activeLLMCalls = Math.max(0, this.activeLLMCalls - 1);
         if (!modelResponse || modelResponse === 'No response generated' ||
             (typeof modelResponse === 'string' && modelResponse.startsWith('Error:'))) {
             throw new Error(modelResponse || 'Model returned empty response');

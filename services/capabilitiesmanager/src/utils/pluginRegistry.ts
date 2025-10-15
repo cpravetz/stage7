@@ -380,7 +380,7 @@ export class PluginRegistry {
         if (!this.pluginMarketplace || typeof this.pluginMarketplace.getRepositories !== 'function') {
             throw new Error('PluginRegistry: pluginMarketplace is not initialized or invalid.');
         }
-        this.initialize();
+
     }
 
     private async _prepareGitPlugin(manifest: PluginManifest, targetDir: string): Promise<void> {

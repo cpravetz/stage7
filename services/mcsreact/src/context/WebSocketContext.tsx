@@ -91,6 +91,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [agentDetails, setAgentDetails] = useState<any[]>([]);
   const [statistics, setStatistics] = useState<any>({
     llmCalls: 0,
+    activeLLMCalls: 0,
     agentCountByStatus: {},
     agentStatistics: new Map(),
     engineerStatistics: { newPlugins: [] }

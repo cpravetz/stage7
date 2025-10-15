@@ -627,7 +627,7 @@ describe('MissionControl Service', () => {
             missionControl.missions.set(mockMissionId, mockMission);
             missionControl.addClientMission('client1', mockMissionId);
 
-            mockAuthenticatedApiGet.mockResolvedValueOnce({ data: { llmCalls: 10 } }); // Brain LLM calls
+            mockAuthenticatedApiGet.mockResolvedValueOnce({ data: { llmCalls: 10, activeLLMCalls: 2 } }); // Brain LLM calls
             mockAuthenticatedApiGet.mockResolvedValueOnce({ data: { newPlugins: ['plugin1'] } }); // Engineer stats
             mockAuthenticatedApiGet.mockResolvedValueOnce({ data: { agentStatisticsByType: { agentCountByStatus: { RUNNING: 1 } }, agentStatisticsByStatus: new Map([['RUNNING', [{ id: 'agent1', steps: [] }]]]) } }); // TrafficManager stats
         });

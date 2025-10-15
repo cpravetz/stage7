@@ -46,6 +46,7 @@ export interface AgentStatistics {
   startTime: number;
   endTime?: number;
   llmCalls: number;
+  activeLLMCalls: number;
   pluginCalls: number;
   steps: AgentStep[];
   color?: string;
@@ -56,6 +57,7 @@ export interface MissionStatistics {
   startTime?: number;
   endTime?: number;
   llmCalls: number;
+  activeLLMCalls: number;
   agentCount?: number;
   activeAgents?: number;
   completedAgents?: number;

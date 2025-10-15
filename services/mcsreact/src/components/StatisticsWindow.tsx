@@ -135,10 +135,24 @@ const StatisticsWindow: React.FC<Props> = ({ statistics, activeMissionName, acti
       </Paper>
 
       <Paper elevation={1} sx={{ p: 2, mb: 3, borderRadius: 2 }}>
-        <Typography variant="subtitle1" color="text.secondary" gutterBottom>
-          LLM Usage
-        </Typography>
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Typography variant="subtitle1" color="text.secondary" gutterBottom>
+            LLM Usage
+          </Typography>
+          {statistics.activeLLMCalls > 0 &&
+            <Typography variant="body2" sx={{
+              animation: 'pulse 1s infinite',
+              '@keyframes pulse': {
+                '0%': { opacity: 1 },
+                '50%': { opacity: 0.2 },
+                '100%': { opacity: 1 },
+              },
+            }}>
+              Thinking
+            </Typography>
+          }
+        </Box>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 1 }}>
           <Typography variant="body1">Total Calls:</Typography>
           <Chip
             label={statistics.llmCalls}

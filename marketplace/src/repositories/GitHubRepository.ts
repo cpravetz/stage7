@@ -1,6 +1,5 @@
 import { PluginManifest, PluginRepository, RepositoryConfig, PluginLocator } from '@cktmcs/shared';
 import axios, { AxiosError, AxiosResponse } from 'axios'; // Import AxiosError and AxiosResponse
-import { analyzeError } from '@cktmcs/errorhandler'; // Restored analyzeError for error handling
 
 // Utility for retry logic
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -105,20 +104,18 @@ export class GitHubRepository implements PluginRepository {
     }
 
     private async _fetchDefaultBranchFromServer(): Promise<string> {
-        if (!this.isEnabled) throw analyzeError(new Error("GitHub access disabled."));
+        if (!this.isEnabled) {
+            console.warn("GitHubRepository: GitHub access disabled, cannot fetch default branch. Returning 'main'.");
+            return 'main'; // Return a default if disabled
+        }
         console.log(`GitHubRepository: Fetching default branch for ${this.repoOwner}/${this.repoName}...`);
-        try {
-            const response = await this.makeGitHubRequest('GET', this.baseApiUrl); // Get repo metadata
-            if (response.data && response.data.default_branch) {
-                return response.data.default_branch;
-            } else {
-                throw analyzeError(new Error(`Could not determine default branch from GitHub API response for ${this.repoOwner}/${this.repoName}. Response missing default_branch field.`));
-            }
-        } catch (error) {
-            console.warn(`GitHubRepository: Failed to fetch default branch from server for ${this.repoOwner}/${this.repoName}. Defaulting to 'main' for this operation.`);
-            // Fallback to 'main' as a common default, but issue warning.
-            // This prevents total failure if repo exists but initial metadata call fails for transient reason.
-            return 'main'; 
+        const response = await this.makeGitHubRequest('GET', this.baseApiUrl); // Get repo metadata
+
+        if (response.status === 200 && response.data && response.data.default_branch) {
+            return response.data.default_branch;
+        } else {
+            console.warn(`GitHubRepository: Failed to fetch default branch from server for ${this.repoOwner}/${this.repoName}. Status: ${response.status}. Response missing default_branch field or request failed. Defaulting to 'main' for this operation.`);
+            return 'main';
         }
     }
 
@@ -138,7 +135,15 @@ export class GitHubRepository implements PluginRepository {
             if (Date.now() - this.lastFailureTime > this.openTimeout) {
                 this.circuitState = 'HALF_OPEN';
             } else {
-                return Promise.reject(new Error('Circuit is open. GitHub repository is temporarily unavailable.'));
+                // Return a dummy response instead of rejecting the promise
+                return {
+                    data: { message: 'Circuit is open. GitHub repository is temporarily unavailable.' },
+                    status: 503, // Service Unavailable
+                    statusText: 'Service Unavailable',
+                    headers: {},
+                    config: {},
+                    request: {},
+                } as AxiosResponse;
             }
         }
 
@@ -146,14 +151,25 @@ export class GitHubRepository implements PluginRepository {
             const errorMsg = 'GitHub access is disabled by configuration.';
             console.warn(`GitHubRepository: ${errorMsg}`);
             // Simulate a "service unavailable" or "forbidden" type of error locally
-            const err = new Error(errorMsg) as AxiosError;
-            (err as any).response = { status: 403, data: { message: errorMsg }};
-            (err as any).isAxiosError = true;
-            return Promise.reject(err);
+            return {
+                data: { message: errorMsg },
+                status: 403, // Forbidden
+                statusText: 'Forbidden',
+                headers: {},
+                config: {},
+                request: {},
+            } as AxiosResponse;
         }
         if (!this.token) {
              console.error(new Error('GitHub token not configured or missing.'));
-             return Promise.reject(new Error('GitHub token not configured or missing.'));
+             return {
+                data: { message: 'GitHub token not configured or missing.' },
+                status: 401, // Unauthorized
+                statusText: 'Unauthorized',
+                headers: {},
+                config: {},
+                request: {},
+            } as AxiosResponse;
         }
 
         try {
@@ -193,7 +209,15 @@ export class GitHubRepository implements PluginRepository {
                 const messageDetails = responseData ? ( (typeof responseData === 'string' ? responseData : JSON.stringify(responseData)) || "No additional details from API.") : (error.message || "Unknown Axios error");
 
                 console.error(new Error(`GitHub API Error for ${method} ${url}. Status: ${status}. Details: ${messageDetails}`));
-                return Promise.reject(error);
+                console.error(`GitHubRepository: Failed request URL: ${url}, Status: ${status}`);
+                return {
+                    data: { message: `GitHub API Error: ${messageDetails}` },
+                    status: status,
+                    statusText: error.response.statusText,
+                    headers: error.response.headers,
+                    config: error.config,
+                    request: error.request,
+                } as AxiosResponse;
             }
             // Non-Axios error or Axios error without response
             if (error instanceof Error) {
@@ -201,7 +225,14 @@ export class GitHubRepository implements PluginRepository {
             } else {
                 console.error(new Error(`Unexpected error during GitHub request to ${url}: Unknown error`));
             }
-            return Promise.reject(error);
+            return {
+                data: { message: `Unexpected error during GitHub request to ${url}` },
+                status: 500, // Internal Server Error
+                statusText: 'Internal Server Error',
+                headers: {},
+                config: {},
+                request: {},
+            } as AxiosResponse;
         }
     }
 
@@ -212,23 +243,31 @@ export class GitHubRepository implements PluginRepository {
         // Path includes version: plugins/{pluginId}/{version}/manifest.json
         const manifestPath = `${this.pluginsDir}/${manifest.id}/${manifest.version}/manifest.json`;
         
-        await this.createOrUpdateFile(
+        const manifestUpdateResult = await this.createOrUpdateFile(
             manifestPath,
             JSON.stringify(manifest, null, 2),
             `Publishing plugin ${manifest.id} v${manifest.version} - ${manifest.verb}`,
             branch
         );
+        if (!manifestUpdateResult) {
+            console.error(`GitHubRepository: Failed to store manifest for plugin ${manifest.id} v${manifest.version}.`);
+            return; // Exit if manifest storage failed
+        }
 
         if (!(manifest.packageSource && manifest.packageSource.type === 'git')) {
             if (manifest.entryPoint?.files) {
                 const basePluginVersionPath = `${this.pluginsDir}/${manifest.id}/${manifest.version}`;
                 for (const [filename, content] of Object.entries(manifest.entryPoint.files)) {
-                    await this.createOrUpdateFile(
+                    const fileUpdateResult = await this.createOrUpdateFile(
                         `${basePluginVersionPath}/${filename}`,
                         content,
                         `Adding file ${filename} for plugin ${manifest.id} v${manifest.version}`,
                         branch
                     );
+                    if (!fileUpdateResult) {
+                        console.error(`GitHubRepository: Failed to store file ${filename} for plugin ${manifest.id} v${manifest.version}.`);
+                        // Continue to try other files or decide to return
+                    }
                 }
             }
         }
@@ -255,6 +294,19 @@ export class GitHubRepository implements PluginRepository {
         
         const manifestContent = await this.getFileContent(manifestPath, effectiveBranch);
         if (!manifestContent) {
+            // If manifest not found and pluginId starts with 'plugin-', try fetching without the prefix
+            if (pluginId.startsWith('plugin-')) {
+                const strippedPluginId = pluginId.substring('plugin-'.length);
+                const strippedManifestPath = `${this.pluginsDir}/${strippedPluginId}/${version ? `${version}/` : ''}manifest.json`;
+                const strippedManifestContent = await this.getFileContent(strippedManifestPath, effectiveBranch);
+                if (strippedManifestContent) {
+                    console.log(`GitHubRepository.fetch: Found manifest for pluginId '${pluginId}' by trying stripped ID '${strippedPluginId}'.`);
+                    const manifest = JSON.parse(strippedManifestContent) as PluginManifest;
+                    // Update manifest ID to match the requested pluginId for consistency
+                    manifest.id = pluginId;
+                    return manifest;
+                }
+            }
             console.log(`GitHubRepository.fetch: Manifest not found for pluginId '${pluginId}' ${version ? `version '${version}'` : '(default/latest)'} at path '${manifestPath}' on branch '${effectiveBranch}'.`);
             return undefined;
         }
@@ -265,26 +317,21 @@ export class GitHubRepository implements PluginRepository {
         if (!(manifest.packageSource && manifest.packageSource.type === 'git')) {
             if (manifest.entryPoint && (!manifest.entryPoint.files || Object.keys(manifest.entryPoint.files).length === 0) ) {
                 manifest.entryPoint.files = {}; // Initialize if null/undefined
-                try {
-                    // List files in the baseContentFetchingPath (versioned or default path)
-                    const filesInDirResponse = await this.makeGitHubRequest('GET', `${this.baseContentUrl}/${baseContentFetchingPath}`, undefined, { ref: effectiveBranch });
-                    if (filesInDirResponse.status === 200 && Array.isArray(filesInDirResponse.data)) {
-                        const filesToFetch = filesInDirResponse.data.filter((item: { type: string; name: string }) =>
-                            item.type === 'file' && item.name !== 'manifest.json'
-                        );
-                        for (const file of filesToFetch) {
-                            const fileContent = await this.getFileContent(`${baseContentFetchingPath}/${file.name}`, effectiveBranch);
-                            if (fileContent) {
-                                manifest.entryPoint.files[file.name] = fileContent;
-                            }
+                const filesInDirResponse = await this.makeGitHubRequest('GET', `${this.baseContentUrl}/${baseContentFetchingPath}`, undefined, { ref: effectiveBranch });
+                if (filesInDirResponse.status === 200 && Array.isArray(filesInDirResponse.data)) {
+                    const filesToFetch = filesInDirResponse.data.filter((item: { type: string; name: string }) =>
+                        item.type === 'file' && item.name !== 'manifest.json'
+                    );
+                    for (const file of filesToFetch) {
+                        const fileContent = await this.getFileContent(`${baseContentFetchingPath}/${file.name}`, effectiveBranch);
+                        if (fileContent) {
+                            manifest.entryPoint.files[file.name] = fileContent;
                         }
                     }
-                } catch (error) {
-                    if (typeof error === 'object' && error !== null && 'code' in error && 'message' in error && (error as any).code !== 'RESOURCE_NOT_FOUND') {
-                         console.warn(`GitHubRepository: Failed to fetch entry point files for inline plugin ${pluginId} ${version ? `v${version}` : '(default)'} on branch ${effectiveBranch}: ${error.message}`);
-                    } else {
-                         console.log(`GitHubRepository: No additional entry point files found for inline plugin ${pluginId} ${version ? `v${version}` : '(default)'} on branch ${effectiveBranch}.`)
-                    }
+                } else if (filesInDirResponse.status !== 404) {
+                    console.warn(`GitHubRepository: Failed to fetch entry point files for inline plugin ${pluginId} ${version ? `v${version}` : '(default)'} on branch ${effectiveBranch}. Status: ${filesInDirResponse.status}`);
+                } else {
+                    console.log(`GitHubRepository: No additional entry point files found for inline plugin ${pluginId} ${version ? `v${version}` : '(default)'} on branch ${effectiveBranch}.`);
                 }
             }
         }
@@ -297,35 +344,26 @@ export class GitHubRepository implements PluginRepository {
 
         const effectiveBranch = await this._getEffectiveBranch();
         const pluginBaseDir = `${this.pluginsDir}/${pluginId}`;
-        let versionDirs: any[];
+        let versionDirs: any[] = []; // Initialize to empty array
 
-        try {
-            const response = await this.makeGitHubRequest('GET', `${this.baseContentUrl}/${pluginBaseDir}`, undefined, { ref: effectiveBranch });
-            if (response.status !== 200 || !Array.isArray(response.data)) {
-                console.warn(`GitHubRepository: No versions found or error listing versions for plugin ${pluginId} at ${pluginBaseDir}`);
-                return undefined; // Or empty array
-            }
+        const response = await this.makeGitHubRequest('GET', `${this.baseContentUrl}/${pluginBaseDir}`, undefined, { ref: effectiveBranch });
+
+        if (response.status === 200 && Array.isArray(response.data)) {
             versionDirs = response.data.filter((item: { type: string }) => item.type === 'dir');
-        } catch (error) {
-            if (typeof error === 'object' && error !== null && 'code' in error && (error as any).code !== 'RESOURCE_NOT_FOUND') {
-                console.log(`GitHubRepository: Plugin directory not found for pluginId '${pluginId}' at ${pluginBaseDir}`);
-                return undefined; // Or empty array
-            }
-            throw error; // Re-throw other errors
+        } else if (response.status === 404) {
+            console.log(`GitHubRepository: Plugin directory not found for pluginId '${pluginId}' at ${pluginBaseDir}. Status: 404.`);
+            return undefined; // Or empty array, depending on desired behavior
+        } else {
+            console.warn(`GitHubRepository: Failed to list versions for plugin ${pluginId} at ${pluginBaseDir}. Status: ${response.status}.`);
+            return undefined; // Or empty array
         }
 
         const manifests: PluginManifest[] = [];
         for (const versionDir of versionDirs) {
             const version = versionDir.name;
-            try {
-                const manifest = await this.fetch(pluginId, version); // Use existing fetch with specific version
-                if (manifest) {
-                    manifests.push(manifest);
-                }
-            } catch (error) {
-                if (typeof error === 'object' && error !== null && 'message' in error ) {
-                    console.warn(`GitHubRepository: Failed to fetch manifest for ${pluginId} version ${version}: ${error.message}`);
-                }
+            const manifest = await this.fetch(pluginId, version);
+            if (manifest) {
+                manifests.push(manifest);
             }
         }
         return manifests.length > 0 ? manifests : undefined;
@@ -341,13 +379,13 @@ export class GitHubRepository implements PluginRepository {
             if (locator.verb === verb) {
                 if (version) { // If a specific version is requested for the verb
                     if (locator.version === version) {
-                        return this.fetch(locator.id, locator.version); // locator.id is base pluginId
+                        return this.fetch(locator.id, locator.version);
                     }
                 } else {
                     // No specific version requested for the verb, return the first one found (likely latest if list is sorted, or arbitrary)
                     // To get the "latest" reliably, list() needs to sort versions or fetchAllVersions + sort here.
                     // For simplicity now, just fetching the located one.
-                    return this.fetch(locator.id, locator.version); 
+                    return this.fetch(locator.id, locator.version);
                 }
             }
         }
@@ -367,43 +405,87 @@ export class GitHubRepository implements PluginRepository {
             pathToDelete = `${this.pluginsDir}/${pluginId}`; // Delete entire plugin directory if no version
         }
 
-        try {
-            // List all files/dirs under pathToDelete to get their SHAs for deletion
-            const response = await this.makeGitHubRequest('GET', `${this.baseContentUrl}/${pathToDelete}`, undefined, { ref: effectiveBranch });
-            if (response.status === 200 && Array.isArray(response.data)) {
-                for (const item of response.data) { // item can be file or dir
-                    // Note: GitHub API doesn't directly delete folders. Must delete all files within.
-                    // This simplified delete assumes we are deleting a version folder or a plugin folder that contains files.
-                    // For recursive delete of a folder, one would list contents recursively and delete files.
-                    // For now, if it's a file, delete it. If it's a folder (e.g. deleting a pluginId with version subfolders), this won't recurse.
-                     if (item.type === 'file') {
-                        await this.deleteFile(
-                            item.path, // Full path from item.path
-                            item.sha,
-                            `Deleting file ${item.name} for ${pluginId}${version ? ` v${version}` : ''}`,
-                            effectiveBranch
-                        );
-                    } else if (item.type === 'dir' && version) { // If deleting a specific version, we might have files in that version dir
-                        // This means pathToDelete was plugins/{pluginId}/{version}
-                        // We need to list files inside this item.path (which is plugins/{pluginId}/{version}/{fileName})
-                        // This part is complex for a simple delete. The current logic will only delete files directly under pathToDelete.
-                        // A true recursive delete is needed if we expect nested structures beyond manifest + files.
-                         console.warn(`GitHubRepository.delete: item ${item.path} is a directory. Recursive delete for directories not fully implemented here. Only direct files under ${pathToDelete} will be attempted for deletion.`);
+        const response = await this.makeGitHubRequest('GET', `${this.baseContentUrl}/${pathToDelete}`, undefined, { ref: effectiveBranch });
+        if (response.status === 200 && Array.isArray(response.data)) {
+            for (const item of response.data) { // item can be file or dir
+                if (item.type === 'file') {
+                    const deleteResult = await this.deleteFile(
+                        item.path, // Full path from item.path
+                        item.sha,
+                        `Deleting file ${item.name} for ${pluginId}${version ? ` v${version}` : ''}`,
+                        effectiveBranch
+                    );
+                    if (!deleteResult) {
+                        console.error(`GitHubRepository: Failed to delete file ${item.name} for ${pluginId}${version ? ` v${version}` : ''}.`);
                     }
+                } else if (item.type === 'dir' && version) {
+                    console.warn(`GitHubRepository.delete: item ${item.path} is a directory. Recursive delete for directories not fully implemented here. Only direct files under ${pathToDelete} will be attempted for deletion.`);
                 }
-                 console.log(`GitHubRepository: Attempted to delete files for ${pathToDelete} from branch ${effectiveBranch}.`);
-            } else {
-                console.log(`GitHubRepository: No files found to delete for ${pathToDelete} on branch ${effectiveBranch}.`);
             }
-        } catch (error: unknown) {
-            if (typeof error === 'object' && error !== null && 'code' in error && (error as any).code === 'RESOURCE_NOT_FOUND') {
-                console.log(`GitHubRepository: Path ${pathToDelete} not found for deletion on branch ${effectiveBranch}. Nothing to delete.`);
-                return;
-            }
-            throw error; // Re-throw other errors
+            console.log(`GitHubRepository: Attempted to delete files for ${pathToDelete} from branch ${effectiveBranch}.`);
+        } else if (response.status === 404) {
+            console.log(`GitHubRepository: Path ${pathToDelete} not found for deletion on branch ${effectiveBranch}. Nothing to delete.`);
+        } else {
+            console.error(`GitHubRepository: Failed to list contents for deletion at ${pathToDelete}. Status: ${response.status}.`);
         }
     }
 
+    private async getFileContent(path: string, ref?: string): Promise<string | undefined> {
+        if (!this.isEnabled) return undefined;
+        const response = await this.makeGitHubRequest('GET', `${this.baseContentUrl}/${path}`, undefined, { ref: ref || await this._getEffectiveBranch() });
+        if (response.status === 200 && response.data.content) {
+            return Buffer.from(response.data.content, 'base64').toString('utf-8');
+        }
+        // Log if it's a 404, otherwise just return undefined
+        if (response.status === 404) {
+            console.log(`GitHubRepository.getFileContent: Path '${path}' not found (404).`);
+        } else {
+            console.warn(`GitHubRepository.getFileContent: Failed to get content for path '${path}'. Status: ${response.status}`);
+        }
+        return undefined;
+    }
+
+    private async createOrUpdateFile(path: string, content: string, message: string, branch: string): Promise<boolean> {
+        if (!this.isEnabled) return false;
+        let sha: string | undefined;
+        const getResponse = await this.makeGitHubRequest('GET', `${this.baseContentUrl}/${path}`, undefined, { ref: branch });
+        if (getResponse.status === 200) {
+            sha = getResponse.data.sha;
+        } else if (getResponse.status !== 404) { // If not 200 and not 404, it's an unexpected error
+            console.error(`GitHubRepository: Failed to check existence of file ${path}. Status: ${getResponse.status}.`);
+            return false;
+        }
+
+        const putResponse = await this.makeGitHubRequest('PUT', `${this.baseContentUrl}/${path}`, {
+            message,
+            content: Buffer.from(content).toString('base64'),
+            sha, // If undefined, GitHub creates a new file. If provided, it updates existing.
+            branch
+        });
+
+        if (putResponse.status === 200 || putResponse.status === 201) {
+            return true;
+        } else {
+            console.error(`GitHubRepository: Failed to create or update file ${path}. Status: ${putResponse.status}.`);
+            return false;
+        }
+    }
+
+    private async deleteFile(path: string, sha: string, message: string, branch: string): Promise<boolean> {
+        if (!this.isEnabled) return false;
+        const response = await this.makeGitHubRequest('DELETE', `${this.baseContentUrl}/${path}`, {
+            message,
+            sha,
+            branch
+        });
+
+        if (response.status === 200) {
+            return true;
+        } else {
+            console.error(`GitHubRepository: Failed to delete file ${path}. Status: ${response.status}.`);
+            return false;
+        }
+    }
     async list(): Promise<PluginLocator[]> {
         if (!this.isEnabled) return [];
         const effectiveBranch = await this._getEffectiveBranch();
@@ -481,50 +563,4 @@ export class GitHubRepository implements PluginRepository {
         return locators;
     }
 
-    private async getFileContent(path: string, ref?: string): Promise<string | undefined> {
-        if (!this.isEnabled) return undefined;
-        try {
-            const response = await this.makeGitHubRequest('GET', `${this.baseContentUrl}/${path}`, undefined, { ref: ref || await this._getEffectiveBranch() });
-            if (response.status === 200 && response.data.content) {
-                return Buffer.from(response.data.content, 'base64').toString('utf-8');
-            }
-            return undefined;
-        } catch (error: unknown) {
-            if (typeof error === 'object' && error !== null && 'code' in error && (error as any).code === 'RESOURCE_NOT_FOUND') {
-                return undefined;
-            }
-            throw error; // Re-throw other errors
-        }
-    }
-
-    private async createOrUpdateFile(path: string, content: string, message: string, branch: string): Promise<void> {
-        if (!this.isEnabled) return;
-        let sha: string | undefined;
-        try {
-            const response = await this.makeGitHubRequest('GET', `${this.baseContentUrl}/${path}`, undefined, { ref: branch });
-            if (response.status === 200) {
-                sha = response.data.sha;
-            }
-        } catch (error: unknown) {
-            if (!(typeof error === 'object' && error !== null && 'code' in error && (error as any).code === 'RESOURCE_NOT_FOUND')) {
-                throw error; // Re-throw if not a 404 (file doesn't exist is fine for creation)
-            }
-        }
-
-        await this.makeGitHubRequest('PUT', `${this.baseContentUrl}/${path}`, {
-            message,
-            content: Buffer.from(content).toString('base64'),
-            sha, // If undefined, GitHub creates a new file. If provided, it updates existing.
-            branch
-        });
-    }
-
-    private async deleteFile(path: string, sha: string, message: string, branch: string): Promise<void> {
-        if (!this.isEnabled) return;
-        await this.makeGitHubRequest('DELETE', `${this.baseContentUrl}/${path}`, {
-            message,
-            sha,
-            branch
-        });
-    }
 }
