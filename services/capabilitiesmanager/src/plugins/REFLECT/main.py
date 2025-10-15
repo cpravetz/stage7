@@ -347,9 +347,15 @@ class ReflectHandler:
         """Extract reflection information from inputs"""
         mission_id_input = inputs.get('missionId')
         if isinstance(mission_id_input, dict) and 'value' in mission_id_input:
-            mission_id = str(mission_id_input['value']).strip()
+            value_content = mission_id_input['value']
+            if isinstance(value_content, (dict, list)):
+                mission_id = json.dumps(value_content)
+            else:
+                mission_id = str(value_content).strip()
         elif isinstance(mission_id_input, str):
             mission_id = mission_id_input.strip()
+        elif isinstance(mission_id_input, (dict, list)):
+            mission_id = json.dumps(mission_id_input)
         else:
             mission_id = ''
 
@@ -373,26 +379,44 @@ class ReflectHandler:
 
         work_products_input = inputs.get('work_products')
         if isinstance(work_products_input, dict) and 'value' in work_products_input:
-            work_products = str(work_products_input['value']).strip()
+            value_content = work_products_input['value']
+            if isinstance(value_content, (dict, list)):
+                work_products = json.dumps(value_content)
+            else:
+                work_products = str(value_content).strip()
         elif isinstance(work_products_input, str):
             work_products = work_products_input.strip()
+        elif isinstance(work_products_input, (dict, list)):
+            work_products = json.dumps(work_products_input)
         else:
             work_products = ''
 
         question_input = inputs.get('question')
         if isinstance(question_input, dict) and 'value' in question_input:
-            question = str(question_input['value']).strip()
+            value_content = question_input['value']
+            if isinstance(value_content, (dict, list)):
+                question = json.dumps(value_content)
+            else:
+                question = str(value_content).strip()
         elif isinstance(question_input, str):
             question = question_input.strip()
+        elif isinstance(question_input, (dict, list)):
+            question = json.dumps(question_input)
         else:
             question = ''
 
         # final_output is optional; default to empty string if not provided
         final_output_input = inputs.get('final_output')
         if isinstance(final_output_input, dict) and 'value' in final_output_input:
-            final_output = str(final_output_input['value']).strip()
+            value_content = final_output_input['value']
+            if isinstance(value_content, (dict, list)):
+                final_output = json.dumps(value_content)
+            else:
+                final_output = str(value_content).strip()
         elif isinstance(final_output_input, str):
             final_output = final_output_input.strip()
+        elif isinstance(final_output_input, (dict, list)):
+            final_output = json.dumps(final_output_input)
         else:
             final_output = ''
 
@@ -405,9 +429,15 @@ class ReflectHandler:
         # Extract agent ID for self-correction
         agent_id_input = inputs.get('agentId')
         if isinstance(agent_id_input, dict) and 'value' in agent_id_input:
-            agent_id = str(agent_id_input['value']).strip()
+            value_content = agent_id_input['value']
+            if isinstance(value_content, (dict, list)):
+                agent_id = json.dumps(value_content)
+            else:
+                agent_id = str(value_content).strip()
         elif isinstance(agent_id_input, str):
             agent_id = agent_id_input.strip()
+        elif isinstance(agent_id_input, (dict, list)):
+            agent_id = json.dumps(agent_id_input)
         else:
             agent_id = ''
 

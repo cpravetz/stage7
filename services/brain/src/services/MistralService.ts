@@ -32,21 +32,17 @@ export class MistralService extends BaseService {
                 this.rateLimitResetTime = null;
                 this.ready = true;
             } else {
-                console.warn(`MistralService is rate limited until ${new Date(this.rateLimitResetTime).toISOString()}`);
                 return false;
             }
         }
 
         const available = !!this.apiKey && this.apiKey.length > 0 && this.ready;
-        //console.log(`MistralService availability check: ${available ? 'Available' : 'Not available'}`);
         if (!available) {
             if (!this.apiKey || this.apiKey.length === 0) {
                 console.error('MistralService is not available. Check MISTRAL_API_KEY environment variable.');
             } else if (!this.ready) {
                 console.warn('MistralService is temporarily unavailable due to rate limiting.');
             }
-        } else {
-            console.log('MistralService is available and ready to use.');
         }
 
         return available;

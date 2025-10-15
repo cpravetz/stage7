@@ -694,7 +694,11 @@ export class PluginRegistry {
                                 this.verbIndex.set(manifest.verb, manifest.id);
                             }
                         } catch (pluginError) {
-                            console.error(`Failed to fetch manifest for plugin ${locator.id} from ${repoType} repository during cache refresh:`, pluginError);
+                            if (pluginError instanceof Error) {
+                                console.error(`Failed to fetch manifest for plugin ${locator.id} from ${repoType} repository during cache refresh: ${pluginError.message}`, pluginError);
+                            } else {
+                                console.error(`Failed to fetch manifest for plugin ${locator.id} from ${repoType} repository during cache refresh:`, pluginError);
+                            }
                         }
                     }
                     console.log(`Loaded ${plugins.length} plugins from ${repoType} repository`);

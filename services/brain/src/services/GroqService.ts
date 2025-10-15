@@ -62,14 +62,9 @@ export class GroqService extends BaseService {
         const hasValidKey = !!(this.apiKey && this.apiKey !== "''" && this.apiKey !== '""');
         const available = this.ready && hasValidKey;
 
-        //console.log(`GroqService availability check: ${available ? 'Available' : 'Not available'}`);
-        console.log(`GroqService ready state: ${this.ready ? 'Ready' : 'Not ready'}`);
-
         if (!available) {
             console.error('GroqService is not available. Check GROQ_API_KEY environment variable in .env file.');
             console.error('Make sure the .env file is properly loaded and contains a valid GROQ_API_KEY');
-        } else {
-            console.log('GroqService is available and ready to use.');
         }
 
         return available;

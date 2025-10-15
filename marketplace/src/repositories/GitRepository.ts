@@ -108,6 +108,7 @@ export class GitRepository implements PluginRepository {
             }
 
             if (!manifestPath) {
+                console.warn(`Manifest for plugin ID ${id} not found in Git repository.`);
                 return undefined;
             }
 
@@ -161,6 +162,7 @@ export class GitRepository implements PluginRepository {
             }
 
             if (!manifestPath) {
+                console.warn(`Manifest for plugin verb ${verb} not found in Git repository.`);
                 return undefined;
             }
 
@@ -261,11 +263,15 @@ export class GitRepository implements PluginRepository {
                             repository: {
                                 type: this.type,
                                 url: this.config.url,
-                                dependencies: manifest.repository.dependencies
+                                dependencies: manifest.repository?.dependencies || undefined
                             }
                         });
                     } catch (error) {
-                        console.warn(`Failed to parse manifest file ${file}:`, error);
+                        if (error instanceof SyntaxError) {
+                            console.warn(`Failed to parse manifest file ${file} (malformed JSON):`, error.message);
+                        } else {
+                            console.warn(`Failed to process manifest file ${file}:`, error);
+                        }
                         continue;
                     }
                 }

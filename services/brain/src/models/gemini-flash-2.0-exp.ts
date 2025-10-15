@@ -29,7 +29,7 @@ export class LlamaGeminiModel extends BaseModel {
             modelName: "gemini-2.5-flash",
             interfaceName: "gemini",
             serviceName: "gemini",
-            tokenLimit: 8192, // Adjust this value if needed
+            tokenLimit: 1048570, 
             scoresByConversationType: scoresByConversationType,
             contentConversation: [LLMConversationType.TextToText, LLMConversationType.TextToCode, LLMConversationType.TextToJSON]
         });

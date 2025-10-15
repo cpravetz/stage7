@@ -831,6 +831,10 @@ Return ONLY the corrected JSON plan, no explanations."""
         
         if not source_output_def and len(source_output_defs) == 1:
             source_output_def = source_output_defs[0]
+            # If we auto-mapped, update the input_def's outputName to match the actual source output name
+            if input_def.get('outputName') != source_output_def.get('name'):
+                logger.info(f"Step {step_number}: Auto-mapping input '{input_name}' outputName from '{input_def.get('outputName')}' to '{source_output_def.get('name')}'")
+                input_def['outputName'] = source_output_def.get('name')
         
         if not source_output_def:
             return
