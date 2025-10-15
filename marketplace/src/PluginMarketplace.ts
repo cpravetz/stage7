@@ -1,4 +1,4 @@
-import { PluginDefinition, signPlugin, verifyPluginSignature, PluginManifest, RepositoryConfig, PluginRepositoryType, PluginLocator } from '@cktmcs/shared'; // PluginRepository removed
+import { PluginDefinition, signPlugin, verifyPluginSignature, PluginManifest, RepositoryConfig, PluginRepositoryType, PluginLocator, PluginRepository } from '@cktmcs/shared'; // PluginRepository restored
 
 import axios from 'axios';
 import { analyzeError } from '@cktmcs/errorhandler';
@@ -12,29 +12,18 @@ import { LocalRepository } from './repositories/LocalRepository';
 import { LibrarianDefinitionRepository, LibrarianDefinitionRepositoryConfig } from './repositories/LibrarianDefinitionRepository';
 import { repositoryConfig } from './config/repositoryConfig';
 
-// Temporary inlined interface for diagnosis
-interface InlinedPluginRepository {
-    type: PluginRepositoryType | string; // Allow string for flexibility if needed
-    list(): Promise<PluginLocator[]>;
-    fetch(id: string, version?: string): Promise<PluginManifest | undefined>;
-    fetchByVerb(verb: string, version?: string): Promise<PluginManifest | undefined>;
-    fetchAllVersionsOfPlugin?(pluginId: string): Promise<PluginManifest[] | undefined>;
-    store(plugin: PluginManifest): Promise<void>;
-    delete(pluginId: string, version?: string): Promise<void>; // Matched from MongoRepository (and should be in others)
-}
-
 
 export class PluginMarketplace {
     public defaultRepository: PluginRepositoryType;
     private localRepository: PluginRepositoryType = 'local';
-    private repositories: Map<string, InlinedPluginRepository>; // Changed to InlinedPluginRepository
+    private repositories: Map<string, PluginRepository>; // Changed to PluginRepository
     private pluginsBaseDir: string;
 
     /**
      * Get all repositories
      * @returns Map of repositories
      */
-    public getRepositories(): Map<string, InlinedPluginRepository> { // Changed to InlinedPluginRepository
+    public getRepositories(): Map<string, PluginRepository> { // Changed to PluginRepository
         return this.repositories;
     }
 
@@ -96,7 +85,7 @@ export class PluginMarketplace {
      */
     async list(repository?: PluginRepositoryType, includeContainerPlugins: boolean = true): Promise<PluginLocator[]> {
         if (repository) {
-            const repo = this.repositories.get(repository); // repo is InlinedPluginRepository | undefined
+            const repo = this.repositories.get(repository); // repo is PluginRepository | undefined
             if (!repo) {
                 console.warn(`Repository ${repository} not found (list). Returning empty list.`);
                 return [];
@@ -159,7 +148,7 @@ export class PluginMarketplace {
      * @param config Repository configuration
      * @returns Repository instance or undefined if creation failed
      */
-    private createRepository(config: RepositoryConfig | LibrarianDefinitionRepositoryConfig): InlinedPluginRepository | undefined { // Changed return type
+    private createRepository(config: RepositoryConfig | LibrarianDefinitionRepositoryConfig): PluginRepository | undefined { // Changed return type
         try {
             switch (config.type) {
                 case 'mongo':
@@ -190,7 +179,7 @@ export class PluginMarketplace {
      */
     async fetchOne(id: string, version?: string, repository?: PluginRepositoryType): Promise<PluginManifest | undefined> {
         if (repository) {
-            const repo = this.repositories.get(repository); // repo is InlinedPluginRepository | undefined
+            const repo = this.repositories.get(repository); // repo is PluginRepository | undefined
             if (!repo) {
                 console.warn(`Repository ${repository} not found (fetchOne). Returning undefined.`);
                 return undefined;
@@ -203,7 +192,7 @@ export class PluginMarketplace {
             }
         }
         // If no repository specified, use default
-        const defaultRepo = this.repositories.get(this.defaultRepository); // defaultRepo is InlinedPluginRepository | undefined
+        const defaultRepo = this.repositories.get(this.defaultRepository); // defaultRepo is PluginRepository | undefined
         if (!defaultRepo) {
             console.warn(`Default repository ${this.defaultRepository} not found (fetchOne). Returning undefined.`);
             return undefined;
@@ -217,9 +206,9 @@ export class PluginMarketplace {
     }
 
     public async fetchOneByVerb(verb: string, version?: string): Promise<PluginManifest | undefined> {
-        for (const repository of this.repositories.values()) { // repository is InlinedPluginRepository
+        for (const repository of this.repositories.values()) { // repository is PluginRepository
             try {
-                const plugin = await repository.fetchByVerb(verb, version); // Removed (repository as PluginRepository) cast
+                const plugin = await repository.fetchByVerb(verb, version);
                 if (plugin) { //} && await this.verifySignature(plugin)) {
                     return plugin;
                 }
@@ -232,7 +221,7 @@ export class PluginMarketplace {
     }
 
     public async fetchAllVersionsOfPlugin(pluginId: string, repositoryType?: PluginRepositoryType): Promise<PluginManifest[] | undefined> {
-        const repoToUse = repositoryType ? this.repositories.get(repositoryType) : this.repositories.get(this.defaultRepository); // repoToUse is InlinedPluginRepository | undefined
+        const repoToUse = repositoryType ? this.repositories.get(repositoryType) : this.repositories.get(this.defaultRepository); // repoToUse is PluginRepository | undefined
         if (!repoToUse) {
             const repoName = repositoryType || this.defaultRepository;
             console.warn(`Repository ${repoName} not found (fetchAllVersionsOfPlugin). Returning undefined.`);
@@ -259,12 +248,12 @@ export class PluginMarketplace {
             }
 
             let repositoryType = plugin.repository.type || this.defaultRepository; // Changed variable name for clarity
-            const existingPlugin = await this.fetchOneByVerb(plugin.verb); // This now correctly uses the InlinedPluginRepository type
+            const existingPlugin = await this.fetchOneByVerb(plugin.verb); // This now correctly uses the PluginRepository type
             if (existingPlugin) {
                 repositoryType = existingPlugin.repository.type;
             }
 
-            const repo = this.repositories.get(repositoryType); // repo is InlinedPluginRepository | undefined
+            const repo = this.repositories.get(repositoryType); // repo is PluginRepository | undefined
             if (repo) {
                 await repo.store(plugin);
             } else {

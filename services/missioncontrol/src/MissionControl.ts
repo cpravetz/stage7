@@ -567,7 +567,7 @@ class MissionControl extends BaseEntity {
             const [llmCallsResponse, engineerStatisticsResponse] = await Promise.all([
                 this.authenticatedApi.get(`http://${this.brainUrl}/getLLMCalls`).catch((error: any) => {
                     console.warn(`Failed to fetch LLM calls for mission ${missionId}:`, error instanceof Error ? error.message : error);
-                    return { data: { llmCalls: 0 } };
+                    return { data: { llmCalls: 0, activeLLMCalls: 0 } };
                 }),
                 this.authenticatedApi.get(`http://${this.engineerUrl}/statistics`).catch((error: any) => {
                     console.warn(`Failed to fetch engineer statistics for mission ${missionId}:`, error instanceof Error ? error.message : error);
@@ -602,6 +602,7 @@ class MissionControl extends BaseEntity {
     
             const missionStats: MissionStatistics = {
                 llmCalls: llmCallsResponse.data.llmCalls,
+                activeLLMCalls: llmCallsResponse.data.activeLLMCalls,
                 agentCountByStatus: trafficManagerStatistics.agentStatisticsByType.agentCountByStatus,
                 agentStatistics: MapSerializer.transformForSerialization(trafficManagerStatistics.agentStatisticsByStatus),
                 engineerStatistics: engineerStatisticsResponse.data

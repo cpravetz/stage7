@@ -9,7 +9,8 @@ export interface PluginRepository {
     store(manifest: PluginManifest): Promise<void>;
     fetch(id: string, version?: string): Promise<PluginManifest | undefined>;
     fetchByVerb(verb: string, version?: string): Promise<PluginManifest | undefined>;
-    delete(id: string): Promise<void>;
+    fetchAllVersionsOfPlugin?(pluginId: string): Promise<PluginManifest[] | undefined>; // Add this line
+    delete(id: string, version?: string): Promise<void>; // Change signature to include version
     list(): Promise<PluginLocator[]>;
 }
 
