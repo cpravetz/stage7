@@ -278,35 +278,26 @@ export class GitHubRepository implements PluginRepository {
         if (!this.isEnabled) return undefined;
         if (!pluginId) { console.warn('GitHubRepository.fetch: pluginId must be provided'); return undefined; }
 
+        // Always strip 'plugin-' prefix for path construction
+        const pathPluginId = pluginId.startsWith('plugin-') ? pluginId.substring('plugin-'.length) : pluginId;
+
         const effectiveBranch = await this._getEffectiveBranch();
         let manifestPath: string;
         let baseContentFetchingPath: string;
 
         if (version) {
-            manifestPath = `${this.pluginsDir}/${pluginId}/${version}/manifest.json`;
-            baseContentFetchingPath = `${this.pluginsDir}/${pluginId}/${version}`;
+            manifestPath = `${this.pluginsDir}/${pathPluginId}/${version}/manifest.json`;
+            baseContentFetchingPath = `${this.pluginsDir}/${pathPluginId}/${version}`;
         } else {
             // Fallback to default/latest manifest directly under pluginId directory
-            manifestPath = `${this.pluginsDir}/${pluginId}/manifest.json`;
-            baseContentFetchingPath = `${this.pluginsDir}/${pluginId}`;
+            manifestPath = `${this.pluginsDir}/${pathPluginId}/manifest.json`;
+            baseContentFetchingPath = `${this.pluginsDir}/${pathPluginId}`;
             console.log(`GitHubRepository.fetch: No version specified for pluginId '${pluginId}'. Attempting to fetch from default path: ${manifestPath}`);
         }
-        
+
         const manifestContent = await this.getFileContent(manifestPath, effectiveBranch);
+
         if (!manifestContent) {
-            // If manifest not found and pluginId starts with 'plugin-', try fetching without the prefix
-            if (pluginId.startsWith('plugin-')) {
-                const strippedPluginId = pluginId.substring('plugin-'.length);
-                const strippedManifestPath = `${this.pluginsDir}/${strippedPluginId}/${version ? `${version}/` : ''}manifest.json`;
-                const strippedManifestContent = await this.getFileContent(strippedManifestPath, effectiveBranch);
-                if (strippedManifestContent) {
-                    console.log(`GitHubRepository.fetch: Found manifest for pluginId '${pluginId}' by trying stripped ID '${strippedPluginId}'.`);
-                    const manifest = JSON.parse(strippedManifestContent) as PluginManifest;
-                    // Update manifest ID to match the requested pluginId for consistency
-                    manifest.id = pluginId;
-                    return manifest;
-                }
-            }
             console.log(`GitHubRepository.fetch: Manifest not found for pluginId '${pluginId}' ${version ? `version '${version}'` : '(default/latest)'} at path '${manifestPath}' on branch '${effectiveBranch}'.`);
             return undefined;
         }
@@ -521,26 +512,26 @@ export class GitHubRepository implements PluginRepository {
 
         for (const pluginIdDir of pluginIdDirs) {
             const pluginId = pluginIdDir.name;
-            const versions = await this.fetchAllVersionsOfPlugin(pluginId); // This will fetch manifests
-            if (versions) {
-                for (const manifest of versions) {
-                    if (manifest.id !== pluginId) {
-                        console.warn(`GitHubRepository.list: Manifest ID '${manifest.id}' does not match directory ID '${pluginId}'. Using manifest ID.`);
-                    }
-                    locators.push({
-                        id: manifest.id, // Use ID from manifest
-                        verb: manifest.verb,
-                        description: manifest.description,
-                        version: manifest.version,
-                        repository: {
-                            type: 'github',
-                            url: `https://github.com/${this.repoOwner}/${this.repoName}/tree/${effectiveBranch}/${this.pluginsDir}/${manifest.id}/${manifest.version}`
-                        }
-                    });
-                }
-            }
-            // Check for a default/latest manifest directly under pluginId dir as well
             try {
+                const versions = await this.fetchAllVersionsOfPlugin(pluginId); // This will fetch manifests
+                if (versions) {
+                    for (const manifest of versions) {
+                        if (manifest.id !== pluginId) {
+                            console.warn(`GitHubRepository.list: Manifest ID '${manifest.id}' does not match directory ID '${pluginId}'. Using manifest ID.`);
+                        }
+                        locators.push({
+                            id: manifest.id, // Use ID from manifest
+                            verb: manifest.verb,
+                            description: manifest.description,
+                            version: manifest.version,
+                            repository: {
+                                type: 'github',
+                                url: `https://github.com/${this.repoOwner}/${this.repoName}/tree/${effectiveBranch}/${this.pluginsDir}/${manifest.id}/${manifest.version}`
+                            }
+                        });
+                    }
+                }
+                // Check for a default/latest manifest directly under pluginId dir as well
                 const defaultManifest = await this.fetch(pluginId); // Fetch without version
                 if (defaultManifest) {
                     // Avoid duplicates if already listed via fetchAllVersions (e.g. if 'latest' is also a numbered version dir)
@@ -557,7 +548,8 @@ export class GitHubRepository implements PluginRepository {
                     }
                 }
             } catch (error) {
-                // It's okay if default manifest doesn't exist, already logged by fetch
+                console.error(`GitHubRepository.list: Failed to process plugin '${pluginId}'. Skipping. Error: ${error instanceof Error ? error.message : String(error)}`);
+                // Continue to the next plugin
             }
         }
         return locators;

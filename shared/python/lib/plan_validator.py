@@ -829,12 +829,20 @@ Return ONLY the corrected JSON plan, no explanations."""
         source_output_defs = source_plugin_def.get('outputDefinitions', [])
         source_output_def = next((out for out in source_output_defs if out.get('name') == source_output_name), None)
         
+        if not source_output_def:
+            # Check against custom output names defined in the source step itself
+            source_step_definition = next((s for s in plan if s.get("number") == source_step_number), None)
+            if source_step_definition and source_output_name in source_step_definition.get('outputs', {}):
+                 # This is a custom output, we can't verify the type from the manifest, so we assume it's correct.
+                 return
+
         if not source_output_def and len(source_output_defs) == 1:
             source_output_def = source_output_defs[0]
             # If we auto-mapped, update the input_def's outputName to match the actual source output name
             if input_def.get('outputName') != source_output_def.get('name'):
                 logger.info(f"Step {step_number}: Auto-mapping input '{input_name}' outputName from '{input_def.get('outputName')}' to '{source_output_def.get('name')}'")
-                input_def['outputName'] = source_output_def.get('name')
+                # This is the line causing the problem. Do not change the user-defined output name.
+                # input_def['outputName'] = source_output_def.get('name')
         
         if not source_output_def:
             return
@@ -883,86 +891,60 @@ Return ONLY the corrected JSON plan, no explanations."""
         foreach_step_number = analysis['max'] + 1
         step_to_wrap_original_number = step_to_wrap['number']
 
-        # Collect steps to move into subplan
+        # Collect steps to move into subplan, ensuring they are deep-copied
         downstream_deps = self._get_downstream_dependencies(step_to_wrap_original_number, plan)
         moved_step_numbers = {step_to_wrap_original_number} | downstream_deps
         
-        steps_to_move = {}
-        for step_num in moved_step_numbers:
-            step = next((s for s in plan if s.get('number') == step_num), None)
-            if step:
-                steps_to_move[step_num] = copy.deepcopy(step)
-
-        # Create sub-plan
         sub_plan = []
-        for step_num in sorted(steps_to_move.keys()):
-            new_step = steps_to_move[step_num]
-            
-            # Update inputs
-            if new_step['number'] == step_to_wrap_original_number:
-                for input_name, input_def in new_step.get('inputs', {}).items():
-                    if input_name == target_input_name:
-                        if isinstance(input_def, dict) and input_def.get('sourceStep') == source_step_number:
-                            # This is the triggering input
-                            input_def['outputName'] = "item"
-                            input_def['sourceStep'] = foreach_step_number
-                            if 'valueType' in input_def:
-                                del input_def['valueType'] # Let type be inferred
-            
-            sub_plan.append(new_step)
+        for step_num in sorted(list(moved_step_numbers)):
+            original_step = next((s for s in plan if s.get('number') == step_num), None)
+            if original_step:
+                new_step = copy.deepcopy(original_step)
+                # If this is the step that triggered the wrap, update its input
+                if new_step['number'] == step_to_wrap_original_number:
+                    if target_input_name in new_step.get('inputs', {}):
+                        new_step['inputs'][target_input_name] = {
+                            "outputName": "item",
+                            "sourceStep": foreach_step_number
+                        }
+                sub_plan.append(new_step)
 
-        # Collect sub-plan outputs
+        # Collect outputs from the sub-plan for the FOREACH step's outputs
         sub_plan_outputs = {}
         for step in sub_plan:
             for out_name, out_desc in step.get('outputs', {}).items():
-                if isinstance(out_desc, dict):
-                    sub_plan_outputs[out_name] = {
-                        "description": out_desc.get("description", f"Output {out_name}"),
-                        "isDeliverable": out_desc.get("isDeliverable", False),
-                        "filename": out_desc.get("filename")
-                    }
-                else:
-                    sub_plan_outputs[out_name] = out_desc
+                sub_plan_outputs[out_name] = out_desc
 
-        # Create FOREACH step
+        # Create the new FOREACH step with its unique number
         foreach_step = {
             "number": foreach_step_number,
             "actionVerb": "FOREACH",
             "description": f"Iterate over '{source_output_name}' from step {source_step_number}",
             "inputs": {
-                "array": {
-                    "outputName": source_output_name,
-                    "sourceStep": source_step_number
-                },
-                "steps": {
-                    "value": sub_plan,
-                    "valueType": "array"
-                }
+                "array": {"outputName": source_output_name, "sourceStep": source_step_number},
+                "steps": {"value": sub_plan, "valueType": "array"}
             },
             "outputs": sub_plan_outputs,
             "recommendedRole": "Coordinator"
         }
 
-        # Reconstruct plan
+        # Reconstruct the plan, removing moved steps and inserting the FOREACH step
         new_plan = []
-        inserted = False
-        
+        inserted_foreach = False
         for step in plan:
-            if step['number'] in moved_step_numbers:
-                if step['number'] == step_to_wrap_original_number and not inserted:
-                    new_plan.append(foreach_step)
-                    inserted = True
-            else:
+            if step['number'] not in moved_step_numbers:
                 new_plan.append(step)
+            elif step['number'] == step_to_wrap_original_number and not inserted_foreach:
+                new_plan.append(foreach_step)
+                inserted_foreach = True
 
-        # Update references to moved steps
+        # Update any steps outside the loop that depended on the moved steps
         for step in new_plan:
             if step['number'] == foreach_step_number:
                 continue
             
             for input_name, input_def in step.get('inputs', {}).items():
                 if isinstance(input_def, dict) and input_def.get('sourceStep') in moved_step_numbers:
-                    old_source = input_def['sourceStep']
                     logger.info(f"Updating step {step['number']} input '{input_name}' to reference FOREACH {foreach_step_number}")
                     input_def['sourceStep'] = foreach_step_number
 

@@ -627,7 +627,7 @@ protected async cleanup() {
     }
   }
 
-  async say(content: string): Promise<void> {
+  async say(content: string, persistent: boolean = false): Promise<void> {
     console.log(`${this.componentType} ${this.id} saying: ${content}`);
 
     // Format the content to be more human-friendly
@@ -644,7 +644,7 @@ protected async cleanup() {
           // Format the output in a more human-friendly way
           if (resultData.data && resultData.data.data && resultData.data.data.length > 0) {
             const outputData = resultData.data.data[0];
-            formattedContent = `I've completed my task: ${outputData.resultDescription}\n\n${outputData.result}`;
+            formattedContent = `I\'ve completed my task: ${outputData.resultDescription}\n\n${outputData.result}`;
           }
         }
       } catch (error) {
@@ -657,7 +657,7 @@ protected async cleanup() {
     formattedContent = formattedContent.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}: /gi, '');
 
     try {
-      await this.sendMessage('say', 'user', formattedContent, false);
+      await this.sendMessage('say', 'user', { message: formattedContent, persistent }, false);
       console.log(`Successfully sent message to PostOffice: ${formattedContent}`);
     } catch (error) {
       console.error(`Error sending message to PostOffice: ${error instanceof Error ? error.message : String(error)}`);
@@ -810,9 +810,9 @@ protected async cleanup() {
     }
   }
 
-  async logAndSay(message: string): Promise<void> {
+  async logAndSay(message: string, persistent: boolean = false): Promise<void> {
     console.log(message);
-    await this.say(message);
+    await this.say(message, persistent);
   }
 
   private askPromises: Map<string, Promise<string>> = new Map();

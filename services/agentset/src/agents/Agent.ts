@@ -705,7 +705,7 @@ Please consider this context when planning and executing the mission. Provide de
             console.log(`[Agent ${this.id}] Sending CHAT message to user: ${message} from input: ${JSON.stringify(messageInput)}`);
 
             if (typeof message === 'string' && message) {
-                this.say(message);
+                this.say(message, true);
                 return [{
                     success: true,
                     name: 'success',
