@@ -312,21 +312,7 @@ export class Step {
                         args: {}
                     });
                 } else {
-                    const successfulOutputs = sourceStep.result.filter(r => r.resultType !== PluginParameterType.ERROR && r.success !== false);
-                    if (successfulOutputs.length === 1) {
-                        const single = successfulOutputs[0];
-                        if (single.result !== undefined && single.result !== null) {
-                            console.warn(`[Step ${this.id}]   - Dependency '${dep.sourceStepId}.${dep.outputName}' not found or has no result. Falling back to single available output '${single.name}'.`);
-                            inputRunValues.set(dep.inputName, {
-                                inputName: dep.inputName,
-                                value: single.result,
-                                valueType: single.resultType,
-                                args: { auto_mapped_from: single.name }
-                            });
-                        }
-                    } else {
-                        console.log(`[Step ${this.id}]   - Dependency '${dep.sourceStepId}.${dep.outputName}' not satisfied. No unique fallback output available.`);
-                    }
+                    console.log(`[Step ${this.id}]   - Dependency '${dep.sourceStepId}.${dep.outputName}' not satisfied. Named output not found.`);
                 }
             } else {
                 console.log(`[Step ${this.id}]   - Source step '${dep.sourceStepId}' not found or has no result. sourceStep:`, sourceStep);
@@ -375,12 +361,6 @@ export class Step {
             // For regular dependencies, the named output must exist in the source step's result.
             const outputExists = sourceStep.result?.some(r => r.name === dep.outputName);
             if (!outputExists) {
-                // Fallback: if the source step produced exactly one successful output, we'll consider the dependency satisfied
-                const successfulOutputs = sourceStep.result?.filter(r => r.resultType !== PluginParameterType.ERROR && r.success !== false) || [];
-                if (successfulOutputs.length === 1) {
-                    console.warn(`[areDependenciesSatisfied] Step ${this.id} dependency '${dep.outputName}' missing from ${sourceStep.id}, but source has single output '${successfulOutputs[0].name}'. Treating as satisfied (will auto-map).`);
-                    return true;
-                }
                 console.warn(`[areDependenciesSatisfied] Step ${this.id} dependency on output '${dep.outputName}' from step ${sourceStep.id} is not met because the output is not in the result.`);
                 return false;
             }
@@ -1915,7 +1895,7 @@ export function createFromPlan(
             missionId: missionId,
             ownerAgentId: parentStep?.ownerAgentId ||'',
             actionVerb: task.actionVerb,
-            stepNo: startingStepNo + idx,
+            stepNo: task.number || (startingStepNo + idx), // Use number from plan if available
             description: task.description,
             dependencies: dependencies,
             inputReferences: inputReferences,
