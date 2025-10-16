@@ -1,15 +1,29 @@
 import React, { useEffect, useLayoutEffect, useRef, useMemo } from 'react';
 import { Box, Typography, useTheme } from '@mui/material';
 import MessageItem from './MessageItem';
+import { ConversationMessage } from '../shared-browser';
 
 interface Props {
-  history: string[];
+  history: ConversationMessage[];
 }
 
-const ConversationHistory: React.FC<Props> = React.memo(({ history }) => {
+export const ConversationHistory: React.FC<Props> = React.memo(({ history }) => {
   const historyContainerRef = useRef<HTMLDivElement>(null);
   const shouldScrollToBottomRef = useRef(true);
-  const isUserScrollingRef = useRef(false);
+
+  const processedHistory = useMemo(() => {
+    const persistentMessages = history.filter(message => message.persistent);
+
+    const lastMessage = history.length > 0 ? history[history.length - 1] : null;
+
+    if (lastMessage && !lastMessage.persistent) {
+      // The last message is a temporary update, so we display it.
+      return [...persistentMessages, lastMessage];
+    }
+
+    // The last message is persistent, so we only display persistent messages.
+    return persistentMessages;
+  }, [history]);
   
   // Handle scroll events to detect user scrolling
   useEffect(() => {
@@ -40,7 +54,7 @@ const ConversationHistory: React.FC<Props> = React.memo(({ history }) => {
     if (shouldScroll) {
       element.scrollTop = element.scrollHeight;
     }
-  }, [history]); // Depend on history to catch all updates
+  }, [processedHistory]); // Depend on processedHistory to catch all updates
 
   const theme = useTheme();
 
@@ -81,14 +95,10 @@ const ConversationHistory: React.FC<Props> = React.memo(({ history }) => {
           },
         }}
       >
-        {history.map((message, index) => (
-          <MessageItem key={`message-${index}-${message.substring(0, 50)}`} message={message} />
+        {processedHistory.map((message, index) => (
+          <MessageItem key={`message-${index}-${message.content.substring(0, 50)}`} message={message.content} />
         ))}
       </Box>
     </Box>
   );
 });
-
-ConversationHistory.displayName = 'ConversationHistory';
-
-export default ConversationHistory;

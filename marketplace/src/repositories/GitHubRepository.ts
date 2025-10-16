@@ -291,22 +291,15 @@ export class GitHubRepository implements PluginRepository {
             baseContentFetchingPath = `${this.pluginsDir}/${pluginId}`;
             console.log(`GitHubRepository.fetch: No version specified for pluginId '${pluginId}'. Attempting to fetch from default path: ${manifestPath}`);
         }
-        
-        const manifestContent = await this.getFileContent(manifestPath, effectiveBranch);
+        let manifestContent;
+        if (pluginId.startsWith('plugin-')) {
+            const strippedPluginId = pluginId.substring('plugin-'.length);
+            const strippedManifestPath = `${this.pluginsDir}/${strippedPluginId}/${version ? `${version}/` : ''}manifest.json`;
+            manifestContent = await this.getFileContent(strippedManifestPath, effectiveBranch);
+        } else {
+            manifestContent = await this.getFileContent(manifestPath, effectiveBranch);
+        }
         if (!manifestContent) {
-            // If manifest not found and pluginId starts with 'plugin-', try fetching without the prefix
-            if (pluginId.startsWith('plugin-')) {
-                const strippedPluginId = pluginId.substring('plugin-'.length);
-                const strippedManifestPath = `${this.pluginsDir}/${strippedPluginId}/${version ? `${version}/` : ''}manifest.json`;
-                const strippedManifestContent = await this.getFileContent(strippedManifestPath, effectiveBranch);
-                if (strippedManifestContent) {
-                    console.log(`GitHubRepository.fetch: Found manifest for pluginId '${pluginId}' by trying stripped ID '${strippedPluginId}'.`);
-                    const manifest = JSON.parse(strippedManifestContent) as PluginManifest;
-                    // Update manifest ID to match the requested pluginId for consistency
-                    manifest.id = pluginId;
-                    return manifest;
-                }
-            }
             console.log(`GitHubRepository.fetch: Manifest not found for pluginId '${pluginId}' ${version ? `version '${version}'` : '(default/latest)'} at path '${manifestPath}' on branch '${effectiveBranch}'.`);
             return undefined;
         }

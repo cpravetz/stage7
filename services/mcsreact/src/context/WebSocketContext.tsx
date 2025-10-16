@@ -3,7 +3,7 @@ import { useSnackbar } from 'notistack';
 import { v4 as uuidv4 } from 'uuid';
 import axios from 'axios';
 import { SecurityClient } from '../SecurityClient';
-import { MapSerializer } from '../shared-browser';
+import { ConversationMessage, MapSerializer } from '../shared-browser';
 // Reuse shared types for Mission where possible to keep types consistent across packages
 import { Mission as SharedMission, MissionFile as SharedMissionFile } from '@cktmcs/shared';
 import { API_BASE_URL, WS_URL } from '../config';
@@ -28,8 +28,8 @@ export type MissionFile = LocalMissionFile;
 interface WebSocketContextType {
   isConnected: boolean;
   clientId: string;
-  conversationHistory: string[];
-  setConversationHistory: React.Dispatch<React.SetStateAction<string[]>>;
+  conversationHistory: ConversationMessage[];
+  setConversationHistory: React.Dispatch<React.SetStateAction<ConversationMessage[]>>;
   currentQuestion: { guid: string, sender: string, content: string, choices?: string[], asker: string } | null;
   setCurrentQuestion: React.Dispatch<React.SetStateAction<{ guid: string, sender: string, content: string, choices?: string[], asker: string } | null>>;
   sendMessage: (message: string) => Promise<void>;
@@ -74,7 +74,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [clientId] = useState<string>(() => uuidv4());
   
   // Conversation state
-  const [conversationHistory, setConversationHistory] = useState<string[]>([]);
+  const [conversationHistory, setConversationHistory] = useState<ConversationMessage[]>([]);
   const [currentQuestion, setCurrentQuestion] = useState<{ guid: string, sender: string, content: string, choices?: string[], asker: string } | null>(null);
   
   // Mission state
@@ -145,19 +145,21 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     switch (data.type) {
       case 'say':
         setConversationHistory((prev) => {
-          // Prevent duplicate messages
           let newMessage = data.content;
+          let isPersistent = false;
           if (typeof newMessage === 'object' && newMessage !== null) {
+            isPersistent = newMessage.persistent === true;
             newMessage = newMessage.message || JSON.stringify(newMessage);
           }
-          const finalMessage = `${newMessage}`;
-          if (prev[prev.length - 1] === finalMessage) return prev;
+          const finalMessage: ConversationMessage = { content: `${newMessage}`, persistent: isPersistent };
+
+          if (prev.length > 0 && prev[prev.length - 1].content === finalMessage.content) return prev;
           return [...prev, finalMessage];
         });
         break;
         
       case MessageType.REQUEST:
-        setConversationHistory((prev) => [...prev, `${data.sender} asks: ${data.content}`]);
+        setConversationHistory((prev) => [...prev, { content: `Question: ${data.content.question}`, persistent: true }]);
         setCurrentQuestion({ 
           guid: data.content.questionGuid, 
           sender: data.sender, 
@@ -371,7 +373,11 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       if (!ws.current) {
         connectWebSocket();
       }
-      setConversationHistory((prev: string[]) => [...prev, `User: ${message}`]);
+      if (currentQuestion) {
+        setConversationHistory((prev) => [...prev, { content: `Answer: ${message}`, persistent: true }]);
+      } else {
+        setConversationHistory((prev) => [...prev, { content: `User: ${message}`, persistent: true }]);
+      }
 
       try {
         const accessToken = securityClient.getAccessToken();
@@ -379,7 +385,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
         if (!accessToken) {
           console.error('No authentication token available. Please log in again.');
-          setConversationHistory((prev: string[]) => [...prev, 'System: Authentication failed. Please log in again.']);
+          setConversationHistory((prev) => [...prev, { content: 'System: Authentication failed. Please log in again.', persistent: false }]);
           return;
         }
 
@@ -432,7 +438,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         }
       } catch (error) {
         console.error('[WebSocketContext] Failed to send message:', error instanceof Error ? error.message : error);
-        setConversationHistory((prev: string[]) => [...prev, 'System: Failed to send message. Please try again.']);
+        setConversationHistory((prev) => [...prev, { content: 'System: Failed to send message. Please try again.', persistent: false }]);
       }
     },
     handleControlAction: async (action: string) => {
@@ -461,7 +467,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
         if (!accessToken) {
           console.error('No authentication token available. Please log in again.');
-          setConversationHistory((prev: string[]) => [...prev, 'System: Authentication failed. Please log in again.']);
+          setConversationHistory((prev) => [...prev, { content: 'System: Authentication failed. Please log in again.', persistent: false }]);
           return;
         }
 
@@ -491,7 +497,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           }
         });
 
-        setConversationHistory((prev: string[]) => [...prev, `System: Sent ${action} request to MissionControl.`]);
+        setConversationHistory((prev) => [...prev, { content: `System: Sent ${action} request to MissionControl.`, persistent: false }]);
 
         if (action === 'abort') {
           setActiveMission(false);
@@ -501,7 +507,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         }
       } catch (error) {
         console.error('[WebSocketContext] Failed to send control action:', error instanceof Error ? error.message : error);
-        setConversationHistory((prev: string[]) => [...prev, `System: Failed to send ${action} request to MissionControl. Please try again.`]);
+        setConversationHistory((prev) => [...prev, { content: `System: Failed to send ${action} request to MissionControl. Please try again.`, persistent: false }]);
       }
     },
     handleLoadMission: async (missionId: string) => {
@@ -511,7 +517,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
         if (!accessToken) {
           console.error('No authentication token available. Please log in again.');
-          setConversationHistory((prev: string[]) => [...prev, 'System: Authentication failed. Please log in again.']);
+          setConversationHistory((prev) => [...prev, { content: 'System: Authentication failed. Please log in again.', persistent: false }]);
           return;
         }
 
@@ -533,10 +539,10 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             'Authorization': `Bearer ${accessToken}`
           }
         });
-        setConversationHistory((prev: string[]) => [...prev, `System: Mission ${missionId} loaded.`]);
+        setConversationHistory((prev) => [...prev, { content: `System: Mission ${missionId} loaded.`, persistent: false }]);
       } catch (error) {
         console.error('[WebSocketContext] Failed to load mission:', error instanceof Error ? error.message : error);
-        setConversationHistory((prev: string[]) => [...prev, 'System: Failed to load mission. Please try again.']);
+        setConversationHistory((prev) => [...prev, { content: 'System: Failed to load mission. Please try again.', persistent: false }]);
       }
     },
     listMissions: async () => {

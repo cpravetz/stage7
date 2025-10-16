@@ -4,8 +4,8 @@ import ChatIcon from '@mui/icons-material/Chat';
 import AssessmentIcon from '@mui/icons-material/Assessment';
 import AccountTreeIcon from '@mui/icons-material/AccountTree';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
-import ConversationHistory from './ConversationHistory';
-import { AgentStatistics } from '../shared-browser';
+import { ConversationHistory } from './ConversationHistory';
+import { AgentStatistics, ConversationMessage } from '../shared-browser';
 import { NetworkGraph } from './NetworkGraph';
 import { MissionFile } from '../context/WebSocketContext';
 import { SecurityClient } from '../SecurityClient';
@@ -20,7 +20,7 @@ interface WorkProduct {
 }
 
 interface TabbedPanelProps {
-  conversationHistory: string[];
+  conversationHistory: ConversationMessage[];
   workProducts: WorkProduct[];
   sharedFiles: MissionFile[];
   agentStatistics: Map<string, Array<AgentStatistics>>;
@@ -166,7 +166,7 @@ export const TabbedPanel: React.FC<TabbedPanelProps> = ({
         </TabPanel>
 
         <TabPanel value={activeTab} index="network">
-            {React.useMemo(() => <NetworkGraph agentStatistics={agentStatistics} zoom={zoom} setZoom={setZoom} pan={pan} setPan={setPan} />, [agentStatistics, zoom, pan])}
+            {React.useMemo(() => <NetworkGraph agentStatistics={agentStatistics} zoom={zoom} setZoom={setZoom} pan={pan} setPan={setPan} theme={theme.palette.mode} />, [agentStatistics, zoom, pan, theme.palette.mode])}
         </TabPanel>
 
         <TabPanel value={activeTab} index="files">

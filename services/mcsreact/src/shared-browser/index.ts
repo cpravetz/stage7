@@ -1,3 +1,8 @@
+export interface ConversationMessage {
+  content: string;
+  persistent?: boolean;
+}
+
 /**
  * This file provides browser-compatible versions of the shared package types and utilities.
  * It excludes any Node.js-specific modules like crypto.
