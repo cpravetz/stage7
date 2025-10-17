@@ -10,11 +10,12 @@ interface UserInputModalProps {
     question: any;
     choices?: string[];
     answerType: AnswerType;
+    onSubmit: (response: string) => void;
     onClose: () => void;
     darkMode?: boolean;
 }
 
-const UserInputModal: React.FC<UserInputModalProps> = ({ requestId, question, choices, answerType, onClose, darkMode }) => {
+const UserInputModal: React.FC<UserInputModalProps> = ({ requestId, question, choices, answerType, onSubmit, onClose, darkMode }) => {
     const [response, setResponse] = useState<string | number | boolean>('');
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
     const [dragOver, setDragOver] = useState(false);
@@ -29,18 +30,6 @@ const UserInputModal: React.FC<UserInputModalProps> = ({ requestId, question, ch
         setIsSubmitting(false);
     }, [requestId]);
 
-    const submitData = async (data: FormData | object) => {
-        const securityClient = SecurityClient.getInstance(API_BASE_URL);
-        const apiClient = securityClient.getApi();
-        const isFormData = data instanceof FormData;
-
-        await apiClient.post('/submitUserInput', data, {
-            headers: {
-                ...(isFormData && { 'Content-Type': 'multipart/form-data' }),
-            },
-        });
-    };
-
     const handleSubmit = async () => {
         setIsSubmitting(true);
         try {
@@ -50,12 +39,9 @@ const UserInputModal: React.FC<UserInputModalProps> = ({ requestId, question, ch
                     setIsSubmitting(false);
                     return;
                 }
-                const formData = new FormData();
-                formData.append('requestId', requestId);
-                formData.append('files', selectedFile);
-                await submitData(formData);
+                // TODO: Handle file uploads
             } else {
-                await submitData({ requestId, response });
+                onSubmit(response as string);
             }
             onClose();
         } catch (error) {
@@ -67,7 +53,7 @@ const UserInputModal: React.FC<UserInputModalProps> = ({ requestId, question, ch
 
     const handleCancel = async () => {
         try {
-            await submitData({ requestId: requestId, cancel: true });
+            // TODO: Handle cancellation
             onClose();
         } catch (error) {
             console.error('Error cancelling user input:', error instanceof Error ? error.message : error);

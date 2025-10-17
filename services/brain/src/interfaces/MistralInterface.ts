@@ -5,6 +5,7 @@ import axios from 'axios';
 
 export class MistralInterface extends BaseInterface {
     interfaceName: string = 'mistral';
+    private readonly DEFAULT_TIMEOUT = 120000;
 
     constructor() {
         super('mistral');
@@ -56,7 +57,8 @@ export class MistralInterface extends BaseInterface {
                     headers: {
                         'Authorization': `Bearer ${apiKey}`,
                         'Content-Type': 'application/json'
-                    }
+                    },
+                    timeout: this.DEFAULT_TIMEOUT
                 }
             );
 

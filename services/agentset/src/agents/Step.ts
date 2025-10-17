@@ -323,13 +323,12 @@ export class Step {
 
         // Phase 4: Resolve placeholders (must be last).
         console.log(`[Step ${this.id}] Phase 4: Resolving placeholders...`);
-        const findOutputFromSteps = (outputName: string): string | null => {
+        const findOutputFromSteps = (outputName: string): any | null => {
             for (const step of allSteps.slice().reverse()) {
                 if (step.status === StepStatus.COMPLETED && step.result) {
                     const output = step.result.find(o => o.name === outputName);
                     if (output && output.result !== undefined && output.result !== null) {
-                        if (typeof output.result === 'string') return output.result;
-                        return JSON.stringify(output.result);
+                        return output.result;
                     }
                 }
             }
@@ -1603,44 +1602,44 @@ export class Step {
     /**
      * Resolve placeholders in a string using both local inputs and step outputs
      */
-    private resolvePlaceholdersInString(text: string, inputRunValues: Map<string, InputValue>, findOutputFromSteps: (outputName: string) => string | null): string {
-        // Find all placeholders in the format {placeholderName}
-        const placeholderRegex = /\{([^\}]+)\}/g;
-        let resolvedText = text;
-        let match;
+    private resolvePlaceholdersInString(text: string, inputRunValues: Map<string, InputValue>, findOutputFromSteps: (outputName: string) => any | null): any {
+        const placeholderRegex = /^\{([^\}]+)\}$/;
+        const match = text.match(placeholderRegex);
 
-        while ((match = placeholderRegex.exec(text)) !== null) {
+        if (match) {
             const placeholderName = match[1];
-            const fullPlaceholder = match[0]; // e.g., "{userPersonas}"
-            let resolvedValue: string | null = null;
-
-            // First, try to resolve from other inputs in the same step
             const localInput = inputRunValues.get(placeholderName);
             if (localInput && localInput.value !== undefined) {
-                if (typeof localInput.value === 'string') {
-                    resolvedValue = localInput.value;
-                } else if (typeof localInput.value === 'object') {
-                    resolvedValue = JSON.stringify(localInput.value, null, 2);
-                } else {
-                    resolvedValue = String(localInput.value);
-                }
-                console.log(`[Step ${this.id}] Resolved placeholder ${fullPlaceholder} from local input`);
-            } else {
-                // If not found locally, try to resolve from completed steps
-                resolvedValue = findOutputFromSteps(placeholderName);
-                if (resolvedValue !== null) {
-                    console.log(`[Step ${this.id}] Resolved placeholder ${fullPlaceholder} from completed step`);
-                } else {
-                    console.warn(`[Step ${this.id}] Could not resolve placeholder ${fullPlaceholder} - not found in local inputs or completed steps`);
-                }
+                return localInput.value;
             }
-
+            const resolvedValue = findOutputFromSteps(placeholderName);
             if (resolvedValue !== null) {
-                resolvedText = resolvedText.replace(fullPlaceholder, resolvedValue);
+                return resolvedValue;
             }
         }
 
-        return resolvedText;
+        return text.replace(/\{([^\}]+)\}/g, (match, placeholderName) => {
+            const localInput = inputRunValues.get(placeholderName);
+            if (localInput && localInput.value !== undefined) {
+                if (typeof localInput.value === 'string') {
+                    return localInput.value;
+                } else {
+                    return JSON.stringify(localInput.value);
+                }
+            }
+
+            const resolvedValue = findOutputFromSteps(placeholderName);
+            if (resolvedValue !== null) {
+                if (typeof resolvedValue === 'string') {
+                    return resolvedValue;
+                } else {
+                    return JSON.stringify(resolvedValue);
+                }
+            }
+
+            console.warn(`[Step ${this.id}] Could not resolve placeholder ${match} - not found in local inputs or completed steps`);
+            return match;
+        });
     }
 
     /**
