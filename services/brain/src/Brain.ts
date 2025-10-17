@@ -288,16 +288,16 @@ export class Brain extends BaseEntity {
                     estimatedTokens
                 );
 
-                if (!selectedModel || !selectedModel.isAvailable()) {
-                    lastError = `No suitable model found for ${thread.optimization}/${thread.conversationType}`;
+                if (!selectedModel) {
+                    lastError = `No model could be selected for the specified criteria.`;
                     console.log(`[Brain Chat] Attempt ${attempt}: ${lastError}`);
+                    break; 
+                }
 
-                    // Check if we have any available models left
-                    const availableModels = this.modelManager.getAvailableAndNotBlacklistedModels(thread.conversationType || LLMConversationType.TextToText);
-                    if (availableModels.length === 0) {
-                        console.error(`[Brain Chat] No available models left after ${attempt} attempts`);
-                        break;
-                    }
+                if (!selectedModel.isAvailable()) {
+                    lastError = `Model ${selectedModel.name} is not available`;
+                    console.log(`[Brain Chat] Attempt ${attempt}: ${lastError}, excluding model.`);
+                    excludedModels.push(selectedModel.name);
                     continue;
                 }
 

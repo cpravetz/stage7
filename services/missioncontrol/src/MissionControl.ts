@@ -23,6 +23,7 @@ class MissionControl extends BaseEntity {
     private librarianUrl: string = process.env.LIBRARIAN_URL || 'librarian:5040';
     private brainUrl: string = process.env.BRAIN_URL || 'brain:5070';
     private engineerUrl: string = process.env.ENGINEER_URL || 'engineer:5050';
+    private capabilitiesManagerUrl: string = process.env.CAPABILITIESMANAGER_URL || 'capabilitiesmanager:5060';
 
     // Add: Map to track pending user input requests
     private pendingUserInputs: Map<string, { missionId: string, stepId: string, agentId: string }> = new Map();
@@ -340,6 +341,7 @@ class MissionControl extends BaseEntity {
             });
 
             console.log(`TrafficManager createAgent response:`, createAgentResponse.data);
+            (mission as any).primaryAgentId = createAgentResponse.data.agentId; // Store the primary agent ID
             mission.status = Status.RUNNING;
             this.sendStatusUpdate(mission, 'Mission started');
 
@@ -478,27 +480,59 @@ class MissionControl extends BaseEntity {
             return;
         }
 
+        const primaryAgentId = (mission as any).primaryAgentId;
+
+        if (!primaryAgentId) {
+            console.error('Primary agent not found for mission:', missionId, '. Falling back to broadcast.');
+            // Fallback to old behavior
+            try {
+                // Send the user message to the TrafficManager for distribution
+                await this.authenticatedApi.post(`http://${this.trafficManagerUrl}/distributeUserMessage`, {
+                    type: MessageType.USER_MESSAGE,
+                    sender: 'user',
+                    recipient: 'agents',
+                    content: {
+                        missionId: missionId,
+                        message: content.message
+                    },
+                    clientId: clientId
+                });
+    
+                console.log(`User message for mission ${missionId} sent to TrafficManager for distribution`);
+    
+                // Update mission status
+                mission.updatedAt = new Date();
+                this.sendStatusUpdate(mission, 'User message received and sent to agents');
+    
+            } catch (error) { analyzeError(error as Error);
+                console.error('Error handling user message:', error instanceof Error ? error.message : error);
+            }
+            return;
+        }
+
         try {
-            // Send the user message to the TrafficManager for distribution
-            await this.authenticatedApi.post(`http://${this.trafficManagerUrl}/distributeUserMessage`, {
-                type: MessageType.USER_MESSAGE,
-                sender: 'user',
-                recipient: 'agents',
-                content: {
-                    missionId: missionId,
-                    message: content.message
-                },
-                clientId: clientId
+            console.log(`User message for mission ${missionId} will be handled by REFLECT plugin via agent ${primaryAgentId}`);
+
+            const inputValues = new Map<string, InputValue>();
+            inputValues.set('missionId', { inputName: 'missionId', value: mission.id, valueType: PluginParameterType.STRING, args: {} });
+            inputValues.set('user_message', { inputName: 'user_message', value: content.message, valueType: PluginParameterType.STRING, args: {} });
+            
+            const serializedInputs = MapSerializer.transformForSerialization(inputValues);
+
+            await this.authenticatedApi.post(`http://${this.capabilitiesManagerUrl}/executeAction`, {
+                actionVerb: 'REFLECT',
+                inputValues: serializedInputs,
+                missionId: mission.id,
+                agentId: primaryAgentId,
+                dependencies: []
             });
 
-            console.log(`User message for mission ${missionId} sent to TrafficManager for distribution`);
-
-            // Update mission status
             mission.updatedAt = new Date();
-            this.sendStatusUpdate(mission, 'User message received and sent to agents');
+            this.sendStatusUpdate(mission, 'User message sent for reflection');
 
-        } catch (error) { analyzeError(error as Error);
-            console.error('Error handling user message:', error instanceof Error ? error.message : error);
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error('Error handling user message with REFLECT:', error instanceof Error ? error.message : error);
         }
     }
 

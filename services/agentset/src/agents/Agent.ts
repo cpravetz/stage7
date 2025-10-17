@@ -89,16 +89,13 @@ export class Agent extends BaseEntity {
             if (!config.actionVerb) {
                 throw new Error(`Missing required property 'actionVerb' for root agent config`);
             }
-            const initialStep = new Step({
-                actionVerb: config.actionVerb,
-                missionId: this.missionId,
-                ownerAgentId: this.id,
-                stepNo: 1,
-                inputValues: this.inputValues,
-                description: 'Initial mission step',
-                status: StepStatus.PENDING,
-                persistenceManager: this.agentPersistenceManager
-            });
+            const initialStep = this.createStep(
+                config.actionVerb,
+                1,
+                this.inputValues,
+                'Initial mission step',
+                StepStatus.PENDING,
+            );
             this.steps.push(initialStep);
         }
         
@@ -117,6 +114,20 @@ export class Agent extends BaseEntity {
             this.say(`Agent ${this.id} failed to initialize or start. Error: ${errorMessage}`);
             return false; // Resolve with false on error
         });
+    }
+
+    private createStep(actionVerb: string, stepNo : number, inputValues : Map<string, InputValue> | undefined, description : string, status: StepStatus) : Step {
+        const newStep = new Step({
+                actionVerb: actionVerb,
+                missionId: this.missionId,
+                ownerAgentId: this.id,
+                stepNo: stepNo,
+                inputValues: inputValues,
+                description: description,
+                status: status,
+                persistenceManager: this.agentPersistenceManager
+            });
+        return newStep;
     }
 
     private async initRabbitMQ(): Promise<void> {
@@ -295,6 +306,68 @@ Please consider this context when planning and executing the mission. Provide de
         );
     }
 
+    private _extractPlanFromReflectionResult(result: PluginOutput[]): ActionVerbTask[] | null {
+        const planOutput = result.find(r => r.name === 'plan');
+        const answerOutput = result.find(r => r.name === 'answer');
+
+        if (planOutput && planOutput.result && Array.isArray(planOutput.result)) {
+            console.log(`[Agent ${this.id}] _extractPlanFromReflectionResult: Extracted plan from 'plan' output.`);
+            return planOutput.result as ActionVerbTask[];
+        }
+
+        if (answerOutput && answerOutput.result) {
+            try {
+                const parsedResult = typeof answerOutput.result === 'string' ? JSON.parse(answerOutput.result) : answerOutput.result;
+                if (Array.isArray(parsedResult)) {
+                    console.log(`[Agent ${this.id}] _extractPlanFromReflectionResult: Extracted plan from 'answer' output.`);
+                    return parsedResult as ActionVerbTask[];
+                }
+            } catch (e) {
+                console.warn(`[Agent ${this.id}] _extractPlanFromReflectionResult: Failed to parse 'answer' as JSON plan, treating as prose.`);
+            }
+        }
+        
+        return null;
+    }
+
+    private async _handleReflectionResult(result: PluginOutput[], step: Step): Promise<void> {
+        const newPlan = this._extractPlanFromReflectionResult(result);
+        const directAnswerOutput = result.find(r => r.name === 'direct_answer');
+
+        if (newPlan) {
+            this.say('Reflection resulted in a new plan. Updating plan.');
+            const currentStepIndex = this.steps.findIndex(s => s.id === step.id);
+            if (currentStepIndex !== -1) {
+                for (let i = currentStepIndex + 1; i < this.steps.length; i++) {
+                    this.steps[i].status = StepStatus.CANCELLED;
+                }
+            }
+            this.addStepsFromPlan(newPlan, step);
+            await this.updateStatus();
+        } else if (directAnswerOutput && directAnswerOutput.result) {
+            const directAnswer = directAnswerOutput.result;
+            this.say(`Reflection provided a direct answer. Creating new ACCOMPLISH step to pursue this direction.`);
+            this.addToConversation('system', `Reflection Direct Answer: ${directAnswer}`);
+            const currentStepIndex = this.steps.findIndex(s => s.id === step.id);
+            if (currentStepIndex !== -1) {
+                for (let i = currentStepIndex + 1; i < this.steps.length; i++) {
+                    this.steps[i].status = StepStatus.CANCELLED;
+                }
+            }
+            const newAccomplishStep = this.createStep(
+                'ACCOMPLISH',
+                this.steps.length + 1,
+                new Map([['goal', { inputName: 'goal', value: directAnswer, valueType: PluginParameterType.STRING }]]),
+                `Pursue direct answer from reflection: ${directAnswer.substring(0, 100)}${directAnswer.length > 100 ? '...' : ''}`,
+                StepStatus.PENDING
+            );
+            this.steps.push(newAccomplishStep);
+            await this.updateStatus();
+        } else {
+            this.say('Reflection did not provide a clear plan or answer. Continuing with the current plan.');
+        }
+    }
+
     private async executeStep(step: Step): Promise<void> {
         try {
             if (this.status !== AgentStatus.RUNNING) return;
@@ -346,7 +419,7 @@ Please consider this context when planning and executing the mission. Provide de
                 return;
             }
 
-            console.log(`[Agent ${this.id}] executeStep: Checking result for pending_user_input. Result: ${JSON.stringify(result)}`);
+            console.log(`[Agent ${this.id}] executeStep: Checking result for pending_user_input. Result: ${JSON.stringify(this.truncateLargeStrings(result))}`);
 
             if (result && result.length > 0 && result[0].name === 'pending_user_input') {
                 console.log(`[Agent ${this.id}] executeStep: Detected pending_user_input. RequestId: ${(result[0] as any).request_id}`);
@@ -367,87 +440,13 @@ Please consider this context when planning and executing the mission. Provide de
                     return;
                 }
             } else {
-                console.log(`[Agent ${this.id}] executeStep: Result is NOT pending_user_input. Actual result: ${JSON.stringify(result)}`);
+                console.log(`[Agent ${this.id}] executeStep: Result is NOT pending_user_input. Actual result: ${JSON.stringify(this.truncateLargeStrings(result))}`);
             }
 
             this.say(`Completed step: ${step.actionVerb}`);
 
-            if (step.actionVerb === 'REFLECT') { // Changed from CHECK_PROGRESS to REFLECT
-                const planOutput = result.find(r => r.name === 'plan'); // REFLECT outputs 'plan'
-                const answerOutput = result.find(r => r.name === 'answer'); // REFLECT outputs 'answer'
-                const directAnswerOutput = result.find(r => r.name === 'direct_answer'); // NEW: Check for direct_answer
-
-                if (planOutput && planOutput.result) {
-                    const newPlan = planOutput.result as ActionVerbTask[];
-                    this.say('Reflection resulted in a new plan. Updating plan.');
-
-                    const currentStepIndex = this.steps.findIndex(s => s.id === step.id);
-                    if (currentStepIndex !== -1) {
-                        // Cancel all steps that come after the current REFLECT step
-                        for (let i = currentStepIndex + 1; i < this.steps.length; i++) {
-                            this.steps[i].status = StepStatus.CANCELLED;
-                        }
-                    }
-
-                    console.log(`[Agent ${this.id}] 406 runAgent: REFLECT step ${step.id} generated plan:`, JSON.stringify(newPlan));
-                    this.addStepsFromPlan(newPlan, step);
-                    await this.updateStatus();
-                } else if (directAnswerOutput && directAnswerOutput.result) { // NEW: Handle direct_answer
-                    const directAnswer = directAnswerOutput.result;
-                    this.say(`Reflection provided a direct answer. Creating new ACCOMPLISH step to pursue this direction.`);
-                    this.addToConversation('system', `Reflection Direct Answer: ${directAnswer}`); // Add to conversation history
-
-                    // Cancel all steps that come after the current REFLECT step
-                    const currentStepIndex = this.steps.findIndex(s => s.id === step.id);
-                    if (currentStepIndex !== -1) {
-                        for (let i = currentStepIndex + 1; i < this.steps.length; i++) {
-                            this.steps[i].status = StepStatus.CANCELLED;
-                        }
-                    }
-
-                    // Create new ACCOMPLISH step with the direct answer as goal
-                    const newAccomplishStep = new Step({
-                        actionVerb: 'ACCOMPLISH',
-                        missionId: this.missionId,
-                        ownerAgentId: this.id,
-                        stepNo: this.steps.length + 1,
-                        inputValues: new Map([
-                            ['goal', { inputName: 'goal', value: directAnswer, valueType: PluginParameterType.STRING }]
-                        ]),
-                        description: `Pursue direct answer from reflection: ${directAnswer.substring(0, 100)}${directAnswer.length > 100 ? '...' : ''}`,
-                        status: StepStatus.PENDING,
-                        persistenceManager: this.agentPersistenceManager
-                    });
-
-                    this.steps.push(newAccomplishStep);
-                    await this.updateStatus();
-                } else if (answerOutput && answerOutput.result) {
-                    this.say(`Reflection result: ${answerOutput.result}`);
-                    try {
-                        const parsedResult = typeof answerOutput.result === 'string' ? JSON.parse(answerOutput.result) : answerOutput.result;
-                        if (Array.isArray(parsedResult)) { // Check if it's an array (a plan)
-                            this.say('Reflection resulted in a new plan. Updating plan.');
-                            const currentStepIndex = this.steps.findIndex(s => s.id === step.id);
-                            if (currentStepIndex !== -1) {
-                                // Cancel all steps that come after the current REFLECT step
-                                for (let i = currentStepIndex + 1; i < this.steps.length; i++) {
-                                    this.steps[i].status = StepStatus.CANCELLED;
-                                }
-                            }
-                            console.log(`[Agent ${this.id}] 428 runAgent: REFLECT step ${step.id} generated plan:`, JSON.stringify(parsedResult));
-                            this.addStepsFromPlan(parsedResult as ActionVerbTask[], step);
-                            await this.updateStatus();
-                            return;
-                        }
-                    } catch (e) {
-                        // Not a JSON plan, so just log it and continue
-                        console.warn(`[Agent ${this.id}] Failed to parse 'answer' as JSON plan, treating as string. Error:`, e instanceof Error ? e.message : e);
-                    }
-
-                    this.say('Progress is on track. Continuing with the current plan.'); // Assuming 'answer' means continue
-                } else {
-                    this.say('Reflection did not provide a clear plan or answer. Continuing with the current plan.');
-                }
+            if (step.actionVerb === 'REFLECT') {
+                await this._handleReflectionResult(result, step);
             } else if (result[0]?.resultType === PluginParameterType.PLAN) {
                 // Apply custom output name mapping for PLAN results
                 const mappedResult = await step.mapPluginOutputsToCustomNames(result);
@@ -577,7 +576,7 @@ Please consider this context when planning and executing the mission. Provide de
     }
 
     private addStepsFromPlan(plan: ActionVerbTask[], parentStep: Step) {
-        console.log(`[Agent ${this.id}] Parsed plan for addStepsFromPlan:`, JSON.stringify(plan));
+        console.log(`[Agent ${this.id}] Parsed plan for addStepsFromPlan:`, JSON.stringify(this.truncateLargeStrings(plan), null, 2));
         const newSteps = createFromPlan(plan, this.steps.length + 1, this.agentPersistenceManager, parentStep, this);
         this.steps.push(...newSteps);
     }
@@ -636,7 +635,7 @@ Please consider this context when planning and executing the mission. Provide de
     }
 
     public async handleMessage(message: any): Promise<void> {
-        console.log(`Agent ${this.id} received message:`, message);
+        console.log(`Agent ${this.id} received message:`, this.truncateLargeStrings(message));
         // Handle base entity messages (handles ANSWER)
         await super.handleBaseMessage(message);
         switch (message.type) {
@@ -702,7 +701,7 @@ Please consider this context when planning and executing the mission. Provide de
         if (inputs.has('message')) {
             const messageInput = inputs.get('message');
             const message = messageInput?.value;
-            console.log(`[Agent ${this.id}] Sending CHAT message to user: ${message} from input: ${JSON.stringify(messageInput)}`);
+            console.log(`[Agent ${this.id}] Sending CHAT message to user: ${message} from input: ${JSON.stringify(this.truncateLargeStrings(messageInput))}`);
 
             if (typeof message === 'string' && message) {
                 this.say(message, true);
@@ -1154,7 +1153,7 @@ Please consider this context when planning and executing the mission. Provide de
                 }
 
                 if (!parsedResult || (typeof parsedResult === 'string' && parsedResult.trim() === '')) {
-                    console.warn(`[Agent ${this.id}] WARNING: Brain returned an empty or missing result for actionVerb=${actionVerb}. Response payload:`, JSON.stringify(response.data || {}, null, 2));
+                    console.warn(`[Agent ${this.id}] WARNING: Brain returned an empty or missing result for actionVerb=${actionVerb}. Response payload:`, JSON.stringify(this.truncateLargeStrings(response.data || {}), null, 2));
                 }
 
                 return [{
@@ -1292,7 +1291,7 @@ Please consider this context when planning and executing the mission. Provide de
 
         while (attempt < MAX_RETRIES) {
             try {
-                if (step.actionVerb === 'ASK') {
+                if (step.actionVerb === 'ASK' || step.actionVerb === 'ASK_USER_QUESTION') {
                     return this.handleAskStep(step.inputValues);
                 }
 
@@ -1684,6 +1683,31 @@ Please consider this context when planning and executing the mission. Provide de
         }
     }
 
+    private truncateLargeStrings(obj: any, maxLength: number = 500): any {
+        if (obj === null || typeof obj !== 'object') {
+            return obj;
+        }
+
+        if (Array.isArray(obj)) {
+            return obj.map(item => this.truncateLargeStrings(item, maxLength));
+        }
+
+        const newObj: { [key: string]: any } = {};
+        for (const key in obj) {
+            if (Object.prototype.hasOwnProperty.call(obj, key)) {
+                const value = obj[key];
+                if (typeof value === 'string' && value.length > maxLength) {
+                    newObj[key] = `[Truncated string, length: ${value.length}]`;
+                } else if (typeof value === 'object') {
+                    newObj[key] = this.truncateLargeStrings(value, maxLength);
+                } else {
+                    newObj[key] = value;
+                }
+            }
+        }
+        return newObj;
+    }
+
     /**
      * Set the agent's role
      * @param roleId Role ID
@@ -1702,7 +1726,7 @@ Please consider this context when planning and executing the mission. Provide de
         switch (message.type) {
           case CollaborationMessageType.TASK_DELEGATION:
             const task = message.payload as TaskDelegationRequest;
-            console.log(`Agent ${this.id} received delegated task:`, JSON.stringify(task, null, 2));
+            console.log(`Agent ${this.id} received delegated task:`, JSON.stringify(this.truncateLargeStrings(task), null, 2));
             if (!task.taskType) {
                 console.log('Agent Line 1364 - Missing required property "taskType" in task');
                 throw new Error(`Missing required property 'taskType' in task`);
@@ -1738,19 +1762,17 @@ Please consider this context when planning and executing the mission. Provide de
                 }));
             }
 
-            const newStep = new Step({
-              actionVerb: task.taskType,
-              missionId: this.missionId,
-              ownerAgentId: this.id,
-              stepNo: this.steps.length + 1,
-              inputReferences: inputReferences,
-              description: task.description,
-              dependencies: dependencies,
-              outputs: deserializedOutputs,
-              recommendedRole: this.role,
-              status: StepStatus.PENDING,
-              persistenceManager: this.agentPersistenceManager
-            });
+            const newStep = this.createStep(
+                task.taskType,
+                this.steps.length + 1,
+                new Map<string, InputValue>(),
+                task.description,
+                StepStatus.PENDING
+            );
+            newStep.inputReferences =  inputReferences;
+            newStep.dependencies = dependencies;
+            newStep.outputs = deserializedOutputs;              
+            newStep.recommendedRole = this.role;
             this.steps.push(newStep);
             // The agent will pick up and run this new step in its main loop.
             await this.updateStatus();
@@ -1765,14 +1787,15 @@ Please consider this context when planning and executing the mission. Provide de
                 console.log(`Received result for delegated step ${step.id}. Success: ${taskResult.success}`);
                 step.status = taskResult.success ? StepStatus.COMPLETED : StepStatus.ERROR;
                 if (taskResult.success) {
-                  step.result = taskResult.result;
-                  console.log(`Updated step ${step.id} with result:`, JSON.stringify(step.result, null, 2));
+                  step.result = MapSerializer.transformFromSerialization(taskResult.result) as PluginOutput[];
+                  console.log(`Updated step ${step.id} with result:`, JSON.stringify(this.truncateLargeStrings(step.result), null, 2));
                   await this.saveWorkProductWithClassification(step.id, taskResult.result, step.isEndpoint(this.steps), this.getAllAgentsInMission());
                 } else {
                   this.say(`Delegated step ${step.actionVerb} failed. Reason: ${taskResult.error}`);
                 }
                 this.delegatedSteps.delete(taskResult.taskId);
                 await this.updateStatus();
+                this.runAgent(); // Re-run the agent to check for new executable steps
               }
             }
             break;
@@ -1807,7 +1830,7 @@ Please consider this context when planning and executing the mission. Provide de
      * @param resolution Conflict resolution
      */
     async processConflictResolution(resolution: ConflictResolutionResponse): Promise<void> {
-        console.log(`Agent ${this.id} processing final conflict resolution:`, resolution);
+        console.log(`Agent ${this.id} processing final conflict resolution:`, this.truncateLargeStrings(resolution));
         this.say(`Conflict ${resolution.conflictId} has been resolved. Outcome: ${resolution.explanation}`);
         // A more advanced implementation would involve the agent taking action based on the resolution,
         // such as retrying a failed step with corrected data or updating its plan.
@@ -2015,23 +2038,19 @@ Explanation: ${resolution.explanation}`);
         console.log(`Agent ${this.id} executing plan template: ${templateId}${wait ? ' and waiting for completion' : ''}`);
 
         // Create a new step for plan template execution
-        const planStep = new Step({
-            actionVerb: 'EXECUTE_PLAN_TEMPLATE',
-            missionId: this.missionId,
-            ownerAgentId: this.id,
-            recommendedRole: this.role,
-            status: StepStatus.PENDING,
-            stepNo: this.steps.length + 1,
-            inputReferences: new Map([
+        const planStep = this.createStep(
+            'EXECUTE_PLAN_TEMPLATE',
+            this.steps.length + 1,
+            new Map<string, InputValue>(),
+            `Execute plan template: ${templateId}`,
+            StepStatus.PENDING);
+        planStep.recommendedRole = this.role;
+        planStep.inputReferences = new Map([
                 ['templateId', { inputName: 'templateId', value: templateId, valueType: PluginParameterType.STRING, args: {} }],
                 ['inputs', { inputName: 'inputs', value: inputs, valueType: PluginParameterType.OBJECT, args: {} }],
                 ['userId', { inputName: 'userId', value: this.id, valueType: PluginParameterType.STRING, args: {} }],
                 ['executionMode', { inputName: 'executionMode', value: executionMode, valueType: PluginParameterType.STRING, args: {} }]
             ]),
-            description: `Execute plan template: ${templateId}`,
-            persistenceManager: this.agentPersistenceManager
-        });
-
         // Add the step to the agent's steps
         this.steps.push(planStep);
 
@@ -2492,25 +2511,21 @@ Explanation: ${resolution.explanation}`);
         const reflectPrompt = `
 Context: The step "${failedStep.actionVerb}" failed with the error: "${errorMsg}".
 
-Task: Analyze this error and the completed work products to generate a new plan to achieve the original goal. The plan should be a series of actionable steps.
+Task: Analyze this error and the completed work products to generate a plan to achieve the original goal given the process so far and the issue preventing completion of the original plan. Your response MUST be a valid JSON array of step objects that represents a new plan to recover from this failure. Do not include any other text, explanation, or prose outside of the JSON array. If no recovery is possible, return an empty array [].
 
 Completed Work:
 ${workProductsSummary}
         `;
 
-        const recoveryStep = new Step({
-            actionVerb: 'REFLECT',
-            missionId: this.missionId,
-            ownerAgentId: this.id,
-            recommendedRole: this.role, // Or a specialized 'planner' or 'critic' role
-            stepNo: this.steps.length + 1,
-            inputValues: new Map([
+        const recoveryStep = this.createStep(
+            'REFLECT',
+            this.steps.length + 1,
+            new Map([
                 ['prompt', { inputName: 'prompt', value: reflectPrompt, valueType: PluginParameterType.STRING, args: {} }]
             ]),
-            description: `Reflect on the failure of step "${failedStep.actionVerb}" and create a new plan.`, 
-            persistenceManager: this.agentPersistenceManager
-        });
-
+            `Reflect on the failure of step "${failedStep.actionVerb}" and create a new plan.`, 
+            StepStatus.PENDING);
+        recoveryStep.recommendedRole = this.role;
         this.steps.push(recoveryStep);
         await this.logEvent({ eventType: 'step_created', ...recoveryStep.toJSON() });
         console.log(`[Agent ${this.id}] Created REFLECT recovery step ${recoveryStep.id} for failed step ${failedStep.actionVerb}.`);

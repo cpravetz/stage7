@@ -159,14 +159,15 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         break;
         
       case MessageType.REQUEST:
-        setConversationHistory((prev) => [...prev, { content: `Question: ${data.content.question}`, persistent: true }]);
-        setCurrentQuestion({ 
-          guid: data.content.questionGuid, 
-          sender: data.sender, 
-          content: data.content.question, 
-          choices: data.content.choices, 
-          asker: data.content.asker 
-        });
+        setPendingUserInputQueue((queue) => [
+          ...queue,
+          {
+            request_id: data.content.questionGuid,
+            question: data.content.question,
+            answerType: data.content.answerType || 'text',
+            choices: data.content.choices
+          }
+        ]);
         break;
         
       case MessageType.WORK_PRODUCT_UPDATE:
@@ -373,7 +374,10 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       if (!ws.current) {
         connectWebSocket();
       }
-      if (currentQuestion) {
+
+      if (pendingUserInput) {
+        setConversationHistory((prev) => [...prev, { content: `Question: ${pendingUserInput.question}` }, { content: `Answer: ${message}`, persistent: true }]);
+      } else if (currentQuestion) {
         setConversationHistory((prev) => [...prev, { content: `Answer: ${message}`, persistent: true }]);
       } else {
         setConversationHistory((prev) => [...prev, { content: `User: ${message}`, persistent: true }]);
@@ -415,7 +419,17 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             'Authorization': `Bearer ${accessToken}`
           };
 
-          if (currentQuestion) {
+          if (pendingUserInput) {
+            console.log(`[WebSocketContext] Sending answer to pending user input from ${pendingUserInput.request_id}`);
+            await api.post('/sendMessage', {
+              type: "USER_INPUT_RESPONSE",
+              sender: 'user',
+              content: { missionId: activeMissionId, response: message, requestId: pendingUserInput.request_id },
+              recipient: 'agentset',
+              clientId
+            }, { headers });
+            if (setPendingUserInput) setPendingUserInput(null);
+          } else if (currentQuestion) {
             console.log(`[WebSocketContext] Sending answer to question from ${currentQuestion.asker}`);
             await api.post('/sendMessage', {
               type: "answer",

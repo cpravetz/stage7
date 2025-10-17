@@ -293,6 +293,10 @@ const MainApp: React.FC = () => {
             question={pendingUserInput.question}
             choices={pendingUserInput.choices}
             answerType={pendingUserInput.answerType as AnswerType}
+            onSubmit={(response) => {
+              contextSendMessage(response);
+              if (setPendingUserInput) setPendingUserInput(null);
+            }}
             onClose={() => {
               if (setPendingUserInput) setPendingUserInput(null);
             }}
