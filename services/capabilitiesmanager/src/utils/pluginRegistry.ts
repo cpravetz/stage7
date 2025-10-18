@@ -9,6 +9,7 @@ import { PluginMarketplace } from '@cktmcs/marketplace';
 import { ensurePythonDependencies } from './pythonPluginHelper';
 
 const execAsync = promisify(exec);
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 // Define internal verbs as PluginManifest objects
 const INTERNAL_VERBS: PluginManifest[] = [
@@ -419,31 +420,60 @@ export class PluginRegistry {
             // Sanitize versionSpecificComponent to be directory-friendly (e.g., replace slashes in branch names)
             const sanitizedVersionComponent = versionSpecificComponent.replace(/[/\\]/g, '_');
             const cacheDir = path.join(cacheDirBase, sanitizedVersionComponent);
+            const lockFilePath = path.join(cacheDir, '.lock');
+            const lockTimeout = 30000; // 30 seconds
+            const lockPollInterval = 500; // 0.5 seconds
 
             console.log(`Preparing git plugin ${manifest.id}. Target cache directory: ${cacheDir}`);
 
-            const dirExists = await fs.stat(cacheDir).then(() => true).catch(() => false);
-
-            if (!dirExists) {
-                console.log(`Cache directory ${cacheDir} not found. Creating and cloning...`);
-                await fs.mkdir(cacheDir, { recursive: true });
-                await this._prepareGitPlugin(manifest, cacheDir);
-            } else {
-                console.log(`Cache directory ${cacheDir} found. Verifying Git repository...`);
+            // Acquire lock
+            let acquiredLock = false;
+            const startTime = Date.now();
+            while (Date.now() - startTime < lockTimeout) {
                 try {
-                    // Check if it's a valid git repository
-                    await execAsync(`git -C ${cacheDir} rev-parse --is-inside-work-tree`);
-                    console.log(`Git repository in ${cacheDir} is valid. Using existing clone.`);
+                    await fs.mkdir(cacheDir, { recursive: true });
+                    await fs.writeFile(lockFilePath, process.pid.toString(), { flag: 'wx' }); // 'wx' ensures file is created only if it doesn't exist
+                    acquiredLock = true;
+                    break;
+                } catch (error: any) {
+                    if (error.code === 'EEXIST') {
+                        console.log(`Lock for ${manifest.id} is held by another process. Waiting...`);
+                        await delay(lockPollInterval);
+                    } else {
+                        throw error;
+                    }
+                }
+            }
+
+            if (!acquiredLock) {
+                throw new Error(`Failed to acquire lock for plugin ${manifest.id} within ${lockTimeout}ms.`);
+            }
+
+            try {
+                const dirExists = await fs.stat(cacheDir).then(() => true).catch(() => false);
+
+                if (!dirExists || !(await fs.stat(path.join(cacheDir, '.git')).then(() => true).catch(() => false))) { // Check for .git dir
+                    console.log(`Cache directory ${cacheDir} not found or not a valid Git repo. Creating and cloning...`);
+                    // Ensure directory is empty before cloning if it exists but is not a valid git repo
+                    if (dirExists) {
+                        await fs.rm(cacheDir, { recursive: true, force: true });
+                        await fs.mkdir(cacheDir, { recursive: true });
+                    }
+                    await this._prepareGitPlugin(manifest, cacheDir);
+                } else {
+                    console.log(`Cache directory ${cacheDir} found and is a valid Git repo. Using existing clone.`);
                     // Optional: pull latest changes if not pinned to a commitHash
                     if (!manifest.packageSource.commitHash && manifest.packageSource.branch) {
                         console.log(`Pulling latest changes for branch ${manifest.packageSource.branch} in ${cacheDir}...`);
                         await execAsync(`git -C ${cacheDir} pull origin ${manifest.packageSource.branch}`);
                     }
-                } catch (gitCheckError) {
-                    console.warn(`Git repository in ${cacheDir} is invalid or corrupted. Removing and re-cloning...`, gitCheckError);
-                    await fs.rm(cacheDir, { recursive: true, force: true });
-                    await fs.mkdir(cacheDir, { recursive: true });
-                    await this._prepareGitPlugin(manifest, cacheDir);
+                }
+            } finally {
+                // Release lock
+                try {
+                    await fs.unlink(lockFilePath);
+                } catch (error) {
+                    console.error(`Error releasing lock for plugin ${manifest.id} at ${lockFilePath}:`, error);
                 }
             }
 
@@ -532,11 +562,25 @@ export class PluginRegistry {
                 }
             }
 
-            const plugin = await this.pluginMarketplace.fetchOne(id, version, repository);
-            if (plugin && !this.cache.has(plugin.id)) {
-                // Removed all updateCache calls
+            const repoTypeInCache = this.cache.get(id);
+
+            if (repoTypeInCache === 'git' || repoTypeInCache === 'github') {
+                // JIT fetch for Git/GitHub plugins
+                const manifest = await this.pluginMarketplace.fetchOne(id, version, repoTypeInCache);
+                if (manifest) {
+                    // Prepare the plugin (clone if Git-sourced)
+                    const { effectiveManifest } = await this.preparePluginForExecution(manifest);
+                    return effectiveManifest;
+                }
+                return undefined;
+            } else {
+                // For other types, fetch directly from marketplace (already cached or local)
+                const plugin = await this.pluginMarketplace.fetchOne(id, version, repository);
+                if (plugin && !this.cache.has(plugin.id)) {
+                    // Removed all updateCache calls
+                }
+                return plugin;
             }
-            return plugin;
         } catch (err) {
             console.warn(`pluginRegistry: fetchOne failed for id=${id}, repository=${repository}:`, err);
             return undefined;
@@ -563,8 +607,24 @@ export class PluginRegistry {
                 if (!id) {
                     return undefined;
                 }
-                const repository = this.cache.get(id);
-                return this.pluginMarketplace.fetchOne(id, version, repository as PluginRepositoryType);
+                const repoTypeInCache = this.cache.get(id);
+                if (repoTypeInCache === 'git' || repoTypeInCache === 'github') {
+                    // JIT fetch for Git/GitHub plugins
+                    const manifest = await this.pluginMarketplace.fetchOne(id, version, repoTypeInCache);
+                    if (manifest) {
+                        // Prepare the plugin (clone if Git-sourced)
+                        const { effectiveManifest } = await this.preparePluginForExecution(manifest);
+                        return effectiveManifest;
+                    }
+                    return undefined;
+                } else {
+                    // For other types, fetch directly from marketplace (already cached or local)
+                    const plugin = await this.pluginMarketplace.fetchOne(id, version, repoTypeInCache);
+                    if (plugin && !this.cache.has(plugin.id)) {
+                        // Removed all updateCache calls
+                    }
+                    return plugin;
+                }
             }
             const plugin = await this.pluginMarketplace.fetchOneByVerb(verb);
             if (plugin && !this.cache.has(plugin.id)) {
@@ -686,22 +746,32 @@ export class PluginRegistry {
                         console.error(`Failed to list plugins from ${repoType} repository: plugins is not iterable`);
                         continue; // Skip this repository
                     }
-                    for (const locator of plugins) {
-                        try {
-                            const manifest = await repository.fetch(locator.id);
-                            if (manifest) {
-                                this.cache.set(manifest.id, repoType as PluginRepositoryType);
-                                this.verbIndex.set(manifest.verb, manifest.id);
-                            }
-                        } catch (pluginError) {
-                            if (pluginError instanceof Error) {
-                                console.error(`Failed to fetch manifest for plugin ${locator.id} from ${repoType} repository during cache refresh: ${pluginError.message}`, pluginError);
-                            } else {
-                                console.error(`Failed to fetch manifest for plugin ${locator.id} from ${repoType} repository during cache refresh:`, pluginError);
+                    if (repoType === 'git' || repoType === 'github') {
+                        // For Git and GitHub, only store locators, not full manifests
+                        for (const locator of plugins) {
+                            this.cache.set(locator.id, repoType as PluginRepositoryType);
+                            this.verbIndex.set(locator.verb, locator.id);
+                        }
+                        console.log(`Loaded ${plugins.length} plugin locators from ${repoType} repository`);
+                    } else {
+                        // For other types (local, mongo, librarian-definition), load full manifests
+                        for (const locator of plugins) {
+                            try {
+                                const manifest = await repository.fetch(locator.id);
+                                if (manifest) {
+                                    this.cache.set(manifest.id, repoType as PluginRepositoryType);
+                                    this.verbIndex.set(manifest.verb, manifest.id);
+                                }
+                            } catch (pluginError) {
+                                if (pluginError instanceof Error) {
+                                    console.error(`Failed to fetch manifest for plugin ${locator.id} from ${repoType} repository during cache refresh: ${pluginError.message}`, pluginError);
+                                } else {
+                                    console.error(`Failed to fetch manifest for plugin ${locator.id} from ${repoType} repository during cache refresh:`, pluginError);
+                                }
                             }
                         }
+                        console.log(`Loaded ${plugins.length} plugins from ${repoType} repository`);
                     }
-                    console.log(`Loaded ${plugins.length} plugins from ${repoType} repository`);
                 } catch (repoError) {
                     console.error(`Failed to list plugins from ${repoType} repository:`, repoError);
                 }

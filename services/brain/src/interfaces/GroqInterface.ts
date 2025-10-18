@@ -78,103 +78,99 @@ export class GroqInterface extends BaseInterface {
 
     chat = async (service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string, responseType:string, response_format?: any }): Promise<string> => {
         console.log('GroqInterface: chat method called directly');
-        try {
-            if (!service || !service.isAvailable() || !service.apiKey) {
-                throw new Error('Groq service is not available or API key is missing');
-            }
+        const maxRetries = 5;
+        let attempt = 0;
+        let waitTime = 1000; // Initial wait time in ms
 
-            // Initialize the Groq client using OpenAI's SDK
-            console.log(`GroqInterface: Using API key with length ${service.apiKey.length}`);
-            console.log(`GroqInterface: Using API URL: ${service.apiUrl}`);
-
-            const groqClient = new OpenAI({
-                apiKey: service.apiKey,
-                baseURL: service.apiUrl
-            });
-
-            // Get the model name from options or use a default
-            // Strip the 'groq/' prefix if present
-            let modelName = options.modelName || 'llama-3-8b-8192';
-            if (modelName.startsWith('groq/')) {
-                modelName = modelName.substring(5); // Remove 'groq/' prefix
-            }
-
-            console.log(`Using Groq model: ${modelName}`);
-
-            // Format messages for Groq API (OpenAI format)
-            const formattedMessages = messages.map(msg => {
-                // Check if the message has a 'message' property instead of 'content'
-                // This is to handle a potential issue where the message structure might be incorrect
-                const content = msg.content || (msg as any).message || '';
-
-                // Log the message structure for debugging
-                //console.log(`GroqInterface: Message structure: ${JSON.stringify(msg, null, 2)}`);
-
-                return {
-                    role: msg.role === 'user' ? 'user' : 'assistant',
-                    content: content
-                } as OpenAI.ChatCompletionMessageParam;
-            });
-
-            // Log the formatted messages
-            /*console.log(`GroqInterface: Formatted messages: ${JSON.stringify(formattedMessages, (key, value) => {
-                // Truncate long content for readability
-                if (key === 'content' && typeof value === 'string' && value.length > 200) {
-                    return value.substring(0, 200) + '... (truncated)';
-                }
-                return value;
-            }, 2)}`);
-            */
-
-            // Check if the first message is very long and might need to be truncated
-            if (formattedMessages.length > 0 && typeof formattedMessages[0].content === 'string' && formattedMessages[0].content.length > 10000) {
-                console.log(`GroqInterface: First message is very long (${formattedMessages[0].content.length} chars), it might be truncated by the API`);
-            }
-
-            const requestOptions: any = {
-                model: modelName,
-                messages: formattedMessages,
-                temperature: options.temperature || 0.7,
-                max_tokens: options.max_length || 6000,
-                stream: false
-                // NOTE: response_type is not supported by Groq API, removed to prevent 400 errors
-            };
-
-            // Add response_format if specified in options
-            if (options.response_format) {
-                console.log(`GroqInterface: Setting response_format to ${JSON.stringify(options.response_format)}`);
-                requestOptions.response_format = options.response_format;
-            }
-            // Log the full request for debugging
-            console.log(`GroqInterface: Full request options: ${JSON.stringify(requestOptions, (key, value) => {
-                // Truncate long message content for readability
-                if (key === 'content' && typeof value === 'string' && value.length > 200) {
-                    return value.substring(0, 200) + '... (truncated)';
-                }
-                return value;
-            }, 2)}`);
-
-            // Create the completion
-            const completion = await groqClient.chat.completions.create(requestOptions);
-
-            // Return the response
-            if (completion.choices && completion.choices.length > 0) {
-                const content = completion.choices[0].message.content || '';
-                console.log(`GroqInterface: Received response with content: ${content.substring(0, 140)}... (truncated)`);
-                // --- Ensure JSON if required ---
-                const requireJson = (options.response_format?.type === 'json_object') || options.responseType === 'json';
-                if (requireJson) {
-                    return this.ensureJsonResponse(content, true);
+        while (attempt < maxRetries) {
+            try {
+                if (!service || !service.isAvailable() || !service.apiKey) {
+                    throw new Error('Groq service is not available or API key is missing');
                 }
 
-                return content;
-            }
+                // Initialize the Groq client using OpenAI's SDK
+                console.log(`GroqInterface: Using API key with length ${service.apiKey.length}`);
+                console.log(`GroqInterface: Using API URL: ${service.apiUrl}`);
 
-            return '';
-        } catch (error) {
-            console.error('Error generating response from Groq:', error instanceof Error ? error.message : error);
-            throw error; // Rethrow to allow the Brain to handle the error
+                const groqClient = new OpenAI({
+                    apiKey: service.apiKey,
+                    baseURL: service.apiUrl
+                });
+
+                // Get the model name from options or use a default
+                // Strip the 'groq/' prefix if present
+                let modelName = options.modelName || 'llama-3-8b-8192';
+                if (modelName.startsWith('groq/')) {
+                    modelName = modelName.substring(5); // Remove 'groq/' prefix
+                }
+
+                console.log(`Using Groq model: ${modelName}`);
+
+                // Format messages for Groq API (OpenAI format)
+                const formattedMessages = messages.map(msg => {
+                    const content = msg.content || (msg as any).message || '';
+                    return {
+                        role: msg.role === 'user' ? 'user' : 'assistant',
+                        content: content
+                    } as OpenAI.ChatCompletionMessageParam;
+                });
+
+                if (formattedMessages.length > 0 && typeof formattedMessages[0].content === 'string' && formattedMessages[0].content.length > 10000) {
+                    console.log(`GroqInterface: First message is very long (${formattedMessages[0].content.length} chars), it might be truncated by the API`);
+                }
+
+                const requestOptions: any = {
+                    model: modelName,
+                    messages: formattedMessages,
+                    temperature: options.temperature || 0.7,
+                    max_tokens: options.max_length || 6000,
+                    stream: false
+                };
+
+                if (options.response_format) {
+                    console.log(`GroqInterface: Setting response_format to ${JSON.stringify(options.response_format)}`);
+                    requestOptions.response_format = options.response_format;
+                }
+                console.log(`GroqInterface: Full request options: ${JSON.stringify(requestOptions, (key, value) => {
+                    if (key === 'content' && typeof value === 'string' && value.length > 200) {
+                        return value.substring(0, 200) + '... (truncated)';
+                    }
+                    return value;
+                }, 2)}`);
+
+                const completion = await groqClient.chat.completions.create(requestOptions);
+
+                if (completion.choices && completion.choices.length > 0) {
+                    const content = completion.choices[0].message.content || '';
+                    console.log(`GroqInterface: Received response with content: ${content.substring(0, 140)}... (truncated)`);
+                    const requireJson = (options.response_format?.type === 'json_object') || options.responseType === 'json';
+                    if (requireJson) {
+                        return this.ensureJsonResponse(content, true);
+                    }
+                    return content;
+                }
+
+                return '';
+            } catch (error: Error | any) {
+                if (error.status === 429 && attempt < maxRetries - 1) {
+                    attempt++;
+                    const retryAfter = error.headers['retry-after'];
+                    if (retryAfter) {
+                        const retryAfterSeconds = parseInt(retryAfter, 10);
+                        if (!isNaN(retryAfterSeconds)) {
+                            waitTime = retryAfterSeconds * 1000;
+                        }
+                    }
+                    console.warn(`Rate limit exceeded. Retrying in ${waitTime / 1000} seconds... (Attempt ${attempt}/${maxRetries})`);
+                    await new Promise(resolve => setTimeout(resolve, waitTime));
+                    waitTime *= 2; // Exponential backoff
+                } else {
+                    console.error('Error generating response from Groq:', error instanceof Error ? error.message : error);
+                    throw error; // Rethrow to allow the Brain to handle the error
+                }
+            }
         }
+        throw new Error('Failed to get response from Groq after multiple retries');
     }
 
     convert = async (service: BaseService, conversionType: LLMConversationType, convertParams: ConvertParamsType): Promise<any> => {

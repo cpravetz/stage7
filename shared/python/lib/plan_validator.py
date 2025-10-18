@@ -90,7 +90,7 @@ class PlanValidator:
     
     # Class constants
     CONTROL_FLOW_VERBS = {'WHILE', 'SEQUENCE', 'IF_THEN', 'UNTIL', 'FOREACH', 'REPEAT'}
-    ALLOWED_ROLES = {'Coordinator', 'Researcher', 'Coder', 'Creative', 'Critic', 'Executor', 'Domain Expert'}
+    ALLOWED_ROLES = {'coordinator', 'researcher', 'coder', 'creative', 'critic', 'executor', 'domain expert'}
     
     def __init__(self, max_retries: int = 3, brain_call=None):
         self.max_retries = max_retries
@@ -721,9 +721,12 @@ Return ONLY the corrected JSON plan, no explanations."""
         
             # Validate recommendedRole
             recommended_role = step.get('recommendedRole')
-            if recommended_role and recommended_role not in self.ALLOWED_ROLES:
-                logger.warning(f"Step {step_number}: Invalid recommendedRole '{recommended_role}', dropping")
-                del step['recommendedRole']
+            if recommended_role:
+                if recommended_role.lower() in [r.lower() for r in self.ALLOWED_ROLES]:
+                    step['recommendedRole'] = recommended_role.lower()
+                else:
+                    logger.warning(f"Step {step_number}: Invalid recommendedRole '{recommended_role}', dropping")
+                    del step['recommendedRole']
         
         return {'valid': len(errors) == 0 and len(wrappable_errors) == 0, 'errors': errors, 'wrappable_errors': wrappable_errors}
 
@@ -946,6 +949,7 @@ Return ONLY the corrected JSON plan, no explanations."""
             for input_name, input_def in step.get('inputs', {}).items():
                 if isinstance(input_def, dict) and input_def.get('sourceStep') in moved_step_numbers:
                     logger.info(f"Updating step {step['number']} input '{input_name}' to reference FOREACH {foreach_step_number}")
+                    # The outputName from the moved step should be preserved as the FOREACH loop will expose it.
                     input_def['sourceStep'] = foreach_step_number
 
         logger.info(f"Created FOREACH step {foreach_step_number} with {len(sub_plan)} sub-steps")

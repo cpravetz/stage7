@@ -219,6 +219,31 @@ export class AgentPersistenceManager {
         }
     }
 
+    async loadStep(stepId: string): Promise<any | null> {
+        try {
+            const response = await this.authenticatedApi.get(`http://${this.librarianUrl}/queryData`, {
+                params: {
+                    storageType: 'mongo',
+                    collection: 'events',
+                    query: {
+                        stepId: stepId,
+                        eventType: 'step_created'
+                    },
+                    options: {
+                        limit: 1
+                    }
+                }
+            });
+            if (response.data && Array.isArray(response.data.data) && response.data.data.length > 0) {
+                return response.data.data[0];
+            }
+            return null;
+        } catch (error) { analyzeError(error as Error);
+            console.error(`Error loading step ${stepId}:`, error instanceof Error ? error.message : error);
+            return null;
+        }
+    }
+
     async loadStepWorkProduct(agentId: string, stepId: string): Promise<WorkProduct | null> {
         try {
             const response = await this.authenticatedApi.get(

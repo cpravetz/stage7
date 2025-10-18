@@ -159,6 +159,7 @@ export class Step {
         maxRetries?: number,
         maxRecoverableRetries?: number
     }) {
+    
         console.log(`[Step constructor] params.outputs =`, params.outputs);
         this.id = params.id || uuidv4();
         this.missionId = params.missionId || 'unknown_mission';
@@ -193,20 +194,7 @@ export class Step {
         this.maxRecoverableRetries = params.maxRecoverableRetries || 5;
         this.lastError = null;
 
-        // Validate and standardize recommendedRole
-        if (this.recommendedRole) {
-            const roleKey = Object.keys(PredefinedRoles).find(key => 
-                PredefinedRoles[key].id.toLowerCase() === this.recommendedRole!.toLowerCase() || 
-                PredefinedRoles[key].name.toLowerCase() === this.recommendedRole!.toLowerCase()
-            );
 
-            if (roleKey) {
-                this.recommendedRole = PredefinedRoles[roleKey].id;
-            } else {
-                console.warn(`[Step Constructor] Invalid or unknown recommendedRole: '${this.recommendedRole}'. Setting to undefined.`);
-                this.recommendedRole = undefined;
-            }
-        }
 
         this.persistenceManager = params.persistenceManager;
         this.awaitsSignal = '';
@@ -275,6 +263,17 @@ export class Step {
         console.log(`[Step ${this.id}] Phase 2: Resolving dependencies...`);
         for (const dep of this.dependencies) {
             let sourceStep = allSteps.find(s => s.id === dep.sourceStepId);
+
+            if (!sourceStep) {
+                try {
+                    const stepData = await this.persistenceManager.loadStep(dep.sourceStepId);
+                    if (stepData) {
+                        sourceStep = new Step({ ...stepData, persistenceManager: this.persistenceManager });
+                    }
+                } catch (e) {
+                    console.warn(`[Step ${this.id}]   - Error attempting to load source step ${dep.sourceStepId} from persistence:`, e instanceof Error ? e.message : e);
+                }
+            }
 
             // If sourceStep exists but has no result in-memory, attempt to hydrate from persistence.
             if (sourceStep && (!sourceStep.result || sourceStep.result.length === 0)) {
@@ -411,69 +410,43 @@ export class Step {
         const arrayInput = this.inputValues.get('array');
         const stepsInput = this.inputValues.get('steps');
 
-        // Debug: Log the inputs received
-        console.log(`[handleForeach] Array input:`, arrayInput);
-        console.log(`[handleForeach] Steps input:`, stepsInput);
-        if (arrayInput?.value) {
-            console.log(`[handleForeach] Array value type: ${typeof arrayInput.value}, length: ${Array.isArray(arrayInput.value) ? arrayInput.value.length : 'N/A'}`);
-            if (Array.isArray(arrayInput.value) && arrayInput.value.length <= 10) {
-                console.log(`[handleForeach] Array contents:`, arrayInput.value);
-            } else if (Array.isArray(arrayInput.value)) {
-                console.log(`[handleForeach] Array first 5 items:`, arrayInput.value.slice(0, 5));
-            }
+        if (!arrayInput || !arrayInput.value || !Array.isArray(arrayInput.value)) {
+            return this.createErrorResponse('FOREACH requires an "array" input that is an array.', '[Step]Error in FOREACH step');
         }
 
-        // Validation: Check for a valid iterable instead of just an array
-        if (!arrayInput || !arrayInput.value || typeof arrayInput.value[Symbol.iterator] !== 'function') {
-            return this.createErrorResponse('FOREACH requires an "array" input that is iterable (e.g., an array, a map, a set).', '[Step]Error in FOREACH step', 'FOREACH requires an "array" input that is iterable (e.g., an array, a map, a set).');
-        }
-    
         if (!stepsInput || !Array.isArray(stepsInput.value)) {
-            return this.createErrorResponse('FOREACH requires a "steps" input of type plan.', '[Step]Error in FOREACH step', 'FOREACH requires a "steps" input of type plan.');
+            return this.createErrorResponse('FOREACH requires a "steps" input of type plan.', '[Step]Error in FOREACH step');
         }
-    
-        // Convert any iterable to an array to allow for indexing and length properties
-        const inputArray: any[] = Array.from(arrayInput.value);
+
+        const inputArray: any[] = arrayInput.value;
         const subPlanTemplate: ActionVerbTask[] = stepsInput.value;
-
-        if (inputArray.length === 0) {
-            return [{
-                success: true, name: 'loop_skipped', resultType: PluginParameterType.STRING,
-                resultDescription: 'FOREACH loop skipped as input iterable was empty.',
-                result: 'Empty iterable, no iterations.'
-            }];
-        }
-
-        // Safety check: prevent system overload from too many iterations
-        const maxIterations = 100; // Reasonable limit
-        if (inputArray.length > maxIterations) {
-            console.error(`[handleForeach] Array too large: ${inputArray.length} items. Limiting to ${maxIterations} items.`);
-            console.error(`[handleForeach] First few items: ${JSON.stringify(inputArray.slice(0, 5))}`);
-            console.error(`[handleForeach] This suggests the array was incorrectly parsed. Check input sanitization.`);
-
-            return this.createErrorResponse(`Array contains ${inputArray.length} items, which exceeds the safety limit of ${maxIterations}. First few items: ${JSON.stringify(inputArray.slice(0, 5))}. Check if the array was incorrectly split character by character.`, 'FOREACH array too large', `FOREACH array too large: ${inputArray.length} items (max: ${maxIterations}). This suggests incorrect array parsing.`);
-        }
-    
-        // Execute sub-plan for each item and collect results
-        const allResults: any[] = [];
+        const newSteps: Step[] = [];
 
         for (let i = 0; i < inputArray.length; i++) {
             const item = inputArray[i];
-            console.log(`[handleForeach] Processing item ${i + 1}/${inputArray.length}:`, item);
+            const subPlanCopy = JSON.parse(JSON.stringify(subPlanTemplate));
+            const iterationSteps = createFromPlan(subPlanCopy, this.stepNo + 1 + (i * subPlanTemplate.length), this.persistenceManager, this);
 
-            // Execute the sub-plan for this item
-            const itemResult = await this.executeSubPlanForItem(item, subPlanTemplate, i);
-            if (itemResult) {
-                allResults.push(itemResult);
+            for (const step of iterationSteps) {
+                for (const [inputName, inputRef] of step.inputReferences.entries()) {
+                    if (inputRef.outputName === 'item') {
+                        step.inputValues.set(inputName, {
+                            inputName: inputName,
+                            value: item,
+                            valueType: this.inferValueType(item)
+                        });
+                    }
+                }
             }
+            newSteps.push(...iterationSteps);
         }
 
         return [{
             success: true,
-            name: 'results',
-            resultType: PluginParameterType.ARRAY,
-            resultDescription: `[Step] FOREACH processed ${inputArray.length} items and collected ${allResults.length} results.`,
-            result: allResults
+            name: 'steps',
+            resultType: PluginParameterType.PLAN,
+            resultDescription: `[Step] FOREACH created ${newSteps.length} steps from ${inputArray.length} items.`,
+            result: newSteps
         }];
     }
 
@@ -603,7 +576,9 @@ export class Step {
 
     private async finalizeStepExecution(result: PluginOutput[]): Promise<void> {
         this.result = await this.mapPluginOutputsToCustomNames(result);
-        this.status = StepStatus.COMPLETED;
+        // Check if any output indicates failure
+        const hasFailureOutput = this.result.some(output => !output.success);
+        this.status = hasFailureOutput ? StepStatus.ERROR : StepStatus.COMPLETED;
     
         await this.persistenceManager.saveWorkProduct({
             id: uuidv4(),
