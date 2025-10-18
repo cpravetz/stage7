@@ -431,7 +431,7 @@ export class GitHubRepository implements PluginRepository {
         if (response.status === 404) {
             console.log(`GitHubRepository.getFileContent: Path '${path}' not found (404).`);
         } else {
-            console.warn(`GitHubRepository.getFileContent: Failed to get content for path '${path}'. Status: ${response.status}`);
+                console.warn(`GitHubRepository.getFileContent: Failed to get content for path '${path}'. Status: ${response.status}`);
         }
         return undefined;
     }

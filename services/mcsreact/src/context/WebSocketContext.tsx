@@ -322,12 +322,10 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         
       case MessageType.SHARED_FILES_UPDATE:
         setSharedFiles((prev: LocalMissionFile[]) => {
-          // Backend may send the files either in `content` (current BaseEntity.sendMessage uses `content`)
-          // or in `payload` (older code paths). Read both for robustness.
           const newFiles = (data.payload && data.payload.files) || (data.content && data.content.files) || [];
-          // Only update if files actually changed
-          if (JSON.stringify(prev) === JSON.stringify(newFiles)) return prev;
-          return newFiles;
+          const filteredFiles = newFiles.filter((file: any) => file.isDeliverable || !file.stepId);
+          if (JSON.stringify(prev) === JSON.stringify(filteredFiles)) return prev;
+          return filteredFiles;
         });
         break;
 

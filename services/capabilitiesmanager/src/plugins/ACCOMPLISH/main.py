@@ -389,16 +389,28 @@ class RobustMissionPlanner:
             "question": {"value": reflection_question, "valueType": "string"}
         }
 
-        plan_history_from_inputs = inputs.get('plan_history', '[]')
-        if isinstance(plan_history_from_inputs, dict) and 'value' in plan_history_from_inputs:
-            plan_history_str = plan_history_from_inputs['value']
-        else:
-            plan_history_str = plan_history_from_inputs
+        try:
+            auth_token = get_auth_token(inputs)
+            librarian_url_input = inputs.get('librarian_url')
+            if isinstance(librarian_url_input, dict) and 'value' in librarian_url_input:
+                librarian_url = librarian_url_input['value']
+            else:
+                librarian_url = librarian_url_input if librarian_url_input is not None else 'librarian:5040'
 
-        reflect_inputs["work_products"] = {
-            "value": plan_history_str,
-            "valueType": "string"
-        }
+            headers = {'Authorization': f'Bearer {auth_token}'}
+            response = requests.get(f"http://{librarian_url}/loadAllStepOutputs/{mission_id}", headers=headers, timeout=30)
+            response.raise_for_status()
+            work_products = response.json()
+            reflect_inputs["work_products"] = {
+                "value": json.dumps(work_products),
+                "valueType": "string"
+            }
+        except Exception as e:
+            logger.error(f"Error fetching work products for mission {mission_id}: {e}")
+            reflect_inputs["work_products"] = {
+                "value": "[]",
+                "valueType": "string"
+            }
 
         check_step = {
             "number": len(plan) + 1,
