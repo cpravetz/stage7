@@ -64,7 +64,11 @@ export class MessageRouter {
     }
 
     if (message.recipient === 'user') {
-        this.webSocketHandler.broadcastToClients(message); // Delegate to WebSocketHandler
+        if (message.missionId) {
+            this.webSocketHandler.broadcastToMissionClients(message.missionId, message);
+        } else {
+            this.webSocketHandler.broadcastToClients(message); // Delegate to WebSocketHandler
+        }
         return;
     }
     
@@ -208,7 +212,11 @@ export class MessageRouter {
         // Process messages for users
         while (messages.length > 0) {
           const message = messages.shift()!;
-          this.webSocketHandler.broadcastToClients(message); // Delegate to WebSocketHandler
+          if (message.missionId) {
+            this.webSocketHandler.broadcastToMissionClients(message.missionId, message);
+          } else {
+            this.webSocketHandler.broadcastToClients(message); // Delegate to WebSocketHandler
+          }
         }
       } else {
         // Process messages for services

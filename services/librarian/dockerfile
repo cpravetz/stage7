@@ -1,8 +1,11 @@
 # Use an official Node.js runtime as the base image
-FROM node:20-alpine
+FROM node:20-slim
 
 # Set the working directory in the container
 WORKDIR /usr/src/app
+
+# Install wget for healthcheck
+RUN apt-get update && apt-get install -y wget && rm -rf /var/lib/apt/lists/*
 
 # Copy package.json and package-lock.json to the container
 COPY package*.json ./
@@ -31,8 +34,5 @@ WORKDIR /usr/src/app/services/librarian
 # Expose the port the app runs on
 EXPOSE 5040
 
-# Install MongoDB client for initialization script
-RUN npm install mongodb
-
 # Define the command to run the initialization script and then the application
-CMD ["sh", "-c", "node src/init-mongo-data.js && node dist/Librarian.js"]
+CMD ["sh", "-c", "node dist/init-mongo-data.js && node dist/Librarian.js"]

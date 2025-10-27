@@ -17,6 +17,15 @@ COPY services/mcsreact/public ./public
 COPY services/mcsreact/tsconfig.json ./
 COPY services/mcsreact/webpack.config.js ./
 
+# Copy shared files
+COPY shared/src/types/MCPTool.ts ./src/shared-browser
+COPY shared/src/types/DefinitionManifest.ts ./src/shared-browser
+COPY shared/src/types/OpenAPITool.ts ./src/shared-browser
+COPY shared/src/types/Plugin.ts ./src/shared-browser
+COPY shared/src/types/PluginManifest.ts ./src/shared-browser
+COPY shared/src/types/PluginRepository.ts ./src/shared-browser
+COPY shared/src/types/PluginStatus.ts ./src/shared-browser
+
 # Set environment variables
 ENV NODE_ENV=production
 ENV REACT_APP_API_BASE_URL=http://localhost:5020

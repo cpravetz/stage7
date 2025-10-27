@@ -1,6 +1,7 @@
 export interface ConversationMessage {
   content: string;
   persistent?: boolean;
+  sender: 'user' | 'system' | 'agent';
 }
 
 /**
@@ -133,3 +134,5 @@ export class MapSerializer {
     return obj;
   }
 }
+
+export type AnswerType = 'text' | 'number' | 'boolean' | 'multipleChoice' | 'file';

@@ -1,8 +1,8 @@
-import express from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import bodyParser from 'body-parser';
 import { v4 as uuidv4 } from 'uuid';
 import { Step, MapSerializer, BaseEntity } from '@cktmcs/shared';
-import { InputValue, PluginOutput, PluginDefinition, PluginParameterType, PluginManifest, PluginLocator, PluginRepositoryType, PluginParameter, DefinitionManifest, DefinitionType, OpenAPITool, MCPTool, MCPActionMapping, MCPAuthentication, MCPServiceTarget, OpenAPIExecutionRequest, OpenAPIExecutionResult } from '@cktmcs/shared'; // Added DefinitionManifest, DefinitionType
+import { InputValue, PluginOutput, PluginDefinition, PluginParameterType, PluginManifest, PluginLocator, PluginRepositoryType, PluginParameter, DefinitionManifest, DefinitionType, OpenAPITool, MCPTool, MCPActionMapping, MCPAuthentication, MCPServiceTarget, OpenAPIExecutionRequest, OpenAPIExecutionResult, PluginStatus } from '@cktmcs/shared'; // Added DefinitionManifest, DefinitionType, PluginStatus
 import { generateStructuredError, ErrorSeverity, GlobalErrorCodes } from './utils/errorReporter';
 import { createPluginOutputError } from './utils/errorHelper';
 import { ConfigManager } from './utils/configManager';
@@ -11,9 +11,20 @@ import { PluginContextManager } from './utils/PluginContextManager';
 import { validateAndStandardizeInputs } from './utils/validator';
 import { ContainerManager } from './utils/containerManager';
 import { PluginExecutor } from './utils/pluginExecutor';
+import axios, { AxiosInstance } from 'axios';
+
+const rawLibrarianUrl = process.env.LIBRARIAN_URL || 'librarian:5040';
+const correctedLibrarianUrl = rawLibrarianUrl.startsWith('http') ? rawLibrarianUrl : `http://${rawLibrarianUrl}`;
+
+const librarianApi = axios.create({
+    baseURL: correctedLibrarianUrl,
+    headers: {
+        'Content-Type': 'application/json',
+    },
+});
 
 export class CapabilitiesManager extends BaseEntity {
-    private librarianUrl: string = process.env.LIBRARIAN_URL || 'librarian:5040';
+    private librarianUrl: string = correctedLibrarianUrl;
     private server: any;
     private configManager!: ConfigManager;
     private pluginRegistry!: PluginRegistry;
@@ -30,6 +41,7 @@ export class CapabilitiesManager extends BaseEntity {
         overall: false
     };
     private serviceId = 'CapabilitiesManager';
+    private authenticatedLibrarianApi!: AxiosInstance;
 
     private failedPluginLookups: Map<string, number> = new Map(); // actionVerb -> last failure timestamp
     private static readonly PLUGIN_LOOKUP_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
@@ -44,7 +56,10 @@ export class CapabilitiesManager extends BaseEntity {
         super('CapabilitiesManager', 'CapabilitiesManager', `capabilitiesmanager`, process.env.PORT || '5060');
         const trace_id = `${this.serviceId}-constructor-${uuidv4().substring(0,8)}`;
         // Retry logic for initialization
-        this.pluginRegistry = new PluginRegistry();
+                const authenticatedLibrarianApi = this.authenticatedApi.api;
+        authenticatedLibrarianApi.defaults.baseURL = this.librarianUrl;
+        this.authenticatedLibrarianApi = authenticatedLibrarianApi;
+        this.pluginRegistry = new PluginRegistry(authenticatedLibrarianApi);
         this.containerManager = new ContainerManager();
         
         // Start periodic cleanup of stale resources
@@ -140,6 +155,7 @@ export class CapabilitiesManager extends BaseEntity {
             console.log(`[${trace_id}] ${source_component}: PluginExecutor initialized.`);
 
             await this.start(trace_id);
+            this.startHealthCheckWorker(); // Re-enabled
 
             if (!this.registeredWithPostOffice) {
                 //console.log(`[${trace_id}] ${source_component}: Registering with PostOffice...`);
@@ -187,10 +203,10 @@ export class CapabilitiesManager extends BaseEntity {
                 });
 
                 // Core routes
-                app.post('/executeAction', (req, res) => this.executeActionVerb(req, res));
+                app.post('/executeAction', (req: Request, res: Response) => this.executeActionVerb(req, res));
 
                 // Health check endpoints
-                app.get('/health', (req, res) => {
+                app.get('/health', (req: Request, res: Response) => {
                     res.json({
                         status: 'ok',
                         service: 'CapabilitiesManager',
@@ -198,7 +214,7 @@ export class CapabilitiesManager extends BaseEntity {
                     });
                 });
 
-                app.get('/ready', (req, res) => {
+                app.get('/ready', (req: Request, res: Response) => {
                     const isReady = this.initializationStatus.overall;
                     res.status(isReady ? 200 : 503).json({
                         ready: isReady,
@@ -208,7 +224,7 @@ export class CapabilitiesManager extends BaseEntity {
                 });
 
                 // --- Plugin CRUD API ---
-                app.get('/plugins', async (req, res) => {
+                app.get('/plugins', async (req: Request, res: Response) => {
                     const trace_id = (req as any).trace_id || `${trace_id_parent}-plugins-list-${uuidv4().substring(0,8)}`;
                     try {
                         const repository = req.query.repository as PluginRepositoryType | undefined;
@@ -227,7 +243,7 @@ export class CapabilitiesManager extends BaseEntity {
                         res.status(500).json(createPluginOutputError(sError));
                     }
                 });
-                app.get('/plugins/:id', async (req, res) => {
+                app.get('/plugins/:id', async (req: Request, res: Response) => {
                     const trace_id = (req as any).trace_id || `${trace_id_parent}-plugins-get-${uuidv4().substring(0,8)}`;
                     try {
                         const repository = req.query.repository as PluginRepositoryType | undefined;
@@ -256,7 +272,7 @@ export class CapabilitiesManager extends BaseEntity {
                         res.status(500).json(createPluginOutputError(sError));
                     }
                 });
-                app.post('/plugins', async (req, res) => {
+                app.post('/plugins', async (req: Request, res: Response) => {
                     const trace_id = (req as any).trace_id || `${trace_id_parent}-plugins-post-${uuidv4().substring(0,8)}`;
                     try {
                         await this.pluginRegistry.store(req.body);
@@ -273,7 +289,7 @@ export class CapabilitiesManager extends BaseEntity {
                         res.status(400).json(createPluginOutputError(sError));
                     }
                 });
-                app.put('/plugins/:id', async (req, res) => {
+                app.put('/plugins/:id', async (req: Request, res: Response) => {
                     const trace_id = (req as any).trace_id || `${trace_id_parent}-plugins-put-${uuidv4().substring(0,8)}`;
                     try {
                         await this.pluginRegistry.store(req.body);
@@ -290,7 +306,7 @@ export class CapabilitiesManager extends BaseEntity {
                         res.status(400).json(createPluginOutputError(sError));
                     }
                 });
-                app.delete('/plugins/:id', async (req, res) => {
+                app.delete('/plugins/:id', async (req: Request, res: Response) => {
                     const trace_id = (req as any).trace_id || `${trace_id_parent}-plugins-delete-${uuidv4().substring(0,8)}`;
                     try {
                         const repository = req.query.repository as string | undefined;
@@ -322,7 +338,7 @@ export class CapabilitiesManager extends BaseEntity {
                     }
                 });
                 // --- Plugin Repositories API ---
-                app.get('/pluginRepositories', (req, res) => {
+                app.get('/pluginRepositories', (req: Request, res: Response) => {
                     const trace_id = (req as any).trace_id || `${trace_id_parent}-repos-list-${uuidv4().substring(0,8)}`;
                     try {
                         const repos = this.pluginRegistry.getActiveRepositories();
@@ -340,7 +356,7 @@ export class CapabilitiesManager extends BaseEntity {
                     }
                 });
 
-                app.post('/message', async (req, res) => {
+                app.post('/message', async (req: Request, res: Response) => {
                     const trace_id = (req as any).trace_id || `${trace_id_parent}-msg-${uuidv4().substring(0,8)}`;
                     try {
                         await super.handleBaseMessage(req.body);
@@ -358,7 +374,7 @@ export class CapabilitiesManager extends BaseEntity {
                     }
                 });
 
-                app.get('/availablePlugins', async (req, res) => {
+                app.get('/availablePlugins', async (req: Request, res: Response) => {
                     const trace_id = (req as any).trace_id || `${trace_id_parent}-avail-${uuidv4().substring(0,8)}`;
                     try {
                         const plugins: PluginLocator[] = (await this.pluginRegistry.list()).filter(
@@ -379,7 +395,7 @@ export class CapabilitiesManager extends BaseEntity {
                 });
 
                 // New endpoint for intelligent plugin context generation
-                app.post('/generatePluginContext', async (req: any, res: any) => {
+                app.post('/generatePluginContext', async (req: Request, res: Response) => {
                     const trace_id = (req as any).trace_id || `${trace_id_parent}-context-${uuidv4().substring(0,8)}`;
                     try {
                         const { goal, constraints } = req.body;
@@ -497,6 +513,17 @@ export class CapabilitiesManager extends BaseEntity {
     }
 
 
+    private async _getAvailablePluginManifests(): Promise<PluginManifest[]> {
+        const allPlugins = await this.pluginRegistry.list();
+        // Filter out plugins that are explicitly marked as disabled or stopped
+        const activePlugins = allPlugins.filter(p => 
+            p.metadata?.status !== PluginStatus.DISABLED && 
+            p.metadata?.status !== PluginStatus.STOPPED &&
+            p.metadata?.status !== PluginStatus.ERROR
+        );
+        return activePlugins;
+    }
+
     private async beginTransaction(trace_id: string, step: Step): Promise<string> {
         const opId = `${step.actionVerb}-${uuidv4()}`;
         this.activeOperations.set(opId, {
@@ -579,7 +606,8 @@ export class CapabilitiesManager extends BaseEntity {
         const step = {
             ...req.body,
             inputValues: inputValues,
-            outputs: MapSerializer.transformFromSerialization(req.body.outputs || {}) instanceof Map ? MapSerializer.transformFromSerialization(req.body.outputs || {}) : new Map(Object.entries(MapSerializer.transformFromSerialization(req.body.outputs || {})))
+            outputs: MapSerializer.transformFromSerialization(req.body.outputs || {}) instanceof Map ? MapSerializer.transformFromSerialization(req.body.outputs || {}) : new Map(Object.entries(MapSerializer.transformFromSerialization(req.body.outputs || {}))),
+            missionId: req.body.missionId || uuidv4() // Ensure missionId is always present
         } as Step;
 
 
@@ -616,6 +644,16 @@ export class CapabilitiesManager extends BaseEntity {
 
                 if (type === 'plugin') {
                     const manifest = handler; // Could be DefinitionManifest or PluginManifest
+                    if (!manifest) { // Add null check here
+                        console.warn(`[${trace_id}] ${source_component}: Plugin handler for '${step.actionVerb}' is undefined. Skipping execution.`);
+                        // Fallback to handleUnknownVerb or return an error
+                        const resultUnknownVerb = await this.handleUnknownVerb(step, trace_id);
+                        if (opId) {
+                            await this.commitTransaction(opId);
+                        }
+                        res.status(200).send(MapSerializer.transformForSerialization(resultUnknownVerb.map(r => this.normalizePluginOutput(r))));
+                        return;
+                    }
                     console.log(`[${trace_id}] ${source_component}: Found plugin handler for '${step.actionVerb}'. Language: '${manifest.language}', ID: '${manifest.id}'. Attempting direct execution.`);
 
 
@@ -659,43 +697,7 @@ export class CapabilitiesManager extends BaseEntity {
                             step.inputValues = new Map(Object.entries(step.inputValues || {}));
                         }
 
-                        // Fetch all available plugins to provide context to Python plugins
-                        const allPlugins = await this.pluginRegistry.list();
-                        const manifestPromises = allPlugins.map(p => {
-                            // Ensure repository property exists and has type
-                            const repositoryType = p.repository?.type;
-                            if (!repositoryType) {
-                                console.warn(`[${trace_id}] Plugin ${p.id} missing repository.type, skipping`);
-                                return Promise.resolve(null);
-                            }
-                            return this.pluginRegistry.fetchOne(p.id, p.version, repositoryType)
-                                .catch(e => {
-                                    console.warn(`[${trace_id}] Failed to fetch manifest for ${p.id} v${p.version}: ${e.message}`);
-                                    return null;
-                                });
-                        });
-                        const manifests = (await Promise.all(manifestPromises)).filter((m): m is PluginManifest => m !== null);
 
-                        // Transform manifests to the format expected by Python plugins (verb -> actionVerb, type -> valueType)
-                        const transformedManifests = manifests.map(manifest => ({
-                            ...manifest,
-                            actionVerb: manifest.verb, // Add actionVerb property for plugin compatibility
-                            inputDefinitions: manifest.inputDefinitions.map(input => ({
-                                ...input,
-                                valueType: input.type // Map type to valueType for plugin compatibility
-                            })),
-                            outputDefinitions: manifest.outputDefinitions.map(output => ({
-                                ...output,
-                                valueType: output.type // Map type to valueType for plugin compatibility
-                            }))
-                        }));
-
-                        step.inputValues.set('availablePlugins', {
-                            inputName: 'availablePlugins',
-                            value: transformedManifests,
-                            valueType: PluginParameterType.ARRAY,
-                            args: {}
-                        });
 
                         // Pass the full inputValues Map to validation (it expects InputValue objects, not raw values)
                         const validatedInputs = await validateAndStandardizeInputs(pluginDefinition, step.inputValues);
@@ -814,220 +816,146 @@ export class CapabilitiesManager extends BaseEntity {
 
     private async handleUnknownVerb(step: Step, trace_id: string): Promise<PluginOutput[]> {
         const source_component = "CapabilitiesManager.handleUnknownVerb";
+        const SEARCH_CONFIDENCE_THRESHOLD = 0.5; // Lower is better match
 
+        // Phase 1: Reactive Tool Discovery
         try {
-            console.log(`[${trace_id}] ${source_component}: Starting handleUnknownVerb for ${step.actionVerb}`);
-            console.log(`[${trace_id}] ${source_component}: step.outputs type:`, typeof step.outputs, step.outputs);
-
-            // Track this operation as using the ACCOMPLISH plugin
-            const resourceId = `accomplish-plugin-${Date.now()}`;
-            this.resourceUsage.set(resourceId, { inUse: true, lastAccessed: Date.now() });
+            console.log(`[${trace_id}] ${source_component}: Novel verb \'${step.actionVerb}\'. Searching for a matching tool...`);
+            const searchQuery = `${step.actionVerb}: ${step.description || ''}`;
+            console.log(`[${trace_id}] ${source_component}: Attempting tool search with Librarian at ${librarianApi.defaults.baseURL}/tools/search for query: ${searchQuery}`);
+            const response = await this.authenticatedLibrarianApi.post('/tools/search', { queryText: searchQuery, maxResults: 1 });
             
-            // Create a concise goal for the ACCOMPLISH plugin, focusing on the novel verb.
-            const novelVerbGoal = `Handle the novel action verb '${step.actionVerb}'. The step's description is: '${step.description}'. Available inputs: ${JSON.stringify(Array.from(step.inputValues?.keys() || []))}. Expected outputs: ${JSON.stringify(step.outputs)}. Your task is to generate a plan of sub-steps to achieve this.`;
+            const searchResults = response.data.data;
 
-            const accomplishInputs = new Map<string, InputValue>();
-            accomplishInputs.set('goal', {
-                inputName: 'goal',
-                value: novelVerbGoal,
-                valueType: PluginParameterType.STRING,
-                args: {}
-            });
-            // Pass missionId for context, instead of the full mission text.
-            accomplishInputs.set('missionId', {
-                inputName: 'missionId',
-                value: step.missionId || '', // Ensure it's an empty string if null/undefined
-                valueType: PluginParameterType.STRING,
-                args: {}
-            });
-            accomplishInputs.set('novel_actionVerb', {
-                inputName: 'novel_actionVerb',
-                value: step.actionVerb,
-                valueType: PluginParameterType.STRING,
-                args: {}
-            });
-            accomplishInputs.set('step_description', {
-                inputName: 'step_description',
-                value: step.description || '',
-                valueType: PluginParameterType.STRING,
-                args: {}
-            });
-            accomplishInputs.set('step_inputValues', {
-                inputName: 'step_inputValues',
-                value: step.inputValues ? MapSerializer.transformForSerialization(step.inputValues) : {},
-                valueType: PluginParameterType.OBJECT,
-                args: {}
-            });
-            accomplishInputs.set('step_outputs', {
-                inputName: 'step_outputs',
-                value: step.outputs ? MapSerializer.transformForSerialization(step.outputs) : {},
-                valueType: PluginParameterType.OBJECT,
-                args: {}
-            });
+            if (searchResults && searchResults.length > 0) {
+                const topMatch = searchResults[0];
+                console.log(`[${trace_id}] ${source_component}: Found potential match: \'${topMatch.metadata.verb}\' with distance ${topMatch.distance}`);
 
-            // Fetch available plugins to provide context to ACCOMPLISH
-            const allPlugins = await this.pluginRegistry.list();
-            const manifestPromises = allPlugins.map(p => {
-                // Ensure repository property exists and has type
-                const repositoryType = p.repository?.type;
-                if (!repositoryType) {
-                    console.warn(`[${trace_id}] Plugin ${p.id} missing repository.type, skipping`);
-                    return Promise.resolve(null);
-                }
-                return this.pluginRegistry.fetchOne(p.id, p.version, repositoryType)
-                    .catch(e => {
-                        console.warn(`[${trace_id}] Failed to fetch manifest for ${p.id} v${p.version}: ${e.message}`);
-                        return null;
-                    });
-            });
-            const manifests = (await Promise.all(manifestPromises)).filter((m): m is PluginManifest => m !== null);
+                if (topMatch.distance < SEARCH_CONFIDENCE_THRESHOLD) {
+                    console.log(`[${trace_id}] ${source_component}: Match confidence is high. Substituting \'${step.actionVerb}\' with \'${topMatch.metadata.verb}\' and re-executing.`);
+                    
+                    const substitutedStep: Step = {
+                        ...step,
+                        actionVerb: topMatch.metadata.verb,
+                    };
 
-            // Transform manifests to the format expected by ACCOMPLISH plugin (verb -> actionVerb, type -> valueType)
-            const transformedManifests = manifests.map(manifest => ({
-                ...manifest,
-                actionVerb: manifest.verb, // Add actionVerb property for ACCOMPLISH plugin compatibility
-                inputDefinitions: manifest.inputDefinitions.map(input => ({
-                    ...input,
-                    valueType: input.type // Map type to valueType for plugin compatibility
-                })),
-                outputDefinitions: manifest.outputDefinitions.map(output => ({
-                    ...output,
-                    valueType: output.type // Map type to valueType for plugin compatibility
-                }))
-            }));
-
-            accomplishInputs.set('availablePlugins', {
-                inputName: 'availablePlugins',
-                value: transformedManifests,
-                valueType: PluginParameterType.ARRAY,
-                args: {}
-            });
-
-            // Call the general ACCOMPLISH plugin execution method
-            const accomplishResultArray = await this.executeAccomplishPlugin(accomplishInputs, trace_id);
-            console.log(`[handleUnknownVerb] plugin result:`, accomplishResultArray);
-            if (!accomplishResultArray[0].success) {
-                return accomplishResultArray;
-            }
-
-            const accomplishResult = accomplishResultArray[0];
-            if (accomplishResult.resultType === PluginParameterType.PLAN) {
-                // Original step's outputs
-                const originalOutputs = step.outputs || new Map<string, string>();
-
-                // The plan steps returned by ACCOMPLISH plugin
-                // ACCOMPLISH returns the plan array directly as accomplishResult.result
-                const newPlanSteps = accomplishResult.result as any[];
-
-                if (!Array.isArray(newPlanSteps) || newPlanSteps.length === 0) {
-                    throw generateStructuredError({
-                        error_code: GlobalErrorCodes.INTERNAL_ERROR_CM,
-                        severity: ErrorSeverity.ERROR,
-                        message: "ACCOMPLISH plugin returned an empty or invalid plan.",
-                        source_component,
-                        trace_id_param: trace_id
-                    });
-                }
-
-                // Ensure outputs of final steps match original step outputs
-                // Find final steps (steps that are not dependencies of any other step)
-                const allDependencies = new Set<string>();
-                for (const stepItem of newPlanSteps) {
-                    if (stepItem.dependencies) {
-                        for (const depOutput in stepItem.dependencies) {
-                            allDependencies.add(depOutput);
-                        }
-                    }
-                }
-                // Final steps are those whose outputs are not dependencies of others
-                const finalSteps = newPlanSteps.filter(stepItem => {
-                    if (!stepItem.outputs) return false;
-                    return Object.keys(stepItem.outputs).some(outputName => !allDependencies.has(outputName));
-                });
-
-                // For each final step, set outputs to match original step outputs if not already set
-                for (const finalStep of finalSteps) {
-                    if (!finalStep.outputs) {
-                        finalStep.outputs = {};
-                    }
-                    if (originalOutputs && originalOutputs.entries) {
-                        for (const [key, value] of originalOutputs.entries()) {
-                            if (!(key in finalStep.outputs)) {
-                                finalStep.outputs[key] = value;
+                    const fakeReq = { body: substitutedStep, trace_id: trace_id } as any;
+                    let resultSent = false;
+                    const fakeRes = {
+                        status: (code: number) => {
+                            return {
+                                send: (body: any) => {
+                                    if (!resultSent) {
+                                        resultSent = true;
+                                        return body;
+                                    }
+                                }
+                            }
+                        },
+                        json: (body: any) => {
+                             if (!resultSent) {
+                                resultSent = true;
+                                return body;
                             }
                         }
-                    }
+                    } as any;
+
+                    await this.executeActionVerb(fakeReq, fakeRes);
+                    return [];
+                }
+            }
+            console.log(`[${trace_id}] ${source_component}: No high-confidence tool found for \'${step.actionVerb}\'. Proceeding to generate a plan.`);
+            throw new Error("No suitable tool found, fallback to ACCOMPLISH");
+
+        } catch (searchError: any) {
+            if (searchError.message !== "No suitable tool found, fallback to ACCOMPLISH") {
+                 console.warn(`[${trace_id}] ${source_component}: Tool search failed with error: ${searchError.message}. Falling back to ACCOMPLISH.`);
+            }
+           
+            try {
+                const novelVerbGoal = `Handle the novel action verb \'${step.actionVerb}\'. The step's description is: \'${step.description}\'. Available inputs: ${JSON.stringify(Array.from(step.inputValues?.keys() || []))}. Expected outputs: ${JSON.stringify(step.outputs)}. Your task is to generate a plan of sub-steps to achieve this.`;
+
+                const accomplishInputs = new Map<string, InputValue>();
+                accomplishInputs.set('goal', {
+                    inputName: 'goal',
+                    value: novelVerbGoal,
+                    valueType: PluginParameterType.STRING,
+                    args: {}
+                });
+                accomplishInputs.set('missionId', {
+                    inputName: 'missionId',
+                    value: step.missionId || '',
+                    valueType: PluginParameterType.STRING,
+                    args: {}
+                });
+
+                // Add available plugins to the inputs for ACCOMPLISH
+                const availablePlugins = await this._getAvailablePluginManifests();
+                accomplishInputs.set('availablePlugins', {
+                    inputName: 'availablePlugins',
+                    value: availablePlugins,
+                    valueType: PluginParameterType.ARRAY,
+                    args: {}
+                });
+
+                const accomplishResultArray = await this.executeAccomplishPlugin(accomplishInputs, trace_id);
+                
+                if (!accomplishResultArray[0].success) {
+                    return accomplishResultArray;
                 }
 
-                // Reset dependencies on the original step to the new steps producing the outputs
-                // This logic depends on the Agent's plan management, so here we just return the new plan
-                // The Agent or caller should handle inserting these steps and resetting dependencies accordingly
-
-                // Cache the newly generated plan
-                this.planCache.set(step.actionVerb, newPlanSteps);
-
-                // Return the new plan as PluginOutput[]
-                return [{
-                    success: true,
-                    name: 'plan',
-                    resultType: PluginParameterType.PLAN,
-                    resultDescription: `A plan to accomplish the original step '${step.actionVerb}'`,
-                    result: newPlanSteps,
-                    mimeType: 'application/json'
-                }];
-            } else {
-                // For other result types, return the first element of the array
-                return [accomplishResult];
+                const accomplishResult = accomplishResultArray[0];
+                if (accomplishResult.resultType === PluginParameterType.PLAN) {
+                    const newPlanSteps = accomplishResult.result as any[];
+                    if (!Array.isArray(newPlanSteps) || newPlanSteps.length === 0) {
+                        throw generateStructuredError({
+                            error_code: GlobalErrorCodes.INTERNAL_ERROR_CM,
+                            severity: ErrorSeverity.ERROR,
+                            message: "ACCOMPLISH plugin returned an empty or invalid plan.",
+                            source_component,
+                            trace_id_param: trace_id
+                        });
+                    }
+                    return [{
+                        success: true,
+                        name: 'plan',
+                        resultType: PluginParameterType.PLAN,
+                        resultDescription: `A plan to accomplish the original step \'${step.actionVerb}\'`,
+                        result: newPlanSteps,
+                        mimeType: 'application/json'
+                    }];
+                } else {
+                    return [accomplishResult];
+                }
+            } catch (error: any) {
+                const sError = generateStructuredError({
+                    error_code: GlobalErrorCodes.CAPABILITIES_MANAGER_UNKNOWN_VERB_HANDLING_FAILED,
+                    severity: ErrorSeverity.ERROR,
+                    message: `Error while handling unknown verb \'${step.actionVerb}\'.`,
+                    source_component,
+                    original_error: error,
+                    trace_id_param: trace_id
+                });
+                return createPluginOutputError(sError);
             }
-        } catch (error: any) {
-            const sError = generateStructuredError({
-                error_code: GlobalErrorCodes.CAPABILITIES_MANAGER_UNKNOWN_VERB_HANDLING_FAILED,
-                severity: ErrorSeverity.ERROR,
-                message: `Error while handling unknown verb '${step.actionVerb}'.`,
-                source_component,
-                original_error: error,
-                trace_id_param: trace_id
-            });
-            return createPluginOutputError(sError);
         }
     }
 
     private async executeAccomplishPlugin(inputs: Map<string, InputValue>, trace_id: string): Promise<PluginOutput[]> {
         const source_component = "CapabilitiesManager.executeAccomplishPlugin";
         try {            
-            // Fetch detailed plugin manifests to provide a schema to the Brain
-            const allPlugins = await this.pluginRegistry.list();
-            const manifestPromises = allPlugins.map(p => {
-                // Ensure repository property exists and has type
-                const repositoryType = p.repository?.type;
-                if (!repositoryType) {
-                    console.warn(`[${trace_id}] Plugin ${p.id} missing repository.type, skipping`);
-                    return Promise.resolve(null);
-                }
-                return this.pluginRegistry.fetchOne(p.id, p.version, repositoryType)
-                    .catch(e => {
-                        console.warn(`[${trace_id}] Failed to fetch manifest for ${p.id} v${p.version}: ${e.message}`);
-                        return null; // Return null on failure to not break Promise.all
-                    });
-            });
-            const manifests = (await Promise.all(manifestPromises)).filter((m): m is PluginManifest => m !== null);
 
-            // Transform manifests to the format expected by ACCOMPLISH plugin (verb -> actionVerb, type -> valueType)
-            const transformedManifests = manifests.map(manifest => ({
-                ...manifest,
-                actionVerb: manifest.verb, // Add actionVerb property for ACCOMPLISH plugin compatibility
-                inputDefinitions: manifest.inputDefinitions.map(input => ({
-                    ...input,
-                    valueType: input.type // Map type to valueType for ACCOMPLISH plugin compatibility
-                })),
-                outputDefinitions: manifest.outputDefinitions.map(output => ({
-                    ...output,
-                    valueType: output.type // Map type to valueType for ACCOMPLISH plugin compatibility
-                }))
-            }));
 
             const accomplishInputs : Map<string, InputValue> = new Map(inputs); // Start with all provided inputs
-            accomplishInputs.set('availablePlugins', { inputName: 'availablePlugins', value: transformedManifests, valueType: PluginParameterType.ARRAY, args: {} });
+
+            // Add available plugins to the inputs for ACCOMPLISH
+            const availablePlugins = await this._getAvailablePluginManifests();
+            accomplishInputs.set('availablePlugins', {
+                inputName: 'availablePlugins',
+                value: availablePlugins,
+                valueType: PluginParameterType.ARRAY,
+                args: {}
+            });
 
             const accomplishPluginManifest = await this.pluginRegistry.fetchOneByVerb('ACCOMPLISH');
             if (!accomplishPluginManifest) {
@@ -1050,6 +978,15 @@ export class CapabilitiesManager extends BaseEntity {
                 }
             };
             const { pluginRootPath, effectiveManifest } = await this.pluginRegistry.preparePluginForExecution(manifestForExecution);
+            if (!effectiveManifest) { // Add null check here
+                throw generateStructuredError({
+                    error_code: GlobalErrorCodes.ACCOMPLISH_PLUGIN_EXECUTION_FAILED,
+                    severity: ErrorSeverity.CRITICAL,
+                    message: "Effective manifest for ACCOMPLISH plugin is undefined after preparation.",
+                    trace_id_param: trace_id,
+                    source_component
+                });
+            }
             const result = await this.pluginExecutor.execute(effectiveManifest, accomplishInputs, pluginRootPath, trace_id);
             if (!Array.isArray(result)) {
                 return [result];
@@ -1107,6 +1044,117 @@ export class CapabilitiesManager extends BaseEntity {
                 error_code: GlobalErrorCodes.INTERNAL_ERROR_CM,
                 severity: ErrorSeverity.ERROR,
                 message: "Error during cleanup of stale resources.",
+                source_component,
+                original_error: error,
+                trace_id_param: trace_id
+            });
+        }
+    }
+
+    private healthCheckStatus: Map<string, { consecutiveFailures: number, lastChecked: number, lastStatus: boolean, latency: number[] }> = new Map();
+    private static readonly HEALTH_CHECK_INTERVAL_MS = 60 * 1000; // Every 1 minute
+    private static readonly MAX_CONSECUTIVE_FAILURES = 3;
+
+    private startHealthCheckWorker() {
+        console.log(`Starting health check worker with interval: ${CapabilitiesManager.HEALTH_CHECK_INTERVAL_MS}ms`);
+        setInterval(() => this.runHealthChecks(), CapabilitiesManager.HEALTH_CHECK_INTERVAL_MS);
+    }
+
+    private async runHealthChecks() {
+        const trace_id = `health-check-${uuidv4().substring(0,8)}`;
+        const source_component = "CapabilitiesManager.runHealthChecks";
+
+        try {
+            const externalPlugins = await this.pluginRegistry.list(undefined, PluginStatus.RUNNING);
+
+            for (const plugin of externalPlugins) {
+                const pluginId = plugin.id;
+                const currentStatus = plugin.metadata?.status;
+                const healthCheckUrl = plugin.metadata?.healthCheckUrl; // HealthCheckUrl should be in metadata
+
+                // Pre-check Plugin State (redundant now, but kept for clarity/safety)
+                if (currentStatus !== PluginStatus.RUNNING) {
+                    //console.log(`[${trace_id}] Plugin ${pluginId} is external and not currently running (status: ${currentStatus || 'undefined'}). Skipping health check.`);
+                    continue;
+                }
+
+                if (!healthCheckUrl) {
+                    //console.log(`[${trace_id}] Plugin ${pluginId} is external and running, but has no healthCheckUrl configured. Skipping health check.`);
+                    continue;
+                }
+
+                let healthCheckState = this.healthCheckStatus.get(pluginId) || { consecutiveFailures: 0, lastChecked: 0, lastStatus: true, latency: [] };
+                const startTime = Date.now();
+                let isHealthy = false;
+
+                try {
+                    const response = await axios.get(healthCheckUrl, { timeout: 5000 }); // 5 second timeout
+                    isHealthy = response.status >= 200 && response.status < 300;
+                } catch (error) {
+                    console.error(`[${trace_id}] Health check failed for plugin ${pluginId} at ${healthCheckUrl}:`, error instanceof Error ? error.message : error);
+                    isHealthy = false;
+                }
+
+                const latency = Date.now() - startTime;
+                healthCheckState.latency.push(latency);
+                if (healthCheckState.latency.length > 10) healthCheckState.latency.shift(); // Keep last 10 latencies
+
+                if (isHealthy) {
+                    healthCheckState.consecutiveFailures = 0;
+                    healthCheckState.lastStatus = true;
+                    console.log(`[${trace_id}] Plugin ${pluginId} is healthy. Latency: ${latency}ms`);
+                } else {
+                    healthCheckState.consecutiveFailures++;
+                    healthCheckState.lastStatus = false;
+                    console.warn(`[${trace_id}] Plugin ${pluginId} is unhealthy. Consecutive failures: ${healthCheckState.consecutiveFailures}`);
+
+                    if (healthCheckState.consecutiveFailures >= CapabilitiesManager.MAX_CONSECUTIVE_FAILURES) {
+                        console.error(`[${trace_id}] Plugin ${pluginId} has consistently failed health checks. Disabling it.`);
+                        await this.disablePlugin(pluginId, trace_id); // Use the new disablePlugin logic
+                    }
+                }
+                healthCheckState.lastChecked = Date.now();
+                this.healthCheckStatus.set(pluginId, healthCheckState);
+            }
+        } catch (error: any) {
+            generateStructuredError({
+                error_code: GlobalErrorCodes.INTERNAL_ERROR_CM,
+                severity: ErrorSeverity.ERROR,
+                message: "Error during external plugin health checks.",
+                source_component,
+                original_error: error,
+                trace_id_param: trace_id
+            });
+        }
+    }
+
+    private async disablePlugin(pluginId: string, trace_id: string): Promise<void> {
+        const source_component = "CapabilitiesManager.disablePlugin";
+        console.log(`[${trace_id}] Attempting to disable plugin ${pluginId}...`);
+        try {
+            await this.pluginRegistry.updatePluginStatus(pluginId, PluginStatus.DISABLED);
+            console.log(`[${trace_id}] Plugin ${pluginId} marked as DISABLED in PluginRegistry.`);
+
+            // Notify Librarian to update its record of the tool
+            try {
+                await this.authenticatedLibrarianApi.put(`/tools/${pluginId}/status`, { status: PluginStatus.DISABLED, reason: 'health_check_failure' });
+                console.log(`[${trace_id}] Librarian notified about disabled plugin ${pluginId}.`);
+            } catch (librarianError) {
+                console.error(`[${trace_id}] Failed to notify Librarian about disabled plugin ${pluginId}:`, librarianError instanceof Error ? librarianError.message : librarianError);
+            }
+
+            generateStructuredError({
+                error_code: GlobalErrorCodes.EXTERNAL_PLUGIN_DISABLED,
+                severity: ErrorSeverity.WARNING,
+                message: `External plugin ${pluginId} has been disabled due to repeated health check failures.`,
+                source_component,
+                trace_id_param: trace_id
+            });
+        } catch (error: any) {
+            generateStructuredError({
+                error_code: GlobalErrorCodes.INTERNAL_ERROR_CM,
+                severity: ErrorSeverity.ERROR,
+                message: `Failed to disable plugin ${pluginId}.`,
                 source_component,
                 original_error: error,
                 trace_id_param: trace_id

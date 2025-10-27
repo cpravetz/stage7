@@ -1,4 +1,4 @@
-import { MongoClient, Db, Collection } from 'mongodb';
+import { MongoClient, Db, Collection, DeleteResult } from 'mongodb';
 import dotenv from 'dotenv';
 import { analyzeError } from '@cktmcs/errorhandler';
 
@@ -143,12 +143,12 @@ export async function loadManyFromMongo(collectionName: string, query: any, opti
     }
 }
 
-export async function deleteManyFromMongo(collectionName: string, query: any) {
+export async function deleteManyFromMongo(collectionName: string, query: any): Promise<DeleteResult> {
     if (!connected) {
         await connectMongo();
     }
     const collection: Collection = db.collection(collectionName);
-    await collection.deleteMany(query);
+    return await collection.deleteMany(query);
 }
 
 export async function deleteFromMongo(collectionName: string, query: any) {

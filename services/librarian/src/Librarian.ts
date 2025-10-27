@@ -8,11 +8,14 @@ import { storeInRedis, loadFromRedis, deleteFromRedis } from './utils/redisUtils
 import { storeInMongo, loadFromMongo, loadManyFromMongo, aggregateInMongo, deleteManyFromMongo } from './utils/mongoUtils';
 import { WorkProduct, Deliverable } from '@cktmcs/shared';
 import { BaseEntity, MapSerializer } from '@cktmcs/shared';
+import { ToolSource, PendingTool } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { v4 as uuidv4 } from 'uuid';
 import { knowledgeStore } from './knowledgeStore';
 
 const LARGE_ASSET_PATH = process.env.LARGE_ASSET_PATH || '/usr/src/app/shared/librarian-assets';
+const ENGINEER_SERVICE_URL = process.env.ENGINEER_SERVICE_URL || 'http://engineer:5050';
+const CAPABILITIES_MANAGER_SERVICE_URL = process.env.CAPABILITIES_MANAGER_SERVICE_URL || 'http://capabilitiesmanager:5000';
 
 
 dotenv.config();
@@ -42,6 +45,7 @@ export class Librarian extends BaseEntity {
         this.app = express();
         this.setupRoutes();
       this.startServer();
+      this.startDiscoveryWorker();
     }
 
     private isRestrictedCollection(collection: string): boolean {
@@ -99,8 +103,21 @@ export class Librarian extends BaseEntity {
         this.app.get('/loadAllStepOutputs/:agentId', (req, res) => this.loadAllStepOutputs(req, res));
         this.app.get('/getSavedMissions', (req, res) => this.getSavedMissions(req, res));
         this.app.delete('/deleteCollection', (req, res) => this.deleteCollection(req, res));
+        this.app.post('/tools/index', (req, res) => this.indexTool(req, res));
+        this.app.post('/tools/search', (req, res) => this.searchTools(req, res));
         this.app.post('/knowledge/save', (req, res) => this.saveKnowledge(req, res));
         this.app.post('/knowledge/query', (req, res) => this.queryKnowledge(req, res));
+
+        // Tool Source Management
+        this.app.post('/tools/sources', (req, res) => this.addToolSource(req, res));
+        this.app.get('/tools/sources', (req, res) => this.getToolSources(req, res));
+        this.app.delete('/tools/sources/:id', (req, res) => this.deleteToolSource(req, res));
+
+        // Pending Tool Review
+        this.app.get('/tools/pending', (req, res) => this.getPendingTools(req, res));
+        this.app.post('/tools/pending/:id/approve', (req, res) => this.approvePendingTool(req, res));
+        this.app.post('/tools/pending/:id/reject', (req, res) => this.rejectPendingTool(req, res));
+        this.app.put('/tools/:id/status', (req, res) => this.updateToolStatus(req, res));
       }
 
       private startServer() {
@@ -108,6 +125,144 @@ export class Librarian extends BaseEntity {
         this.app.listen(port, '0.0.0.0', () => {
         console.log(`Librarian listening at http://0.0.0.0:${port}`);
         });
+        // Keep the process alive
+        setInterval(() => {}, 1 << 30);
+    }
+
+    private startDiscoveryWorker() {
+        const discoveryInterval = parseInt(process.env.TOOL_DISCOVERY_INTERVAL_MS || '300000', 10); // Default to 5 minutes
+        console.log(`Starting tool discovery worker with interval: ${discoveryInterval}ms`);
+        setInterval(() => this.runDiscovery(), discoveryInterval);
+    }
+
+    private async runDiscovery() {
+        console.log('Running tool discovery...');
+        try {
+            const toolSources = await loadManyFromMongo('toolSources', {});
+            for (const source of toolSources) {
+                console.log(`Processing tool source: ${source.id} (Type: ${source.type}, URL: ${source.url})`);
+
+                let discoveredManifests: any[] = [];
+
+                switch (source.type) {
+                    case 'openapi':
+                        discoveredManifests = await this.fetchAndParseOpenAPITools(source as ToolSource);
+                        break;
+                    case 'git':
+                        discoveredManifests = await this.fetchAndParseGitTools(source as ToolSource);
+                        break;
+                    case 'marketplace':
+                        discoveredManifests = await this.fetchAndParseMarketplaceTools(source as ToolSource);
+                        break;
+                    default:
+                        console.warn(`Unknown tool source type: ${source.type} for source ${source.id}`);
+                        break;
+                }
+
+                for (const manifest of discoveredManifests) {
+                    // Check if this tool is already pending
+                    let existingPendingTool = await loadFromMongo('pendingTools', { id: manifest.id });
+
+                    // Check if the tool is already approved and active in CapabilitiesManager
+                    let isToolActiveInCM = false;
+                    try {
+                        const cmResponse = await axios.get(`${CAPABILITIES_MANAGER_SERVICE_URL}/plugins/${manifest.id}`);
+                        if (cmResponse.status === 200 && cmResponse.data) {
+                            isToolActiveInCM = true;
+                            console.log(`Tool ${manifest.id} is already active in CapabilitiesManager.`);
+                        }
+                    } catch (cmError) {
+                        // If CM returns 404 or other error, it means the tool is not active there
+                        console.log(`Tool ${manifest.id} not found in CapabilitiesManager (or CM error): ${cmError instanceof Error ? cmError.message : cmError}`);
+                    }
+
+                    if (existingPendingTool) {
+                        // Tool is already pending, check for updates
+                        if (JSON.stringify(existingPendingTool.manifest_json) !== JSON.stringify(manifest)) {
+                            // Manifest has changed, update the pending tool and set status back to pending for re-review
+                            existingPendingTool.manifest_json = manifest;
+                            existingPendingTool.status = 'pending';
+                            existingPendingTool.manifest_url = source.url; // Update manifest URL if it changed
+                            await storeInMongo('pendingTools', { ...existingPendingTool, _id: existingPendingTool._id });
+                            console.log(`Updated pending tool ${existingPendingTool.id} from source ${source.id} due to manifest change.`);
+                        } else {
+                            console.log(`Tool ${manifest.id} from source ${source.id} is already pending and manifest is unchanged.`);
+                        }
+                    } else if (!isToolActiveInCM) {
+                        // Tool is not pending and not active in CM, add as new pending tool
+                        const newPendingTool: PendingTool = {
+                            _id: manifest.id, // Use id as _id for upsert
+                            id: manifest.id,
+                            source_id: source.id,
+                            manifest_url: source.url, // This might need to be more specific for individual tools
+                            manifest_json: manifest,
+                            status: 'pending',
+                        };
+                        await storeInMongo('pendingTools', newPendingTool);
+                        console.log(`Discovered and added new pending tool ${newPendingTool.id} from source ${source.id}`);
+                    } else {
+                        // console.debug(`Tool ${manifest.id} from source ${source.id} is already active in CapabilitiesManager and does not require re-approval.`);
+                    }
+                }
+
+                // Update last_scanned_at
+                source.last_scanned_at = new Date();
+                await storeInMongo('toolSources', { ...source, _id: source._id || source.id });
+            }
+            console.log('Tool discovery run complete.');
+        } catch (error) {
+            console.error('Error during tool discovery run:', error instanceof Error ? error.message : error);
+        }
+    }
+
+    private async fetchAndParseOpenAPITools(source: ToolSource): Promise<any[]> {
+        console.log(`Fetching and parsing OpenAPI spec from: ${source.url}`);
+        try {
+            const response = await axios.get(source.url);
+            const openApiSpec = response.data;
+            // In a real scenario, parse the OpenAPI spec to extract tool definitions
+            // For now, return a dummy manifest based on the spec
+            const dummyManifest = {
+                verb: `OPENAPI_TOOL_${source.id}`,
+                id: `openapi-tool-${source.id}`,
+                explanation: `Tool from OpenAPI spec at ${source.url}`,
+                language: 'openapi',
+                repository: { type: source.type, url: source.url },
+                openApiSpec: openApiSpec // Store the spec for later use by Engineer
+            };
+            return [dummyManifest];
+        } catch (error) {
+            console.error(`Failed to fetch or parse OpenAPI spec from ${source.url}:`, error instanceof Error ? error.message : error);
+            return [];
+        }
+    }
+
+    private async fetchAndParseGitTools(source: ToolSource): Promise<any[]> {
+        console.log(`Fetching and parsing Git repository for tools from: ${source.url}`);
+        // This would involve cloning the repo, scanning for manifest.json files, etc.
+        // For now, return a dummy manifest
+        const dummyManifest = {
+            verb: `GIT_TOOL_${source.id}`,
+            id: `git-tool-${source.id}`,
+            explanation: `Tool from Git repository at ${source.url}`,
+            language: 'git',
+            repository: { type: source.type, url: source.url }
+        };
+        return [dummyManifest];
+    }
+
+    private async fetchAndParseMarketplaceTools(source: ToolSource): Promise<any[]> {
+        console.log(`Fetching and parsing Marketplace tools from: ${source.url}`);
+        // This would involve making an API call to the marketplace service
+        // For now, return a dummy manifest
+        const dummyManifest = {
+            verb: `MARKETPLACE_TOOL_${source.id}`,
+            id: `marketplace-tool-${source.id}`,
+            explanation: `Tool from Marketplace at ${source.url}`,
+            language: 'marketplace',
+            repository: { type: source.type, url: source.url }
+        };
+        return [dummyManifest];
     }
 
     private async storeLargeAsset(req: express.Request, res: express.Response) {
@@ -583,6 +738,211 @@ export class Librarian extends BaseEntity {
         } catch (error) {
             console.error('Error in queryKnowledge:', error instanceof Error ? error.message : error);
             res.status(500).send({ error: 'Failed to query knowledge', details: error instanceof Error ? error.message : String(error) });
+        }
+    }
+
+    private async indexTool(req: express.Request, res: express.Response) {
+        const { manifest, entities } = req.body;
+
+        if (!manifest || !manifest.verb || !manifest.id) {
+            return res.status(400).send({ error: 'Plugin manifest with at least id and verb is required' });
+        }
+
+        try {
+            // The document to be embedded is a string combining the verb and its explanation.
+            const content = `${manifest.verb}: ${manifest.explanation || ''}`;
+            
+            // The entire manifest is stored as metadata, along with any provided entities.
+            const metadata = { ...manifest, id: manifest.id, entities: entities || [] };
+
+            await knowledgeStore.save('tools', content, metadata);
+            res.status(200).send({ status: 'Tool indexed successfully' });
+        } catch (error) {
+            console.error('Error in indexTool:', error instanceof Error ? error.message : error);
+            res.status(500).send({ error: 'Failed to index tool', details: error instanceof Error ? error.message : String(error) });
+        }
+    }
+
+    private async searchTools(req: express.Request, res: express.Response) {
+        const { queryText, maxResults = 1, contextEntities = [] } = req.body;
+
+        if (!queryText) {
+            return res.status(400).send({ error: 'queryText is required' });
+        }
+
+        try {
+            let results = await knowledgeStore.query('tools', queryText, maxResults);
+
+            if (contextEntities.length > 0) {
+                // Filter or re-rank results based on contextEntities
+                results = results.map((result: any) => {
+                    const toolEntities = result.metadata?.entities || [];
+                    const commonEntities = contextEntities.filter((entity: string) => toolEntities.includes(entity));
+                    const score = commonEntities.length; // Simple overlap score
+                    return { ...result, context_score: score };
+                });
+
+                // Sort by context_score (descending) then by original distance (ascending)
+                results.sort((a: any, b: any) => {
+                    if (b.context_score !== a.context_score) {
+                        return b.context_score - a.context_score;
+                    }
+                    return a.distance - b.distance;
+                });
+            }
+
+            res.status(200).send({ data: results });
+        } catch (error) {
+            console.error('Error in searchTools:', error instanceof Error ? error.message : error);
+            res.status(500).send({ error: 'Failed to search for tools', details: error instanceof Error ? error.message : String(error) });
+        }
+    }
+
+    // --- Tool Source Management ---
+    private async addToolSource(req: express.Request, res: express.Response) {
+        const { id, type, url } = req.body;
+
+        if (!id || !type || !url) {
+            return res.status(400).send({ error: 'id, type, and url are required' });
+        }
+
+        try {
+            const newToolSource: ToolSource = { _id: id, id, type, url, last_scanned_at: new Date() };
+            await storeInMongo('toolSources', newToolSource);
+            res.status(201).send({ status: 'Tool source added successfully', id: newToolSource.id });
+        } catch (error) {
+            console.error('Error in addToolSource:', error instanceof Error ? error.message : error);
+            res.status(500).send({ error: 'Failed to add tool source', details: error instanceof Error ? error.message : String(error) });
+        }
+    }
+
+    private async getToolSources(req: express.Request, res: express.Response) {
+        try {
+            const toolSources = await loadManyFromMongo('toolSources', {});
+            res.status(200).send(toolSources);
+        } catch (error) {
+            console.error('Error in getToolSources:', error instanceof Error ? error.message : error);
+            res.status(500).send({ error: 'Failed to retrieve tool sources', details: error instanceof Error ? error.message : String(error) });
+        }
+    }
+
+    private async deleteToolSource(req: express.Request, res: express.Response) {
+        const { id } = req.params;
+
+        if (!id) {
+            return res.status(400).send({ error: 'Tool source ID is required' });
+        }
+
+        try {
+            const result = await deleteManyFromMongo('toolSources', { id });
+            if (result.deletedCount === 0) {
+                return res.status(404).send({ error: 'Tool source not found' });
+            }
+            // Also delete any pending tools associated with this source
+            await deleteManyFromMongo('pendingTools', { source_id: id });
+            res.status(200).send({ status: 'Tool source deleted successfully' });
+        } catch (error) {
+            console.error('Error in deleteToolSource:', error instanceof Error ? error.message : error);
+            res.status(500).send({ error: 'Failed to delete tool source', details: error instanceof Error ? error.message : String(error) });
+        }
+    }
+
+    // --- Pending Tool Review Management ---
+    private async getPendingTools(req: express.Request, res: express.Response) {
+        try {
+            const pendingTools = await loadManyFromMongo('pendingTools', { status: 'pending' });
+            res.status(200).send(pendingTools);
+        } catch (error) {
+            console.error('Error in getPendingTools:', error instanceof Error ? error.message : error);
+            res.status(500).send({ error: 'Failed to retrieve pending tools', details: error instanceof Error ? error.message : String(error) });
+        }
+    }
+
+    private async approvePendingTool(req: express.Request, res: express.Response) {
+        const { id } = req.params;
+        const { policy_config } = req.body;
+
+        if (!id) {
+            return res.status(400).send({ error: 'Pending tool ID is required' });
+        }
+
+        try {
+            let updatedTool = await loadFromMongo('pendingTools', { id });
+
+            if (!updatedTool || updatedTool.status !== 'pending') {
+                return res.status(404).send({ error: 'Pending tool not found or already processed' });
+            }
+
+            updatedTool.status = 'approved';
+            updatedTool.policy_config = policy_config;
+            await storeInMongo('pendingTools', { ...updatedTool, _id: updatedTool._id || updatedTool.id } as PendingTool);
+
+            // Trigger Engineer onboarding process
+            try {
+                await axios.post(`${ENGINEER_SERVICE_URL}/tools/onboard`, {
+                    toolManifest: updatedTool.manifest_json,
+                    policyConfig: updatedTool.policy_config,
+                });
+                console.log(`Engineer service triggered for onboarding tool ${id}`);
+            } catch (engineerError) {
+                console.error(`Failed to trigger Engineer service for tool ${id}:`, engineerError instanceof Error ? engineerError.message : engineerError);
+                // Optionally, revert status or log a critical error if Engineer onboarding is essential
+            }
+
+            res.status(200).send({ status: 'Tool approved successfully', tool: updatedTool });
+        } catch (error) {
+            console.error('Error in approvePendingTool:', error instanceof Error ? error.message : error);
+            res.status(500).send({ error: 'Failed to approve pending tool', details: error instanceof Error ? error.message : String(error) });
+        }
+    }
+
+    private async rejectPendingTool(req: express.Request, res: express.Response) {
+        const { id } = req.params;
+
+        if (!id) {
+            return res.status(400).send({ error: 'Pending tool ID is required' });
+        }
+
+        try {
+            let updatedTool = await loadFromMongo('pendingTools', { id });
+
+            if (!updatedTool || updatedTool.status !== 'pending') {
+                return res.status(404).send({ error: 'Pending tool not found or already processed' });
+            }
+
+            updatedTool.status = 'rejected';
+            await storeInMongo('pendingTools', { ...updatedTool, _id: updatedTool._id || updatedTool.id } as PendingTool);
+
+            res.status(200).send({ status: 'Tool rejected successfully', tool: updatedTool });
+        } catch (error) {
+            console.error('Error in rejectPendingTool:', error instanceof Error ? error.message : error);
+            res.status(500).send({ error: 'Failed to reject pending tool', details: error instanceof Error ? error.message : String(error) });
+        }
+    }
+
+    private async updateToolStatus(req: express.Request, res: express.Response) {
+        const { id } = req.params;
+        const { status, reason } = req.body;
+
+        if (!id || !status) {
+            return res.status(400).send({ error: 'Tool ID and status are required' });
+        }
+
+        try {
+            let updatedTool = await loadFromMongo('pendingTools', { id });
+
+            if (!updatedTool) {
+                return res.status(404).send({ error: 'Tool not found in pending/approved list.' });
+            }
+
+            updatedTool.status = status;
+            updatedTool.disabledReason = reason; // Assuming IPendingTool can have a disabledReason
+            await storeInMongo('pendingTools', { ...updatedTool, _id: updatedTool._id || updatedTool.id } as PendingTool);
+
+            res.status(200).send({ status: `Tool ${id} status updated to ${status} successfully.`, tool: updatedTool });
+        } catch (error) {
+            console.error('Error in updateToolStatus:', error instanceof Error ? error.message : error);
+            res.status(500).send({ error: 'Failed to update tool status', details: error instanceof Error ? error.message : String(error) });
         }
     }
 }

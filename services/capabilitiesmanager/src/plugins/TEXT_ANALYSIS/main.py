@@ -1,57 +1,3 @@
-import tempfile
-import shutil
-import hashlib
-
-_seen_hashes = set()
-
-def robust_execute_plugin(script_parameters):
-    temp_dir = None
-    try:
-        # Deduplication: hash the script_parameters
-        hash_input = json.dumps(script_parameters, sort_keys=True)
-        input_hash = hashlib.sha256(hash_input.encode()).hexdigest()
-        if input_hash in _seen_hashes:
-            return [
-                {
-                    "success": False,
-                    "name": "error",
-                    "resultType": "error",
-                    "resultDescription": "Duplicate input detected. This input combination has already failed. Aborting to prevent infinite loop.",
-                    "error": "Duplicate input detected."
-                }
-            ]
-        _seen_hashes.add(input_hash)
-
-        # Temp directory hygiene
-        temp_dir = tempfile.mkdtemp(prefix="text_analysis_")
-        os.environ["TEXT_ANALYSIS_TEMP_DIR"] = temp_dir
-
-        # Call the original plugin logic
-        result = execute_plugin(script_parameters)
-
-        # Strict output validation: must be a list or dict
-        if not isinstance(result, (list, dict)):
-            raise ValueError("Output schema validation failed: must be a list or dict.")
-
-        return result
-    except Exception as e:
-        # Log the error internally
-        print(f"TEXT_ANALYSIS plugin encountered an error: {e}")
-        return [
-            {
-                "success": False,
-                "name": "error",
-                "resultType": "error",
-                "resultDescription": f"Error: {str(e)}",
-                "error": str(e)
-            }
-        ]
-    finally:
-        if temp_dir and os.path.exists(temp_dir):
-            try:
-                shutil.rmtree(temp_dir)
-            except Exception as cleanup_err:
-                print(f"Failed to clean up temp dir {temp_dir}: {cleanup_err}")
 #!/usr/bin/env python3
 """
 TEXT_ANALYSIS Plugin for Stage7
@@ -70,7 +16,11 @@ import os
 import re
 from typing import Dict, List, Any, Optional
 from collections import Counter
+import logging
 
+# Configure logging
+logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"), format='%(asctime)s - %(levelname)s - [%(funcName)s:%(lineno)d] - %(message)s')
+logger = logging.getLogger(__name__)
 
 class InputValue:
     """Represents a plugin input parameter in the new format"""
@@ -79,12 +29,6 @@ class InputValue:
         self.value = value
         self.valueType = valueType
         self.args = args or {}
-
-
-
-
-
-
 
 class PluginOutput:
     """Represents a plugin output result"""
@@ -189,7 +133,7 @@ def extract_keywords(text: str, top_n: int = 10) -> List[Dict[str, Any]]:
         List of keyword dictionaries with word and frequency
     """
     # Convert to lowercase and remove punctuation
-    clean_text = re.sub(r\'[^\w\\s]\', \'\', text.lower())
+    clean_text = re.sub('[^\\w\\s]', '', text.lower())
     
     # Split into words
     words = clean_text.split()

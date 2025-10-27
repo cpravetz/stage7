@@ -1,42 +1,17 @@
 import React from 'react';
 import { Box, Typography, Paper, Divider, useTheme } from '@mui/material';
 import ReactMarkdown from 'react-markdown';
+import { ConversationMessage } from '../shared-browser';
 
 interface MessageItemProps {
-  message: string;
+  message: ConversationMessage;
 }
 
 const MessageItem: React.FC<MessageItemProps> = ({ message }) => {
   const theme = useTheme();
 
-  const isUserMessage = (msg: string): boolean => {
-    return msg.startsWith('User:') || msg.startsWith('You:');
-  };
-
-  const formatMessage = (msg: string): string => {
-    if (msg.startsWith('User:') || msg.startsWith('You:') || msg.startsWith('System:')) {
-      return msg.substring(msg.indexOf(':') + 1).trim();
-    }
-    return msg;
-  };
-
-  // Normalize message content to prevent unintended code block rendering
-  const normalizeMessageContent = (content: string): string => {
-    // Remove any leading/trailing whitespace that might cause markdown issues
-    let normalized = content.trim();
-    
-    // Ensure consistent line breaks - replace multiple newlines with double newlines for paragraphs
-    normalized = normalized.replace(/\n{3,}/g, '\n\n');
-    
-    // Remove any indentation that might trigger code block parsing
-    normalized = normalized.replace(/^[ \t]+/gm, '');
-    
-    return normalized;
-  };
-
-  const isUser = isUserMessage(message);
-  const formattedMessage = formatMessage(message);
-  const normalizedMessage = normalizeMessageContent(formattedMessage);
+  // Determine if it's a user message based on the sender property
+  const isUser = message.sender === 'user';
 
   return (
     <Paper
@@ -120,7 +95,7 @@ const MessageItem: React.FC<MessageItemProps> = ({ message }) => {
       }}
     >
       <Typography variant="subtitle2" color={isUser ? 'primary.contrastText' : 'text.secondary'} sx={{ mb: 1, fontWeight: 'bold' }}>
-        {isUser ? 'You' : 'System'}
+        {message.sender.charAt(0).toUpperCase() + message.sender.slice(1)}
       </Typography>
       <Divider sx={{ mb: 1 }} />
       <ReactMarkdown
@@ -150,7 +125,7 @@ const MessageItem: React.FC<MessageItemProps> = ({ message }) => {
           }
         }}
       >
-        {normalizedMessage}
+        {message.content}
       </ReactMarkdown>
     </Paper>
   );

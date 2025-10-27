@@ -12,6 +12,7 @@
     "axios": "^1.12.0"
   },
   "devDependencies": {
+    "@types/jest": "^30.0.0",
     "@types/uuid": "^10.0.0",
     "typescript": "5.6.3"
   },

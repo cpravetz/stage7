@@ -55,6 +55,26 @@ export class TrafficManager extends BaseEntity {
         router.post('/agentStatisticsUpdate', this.agentStatisticsUpdateRoute.bind(this));
         router.get('/mission/:missionId/roster', this.getMissionRosterRoute.bind(this));
 
+        // Proxy route for Librarian service
+        router.all('/librarian/*', async (req, res) => {
+            const librarianUrl = process.env.LIBRARIAN_URL || 'http://librarian:5040';
+            const targetPath = req.originalUrl.replace('/librarian', '');
+            const fullUrl = `${librarianUrl}${targetPath}`;
+
+            try {
+                const response = await this.authenticatedApi({
+                    method: req.method as any,
+                    url: fullUrl,
+                    data: req.body,
+                    headers: req.headers as Record<string, string>,
+                });
+                res.status(response.status).send(response.data);
+            } catch (error: any) {
+                console.error('Error proxying request to Librarian:', error.message);
+                res.status(error.response?.status || 500).send(error.response?.data || 'Proxy error');
+            }
+        });
+
         // Use the router
         this.app.use(router);
     }

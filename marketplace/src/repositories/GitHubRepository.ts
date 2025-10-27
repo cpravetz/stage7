@@ -292,7 +292,6 @@ export class GitHubRepository implements PluginRepository {
             // Fallback to default/latest manifest directly under pluginId directory
             manifestPath = `${this.pluginsDir}/${pathPluginId}/manifest.json`;
             baseContentFetchingPath = `${this.pluginsDir}/${pathPluginId}`;
-            console.log(`GitHubRepository.fetch: No version specified for pluginId '${pluginId}'. Attempting to fetch from default path: ${manifestPath}`);
         }
 
         const manifestContent = await this.getFileContent(manifestPath, effectiveBranch);
@@ -302,7 +301,12 @@ export class GitHubRepository implements PluginRepository {
             return undefined;
         }
 
-        const manifest = JSON.parse(manifestContent) as PluginManifest;
+        const manifest = JSON.parse(manifestContent);
+
+        if (!manifest || typeof manifest.id !== 'string' || typeof manifest.verb !== 'string' || typeof manifest.version !== 'string') {
+            console.warn(`GitHubRepository.fetch: Invalid manifest for pluginId '${pluginId}' ${version ? `version '${version}'` : '(default/latest)'}. Missing id, verb, or version.`);
+            return undefined;
+        }
 
         // For non-git-sourced plugins (inline), fetch files if entryPoint.files is not already populated.
         if (!(manifest.packageSource && manifest.packageSource.type === 'git')) {
@@ -353,8 +357,10 @@ export class GitHubRepository implements PluginRepository {
         for (const versionDir of versionDirs) {
             const version = versionDir.name;
             const manifest = await this.fetch(pluginId, version);
-            if (manifest) {
+            if (manifest) { // Only add if manifest was successfully fetched
                 manifests.push(manifest);
+            } else {
+                console.warn(`GitHubRepository.fetchAllVersionsOfPlugin: Skipping invalid or unfetchable manifest for plugin ${pluginId} version ${version}.`);
             }
         }
         return manifests.length > 0 ? manifests : undefined;
@@ -477,6 +483,7 @@ export class GitHubRepository implements PluginRepository {
             return false;
         }
     }
+
     async list(): Promise<PluginLocator[]> {
         if (!this.isEnabled) return [];
         const effectiveBranch = await this._getEffectiveBranch();
@@ -516,35 +523,43 @@ export class GitHubRepository implements PluginRepository {
                 const versions = await this.fetchAllVersionsOfPlugin(pluginId); // This will fetch manifests
                 if (versions) {
                     for (const manifest of versions) {
-                        if (manifest.id !== pluginId) {
-                            console.warn(`GitHubRepository.list: Manifest ID '${manifest.id}' does not match directory ID '${pluginId}'. Using manifest ID.`);
-                        }
-                        locators.push({
-                            id: manifest.id, // Use ID from manifest
-                            verb: manifest.verb,
-                            description: manifest.description,
-                            version: manifest.version,
-                            repository: {
-                                type: 'github',
-                                url: `https://github.com/${this.repoOwner}/${this.repoName}/tree/${effectiveBranch}/${this.pluginsDir}/${manifest.id}/${manifest.version}`
+                        if (manifest && manifest.id && manifest.verb && manifest.version) {
+                            if (manifest.id !== pluginId) {
+                                console.warn(`GitHubRepository.list: Manifest ID '${manifest.id}' does not match directory ID '${pluginId}'. Using manifest ID.`);
                             }
-                        });
+                            locators.push({
+                                id: manifest.id, // Use ID from manifest
+                                verb: manifest.verb,
+                                description: manifest.description,
+                                version: manifest.version,
+                                repository: {
+                                    type: 'github',
+                                    url: `https://github.com/${this.repoOwner}/${this.repoName}/tree/${effectiveBranch}/${this.pluginsDir}/${manifest.id}/${manifest.version}`
+                                }
+                            });
+                        } else {
+                            console.warn(`GitHubRepository.list: Invalid manifest for plugin ${pluginId}, version ${manifest.version}. Skipping.`);
+                        }
                     }
                 }
                 // Check for a default/latest manifest directly under pluginId dir as well
                 const defaultManifest = await this.fetch(pluginId); // Fetch without version
                 if (defaultManifest) {
-                    // Avoid duplicates if already listed via fetchAllVersions (e.g. if 'latest' is also a numbered version dir)
-                    if (!locators.some(loc => loc.id === defaultManifest.id && loc.version === defaultManifest.version)) {
-                         locators.push({
-                            id: defaultManifest.id,
-                            verb: defaultManifest.verb,
-                            version: defaultManifest.version, // This might be "latest" or a specific version
-                            repository: {
-                                type: 'github',
-                                url: `https://github.com/${this.repoOwner}/${this.repoName}/tree/${effectiveBranch}/${this.pluginsDir}/${defaultManifest.id}`
-                            }
-                        });
+                    if (defaultManifest.id && defaultManifest.verb && defaultManifest.version) {
+                        // Avoid duplicates if already listed via fetchAllVersions (e.g. if 'latest' is also a numbered version dir)
+                        if (!locators.some(loc => loc.id === defaultManifest.id && loc.version === defaultManifest.version)) {
+                            locators.push({
+                                id: defaultManifest.id,
+                                verb: defaultManifest.verb,
+                                version: defaultManifest.version, // This might be "latest" or a specific version
+                                repository: {
+                                    type: 'github',
+                                    url: `https://github.com/${this.repoOwner}/${this.repoName}/tree/${effectiveBranch}/${this.pluginsDir}/${defaultManifest.id}`
+                                }
+                            });
+                        }
+                    } else {
+                        console.warn(`GitHubRepository.list: Invalid default manifest for plugin ${pluginId}. Skipping.`);
                     }
                 }
             } catch (error) {

@@ -15,7 +15,7 @@ import tempfile
 import shutil
 import hashlib
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 
 def get_auth_token(inputs: Dict[str, Any]) -> str:
@@ -278,7 +278,7 @@ class FileOperationPlugin:
             'originalName': file_name,
             'mimeType': mime_type,
             'size': len(content_for_file.encode('utf-8')),
-            'uploadedAt': datetime.utcnow().isoformat() + 'Z',
+            'uploadedAt': datetime.now(timezone.utc).isoformat(),
             'uploadedBy': 'FILE_OPS_PYTHON',
             'storagePath': f'step-outputs/{mission_id}/{file_name}',
             'description': f"Output from plugin write: {path}"

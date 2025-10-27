@@ -1,10 +1,10 @@
-import express from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import cors from 'cors';
 import WebSocket from 'ws';
 import http from 'http';
 import { Component } from './types/Component';
-import { Message, MessageType, BaseEntity, LLMConversationType } from '@cktmcs/shared';
+import { Message, MessageType, BaseEntity, LLMConversationType, ToolSource, PendingTool, PluginManifest, DefinitionManifest } from '@cktmcs/shared';
 import axios from 'axios';
 import { analyzeError } from '@cktmcs/errorhandler';
 import bodyParser from 'body-parser';
@@ -105,7 +105,7 @@ export class PostOffice extends BaseEntity {
         this.app.use(bodyParser.json({ limit: '500mb' }));
         this.app.use(bodyParser.urlencoded({ limit: '500mb', extended: true }));
 
-        this.app.use((_req, res, next) => {
+        this.app.use((_req: Request, res: Response, next: NextFunction) => {
             res.setHeader('Content-Type', 'application/json');
             next();
         });
@@ -147,35 +147,83 @@ export class PostOffice extends BaseEntity {
             return this.verifyToken(req, res, next);
         });
 
-        this.app.get('/', (_req, res) => {
+        this.app.get('/', (_req: Request, res: Response) => {
             res.send('PostOffice service is running');
         });
 
-        this.app.post('/registerComponent', (req, res) => {
+        this.app.post('/registerComponent', (req: Request, res: Response) => {
             console.log('Received registration request:', req.body);
             this.registerComponent(req, res);
         });
 
-        this.app.post('/message', (req, res) => this.handleMessage(req, res));
-        this.app.post('/sendMessage', (req, res) => this.handleIncomingMessage(req, res));
-        this.app.use('/securityManager/*', async (req, res, next) => this.routeSecurityRequest(req, res, next));
-        this.app.get('/requestComponent', (req, res) => this.requestComponent(req, res));
-        this.app.get('/getServices', (req, res) => this.getServices(req, res));
-        this.app.post('/submitUserInput', this.fileUploadManager.getUploadMiddleware(), (req, res) => { this.submitUserInput(req, res)});
-        this.app.post('/sendUserInputRequest', (req, res) => this.sendUserInputRequest(req, res));
-        this.app.get('/getUserInputResponse/:requestId', (req, res) => this.getUserInputResponse(req, res));
-        this.app.post('/createMission', (req, res) => this.createMission(req, res));
-        this.app.post('/loadMission', (req, res) => this.loadMission(req, res));
-        this.app.get('/librarian/retrieve/:id', (req, res) => this.retrieveWorkProduct(req, res));
-        this.app.get('/getSavedMissions', (req, res) => this.getSavedMissions(req, res));
-        this.app.get('/step/:stepId', (req, res) => { this.getStepDetails(req, res)});
-        this.app.get('/brain/performance', (req, res) => { this.getModelPerformance(req, res)});
-        this.app.get('/brain/performance/rankings', (req, res) => { this.getModelRankings(req, res);});
-        this.app.post('/brain/evaluations', (req, res) => { this.submitModelEvaluation(req, res);});
+        this.app.post('/message', (req: Request, res: Response) => this.handleMessage(req, res));
+        this.app.post('/sendMessage', (req: Request, res: Response) => this.handleIncomingMessage(req, res));
+        this.app.use('/securityManager/*', async (req: Request, res: Response, next: NextFunction) => this.routeSecurityRequest(req, res, next));
+        this.app.get('/requestComponent', (req: Request, res: Response) => this.requestComponent(req, res));
+        this.app.get('/getServices', (req: Request, res: Response) => this.getServices(req, res));
+        this.app.post('/submitUserInput', this.fileUploadManager.getUploadMiddleware(), (req: Request, res: Response) => { this.submitUserInput(req, res);});
+        this.app.post('/sendUserInputRequest', (req: Request, res: Response) => this.sendUserInputRequest(req, res));
+        this.app.get('/getUserInputResponse/:requestId', (req: Request, res: Response) => this.getUserInputResponse(req, res));
+        this.app.post('/createMission', (req: Request, res: Response) => this.createMission(req, res));
+        this.app.post('/loadMission', (req: Request, res: Response) => this.loadMission(req, res));
+        this.app.get('/librarian/retrieve/:id', (req: Request, res: Response) => this.retrieveWorkProduct(req, res));
+        this.app.get('/getSavedMissions', (req: Request, res: Response) => this.getSavedMissions(req, res));
+        this.app.get('/step/:stepId', (req: Request, res: Response) => { this.getStepDetails(req, res);});
+        this.app.get('/brain/performance', (req: Request, res: Response) => { this.getModelPerformance(req, res);});
+        this.app.get('/brain/performance/rankings', (req: Request, res: Response) => { this.getModelRankings(req, res);});
+        this.app.post('/brain/evaluations', (req: Request, res: Response) => { this.submitModelEvaluation(req, res);});
 
-        this.app.delete('/missions/:missionId/files/:fileId', (req, res) => this.deleteMissionFile(req, res));
+        // External Tool Management Endpoints
+        this.app.get('/tools/sources', (req: Request, res: Response) => this.getToolSources(req, res));
+        this.app.post('/tools/sources', (req: Request, res: Response) => this.addToolSource(req, res));
+        this.app.delete('/tools/sources/:id', (req: Request, res: Response) => this.deleteToolSource(req, res));
+        this.app.get('/tools/pending', (req: Request, res: Response) => this.getPendingTools(req, res));
+        this.app.post('/tools/pending/:id/approve', (req: Request, res: Response) => this.approvePendingTool(req, res));
+        this.app.post('/tools/pending/:id/reject', (req: Request, res: Response) => this.rejectPendingTool(req, res));
 
-        this.app.get('/missions/:missionId/files/:fileId/download', (req, res) => this.downloadMissionFile(req, res));
+        this.app.delete('/missions/:missionId/files/:fileId', (req: Request, res: Response) => this.deleteMissionFile(req, res));
+
+        this.app.get('/missions/:missionId/files/:fileId/download', (req: Request, res: Response) => this.downloadMissionFile(req, res));
+
+        // Generic API proxy for frontend requests
+        this.app.all('/api/*', async (req: Request, res: Response) => {
+            const originalPath = req.originalUrl.replace('/api', ''); // Remove /api prefix
+            const serviceName = originalPath.split('/')[1]; // e.g., 'librarian', 'capabilitiesmanager'
+
+            if (!serviceName) {
+                return res.status(400).send({ error: 'Service name missing in API request' });
+            }
+
+            const targetServiceUrl = this.getComponentUrl(serviceName);
+            if (!targetServiceUrl) {
+                return res.status(503).send({ error: `Service ${serviceName} not available` });
+            }
+
+            const targetPath = originalPath.replace(`/${serviceName}`, ''); // Remove service name prefix
+            const fullUrl = `http://${targetServiceUrl}${targetPath}`;
+
+            try {
+                const response = await this.authenticatedApi({
+                    method: req.method as any,
+                    url: fullUrl,
+                    data: req.body,
+                    headers: {
+                        ...req.headers as Record<string, string>,
+                        host: new URL(`http://${targetServiceUrl}`).host,
+                        'Content-Type': req.headers['content-type'] || 'application/json',
+                        'Authorization': req.headers['authorization'] || '',
+                    },
+                    params: req.query,
+                    validateStatus: function (status: any) {
+                        return status < 500; // Resolve only if status is less than 500
+                    }
+                });
+                res.status(response.status).send(response.data);
+            } catch (error: any) {
+                console.error(`Error proxying request to ${serviceName}:`, error.message);
+                res.status(error.response?.status || 500).send(error.response?.data || 'Proxy error');
+            }
+        });
 
         // Setup plugin management routes
         this.pluginManager.setupRoutes(this.app);
@@ -1043,10 +1091,154 @@ export class PostOffice extends BaseEntity {
         }
     }
 
+    private async getToolSources(req: express.Request, res: express.Response) {
+        try {
+            const librarianUrl = this.getComponentUrl('Librarian');
+            if (!librarianUrl) {
+                return res.status(503).send({ error: 'Librarian service not available' });
+            }
+            const response = await this.authenticatedApi.post(`http://${librarianUrl}/queryData`, {
+                collection: 'toolSources',
+                query: {}
+            });
+            res.status(200).send(response.data.data || []);
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error('Error getting tool sources:', error instanceof Error ? error.message : error);
+            res.status(500).send({ error: 'Failed to get tool sources' });
+        }
+    }
+
+    private async addToolSource(req: express.Request, res: express.Response) {
+        try {
+            const newToolSource: ToolSource = { ...req.body, id: uuidv4() };
+            const librarianUrl = this.getComponentUrl('Librarian');
+            if (!librarianUrl) {
+                return res.status(503).send({ error: 'Librarian service not available' });
+            }
+            await this.authenticatedApi.post(`http://${librarianUrl}/storeData`, {
+                collection: 'toolSources',
+                data: newToolSource,
+                id: newToolSource.id
+            });
+            res.status(201).send(newToolSource);
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error('Error adding tool source:', error instanceof Error ? error.message : error);
+            res.status(500).send({ error: 'Failed to add tool source' });
+        }
+    }
+
+    private async deleteToolSource(req: express.Request, res: express.Response) {
+        try {
+            const { id } = req.params;
+            const librarianUrl = this.getComponentUrl('Librarian');
+            if (!librarianUrl) {
+                return res.status(503).send({ error: 'Librarian service not available' });
+            }
+            await this.authenticatedApi.delete(`http://${librarianUrl}/deleteData/${id}`, {
+                params: { collection: 'toolSources' }
+            });
+            res.status(204).send();
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error('Error deleting tool source:', error instanceof Error ? error.message : error);
+            res.status(500).send({ error: 'Failed to delete tool source' });
+        }
+    }
+
+    private async getPendingTools(req: express.Request, res: express.Response) {
+        try {
+            const librarianUrl = this.getComponentUrl('Librarian');
+            if (!librarianUrl) {
+                return res.status(503).send({ error: 'Librarian service not available' });
+            }
+            const response = await this.authenticatedApi.post(`http://${librarianUrl}/queryData`, {
+                collection: 'pendingTools',
+                query: { status: 'pending' }
+            });
+            res.status(200).send(response.data.data || []);
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error('Error getting pending tools:', error instanceof Error ? error.message : error);
+            res.status(500).send({ error: 'Failed to get pending tools' });
+        }
+    }
+
+    private async approvePendingTool(req: express.Request, res: express.Response) {
+        try {
+            const { id } = req.params;
+            const librarianUrl = this.getComponentUrl('Librarian');
+            const capabilitiesManagerUrl = this.getComponentUrl('CapabilitiesManager');
+
+            if (!librarianUrl || !capabilitiesManagerUrl) {
+                return res.status(503).send({ error: 'Librarian or CapabilitiesManager service not available' });
+            }
+
+            // 1. Fetch the pending tool
+            const pendingToolResponse = await this.authenticatedApi.get(`http://${librarianUrl}/loadData/${id}`, {
+                params: { collection: 'pendingTools' }
+            });
+            const pendingTool: PendingTool = pendingToolResponse.data.data;
+
+            if (!pendingTool) {
+                return res.status(404).send({ error: 'Pending tool not found' });
+            }
+
+            // 2. Update the pending tool status to 'approved'
+            pendingTool.status = 'approved';
+            await this.authenticatedApi.post(`http://${librarianUrl}/storeData`, {
+                collection: 'pendingTools',
+                data: pendingTool,
+                id: pendingTool.id
+            });
+
+            res.status(200).send({ message: 'Pending tool approved' });
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error('Error approving pending tool:', error instanceof Error ? error.message : error);
+            res.status(500).send({ error: 'Failed to approve pending tool' });
+        }
+    }
+
+    private async rejectPendingTool(req: express.Request, res: express.Response) {
+        try {
+            const { id } = req.params;
+            const librarianUrl = this.getComponentUrl('Librarian');
+            if (!librarianUrl) {
+                return res.status(503).send({ error: 'Librarian service not available' });
+            }
+
+            // 1. Fetch the pending tool
+            const pendingToolResponse = await this.authenticatedApi.get(`http://${librarianUrl}/loadData/${id}`, {
+                params: { collection: 'pendingTools' }
+            });
+            const pendingTool: PendingTool = pendingToolResponse.data.data;
+
+            if (!pendingTool) {
+                return res.status(404).send({ error: 'Pending tool not found' });
+            }
+
+            // 2. Update the pending tool status to 'rejected'
+            pendingTool.status = 'rejected';
+            await this.authenticatedApi.post(`http://${librarianUrl}/storeData`, {
+                collection: 'pendingTools',
+                data: pendingTool,
+                id: pendingTool.id
+            });
+
+            res.status(200).send({ message: 'Pending tool rejected' });
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error('Error rejecting pending tool:', error instanceof Error ? error.message : error);
+            res.status(500).send({ error: 'Failed to reject pending tool' });
+        }
+    }
+
     // Add this method to PostOffice
     private async sendUserInputRequest(req: express.Request, res: express.Response) {
         try {
-            const { question, answerType, choices, clientId } = req.body;
+            const { question, answerType, choices, clientId, missionId } = req.body;
             const request_id = require('uuid').v4();
 
             // Store the request metadata
@@ -1075,10 +1267,20 @@ export class PostOffice extends BaseEntity {
                     request_id,
                     question,
                     answerType: answerType || 'text',
-                    choices: choices || null
+                    choices: choices || null,
+                    missionId: missionId // Include missionId if available
+                });
+            } else if (missionId) {
+                this.webSocketHandler.broadcastToMissionClients(missionId, {
+                    type: 'USER_INPUT_REQUEST',
+                    request_id,
+                    question,
+                    answerType: answerType || 'text',
+                    choices: choices || null,
+                    missionId: missionId // Include missionId
                 });
             } else {
-                // Fallback to broadcasting to all connected clients if no clientId is provided
+                // Fallback to broadcasting to all connected clients if neither clientId nor missionId is provided
                 this.webSocketHandler.broadcastToClients({
                     type: 'USER_INPUT_REQUEST',
                     request_id,

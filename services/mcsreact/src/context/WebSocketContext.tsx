@@ -151,7 +151,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             isPersistent = newMessage.persistent === true;
             newMessage = newMessage.message || JSON.stringify(newMessage);
           }
-          const finalMessage: ConversationMessage = { content: `${newMessage}`, persistent: isPersistent };
+          const finalMessage: ConversationMessage = { content: `${newMessage}`, persistent: isPersistent, sender: 'system' };
 
           if (prev.length > 0 && prev[prev.length - 1].content === finalMessage.content) return prev;
           return [...prev, finalMessage];
@@ -181,7 +181,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           const newProduct = {
             type: data.content.type,
             name: data.content.name,
-            url: `${API_BASE_URL}/librarian/retrieve/${data.content.id}`,
+            url: `${API_BASE_URL}/retrieve/${data.content.id}`,
             workproduct: data.content.workproduct,
             isDeliverable: data.content.isDeliverable || false
           };
@@ -374,11 +374,11 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
 
       if (pendingUserInput) {
-        setConversationHistory((prev) => [...prev, { content: `Question: ${pendingUserInput.question}` }, { content: `Answer: ${message}`, persistent: true }]);
+        setConversationHistory((prev) => [...prev, { content: `Question: ${pendingUserInput.question}`, sender: 'system', persistent: true }, { content: `Answer: ${message}`, sender: 'user', persistent: true }]);
       } else if (currentQuestion) {
-        setConversationHistory((prev) => [...prev, { content: `Answer: ${message}`, persistent: true }]);
+        setConversationHistory((prev) => [...prev, { content: `Answer: ${message}`, sender: 'user', persistent: true }]);
       } else {
-        setConversationHistory((prev) => [...prev, { content: `User: ${message}`, persistent: true }]);
+        setConversationHistory((prev) => [...prev, { content: `${message}`, sender: 'user', persistent: true }]);
       }
 
       try {
@@ -387,7 +387,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
         if (!accessToken) {
           console.error('No authentication token available. Please log in again.');
-          setConversationHistory((prev) => [...prev, { content: 'System: Authentication failed. Please log in again.', persistent: false }]);
+          setConversationHistory((prev) => [...prev, { content: 'Authentication failed. Please log in again.', sender: 'system', persistent: false }]);
           return;
         }
 
@@ -450,7 +450,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         }
       } catch (error) {
         console.error('[WebSocketContext] Failed to send message:', error instanceof Error ? error.message : error);
-        setConversationHistory((prev) => [...prev, { content: 'System: Failed to send message. Please try again.', persistent: false }]);
+        setConversationHistory((prev) => [...prev, { content: 'Failed to send message. Please try again.', sender: 'system', persistent: false }]);
       }
     },
     handleControlAction: async (action: string) => {
@@ -479,7 +479,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
         if (!accessToken) {
           console.error('No authentication token available. Please log in again.');
-          setConversationHistory((prev) => [...prev, { content: 'System: Authentication failed. Please log in again.', persistent: false }]);
+          setConversationHistory((prev) => [...prev, { content: 'Authentication failed. Please log in again.', sender: 'system', persistent: false }]);
           return;
         }
 
@@ -509,7 +509,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           }
         });
 
-        setConversationHistory((prev) => [...prev, { content: `System: Sent ${action} request to MissionControl.`, persistent: false }]);
+        setConversationHistory((prev) => [...prev, { content: `Sent ${action} request to MissionControl.`, sender: 'system', persistent: false }]);
 
         if (action === 'abort') {
           setActiveMission(false);
@@ -519,7 +519,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         }
       } catch (error) {
         console.error('[WebSocketContext] Failed to send control action:', error instanceof Error ? error.message : error);
-        setConversationHistory((prev) => [...prev, { content: `System: Failed to send ${action} request to MissionControl. Please try again.`, persistent: false }]);
+        setConversationHistory((prev) => [...prev, { content: `Failed to send ${action} request to MissionControl. Please try again.`, sender: 'system', persistent: false }]);
       }
     },
     handleLoadMission: async (missionId: string) => {
@@ -529,7 +529,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
         if (!accessToken) {
           console.error('No authentication token available. Please log in again.');
-          setConversationHistory((prev) => [...prev, { content: 'System: Authentication failed. Please log in again.', persistent: false }]);
+          setConversationHistory((prev) => [...prev, { content: 'Authentication failed. Please log in again.', sender: 'system', persistent: false }]);
           return;
         }
 
@@ -551,10 +551,10 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             'Authorization': `Bearer ${accessToken}`
           }
         });
-        setConversationHistory((prev) => [...prev, { content: `System: Mission ${missionId} loaded.`, persistent: false }]);
+        setConversationHistory((prev) => [...prev, { content: `Mission ${missionId} loaded.`, sender: 'system', persistent: false }]);
       } catch (error) {
         console.error('[WebSocketContext] Failed to load mission:', error instanceof Error ? error.message : error);
-        setConversationHistory((prev) => [...prev, { content: 'System: Failed to load mission. Please try again.', persistent: false }]);
+        setConversationHistory((prev) => [...prev, { content: 'Failed to load mission. Please try again.', sender: 'system', persistent: false }]);
       }
     },
     listMissions: async () => {

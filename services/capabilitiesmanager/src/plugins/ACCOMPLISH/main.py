@@ -265,7 +265,7 @@ def parse_inputs(inputs_str: str) -> Dict[str, Any]:
         raise AccomplishError(f"Input validation failed: {e}", "input_error")
 
 def _create_detailed_plugin_guidance(inputs: Dict[str, Any]) -> str:
-    """Create a detailed list of available plugins with input specs and descriptions."""
+    """Create a detailed list of available plugins with input specs, descriptions, and types."""
     available_plugins_input = inputs.get('availablePlugins', {})
     available_plugins = available_plugins_input.get('value', []) if isinstance(available_plugins_input, dict) else available_plugins_input
     if not available_plugins:
@@ -274,23 +274,26 @@ def _create_detailed_plugin_guidance(inputs: Dict[str, Any]) -> str:
     guidance_lines = ["Available Plugins & Input Specifications:"]
     for plugin in available_plugins:
         if isinstance(plugin, dict): # Defensive check
-            action_verb = plugin.get('actionVerb', 'UNKNOWN')
+            action_verb = plugin.get('verb', 'UNKNOWN') # Use 'verb' from PluginManifest
             description = plugin.get('description', 'No description available.')
+            language = plugin.get('language', 'unknown')
+            repository_type = plugin.get('repository', {}).get('type', 'unknown')
             input_definitions = plugin.get('inputDefinitions', [])
             input_guidance = plugin.get('inputGuidance', '')
 
-            guidance_lines.append(f"\nPlugin: {action_verb}")
+            guidance_lines.append(f"\nPlugin: {action_verb} (Language: {language}, Source: {repository_type})")
             guidance_lines.append(f"  Description: {description}")
             if input_definitions:
                 guidance_lines.append("  Inputs:")
                 for input_def in input_definitions:
                     input_name = input_def.get('name', 'UNKNOWN')
                     input_desc = input_def.get('description', 'No description.')
-                    value_type = input_def.get('valueType', 'any')
+                    value_type = input_def.get('type', 'any') # Use 'type' from PluginParameter
                     guidance_lines.append(f"    - {input_name} (type: {value_type}){ ' (REQUIRED)' if input_def.get('required') else ''}: {input_desc}")
             else:
                 guidance_lines.append("  Inputs: None required.")
-            guidance_lines.append(f"{input_guidance}")
+            if input_guidance:
+                guidance_lines.append(f"  Guidance: {input_guidance}")
         else:
             # Handle case where plugin is not a dictionary (e.g., a string)
             guidance_lines.append(f"\nPlugin: {plugin} (Details not available - unexpected format)")
@@ -386,7 +389,8 @@ class RobustMissionPlanner:
                 "value": f"{json.dumps(plan)}",
                 "valueType": "string"
             },
-            "question": {"value": reflection_question, "valueType": "string"}
+            "question": {"value": reflection_question, "valueType": "string"},
+            "availablePlugins": inputs.get('availablePlugins', {})
         }
 
         try:
@@ -472,7 +476,7 @@ class RobustMissionPlanner:
         context_input = inputs.get('context')
         context = context_input if context_input is not None else ''
         full_goal = f"MISSION: {mission_goal}\n\nTASK: {goal}" if mission_goal and mission_goal != goal else goal
-        prompt = f"""You are an expert strategic planner and an autonomous agent. Your core purpose is to accomplish the user's mission and complete tasks *for* the user, not to delegate them back. Create a comprehensive, well-thought plan to achieve the given goal:
+        prompt = f"""You are an expert strategic planner and an autonomous agent. Your core purpose is to accomplish the user's mission and complete tasks *for* the user, not to delegate them back. Your goal is to be resourceful and solve problems independently. Create a comprehensive, well-thought plan to achieve the given goal:
 
 GOAL: {full_goal}
 
@@ -542,88 +546,29 @@ Follow these steps to create the final JSON output:
 After your internal analysis and self-correction is complete, provide ONLY the final, valid JSON array of steps.
 
 ---
-**CRITICAL DEPENDENCY RULES (STRICTLY ENFORCED):**
+**CRITICAL PLANNING PRINCIPLES (STRICTLY ENFORCED):**
 ---
-
-**CRITICAL: GLOBALLY UNIQUE STEP NUMBERS - Every step must have a globally unique step number across the entire plan including all sub-plans at any nesting level. Do not reuse step numbers anywhere in the plan.**
-
-**THE GOLDEN RULE OF DEPENDENCIES: A step can ONLY depend on the outputs of PRECEDING steps. A step can NEVER depend on itself.**
-
-**Handling Lists (Arrays) - CRITICAL FOREACH USAGE:**
-    - If a step (e.g., `SCRAPE`) requires a single item (e.g., a URL as a `string`) but a previous step (e.g., `SEARCH`) provides a list of items (an `array`), you MUST use a `FOREACH` loop.
-    - The `FOREACH` step's `array` input MUST depend on the array output from the source step (e.g., `sourceStep: 1`, `outputName: "competitorList"`).
-    - The step(s) inside the `FOREACH`'s `steps` sub-array that consume the individual items MUST reference the `FOREACH` step itself as their `sourceStep` and `item` as their `outputName`.
-    - **VERY IMPORTANT**: The `item` provided by `FOREACH` is a SINGLE item from the list. The `valueType` for an input consuming `item` should be the type of that single item (e.g., `string`), NOT `array`.
-    - **CRITICAL for FILE_OPERATION content:** The `content` input for `FILE_OPERATION` MUST always be a `string`. Do NOT use boolean outputs (e.g., `success` from `CHAT` verbs) as content for `FILE_OPERATION`.
-- **Multi-step plans are essential:** Break down complex goals into multiple, sequential steps.
-- **Dependencies are crucial for flow:** Every step that uses an output from a previous step MUST declare that dependency in its `inputs` object using `outputName` and `sourceStep`.
-- **Prioritize autonomous information gathering:** Use tools like SEARCH, SCRAPE, DATA_TOOLKIT, TEXT_ANALYSIS, TRANSFORM, and FILE_OPERATION to gather information and perform tasks.
-- **Avoid unnecessary user interaction:** Only use 'ASK_USER_QUESTION' for decisions, permissions, or clarification. Do NOT use it for seeking advice, delegating research or data collection that the agent can perform.
-- **CHAT vs ASK_USER_QUESTION:** Use ASK_USER_QUESTION for structured questions requiring user input. Use CHAT sparingly and only when you need to communicate critical information, final results, or important decisions to the user. Avoid routine status updates or progress notifications.
-- **Avoid repetitive steps:** Do not create multiple identical or nearly identical steps. Each step should serve a distinct purpose in achieving the goal.
-**Role Assignment Strategy:**
-- Assign `recommendedRole` at the **deliverable level**, not per-step optimization
-- All steps contributing to a single coherent output (e.g., "research report", "code module", "analysis document") should share the same `recommendedRole`
-- Only change `recommendedRole` when transitioning to a fundamentally different type of deliverable
-- Example: Steps 1-5 all produce research for a report → all get `recommendedRole: "researcher"`
-- Counter-example: Don't switch roles between gathering data (step 1) and formatting it (step 2) if they're part of the same research deliverable
+- **Autonomy is Paramount:** Your goal is to *solve* the mission, not to delegate research or information gathering back to the user.
+- **Resourcefulness:** Exhaust all available tools (`SEARCH`, `SCRAPE`, `GENERATE`, `QUERY_KNOWLEDGE_BASE`) to find answers and create deliverables *before* ever considering asking the user.
+- **`ASK_USER_QUESTION` is a Last Resort:** This tool is exclusively for obtaining subjective opinions, approvals, or choices from the user. It is *never* for offloading tasks. Generating a plan that asks the user for information you can find yourself is a critical failure.
+- **Dependencies are Crucial:** Every step that uses an output from a previous step MUST declare this in its `inputs` using `sourceStep` and `outputName`. A plan with disconnected steps is invalid.
+- **Pay Attention to `inputGuidance`:** The `inputGuidance` field in the plugin manifest provides critical information on how to use the plugin correctly. You MUST read and follow this guidance.
+- **Handling Lists (`FOREACH`):** If a step requires a single item (e.g., a URL string) but receives a list from a preceding step (e.g., search results), you MUST use a `FOREACH` loop to iterate over the list. The `inputGuidance` for the `FOREACH` plugin explains how to do this.
+- **Role Assignment:** Assign `recommendedRole` at the deliverable level, not per individual step. All steps contributing to a single output (e.g., a research report) should share the same role.
 
 **DELIVERABLE IDENTIFICATION:**
-When defining outputs, identify which ones are final deliverables that the user will want to see:
-- For outputs that represent final results, reports, or completed work products, use the enhanced format:
-  ```json
-  "outputs": {{
-    "final_report": {{
-      "description": "A comprehensive analysis report",
-      "isDeliverable": true,
-      "filename": "market_analysis_2025.md"
-    }}
-  }}
-  ```
-- For intermediate outputs used only by subsequent steps, use the simple string format:
-  ```json
-  "outputs": {{
-    "research_data": "Raw research data for analysis"
-  }}
-  ```
-- Guidelines for deliverable filenames:
-  * Use descriptive, professional names
-  * Include relevant dates or versions when appropriate
-  * Use appropriate file extensions (.md, .txt, .json, .csv, .pdf, etc.)
-  * Avoid generic names like "output.txt" or "result.json"
-  * Examples: "quarterly_sales_report_2025.md", "competitor_analysis.json", "user_survey_results.csv"
-- Mark outputs as deliverables when they are:
-  * Final reports or analyses
-  * Completed documents or files
-  * Summary results that users will reference
-  * Data exports or processed datasets
-- Do NOT mark as deliverables:
-  * Intermediate data used only by subsequent steps
-  * Temporary processing results
-  * Internal state or configuration data
+When defining outputs, identify which ones are final deliverables for the user:
+- For final reports, analyses, or completed files, use the enhanced format:
+  `"outputs": {{ "final_report": {{ "description": "A comprehensive analysis", "isDeliverable": true, "filename": "analysis_report.md" }} }}`
+- For intermediate data used only by subsequent steps, use the simple string format:
+  `"outputs": {{ "raw_data": "Raw data for processing" }}`
 
-- **CRITICAL for sourceStep:**
-    - Use `sourceStep: 0` ONLY for inputs that are explicitly provided in the initial mission context (the "PARENT STEP INPUTS" section if applicable, or the overall mission goal).
-    - For any other input, it MUST be the `outputName` from a *preceding step* in this plan, and `sourceStep` MUST be the `number` of that preceding step.
-    - Every input in your plan MUST be resolvable either from a given constant value, a "PARENT STEP INPUT" (using `sourceStep: 0`) or from an output of a previous step in the plan.
-- **Example for `sourceStep`:** If Step 2 needs `research_results` from Step 1, and Step 1 outputs `{{ "research_results": "..." }}`, then Step 2's inputs would be `{{ "research": {{"outputName": "research_results", "sourceStep": 1, "valueType": "string"}} }}`.
-- **Completeness:** The generated plan must be a complete and executable plan that will fully accomplish the goal. It should not be a partial plan or an outline. It should include all the necessary steps to produce the final deliverables.
-- **Iterative Processes/Feedback Loops:** If the prose plan describes a continuous feedback loop, iterative process, or any form of repetition, you MUST translate this into an appropriate looping construct (e.g., using 'WHILE', 'REPEAT', or 'FOREACH' actionVerbs) within the JSON plan. Do not simply list the steps once if they are intended to be repeated.
-- **VERY IMPORTANT**: For each step, you MUST examine the `inputDefinitions` for the corresponding `actionVerb` and ensure that all `required` inputs are present in the step's `inputs` object.
+CRITICAL: The actionVerb for each step MUST be a valid, existing plugin actionVerb. **You MUST NOT create new verbs that are not directly executable or are too abstract. Focus on using existing, granular action verbs like SEARCH, SCRAPE, FILE_OPERATION, TEXT_ANALYSIS, TRANSFORM, CHAT, ASK_USER_QUESTION.**
 
-CRITICAL: The actionVerb for each step MUST be a valid, existing plugin actionVerb (from the provided list) or a descriptive, new actionVerb (e.g., 'ANALYZE_DATA', 'GENERATE_REPORT'). It MUST NOT be 'UNKNOWN' or 'NOVEL_VERB'.
-
-**CRITICAL - LINKING STEPS:** You MUST explicitly connect steps. Any step that uses the output of a previous step MUST declare this in its `inputs` using `sourceStep` and `outputName`. DO NOT simply refer to previous outputs in a `prompt` string without also adding the formal dependency in the `inputs` object. 
+- **CRITICAL - LINKING STEPS:** You MUST explicitly connect steps. Any step that uses the output of a previous step MUST declare this in its `inputs` using `sourceStep` and `outputName`. DO NOT simply refer to previous outputs in a `prompt` string without also adding the formal dependency in the `inputs` object. For verbs like `THINK`, `CHAT`, or `ASK_USER_QUESTION`, if the `prompt` or `question` text refers to a file or work product from a previous step, you MUST add an input that references the output of that step using `sourceStep` and `outputName`. This ensures the step waits for the file to be created.
 A plan with no connections between steps is invalid and will be rejected.
 
-{plugin_guidance}
-
-CRITICAL PLANNING_PRINCIPLES:
-- **Autonomous Execution:** Your primary role is to complete tasks independently. Prioritize autonomous information gathering using SEARCH, SCRAPE, API_CLIENT, and other research tools.
-- **Strategic Use of User Questions:** Use the ASK_USER_QUESTION verb *only* when information is truly unobtainable through your own tools (e.g., subjective opinions, personal preferences, or explicit permissions). Do NOT use it to ask the user for information you can find yourself or to delegate tasks back to them.
-- Design plans that can execute independently without requiring user input for factual information.
-- Use available tools and APIs to gather data rather than asking users to provide it.
-"""
+{plugin_guidance}"""
 
         for attempt in range(self.max_retries):
             try:
@@ -752,11 +697,11 @@ Your task is to determine the best way to accomplish the goal of the novel verb 
 2.  **Create a Plan:** If the task is complex and requires multiple steps, breaking it down into a sequence of actions using available tools, then create a plan. The plan should be a JSON array of steps. This is the preferred option for complex tasks that can be broken down.
 3.  **Recommend a Plugin:** If the task requires a new, complex, and reusable capability that is not covered by existing tools and would be beneficial for future use, recommend the development of a new plugin by providing a JSON object with a "plugin" key.
 
-**CRITICAL CONSTRAINTS:**
+          **CRITICAL CONSTRAINTS:**
 - You MUST NOT use the novel verb "{verb}" in your plan.
+- **When creating a plan, prioritize breaking down tasks into the most granular, atomic steps possible. Avoid generating new high-level, abstract action verbs that would require further decomposition by the ACCOMPLISH plugin. Instead, use existing, fundamental action verbs or create new, specific action verbs that are immediately executable.**
 - You are an autonomous agent. Your primary goal is to solve problems independently.
 - Do not use the `ASK_USER_QUESTION` verb to seek information from the user that can be found using other tools like `SEARCH` or `SCRAPE`. Your goal is to be resourceful and autonomous.
-
 **RESPONSE FORMATS:**
 
 -   **For a Plan:** A JSON array of steps defined with the schema below.

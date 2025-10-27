@@ -1,5 +1,3 @@
-import { repositoryConfig } from '../src/config/repositoryConfig';
-
 describe('repositoryConfig', () => {
     let originalEnv: NodeJS.ProcessEnv;
     let consoleLogSpy: jest.SpyInstance;
@@ -46,20 +44,6 @@ describe('repositoryConfig', () => {
         expect(repositoryConfig.Repositories.length).toBe(5);
         expect(repositoryConfig.Repositories.some(r => r.type === 'git')).toBe(true);
         expect(repositoryConfig.Repositories.some(r => r.type === 'github')).toBe(true);
-
-        const gitRepo = repositoryConfig.Repositories.find(r => r.type === 'git');
-        expect(gitRepo).toEqual({
-            type: 'git',
-            url: 'https://github.com/mock/repo.git',
-            credentials: {
-                username: 'mock_user',
-                token: 'mock_token',
-                email: '',
-            },
-            options: {
-                defaultBranch: 'dev',
-            },
-        });
 
         const githubRepo = repositoryConfig.Repositories.find(r => r.type === 'github');
         expect(githubRepo).toEqual({

@@ -94,7 +94,7 @@ export class PluginManager {
             }
             const repoParam = repository ? `?repository=${repository}` : '';
             const response = await this.authenticatedApi.get(`http://${capabilitiesManagerUrl}/plugins${repoParam}`);
-            console.log('Plugins retrieved successfully:', response.data);
+            // console.debug('Plugins retrieved successfully:', response.data);
             res.status(200).json(response.data);
         } catch (error) {
             analyzeError(error as Error);

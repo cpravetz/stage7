@@ -6,7 +6,7 @@ import { createAuthenticatedAxios } from './http/createAuthenticatedAxios';
  * Client for making authenticated API requests
  */
 export class AuthenticatedApiClient {
-  private api: AxiosInstance;
+  public api: AxiosInstance;
 
   constructor(private baseEntity: IBaseEntity) {
     const securityManagerUrl = process.env.SECURITYMANAGER_URL || 'securitymanager:5010';

@@ -117,18 +117,33 @@ if __name__ == "__main__":
         if not script:
             raise TransformError("Missing required 'script' input")
 
+        params_to_execute = {}
         if isinstance(script_parameters, str):
             try:
-                if script_parameters.strip():
-                    script_parameters = json.loads(script_parameters)
-                else:
-                    script_parameters = {}
+                script_parameters = json.loads(script_parameters) if script_parameters.strip() else {}
             except json.JSONDecodeError:
                 raise TransformError("Invalid JSON string for 'script_parameters'")
-        elif not isinstance(script_parameters, dict):
+
+        if isinstance(script_parameters, dict):
+            for param_name, param_value in script_parameters.items():
+                if isinstance(param_value, dict) and 'outputName' in param_value:
+                    input_name = param_value['outputName']
+                    if input_name in inputs_dict:
+                        value = inputs_dict[input_name]
+                        if isinstance(value, str):
+                            try:
+                                value = json.loads(value)
+                            except json.JSONDecodeError:
+                                pass # Not a json string
+                        params_to_execute[param_name] = value
+                    else:
+                        params_to_execute[param_name] = param_value # pass as is
+                else:
+                    params_to_execute[param_name] = param_value
+        else:
             raise TransformError(f"'script_parameters' must be a JSON object or string, got {type(script_parameters)}")
 
-        transform_output = execute_transform(script, script_parameters)
+        transform_output = execute_transform(script, params_to_execute)
 
         sys.stdout.write(format_plugin_output(
             success=True,
