@@ -326,9 +326,21 @@ export class Brain extends BaseEntity {
                     this.modelManager.trackModelResponse(trackingRequestId, '', 0, false, errorMessage);
                 }
 
-                if (selectedModel && selectedModel.name && errorMessage.includes('context window')) {
-                    console.log(`[Brain Chat] Context window error detected for model ${selectedModel.name}. Excluding it from retries.`);
-                    excludedModels.push(selectedModel.name);
+                if (selectedModel && selectedModel.name && errorMessage.includes('max_tokens') && errorMessage.includes('context_window')) {
+                    const currentMaxTokens = thread.optionals?.max_length || selectedModel.tokenLimit;
+                    const newMaxTokens = Math.max(512, Math.floor(currentMaxTokens * 0.75)); // Reduce by 25%, minimum 512
+
+                    if (newMaxTokens < currentMaxTokens) {
+                        console.warn(`[Brain Chat] Model ${selectedModel.name} failed due to max_tokens. Retrying with reduced max_tokens from ${currentMaxTokens} to ${newMaxTokens}.`);
+                        if (!thread.optionals) {
+                            thread.optionals = {};
+                        }
+                        thread.optionals.max_length = newMaxTokens;
+                        // Do NOT add to excludedModels, allow retry with smaller tokens
+                    } else {
+                        console.error(`[Brain Chat] Model ${selectedModel.name} failed due to max_tokens, but could not reduce further or already at minimum. Excluding it from retries.`);
+                        excludedModels.push(selectedModel.name);
+                    }
                 } else if (selectedModel && selectedModel.name) {
                     const isTimeout = /timeout|system_error|connection error/i.test(errorMessage);
                     const isJsonError = /json|parse|invalid format/i.test(errorMessage);

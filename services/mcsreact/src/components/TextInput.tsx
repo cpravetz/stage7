@@ -1,20 +1,35 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Box, TextField, Button, Paper, IconButton } from '@mui/material';
+import { Box, TextField, Button, Paper, IconButton, Typography } from '@mui/material';
 import SendIcon from '@mui/icons-material/Send';
 import MicIcon from '@mui/icons-material/Mic';
 import { useTheme } from '@mui/material/styles';
+import { AnswerType } from '../shared-browser';
+
+export interface ActiveQuestion {
+  requestId: string;
+  question: string;
+  choices?: string[];
+  answerType: AnswerType;
+}
 
 interface Props {
   onSend: (message: string) => void;
+  activeQuestion: ActiveQuestion | null;
+  onAnswer: (requestId: string, answer: string) => void;
+  onCancelQuestion: () => void;
 }
 
-const TextInput: React.FC<Props> = ({ onSend }) => {
+const TextInput: React.FC<Props> = ({ onSend, activeQuestion, onAnswer, onCancelQuestion }) => {
   const [message, setMessage] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (message.trim()) {
-      onSend(message);
+      if (activeQuestion) {
+        onAnswer(activeQuestion.requestId, message);
+      } else {
+        onSend(message);
+      }
       setMessage('');
     }
   };
@@ -22,7 +37,7 @@ const TextInput: React.FC<Props> = ({ onSend }) => {
   const textFieldRef = useRef<HTMLDivElement>(null);
   const theme = useTheme();
 
-  // Auto-focus the text field when the component mounts
+  // Auto-focus the text field when the component mounts or activeQuestion changes
   useEffect(() => {
     if (textFieldRef.current) {
       const input = textFieldRef.current.querySelector('textarea');
@@ -30,7 +45,7 @@ const TextInput: React.FC<Props> = ({ onSend }) => {
         input.focus();
       }
     }
-  }, []);
+  }, [activeQuestion]); // Re-focus when activeQuestion changes
 
   // Handle Ctrl+Enter to submit
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -39,6 +54,8 @@ const TextInput: React.FC<Props> = ({ onSend }) => {
       handleSubmit(e as unknown as React.FormEvent);
     }
   };
+
+  const isInputDisabled = activeQuestion !== null && activeQuestion.answerType !== 'text';
 
   return (
     <Paper
@@ -49,6 +66,16 @@ const TextInput: React.FC<Props> = ({ onSend }) => {
         bgcolor: 'background.paper'
       }}
     >
+      {activeQuestion && (
+        <Box sx={{ mb: 2, p: 1, bgcolor: theme.palette.action.hover, borderRadius: 1 }}>
+          <Typography variant="subtitle2" color="text.secondary">
+            Question from System:
+          </Typography>
+          <Typography variant="body1" sx={{ fontWeight: 'bold' }}>
+            {activeQuestion.question}
+          </Typography>
+        </Box>
+      )}
       <Box component="form" onSubmit={handleSubmit} sx={{ display: 'flex', alignItems: 'flex-end' }}>
         <TextField
           fullWidth
@@ -57,9 +84,10 @@ const TextInput: React.FC<Props> = ({ onSend }) => {
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Enter message..."
+          placeholder={activeQuestion ? "Enter your answer..." : "Enter message..."}
           variant="outlined"
           ref={textFieldRef}
+          disabled={isInputDisabled}
           sx={{
             mr: 1,
             '& .MuiOutlinedInput-root': {
@@ -73,7 +101,7 @@ const TextInput: React.FC<Props> = ({ onSend }) => {
             type="submit"
             variant="contained"
             color="primary"
-            disabled={!message.trim()}
+            disabled={!message.trim() || isInputDisabled}
             endIcon={<SendIcon />}
             sx={{
               height: '40px',
@@ -81,8 +109,22 @@ const TextInput: React.FC<Props> = ({ onSend }) => {
               mb: 1
             }}
           >
-            Send
+            {activeQuestion ? 'Submit Answer' : 'Send'}
           </Button>
+          {activeQuestion && (
+            <Button
+              variant="outlined"
+              color="secondary"
+              onClick={onCancelQuestion}
+              sx={{
+                height: '40px',
+                borderRadius: 2,
+                mb: 1
+              }}
+            >
+              Cancel
+            </Button>
+          )}
           <IconButton
             color="secondary"
             aria-label="voice input"

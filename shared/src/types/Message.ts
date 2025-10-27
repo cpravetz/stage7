@@ -49,4 +49,5 @@ export interface Message {
     data?: any;
     requiresSync?: boolean; // Indicates if the message requires a synchronous response
     timestamp?: string; // ISO timestamp for message tracking
+    missionId?: string; // Optional: The ID of the mission this message is associated with
   }

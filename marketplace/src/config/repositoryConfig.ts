@@ -25,18 +25,6 @@ const repositories: any[] = [
 if (process.env.ENABLE_GITHUB === 'true' && process.env.GITHUB_TOKEN && process.env.GITHUB_USERNAME) {
     repositories.push(
         {
-            type: 'git',
-            url: process.env.GIT_REPOSITORY_URL || '',
-            credentials: {
-                username: process.env.GITHUB_USERNAME || '',
-                token: process.env.GITHUB_TOKEN || '',
-                email: process.env.GITHUB_EMAIL || ''
-            },
-            options: {
-                defaultBranch: process.env.GIT_DEFAULT_BRANCH || 'main'
-            }
-        },
-        {
             type: 'github',
             url: process.env.GIT_REPOSITORY_URL || '',
             credentials: {

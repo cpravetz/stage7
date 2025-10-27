@@ -9,6 +9,7 @@ module.exports = {
     publicPath: '/',
   },
   mode: 'development',
+  devtool: 'eval-source-map', // Explicitly set devtool for better source map handling
   resolve: {
     extensions: ['.tsx', '.ts', '.js', '.jsx'],
     fallback: {

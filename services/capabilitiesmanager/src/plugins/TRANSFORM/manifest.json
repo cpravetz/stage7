@@ -4,7 +4,7 @@
     "description": "A plugin for performing general data transformations using code snippets.",
     "explanation": "This plugin executes a provided Python code snippet to transform input data.",
     "repository":{"type":"local"},
-    "inputGuidance": "Parameters to be passed to the script. Available as a 'params' variable in the script context. The values within 'params' will already be deserialized Python objects (dictionaries, lists, strings, numbers, booleans). Therefore, the Python script should NOT call json.loads() on these values. If referencing outputs from previous steps, embed them directly. For example, to pass 'metrics' from sourceStep 4: '{\"metrics\": {\"outputName\": \"metrics\", \"sourceStep\": 4}}'. The TRANSFORM plugin will make its contents available to the Python script via the 'params' dictionary, with values already converted to native Python types.",
+    "inputGuidance": "Parameters to be passed to the script. Available as a 'params' variable in the script context. The values within 'params' will already be deserialized Python objects (dictionaries, lists, strings, numbers, booleans). Therefore, the Python script should NOT call json.loads() on these values. If referencing outputs from previous steps, embed them directly. For example, to pass 'metrics' from sourceStep 4: '{\"metrics\": {\"outputName\": \"metrics\", \"sourceStep\": 4}}'. The TRANSFORM plugin will make its contents available to the Python script via the 'params' dictionary, with values already converted to native Python types.     - **CRITICAL for TRANSFORM:** The `script` input for `TRANSFORM` MUST be a `string` that represents executable code (e.g., Python, JavaScript) and MUST be provided.",
     "inputDefinitions":[
         {
             "name": "script",

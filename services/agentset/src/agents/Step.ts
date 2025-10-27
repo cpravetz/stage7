@@ -286,7 +286,7 @@ export class Step {
                                 const transformed = MapSerializer.transformFromSerialization(persistedData) as PluginOutput[];
                                 if (Array.isArray(transformed) && transformed.length > 0) {
                                     sourceStep.result = transformed;
-                                    console.log(`[Step ${this.id}]   - Hydrated source step ${sourceStep.id} result from persistence. Keys:`, sourceStep.result.map(r => r.name));
+                                    //console.log(`[Step ${this.id}]   - Hydrated source step ${sourceStep.id} result from persistence. Keys:`, sourceStep.result.map(r => r.name));
                                 }
                             } catch (e) {
                                 console.warn(`[Step ${this.id}]   - Failed to transform persisted work product for step ${sourceStep.id}:`, e instanceof Error ? e.message : e);
@@ -298,15 +298,23 @@ export class Step {
             }
 
             if (sourceStep?.result) {
-                console.log(`[Step ${this.id}]   - Source step ${dep.sourceStepId} result:`, JSON.stringify(sourceStep.result, null, 2));
-                console.log(`[Step ${this.id}]   - Looking up dependency '${dep.inputName}' from source step ${dep.sourceStepId}. Source step result keys:`, sourceStep.result.map(r => r.name));
                 const output = sourceStep.result.find(r => r.name === dep.outputName);
 
                 if (output && output.result !== undefined && output.result !== null) {
-                    console.log(`[Step ${this.id}]   - Populating '${dep.inputName}' from dependency '${dep.sourceStepId}.${dep.outputName}' with value:`, output.result);
+                    let value = output.result;
+                    // If the expected type is an object but we got a string, try to parse it.
+                    if (output.resultType === PluginParameterType.OBJECT && typeof value === 'string') {
+                        try {
+                            value = JSON.parse(value);
+                        } catch (e) {
+                            console.warn(`[Step ${this.id}]   - Failed to parse string to object for dependency '${dep.sourceStepId}.${dep.outputName}'. Passing as string.`);
+                        }
+                    }
+                    
+                    console.log(`[Step ${this.id}]   - Populating '${dep.inputName}' from dependency '${dep.sourceStepId}.${dep.outputName}'.`);
                     inputRunValues.set(dep.inputName, {
                         inputName: dep.inputName,
-                        value: output.result,
+                        value: value,
                         valueType: output.resultType,
                         args: {}
                     });
@@ -314,7 +322,7 @@ export class Step {
                     console.log(`[Step ${this.id}]   - Dependency '${dep.sourceStepId}.${dep.outputName}' not satisfied. Named output not found.`);
                 }
             } else {
-                console.log(`[Step ${this.id}]   - Source step '${dep.sourceStepId}' not found or has no result. sourceStep:`, sourceStep);
+                console.log(`[Step ${this.id}]   - Source step '${dep.sourceStepId}' not found or has no result.`);
             }
         }
 
@@ -1719,11 +1727,11 @@ export function createFromPlan(
     const planTasks = plan as PlanTask[];
     const stepNumberToUUID: Record<number, string> = {};
 
+    // First pass: assign UUIDs to all tasks so we can resolve dependencies.
     planTasks.forEach((task, idx) => {
-        const uuid = uuidv4();
-        task.id = uuid;
+        task.id = uuidv4();
         const stepNum = task.number || idx + 1;
-        stepNumberToUUID[stepNum] = uuid;
+        stepNumberToUUID[stepNum] = task.id;
     });
 
     const newSteps = planTasks.map((task, idx) => {
@@ -1736,155 +1744,65 @@ export function createFromPlan(
             throw new Error('Cannot create step from plan without a missionId from parentStep or agentContext');
         }
 
-        let inputSource = (task as any).inputs || task.inputReferences;
+        const inputSource = (task as any).inputs || {};
 
-        // FIX: Check if inputSource is a serialized map and deserialize it before processing.
-        if (inputSource && inputSource._type === 'Map' && Array.isArray(inputSource.entries)) {
-            try {
-                inputSource = Object.fromEntries(inputSource.entries);
-            } catch (e) {
-                console.error(`[createFromPlan] Failed to deserialize nested input map for task \'${task.actionVerb}\'. Inputs may be incorrect.`, e);
-            }
-        }
+        for (const [inputName, inputDef] of Object.entries(inputSource as Record<string, any>)) {
+            if (typeof inputDef !== 'object' || inputDef === null) continue;
 
-        if (inputSource) {
-            for (const [inputName, inputDef] of Object.entries(inputSource as Record<string, any>)) {
-                if (typeof inputDef !== 'object' || inputDef === null) {
-                    console.warn(`[createFromPlan] Skipping invalid input definition for \'${inputName}\' in task \'${task.actionVerb}\'.`);
-                    continue;
-                }
+            // Always create the reference for logging/debugging purposes
+            inputReferences.set(inputName, {
+                inputName,
+                value: inputDef.value,
+                outputName: inputDef.outputName,
+                valueType: inputDef.valueType,
+                args: inputDef.args,
+            });
 
-                const hasValue = inputDef.value !== undefined && inputDef.value !== null;
-                const hasOutputName = inputDef.outputName !== undefined && inputDef.outputName !== null && inputDef.outputName !== '';
-                const hasSourceStep = inputDef.sourceStep !== undefined && inputDef.sourceStep !== null;
-
-                if (inputName === 'missionId') {
-                    inputValues.set(inputName, {
-                        inputName: inputName,
-                        value: missionId,
-                        valueType: PluginParameterType.STRING,
-                        args: {},
+            const isDependency = inputDef.sourceStep !== undefined && inputDef.outputName;
+            if (isDependency) {
+                const sourceStepId = stepNumberToUUID[inputDef.sourceStep];
+                if (sourceStepId) {
+                    dependencies.push({
+                        outputName: inputDef.outputName,
+                        sourceStepId,
+                        inputName,
                     });
-                } else if (hasValue) {
-                    let value = inputDef.value;
-                    if (typeof value === 'object' && value !== null) {
-                        value = JSON.stringify(value);
-                    }
-                    inputValues.set(inputName, {
-                        inputName: inputName,
-                        value: value,
-                        valueType: inputDef.valueType,
-                        args: inputDef.args,
-                    });
-                } else if (hasOutputName && hasSourceStep) {
-                    console.log(`[createFromPlan] 🔗 Creating dependency: ${inputName} <- step ${inputDef.sourceStep}.${inputDef.outputName} for task \'${task.actionVerb}\'`);
-
-                    if (inputDef.sourceStep === 0) {
-                        let resolvedValue: any;
-                        let resolvedValueType: PluginParameterType = inputDef.valueType;
-
-                        if (parentStep && parentStep.inputValues.has(inputDef.outputName)) {
-                            const parentInputValue = parentStep.inputValues.get(inputDef.outputName);
-                            resolvedValue = parentInputValue?.value;
-                            resolvedValueType = parentInputValue?.valueType || inputDef.valueType;
-                        }
-                        else if (agentContext && agentContext[inputDef.outputName]) {
-                            resolvedValue = agentContext[inputDef.outputName];
-                        }
-
-                        if (resolvedValue !== undefined) {
-                            inputValues.set(inputName, {
-                                inputName: inputName,
-                                value: resolvedValue,
-                                valueType: resolvedValueType,
-                                args: {}
-                            });
-                        } else {
-                            if (parentStep) {
-                                dependencies.push({
-                                    outputName: inputDef.outputName,
-                                    sourceStepId: parentStep.id,
-                                    inputName: inputName
-                                });
-                                console.log(`[createFromPlan] ✅ Added dependency to parent step: ${inputName} <- ${parentStep.id}.${inputDef.outputName}`);
-                            } else {
-                                console.error(`[createFromPlan] 🚨 Unresolved sourceStep 0: Input \'${inputDef.outputName}\' not found for step \'${task.actionVerb}\'.`);
-                            }
-                        }
-                    } else {
-                        const sourceStepId = stepNumberToUUID[inputDef.sourceStep];
-                        if (sourceStepId) {
-                            dependencies.push({
-                                outputName: inputDef.outputName,
-                                sourceStepId,
-                                inputName: inputName
-                            });
-                            console.log(`[createFromPlan] ✅ Added dependency: ${inputName} <- ${sourceStepId}.${inputDef.outputName} (step ${inputDef.sourceStep})`);
-                        } else {
-                            console.error(`[createFromPlan] 🚨 Unresolved sourceStep ${inputDef.sourceStep} for input \'${inputName}\' in step \'${task.actionVerb}\'`);
-                            console.error(`[createFromPlan] Available step numbers:`, Object.keys(stepNumberToUUID));
-                        }
-                    }
                 } else {
-                    console.error(`[createFromPlan] 🚨 MALFORMED INPUT DETECTED: \'${inputName}\' in step \'${task.actionVerb}\' (step ${idx + 1})`);
-                    console.error(`[createFromPlan] Input definition:`, JSON.stringify(inputDef, null, 2));
+                    console.error(`[createFromPlan] 🚨 Unresolved sourceStep ${inputDef.sourceStep} for input '${inputName}' in step '${task.actionVerb}'`);
                 }
-
-                const reference: InputReference = {
-                    inputName: inputName,
+            } else if (inputDef.value !== undefined) {
+                inputValues.set(inputName, {
+                    inputName,
                     value: inputDef.value,
-                    outputName: inputDef.outputName,
                     valueType: inputDef.valueType,
                     args: inputDef.args,
-                };
-                inputReferences.set(inputName, reference);
+                });
             }
         }
 
-        if (parentStep) {
-            const subPlanInputNames = new Set(dependencies.map(d => d.inputName));
-            parentStep.dependencies.forEach(parentDep => {
-                if (!subPlanInputNames.has(parentDep.inputName)) {
-                    dependencies.push(parentDep);
-                }
-            });
-        }
-
-        if (task.actionVerb === 'EXECUTE') {
-            task.actionVerb = 'ACCOMPLISH';
-        }
-        if (task.actionVerb === 'LLM') {
-            task.actionVerb = 'THINK';
-        }
-
-        if (!task.actionVerb) {
-        console.log('Step Line 1018 - Missing required property "actionVerb" in task', task);
-        throw new Error(`Missing required property \'actionVerb\' in agent config`);
-    }
-
-        let normalizedOutputs = Step.normalizeOutputs((task as any).outputs);
+        const normalizedOutputs = Step.normalizeOutputs((task as any).outputs);
         
         const step = new Step({
             id: task.id!,
-            missionId: missionId,
-            ownerAgentId: parentStep?.ownerAgentId ||'',
+            missionId,
+            ownerAgentId: parentStep?.ownerAgentId || '',
             actionVerb: task.actionVerb,
-            stepNo: task.number || (startingStepNo + idx), // Use number from plan if available
+            stepNo: task.number || (startingStepNo + idx),
             description: task.description,
-            dependencies: dependencies,
-            inputReferences: inputReferences,
-            inputValues: inputValues,
-            outputs: normalizedOutputs || (task.outputs ? new Map(Object.entries(task.outputs)) : undefined),
-            originalOutputDefinitions: normalizedOutputs as Map<string, any> | undefined,
+            dependencies,
+            inputReferences,
+            inputValues,
+            outputs: normalizedOutputs,
+            originalOutputDefinitions: normalizedOutputs,
             recommendedRole: task.recommendedRole,
-            persistenceManager: persistenceManager
+            persistenceManager,
         });
-
         console.log(`[createFromPlan] 📊 Created step ${step.stepNo} (${task.actionVerb}) with ${dependencies.length} dependencies:`,
             dependencies.map(d => `${d.inputName} <- ${d.sourceStepId}.${d.outputName}`));
         return step;
     });
 
+    // Post-creation dependency wiring (for placeholders, REFLECT, etc.)
     if (parentStep && newSteps.length > 0) {
         parentStep.outputs.forEach((outputType, outputName) => {
             const producingStep = [...newSteps].reverse().find(s => s.outputs.has(outputName));
@@ -1948,14 +1866,13 @@ export function createFromPlan(
                 while ((match = placeholderRegex.exec(inputRef.value)) !== null) {
                     const placeholderName = match[1].trim();
                     
-                    // Find the step that produces this output
                     const producingStep = newSteps.find(s => s.id !== step.id && s.outputs.has(placeholderName));
 
                     if (producingStep) {
                         const dependencyExists = step.dependencies.some(d => d.sourceStepId === producingStep.id && d.outputName === placeholderName);
                         if (!dependencyExists) {
                             step.dependencies.push({
-                                inputName: inputName, // The input that uses the placeholder
+                                inputName: inputName,
                                 sourceStepId: producingStep.id,
                                 outputName: placeholderName
                             });

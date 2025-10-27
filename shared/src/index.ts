@@ -1,3 +1,4 @@
+export * from './types/PluginStatus';
 export * from './BaseEntity';
 //export * from './SecurityMiddleware';
 export * from './interfaces/IBaseEntity';
@@ -24,6 +25,7 @@ export * from './messaging/queueClient';
 export * from './utils/asyncLLM';
 export * from './discovery/serviceDiscovery';
 export * from './config/configClient';
+export * from './models/ToolModels';
 export * from './versioning/semver';
 export * from './versioning/compatibilityChecker';
 export * from './security/pluginPermissions';

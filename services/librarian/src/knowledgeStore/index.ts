@@ -1,41 +1,73 @@
-
 import { ChromaClient, Collection, Metadata, IEmbeddingFunction } from 'chromadb';
 
-// Simple embedding function placeholder for now.
-// In a real implementation, this would use a proper model like sentence-transformers.
-class SimpleEmbeddingFunction implements IEmbeddingFunction {
+// Use dynamic import for @xenova/transformers
+let Transformers: any;
+let pipeline: any;
+
+class TransformerEmbeddingFunction implements IEmbeddingFunction {
+    private pipe: any;
+
+    private constructor(pipe: any) {
+        this.pipe = pipe;
+    }
+
+    public static async create() {
+        if (!Transformers) {
+            Transformers = await import('@xenova/transformers');
+
+        }
+        // Use a pre-downloaded and locally available model
+        // This model should be part of the service's deployment package.
+        const pipe = await Transformers.pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
+        return new TransformerEmbeddingFunction(pipe);
+    }
+
     public async generate(texts: string[]): Promise<number[][]> {
-        // This is a very naive embedding function for demonstration purposes.
-        // It creates a sparse vector where the value at the index of the first letter's
-        // position in the alphabet is 1.
-        return texts.map(text => {
-            const embedding = new Array(26).fill(0);
-            if (text && text.length > 0) {
-                const charCode = text.toLowerCase().charCodeAt(0) - 'a'.charCodeAt(0);
-                if (charCode >= 0 && charCode < 26) {
-                    embedding[charCode] = 1;
-                }
-            }
-            return embedding;
-        });
+        const output = await this.pipe(texts, { pooling: 'mean', normalize: true });
+        return output.tolist();
     }
 }
 
 class KnowledgeStore {
     private client: ChromaClient;
-    private embeddingFunction: IEmbeddingFunction;
+    private embeddingFunction: IEmbeddingFunction | null = null;
+    private initializationPromise: Promise<void> | null = null;
 
     constructor() {
-        this.client = new ChromaClient({ path: 'http://chromadb:8000' });
-        this.embeddingFunction = new SimpleEmbeddingFunction();
-        console.log('KnowledgeStore initialized, connecting to ChromaDB at http://chromadb:8000');
+        this.client = new ChromaClient({ path: process.env.CHROMADB_PATH || 'http://chromadb:8000' });
+        console.log(`KnowledgeStore initialized, connecting to ChromaDB at ${process.env.CHROMADB_PATH || 'http://chromadb:8000'}`);
+        this.initializationPromise = this.initializeEmbeddingFunction();
+    }
+
+    private async initializeEmbeddingFunction(): Promise<void> {
+        try {
+            this.embeddingFunction = await TransformerEmbeddingFunction.create();
+            console.log('Transformer embedding function initialized successfully.');
+        } catch (error) {
+            console.error('Failed to initialize transformer embedding function:', error);
+            // In a production environment, you might want to handle this more gracefully,
+            // perhaps by falling back to a simpler function or preventing the service from starting.
+            throw new Error('Could not initialize embedding function.');
+        }
+    }
+
+    private async getEmbeddingFunction(): Promise<IEmbeddingFunction> {
+        if (!this.initializationPromise) {
+            throw new Error("KnowledgeStore embedding function not initialized.");
+        }
+        await this.initializationPromise;
+        if (!this.embeddingFunction) {
+            throw new Error("Embedding function is null after initialization.");
+        }
+        return this.embeddingFunction;
     }
 
     private async getOrCreateCollection(name: string): Promise<Collection> {
+        const embeddingFunction = await this.getEmbeddingFunction();
         try {
             const collection = await this.client.getCollection({
                 name,
-                embeddingFunction: this.embeddingFunction,
+                embeddingFunction,
             });
             console.log(`Found existing collection: ${name}`);
             return collection;
@@ -44,10 +76,23 @@ class KnowledgeStore {
             try {
                 const collection = await this.client.createCollection({
                     name,
-                    embeddingFunction: this.embeddingFunction,
+                    embeddingFunction,
                 });
                 return collection;
             } catch (createError) {
+                if (createError instanceof Error && createError.message.includes('already exists')) {
+                    console.log(`Collection ${name} was created by another process, getting it now.`);
+                    try {
+                        const collection = await this.client.getCollection({
+                            name,
+                            embeddingFunction,
+                        });
+                        return collection;
+                    } catch (getError) {
+                        console.error(`Failed to get collection ${name} after creation race condition:`, getError);
+                        throw new Error(`ChromaDB connection failed after race condition: ${getError instanceof Error ? getError.message : 'Unknown error'}`);
+                    }
+                }
                 console.error(`Failed to create collection ${name}:`, createError);
                 throw new Error(`ChromaDB connection failed: ${createError instanceof Error ? createError.message : 'Unknown error'}`);
             }
@@ -57,12 +102,23 @@ class KnowledgeStore {
     public async save(collectionName: string, content: string, metadata: Metadata = {}): Promise<void> {
         try {
             const collection = await this.getOrCreateCollection(collectionName);
-            const id = new Date().toISOString(); // Simple unique ID for the document
+            // Use a more robust unique ID, like a hash of the content or a UUID
+            const id = metadata.id as string || new Date().toISOString();
 
-            await collection.add({
+            // Sanitize metadata for ChromaDB
+            const sanitizedMetadata: Metadata = {};
+            for (const key in metadata) {
+                if (typeof metadata[key] === 'object' && metadata[key] !== null) {
+                    sanitizedMetadata[key] = JSON.stringify(metadata[key]);
+                } else {
+                    sanitizedMetadata[key] = metadata[key];
+                }
+            }
+
+            await collection.upsert({
                 ids: [id],
                 documents: [content],
-                metadatas: [metadata],
+                metadatas: [sanitizedMetadata],
             });
 
             console.log(`Saved content to collection ${collectionName} with id ${id}`);
@@ -83,10 +139,11 @@ class KnowledgeStore {
 
             if (!results.distances) {
                 console.warn('Warning: results.distances is null or undefined.');
+                return [];
             }
 
             console.log(`Queried collection ${collectionName} with "${queryText}", found ${results.ids[0].length} results.`);
-            // Restructure the results to be more intuitive
+            
             const formattedResults = results.ids[0].map((id, index) => ({
                 id,
                 document: results.documents[0][index],

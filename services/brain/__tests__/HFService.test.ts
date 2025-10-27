@@ -6,7 +6,7 @@ describe('HFService', () => {
     const service = new HFService();
 
     expect(service.serviceName).toBe('HFService');
-    expect(service.baseUrl).toBe('https://api-inference.huggingface.co/models');
+    expect(service.baseUrl).toBe('https://router.huggingface.co/hf-inference/models');
     expect(service.interfaces).toEqual(['huggingface']);
   });
 });

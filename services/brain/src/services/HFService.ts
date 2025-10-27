@@ -4,7 +4,7 @@ export class HFService extends BaseService {
     constructor() {
         // Use the API key from environment variables or a default key for testing
         const apiKey = process.env.HUGGINGFACE_API_KEY || process.env.HF_API_KEY || '';
-        super('HFService', apiKey, process.env.HUGGINGFACE_API_URL || 'https://api-inference.huggingface.co/models', ['huggingface']);
+        super('HFService', apiKey, process.env.HUGGINGFACE_API_URL || 'https://router.huggingface.co/hf-inference/models', ['huggingface']);
         console.log(`Huggingface Service created with API key: ${apiKey ? 'Set (length: ' + apiKey.length + ')' : 'Not set'}`);
     }
 

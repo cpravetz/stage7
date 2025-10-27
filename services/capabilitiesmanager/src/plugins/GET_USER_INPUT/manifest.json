@@ -3,7 +3,7 @@
   "verb": "ASK_USER_QUESTION",
   "description": "Use this to get subjective input, opinions, or approvals from the user. Do not use ask the user to perform tasks or provide information that could be found elsewhere. For example, use it to ask 'Which of these three logos do you prefer?', not to ask 'What is the capital of France?'.",
   "explanation": "This plugin sends a question to the user and returns their response. It is not intended to be used to offload work to the user.  If should be used for user optinions, decisions or approvals",
-  "inputGuidance": "Inputs for this plugin must include 'question'.",
+  "inputGuidance": "Inputs for this plugin must include 'question'.  Do not ask a question you can answer yourself or via another means.",
   "inputDefinitions": [
     {
       "name": "question",

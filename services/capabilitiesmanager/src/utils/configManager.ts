@@ -80,14 +80,34 @@ export class ConfigManager {
 
 
  private async loadConfig() {
-        try {
-            const response = await this.authenticatedApi.get(`http://${this.librarianUrl}/loadData/${this.configId}`, {
-                params: {
-                    storageType: 'mongo',
-                    collection: 'configurations'
+        const MAX_AUTH_RETRIES = 5;
+        let response: any; // Declare response outside the loop
+        for (let i = 0; i < MAX_AUTH_RETRIES; i++) {
+            try {
+                response = await this.authenticatedApi.get(`${this.librarianUrl}/loadData/${this.configId}`, {
+                    params: {
+                        storageType: 'mongo',
+                        collection: 'configurations'
+                    }
+                });
+                // If successful, break the retry loop
+                break;
+            } catch (error: any) {
+                if (axios.isAxiosError(error) && error.response?.status === 429) {
+                    console.warn(`ConfigManager: Authentication failed (429 Too Many Requests) on attempt ${i + 1}/${MAX_AUTH_RETRIES}. Retrying...`);
+                    await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1))); // Exponential backoff
+                } else {
+                    // Re-throw for other errors
+                    throw error;
                 }
-            });
+            }
+        }
+        // If response is still undefined after retries, it means all retries failed
+        if (!response) {
+            throw new Error(`ConfigManager: Failed to load config after ${MAX_AUTH_RETRIES} retries due to persistent authentication issues.`);
+        }
 
+        try {
             const responseData = response.data?.data; // Optional chaining for safety
 
             // Handle environment
@@ -158,17 +178,29 @@ export class ConfigManager {
     }
 
     private async saveConfig() {
-        try {
-            await this.authenticatedApi.post(`http://${this.librarianUrl}/storeData`, {
-                id: this.configId,
-                data: this.config,
-                storageType: 'mongo',
-                collection: 'configurations'
-            });
-        } catch (error) {
-            analyzeError(error as Error);
-            console.error('Error saving config to Librarian:', error instanceof Error ? error.message : error);
+        const MAX_AUTH_RETRIES = 5;
+        for (let i = 0; i < MAX_AUTH_RETRIES; i++) {
+            try {
+                await this.authenticatedApi.post(`${this.librarianUrl}/storeData`, {
+                    id: this.configId,
+                    data: this.config,
+                    storageType: 'mongo',
+                    collection: 'configurations'
+                });
+                // If successful, break the retry loop
+                return;
+            } catch (error: any) {
+                if (axios.isAxiosError(error) && error.response?.status === 429) {
+                    console.warn(`ConfigManager: Authentication failed (429 Too Many Requests) on attempt ${i + 1}/${MAX_AUTH_RETRIES}. Retrying...`);
+                    await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1))); // Exponential backoff
+                } else {
+                    // Re-throw for other errors
+                    throw error;
+                }
+            }
         }
+        // If all retries fail, log an error but don't re-throw to avoid crashing the ConfigManager
+        console.error(`ConfigManager: Failed to save config after ${MAX_AUTH_RETRIES} retries due to persistent authentication issues.`);
     }
 
     async setEnvironmentVariable(key: string, value: string) {

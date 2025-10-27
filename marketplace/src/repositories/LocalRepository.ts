@@ -130,79 +130,65 @@ export class LocalRepository implements PluginRepository {
             console.log('LocalRepository.fetchByVerb: Verb must be provided.');
             return undefined;
         }
-        // Check cache first
+
+        // 1. Check manifestPathCache directly for the verb
         if (this.manifestPathCache.has(verb)) {
             const cachedPath = this.manifestPathCache.get(verb)!;
             try {
                 const manifestContent = await fs.readFile(cachedPath, 'utf-8');
                 const manifest = JSON.parse(manifestContent) as PluginManifest;
-                if (manifest.verb === verb) {
+                if (manifest.verb === verb && (!version || manifest.version === version)) {
                     console.log(`LocalRepository.fetchByVerb: Cache hit for verb '${verb}' at ${cachedPath}`);
                     return manifest;
                 }
             } catch (e) {
-                console.warn(`LocalRepository.fetchByVerb: Cache path for verb '${verb}' is invalid, will fall back.`, e);
+                console.warn(`LocalRepository.fetchByVerb: Cache path for verb '${verb}' is invalid or manifest read failed, will re-index.`, e);
                 this.manifestPathCache.delete(verb);
-                // Also invalidate the plugin list cache since there might be stale data
+                // Invalidate plugin list cache to force a re-scan and re-population of manifestPathCache
                 this.invalidateCache();
             }
         }
+
+        // 2. If not in manifestPathCache or cache entry was invalid, ensure pluginListCache is loaded
+        //    and then try to find the plugin there. This will also re-populate manifestPathCache.
         try {
-            let manifestPath: string;
-            const pluginDir = path.join(this.baseDir, verb);
-            if (version) {
-                manifestPath = path.join(pluginDir, version, 'manifest.json');
-            } else {
-                manifestPath = path.join(pluginDir, 'manifest.json');
+            const pluginList = await this.list(); // This will load/refresh cache if needed
+            const targetPlugin = pluginList.find(plugin => plugin.verb === verb && (!version || plugin.version === version));
+
+            if (targetPlugin) {
+                // If found in the list, fetch the full manifest using its ID
+                // This will use the manifestPathCache if already populated by list()
+                return await this.fetch(targetPlugin.id, version);
             }
-            try {
-                const manifestContent = await fs.readFile(manifestPath, 'utf-8');
-                const manifest = JSON.parse(manifestContent) as PluginManifest;
-                if (manifest.verb !== verb) {
-                    console.warn(`LocalRepository.fetchByVerb: Manifest verb '${manifest.verb}' does not match directory verb '${verb}'.`);
-                }
-                // Cache for future
-                if (manifest.id) this.manifestPathCache.set(manifest.id, manifestPath);
-                if (manifest.verb) this.manifestPathCache.set(manifest.verb, manifestPath);
-                return manifest;
-            } catch (e) {
-                // Fallback: use cached plugin list instead of scanning directories
-                if (!version) {
-                    console.warn(`LocalRepository.fetchByVerb: Manifest not found at direct path for verb '${verb}'. Using cached plugin list for search.`);
-                    try {
-                        const pluginList = await this.list(); // This uses cache if available
-                        const targetPlugin = pluginList.find(plugin => plugin.verb === verb);
-                        if (targetPlugin) {
-                            // Try to fetch by ID instead
-                            return await this.fetch(targetPlugin.id);
-                        }
-                    } catch (listError) {
-                        console.warn(`LocalRepository.fetchByVerb: Failed to use cached plugin list, falling back to directory scan:`, listError);
-                        // Final fallback: directory scan
-                        const dirs = await fs.readdir(this.baseDir);
-                        for (const dir of dirs) {
-                            const currentPath = path.join(this.baseDir, dir, 'manifest.json');
-                            try {
-                                const manifestData = JSON.parse(await fs.readFile(currentPath, 'utf-8')) as PluginManifest;
-                                if (manifestData.verb === verb) {
-                                    // Cache for future
-                                    if (manifestData.id) this.manifestPathCache.set(manifestData.id, currentPath);
-                                    if (manifestData.verb) this.manifestPathCache.set(manifestData.verb, currentPath);
-                                    return manifestData;
-                                }
-                            } catch { continue; }
-                        }
+        } catch (listError) {
+            console.error(`LocalRepository.fetchByVerb: Error while trying to use plugin list cache for verb '${verb}':`, listError);
+            // Fall through to direct file system scan as a last resort if list() itself failed
+        }
+
+        // 3. Fallback: Direct file system scan (should be rare after above changes)
+        //    This part is largely redundant if list() correctly populates manifestPathCache
+        //    and fetch() uses it. But keeping it as a final safeguard.
+        try {
+            const dirs = await fs.readdir(this.baseDir);
+            for (const dir of dirs) {
+                const manifestPath = path.join(this.baseDir, dir, 'manifest.json');
+                try {
+                    const manifestData = JSON.parse(await fs.readFile(manifestPath, 'utf-8')) as PluginManifest;
+                    if (manifestData.verb === verb && (!version || manifestData.version === version)) {
+                        // Cache for future
+                        if (manifestData.id) this.manifestPathCache.set(manifestData.id, manifestPath);
+                        if (manifestData.verb) this.manifestPathCache.set(manifestData.verb, manifestPath);
+                        return manifestData;
                     }
-                }
-                return undefined;
+                } catch { continue; }
             }
         } catch (error) {
-            if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-                return undefined;
+            if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+                console.error(`LocalRepository.fetchByVerb: Error during final file system scan for verb '${verb}':`, error);
             }
-            console.error(`LocalRepository.fetchByVerb: Error fetching plugin verb '${verb}'${version ? ` version '${version}'` : ''}:`, error);
-            throw error;
         }
+
+        return undefined;
     }
 
     async delete(id: string): Promise<void> {

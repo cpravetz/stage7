@@ -1,4 +1,4 @@
-import { PluginDefinition, PluginParameterType, PluginManifest, PluginRepositoryType, PluginLocator, compareVersions } from '@cktmcs/shared'; // Added compareVersions
+import { PluginDefinition, PluginParameterType, PluginManifest, PluginRepositoryType, PluginLocator, compareVersions, PluginStatus } from '@cktmcs/shared'; // Added compareVersions, PluginStatus
 import path from 'path';
 import os from 'os';
 import { promisify } from 'util';
@@ -7,6 +7,7 @@ import fs from 'fs/promises';
 import * as fsSync from 'fs';
 import { PluginMarketplace } from '@cktmcs/marketplace';
 import { ensurePythonDependencies } from './pythonPluginHelper';
+import axios, { AxiosInstance } from 'axios';
 
 const execAsync = promisify(exec);
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -19,6 +20,7 @@ const INTERNAL_VERBS: PluginManifest[] = [
         version: '1.0.0',
         description: 'Allows the agent to perform internal reasoning and analysis based on a given prompt.',
         language: 'internal',
+        inputGuidance: "If the output of this step is meant to be used by another step that expects a specific format (e.g., JSON), you can add a request to the prompt to format the output accordingly.",
         inputDefinitions: [
             {
                 name: 'prompt',
@@ -46,6 +48,7 @@ const INTERNAL_VERBS: PluginManifest[] = [
                 signature: 'internal',
             },
         },
+        metadata: { status: PluginStatus.RUNNING } // Internal plugins are always running
     },
     {
         id: 'internal-GENERATE',
@@ -82,6 +85,7 @@ const INTERNAL_VERBS: PluginManifest[] = [
                 signature: 'internal',
             },
         },
+        metadata: { status: PluginStatus.RUNNING } // Internal plugins are always running
     },
     {
         id: 'internal-IF_THEN',
@@ -113,6 +117,7 @@ const INTERNAL_VERBS: PluginManifest[] = [
                 signature: 'internal',
             },
         },
+        metadata: { status: PluginStatus.RUNNING } // Internal plugins are always running
     },
     {
         id: 'internal-WHILE',
@@ -143,6 +148,7 @@ const INTERNAL_VERBS: PluginManifest[] = [
                 signature: 'internal',
             },
         },
+        metadata: { status: PluginStatus.RUNNING } // Internal plugins are always running
     },
     {
         id: 'internal-UNTIL',
@@ -173,6 +179,7 @@ const INTERNAL_VERBS: PluginManifest[] = [
                 signature: 'internal',
             },
         },
+        metadata: { status: PluginStatus.RUNNING } // Internal plugins are always running
     },
     {
         id: 'internal-SEQUENCE',
@@ -202,6 +209,7 @@ const INTERNAL_VERBS: PluginManifest[] = [
                 signature: 'internal',
             },
         },
+        metadata: { status: PluginStatus.RUNNING } // Internal plugins are always running
     },
     {
         id: 'internal-TIMEOUT',
@@ -232,6 +240,7 @@ const INTERNAL_VERBS: PluginManifest[] = [
                 signature: 'internal',
             },
         },
+        metadata: { status: PluginStatus.RUNNING } // Internal plugins are always running
     },
     {
         id: 'internal-REPEAT',
@@ -262,6 +271,7 @@ const INTERNAL_VERBS: PluginManifest[] = [
                 signature: 'internal',
             },
         },
+        metadata: { status: PluginStatus.RUNNING } // Internal plugins are always running
     },
     {
         id: 'internal-FOREACH',
@@ -302,6 +312,7 @@ const INTERNAL_VERBS: PluginManifest[] = [
                 signature: 'internal',
             },
         },
+        metadata: { status: PluginStatus.RUNNING } // Internal plugins are always running
     },
     {
         id: 'internal-CHAT',
@@ -337,6 +348,7 @@ const INTERNAL_VERBS: PluginManifest[] = [
                 signature: 'internal',
             },
         },
+        metadata: { status: PluginStatus.RUNNING } // Internal plugins are always running
     },
 ];
 
@@ -346,6 +358,7 @@ export class PluginRegistry {
     private verbIndex: Map<string, string>;  // verb -> id mapping
     private pluginMarketplace: PluginMarketplace;
     public currentDir: string; // Base directory for inline plugins, e.g., services/capabilitiesmanager/src
+    private librarianApi: AxiosInstance;
 
     /**
      * Get the plugin marketplace instance
@@ -370,7 +383,7 @@ export class PluginRegistry {
         });
     }
 
-    constructor() {
+    constructor(authenticatedAxios?: AxiosInstance) {
         this.cache = new Map();
         this.verbIndex = new Map();
         this.pluginMarketplace = new PluginMarketplace();
@@ -382,6 +395,14 @@ export class PluginRegistry {
             throw new Error('PluginRegistry: pluginMarketplace is not initialized or invalid.');
         }
 
+        if (authenticatedAxios) {
+            this.librarianApi = authenticatedAxios;
+        } else {
+            const librarianUrl = process.env.LIBRARIAN_URL || 'librarian:5040';
+            this.librarianApi = axios.create({
+                baseURL: librarianUrl.startsWith('http') ? librarianUrl : `http://${librarianUrl}`,
+            });
+        }
     }
 
     private async _prepareGitPlugin(manifest: PluginManifest, targetDir: string): Promise<void> {
@@ -413,6 +434,11 @@ export class PluginRegistry {
     }
 
     public async preparePluginForExecution(manifest: PluginManifest): Promise<{ pluginRootPath: string; effectiveManifest: PluginManifest }> {
+        if (manifest.repository.type === 'github' && manifest.packageSource?.type !== 'git') {
+            // This is a GitHub plugin that is not a git repository, so there's nothing to prepare locally.
+            return { pluginRootPath: '', effectiveManifest: manifest };
+        }
+
         if (manifest.packageSource && manifest.packageSource.type === 'git') {
             const cacheDirBase = path.join(os.homedir(), '.cktmcs', 'plugin_cache', manifest.id);
             // Use commitHash for definitive versioning, fallback to branch, then 'latest_main'
@@ -527,12 +553,24 @@ export class PluginRegistry {
         }
     }
 
+    private async indexPlugin(manifest: PluginManifest): Promise<void> {
+        try {
+            // Do not await this, let it run in the background
+            console.log(`[PluginRegistry] Attempting to index plugin ${manifest.verb} with Librarian at ${this.librarianApi.defaults.baseURL}/tools/index`);
+            this.librarianApi.post('/tools/index', { manifest });
+            console.log(`Initiated indexing for plugin ${manifest.verb} with Librarian.`);
+        } catch (error: any) {
+            console.error(`Failed to initiate indexing for plugin ${manifest.verb}:`, error.isAxiosError ? error.response?.data : error.message);
+        }
+    }
+
     private _registerInternalVerbs(): void {
         for (const manifest of INTERNAL_VERBS) {
             this.cache.set(manifest.id, 'internal' as PluginRepositoryType);
             this.verbIndex.set(manifest.verb, manifest.id);
+            this.indexPlugin(manifest); // Index internal verbs
         }
-        console.log(`Registered ${INTERNAL_VERBS.length} internal verbs.`);
+        console.log(`Registered and initiated indexing for ${INTERNAL_VERBS.length} internal verbs.`);
     }
 
     public async initialize(): Promise<void> {
@@ -695,9 +733,63 @@ export class PluginRegistry {
 
     public async store(plugin: PluginManifest): Promise<void> {
         try {
-            await this.pluginMarketplace.store(plugin);
+            // Ensure metadata exists and set status if not already set
+            const pluginToStore = { ...plugin };
+            if (!pluginToStore.metadata) {
+                pluginToStore.metadata = {};
+            }
+            if (!pluginToStore.metadata.status) {
+                pluginToStore.metadata.status = PluginStatus.SOURCE_AVAILABLE;
+            }
+
+            await this.pluginMarketplace.store(pluginToStore);
+            // After storing, update internal cache and re-index
+            this.cache.set(pluginToStore.id, pluginToStore.repository.type);
+            this.verbIndex.set(pluginToStore.verb, pluginToStore.id);
+            this.indexPlugin(pluginToStore);
         } catch (err) {
             console.warn(`pluginRegistry: store failed for plugin id=${plugin.id}:`, err);
+            throw err; // Re-throw to indicate failure
+        }
+    }
+
+    public async updatePlugin(plugin: PluginManifest): Promise<void> {
+        try {
+            // Use the existing store method to update the plugin in the marketplace
+            await this.pluginMarketplace.store(plugin);
+            // Update internal cache and re-index with the new manifest
+            this.cache.set(plugin.id, plugin.repository.type);
+            this.verbIndex.set(plugin.verb, plugin.id);
+            this.indexPlugin(plugin);
+            console.log(`Plugin ${plugin.id} updated and re-indexed.`);
+        } catch (err) {
+            console.warn(`pluginRegistry: updatePlugin failed for plugin id=${plugin.id}:`, err);
+            throw err; // Re-throw to indicate failure
+        }
+    }
+
+    public async updatePluginStatus(pluginId: string, newStatus: PluginStatus): Promise<void> {
+        try {
+            const plugin = await this.fetchOne(pluginId);
+            if (!plugin) {
+                console.warn(`PluginRegistry: Cannot update status for non-existent plugin ${pluginId}.`);
+                return;
+            }
+
+            // Only update if status is actually changing
+            if (plugin.metadata?.status === newStatus) {
+                console.log(`PluginRegistry: Plugin ${pluginId} already has status ${newStatus}. No update needed.`);
+                return;
+            }
+
+            const updatedPlugin = { ...plugin, metadata: { ...plugin.metadata, status: newStatus } };
+            await this.pluginMarketplace.store(updatedPlugin);
+            console.log(`PluginRegistry: Updated status for plugin ${pluginId} to ${newStatus}.`);
+            // Re-index the plugin with the new status
+            this.indexPlugin(updatedPlugin);
+        } catch (error) {
+            console.error(`PluginRegistry: Failed to update status for plugin ${pluginId} to ${newStatus}:`, error);
+            throw error;
         }
     }
 
@@ -740,43 +832,44 @@ export class PluginRegistry {
             const repositories = this.pluginMarketplace.getRepositories();
             for (const [repoType, repository] of repositories.entries()) {
                 try {
-                    console.log(`Loading plugins from ${repoType} repository...`);
-                    const plugins = await repository.list(); // Lists PluginLocators
-                    if (!Array.isArray(plugins)) {
-                        console.error(`Failed to list plugins from ${repoType} repository: plugins is not iterable`);
+                    console.log(`Loading and indexing plugins from ${repoType} repository...`);
+                    const locators = await repository.list(); // Lists PluginLocators
+                    if (!Array.isArray(locators)) {
+                        console.error(`Failed to list plugins from ${repoType} repository: locators is not iterable`);
                         continue; // Skip this repository
                     }
-                    if (repoType === 'git' || repoType === 'github') {
-                        // For Git and GitHub, only store locators, not full manifests
-                        for (const locator of plugins) {
-                            this.cache.set(locator.id, repoType as PluginRepositoryType);
-                            this.verbIndex.set(locator.verb, locator.id);
-                        }
-                        console.log(`Loaded ${plugins.length} plugin locators from ${repoType} repository`);
-                    } else {
-                        // For other types (local, mongo, librarian-definition), load full manifests
-                        for (const locator of plugins) {
-                            try {
-                                const manifest = await repository.fetch(locator.id);
-                                if (manifest) {
-                                    this.cache.set(manifest.id, repoType as PluginRepositoryType);
-                                    this.verbIndex.set(manifest.verb, manifest.id);
+
+                    for (const locator of locators) {
+                        try {
+                            const manifest = await repository.fetch(locator.id);
+                            if (manifest) {
+                                // Set initial status for newly discovered plugins
+                                if (!manifest.metadata) {
+                                    manifest.metadata = {};
                                 }
-                            } catch (pluginError) {
-                                if (pluginError instanceof Error) {
-                                    console.error(`Failed to fetch manifest for plugin ${locator.id} from ${repoType} repository during cache refresh: ${pluginError.message}`, pluginError);
-                                } else {
-                                    console.error(`Failed to fetch manifest for plugin ${locator.id} from ${repoType} repository during cache refresh:`, pluginError);
+                                if (!manifest.metadata.status) {
+                                    manifest.metadata.status = PluginStatus.SOURCE_AVAILABLE;
                                 }
+                                this.cache.set(manifest.id, repoType as PluginRepositoryType);
+                                this.verbIndex.set(manifest.verb, manifest.id);
+                                this.indexPlugin(manifest); // Index every plugin
+                            } else {
+                                console.warn(`Could not fetch manifest for locator ${locator.id} from ${repoType}`);
+                            }
+                        } catch (pluginError) {
+                            if (pluginError instanceof Error) {
+                                console.error(`Failed to fetch or index manifest for plugin ${locator.id} from ${repoType}: ${pluginError.message}`, pluginError);
+                            } else {
+                                console.error(`Failed to fetch or index manifest for plugin ${locator.id} from ${repoType}:`, pluginError);
                             }
                         }
-                        console.log(`Loaded ${plugins.length} plugins from ${repoType} repository`);
                     }
+                    console.log(`Loaded and initiated indexing for ${locators.length} plugins from ${repoType} repository`);
                 } catch (repoError) {
                     console.error(`Failed to list plugins from ${repoType} repository:`, repoError);
                 }
             }
-            console.log(`Plugin cache refreshed. Total plugins: ${this.cache.size}`);
+            console.log(`Plugin cache refreshed. Total plugins in cache: ${this.cache.size}`);
             this._registerInternalVerbs();
         } catch (error) {
             console.error('Failed to refresh plugin cache:', error);
@@ -806,9 +899,8 @@ export class PluginRegistry {
         }));
     }
 
-    public async list(repositoryType?: PluginRepositoryType): Promise<PluginManifest[]> { // Change return type to PluginManifest[]
+    public async list(repositoryType?: PluginRepositoryType, statusFilter?: PluginStatus): Promise<PluginManifest[]> { // Added statusFilter
         try {
-            console.log(`Listing plugins from repository type: ${repositoryType || 'all'}`);
             const allPlugins: PluginManifest[] = []; // Collect full manifests
 
             // Iterate through the cache to get full manifests
@@ -817,12 +909,14 @@ export class PluginRegistry {
                     // Fetch the full manifest using fetchOne, which retrieves from marketplace
                     const manifest = await this.fetchOne(pluginId, undefined, repoTypeInCache);
                     if (manifest) {
-                        allPlugins.push(manifest);
+                        // Apply status filter
+                        if (!statusFilter || manifest.metadata?.status === statusFilter) {
+                            allPlugins.push(manifest);
+                        }
                     }
                 }
             }
 
-            console.log(`Found ${allPlugins.length} plugins in total from repository type: ${repositoryType || 'all'}`);
             return allPlugins; // Return full manifests
         } catch (err) {
             console.warn('pluginRegistry: list failed:', err);

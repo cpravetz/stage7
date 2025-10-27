@@ -3,7 +3,7 @@
   "verb": "FILE_OPERATION",
   "description": "Provides services for file operations: read, write, append",
   "explanation": "This plugin takes a path and optional content and executes the selected operation. Python version with enhanced security and error handling.",
-  "inputGuidance": "FILE_OPERATION requires 'path' or 'fileId' and 'operation' inputs.  The path or file MUST be created in this step or confirmed to be created by a previous step. Ensure your plans do not refer to files or folders that you are not sure exist. Written files are shared with the user and this is the best way to share workproducts.",
+  "inputGuidance": "**CRITICAL for FILE_OPERATION content:** The `content` input for `FILE_OPERATION` MUST always be a `string`. Do NOT use boolean outputs (e.g., `success` from `CHAT` verbs) as content for `FILE_OPERATION`. FILE_OPERATION requires 'path' or 'fileId' and 'operation' inputs.  The path or file MUST be created in this step or confirmed to be created by a previous step. Ensure your plans do not refer to files or folders that you are not sure exist. Written files are shared with the user and this is the best way to share workproducts.",
   "inputDefinitions": [
     {
       "name": "path",

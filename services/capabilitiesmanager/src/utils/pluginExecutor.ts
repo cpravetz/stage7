@@ -40,6 +40,7 @@ export class PluginExecutor {
         this.containerManager = containerManager;
         this.librarianUrl = librarianUrl;
         this.securityManagerUrl = securityManagerUrl;
+        console.log(`[PluginExecutor] Initialized with securityManagerUrl: ${this.securityManagerUrl}`);
         this.missionControlUrl = missionControlUrl;
     }
 
@@ -343,7 +344,7 @@ export class PluginExecutor {
                         (error as any).stderr = stderr;
                         reject(error);
                     } else {
-                        console.log(`[${trace_id}] ${source_component}: Raw stdout from Python plugin ${pluginDefinition.verb} v${pluginDefinition.version}:\n${stdout}`);
+                        //console.log(`[${trace_id}] ${source_component}: Raw stdout from Python plugin ${pluginDefinition.verb} v${pluginDefinition.version}:\n${stdout}`);
                         if (stderr) {
                             console.warn(`[${trace_id}] ${source_component}: Raw stderr from Python plugin ${pluginDefinition.verb} v${pluginDefinition.version}:\n${stderr}`);
                         }

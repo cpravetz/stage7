@@ -1,10 +1,8 @@
-import React, { useState, useRef } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, Link } from 'react-router-dom';
 import { Box, Button, Container, Paper, Typography, Drawer, AppBar, Toolbar, IconButton } from '@mui/material';
+import React, { useState, useEffect, useRef } from 'react';
 import MenuIcon from '@mui/icons-material/Menu';
 import CloseIcon from '@mui/icons-material/Close';
-import UserInputModal from './components/UserInputModal';
-import { AnswerType } from './components/UserInputModal';
 import TabbedPanel from './components/TabbedPanel';
 import TextInput from './components/TextInput';
 import MissionControls from './components/MissionControls';
@@ -27,11 +25,14 @@ import { useWebSocket, useMission, useData } from './context/WebSocketContext';
 import { useAuth } from './context/AuthContext';
 import { API_BASE_URL } from './config';
 import './App.css';
+import { AnswerType, ConversationMessage } from './shared-browser'; // Import AnswerType and ConversationMessage
+import { ActiveQuestion } from './components/TextInput'; // Import ActiveQuestion
 
 const MainApp: React.FC = () => {
   const { isAuthenticated, login, logout } = useAuth();
   const [showSavedMissions, setShowSavedMissions] = useState<boolean>(false);
   const [showMissionList, setShowMissionList] = useState<boolean>(false);
+  const [activeQuestion, setActiveQuestion] = useState<ActiveQuestion | null>(null); // New state for active question
   const securityClient = SecurityClient.getInstance(API_BASE_URL);
 
   // Use the split contexts for shared state across routes
@@ -66,6 +67,21 @@ const MainApp: React.FC = () => {
 
   const ws = useRef<WebSocket | null>(null);
 
+  // Effect to update activeQuestion when pendingUserInput changes
+  
+  useEffect(() => {
+    if (pendingUserInput) {
+      setActiveQuestion({
+        requestId: pendingUserInput.request_id,
+        question: getQuestionContent(pendingUserInput.question),
+        choices: pendingUserInput.choices,
+        answerType: pendingUserInput.answerType as AnswerType,
+      });
+    } else {
+      setActiveQuestion(null);
+    }
+  }, [pendingUserInput]);
+  
   const handleLogin = async (email: string, password: string) => {
     try {
         await login(email, password);
@@ -107,8 +123,30 @@ const MainApp: React.FC = () => {
     }
   };
 
+  const getQuestionContent = (question: any): string => {
+    if (typeof question === 'object' && question !== null && 'value' in question) {
+      return question.value;
+    }
+    return String(question); // Ensure it's always a string
+  };
+
   const handleSendMessage = async (message: string) => {
     await contextSendMessage(message);
+  };
+
+  const handleAnswer = async (requestId: string, answer: string) => {
+    // The WebSocketContext should handle adding the question to history when pendingUserInput is set.
+    // We just need to send the answer and clear the pending state.
+    await contextSendMessage(answer);
+    if (setPendingUserInput) setPendingUserInput(null);
+    setActiveQuestion(null);
+  };
+
+  const handleCancelQuestion = () => {
+    if (setPendingUserInput) setPendingUserInput(null);
+    setActiveQuestion(null);
+    // Optionally, send a cancellation message to the server
+    // contextSendMessage("User cancelled the question.");
   };
 
   // Use the handleControlAction function from WebSocketContext
@@ -169,7 +207,7 @@ const MainApp: React.FC = () => {
               <Button
                 color="inherit"
                 component={Link}
-                to="/github-plugins"
+                to="/plugins"
                 sx={{ mr: 2 }}
               >
                 Tools and Plugins
@@ -242,7 +280,12 @@ const MainApp: React.FC = () => {
                 activeMissionId={activeMissionId || undefined}
               />
             </Paper>
-            <TextInput onSend={handleSendMessage} />
+            <TextInput
+              onSend={handleSendMessage}
+              activeQuestion={activeQuestion}
+              onAnswer={handleAnswer}
+              onCancelQuestion={handleCancelQuestion}
+            />
             <Box sx={{ mt: 2 }}>
               <MissionControls
                 onControl={handleControlAction}
@@ -285,23 +328,6 @@ const MainApp: React.FC = () => {
             )}
           </Box>
         </Box>
-
-        {/* User Input Modal */}
-        {pendingUserInput && (
-          <UserInputModal
-            requestId={pendingUserInput.request_id}
-            question={pendingUserInput.question}
-            choices={pendingUserInput.choices}
-            answerType={pendingUserInput.answerType as AnswerType}
-            onSubmit={(response) => {
-              contextSendMessage(response);
-              if (setPendingUserInput) setPendingUserInput(null);
-            }}
-            onClose={() => {
-              if (setPendingUserInput) setPendingUserInput(null);
-            }}
-          />
-        )}
       </Box>
     </ErrorBoundary>
   );
@@ -321,7 +347,7 @@ const App: React.FC = () => {
             <Route path="/reset-password" element={<PasswordReset />} />
             <Route path="/forgot-password" element={<RequestPasswordReset />} />
             <Route path="/model-performance" element={<ModelPerformanceDashboard />} />
-            <Route path="/github-plugins" element={<PluginManager />} />
+            <Route path="/plugins" element={<PluginManager />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>

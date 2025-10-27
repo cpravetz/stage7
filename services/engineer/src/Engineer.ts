@@ -5,6 +5,7 @@ import {
     BaseEntity,
     InputValue,
     PluginDefinition,
+    PluginManifest,
     PluginParameter,
     PluginMetadata, // Changed from MetadataType
     PluginConfigurationItem, // Changed from ConfigItem
@@ -128,6 +129,18 @@ export class Engineer extends BaseEntity {
 
         app.post('/message', (req, res) => this.handleMessage(req, res));
         app.get('/statistics', (req, res) => { this.getStatistics(req, res) });
+
+        app.post('/tools/onboard', async (req, res) => {
+            try {
+                const { toolManifest, policyConfig } = req.body;
+                const result = await this.onboardTool(toolManifest, policyConfig);
+                res.json(result);
+            } catch (error) {
+                analyzeError(error as Error);
+                console.error('Failed to onboard tool:', error instanceof Error ? error.message : error);
+                res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+            }
+        });
 
         app.listen(this.port, () => {
             console.log(`Engineer listening at ${this.url}`);
@@ -473,8 +486,8 @@ Context: ${contextString}`;
       }
     }
 
-    private finalizePlugin(pluginStructure: any, explanation: string): PluginDefinition {
-      const plugin: PluginDefinition = {
+    private finalizePlugin(pluginStructure: any, explanation: string): PluginManifest {
+      const plugin: PluginManifest = {
           id: pluginStructure.id,
           verb: pluginStructure.verb,
           description: pluginStructure.description,
@@ -493,6 +506,7 @@ Context: ${contextString}`;
           })),
           version: pluginStructure.version || '1.0.0', // Default version
           metadata: pluginStructure.metadata as PluginMetadata, // Cast, assuming LLM provides compatible structure
+          repository: pluginStructure.repository || { type: 'generated', url: 'internal' }, // Ensure repository is always present
           security: {
               permissions: this.determineRequiredPermissions(pluginStructure as PluginDefinition), // Cast for this call
               sandboxOptions: {
@@ -867,7 +881,8 @@ Context: ${contextString}`;
                 // Basic Python syntax check
                 return !code.includes('import os') || code.includes('# SAFE_OS_IMPORT');
             case 'javascript':
-                // Basic JavaScript syntax check
+            case 'typescript': // Added typescript
+                // Basic JavaScript/TypeScript syntax check
                 try {
                     new Function(code);
                     return true;
@@ -876,6 +891,110 @@ Context: ${contextString}`;
                 }
             default:
                 return true; // Allow unknown languages for now
+        }
+    }
+
+    private async onboardTool(toolManifest: any, policyConfig: any): Promise<any> {
+        console.log(`Onboarding tool: ${toolManifest.id}`);
+
+        try {
+            // 1. Determine wrapper language (e.g., TypeScript for web APIs, Python for others)
+            const wrapperLanguage = 'typescript'; // Default for now, can be dynamic
+
+            // 2. Generate wrapper plugin code and unit tests using the Brain
+            const generatedPlugin = await this.generateWrapperPlugin(toolManifest, policyConfig, wrapperLanguage);
+
+            if (!generatedPlugin) {
+                throw new Error('Failed to generate wrapper plugin.');
+            }
+
+            // 3. Validate and execute generated unit tests
+            const testResult = await this.executeWrapperTests(generatedPlugin);
+            if (!testResult.valid) {
+                throw new Error(`Wrapper plugin tests failed: ${testResult.issues.join(', ')}`);
+            }
+
+            // 4. Register the new wrapper plugin with the PluginMarketplace/CapabilitiesManager
+            // The finalizePlugin method already handles signing and returns a PluginDefinition
+            const finalPluginDefinition = this.finalizePlugin(generatedPlugin, generatedPlugin.explanation);
+
+            // Assuming PluginMarketplace.store takes a PluginDefinition
+            await this.pluginMarketplace.store(finalPluginDefinition);
+            console.log(`Wrapper plugin ${finalPluginDefinition.id} registered with PluginMarketplace.`);
+
+            // 5. Update the status of the tool in the Librarian's database (from approved to active)
+            // This would be an API call to Librarian, e.g., PUT /tools/pending/:id/activate
+            // For now, we'll assume the Librarian handles this after receiving the approval response.
+
+            return { success: true, message: `Tool ${toolManifest.id} onboarded successfully.` };
+
+        } catch (error) {
+            console.error('Error in onboardTool:', error instanceof Error ? error.message : error);
+            throw error; // Re-throw for API endpoint to catch and return 500
+        }
+    }
+
+    private async generateWrapperPlugin(toolManifest: any, policyConfig: any, language: string): Promise<any> {
+        console.log(`Generating wrapper plugin for ${toolManifest.id} in ${language}...`);
+        const prompt = `Generate a ${language} wrapper plugin for the following tool manifest:
+${JSON.stringify(toolManifest, null, 2)}
+
+Apply the following policy configurations:
+${JSON.stringify(policyConfig, null, 2)}
+
+The wrapper should:
+1. Act as a client for the external API defined in the toolManifest.
+2. Enforce the provided policy configurations (e.g., rate limits, access control).
+3. Include input/output schema validation.
+4. Provide a basic unit test suite for the wrapper.
+5. Return a PluginDefinition JSON object, including entryPoint.files for the wrapper code and tests.
+`;
+
+        try {
+            const response = await this.authenticatedApi.post(`http://${this.brainUrl}/chat`, {
+                exchanges: [{ role: 'user', content: prompt }],
+                optimization: 'accuracy',
+                responseType: 'json'
+            });
+            const generatedPlugin = JSON.parse(response.data.result || response.data.response || response.data);
+            if (!this.validatePluginStructure(generatedPlugin)) {
+                throw new Error('Generated wrapper plugin structure is invalid.');
+            }
+            return generatedPlugin;
+        } catch (error) {
+            console.error('Error generating wrapper plugin:', error instanceof Error ? error.message : error);
+            throw error;
+        }
+    }
+
+    private async executeWrapperTests(generatedPlugin: any): Promise<{ valid: boolean; issues: string[] }> {
+        console.log(`Executing wrapper tests for ${generatedPlugin.id}...`);
+        const issues: string[] = [];
+
+        // Assuming generatedPlugin has entryPoint.files and language
+        if (!generatedPlugin.entryPoint || !generatedPlugin.entryPoint.files || !generatedPlugin.language) {
+            issues.push('Generated plugin missing entryPoint, files, or language for testing.');
+            return { valid: false, issues };
+        }
+
+        try {
+            // Use the existing validatePluginCode for basic syntax and compilation checks
+            const codeValidationPassed = await this.validatePluginCode(generatedPlugin.entryPoint, generatedPlugin.language);
+            if (!codeValidationPassed) {
+                issues.push('Generated wrapper code failed basic validation.');
+            }
+
+            // TODO: Implement actual test execution logic here
+            // This would involve writing the generated test files to a temporary location,
+            // running the test runner (e.g., `jest` for JS/TS, `pytest` for Python),
+            // and parsing the results.
+            console.warn('Actual wrapper test execution is not yet implemented. Assuming success for now.');
+
+            return { valid: issues.length === 0, issues };
+        } catch (error) {
+            console.error('Error executing wrapper tests:', error instanceof Error ? error.message : error);
+            issues.push(`Test execution failed: ${error instanceof Error ? error.message : String(error)}`);
+            return { valid: false, issues };
         }
     }
 

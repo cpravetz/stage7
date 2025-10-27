@@ -3,7 +3,6 @@ import { LibrarianDefinitionRepository, LibrarianDefinitionRepositoryConfig } fr
 import { MongoRepository } from '../src/repositories/MongoRepository';
 import { LocalRepository } from '../src/repositories/LocalRepository';
 import { GitHubRepository } from '../src/repositories/GitHubRepository';
-import { GitRepository } from '../src/repositories/GitRepository';
 import { repositoryConfig as originalRepositoryConfig } from '../src/config/repositoryConfig';
 import { PluginManifest, PluginLocator, DefinitionType, OpenAPITool, MCPTool, createOpenApiDefinitionManifest, createMcpDefinitionManifest, PluginRepositoryType } from '@cktmcs/shared';
 import axios from 'axios';
@@ -13,7 +12,6 @@ jest.mock('../src/repositories/LibrarianDefinitionRepository');
 jest.mock('../src/repositories/MongoRepository');
 jest.mock('../src/repositories/LocalRepository');
 jest.mock('../src/repositories/GitHubRepository');
-jest.mock('../src/repositories/GitRepository');
 jest.mock('axios'); // Mock axios for any internal calls by repos if not already mocked
 
 // Cast mocked classes
@@ -21,7 +19,6 @@ const MockedLibrarianDefinitionRepository = LibrarianDefinitionRepository as jes
 const MockedMongoRepository = MongoRepository as jest.MockedClass<typeof MongoRepository>;
 const MockedLocalRepository = LocalRepository as jest.MockedClass<typeof LocalRepository>;
 const MockedGitHubRepository = GitHubRepository as jest.MockedClass<typeof GitHubRepository>;
-const MockedGitRepository = GitRepository as jest.MockedClass<typeof GitRepository>;
 
 // Mock repositoryConfig module
 jest.mock('../src/config/repositoryConfig', () => ({
@@ -31,7 +28,6 @@ jest.mock('../src/config/repositoryConfig', () => ({
             { type: 'local', name: 'Local Repo', path: '/tmp/plugins' },
             { type: 'mongo', name: 'Mongo Repo', url: 'mongodb://test', options: { collection: 'plugins' } },
             { type: 'github', name: 'GitHub Repo', owner: 'test', repo: 'test', token: 'test', branch: 'main' },
-            { type: 'git', name: 'Git Repo', url: 'git://test', branch: 'main' },
             { type: 'librarian-definition', name: 'Librarian Defs', librarianUrl: 'http://librarian.test', openApiToolsCollection: 'openApiTools', mcpToolsCollection: 'mcpTools' },
         ]
     }
@@ -43,8 +39,7 @@ describe('PluginMarketplace', () => {
     let mockMongoRepoInstance: jest.Mocked<MongoRepository>;
     let mockLocalRepoInstance: jest.Mocked<LocalRepository>;
     let mockGitHubRepoInstance: jest.Mocked<GitHubRepository>;
-    let mockGitRepoInstance: jest.Mocked<GitRepository>;
-
+    
     const sampleOpenAPITool: OpenAPITool = { id: 'oa1', name: 'oa name', description: 'desc', version: '1', specUrl: 'url', baseUrl: 'base', authentication: { type: 'none' }, actionMappings: [{ actionVerb: 'VERB_OA', operationId: 'op1', method: 'GET', path: '/', inputs: [], outputs: [] }], metadata: { created: new Date().toISOString() } };
     const sampleMCPTool: MCPTool = { id: 'mcp1', name: 'mcp name', description: 'desc', version: '1', actionMappings: [{ actionVerb: 'VERB_MCP', mcpServiceTarget: { serviceName: 's', endpointOrCommand: 'e', method: 'm' }, inputs: [], outputs: [] }], metadata: { created: new Date().toISOString() } };
 
@@ -67,14 +62,12 @@ describe('PluginMarketplace', () => {
         mockMongoRepoInstance = { ...mockLibrarianRepoInstance } as any;
         mockLocalRepoInstance = { ...mockLibrarianRepoInstance } as any;
         mockGitHubRepoInstance = { ...mockLibrarianRepoInstance } as any;
-        mockGitRepoInstance = { ...mockLibrarianRepoInstance } as any;
 
         // Make the mocked constructors return our mock instances
         MockedLibrarianDefinitionRepository.mockImplementation(() => mockLibrarianRepoInstance);
         MockedMongoRepository.mockImplementation(() => mockMongoRepoInstance);
         MockedLocalRepository.mockImplementation(() => mockLocalRepoInstance);
         MockedGitHubRepository.mockImplementation(() => mockGitHubRepoInstance);
-        MockedGitRepository.mockImplementation(() => mockGitRepoInstance);
 
         // Set default environment variables
         process.env.DEFAULT_PLUGIN_REPOSITORY = 'local';
@@ -102,14 +95,12 @@ describe('PluginMarketplace', () => {
             expect(MockedLocalRepository).toHaveBeenCalledTimes(1);
             expect(MockedMongoRepository).toHaveBeenCalledTimes(1);
             expect(MockedGitHubRepository).toHaveBeenCalledTimes(1);
-            expect(MockedGitRepository).toHaveBeenCalledTimes(1);
             expect(MockedLibrarianDefinitionRepository).toHaveBeenCalledTimes(1);
 
             expect(marketplace.getRepositories().size).toBe(5);
             expect(marketplace.getRepositories().get('local')).toBe(mockLocalRepoInstance);
             expect(marketplace.getRepositories().get('mongo')).toBe(mockMongoRepoInstance);
             expect(marketplace.getRepositories().get('github')).toBe(mockGitHubRepoInstance);
-            expect(marketplace.getRepositories().get('git')).toBe(mockGitRepoInstance);
             expect(marketplace.getRepositories().get('librarian-definition')).toBe(mockLibrarianRepoInstance);
         });
 
@@ -291,7 +282,6 @@ describe('PluginMarketplace', () => {
             mockLocalRepoInstance.fetchByVerb.mockResolvedValueOnce(undefined);
             mockMongoRepoInstance.fetchByVerb.mockResolvedValueOnce(undefined);
             mockGitHubRepoInstance.fetchByVerb.mockResolvedValueOnce(undefined);
-            mockGitRepoInstance.fetchByVerb.mockResolvedValueOnce(undefined);
             mockLibrarianRepoInstance.fetchByVerb.mockResolvedValueOnce(undefined);
 
             const plugin = await marketplace.fetchOneByVerb('NON_EXISTENT_VERB');

@@ -136,7 +136,11 @@ export class Agent extends BaseEntity {
             this.connection = amqp_connection_manager.connect([rabbitmqUrl]);
 
             this.connection.on('connect', () => console.log(`Agent ${this.id} connected to RabbitMQ!`));
-            this.connection.on('disconnect', err => console.log(`Agent ${this.id} disconnected from RabbitMQ.`, err));
+            this.connection.on('disconnect', async (err) => {
+                console.error(`Agent ${this.id} disconnected from RabbitMQ. Attempting to re-initialize...`, err);
+                // Attempt to re-initialize the connection and channel
+                await this._reinitializeRabbitMQ();
+            });
 
             this.channel = this.connection.createChannel({
                 json: true,
@@ -145,9 +149,31 @@ export class Agent extends BaseEntity {
                     console.log(`Agent ${this.id} asserted 'agent.events' exchange.`);
                 },
             });
+
+            this.channel.on('error', async (err) => {
+                console.error(`Agent ${this.id} RabbitMQ channel error. Attempting to re-initialize...`, err);
+                await this._reinitializeRabbitMQ();
+            });
+
         } catch (error) {
             console.error(`Error initializing RabbitMQ for Agent ${this.id}:`, error);
         }
+    }
+
+    private async _reinitializeRabbitMQ(): Promise<void> {
+        console.log(`Agent ${this.id} re-initializing RabbitMQ connection and channel.`);
+        // Clear existing connection and channel to force a fresh start
+        if (this.connection) {
+            try {
+                await this.connection.close();
+            } catch (e) {
+                console.warn(`Error closing old RabbitMQ connection for Agent ${this.id}:`, e);
+            }
+        }
+        this.connection = null;
+        this.channel = null;
+        // Re-call initRabbitMQ to establish a new connection
+        await this.initRabbitMQ();
     }
 
     async cleanup(): Promise<void> {
@@ -747,13 +773,8 @@ Please consider this context when planning and executing the mission. Provide de
         });
         const choices = input.args?.choices;
         const answerType = input.args?.answerType || 'text';
-        const timeout = input.args?.timeout || 600000; // Default timeout of 10 minutes if not specified
-
         try {
-            const response = await Promise.race([
-                this.askUser(question, choices, answerType),
-                new Promise((_, reject) => setTimeout(() => reject(new Error('Question timeout')), timeout))
-            ]);
+            const response = await this.askUser(question, choices, answerType);
 
             return [{
                 success: true,
@@ -763,17 +784,6 @@ Please consider this context when planning and executing the mission. Provide de
                 result: response
             }];
         } catch (error) { analyzeError(error as Error);
-            if (error instanceof Error && error.message === 'Question timeout') {
-                console.error(`Question timed out after ${timeout}ms: ${question}`);
-                return [{
-                    success: false,
-                    name: 'error',
-                    resultType: PluginParameterType.ERROR,
-                    resultDescription: 'Question to user timed out',
-                    result: null,
-                    error: 'Question timed out'
-                }];
-            }
             return [{
                 success: false,
                 name: 'error',
@@ -876,6 +886,21 @@ Please consider this context when planning and executing the mission. Provide de
             if (missionFileResult && missionFileResult.id && missionFileResult.originalName) {
                 uploadedFiles.push(missionFileResult);
             }
+            let workproductContent = data[0]?.result;
+            if (workproductContent && typeof workproductContent === 'object' && workproductContent !== null && 'value' in workproductContent) {
+                workproductContent = workproductContent.value;
+                if (typeof workproductContent === 'string' && workproductContent.startsWith('[') && workproductContent.endsWith(']')) {
+                    try {
+                        const parsed = JSON.parse(workproductContent);
+                        if (Array.isArray(parsed)) {
+                            workproductContent = parsed.join('\n');
+                        }
+                    } catch (e) {
+                        // Not valid JSON, so we'll just use the string as is.
+                        console.warn("[Agent.ts] Could not parse workproduct content as JSON array, using as is.");
+                    }
+                }
+            }
             const workProductPayload: any = {
                 id: stepId,
                 type: type,
@@ -888,7 +913,7 @@ Please consider this context when planning and executing the mission. Provide de
                 fileName: data[0]?.fileName,
                 isDeliverable: hasDeliverables, // Include deliverable metadata
                 workproduct: (type === 'Plan' && data[0]?.result) ?
-                    `Plan with ${Array.isArray(data[0].result) ? data[0].result.length : Object.keys(data[0].result).length} steps` : data[0]?.result
+                    `Plan with ${Array.isArray(data[0].result) ? data[0].result.length : Object.keys(data[0].result).length} steps` : workproductContent
             };
             // If we uploaded files above, attach their metadata so the UI can list them
             if (typeof uploadedFiles !== 'undefined' && Array.isArray(uploadedFiles) && uploadedFiles.length > 0) {
@@ -896,7 +921,22 @@ Please consider this context when planning and executing the mission. Provide de
             }
             console.log('[Agent.ts] WORK_PRODUCT_UPDATE payload:', JSON.stringify(workProductPayload, null, 2));
 
-            this.sendMessage(MessageType.WORK_PRODUCT_UPDATE, 'user', workProductPayload);
+            const MAX_MESSAGE_RETRIES = 3;
+            for (let i = 0; i < MAX_MESSAGE_RETRIES; i++) {
+                try {
+                    await this.sendMessage(MessageType.WORK_PRODUCT_UPDATE, 'user', workProductPayload);
+                    break; // If successful, break the loop
+                } catch (messageError) {
+                    if (axios.isAxiosError(messageError) && (messageError.code === 'ECONNRESET' || messageError.code === 'ECONNABORTED')) {
+                        console.warn(`[Agent ${this.id}] Attempt ${i + 1}/${MAX_MESSAGE_RETRIES}: Failed to send WORK_PRODUCT_UPDATE due to network error (ECONNRESET/ECONNABORTED). Retrying...`);
+                        await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1))); // Exponential backoff
+                    } else {
+                        console.error(`[Agent ${this.id}] Unexpected error sending WORK_PRODUCT_UPDATE:`, messageError instanceof Error ? messageError.message : messageError);
+                        analyzeError(messageError as Error);
+                        break; // For other errors, don't retry
+                    }
+                }
+            }
         } catch (error) { analyzeError(error as Error);
             console.error('Error saving work product:', error instanceof Error ? error.message : error);
         }
@@ -1295,7 +1335,7 @@ Please consider this context when planning and executing the mission. Provide de
                     return this.handleAskStep(step.inputValues);
                 }
 
-                const payload = {
+                const payload: any = { // Use 'any' for now to allow dynamic properties
                     actionVerb: step.actionVerb,
                     description: step.description,
                     missionId: step.missionId,
@@ -1306,6 +1346,27 @@ Please consider this context when planning and executing the mission. Provide de
                     stepNo: step.stepNo,
                     id: step.id
                 };
+
+                // --- START MODIFICATION ---
+                if (step.actionVerb === 'SCRAPE') {
+                    const urlInput = step.inputValues?.get('url');
+                    if (urlInput && typeof urlInput.value === 'string') {
+                        payload.url = urlInput.value;
+                    } else {
+                        // Log a warning or throw an error if URL is missing for SCRAPE
+                        console.warn(`[Agent ${this.id}] SCRAPE actionVerb requires a 'url' input, but it was not found or was invalid for step ${step.id}.`);
+                        // To prevent infinite loops, we should fail early here if url is truly required
+                        return [{
+                            success: false,
+                            name: 'error',
+                            resultType: PluginParameterType.ERROR,
+                            resultDescription: 'Missing required input: url for SCRAPE action',
+                            result: null,
+                            error: 'Missing required input: url'
+                        }];
+                    }
+                }
+                // --- END MODIFICATION ---
                 step.storeTempData('payload', payload);
 
                 const timeout = step.actionVerb === 'ACCOMPLISH' ? 3600000 : 1800000;
@@ -1895,6 +1956,7 @@ Explanation: ${resolution.explanation}`);
             }
         } catch (error) {
             console.error(`Error finding or creating agent with role ${roleId}:`, error);
+            analyzeError(error as Error);
             return null;
         }
     }
@@ -1952,6 +2014,8 @@ Explanation: ${resolution.explanation}`);
             }
         } catch (error) {
             console.error(`Error delegating step ${step.id}:`, error);
+            analyzeError(error as Error);
+            return { success: false, result: null };
             return { success: false, result: null };
         }
     }
@@ -2354,6 +2418,18 @@ Explanation: ${resolution.explanation}`);
             return; // Return to allow the retry or replan
         }
 
+        // --- START MODIFICATION ---
+        // Check replanning depth before attempting any replanning
+        if (this.replanDepth >= this.maxReplanDepth) {
+            console.warn(`[Agent ${this.id}] Maximum replanning depth (${this.maxReplanDepth}) reached in handleStepFailure. Aborting mission.`);
+            this.say(`Maximum replanning depth reached. This suggests a fundamental issue that cannot be resolved through replanning. Aborting mission.`);
+            step.status = StepStatus.ERROR;
+            this.setAgentStatus(AgentStatus.ERROR, {eventType: 'agent_error', details: 'Maximum replanning depth reached'});
+            await this.updateStatus();
+            return;
+        }
+        // --- END MODIFICATION ---
+
         if (errorType === StepErrorType.VALIDATION) {
             // For validation errors, immediately trigger replanning
             step.status = StepStatus.ERROR;
@@ -2365,6 +2441,7 @@ Explanation: ${resolution.explanation}`);
                 error: step.lastError.message,
                 timestamp: new Date().toISOString()
             });
+            await this.replanFromFailure(step); // Call replanFromFailure
         } else if (errorType === StepErrorType.TRANSIENT && step.retryCount < step.maxRetries) {
             step.retryCount++;
             step.status = StepStatus.PENDING;

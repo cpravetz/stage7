@@ -7,22 +7,33 @@ interface Props {
   history: ConversationMessage[];
 }
 
-export const ConversationHistory: React.FC<Props> = React.memo(({ history }) => {
+export const ConversationHistory: React.FC<Props> = React.memo(({ history }: Props) => {
   const historyContainerRef = useRef<HTMLDivElement>(null);
   const shouldScrollToBottomRef = useRef(true);
 
   const processedHistory = useMemo(() => {
-    const persistentMessages = history.filter(message => message.persistent);
-
-    const lastMessage = history.length > 0 ? history[history.length - 1] : null;
-
-    if (lastMessage && !lastMessage.persistent) {
-      // The last message is a temporary update, so we display it.
-      return [...persistentMessages, lastMessage];
-    }
-
-    // The last message is persistent, so we only display persistent messages.
-    return persistentMessages;
+    // This reducer processes the history to show all persistent messages
+    // but only the last consecutive temporary message.
+    return history.reduce((acc: ConversationMessage[], message: ConversationMessage) => {
+      if (message.persistent) {
+        // If the last message in the accumulator is temporary, remove it
+        // before adding the new persistent one.
+        if (acc.length > 0 && !acc[acc.length - 1].persistent) {
+          acc.pop();
+        }
+        acc.push(message);
+      } else {
+        // This is a temporary message.
+        // If the last message in the accumulator is also temporary, replace it.
+        // Otherwise, just add the new temporary message.
+        if (acc.length > 0 && !acc[acc.length - 1].persistent) {
+          acc[acc.length - 1] = message;
+        } else {
+          acc.push(message);
+        }
+      }
+      return acc;
+    }, []);
   }, [history]);
   
   // Handle scroll events to detect user scrolling
@@ -95,8 +106,8 @@ export const ConversationHistory: React.FC<Props> = React.memo(({ history }) => 
           },
         }}
       >
-        {processedHistory.map((message, index) => (
-          <MessageItem key={`message-${index}-${message.content.substring(0, 50)}`} message={message.content} />
+        {processedHistory.map((message: ConversationMessage, index: number) => (
+          <MessageItem key={`message-${index}-${message.content.substring(0, 50)}`} message={message} />
         ))}
       </Box>
     </Box>

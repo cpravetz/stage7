@@ -19,6 +19,9 @@ export * from './types/Statistics';
 export * from './Serializer';
 export * from './versioning/semver';
 export * from './versioning/compatibilityChecker';
+export * from './types/DefinitionManifest';
+export * from './types/OpenAPITool';
+export * from './types/MCPTool';
 
 // Note: We exclude the following Node.js-specific modules:
 // - security/pluginSigning (uses crypto)

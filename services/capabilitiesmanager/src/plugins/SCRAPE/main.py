@@ -102,13 +102,22 @@ class ScrapePlugin:
             
             # Select elements based on selector
             selector = config.get('selector')
+            elements = []
             if selector:
                 elements = soup.select(selector)
-            else:
-                elements = soup.find_all()
+                if not elements:
+                    logger.warning(f"Selector '{selector}' returned no elements. Trying fallback selectors.")
+
+            if not elements:
+                fallback_selectors = ['main', 'article', '#content', '#main', '.content', '.main']
+                for fallback in fallback_selectors:
+                    elements = soup.select(fallback)
+                    if elements:
+                        logger.info(f"Found content with fallback selector: '{fallback}'")
+                        break
             
             if not elements:
-                logger.warning(f"No elements found for selector: {selector or 'all'}")
+                logger.warning("All selectors and fallbacks failed. No content found.")
                 return []
             
             # Extract content based on attribute

@@ -5,7 +5,6 @@ import { analyzeError } from '@cktmcs/errorhandler';
 import fs from 'fs/promises';
 import path from 'path';
 import { MongoRepository } from './repositories/MongoRepository';
-import { GitRepository } from './repositories/GitRepository';
 import { GitHubRepository } from './repositories/GitHubRepository';
 //import { NpmRepository } from './repositories/NpmRepository';
 import { LocalRepository } from './repositories/LocalRepository';
@@ -18,6 +17,7 @@ export class PluginMarketplace {
     private localRepository: PluginRepositoryType = 'local';
     private repositories: Map<string, PluginRepository>; // Changed to PluginRepository
     private pluginsBaseDir: string;
+    private _cachedPlugins: PluginLocator[] = [];
 
     /**
      * Get all repositories
@@ -75,6 +75,29 @@ export class PluginMarketplace {
                 console.error(`Error initializing repository of type ${repoConfig.type}:`, error);
             }
         }
+        this.loadAllPlugins();
+    }
+
+    private async loadAllPlugins() {
+        const allPlugins: PluginLocator[] = [];
+        for (const repo of this.repositories.values()) {
+            try {
+                const plugins = await repo.list();
+                allPlugins.push(...plugins);
+            } catch (err) {
+                console.warn(`Error listing plugins from repository ${repo.type}:`, err);
+            }
+        }
+
+        const uniquePlugins = new Map<string, PluginLocator>();
+        for (const plugin of allPlugins) {
+            const key = `${plugin.id}@${plugin.version}`;
+            if (!uniquePlugins.has(key)) {
+                uniquePlugins.set(key, plugin);
+            }
+        }
+        this._cachedPlugins = Array.from(uniquePlugins.values());
+        console.log(`PluginMarketplace: Cached ${this._cachedPlugins.length} plugins from all repositories.`);
     }
 
     /**
@@ -84,63 +107,28 @@ export class PluginMarketplace {
      * @returns Array of plugin locators
      */
     async list(repository?: PluginRepositoryType, includeContainerPlugins: boolean = true): Promise<PluginLocator[]> {
+        let pluginsToList = this._cachedPlugins;
+
         if (repository) {
-            const repo = this.repositories.get(repository); // repo is PluginRepository | undefined
-            if (!repo) {
-                console.warn(`Repository ${repository} not found (list). Returning empty list.`);
-                return [];
-            }
-            try {
-                const plugins = await repo.list();
-                if (!includeContainerPlugins) {
-                    const filteredPlugins: PluginLocator[] = [];
-                    for (const plugin of plugins) {
-                        try {
-                            const manifest = await repo.fetch(plugin.id, plugin.version);
-                            if (manifest && manifest.language !== 'container') {
-                                filteredPlugins.push(plugin);
-                            }
-                        } catch (error) {
-                            console.warn(`Error fetching manifest for plugin ${plugin.id}: ${error}`);
-                            filteredPlugins.push(plugin);
-                        }
-                    }
-                    return filteredPlugins;
-                }
-                return plugins;
-            } catch (err) {
-                console.warn(`Error listing plugins from repository ${repository}:`, err);
-                return [];
-            }
+            pluginsToList = pluginsToList.filter(p => p.repository.type === repository);
         }
-        // If no repository specified, use default
-        const defaultRepo = this.repositories.get(this.defaultRepository); 
-        if (!defaultRepo) {
-            console.warn(`Default repository ${this.defaultRepository} not found (list). Returning empty list.`);
-            return [];
-        }
-        try {
-            const plugins = await defaultRepo.list();
-            if (!includeContainerPlugins) {
-                const filteredPlugins: PluginLocator[] = [];
-                for (const plugin of plugins) {
-                    try {
-                        const manifest = await defaultRepo.fetch(plugin.id, plugin.version);
-                        if (manifest && manifest.language !== 'container') {
-                            filteredPlugins.push(plugin);
-                        }
-                    } catch (error) {
-                        console.warn(`Error fetching manifest for plugin ${plugin.id}: ${error}`);
+
+        if (!includeContainerPlugins) {
+            const filteredPlugins: PluginLocator[] = [];
+            for (const plugin of pluginsToList) {
+                try {
+                    const manifest = await this.fetchOne(plugin.id, plugin.version, plugin.repository.type);
+                    if (manifest && manifest.language !== 'container') {
                         filteredPlugins.push(plugin);
                     }
+                } catch (error) {
+                    console.warn(`Error fetching manifest for plugin ${plugin.id}: ${error}`);
                 }
-                return filteredPlugins;
             }
-            return plugins;
-        } catch (err) {
-            console.warn(`Error listing plugins from default repository:`, err);
-            return [];
+            return filteredPlugins;
         }
+
+        return pluginsToList;
     }
 
     /**
@@ -153,8 +141,6 @@ export class PluginMarketplace {
             switch (config.type) {
                 case 'mongo':
                     return new MongoRepository(config);
-                case 'git':
-                    return new GitRepository(config);
                 case 'github':
                     return new GitHubRepository(config);
                 case 'local':
@@ -179,7 +165,7 @@ export class PluginMarketplace {
      */
     async fetchOne(id: string, version?: string, repository?: PluginRepositoryType): Promise<PluginManifest | undefined> {
         if (repository) {
-            const repo = this.repositories.get(repository); // repo is PluginRepository | undefined
+            const repo = this.repositories.get(repository);
             if (!repo) {
                 console.warn(`Repository ${repository} not found (fetchOne). Returning undefined.`);
                 return undefined;
@@ -191,30 +177,41 @@ export class PluginMarketplace {
                 return undefined;
             }
         }
-        // If no repository specified, use default
-        const defaultRepo = this.repositories.get(this.defaultRepository); // defaultRepo is PluginRepository | undefined
-        if (!defaultRepo) {
-            console.warn(`Default repository ${this.defaultRepository} not found (fetchOne). Returning undefined.`);
-            return undefined;
+        // If no repository is specified, search all repositories
+        for (const repo of this.repositories.values()) {
+            try {
+                const manifest = await repo.fetch(id, version);
+                if (manifest) {
+                    return manifest;
+                }
+            } catch (err) {
+                // Log and continue to the next repository
+                console.warn(`Error fetching plugin ${id} from repository ${repo.type}:`, err);
+            }
         }
-        try {
-            return await defaultRepo.fetch(id, version);
-        } catch (err) {
-            console.warn(`Error fetching plugin ${id} from default repository:`, err);
-            return undefined;
-        }
+
+        return undefined; // Return undefined if not found in any repository
     }
 
     public async fetchOneByVerb(verb: string, version?: string): Promise<PluginManifest | undefined> {
-        for (const repository of this.repositories.values()) { // repository is PluginRepository
+        // First, try to find the plugin in the cached locators
+        const locator = this._cachedPlugins.find(p => p.verb === verb && (!version || p.version === version));
+
+        if (locator) {
+            // If found in cache, fetch the full manifest using fetchOne
+            return this.fetchOne(locator.id, locator.version, locator.repository.type);
+        }
+
+        // If not found in cache, then iterate through repositories (fallback for newly added plugins or if cache is not fully up-to-date)
+        for (const repository of this.repositories.values()) {
             try {
                 const plugin = await repository.fetchByVerb(verb, version);
-                if (plugin) { //} && await this.verifySignature(plugin)) {
+                if (plugin) { // && await this.verifySignature(plugin)) {
                     return plugin;
                 }
             } catch (error) {
-                console.warn(`Error fetching from repository: ${error}`);
-                continue;
+                console.warn(`Error fetching from repository ${repository.type} for verb ${verb}:`, error);
+                // Continue to the next repository
             }
         }
         return undefined;

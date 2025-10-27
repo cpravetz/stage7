@@ -151,10 +151,10 @@ class GoogleWebSearchProvider(SearchProvider):
 
     def search(self, search_term: str, **kwargs) -> List[Dict[str, str]]:
         try:
-            if not self.api_key or not self.search_engine_id:
-                logger.warning("Google Custom Search API key or Search Engine ID not configured. Skipping Google search.")
+            if not self.api_key or not self.search_engine_id or self.search_engine_id == 'YOUR_GOOGLE_CSE_ID':
+                logger.warning("Google Custom Search API key or Search Engine ID not configured or is a placeholder. Skipping Google search.")
                 self.update_performance(success=False)
-                raise Exception("Google API credentials not configured")
+                raise Exception("Google API credentials not configured or are placeholders")
 
             params = {
                 'key': self.api_key,
@@ -202,8 +202,8 @@ class LangsearchSearchProvider(SearchProvider):
 
     def search(self, search_term: str, **kwargs) -> List[Dict[str, str]]:
         """Execute semantic search using LangSearch API."""
-        retries = 3
-        backoff_factor = 0.5
+        retries = 5
+        backoff_factor = 1.0
 
         for attempt in range(retries):
             # --- Rate Limiting Logic ---

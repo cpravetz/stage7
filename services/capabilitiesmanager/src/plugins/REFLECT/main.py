@@ -30,7 +30,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 def _create_detailed_plugin_guidance(inputs: Dict[str, Any]) -> str:
-    """Create a detailed list of available plugins with input specs and descriptions."""
+    """Create a detailed list of available plugins with input specs, descriptions, and types."""
     available_plugins_input = inputs.get('availablePlugins', {})
     available_plugins = available_plugins_input.get('value', []) if isinstance(available_plugins_input, dict) else available_plugins_input
     if not available_plugins:
@@ -39,23 +39,26 @@ def _create_detailed_plugin_guidance(inputs: Dict[str, Any]) -> str:
     guidance_lines = ["Available Plugins & Input Specifications:"]
     for plugin in available_plugins:
         if isinstance(plugin, dict): # Defensive check
-            action_verb = plugin.get('actionVerb', 'UNKNOWN')
+            action_verb = plugin.get('verb', 'UNKNOWN') # Use 'verb' from PluginManifest
             description = plugin.get('description', 'No description available.')
+            language = plugin.get('language', 'unknown')
+            repository_type = plugin.get('repository', {}).get('type', 'unknown')
             input_definitions = plugin.get('inputDefinitions', [])
             input_guidance = plugin.get('inputGuidance', '')
 
-            guidance_lines.append(f"\nPlugin: {action_verb}")
+            guidance_lines.append(f"\nPlugin: {action_verb} (Language: {language}, Source: {repository_type})")
             guidance_lines.append(f"  Description: {description}")
             if input_definitions:
                 guidance_lines.append("  Inputs:")
                 for input_def in input_definitions:
                     input_name = input_def.get('name', 'UNKNOWN')
                     input_desc = input_def.get('description', 'No description.')
-                    value_type = input_def.get('valueType', 'any')
+                    value_type = input_def.get('type', 'any') # Use 'type' from PluginParameter
                     guidance_lines.append(f"    - {input_name} (type: {value_type}){ ' (REQUIRED)' if input_def.get('required') else ''}: {input_desc}")
             else:
                 guidance_lines.append("  Inputs: None required.")
-            guidance_lines.append(f"{input_guidance}")
+            if input_guidance:
+                guidance_lines.append(f"  Guidance: {input_guidance}")
         else:
             # Handle case where plugin is not a dictionary (e.g., a string)
             guidance_lines.append(f"\nPlugin: {plugin} (Details not available - unexpected format)")
@@ -457,7 +460,6 @@ class ReflectHandler:
         work_products = reflection_info['work_products']
         question = reflection_info['question']
         mission_id = reflection_info['missionId']
-        plugin_guidance = _create_detailed_plugin_guidance(inputs)
 
         PLAN_ARRAY_SCHEMA = {
             "type": "array",
@@ -481,14 +483,14 @@ Your task is to reflect on the mission progress and determine the best course of
 1.  **Provide a Direct Answer:** If the reflection question can be answered directly with the given context and the mission is complete or no further action is needed, provide a JSON object with a single key "direct_answer".
 2.  **Create a Plan:** If the mission is NOT complete and requires multiple steps to achieve the remaining objectives, generate a new, concise plan to achieve the remaining objectives. The plan should be a JSON array of steps following the established schema.
 
-**CRITICAL CONSTRAINTS:**
-- You are an autonomous agent. Your primary goal is to solve problems independently.
-- **Prioritize autonomous information gathering:** Use tools like SEARCH, SCRAPE, DATA_TOOLKIT, TEXT_ANALYSIS, TRANSFORM, and FILE_OPERATION to gather information and perform tasks.
-- **Avoid unnecessary user interaction:** Only use 'ASK_USER_QUESTION' for decisions, permissions, or clarification. Do NOT use it for seeking advice, delegating research or data collection that the agent can perform.
-- **CHAT vs ASK_USER_QUESTION:** Use ASK_USER_QUESTION for structured questions requiring user input. Use CHAT sparingly and only when you need to communicate critical information, final results, or important decisions to the user. Avoid routine status updates or progress notifications.
-- **Avoid repetitive steps:** Do not create multiple identical or nearly identical steps. Each step should serve a distinct purpose in achieving the goal.
-- If creating a plan, ensure it builds upon the existing plan history and work products.
-- **CRITICAL: GLOBALLY UNIQUE STEP NUMBERS** - Every step must have a globally unique step number across the entire plan including all sub-plans at any nesting level. Do not reuse step numbers anywhere in the plan.
+**CRITICAL PLANNING PRINCIPLES (STRICTLY ENFORCED):**
+---
+- **Autonomy is Paramount:** Your goal is to *solve* the mission, not to delegate research or information gathering back to the user.
+- **Resourcefulness:** Exhaust all available tools (`SEARCH`, `SCRAPE`, `GENERATE`, `QUERY_KNOWLEDGE_BASE`) to find answers and create deliverables *before* ever considering asking the user.
+- **`ASK_USER_QUESTION` is a Last Resort:** This tool is exclusively for obtaining subjective opinions, approvals, or choices from the user. It is *never* for offloading tasks. Generating a plan that asks the user for information you can find yourself is a critical failure.
+- **Dependencies are Crucial:** Every step that uses an output from a previous step MUST declare this in its `inputs` using `sourceStep` and `outputName`. A plan with disconnected steps is invalid.
+- **Handling Lists (`FOREACH`):** If a step requires a single item (e.g., a URL string) but receives a list from a preceding step (e.g., search results), you MUST use a `FOREACH` loop to iterate over the list.
+- **Role Assignment:** Assign `recommendedRole` at the deliverable level, not per individual step. All steps contributing to a single output (e.g., a research report) should share the same role.
 
 **RESPONSE FORMATS:**
 
@@ -505,17 +507,7 @@ Plan Schema
     - Use `sourceStep: 0` ONLY for inputs that are explicitly provided in the "PARENT STEP INPUTS" section above.
     - For any other input, it MUST be the `outputName` from a *preceding step* in this plan, and `sourceStep` MUST be the `number` of that preceding step.
     - Every input in your plan MUST be resolvable either from a given constant value, a "PARENT STEP" (using `sourceStep: 0`) or from an output of a previous step in the plan.
-    - CRITICAL: If you use placeholders like {'{output_name}'} or [output_name] within a longer string value (e.g., a prompt that references previous outputs), you MUST also declare each referenced output_name as a separate input with proper sourceStep and outputName. Example:
-        {{\\"inputs\\": {{
-            \\"prompt\\": {{
-                \\"value\\": \\"Analyze the competitor data: {'{competitor_details}'}\\",
-                \\"valueType\\": \\"string\\"
-            }},
-            \\"competitor_details\\": {{
-                \\"outputName\\": \\"competitor_details\\",
-                \\"sourceStep\\": 2
-            }}
-        }}}}
+    - CRITICAL: If you use placeholders like {{{{'{{output_name}}'}}}} within a longer string value (e.g., a prompt that references previous outputs), you MUST also declare each referenced output_name as a separate input with proper sourceStep and outputName.
 - **Mapping Outputs to Inputs:** When the output of one step is used as the input to another, the `outputName` in the input of the second step must match the `name` of the output of the first step.
 
 **Role Assignment Strategy:**
@@ -525,13 +517,9 @@ Plan Schema
 - Example: Steps 1-5 all produce research for a report → all get `recommendedRole: "researcher"`
 - Counter-example: Don't switch roles between gathering data (step 1) and formatting it (step 2) if they're part of the same research deliverable
 
-**CRITICAL - LINKING STEPS:** You MUST explicitly connect steps. Any step that uses the output of a previous step MUST declare this in its `inputs` using `sourceStep` and `outputName`. DO NOT simply refer to previous outputs in a `prompt` string without also adding the formal dependency in the `inputs` object. 
+**CRITICAL - LINKING STEPS:** You MUST explicitly connect steps. Any step that uses the output of a previous step MUST declare this in its `inputs` using `sourceStep` and `outputName`. DO NOT simply refer to previous outputs in a `prompt` string without also adding the formal dependency in the `inputs` object. For verbs like `THINK`, `CHAT`, or `ASK_USER_QUESTION`, if the `prompt` or `question` text refers to a file or work product from a previous step, you MUST add an input that references the output of that step using `sourceStep` and `outputName`. This ensures the step waits for the file to be created.
 A plan with no connections between steps is invalid and will be rejected.
 
-CRITICAL: The actionVerb for each step MUST be a valid, existing plugin actionVerb (from the provided list) or a descriptive, new actionVerb (e.g., 'ANALYZE_DATA', 'GENERATE_REPORT'). It MUST NOT be 'UNKNOWN' or 'NOVEL_VERB'.
-
-**Existing ActionVerbs**
-{plugin_guidance}
 """
 
         try:
@@ -541,30 +529,30 @@ CRITICAL: The actionVerb for each step MUST be a valid, existing plugin actionVe
             return json.dumps({"error": f"Brain call failed: {str(e)}"})
 
     def _clean_brain_response(self, response: str) -> str:
-        """Clean Brain response by removing markdown code blocks and extra formatting"""
-        if not response or not response.strip():
-            return "{}"
+            """Clean Brain response by removing markdown code blocks and extra formatting"""
+            if not response or not response.strip():
+                return "{}"
 
-        # Remove markdown code blocks
-        response = response.strip()
+            # Remove markdown code blocks
+            response = response.strip()
 
-        # Remove ```json and ``` markers
-        if response.startswith('```json'):
-            response = response[7:]  # Remove ```json
-        elif response.startswith('```'):
-            response = response[3:]   # Remove ```
+            # Remove ```json and ``` markers
+            if response.startswith('```json'):
+                response = response[7:]  # Remove ```json
+            elif response.startswith('```'):
+                response = response[3:]   # Remove ```
 
-        if response.endswith('```'):
-            response = response[:-3]  # Remove trailing ```
+            if response.endswith('```'):
+                response = response[:-3]  # Remove trailing ```
 
-        # Clean up whitespace
-        response = response.strip()
+            # Clean up whitespace
+            response = response.strip()
 
-        # If still empty, return empty object
-        if not response:
-            return "{}"
+            # If still empty, return empty object
+            if not response:
+                return "{}"
 
-        return response
+            return response
 
     def _format_response(self, brain_response: Any, verb_info: Dict[str, Any], inputs: Dict[str, Any]) -> str:
         """Format the Brain response into the expected output format"""
@@ -595,8 +583,37 @@ CRITICAL: The actionVerb for each step MUST be a valid, existing plugin actionVe
                 }])
             elif isinstance(data, dict): # Could be direct answer or plugin recommendation
                 if "direct_answer" in data:
-                    # The answer might contain a plan, so we need to parse it.
                     answer_content = data["direct_answer"]
+                    # Check for keywords suggesting a new plan is needed
+                    if any(keyword in answer_content.lower() for keyword in ["retry", "use", "instead of", "break down", "should", "first"]):
+                        # Create a new goal for the ACCOMPLISH plugin
+                        new_goal = f"The previous attempt failed. The advice is: '{answer_content}'. Create a new plan to accomplish the original goal: {verb_info['mission_goal']}"
+                        
+                        # Return a new step to call ACCOMPLISH
+                        new_step = {
+                            "number": 1,
+                            "actionVerb": "ACCOMPLISH",
+                            "description": "Create a new plan based on reflection.",
+                            "inputs": {
+                                "goal": {
+                                    "value": new_goal,
+                                    "valueType": "string"
+                                }
+                            },
+                            "outputs": {
+                                "plan": "A new plan to achieve the goal"
+                            }
+                        }
+                        return json.dumps([{
+                            "success": True,
+                            "name": "plan",
+                            "resultType": "plan",
+                            "resultDescription": "Generated a new plan to overcome the previous failure.",
+                            "result": [new_step],
+                            "mimeType": "application/json"
+                        }])
+
+                    # The answer might contain a plan, so we need to parse it.
                     try:
                         # Attempt to extract a JSON plan from the answer string
                         plan_from_answer = _extract_json_from_string(answer_content)
