@@ -9,7 +9,7 @@ export class OWService extends BaseService {
         super(
             'OWService',
             process.env.OPENWEBUI_API_KEY || 'default-key',
-            process.env.OPENWEB_URL || 'https://knllm.dusdusdusd.com',
+            process.env.OPENWEB_URL || 'http://localhost:11434/api/v1',
             ['openwebui']
         );
 
@@ -22,9 +22,6 @@ export class OWService extends BaseService {
             console.error('WARNING: OWService API key is not properly set. Check OPENWEBUI_API_KEY environment variable.');
         }
 
-        if (!this.apiUrl || this.apiUrl === 'https://knllm.dusdusdusd.com') {
-            console.log('Using default OpenWebUI URL: https://knllm.dusdusdusd.com');
-        }
     }
 
     isAvailable(): boolean {

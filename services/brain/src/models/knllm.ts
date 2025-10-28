@@ -29,7 +29,6 @@ export class KNLLMModel extends BaseModel {
             ]
         });
 
-        console.log('KNLLMModel initialized with OpenWebUI interface');
     }
 }
 
