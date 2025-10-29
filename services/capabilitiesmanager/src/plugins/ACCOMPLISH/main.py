@@ -573,37 +573,42 @@ A plan with no connections between steps is invalid and will be rejected.
         for attempt in range(self.max_retries):
             try:
                 response = call_brain(prompt, inputs, "json")
-                plan = json.loads(response)
-                
-                if isinstance(plan, dict):
-                    # Check if it's an object with numeric keys (like "0", "1", ...)
-                    is_numeric_keyed_object = True
-                    converted_plan_list = []
-                    for key in sorted(plan.keys(), key=int): # Sort keys to maintain order
-                        if key.isdigit():
-                            converted_plan_list.append(plan[key])
-                        else:
-                            is_numeric_keyed_object = False
-                            break
-                    
-                    if is_numeric_keyed_object:
-                        logger.warning(f"Attempt {attempt + 1}: LLM returned a JSON object with numeric keys. Converting to array.")
-                        plan = converted_plan_list # Assign the converted list to plan
-
-                if isinstance(plan, list): # Now, if plan is a list (either originally or after conversion)
-                    return plan # Return the processed plan
-                else:
-                    logger.warning(f"Attempt {attempt + 1}: Response is not a JSON array. Response: {response}")
+                # Log raw response for debugging
+                logger.info(f"Raw response from Brain (attempt {attempt+1}): {str(response)[:500]}...")
+                try:
+                    plan = json.loads(response)
+                except Exception as e:
+                    logger.warning(f"Attempt {attempt + 1}: JSON parsing failed: {e}. Response: {response}")
+                    if attempt == self.max_retries - 1:
+                        raise AccomplishError(f"Failed to parse structured plan JSON: {e}", "json_parse_error")
                     continue
 
-            except json.JSONDecodeError as e:
-                logger.warning(f"Attempt {attempt + 1}: JSON parsing failed: {e}. Response: {response}")
+                # Type check: must be list of dicts
+                if isinstance(plan, list) and all(isinstance(step, dict) for step in plan):
+                    return plan
+                # If dict with integer keys, convert to list
+                if isinstance(plan, dict):
+                    keys = list(plan.keys())
+                    if all(str(k).isdigit() for k in keys):
+                        sorted_steps = [plan[k] for k in sorted(keys, key=int)]
+                        if all(isinstance(step, dict) for step in sorted_steps):
+                            logger.warning(f"Attempt {attempt + 1}: LLM returned a JSON object with numeric keys. Converting to array.")
+                            return sorted_steps
+                # If string or other type, log and raise recoverable error
+                logger.error(f"Attempt {attempt + 1}: Plan response is not a valid list of steps: {str(plan)[:500]}...")
                 if attempt == self.max_retries - 1:
-                    raise AccomplishError(f"Failed to parse structured plan JSON: {e}", "json_parse_error")
+                    raise AccomplishError("Plan response is not a valid list of steps", "recoverable_error")
+                continue
+            except AccomplishError as e:
+                logger.warning(f"Attempt {attempt + 1}: Brain call for JSON conversion failed: {e}")
+                if attempt == self.max_retries - 1:
+                    raise
+                continue
             except Exception as e:
                 logger.warning(f"Attempt {attempt + 1}: Brain call for JSON conversion failed: {e}")
                 if attempt == self.max_retries - 1:
-                    raise # Re-raise the last exception
+                    raise
+                continue
 
         raise AccomplishError("Could not generate a valid structured plan after multiple attempts.", "json_conversion_error")
 
@@ -697,11 +702,12 @@ Your task is to determine the best way to accomplish the goal of the novel verb 
 2.  **Create a Plan:** If the task is complex and requires multiple steps, breaking it down into a sequence of actions using available tools, then create a plan. The plan should be a JSON array of steps. This is the preferred option for complex tasks that can be broken down.
 3.  **Recommend a Plugin:** If the task requires a new, complex, and reusable capability that is not covered by existing tools and would be beneficial for future use, recommend the development of a new plugin by providing a JSON object with a "plugin" key.
 
-          **CRITICAL CONSTRAINTS:**
+**CRITICAL CONSTRAINTS:**
 - You MUST NOT use the novel verb "{verb}" in your plan.
 - **When creating a plan, prioritize breaking down tasks into the most granular, atomic steps possible. Avoid generating new high-level, abstract action verbs that would require further decomposition by the ACCOMPLISH plugin. Instead, use existing, fundamental action verbs or create new, specific action verbs that are immediately executable.**
 - You are an autonomous agent. Your primary goal is to solve problems independently.
 - Do not use the `ASK_USER_QUESTION` verb to seek information from the user that can be found using other tools like `SEARCH` or `SCRAPE`. Your goal is to be resourceful and autonomous.
+
 **RESPONSE FORMATS:**
 
 -   **For a Plan:** A JSON array of steps defined with the schema below.
@@ -924,30 +930,53 @@ class AccomplishOrchestrator:
         self.novel_verb_handler = NovelVerbHandler()
 
     def execute(self, inputs_str: str) -> str:
-        """Main execution method"""
+        """Main execution method with robust error handling and remediation."""
         progress.checkpoint("orchestrator_execute_start")
 
-        try:
-            # Parse inputs
-            inputs = parse_inputs(inputs_str)
-            progress.checkpoint("input_processed")
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            try:
+                # Parse inputs
+                inputs = parse_inputs(inputs_str)
+                progress.checkpoint("input_processed")
 
-            # Route to appropriate handler
-            if self._is_novel_verb_request(inputs):
-                return self.novel_verb_handler.handle(inputs)
-            else:
-                return self.goal_planner.plan(inputs)
+                # Route to appropriate handler
+                if self._is_novel_verb_request(inputs):
+                    result = self.novel_verb_handler.handle(inputs)
+                else:
+                    result = self.goal_planner.plan(inputs)
 
-        except Exception as e:
-            logger.error(f"ACCOMPLISH execution failed: {e}")
-            return json.dumps([{ 
-                "success": False,
-                "name": "error",
-                "resultType": "error",
-                "resultDescription": f"ACCOMPLISH execution failed: {str(e)}",
-                "result": str(e),
-                "mimeType": "text/plain"
-            }])
+                # If result indicates a recoverable data/state error, retry/remediate
+                if isinstance(result, str) and 'recoverable_error' in result and attempt < max_attempts:
+                    logger.warning(f"Recoverable error detected, attempt {attempt} - retrying...")
+                    continue
+                return result
+            except AccomplishError as e:
+                if e.error_type != "critical_error" and attempt < max_attempts:
+                    logger.warning(f"Recoverable AccomplishError: {e}, attempt {attempt} - retrying...")
+                    continue
+                logger.error(f"Critical AccomplishError: {e}")
+                return json.dumps([{ 
+                    "success": False,
+                    "name": "error",
+                    "resultType": e.error_type,
+                    "resultDescription": f"ACCOMPLISH execution failed: {str(e)}",
+                    "result": str(e),
+                    "mimeType": "text/plain"
+                }])
+            except Exception as e:
+                logger.error(f"ACCOMPLISH execution failed: {e}")
+                if attempt < max_attempts:
+                    logger.warning(f"Recoverable exception, attempt {attempt} - retrying...")
+                    continue
+                return json.dumps([{ 
+                    "success": False,
+                    "name": "error",
+                    "resultType": "error",
+                    "resultDescription": f"ACCOMPLISH execution failed: {str(e)}",
+                    "result": str(e),
+                    "mimeType": "text/plain"
+                }])
 
     def _is_novel_verb_request(self, inputs: Dict[str, Any]) -> bool:
         """Check if this is a novel verb request"""
@@ -960,59 +989,24 @@ def main():
     """
     progress.checkpoint("main_start")
 
-    try:
-        orchestrator = AccomplishOrchestrator()
-        progress.checkpoint("orchestrator_created")
+    orchestrator = AccomplishOrchestrator()
+    progress.checkpoint("orchestrator_created")
 
-        # Read input from stdin
-        import sys
-        input_data = sys.stdin.read()
-        progress.checkpoint("input_read")
-        
-        if not input_data:
-            logger.warning("Input data is empty. Exiting.")
-            return
+    # Read input from stdin
+    import sys
+    input_data = sys.stdin.read()
+    progress.checkpoint("input_read")
+    
+    if not input_data:
+        logger.warning("Input data is empty. Exiting.")
+        return
 
-        # Execute
-        result = orchestrator.execute(input_data)
+    # Execute with robust error handling
+    result = orchestrator.execute(input_data)
 
-        # Output result
-        print(result)
-        progress.checkpoint("plan_creation_complete")
-
-    except json.JSONDecodeError as e:
-        logger.error(f"ACCOMPLISH plugin failed due to JSON decoding error: {e}")
-        error_result = json.dumps([{ 
-            "success": False,
-            "name": "error",
-            "resultType": "error",
-            "resultDescription": f"Invalid JSON input: {str(e)}",
-            "result": str(e),
-            "mimeType": "text/plain"
-        }])
-        print(error_result)
-    except AccomplishError as e:
-        logger.error(f"ACCOMPLISH plugin failed with a known error: {e}")
-        error_result = json.dumps([{ 
-            "success": False,
-            "name": "error",
-            "resultType": e.error_type,
-            "resultDescription": f"ACCOMPLISH plugin failed: {str(e)}",
-            "result": str(e),
-            "mimeType": "text/plain"
-        }])
-        print(error_result)
-    except Exception as e:
-        logger.error(f"An unexpected error occurred in ACCOMPLISH plugin: {e}", exc_info=True)
-        error_result = json.dumps([{ 
-            "success": False,
-            "name": "error",
-            "resultType": "unexpected_error",
-            "resultDescription": f"An unexpected error occurred: {str(e)}",
-            "result": str(e),
-            "mimeType": "text/plain"
-        }])
-        print(error_result)
+    # Output result
+    print(result)
+    progress.checkpoint("plan_creation_complete")
 
 # Main execution
 if __name__ == "__main__":

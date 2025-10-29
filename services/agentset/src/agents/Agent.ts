@@ -1052,6 +1052,21 @@ Please consider this context when planning and executing the mission. Provide de
         let outputName: string;
         let outputDescription: string;
 
+        // Enrich prompt for GENERATE and THINK using context, goals, constraints, and explicit output instructions
+        let enrichedPrompt = '';
+        const goal = inputs.get('goal')?.value;
+        const context = this.missionContext || inputs.get('context')?.value;
+        const constraints = inputs.get('constraints')?.value;
+        const userPrompt = inputs.get('prompt')?.value;
+        const outputFormat = actionVerb === 'GENERATE' ? 'Return a concise answer in plain text.' : 'List your reasoning steps before the answer.';
+
+        enrichedPrompt += `You are an autonomous agent.`;
+        if (goal) enrichedPrompt += `\nGoal: ${goal}`;
+        if (context) enrichedPrompt += `\nContext: ${context}`;
+        if (constraints) enrichedPrompt += `\nConstraints: ${constraints}`;
+        if (userPrompt) enrichedPrompt += `\nTask: ${userPrompt}`;
+        enrichedPrompt += `\nInstructions: ${outputFormat}`;
+
         if (actionVerb === 'GENERATE') {
             brainEndpoint = 'generate';
             outputName = 'generated_content';
@@ -1060,7 +1075,6 @@ Please consider this context when planning and executing the mission. Provide de
             const conversationType = inputs.get('conversationType')?.value as LLMConversationType || LLMConversationType.TextToText;
             const modelName = inputs.get('modelName')?.value;
             const optimization = inputs.get('optimization')?.value;
-            const prompt = inputs.get('prompt')?.value;
             const file = inputs.get('file')?.value;
             const audio = inputs.get('audio')?.value;
             const video = inputs.get('video')?.value;
@@ -1068,7 +1082,7 @@ Please consider this context when planning and executing the mission. Provide de
 
             brainRequestBody = {
                 type: conversationType,
-                prompt: prompt,
+                prompt: enrichedPrompt,
                 modelName: modelName,
                 optimization: optimization,
                 file: file,
@@ -1077,23 +1091,12 @@ Please consider this context when planning and executing the mission. Provide de
                 image: image,
                 trace_id: this.id // Assuming agent ID can be used as trace_id
             };
-        } else { // Default to THINK logic
+        } else { // THINK logic
             brainEndpoint = 'chat';
             outputName = 'answer';
             outputDescription = `Brain reasoning output (${inputs.get('conversationType')?.value || LLMConversationType.TextToText})`; // Use conversationType from inputs
 
-            const prompt = inputs.get('prompt')?.value as string;
-            if (!prompt) {
-                return [{
-                    success: false,
-                    name: 'error',
-                    resultType: PluginParameterType.ERROR,
-                    resultDescription: 'Error in useBrainForReasoning',
-                    result: null,
-                    error: 'Prompt is required for THINK plugin'
-                }];
-            }
-
+            const prompt = enrichedPrompt;
             const optimization = (inputs.get('optimization')?.value as string) || 'accuracy';
             const conversationType = (inputs.get('conversationType')?.value as LLMConversationType) || LLMConversationType.TextToText;
 
@@ -1105,6 +1108,16 @@ Please consider this context when planning and executing the mission. Provide de
                 LLMConversationType.TextToVideo, 
                 LLMConversationType.TextToCode];
 
+            if (!prompt) {
+                return [{
+                    success: false,
+                    name: 'error',
+                    resultType: PluginParameterType.ERROR,
+                    resultDescription: 'Error in useBrainForReasoning',
+                    result: null,
+                    error: 'Prompt is required for THINK plugin'
+                }];
+            }
             if (!validOptimizations.includes(optimization)) {
                 return [{
                     success: false,
@@ -1115,7 +1128,6 @@ Please consider this context when planning and executing the mission. Provide de
                     error: `Invalid optimization: ${optimization}. Must be one of ${validOptimizations.join(', ')}`
                 }];
             }
-
             if (!validConversationTypes.includes(conversationType)) {
                 return [{
                     success: false,
@@ -1128,7 +1140,7 @@ Please consider this context when planning and executing the mission. Provide de
             }
 
             brainRequestBody = {
-                exchanges: [...this.conversation, { role: 'user', content: prompt }], // Combine history with current prompt
+                exchanges: [...this.conversation, { role: 'user', content: prompt }], // Combine history with enriched prompt
                 optimization: optimization,
                 conversationType: conversationType,
                 responseType: 'text'

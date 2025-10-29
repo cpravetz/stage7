@@ -114,9 +114,13 @@ export class OpenAIInterface extends BaseInterface {
             }
             console.log(`OpenAIInterface: Received response with content: ${fullResponse.substring(0, 140)}... (truncated)`);
             // --- Ensure JSON if required ---
-            let requireJson = options.responseType === 'json' ? true : false;
+            const requireJson = options.responseType === 'json';
             if (requireJson) {
-                return await this.ensureJsonResponse(fullResponse, true, service);
+                const jsonResponse = await this.ensureJsonResponse(fullResponse, true, service);
+                if (jsonResponse === null) {
+                    throw new Error("Failed to extract valid JSON from the model's response.");
+                }
+                return jsonResponse;
             }
             return fullResponse || '';
         } catch (error) {
@@ -290,7 +294,11 @@ export class OpenAIInterface extends BaseInterface {
             const rawResponse = response.choices[0].message.content;
 
             // Always apply JSON cleanup for TextToJSON conversion type
-            return await this.ensureJsonResponse(rawResponse, true, service);
+            const jsonResponse = await this.ensureJsonResponse(rawResponse, true, service);
+            if (jsonResponse === null) {
+                throw new Error("Failed to extract valid JSON from the model's response.");
+            }
+            return jsonResponse;
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             console.error(`OpenAI Interface: Error generating JSON with ${service.serviceName}:`, errorMessage);

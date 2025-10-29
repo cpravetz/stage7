@@ -18,18 +18,18 @@ export class GLlama3Model extends BaseModel {
             }],
             [LLMConversationType.TextToJSON, {
                 costScore: 100,
-                accuracyScore: 100,
-                creativityScore: 80,
-                speedScore: 80
+                accuracyScore: 10,
+                creativityScore: 10,
+                speedScore: 50
             }]
         ]);
 
         super({
-            name: "groq/allam-2-7b",
-            modelName: "allam-2-7b",
+            name: "groq/meta-llama/llama-4-scout-17b-16e-instruct",
+            modelName: "meta-llama/llama-4-scout-17b-16e-instruct",
             interfaceName: "groq",
             serviceName: "GroqService",
-            tokenLimit: 4096, // Adjust this value if needed
+            tokenLimit: 1024, // Adjust this value if needed
             scoresByConversationType: scoresByConversationType,
             contentConversation: [LLMConversationType.TextToText, LLMConversationType.TextToCode, LLMConversationType.TextToJSON]
         });

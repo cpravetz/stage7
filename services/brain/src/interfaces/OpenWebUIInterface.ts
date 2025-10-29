@@ -116,9 +116,13 @@ export class OpenWebUIInterface extends BaseInterface {
                     console.log(`OpenWebUI: Received response with content: ${content.substring(0, 140)}... (truncated)`);
 
                     // --- Ensure JSON if required ---
-                    let requireJson = options.responseType === 'json' ? true : false;
+                    const requireJson = options.responseType === 'json';
                     if (requireJson) {
-                        return this.ensureJsonResponse(content, true);
+                        const jsonResponse = await this.ensureJsonResponse(content, true, service);
+                        if (jsonResponse === null) {
+                            throw new Error("Failed to extract valid JSON from the model's response.");
+                        }
+                        return jsonResponse;
                     }
                     return content;
                 } else {
@@ -164,10 +168,13 @@ export class OpenWebUIInterface extends BaseInterface {
                 modelName: convertParams.modelName,
                 responseType: conversionType === LLMConversationType.TextToJSON ? 'json' : convertParams.responseType
             });
-
             // Apply JSON cleanup for TextToJSON conversion type
             if (conversionType === LLMConversationType.TextToJSON) {
-                return this.ensureJsonResponse(response, true);
+                const jsonResponse = await this.ensureJsonResponse(response, true, service);
+                if (jsonResponse === null) {
+                    throw new Error("Failed to extract valid JSON from the model's response.");
+                }
+                return jsonResponse;
             }
 
             return response;

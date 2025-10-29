@@ -202,7 +202,6 @@ export class PluginExecutor {
                     valueType: PluginParameterType.STRING,
                     args: { token: brainToken }
                 });
-                console.log(`[${trace_id}] ${source_component}: Added __brain_auth_token to plugin inputs`);
             } else {
                 console.log(`[${trace_id}] ${source_component}: WARNING - No brain token available, __brain_auth_token not added to plugin inputs`);
             }
@@ -212,15 +211,12 @@ export class PluginExecutor {
             // Add Google and LangSearch API keys to the environment passed to the plugin
             if (process.env.GOOGLE_SEARCH_API_KEY) {
                 currentEnv.GOOGLE_API_KEY = process.env.GOOGLE_SEARCH_API_KEY; // Corrected variable name
-                console.log(`[${trace_id}] ${source_component}: Added GOOGLE_API_KEY to plugin environment.`);
             }
             if (process.env.GOOGLE_CSE_ID) {
                 currentEnv.GOOGLE_SEARCH_ENGINE_ID = process.env.GOOGLE_CSE_ID; // Corrected variable name
-                console.log(`[${trace_id}] ${source_component}: Added GOOGLE_SEARCH_ENGINE_ID to plugin environment.`);
             }
             if (process.env.LANGSEARCH_API_KEY) {
                 currentEnv.LANGSEARCH_API_KEY = process.env.LANGSEARCH_API_KEY;
-                console.log(`[${trace_id}] ${source_component}: Added LANGSEARCH_API_KEY to plugin environment.`);
             }
             const executionContext: ExecutionContext = {
                 inputValues: executionInputs,

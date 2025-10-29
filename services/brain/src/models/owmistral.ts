@@ -5,19 +5,19 @@ export class KNLLMModel extends BaseModel {
     constructor() {
         const scoresByConversationType = new Map<LLMConversationType, ModelScore>([
             // Use reasonable scores for fair comparison with other models
-            [LLMConversationType.TextToText, { costScore: 100, accuracyScore: 45, creativityScore: 85, speedScore: 70 }],
+            [LLMConversationType.TextToText, { costScore: 100, accuracyScore: 85, creativityScore: 85, speedScore: 70 }],
             [LLMConversationType.TextToCode, { costScore: 100, accuracyScore: 85, creativityScore: 85, speedScore: 70 }],
             [LLMConversationType.CodeToText, { costScore: 100, accuracyScore: 85, creativityScore: 85, speedScore: 70 }],
             [LLMConversationType.ImageToText, { costScore: 100, accuracyScore: 85, creativityScore: 85, speedScore: 70 }],
-            [LLMConversationType.TextToJSON, { costScore: 100, accuracyScore: 10, creativityScore: 10, speedScore: 50 }],
+            [LLMConversationType.TextToJSON, { costScore: 100, accuracyScore: 85, creativityScore: 85, speedScore: 70 }],
         ]);
 
         super({
-            name: "openweb/gemma3:12b",
-            modelName: "gemma3:12b", // This is the model name that will be sent to the OpenWebUI API
+            name: "openweb/mistral:7b",
+            modelName: "mistral:7b",
             interfaceName: "openwebui", // Must match the interface name in OpenWebUIInterface.ts
             serviceName: "OWService", // Must match the service name in OWService.ts
-            tokenLimit: 32000,
+            tokenLimit: 128000,
             scoresByConversationType: scoresByConversationType,
             contentConversation: [
                 LLMConversationType.TextToCode,
@@ -28,7 +28,7 @@ export class KNLLMModel extends BaseModel {
             ]
         });
 
-        console.log('OWGemma3 Model initialized with OpenWebUI interface');
+        console.log('Mistral:7b Model initialized with OpenWebUI interface');
     }
 }
 

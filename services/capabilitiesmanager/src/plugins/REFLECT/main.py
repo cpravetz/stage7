@@ -309,6 +309,7 @@ class ReflectHandler:
 
     def __init__(self):
         self.validator = PlanValidator(brain_call=call_brain)
+        self.max_retries = 3
 
     def handle(self, inputs: Dict[str, Any]) -> str:
         try:
@@ -348,19 +349,17 @@ class ReflectHandler:
 
     def _extract_reflection_info(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         """Extract reflection information from inputs"""
-        mission_id_input = inputs.get('missionId')
-        if isinstance(mission_id_input, dict) and 'value' in mission_id_input:
-            value_content = mission_id_input['value']
-            if isinstance(value_content, (dict, list)):
-                mission_id = json.dumps(value_content)
-            else:
-                mission_id = str(value_content).strip()
-        elif isinstance(mission_id_input, str):
-            mission_id = mission_id_input.strip()
-        elif isinstance(mission_id_input, (dict, list)):
-            mission_id = json.dumps(mission_id_input)
-        else:
-            mission_id = ''
+        def _normalize_input_value(input_val: Any) -> str:
+            if isinstance(input_val, dict) and 'value' in input_val:
+                content = input_val['value']
+                if isinstance(content, (dict, list)):
+                    return json.dumps(content)
+                return str(content).strip()
+            elif isinstance(input_val, (dict, list)):
+                return json.dumps(input_val)
+            return str(input_val).strip() if input_val is not None else ''
+
+        mission_id = _normalize_input_value(inputs.get('missionId'))
 
         plan_history_input = inputs.get('plan_history')
         plan_history = []
@@ -380,69 +379,16 @@ class ReflectHandler:
         else:
             plan_history = []
 
-        work_products_input = inputs.get('work_products')
-        if isinstance(work_products_input, dict) and 'value' in work_products_input:
-            value_content = work_products_input['value']
-            if isinstance(value_content, (dict, list)):
-                work_products = json.dumps(value_content)
-            else:
-                work_products = str(value_content).strip()
-        elif isinstance(work_products_input, str):
-            work_products = work_products_input.strip()
-        elif isinstance(work_products_input, (dict, list)):
-            work_products = json.dumps(work_products_input)
-        else:
-            work_products = ''
+        work_products = _normalize_input_value(inputs.get('work_products'))
+        question = _normalize_input_value(inputs.get('question'))
+        final_output = _normalize_input_value(inputs.get('final_output'))
+        agent_id = _normalize_input_value(inputs.get('agentId'))
 
-        question_input = inputs.get('question')
-        if isinstance(question_input, dict) and 'value' in question_input:
-            value_content = question_input['value']
-            if isinstance(value_content, (dict, list)):
-                question = json.dumps(value_content)
-            else:
-                question = str(value_content).strip()
-        elif isinstance(question_input, str):
-            question = question_input.strip()
-        elif isinstance(question_input, (dict, list)):
-            question = json.dumps(question_input)
-        else:
-            question = ''
-
-        # final_output is optional; default to empty string if not provided
-        final_output_input = inputs.get('final_output')
-        if isinstance(final_output_input, dict) and 'value' in final_output_input:
-            value_content = final_output_input['value']
-            if isinstance(value_content, (dict, list)):
-                final_output = json.dumps(value_content)
-            else:
-                final_output = str(value_content).strip()
-        elif isinstance(final_output_input, str):
-            final_output = final_output_input.strip()
-        elif isinstance(final_output_input, (dict, list)):
-            final_output = json.dumps(final_output_input)
-        else:
-            final_output = ''
-
-        logger.info(f"DEBUG REFLECT: mission_id = '{mission_id}' (type: {type(mission_id)})") # Add this line
-        logger.info(f"DEBUG REFLECT: plan_history = '{str(plan_history)[:50]}...' (type: {type(plan_history)})") # Add this line
-        logger.info(f"DEBUG REFLECT: work_products = '{str(work_products)[:50]}...' (type: {type(work_products)})") # Add this line
-        logger.info(f"DEBUG REFLECT: question = '{str(question)[:50]}...' (type: {type(question)})") # Add this line
+        logger.info(f"DEBUG REFLECT: mission_id = '{mission_id}' (type: {type(mission_id)})")
+        logger.info(f"DEBUG REFLECT: plan_history = '{str(plan_history)[:50]}...' (type: {type(plan_history)})")
+        logger.info(f"DEBUG REFLECT: work_products = '{str(work_products)[:50]}...' (type: {type(work_products)})")
+        logger.info(f"DEBUG REFLECT: question = '{str(question)[:50]}...' (type: {type(question)})")
         logger.info(f"DEBUG REFLECT: final_output present: {'yes' if final_output else 'no'} (length: {len(str(final_output))})")
-
-        # Extract agent ID for self-correction
-        agent_id_input = inputs.get('agentId')
-        if isinstance(agent_id_input, dict) and 'value' in agent_id_input:
-            value_content = agent_id_input['value']
-            if isinstance(value_content, (dict, list)):
-                agent_id = json.dumps(value_content)
-            else:
-                agent_id = str(value_content).strip()
-        elif isinstance(agent_id_input, str):
-            agent_id = agent_id_input.strip()
-        elif isinstance(agent_id_input, (dict, list)):
-            agent_id = json.dumps(agent_id_input)
-        else:
-            agent_id = ''
 
         return {
             "missionId": mission_id,
@@ -522,11 +468,40 @@ A plan with no connections between steps is invalid and will be rejected.
 
 """
 
-        try:
-            return call_brain(prompt, inputs, "json")
-        except Exception as e:
-            logger.error(f"Brain call failed for reflection: {e}")
-            return json.dumps({"error": f"Brain call failed: {str(e)}"})
+        for attempt in range(self.max_retries):
+            try:
+                response = call_brain(prompt, inputs, "json")
+                # Log raw response for debugging
+                logger.info(f"Raw response from Brain (attempt {attempt+1}): {str(response)[:500]}...")
+                try:
+                    # Attempt to parse the response as JSON
+                    parsed_response = json.loads(response)
+                except Exception as e:
+                    logger.warning(f"Attempt {attempt + 1}: JSON parsing failed: {e}. Response: {response}")
+                    if attempt == self.max_retries - 1:
+                        raise ReflectError(f"Failed to parse Brain response as JSON: {e}", "json_parse_error")
+                    continue
+
+                # Check if the parsed response is a valid structure for reflection (plan or direct answer)
+                if isinstance(parsed_response, (list, dict)):
+                    return parsed_response # Return the parsed JSON
+                
+                logger.error(f"Attempt {attempt + 1}: Brain response is not a valid JSON object or array: {str(parsed_response)[:500]}...")
+                if attempt == self.max_retries - 1:
+                    raise ReflectError("Brain response is not a valid JSON object or array", "invalid_response_format")
+                continue
+            except ReflectError as e:
+                logger.warning(f"Attempt {attempt + 1}: Brain call for reflection failed: {e}")
+                if attempt == self.max_retries - 1:
+                    raise
+                continue
+            except Exception as e:
+                logger.warning(f"Attempt {attempt + 1}: Brain call for reflection failed: {e}")
+                if attempt == self.max_retries - 1:
+                    raise
+                continue
+
+        raise ReflectError("Could not get a valid reflection response from Brain after multiple attempts.", "brain_response_error")
 
     def _clean_brain_response(self, response: str) -> str:
             """Clean Brain response by removing markdown code blocks and extra formatting"""
@@ -747,11 +722,11 @@ A plan with no connections between steps is invalid and will be rejected.
 
             # Determine current task from the reflection question or context
             current_task = "REFLECT"  # Default to current task
-            question = inputs.get('question', {})
+            question = inputs.get('question', {}) # Ensure question is always a string
             if isinstance(question, dict) and 'value' in question:
-                question_text = question['value']
+                question_text = str(question['value'])
             else:
-                question_text = str(question) if question else ""
+                question_text = str(question)
 
             # Try to extract task context from question
             if "code" in question_text.lower() or "programming" in question_text.lower():
@@ -946,4 +921,36 @@ def generate_lesson_learned(agent_id: str, current_task: str, performance_data: 
 
 
 if __name__ == "__main__":
-    main()
+    max_attempts = 3
+    for attempt in range(1, max_attempts + 1):
+        try:
+            main()
+            break
+        except ReflectError as e:
+            if getattr(e, 'error_type', None) != "critical_error" and attempt < max_attempts:
+                logger.warning(f"Recoverable ReflectError: {e}, attempt {attempt} - retrying...")
+                continue
+            logger.error(f"Critical ReflectError: {e}")
+            print(json.dumps([{ 
+                "success": False,
+                "name": "error",
+                "resultType": getattr(e, 'error_type', 'error'),
+                "resultDescription": f"REFLECT execution failed: {str(e)}",
+                "result": str(e),
+                "mimeType": "text/plain"
+            }]))
+            break
+        except Exception as e:
+            logger.error(f"REFLECT execution failed: {e}")
+            if attempt < max_attempts:
+                logger.warning(f"Recoverable exception, attempt {attempt} - retrying...")
+                continue
+            print(json.dumps([{ 
+                "success": False,
+                "name": "error",
+                "resultType": "error",
+                "resultDescription": f"REFLECT execution failed: {str(e)}",
+                "result": str(e),
+                "mimeType": "text/plain"
+            }]))
+            break

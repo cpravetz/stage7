@@ -68,9 +68,13 @@ export class AnthropicInterface extends BaseInterface {
             }
             console.log(`AnthropicInterface: Received response with content: ${fullResponse.substring(0, 140)}... (truncated)`);
             // --- Ensure JSON if required ---
-            let requireJson = options.responseType === 'json' ? true : false;
+            const requireJson = options.responseType === 'json';
             if (requireJson) {
-                return this.ensureJsonResponse(fullResponse, true);
+                const jsonResponse = await this.ensureJsonResponse(fullResponse, true, service);
+                if (jsonResponse === null) {
+                    throw new Error("Failed to extract valid JSON from the model's response.");
+                }
+                return jsonResponse;
             }
     
             return fullResponse || '';
@@ -137,7 +141,11 @@ export class AnthropicInterface extends BaseInterface {
         const response = await this.chat(service, messages, { modelName: modelName, responseType: 'json' });
 
         // Always apply JSON cleanup for TextToJSON conversion type
-        return this.ensureJsonResponse(response, true);
+        const jsonResponse = await this.ensureJsonResponse(response, true, service);
+        if (jsonResponse === null) {
+            throw new Error("Failed to extract valid JSON from the model's response.");
+        }
+        return jsonResponse;
     }
 
     async convert(service: BaseService, conversionType: LLMConversationType, convertParams: ConvertParamsType): Promise<any> {

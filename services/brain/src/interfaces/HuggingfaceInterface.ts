@@ -229,9 +229,13 @@ export class HuggingfaceInterface extends BaseInterface {
                 }
                 console.log(`HuggingfaceInterface: Received response with content: ${out.substring(0, 140)}... (truncated)`);
                 // --- Ensure JSON if required ---
-                let requireJson =  options.responseType === 'json' ? true : false;
+                const requireJson = options.responseType === 'json';
                 if (requireJson) {
-                    return this.ensureJsonResponse(out, true);
+                    const jsonResponse = await this.ensureJsonResponse(out, true, service);
+                    if (jsonResponse === null) {
+                        throw new Error("Failed to extract valid JSON from the model's response.");
+                    }
+                    return jsonResponse;
                 }
                 return out || 'No response generated';
             } catch (streamError) {
@@ -347,7 +351,11 @@ export class HuggingfaceInterface extends BaseInterface {
         const response = await this.chat(service, messages, { modelName, responseType: 'json' });
 
         // Always apply JSON cleanup for TextToJSON conversion type
-        return this.ensureJsonResponse(response, true);
+        const jsonResponse = await this.ensureJsonResponse(response, true, service);
+        if (jsonResponse === null) {
+            throw new Error("Failed to extract valid JSON from the model's response.");
+        }
+        return jsonResponse;
     }
 
     async convertTextToImage(args: ConvertParamsType): Promise<Blob| undefined> {

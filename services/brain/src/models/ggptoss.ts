@@ -18,9 +18,9 @@ export class GgptOSSModel extends BaseModel {
             }],
             [LLMConversationType.TextToJSON, {
                 costScore: 100,
-                accuracyScore: 100,
-                creativityScore: 80,
-                speedScore: 80
+                accuracyScore: 10,
+                creativityScore: 10,
+                speedScore: 50
             }]
         ]);
 

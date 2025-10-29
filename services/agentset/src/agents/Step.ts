@@ -431,17 +431,32 @@ export class Step {
         const newSteps: Step[] = [];
 
         for (let i = 0; i < inputArray.length; i++) {
-            const item = inputArray[i];
+            let item = inputArray[i];
             const subPlanCopy = JSON.parse(JSON.stringify(subPlanTemplate));
             const iterationSteps = createFromPlan(subPlanCopy, this.stepNo + 1 + (i * subPlanTemplate.length), this.persistenceManager, this);
 
             for (const step of iterationSteps) {
                 for (const [inputName, inputRef] of step.inputReferences.entries()) {
                     if (inputRef.outputName === 'item') {
+                        // If item is an object, try to extract the property matching the inputName (case-insensitive)
+                        let valueToPass = item;
+                        if (item && typeof item === 'object' && !Array.isArray(item)) {
+                            // Find property matching inputName (case-insensitive)
+                            const propKey = Object.keys(item).find(k => k.toLowerCase() === inputName.toLowerCase());
+                            if (propKey) {
+                                valueToPass = item[propKey];
+                            } else {
+                                // No matching property, fallback to BRAIN for conversion
+                                // Simulate THINK step: ask BRAIN to convert array of objects to array of strings
+                                // This is a placeholder for actual BRAIN integration
+                                console.warn(`[FOREACH] No property '${inputName}' found in item. Fallback to BRAIN for conversion.`);
+                                valueToPass = await this.simulateBrainArrayConversion(item, inputName);
+                            }
+                        }
                         step.inputValues.set(inputName, {
                             inputName: inputName,
-                            value: item,
-                            valueType: this.inferValueType(item)
+                            value: valueToPass,
+                            valueType: this.inferValueType(valueToPass)
                         });
                     }
                 }
@@ -571,6 +586,17 @@ export class Step {
             console.error(`[executeSubPlanForItem] Error executing sub-plan for item ${itemIndex + 1}:`, error);
             return null;
         }
+    }
+
+    /**
+     * Simulate a THINK step to ask BRAIN to convert an object to a string for plugin input.
+     * This is a placeholder for actual BRAIN/LLM integration.
+     */
+    private async simulateBrainArrayConversion(item: any, inputName: string): Promise<string> {
+        // For now, just JSON.stringify the object and log a warning
+        // In production, this should call the BRAIN/LLM to convert the object to a string
+        console.warn(`[simulateBrainArrayConversion] Converting item to string for input '${inputName}'.`);
+        return JSON.stringify(item);
     }
 
     private inferValueType(value: any): PluginParameterType {
@@ -1424,6 +1450,7 @@ export class Step {
                 case 'THINK':
                 case 'GENERATE':
                     result = await thinkAction(this.inputValues, internalActionVerb);
+                    if (!Array.isArray(result)) result = [result];
                     break;
                 case 'DELEGATE':
                     result = await this.handleDelegate(executeAction);
