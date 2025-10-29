@@ -410,42 +410,61 @@ export class Brain extends BaseEntity {
 
         const filteredOptionals = this.filterInternalParameters(thread.optionals || {});
 
-        let modelResponse = await selectedModel.llminterface.chat(
-            selectedModel.service,
-            thread.exchanges,
-            {
-                max_length: thread.max_length || selectedModel.tokenLimit,
-                temperature: thread.temperature || 0.7,
-                modelName: selectedModel.modelName,
-                responseType: thread.responseType || 'text',
-                ...filteredOptionals
+        let modelResponse;
+        try {
+            modelResponse = await selectedModel.llminterface.chat(
+                selectedModel.service,
+                thread.exchanges,
+                {
+                    max_length: thread.max_length || selectedModel.tokenLimit,
+                    temperature: thread.temperature || 0.7,
+                    modelName: selectedModel.modelName,
+                    responseType: thread.responseType || 'text',
+                    ...filteredOptionals
+                }
+            );
+            this.activeLLMCalls = Math.max(0, this.activeLLMCalls - 1);
+            if (!modelResponse || modelResponse === 'No response generated' ||
+                (typeof modelResponse === 'string' && modelResponse.startsWith('Error:'))) {
+                throw new Error(modelResponse || 'Model returned empty response');
             }
-        );
-        this.activeLLMCalls = Math.max(0, this.activeLLMCalls - 1);
-        if (!modelResponse || modelResponse === 'No response generated' ||
-            (typeof modelResponse === 'string' && modelResponse.startsWith('Error:'))) {
-            throw new Error(modelResponse || 'Model returned empty response');
-        }
 
-        let tokenCount = 0;
-        if (typeof modelResponse === 'object' && modelResponse && 'usage' in modelResponse) {
-            tokenCount = (modelResponse as any).usage?.total_tokens || 0;
-        }
-        this.modelManager.trackModelResponse(requestId, typeof modelResponse === 'string' ? modelResponse : JSON.stringify(modelResponse), tokenCount, true);
+            // For TextToJSON, ensure JSON validity and handle unrecoverable errors
+            if (thread.conversationType === LLMConversationType.TextToJSON) {
+                try {
+                    // Use ensureJsonResponse to validate/repair
+                    await selectedModel.llminterface.ensureJsonResponse(modelResponse);
+                } catch (jsonError) {
+                    // Blacklist model and throw to trigger retry
+                    console.error(`[Brain Chat] Model ${selectedModel.name} failed to return valid JSON: ${jsonError instanceof Error ? jsonError.message : String(jsonError)}`);
+                    this.modelManager.blacklistModel(selectedModel.name, new Date());
+                    throw new Error('Unrecoverable JSON from model: ' + selectedModel.name);
+                }
+            }
 
-        let confidence = 0.9;
-        let finalResponse = modelResponse;
-        if (typeof modelResponse === 'object' && modelResponse && 'confidence' in modelResponse) {
-            confidence = (modelResponse as any).confidence;
-            finalResponse = (modelResponse as any).result || modelResponse;
-        }
+            let tokenCount = 0;
+            if (typeof modelResponse === 'object' && modelResponse && 'usage' in modelResponse) {
+                tokenCount = (modelResponse as any).usage?.total_tokens || 0;
+            }
+            this.modelManager.trackModelResponse(requestId, typeof modelResponse === 'string' ? modelResponse : JSON.stringify(modelResponse), tokenCount, true);
 
-        res.json({
-            result: finalResponse,
-            confidence: confidence,
-            model: selectedModel.modelName,
-            requestId: requestId
-        });
+            let confidence = 0.9;
+            let finalResponse = modelResponse;
+            if (typeof modelResponse === 'object' && modelResponse && 'confidence' in modelResponse) {
+                confidence = (modelResponse as any).confidence;
+                finalResponse = (modelResponse as any).result || modelResponse;
+            }
+
+            res.json({
+                result: finalResponse,
+                confidence: confidence,
+                model: selectedModel.modelName,
+                requestId: requestId
+            });
+        } catch (err) {
+            this.activeLLMCalls = Math.max(0, this.activeLLMCalls - 1);
+            throw err;
+        }
     }
 
     getAvailableModels(): string[] {

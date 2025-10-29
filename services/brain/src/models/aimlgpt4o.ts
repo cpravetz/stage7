@@ -24,9 +24,9 @@ export class GPT4oModel extends BaseModel {
             }],
             [LLMConversationType.TextToJSON, {
                 costScore: 65,
-                accuracyScore: 92,
-                creativityScore: 90,
-                speedScore: 82
+                accuracyScore: 10,
+                creativityScore: 10,
+                speedScore: 50
             }]
         ]);
 

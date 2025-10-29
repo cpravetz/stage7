@@ -18,9 +18,9 @@ export class ClaudeSonnetModel extends BaseModel {
             }],
             [LLMConversationType.TextToJSON, {
                 costScore: 20,
-                accuracyScore: 90,
-                creativityScore: 90,
-                speedScore: 80
+                accuracyScore: 10,
+                creativityScore: 10,
+                speedScore: 50
             }]
         ]);
 

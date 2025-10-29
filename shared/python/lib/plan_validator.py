@@ -187,55 +187,59 @@ class PlanValidator:
 
     def validate_and_repair(self, plan: List[Dict[str, Any]], goal: str, inputs: Dict[str, Any], 
                            attempt: int = 1, previous_errors: List[str] = []) -> List[Dict[str, Any]]:
-        """Validate and repair plan if needed, with retries."""
-        logger.info(f"--- Validation Attempt {attempt}/{self.max_retries} ---")
-
-        if attempt > self.max_retries:
-            logger.warning(f"Plan validation failed after {self.max_retries} attempts. Returning plan.")
-            return plan
-
-        # Code-based repair first
-        current_plan = self._repair_plan_code_based(plan)
-        available_plugins = self._initialize_plugin_map(inputs)
-
-        # Apply input alias resolution
-        current_plan = self._resolve_input_aliases(current_plan, available_plugins)
-
-        validation_result = self._validate_plan(current_plan, available_plugins)
-
-        # Handle wrappable errors (FOREACH candidates)
-        wrappable_errors = validation_result.get('wrappable_errors', [])
-        if wrappable_errors:
-            logger.info(f"Found {len(wrappable_errors)} steps to wrap in FOREACH")
-            error = wrappable_errors[0]
-            step_to_wrap = next((s for s in current_plan if s.get('number') == error['step_number']), None)
-            
-            if step_to_wrap:
-                modified_plan = self._wrap_step_in_foreach(
-                    current_plan, step_to_wrap, error['source_step_number'],
-                    error['source_output_name'], error['target_input_name'], self.plugin_map
-                )
-                return self.validate_and_repair(modified_plan, goal, inputs, attempt + 1, validation_result['errors'])
-
-        # Handle validation errors
-        if validation_result['valid']:
-            logger.info("Plan validation successful")
-            return current_plan
-
-        actual_errors = validation_result['errors']
-        if not actual_errors:
-            logger.warning("Plan validation failed but no specific errors reported.")
-            return current_plan
-
-        logger.warning(f"Attempt {attempt}: Validation failed with {len(actual_errors)} errors")
-
-        # Try LLM repair
+        """Validate and repair plan if needed, with retries. Only throw for truly critical failures."""
         try:
-            repaired_plan = self._repair_plan_with_llm(current_plan, actual_errors, goal, inputs, previous_errors)
-            return self.validate_and_repair(repaired_plan, goal, inputs, attempt + 1, actual_errors)
+            logger.info(f"--- Validation Attempt {attempt}/{self.max_retries} ---")
+
+            if attempt > self.max_retries:
+                logger.warning(f"Plan validation failed after {self.max_retries} attempts. Returning plan.")
+                return plan
+
+            # Code-based repair first
+            current_plan = self._repair_plan_code_based(plan)
+            available_plugins = self._initialize_plugin_map(inputs)
+
+            # Apply input alias resolution
+            current_plan = self._resolve_input_aliases(current_plan, available_plugins)
+
+            validation_result = self._validate_plan(current_plan, available_plugins)
+
+            # Handle wrappable errors (FOREACH candidates)
+            wrappable_errors = validation_result.get('wrappable_errors', [])
+            if wrappable_errors:
+                logger.info(f"Found {len(wrappable_errors)} steps to wrap in FOREACH")
+                error = wrappable_errors[0]
+                step_to_wrap = next((s for s in current_plan if s.get('number') == error['step_number']), None)
+                if step_to_wrap:
+                    modified_plan = self._wrap_step_in_foreach(
+                        current_plan, step_to_wrap, error['source_step_number'],
+                        error['source_output_name'], error['target_input_name'], self.plugin_map
+                    )
+                    return self.validate_and_repair(modified_plan, goal, inputs, attempt + 1, validation_result['errors'])
+
+            # Handle validation errors
+            if validation_result['valid']:
+                logger.info("Plan validation successful")
+                return current_plan
+
+            actual_errors = validation_result['errors']
+            if not actual_errors:
+                logger.warning("Plan validation failed but no specific errors reported.")
+                return current_plan
+
+            logger.warning(f"Attempt {attempt}: Validation failed with {len(actual_errors)} errors")
+
+            # Try LLM repair
+            try:
+                repaired_plan = self._repair_plan_with_llm(current_plan, actual_errors, goal, inputs, previous_errors)
+                return self.validate_and_repair(repaired_plan, goal, inputs, attempt + 1, actual_errors)
+            except Exception as e:
+                logger.error(f"LLM repair failed: {e}")
+                # Instead of throwing, return best effort plan unless truly critical
+                return current_plan
         except Exception as e:
-            logger.error(f"LLM repair failed: {e}")
-            return current_plan
+            logger.error(f"Critical error in plan validation: {e}")
+            raise AccomplishError(str(e), "critical_error")
 
     def _find_embedded_references(self, value: str) -> Set[str]:
         """Find all embedded references in a string value (e.g., {output_name} or [output_name])."""
@@ -814,7 +818,7 @@ Return ONLY the corrected JSON plan, no explanations."""
         if not dest_input_def:
             return
         
-        dest_input_type = dest_input_def.get('valueType')
+        dest_input_type = dest_input_def.get('type') # Corrected from 'valueType'
         if not dest_input_type:
             return
 
@@ -828,46 +832,40 @@ Return ONLY the corrected JSON plan, no explanations."""
         if not source_plugin_def:
             return
 
-        # Get source output type
+        source_output_type = None
         source_output_defs = source_plugin_def.get('outputDefinitions', [])
-        source_output_def = next((out for out in source_output_defs if out.get('name') == source_output_name), None)
-        
-        if not source_output_def:
-            # Check against custom output names defined in the source step itself
-            source_step_definition = next((s for s in plan if s.get("number") == source_step_number), None)
-            if source_step_definition and source_output_name in source_step_definition.get('outputs', {}):
-                 # This is a custom output, we can't verify the type from the manifest, so we assume it's correct.
-                 return
 
-        if not source_output_def and len(source_output_defs) == 1:
-            source_output_def = source_output_defs[0]
-            # If we auto-mapped, update the input_def's outputName to match the actual source output name
-            if input_def.get('outputName') != source_output_def.get('name'):
-                logger.info(f"Step {step_number}: Auto-mapping input '{input_name}' outputName from '{input_def.get('outputName')}' to '{source_output_def.get('name')}'")
-                # This is the line causing the problem. Do not change the user-defined output name.
-                # input_def['outputName'] = source_output_def.get('name')
-        
-        if not source_output_def:
-            return
+        # 1. Try to find direct match in plugin's output definitions by name
+        direct_match_output_def = next((out for out in source_output_defs if out.get('name') == source_output_name), None)
+        if direct_match_output_def:
+            source_output_type = direct_match_output_def.get('type')
 
-        source_output_type = source_output_def.get('valueType')
+        # 2. If no direct match, and only one output definition exists for the source plugin, use its type
+        # This handles cases where the plan might use a custom output name for a plugin with a single output.
+        if not source_output_type and len(source_output_defs) == 1:
+            single_output_def = source_output_defs[0]
+            source_output_type = single_output_def.get('type')
+
         if not source_output_type:
-            return
+            # If we still don't have a source_output_type, it means we couldn't determine it from the plugin manifest.
+            # This will cause is_mismatch to be True, which is the desired behavior for an unknown type.
+            errors.append(f"Step {step_number}: Could not determine type for output '{original_source_output_name}' from step {source_step_number}")
+            return # Cannot proceed with type compatibility if source type is unknown
 
         # Check for type mismatch
         is_mismatch = False
-        
+
         # Allow implicit conversions
         if dest_input_type == 'string' and source_output_type in ['boolean', 'number']:
             return  # Allowed
         elif dest_input_type == 'array' and source_output_type == 'string':
             return  # Allowed
         else:
-            is_mismatch = (dest_input_type != source_output_type and 
+            is_mismatch = (dest_input_type != source_output_type and
                           dest_input_type != 'any' and source_output_type != 'any')
 
         # Check if wrappable in FOREACH
-        is_wrappable = (dest_input_type in ['string', 'number', 'object'] and 
+        is_wrappable = (dest_input_type in ['string', 'number', 'object'] and
                        source_output_type in ['array', 'list'])
 
         if is_wrappable and step.get('actionVerb') != 'FOREACH':

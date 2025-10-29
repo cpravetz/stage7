@@ -18,9 +18,9 @@ export class CodeLlama34bModel extends BaseModel {
             }],
             [LLMConversationType.TextToJSON, {
                 costScore: 95,
-                accuracyScore: 88,
-                creativityScore: 85,
-                speedScore: 90
+                accuracyScore: 10,
+                creativityScore: 10,
+                speedScore: 50
             }]
         ]);
 

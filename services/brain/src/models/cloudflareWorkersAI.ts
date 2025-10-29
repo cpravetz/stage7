@@ -17,9 +17,9 @@ export class CloudflareWorkersAIModel extends BaseModel {
                     costScore: 99, 
                 }],
                 [LLMConversationType.TextToJSON, {
-                    speedScore: 80,
-                    accuracyScore: 70,
-                    creativityScore: 60,
+                    speedScore: 50,
+                    accuracyScore: 10,
+                    creativityScore: 10,
                     costScore: 99, 
                 }],
             ]),

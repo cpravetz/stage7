@@ -1,4 +1,5 @@
 import { BaseInterface, ConvertParamsType } from './baseInterface';
+import { modelManagerInstance } from '../utils/modelManager';
 import { LLMConversationType } from '@cktmcs/shared';
 import { BaseService, ExchangeType } from '../services/baseService';
 import OpenAI from 'openai';
@@ -73,7 +74,11 @@ export class GroqInterface extends BaseInterface {
         const response = await this.chat(service, formattedMessages, { modelName: modelName, responseType: 'json'} );
 
         // Always apply JSON cleanup for TextToJSON conversion type
-        return this.ensureJsonResponse(response, true);
+        const jsonResponse = await this.ensureJsonResponse(response, true, service);
+        if (jsonResponse === null) {
+            throw new Error("Failed to extract valid JSON from the model's response.");
+        }
+        return jsonResponse;
     }
 
     chat = async (service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string, responseType:string, response_format?: any }): Promise<string> => {
@@ -81,6 +86,9 @@ export class GroqInterface extends BaseInterface {
         const maxRetries = 5;
         let attempt = 0;
         let waitTime = 1000; // Initial wait time in ms
+    let lastTokenLimit: number | undefined;
+    let model: any = undefined;
+    let modelIdentifier: string = options.modelName || 'groq/llama-3-8b-8192';
 
         while (attempt < maxRetries) {
             try {
@@ -99,12 +107,18 @@ export class GroqInterface extends BaseInterface {
 
                 // Get the model name from options or use a default
                 // Strip the 'groq/' prefix if present
-                let modelName = options.modelName || 'llama-3-8b-8192';
+                modelIdentifier = options.modelName || 'groq/llama-3-8b-8192';
+                let modelName = modelIdentifier;
                 if (modelName.startsWith('groq/')) {
                     modelName = modelName.substring(5); // Remove 'groq/' prefix
                 }
 
                 console.log(`Using Groq model: ${modelName}`);
+
+                // Get the model from the model manager to check the token limit
+                model = modelManagerInstance.getModel(modelIdentifier);
+                let tokenLimit = model ? model.tokenLimit : 8192; // Default to 8192 if model not found
+                lastTokenLimit = tokenLimit;
 
                 // Format messages for Groq API (OpenAI format)
                 const formattedMessages = messages.map(msg => {
@@ -119,11 +133,12 @@ export class GroqInterface extends BaseInterface {
                     console.log(`GroqInterface: First message is very long (${formattedMessages[0].content.length} chars), it might be truncated by the API`);
                 }
 
+                let maxTokens = Math.min(options.max_length || 6000, tokenLimit);
                 const requestOptions: any = {
                     model: modelName,
                     messages: formattedMessages,
                     temperature: options.temperature || 0.7,
-                    max_tokens: options.max_length || 6000,
+                    max_tokens: maxTokens,
                     stream: false
                 };
 
@@ -145,13 +160,32 @@ export class GroqInterface extends BaseInterface {
                     console.log(`GroqInterface: Received response with content: ${content.substring(0, 140)}... (truncated)`);
                     const requireJson = (options.response_format?.type === 'json_object') || options.responseType === 'json';
                     if (requireJson) {
-                        return this.ensureJsonResponse(content, true);
+                        const jsonResponse = await this.ensureJsonResponse(content, true, service);
+                        if (jsonResponse === null) {
+                            throw new Error("Failed to extract valid JSON from the model's response.");
+                        }
+                        return jsonResponse;
                     }
                     return content;
                 }
 
                 return '';
             } catch (error: Error | any) {
+                // Handle context window/max_tokens errors
+                if (error.message && error.message.match(/max_tokens|context_window|maximum context length/i) && attempt < maxRetries - 1) {
+                    attempt++;
+                    // Reduce max_tokens and update model tokenLimit
+                    lastTokenLimit = Math.max(Math.floor((lastTokenLimit || 8192) * 0.75), 512);
+                    if (model) {
+                        model.tokenLimit = lastTokenLimit;
+                        console.warn(`GroqInterface: Reducing tokenLimit for model ${modelIdentifier} to ${lastTokenLimit}`);
+                    }
+                    options.max_length = lastTokenLimit;
+                    console.warn(`GroqInterface: Context window error. Retrying with max_tokens=${lastTokenLimit} (Attempt ${attempt}/${maxRetries})`);
+                    await new Promise(resolve => setTimeout(resolve, waitTime));
+                    waitTime *= 2;
+                    continue;
+                }
                 if (error.status === 429 && attempt < maxRetries - 1) {
                     attempt++;
                     const retryAfter = error.headers['retry-after'];
@@ -164,6 +198,7 @@ export class GroqInterface extends BaseInterface {
                     console.warn(`Rate limit exceeded. Retrying in ${waitTime / 1000} seconds... (Attempt ${attempt}/${maxRetries})`);
                     await new Promise(resolve => setTimeout(resolve, waitTime));
                     waitTime *= 2; // Exponential backoff
+                    continue;
                 } else {
                     console.error('Error generating response from Groq:', error instanceof Error ? error.message : error);
                     throw error; // Rethrow to allow the Brain to handle the error

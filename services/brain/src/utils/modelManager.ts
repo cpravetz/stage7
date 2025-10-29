@@ -161,46 +161,59 @@ export class ModelManager {
         // Get all available models that support the conversation type
         const availableModels = Array.from(this.models.values())
             .filter(model => {
-
+                // Enhanced logging for every model considered
+                let reason = '';
                 if (excludedModels.includes(model.name)) {
+                    reason = 'excluded (already tried this request)';
+                    console.log(`[ModelSelection] Skipping ${model.name}: ${reason}`);
                     return false;
                 }
-
+                // Enforce minimum tokenLimit for complex planning (phases 1 & 2)
+                if ((conversationType === LLMConversationType.TextToText || conversationType === LLMConversationType.TextToJSON) && model.tokenLimit < 8000) {
+                    reason = `tokenLimit ${model.tokenLimit} < 8000 for ${conversationType}`;
+                    console.log(`[ModelSelection] Skipping ${model.name}: ${reason}`);
+                    return false;
+                }
                 // Check if the model can handle the estimated token count
                 if (estimatedTokens > 0 && model.tokenLimit < estimatedTokens) {
+                    reason = `tokenLimit ${model.tokenLimit} < estimatedTokens ${estimatedTokens}`;
+                    console.log(`[ModelSelection] Skipping ${model.name}: ${reason}`);
                     return false;
                 }
-
                 // Check if model supports the conversation type
                 if (!model.contentConversation.includes(conversationType)) {
+                    reason = `does not support conversation type ${conversationType}`;
+                    console.log(`[ModelSelection] Skipping ${model.name}: ${reason}`);
                     return false;
                 }
-
                 // Check if model's interface is available
                 const interfaceInstance = interfaceManager.getInterface(model.interfaceName);
                 if (!interfaceInstance) {
+                    reason = 'interface unavailable';
+                    console.log(`[ModelSelection] Skipping ${model.name}: ${reason}`);
                     return false;
                 }
-
                 // Check if model's service is available
                 const service = serviceManager.getService(model.serviceName);
                 if (!service) {
+                    reason = 'service unavailable';
+                    console.log(`[ModelSelection] Skipping ${model.name}: ${reason}`);
                     return false;
                 }
-
                 if (!service.isAvailable()) {
+                    reason = 'service not available';
+                    console.log(`[ModelSelection] Skipping ${model.name}: ${reason}`);
                     return false;
                 }
-
                 // Check if model is blacklisted
                 const isBlacklisted = this.performanceTracker.isModelBlacklisted(model.name, conversationType);
                 if (isBlacklisted) {
-                    console.log(`Model ${model.name} is blacklisted for conversation type ${conversationType}`);
+                    reason = 'blacklisted';
+                    console.log(`[ModelSelection] Skipping ${model.name}: ${reason}`);
                     return false;
                 } else {
-                    console.log(`Model ${model.name} is NOT blacklisted for conversation type ${conversationType}`);
+                    console.log(`[ModelSelection] Considering ${model.name}: tokenLimit=${model.tokenLimit}, supports=${model.contentConversation}, not blacklisted`);
                 }
-
                 return true;
             });
 

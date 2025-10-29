@@ -4,7 +4,7 @@ import cors from 'cors';
 import WebSocket from 'ws';
 import http from 'http';
 import { Component } from './types/Component';
-import { Message, MessageType, BaseEntity, LLMConversationType, ToolSource, PendingTool, PluginManifest, DefinitionManifest } from '@cktmcs/shared';
+import { Message, MessageType, BaseEntity, LLMConversationType, ToolSource, PendingTool, PluginManifest, DefinitionManifest, MissionFile } from '@cktmcs/shared';
 import axios from 'axios';
 import { analyzeError } from '@cktmcs/errorhandler';
 import bodyParser from 'body-parser';
@@ -1063,31 +1063,80 @@ export class PostOffice extends BaseEntity {
             if (!librarianUrl) {
                 return res.status(503).send({ error: 'Librarian service not available' });
             }
-    
-            const fileInfoResponse = await this.authenticatedApi.get(`http://${librarianUrl}/loadData/step-output-${fileId}`, {
-                params: { collection: 'step-outputs', storageType: 'mongo' }
-            });
-    
-            const fileData = fileInfoResponse.data.data;
-            if (!fileData) {
-                return res.status(404).send({ error: 'File not found' });
+
+            let fileToDownload: MissionFile | undefined;
+            let missionId: string | undefined;
+
+            // Attempt 1: Search for the file in the 'deliverables' collection
+            try {
+                const deliverableResponse = await this.authenticatedApi.get(`http://${librarianUrl}/loadData/${fileId}`, {
+                    params: { collection: 'deliverables', storageType: 'mongo' }
+                });
+
+                if (deliverableResponse.data && deliverableResponse.data.data) {
+                    const deliverable = deliverableResponse.data.data;
+                    // Assuming deliverable structure contains MissionFile-like properties or a direct MissionFile
+                    // If deliverable is directly a MissionFile
+                    if (deliverable.id === fileId && deliverable.storagePath) {
+                        fileToDownload = deliverable;
+                        missionId = deliverable.missionId; // Deliverables should have missionId
+                    } else if (deliverable.data && deliverable.data.id === fileId && deliverable.data.storagePath) {
+                        // If deliverable wraps the MissionFile in a 'data' field
+                        fileToDownload = deliverable.data;
+                        missionId = deliverable.missionId;
+                    }
+                }
+            } catch (error) {
+                // Log and ignore 404s from deliverables collection, continue search
+                if (axios.isAxiosError(error) && error.response?.status !== 404) {
+                    console.warn(`Error searching deliverables for file ${fileId}:`, error instanceof Error ? error.message : error);
+                }
             }
-    
-            const fileName = fileData.originalName || 'download';
-            const mimeType = fileData.mimeType || 'application/octet-stream';
-            const content = fileData.fileContent;
-    
-            res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
-            res.setHeader('Content-Type', mimeType);
-            res.send(Buffer.from(content));
-    
+
+            // Attempt 2: If not found as a deliverable, search within 'missions.attachedFiles' (user uploads)
+            if (!fileToDownload) {
+                const missionFileQueryResult = await this.authenticatedApi.post(`http://${librarianUrl}/queryData`, {
+                    collection: 'missions',
+                    query: { "attachedFiles.id": fileId },
+                    limit: 1
+                });
+
+                if (missionFileQueryResult.data && missionFileQueryResult.data.data && missionFileQueryResult.data.data.length > 0) {
+                    const mission = missionFileQueryResult.data.data[0];
+                    const foundFile = mission.attachedFiles.find((f: MissionFile) => f.id === fileId);
+                    if (foundFile) {
+                        fileToDownload = foundFile;
+                        missionId = mission.id;
+                    }
+                }
+            }
+
+            if (!fileToDownload || !missionId) {
+                return res.status(404).send({ error: 'File not found or not authorized for download.' });
+            }
+
+            // Check if file exists on disk before attempting to get content
+            const fileExists = await this.fileUploadManager.fileUploadServiceInstance.fileExists(fileToDownload.storagePath);
+            if (!fileExists) {
+                return res.status(404).send({ error: 'File not found on storage.' });
+            }
+
+            // Get the file content using FileUploadManager's service
+            const fileBuffer = await this.fileUploadManager.fileUploadServiceInstance.getFile(fileToDownload.id, fileToDownload.storagePath);
+
+            // Set appropriate headers for file download
+            res.setHeader('Content-Disposition', `attachment; filename="${fileToDownload.originalName}"`);
+            res.setHeader('Content-Type', fileToDownload.mimeType);
+            res.setHeader('Content-Length', fileBuffer.length.toString());
+            res.send(fileBuffer);
+
         } catch (error) {
             analyzeError(error as Error);
-            console.error('Error downloading mission file:', error instanceof Error ? error.message : error);
+            console.error('Error downloading shared file:', error instanceof Error ? error.message : error);
             if (axios.isAxiosError(error) && error.response?.status === 404) {
                 return res.status(404).send({ error: 'File not found in storage.' });
             }
-            res.status(500).send({ error: 'Failed to download mission file' });
+            res.status(500).send({ error: 'Failed to download shared file.' });
         }
     }
 

@@ -66,9 +66,13 @@ export class MistralInterface extends BaseInterface {
                 let content = response.data.choices[0].message.content;
 
                 // --- Ensure JSON if required ---
-                let requireJson = options.responseType === 'json' ? true : false;
+                const requireJson = options.responseType === 'json';
                 if (requireJson) {
-                    return await this.ensureJsonResponse(content, true, service);
+                    const jsonResponse = await this.ensureJsonResponse(content, true, service);
+                    if (jsonResponse === null) {
+                        throw new Error("Failed to extract valid JSON from the model's response.");
+                    }
+                    return jsonResponse;
                 }
                 return content;
             } else {

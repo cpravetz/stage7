@@ -4,7 +4,7 @@ import { MissionFile } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { FileUploadService } from './fileUploadService';
 import path from 'path';
-import { AxiosInstance } from 'axios';
+import axios, { AxiosInstance } from 'axios';
 
 export class FileUploadManager {
     private fileUploadService: FileUploadService;
@@ -181,9 +181,11 @@ export class FileUploadManager {
                 const existingFiles = mission.attachedFiles || [];
                 const missionFile = this.fileUploadService.convertToMissionFile(uploadedFile);
 
+                // Only include files that have actual file content or are valid deliverables
+                const filteredExistingFiles = existingFiles.filter((f: MissionFile) => f && f.storagePath && f.size > 0);
                 const updatedMission = {
                     ...mission,
-                    attachedFiles: [...existingFiles, missionFile],
+                    attachedFiles: [...filteredExistingFiles, missionFile],
                     updatedAt: new Date()
                 };
 
@@ -271,9 +273,11 @@ export class FileUploadManager {
 
             // Update the mission with the new files
             const existingFiles = mission.attachedFiles || [];
+            // Only include files that have actual file content or are valid deliverables
+            const filteredExistingFiles = existingFiles.filter((f: MissionFile) => f && f.storagePath && f.size > 0);
             const updatedMission = {
                 ...mission,
-                attachedFiles: [...existingFiles, ...uploadedFiles],
+                attachedFiles: [...filteredExistingFiles, ...uploadedFiles],
                 updatedAt: new Date()
             };
 
@@ -356,38 +360,66 @@ export class FileUploadManager {
                 return res.status(500).json({ error: 'Librarian service not available' });
             }
 
-            // Load the mission to get file information
-            const missionResponse = await this.authenticatedApi.get(`http://${librarianUrl}/loadData/${missionId}`, {
-                params: { collection: 'missions', storageType: 'mongo' }
-            });
+            let fileToDownload: MissionFile | undefined;
 
-            if (!missionResponse.data || !missionResponse.data.data) {
-                return res.status(404).json({ error: 'Mission not found' });
+            // Attempt 1: Search for the file in the 'deliverables' collection
+            try {
+                const deliverableResponse = await this.authenticatedApi.get(`http://${librarianUrl}/loadData/deliverable-${fileId}`, {
+                    params: { collection: 'deliverables', storageType: 'mongo' }
+                });
+
+                if (deliverableResponse.data && deliverableResponse.data.data) {
+                    const deliverable = deliverableResponse.data.data;
+                    if (deliverable.missionFile && deliverable.missionFile.id === fileId && deliverable.missionFile.missionId === missionId) {
+                        fileToDownload = deliverable.missionFile;
+                    }
+                }
+            } catch (error) {
+                // Log and ignore 404s from deliverables collection, continue search
+                if (axios.isAxiosError(error) && error.response?.status !== 404) {
+                    console.warn(`Error searching deliverables for file ${fileId}:`, error instanceof Error ? error.message : error);
+                }
             }
 
-            const mission = missionResponse.data.data;
-            const files = mission.attachedFiles || [];
-            const file = files.find((f: MissionFile) => f.id === fileId);
+            // Attempt 2: If not found as a deliverable, load the mission and search within 'missions.attachedFiles'
+            if (!fileToDownload) {
+                const missionResponse = await this.authenticatedApi.get(`http://${librarianUrl}/loadData/${missionId}`, {
+                    params: { collection: 'missions', storageType: 'mongo' }
+                });
 
-            if (!file) {
-                return res.status(404).json({ error: 'File not found in mission' });
+                if (!missionResponse.data || !missionResponse.data.data) {
+                    return res.status(404).json({ error: 'Mission not found' });
+                }
+
+                const mission = missionResponse.data.data;
+                const files = mission.attachedFiles || [];
+                const foundFile = files.find((f: MissionFile) => f.id === fileId);
+
+                if (foundFile) {
+                    fileToDownload = foundFile;
+                }
+            }
+
+            if (!fileToDownload) {
+                return res.status(404).json({ error: 'File not found in mission or deliverables' });
             }
 
             // Check if file exists on disk
-            const fileExists = await this.fileUploadService.fileExists(file.storagePath);
+            const fileExists = await this.fileUploadService.fileExists(fileToDownload.storagePath);
             if (!fileExists) {
                 return res.status(404).json({ error: 'File not found on storage' });
             }
 
             // Get the file content
-            const fileBuffer = await this.fileUploadService.getFile(file.id, file.storagePath);
+            const fileBuffer = await this.fileUploadService.getFile(fileToDownload.id, fileToDownload.storagePath);
 
             // Set appropriate headers for file download
-            res.setHeader('Content-Type', file.mimeType);
-            res.setHeader('Content-Disposition', `attachment; filename="${file.originalName}"`);
-            res.setHeader('Content-Length', file.size.toString());
+            res.setHeader('Content-Type', fileToDownload.mimeType);
+            res.setHeader('Content-Disposition', `attachment; filename="${fileToDownload.originalName}"`);
+            res.setHeader('Content-Length', fileBuffer.length.toString());
 
-            res.send(fileBuffer);
+                // Return only the file content, not the full object with metadata
+                res.status(200).send(fileBuffer);
 
         } catch (error) {
             analyzeError(error as Error);

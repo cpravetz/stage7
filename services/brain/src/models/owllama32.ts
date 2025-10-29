@@ -13,8 +13,8 @@ export class KNLLMModel extends BaseModel {
         ]);
 
         super({
-            name: "openweb/llama3.2:3b",
-            modelName: "llama3.2:3b",
+            name: "openweb/llama4:latest",
+            modelName: "llama4:latest",
             interfaceName: "openwebui", // Must match the interface name in OpenWebUIInterface.ts
             serviceName: "OWService", // Must match the service name in OWService.ts
             tokenLimit: 128000,

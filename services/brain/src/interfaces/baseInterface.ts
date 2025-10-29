@@ -27,7 +27,7 @@ export abstract class BaseInterface {
         this.converters = new Map(); // Initialize converters map
     }
 
-    abstract chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, responseType?: string, tokenLimit?: number }): Promise<string>;
+    abstract chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, responseType?: string, tokenLimit?: number, schema?: any }): Promise<string>;
 
     abstract convert(service: BaseService, conversionType: LLMConversationType, convertParams: ConvertParamsType): Promise<any>;
 
@@ -47,11 +47,12 @@ export abstract class BaseInterface {
      * @param originalPrompt Optional original prompt for context-aware validation.
      * @returns Valid JSON string or throws an error.
      */
-    public async ensureJsonResponse(response: string, allowPartialRecovery: boolean = false, service?: BaseService, originalPrompt?: string): Promise<string> {
+    public async ensureJsonResponse(response: string, allowPartialRecovery: boolean = false, service?: BaseService, originalPrompt?: string): Promise<string | null> {
         console.log('[baseInterface] Ensuring JSON response');
         console.log('[baseInterface] Original response:', response);
         if (!response || response.trim() === '') {
-            throw new Error('[baseInterface] Empty response received');
+            console.error('[baseInterface] Empty response received');
+            return null;
         }
 
         let cleanedResponse = response.trim();
@@ -120,14 +121,23 @@ export abstract class BaseInterface {
             return JSON.stringify(parsed, null, 2);
         } catch (e) {
             if (service) {
-                console.log('[baseInterface] Local JSON repair failed, attempting LLM-assisted repair...');
-                const repairPrompt = `The following text is supposed to be a single valid JSON object, but it is malformed. Please fix it. Your entire response must be a single, valid JSON object. Do not include any explanations, markdown, or code blocks - just the raw JSON object.\n\nBROKEN JSON:\n${cleanedResponse}`;
-                return this.chat(service, [{ role: 'user', content: repairPrompt }], { responseType: 'json' });
+                try {
+                    console.log('[baseInterface] Local JSON repair failed, attempting LLM-assisted repair...');
+                    const repairPrompt = `The following text is supposed to be a single valid JSON object, but it is malformed. Please fix it. Your entire response must be a single, valid JSON object. Do not include any explanations, markdown, or code blocks - just the raw JSON object.\n\nBROKEN JSON:\n${cleanedResponse}`;
+                    const repairedJson = await this.chat(service, [{ role: 'user', content: repairPrompt }], { responseType: 'json' });
+                    // Final validation of the LLM-repaired JSON
+                    JSON.parse(repairedJson);
+                    return repairedJson;
+                } catch (llmError) {
+                    const errorMessage = llmError instanceof Error ? llmError.message : String(llmError);
+                    console.error(`[baseInterface] LLM-assisted repair failed: ${errorMessage}`);
+                }
             }
             const errorMessage = e instanceof Error ? e.message : String(e);
             console.error(`[baseInterface] Final JSON parse failed after all attempts: ${errorMessage}`);
             console.error('[baseInterface] Malformed JSON that caused final failure:', cleanedResponse.substring(0, 500) + '...');
-            throw new Error(`JSON_PARSE_ERROR: ${errorMessage}`);
+            // Throw error so Brain can handle blacklisting and retry
+            throw new Error('Unrecoverable JSON: ' + errorMessage);
         }
     }
 
@@ -266,7 +276,7 @@ export abstract class BaseInterface {
                 for (const match of sortedMatches) {
                     try {
                         const parsed = JSON.parse(match);
-                        if (parsed.type) {
+                        if (typeof parsed === 'object' && parsed !== null && parsed.type) {
                             console.log('[baseInterface] Successfully extracted complete response with type:', parsed.type);
                             return JSON.stringify(parsed, null, 2);
                         }
@@ -297,8 +307,10 @@ export abstract class BaseInterface {
                 for (const match of sortedMatches) {
                     try {
                         const parsed = JSON.parse(match);
-                        console.log('[baseInterface] Extracted JSON (fallback)');
-                        return JSON.stringify(parsed, null, 2);
+                        if (typeof parsed === 'object' && parsed !== null) {
+                            console.log('[baseInterface] Extracted JSON (fallback)');
+                            return JSON.stringify(parsed, null, 2);
+                        }
                     } catch (e) {
                         continue;
                     }

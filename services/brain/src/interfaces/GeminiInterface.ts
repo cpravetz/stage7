@@ -94,7 +94,11 @@ export class GeminiInterface extends BaseInterface {
         const response = await this.chat(service, messages, { modelName, responseType: 'json' });
 
         // Always apply JSON cleanup for TextToJSON conversion type
-        return this.ensureJsonResponse(response, true);
+        const jsonResponse = await this.ensureJsonResponse(response, true, service);
+        if (jsonResponse === null) {
+            throw new Error("Failed to extract valid JSON from the model's response.");
+        }
+        return jsonResponse;
     }
 
     async convertImageToText(args: ConvertParamsType): Promise<string> {
@@ -300,9 +304,13 @@ export class GeminiInterface extends BaseInterface {
                 const prompt = formattedMessages[0].parts[0].text || '';
                 const result = await model.generateContent(prompt);
                 const response = result.response;
-                let requireJson = options.responseType === 'json' ? true : false;
+                const requireJson = options.responseType === 'json';
                 if (requireJson) {
-                    return this.ensureJsonResponse(response.text(), true);
+                    const jsonResponse = await this.ensureJsonResponse(response.text(), true, service);
+                    if (jsonResponse === null) {
+                        throw new Error("Failed to extract valid JSON from the model's response.");
+                    }
+                    return jsonResponse;
                 }
                 return response.text();
             } else {
@@ -318,9 +326,13 @@ export class GeminiInterface extends BaseInterface {
                 const result = await chat.sendMessage(lastMessage);
                 const fullResponse = result.response.text();
                 console.log(`GeminiInterface: Received response with content: ${fullResponse.substring(0, 140)}... (truncated)`);
-                let requireJson = options.responseType === 'json' ? true : false;
+                const requireJson = options.responseType === 'json';
                 if (requireJson) {
-                    return this.ensureJsonResponse(fullResponse, true);
+                    const jsonResponse = await this.ensureJsonResponse(fullResponse, true, service);
+                    if (jsonResponse === null) {
+                        throw new Error("Failed to extract valid JSON from the model's response.");
+                    }
+                    return jsonResponse;
                 }
                 return fullResponse;
             }

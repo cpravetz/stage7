@@ -111,7 +111,11 @@ export class OpenRouterInterface extends BaseInterface {
         const response = await this.chat(service, messages, { modelName, responseType: 'json' });
 
         // Always apply JSON cleanup for TextToJSON conversion type
-        return await this.ensureJsonResponse(response, true, service);
+        const jsonResponse = await this.ensureJsonResponse(response, true, service);
+        if (jsonResponse === null) {
+            throw new Error("Failed to extract valid JSON from the model's response.");
+        }
+        return jsonResponse;
     }
 
     async convertTextToImage(args: ConvertParamsType): Promise<string> {
@@ -140,7 +144,7 @@ export class OpenRouterInterface extends BaseInterface {
           return result.json();
     }
 
-    async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string, responseType?: string }): Promise<string> {
+    async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string, responseType?: string, schema?: any }): Promise<string> {
         const max_length = options.max_length || 4000;
         const temperature = options.temperature || 0.7;
         let trimmedMessages = this.trimMessages(messages, max_length);
@@ -152,6 +156,15 @@ export class OpenRouterInterface extends BaseInterface {
             max_tokens: max_length,
             stream: false, // Always use non-streaming for compatibility
         };
+
+        // If schema is provided and API supports it, pass it in requestOptions
+        if (options.schema) {
+            // OpenRouter does not support JSON schema natively, so add to prompt
+            if (Array.isArray(requestOptions.messages)) {
+                requestOptions.messages.unshift({ role: 'system', content: `Your response must comply with this schema: ${JSON.stringify(options.schema)}` });
+            }
+        }
+
         // If responseType is 'json', set response_format and prepend system prompt
         if (options.responseType === 'json') {
             requestOptions.response_format = { type: 'json_object' };
@@ -164,16 +177,30 @@ export class OpenRouterInterface extends BaseInterface {
         const openRouterApiClient = new OpenAI({ apiKey: service.apiKey, baseURL: service.apiUrl });
 
         let fullResponse = '';
-        const response = await openRouterApiClient.chat.completions.create(requestOptions);
-        if (response.choices && response.choices[0] && response.choices[0].message && response.choices[0].message.content) {
-            fullResponse = response.choices[0].message.content;
+        try {
+            const response = await openRouterApiClient.chat.completions.create(requestOptions);
+            if (response.choices && response.choices[0] && response.choices[0].message && response.choices[0].message.content) {
+                fullResponse = response.choices[0].message.content;
+            }
+            console.log(`OpenRouterInterface: Received response with content: ${fullResponse.substring(0, 140)}... (truncated)`);
+        } catch (error) {
+            console.error(`OpenRouterInterface: Error during chat completion:`, error);
+            if (error instanceof Error) {
+                if (error.message) {
+                    console.error(`OpenRouterInterface: Error message: ${error.message}`);
+                }
+            }
+            throw error;
         }
-        console.log(`OpenRouterInterface: Received response with content: ${fullResponse.substring(0, 140)}... (truncated)`);
 
         // --- Ensure JSON if required ---
-        let requireJson = options.responseType === 'json' ? true : false;
+        const requireJson = options.responseType === 'json';
         if (requireJson) {
-            return await this.ensureJsonResponse(fullResponse, true, service);
+            const jsonResponse = await this.ensureJsonResponse(fullResponse, true, service);
+            if (jsonResponse === null) {
+                throw new Error("Failed to extract valid JSON from the model's response.");
+            }
+            return jsonResponse;
         }
 
         return fullResponse || '';

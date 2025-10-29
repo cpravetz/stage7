@@ -13,6 +13,11 @@ export class CloudflareWorkersAIInterface extends BaseInterface {
             requiredParams: ['service', 'prompt'],
             converter: this.convertTextToText,
         });
+        this.converters.set(LLMConversationType.TextToJSON, {
+            conversationType: LLMConversationType.TextToJSON,
+            requiredParams: ['service', 'prompt'],
+            converter: this.convertTextToJSON,
+        });
     }
 
     async convertTextToText(args: ConvertParamsType): Promise<string> {
@@ -23,6 +28,29 @@ export class CloudflareWorkersAIInterface extends BaseInterface {
 
         const messages: ExchangeType = [{ role: 'user', content: prompt || '' }];
         return this.chat(service, messages, { modelName });
+    }
+
+    async convertTextToJSON(args: ConvertParamsType): Promise<string> {
+        const { service, prompt, modelName } = args;
+        if (!service) {
+            throw new Error('CloudflareWorkersAIInterface: No service provided for text-to-JSON conversion');
+        }
+
+        const systemMessage = 'You are a JSON generation assistant. You must respond with valid JSON only. No explanations, no markdown, no code blocks - just pure JSON starting with { or [ and ending with } or ].';
+
+        const messages: ExchangeType = [
+            { role: 'system', content: systemMessage },
+            { role: 'user', content: prompt || '' }
+        ];
+
+        const response = await this.chat(service, messages, { modelName, responseType: 'json' });
+
+        // Always apply JSON cleanup for TextToJSON conversion type
+        const jsonResponse = await this.ensureJsonResponse(response, true, service);
+        if (jsonResponse === null) {
+            throw new Error("Failed to extract valid JSON from the model's response.");
+        }
+        return jsonResponse;
     }
 
     async convert(service: BaseService, conversionType: LLMConversationType, convertParams: ConvertParamsType): Promise<any> {
@@ -41,7 +69,7 @@ export class CloudflareWorkersAIInterface extends BaseInterface {
         return converter.converter(convertParams);
     }
 
-    async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string }): Promise<string> {
+    async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string, responseType?: string }): Promise<string> {
         try {
             if (!service || !service.isAvailable() || !service.apiKey || !service.apiUrl) {
                 throw new Error('Cloudflare Workers AI service is not available or API key/URL is missing');
@@ -66,14 +94,25 @@ export class CloudflareWorkersAIInterface extends BaseInterface {
 
             const response = await axios.post(apiUrl, payload, { headers });
 
+            let content = '';
             if (response.data && response.data.result && response.data.result.response) {
-                return response.data.result.response;
+                content = response.data.result.response;
             } else if (response.data && response.data.result && response.data.result.choices && response.data.result.choices.length > 0) {
                 // Fallback for OpenAI-compatible response structure
-                return response.data.result.choices[0].message.content;
+                content = response.data.result.choices[0].message.content;
             } else {
                 throw new Error(`Unexpected response format from Cloudflare Workers AI: ${JSON.stringify(response.data)}`);
             }
+
+            const requireJson = options.responseType === 'json';
+            if (requireJson) {
+                const jsonResponse = await this.ensureJsonResponse(content, true, service);
+                if (jsonResponse === null) {
+                    throw new Error("Failed to extract valid JSON from the model's response.");
+                }
+                return jsonResponse;
+            }
+            return content;
         } catch (error) {
             console.error('Error generating response from Cloudflare Workers AI:', error instanceof Error ? error.message : error);
             throw error;

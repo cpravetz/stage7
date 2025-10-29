@@ -472,10 +472,12 @@ class SearchPlugin:
                 
                 search_successful = False
                 for provider in sorted_providers:
+                    logger.info(f"Attempting search for '{term}' using {provider.name} (performance score: {provider.performance_score})")
                     try:
                         results = provider.search(term)
                         
                         if results:
+                            logger.info(f"{provider.name} successfully returned {len(results)} results for '{term}'.")
                             term_results.extend(results)
                             provider.update_performance(success=True)
                             search_successful = True
@@ -572,7 +574,34 @@ def parse_inputs(inputs_str: str) -> Dict[str, Any]:
         payload = json.loads(inputs_str)
         inputs: Dict[str, Any] = {}
 
-        # Case A: payload is a list of [key, value] pairs (legacy / preferred)
+        # Accept a single string as the search term
+        if isinstance(payload, str):
+            inputs['searchTerm'] = {'value': payload}
+            return inputs
+
+        # Accept a dict with a searchTerm key
+        if isinstance(payload, dict):
+            # If _type: Map and entries, treat as array of pairs
+            if payload.get('_type') == 'Map' and isinstance(payload.get('entries'), list):
+                for entry in payload.get('entries', []):
+                    if isinstance(entry, list) and len(entry) == 2:
+                        key, raw_value = entry
+                        if isinstance(raw_value, dict):
+                            inputs[key] = raw_value
+                        else:
+                            inputs[key] = {'value': raw_value}
+                return inputs
+            # Otherwise, treat as a normal dict
+            for key, raw_value in payload.items():
+                if key == '_type' or key == 'entries':
+                    continue
+                if isinstance(raw_value, dict):
+                    inputs[key] = raw_value
+                else:
+                    inputs[key] = {'value': raw_value}
+            return inputs
+
+        # Accept a list of [key, value] pairs
         if isinstance(payload, list):
             for item in payload:
                 if isinstance(item, list) and len(item) == 2:
@@ -581,36 +610,10 @@ def parse_inputs(inputs_str: str) -> Dict[str, Any]:
                         inputs[key] = raw_value
                     else:
                         inputs[key] = {'value': raw_value}
-                else:
-                    logger.debug(f"Skipping invalid input item in list payload: {item}")
+            return inputs
 
-        # Case B: payload is a serialized Map object with entries: [[key, value], ...]
-        elif isinstance(payload, dict) and payload.get('_type') == 'Map' and isinstance(payload.get('entries'), list):
-            for entry in payload.get('entries', []):
-                if isinstance(entry, list) and len(entry) == 2:
-                    key, raw_value = entry
-                    if isinstance(raw_value, dict):
-                        inputs[key] = raw_value
-                    else:
-                        inputs[key] = {'value': raw_value}
-                else:
-                    logger.debug(f"Skipping invalid Map entry: {entry}")
-
-        # Case C: payload is already a dict mapping keys -> values (possibly already normalized)
-        elif isinstance(payload, dict):
-            for key, raw_value in payload.items():
-                # Skip internal meta fields if present
-                if key == '_type' or key == 'entries':
-                    continue
-                if isinstance(raw_value, dict):
-                    inputs[key] = raw_value
-                else:
-                    inputs[key] = {'value': raw_value}
-
-        else:
-            # Unsupported top-level type, provide clear error
-            raise ValueError("Unsupported input format: expected array of pairs, Map with entries, or object mapping")
-
+        # If none of the above, treat as a single search term string
+        inputs['searchTerm'] = {'value': str(payload)}
         return inputs
     except Exception as e:
         logger.error(f"Input parsing failed: {e}")

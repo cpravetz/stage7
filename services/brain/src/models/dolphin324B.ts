@@ -24,8 +24,8 @@ export class Dolphin324BModel extends BaseModel {
             }],
             [LLMConversationType.TextToJSON, {
                 costScore: 100,  
-                accuracyScore: 75,  
-                creativityScore: 40,  
+                accuracyScore: 10,  
+                creativityScore: 10,  
                 speedScore: 50  
             }]
         ]);
