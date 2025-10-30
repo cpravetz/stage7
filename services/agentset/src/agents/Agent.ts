@@ -811,134 +811,45 @@ Please consider this context when planning and executing the mission. Provide de
         }
     }
 
-    private async saveWorkProductWithClassification(stepId: string, data: PluginOutput[], isAgentEndpoint: boolean, allAgents: Agent[]): Promise<void> {
+    private async saveWorkProductWithClassification(step: Step, data: PluginOutput[]): Promise<void> {
         if (this.status in [AgentStatus.PAUSED, AgentStatus.ABORTED]) {
-            console.log(`Agent ${this.id} is in status ${this.status}, skipping saveWorkProduct for step ${stepId}.`);
+            console.log(`Agent ${this.id} is in status ${this.status}, skipping saveWorkProduct for step ${step.id}.`);
             return;
         }
-        const serializedData = MapSerializer.transformForSerialization(data);
-        const workProduct = {
-            id: uuidv4(),
-            agentId: this.id,
-            stepId: stepId,
-            data: serializedData,
-            timestamp: new Date().toISOString()
-        } as WorkProduct;
+
         try {
-            const step = this.steps.find(s => s.id === stepId);
-            if (!step) {
-                console.error(`Step with id ${stepId} not found in agent ${this.id}`);
-                return;
-            }
+            // The new, consolidated save method in the persistence manager handles both work products and deliverables
+            await this.agentPersistenceManager.saveWorkProduct(step, data);
 
-            const hasDeliverables = step && step.hasDeliverableOutputs();
-            await this.agentPersistenceManager.saveWorkProduct(workProduct);
-            if(hasDeliverables){
-                await this.agentPersistenceManager.saveDeliverable({...workProduct, isDeliverable: true} as Deliverable);
-            }
-
+            // UI notification logic remains here
             const outputType = step.getOutputType(this.steps);
             const type = outputType === OutputType.FINAL ? 'Final' : outputType === OutputType.PLAN ? 'Plan' : 'Interim';
-            console.log(`Agent ${this.id}: Step ${stepId} outputType=${outputType}, type=${type}, step.result=${JSON.stringify(step.result?.map(r => ({name: r.name, resultType: r.resultType})))}`);
-            console.log(`Agent ${this.id}: PluginParameterType.PLAN=${PluginParameterType.PLAN}, OutputType.PLAN=${OutputType.PLAN}`);
+            const hasDeliverables = step.hasDeliverableOutputs();
+            const workproductContent = data[0]?.result;
 
-            let scope: string;
-            if (this.steps.length === 1 || (isAgentEndpoint && outputType === OutputType.FINAL)) {
-                scope = 'MissionOutput';
-            } else if (isAgentEndpoint) {
-                scope = 'AgentOutput';
-            } else {
-                scope = 'AgentStep';
-            }
-
-            // Upload outputs to shared file space based on deliverable flags or fallback to existing logic
-            let uploadedFiles: MissionFile[] = [];
-            const outputsHaveFiles = Array.isArray(data) && data.some(o => !!(o as any).fileName || !!(o as any).storagePath);
-
-            let shouldUploadToSharedSpace = false;
-
-            if (hasDeliverables || (outputType === OutputType.FINAL && data && data.length > 0)) {
-                // New logic: only upload outputs marked as deliverables
-                shouldUploadToSharedSpace = true;
-                console.log(`[Agent.ts] Step ${stepId} has deliverable outputs, will upload deliverables only`);
-            }
-
-            if (step && step.actionVerb === 'FILE_OPERATION') {
-                shouldUploadToSharedSpace = false; // Explicitly disable for FILE_OPERATION
-            }
-
-            if (shouldUploadToSharedSpace) {
-                try {
-                    const librarianUrl = await this.getServiceUrl('Librarian');
-                    if (librarianUrl) {
-                        uploadedFiles = await this._uploadOutputs(step, data, librarianUrl);
-                        if (uploadedFiles.length > 0) {
-                            console.log(`Uploaded ${uploadedFiles.length} files to Librarian for step ${stepId}`);
-                        }
-                    }
-                } catch (error) {
-                    console.error('Error uploading step outputs to Librarian:', error);
-                }
-            }
-
-            // If FILE_OPERATION was executed, and it returned a file, use its result as the attached file
-            const missionFileResult = data[0].result as MissionFile;
-            if (missionFileResult && missionFileResult.id && missionFileResult.originalName) {
-                uploadedFiles.push(missionFileResult);
-            }
-            let workproductContent = data[0]?.result;
-            if (workproductContent && typeof workproductContent === 'object' && workproductContent !== null && 'value' in workproductContent) {
-                workproductContent = workproductContent.value;
-                if (typeof workproductContent === 'string' && workproductContent.startsWith('[') && workproductContent.endsWith(']')) {
-                    try {
-                        const parsed = JSON.parse(workproductContent);
-                        if (Array.isArray(parsed)) {
-                            workproductContent = parsed.join('\n');
-                        }
-                    } catch (e) {
-                        // Not valid JSON, so we'll just use the string as is.
-                        console.warn("[Agent.ts] Could not parse workproduct content as JSON array, using as is.");
-                    }
-                }
-            }
             const workProductPayload: any = {
-                id: stepId,
+                id: step.id,
                 type: type,
-                scope: scope,
+                scope: step.isEndpoint(this.steps) ? 'AgentOutput' : 'AgentStep',
                 name: data[0] ? data[0].resultDescription : 'Step Output',
                 agentId: this.id,
-                stepId: stepId,
+                stepId: step.id,
                 missionId: this.missionId,
                 mimeType: data[0]?.mimeType || 'text/plain',
                 fileName: data[0]?.fileName,
-                isDeliverable: hasDeliverables, // Include deliverable metadata
+                isDeliverable: hasDeliverables,
                 workproduct: (type === 'Plan' && data[0]?.result) ?
                     `Plan with ${Array.isArray(data[0].result) ? data[0].result.length : Object.keys(data[0].result).length} steps` : workproductContent
             };
-            // If we uploaded files above, attach their metadata so the UI can list them
-            if (typeof uploadedFiles !== 'undefined' && Array.isArray(uploadedFiles) && uploadedFiles.length > 0) {
-                workProductPayload.attachedFiles = uploadedFiles;
-            }
-            console.log('[Agent.ts] WORK_PRODUCT_UPDATE payload:', JSON.stringify(workProductPayload, null, 2));
 
-            const MAX_MESSAGE_RETRIES = 3;
-            for (let i = 0; i < MAX_MESSAGE_RETRIES; i++) {
-                try {
-                    await this.sendMessage(MessageType.WORK_PRODUCT_UPDATE, 'user', workProductPayload);
-                    break; // If successful, break the loop
-                } catch (messageError) {
-                    if (axios.isAxiosError(messageError) && (messageError.code === 'ECONNRESET' || messageError.code === 'ECONNABORTED')) {
-                        console.warn(`[Agent ${this.id}] Attempt ${i + 1}/${MAX_MESSAGE_RETRIES}: Failed to send WORK_PRODUCT_UPDATE due to network error (ECONNRESET/ECONNABORTED). Retrying...`);
-                        await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1))); // Exponential backoff
-                    } else {
-                        console.error(`[Agent ${this.id}] Unexpected error sending WORK_PRODUCT_UPDATE:`, messageError instanceof Error ? messageError.message : messageError);
-                        analyzeError(messageError as Error);
-                        break; // For other errors, don't retry
-                    }
-                }
-            }
-        } catch (error) { analyzeError(error as Error);
-            console.error('Error saving work product:', error instanceof Error ? error.message : error);
+            // The UI can use the isDeliverable flag to know when to fetch the full deliverable details separately.
+            // The attachedFiles property is removed as it's no longer sourced here.
+
+            await this.sendMessage(MessageType.WORK_PRODUCT_UPDATE, 'user', workProductPayload);
+
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error('Error in simplified saveWorkProductWithClassification:', error instanceof Error ? error.message : error);
         }
     }
 
@@ -1781,6 +1692,9 @@ Please consider this context when planning and executing the mission. Provide de
         return newObj;
     }
 
+
+
+
     /**
      * Set the agent's role
      * @param roleId Role ID
@@ -1862,7 +1776,7 @@ Please consider this context when planning and executing the mission. Provide de
                 if (taskResult.success) {
                   step.result = MapSerializer.transformFromSerialization(taskResult.result) as PluginOutput[];
                   console.log(`Updated step ${step.id} with result:`, JSON.stringify(this.truncateLargeStrings(step.result), null, 2));
-                  await this.saveWorkProductWithClassification(step.id, taskResult.result, step.isEndpoint(this.steps), this.getAllAgentsInMission());
+                  await this.saveWorkProductWithClassification(step, taskResult.result);
                 } else {
                   this.say(`Delegated step ${step.actionVerb} failed. Reason: ${taskResult.error}`);
                 }
@@ -2141,7 +2055,7 @@ Explanation: ${resolution.explanation}`);
 
         // Save the work product
         const isAgentEndpointForPlan = planStep.isEndpoint(this.steps);
-        await this.saveWorkProductWithClassification(planStep.id, result, isAgentEndpointForPlan, this.getAllAgentsInMission());
+        await this.saveWorkProductWithClassification(planStep, result);
 
         if (!wait) {
             console.log(`Agent ${this.id} started plan template execution: ${templateId}`);
@@ -2221,138 +2135,11 @@ Explanation: ${resolution.explanation}`);
         }
     }
 
-    private async _uploadOutputs(
-        step: Step,
-        data: PluginOutput[],
-        librarianUrl: string
-    ): Promise<MissionFile[]> {
-        if (!data || data.length === 0) {
-            return [];
-        }
 
-        const uploadedFiles: MissionFile[] = [];
-        const missionControlUrl = await this.getServiceUrl('MissionControl');
-        const hasDeliverables = step.hasDeliverableOutputs();
-
-        for (const output of data) {
-            try {
-                const isDeliverable = step.isOutputDeliverable(output.name);
-
-                if (hasDeliverables && !isDeliverable) {
-                    console.log(`[Agent.ts] Skipping non-deliverable output: ${output.name}`);
-                    continue;
-                }
-
-                if (!output.result || output.result === '') {
-                    console.log(`[Agent.ts] Skipping empty output: ${output.name}`);
-                    continue;
-                }
-
-                let fileName: string;
-                if (isDeliverable) {
-                    fileName = step.getDeliverableFilename(output.name) || `${output.name.replace(/[^a-zA-Z0-9_-]/g, '_')}${this.getFileExtensionForOutput(output)}`;
-                } else {
-                    const sanitizedName = output.name.replace(/[^a-zA-Z0-9_-]/g, '_');
-                    const extension = this.getFileExtensionForOutput(output);
-                    fileName = `step_${step.stepNo}_${sanitizedName}${extension}`;
-                }
-
-                const mimeType = output.mimeType || this.getMimeTypeForOutput(output);
-
-                let fileContent: string;
-                if (typeof output.result === 'string') {
-                    fileContent = output.result;
-                } else {
-                    fileContent = JSON.stringify(output.result, null, 2);
-                    if (!fileName.endsWith('.json')) {
-                        fileName = fileName.replace(/\.[^.]*$/, '') + '.json';
-                    }
-                }
-
-                const missionFile: MissionFile = {
-                    id: uuidv4(),
-                    originalName: fileName,
-                    mimeType: mimeType,
-                    size: Buffer.byteLength(fileContent, 'utf8'),
-                    uploadedAt: new Date(),
-                    uploadedBy: `agent-${this.id}`,
-                    storagePath: `${isDeliverable ? 'deliverables' : 'step-outputs'}/${this.missionId}/${fileName}`,
-                    description: `Output from step ${step.stepNo}: ${step.actionVerb} - ${output.resultDescription}`,
-                    isDeliverable: isDeliverable,
-                    stepId: step.id
-                } as any;
-
-                await this.authenticatedApi.post(`http://${librarianUrl}/storeData`, {
-                    id: `${isDeliverable ? 'deliverable' : 'step-output'}-${missionFile.id}`,
-                    data: {
-                        fileContent: fileContent,
-                        missionFile: missionFile
-                    },
-                    storageType: 'mongo',
-                    collection: isDeliverable ? 'deliverables' : 'step-outputs'
-                });
-
-                if (isDeliverable && missionControlUrl) {
-                    await this.authenticatedApi.post(`http://${missionControlUrl}/missions/${this.missionId}/files/add`, missionFile);
-                }
-
-                uploadedFiles.push(missionFile);
-                console.log(`[Agent.ts] Uploaded output to shared space: ${fileName} (from output: ${output.name})`);
-
-            } catch (error) {
-                console.error(`[Agent.ts] Failed to upload output ${output.name}:`, error);
-            }
-        }
-
-        console.log(`[Agent.ts] Uploaded ${uploadedFiles.length} files from step ${step.stepNo}`);
-        return uploadedFiles;
-    }
-
-    /**
-     * Determines the appropriate file extension for an output
-     */
-    private getFileExtensionForOutput(output: PluginOutput): string {
-        if (output.fileName) {
-            const ext = output.fileName.substring(output.fileName.lastIndexOf('.'));
-            if (ext) return ext;
-        }
-
-        switch (output.resultType) {
-            case PluginParameterType.STRING:
-                return '.txt';
-            case PluginParameterType.OBJECT:
-            case PluginParameterType.ARRAY:
-                return '.json';
-            case PluginParameterType.PLAN:
-                return '.json';
-            default:
-                return '.txt';
-        }
-    }
-
-    /**
-     * Determines the appropriate MIME type for an output
-     */
-    private getMimeTypeForOutput(output: PluginOutput): string {
-        if (output.mimeType) {
-            return output.mimeType;
-        }
-
-        switch (output.resultType) {
-            case PluginParameterType.STRING:
-                return 'text/plain';
-            case PluginParameterType.OBJECT:
-            case PluginParameterType.ARRAY:
-            case PluginParameterType.PLAN:
-                return 'application/json';
-            default:
-                return 'text/plain';
-        }
-    }
 
     private async handleStepSuccess(step: Step, result: PluginOutput[]): Promise<void> {
-        const isAgentEndpoint = step.isEndpoint(this.steps);
-        await this.saveWorkProductWithClassification(step.id, result, isAgentEndpoint, this.getAllAgentsInMission());
+        // The new saveWorkProductWithClassification method now takes the step and result directly
+        await this.saveWorkProductWithClassification(step, result);
 
         // Reset replan depth on successful step completion to allow future replanning
         // This prevents the system from getting stuck after a few failures

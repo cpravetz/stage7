@@ -1,5 +1,5 @@
 import { WorkProduct, Deliverable } from '@cktmcs/shared';
-import { MapSerializer, PluginOutput, createAuthenticatedAxios } from '@cktmcs/shared';
+import { MissionFile, MapSerializer, PluginOutput, createAuthenticatedAxios } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 
 
@@ -161,63 +161,66 @@ export class AgentPersistenceManager {
         }
     }
 
-    async saveWorkProduct(workProduct: WorkProduct): Promise<void> {
-        if (!workProduct || !workProduct.agentId || !workProduct.stepId) {
-            console.error('Cannot save work product: missing required fields', workProduct);
+    async saveWorkProduct(step: any, result: PluginOutput[]): Promise<void> {
+        if (!step || !step.id) {
+            console.error('Cannot save work product: step or step.id is missing');
             return;
         }
 
-        console.log(`Saving work product for agent ${workProduct.agentId}, step ${workProduct.stepId}`);
-        try {
-            // Ensure data is properly serialized
-            const serializedData = Array.isArray(workProduct.data)
-                ? workProduct.data.map(item => {
-                    if (item && item.result && typeof item.result === 'object') {
-                        return { ...item, result: MapSerializer.transformForSerialization(item.result) };
-                    }
-                    return item;
-                })
-                : MapSerializer.transformForSerialization(workProduct.data);
+        const isDeliverable = step.hasDeliverableOutputs();
+        const deliverableOutput = isDeliverable ? result.find(r => (r as any).isDeliverable) : undefined;
 
-            return await this.authenticatedApi.post(`http://${this.librarianUrl}/storeOutput`, {
-                agentId: workProduct.agentId,
-                stepId: workProduct.stepId,
-                data: serializedData,
-                isDeliverable: false
+        // Step 1: Always save the metadata-rich WorkProduct to 'step-outputs'
+        try {
+            // Exclude large file content from this payload
+            const metadataResult = result.map(r => {
+                if ((r as any).isDeliverable && r.result instanceof Buffer) {
+                    return { ...r, result: `[File Content Stored Separately as Deliverable for Step ${step.id}]` };
+                }
+                return r;
             });
-        } catch (error) { analyzeError(error as Error);
-            console.error(`Error saving work product for agent ${workProduct.agentId}, step ${workProduct.stepId}:`, error instanceof Error ? error.message : String(error));
+
+            const serializedData = MapSerializer.transformForSerialization(metadataResult);
+
+            await this.authenticatedApi.post(`http://${this.librarianUrl}/storeOutput`, {
+                agentId: step.ownerAgentId,
+                stepId: step.id,
+                data: serializedData,
+                isDeliverable: isDeliverable
+            });
+            console.log(`Saved work product metadata for step ${step.id}`);
+
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error(`Error saving work product metadata for step ${step.id}:`, error instanceof Error ? error.message : String(error));
+        }
+
+        // Step 2 & 3: If it's a deliverable, stream the file to the new endpoint
+        if (isDeliverable && deliverableOutput && deliverableOutput.result instanceof Buffer) {
+            try {
+                const fileContent: Buffer = deliverableOutput.result;
+                const queryParams = new URLSearchParams({
+                    agentId: step.ownerAgentId,
+                    missionId: step.missionId,
+                    originalName: (deliverableOutput as any).fileName || 'deliverable.bin',
+                    mimeType: (deliverableOutput as any).mimeType || 'application/octet-stream'
+                }).toString();
+
+                const url = `http://${this.librarianUrl}/deliverable/${step.id}?${queryParams}`;
+
+                await this.authenticatedApi.post(url, fileContent, {
+                    headers: { 'Content-Type': 'application/octet-stream' }
+                });
+                console.log(`Successfully streamed deliverable for step ${step.id}`);
+
+            } catch (error) {
+                analyzeError(error as Error);
+                console.error(`Error streaming deliverable for step ${step.id}:`, error instanceof Error ? error.message : String(error));
+            }
         }
     }
 
-    async saveDeliverable(deliverable: Deliverable): Promise<void> {
-        if (!deliverable || !deliverable.agentId || !deliverable.stepId) {
-            console.error('Cannot save deliverable: missing required fields', deliverable);
-            return;
-        }
 
-        console.log(`Saving deliverable for agent ${deliverable.agentId}, step ${deliverable.stepId}`);
-        try {
-            // Ensure data is properly serialized
-            const serializedData = Array.isArray(deliverable.data)
-                ? deliverable.data.map(item => {
-                    if (item && item.result && typeof item.result === 'object') {
-                        return { ...item, result: MapSerializer.transformForSerialization(item.result) };
-                    }
-                    return item;
-                })
-                : MapSerializer.transformForSerialization(deliverable.data);
-
-            return await this.authenticatedApi.post(`http://${this.librarianUrl}/storeOutput`, {
-                agentId: deliverable.agentId,
-                stepId: deliverable.stepId,
-                data: serializedData,
-                isDeliverable: true
-            });
-        } catch (error) { analyzeError(error as Error);
-            console.error(`Error saving deliverable for agent ${deliverable.agentId}, step ${deliverable.stepId}:`, error instanceof Error ? error.message : String(error));
-        }
-    }
 
     async loadStep(stepId: string): Promise<any | null> {
         try {
@@ -397,5 +400,26 @@ export class AgentPersistenceManager {
             return [];
         }
     }
+
+    async getFileContentFromLibrarian(agentId: string, missionFile: MissionFile): Promise<string | Buffer | null> {
+        try {
+            if (!this.librarianUrl) {
+                console.error('Librarian service not available to get file content.');
+                return null;
+            }
+            const response = await this.authenticatedApi.get(`http://${this.librarianUrl}/assets/deliverables/${missionFile.id}`, {
+                responseType: 'arraybuffer'
+            });
+            console.log(`[Agent ${agentId}] Successfully fetched content for MissionFile ${missionFile.id}.`);
+            if (missionFile.mimeType && missionFile.mimeType.startsWith('text/')) {
+                return response.data.toString('utf8');
+            }
+            return response.data;
+        } catch (error) {
+            console.error(`[Agent ${agentId}] Error getting file content for MissionFile ${missionFile.id}:`, error instanceof Error ? error.message : error);
+            return null;
+        }
+    }
+
 
 }

@@ -429,11 +429,20 @@ export class Brain extends BaseEntity {
                 throw new Error(modelResponse || 'Model returned empty response');
             }
 
+            let logicFailure = false;
             // For TextToJSON, ensure JSON validity and handle unrecoverable errors
             if (thread.conversationType === LLMConversationType.TextToJSON) {
                 try {
                     // Use ensureJsonResponse to validate/repair
-                    await selectedModel.llminterface.ensureJsonResponse(modelResponse);
+                    const jsonResponse = await selectedModel.llminterface.ensureJsonResponse(modelResponse);
+                    if (jsonResponse) {
+                        const parsed = JSON.parse(jsonResponse);
+                        if (Object.keys(parsed).length === 0 || (Object.keys(parsed).length === 1 && parsed.content)) {
+                            logicFailure = true;
+                        }
+                    } else {
+                        logicFailure = true;
+                    }
                 } catch (jsonError) {
                     // Blacklist model and throw to trigger retry
                     console.error(`[Brain Chat] Model ${selectedModel.name} failed to return valid JSON: ${jsonError instanceof Error ? jsonError.message : String(jsonError)}`);
@@ -446,7 +455,7 @@ export class Brain extends BaseEntity {
             if (typeof modelResponse === 'object' && modelResponse && 'usage' in modelResponse) {
                 tokenCount = (modelResponse as any).usage?.total_tokens || 0;
             }
-            this.modelManager.trackModelResponse(requestId, typeof modelResponse === 'string' ? modelResponse : JSON.stringify(modelResponse), tokenCount, true);
+            this.modelManager.trackModelResponse(requestId, typeof modelResponse === 'string' ? modelResponse : JSON.stringify(modelResponse), tokenCount, true, undefined, undefined, logicFailure);
 
             let confidence = 0.9;
             let finalResponse = modelResponse;

@@ -226,7 +226,7 @@ def execute_plugin(script_parameters: Dict[str, InputValue]) -> List[PluginOutpu
         # Get text input
         text_input = script_parameters.get('text')
         if not text_input:
-            return [create_error_output("error", "Missing required input: text")]
+            return [create_error_output("error", "Missing or malformed required input: text")]
         
         text = text_input.value
         if not text or not isinstance(text, str):

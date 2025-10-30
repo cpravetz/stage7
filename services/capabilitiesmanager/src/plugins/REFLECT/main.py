@@ -385,7 +385,7 @@ class ReflectHandler:
         agent_id = _normalize_input_value(inputs.get('agentId'))
 
         logger.info(f"DEBUG REFLECT: mission_id = '{mission_id}' (type: {type(mission_id)})")
-        logger.info(f"DEBUG REFLECT: plan_history = '{str(plan_history)[:50]}...' (type: {type(plan_history)})")
+        logger.info(f"DEBUG REFLECT: plan_history = {json.dumps(plan_history, indent=2)} (type: {type(plan_history)})")
         logger.info(f"DEBUG REFLECT: work_products = '{str(work_products)[:50]}...' (type: {type(work_products)})")
         logger.info(f"DEBUG REFLECT: question = '{str(question)[:50]}...' (type: {type(question)})")
         logger.info(f"DEBUG REFLECT: final_output present: {'yes' if final_output else 'no'} (length: {len(str(final_output))})")
