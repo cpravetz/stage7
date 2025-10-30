@@ -97,6 +97,7 @@ export class Librarian extends BaseEntity {
         this.app.post('/searchData', (req, res) => this.searchData(req, res));
         this.app.delete('/deleteData/:id', (req, res) => this.deleteData(req, res));
         this.app.post('/storeOutput', (req, res) => this.storeOutput(req, res));
+        this.app.post('/deliverable/:stepId', (req, res) => this.storeDeliverable(req, res));
         this.app.get('/loadDeliverable/:stepId', (req, res) => this.loadDeliverable(req, res));
         this.app.get('/loadAllDeliverables/:agentId', (req, res) => this.loadAllDeliverables(req, res));
         this.app.get('/loadStepOutput/:stepId', (req, res) => this.loadStepWorkProduct(req, res));
@@ -424,39 +425,95 @@ export class Librarian extends BaseEntity {
 
         const { agentId, stepId, data, isDeliverable } = req.body;
 
-        if (!agentId) {
-            console.log(`storeOutput failed: agentId is ${agentId === undefined ? 'undefined' : 'null'}`);
-            return res.status(400).send({ error: 'AgentId is required' });
-        }
-
         if (!stepId) {
-            console.log(`storeOutput failed: stepId is ${stepId === undefined ? 'undefined' : 'null'} for agent ${agentId}`);
+            console.log(`storeOutput failed: stepId is required.`);
             return res.status(400).send({ error: 'StepId is required' });
         }
 
-        const stepOutput: WorkProduct = {
-            id: `${agentId}_${stepId}`,
+        // The document to be saved in the 'step-outputs' collection.
+        // Using stepId as the primary key (_id) for uniqueness and fast lookups.
+        const workProductDocument = {
+            _id: stepId,
             agentId,
-            stepId,
+            stepId, // Keep stepId as a queryable field as well
             data: data || null,
+            isDeliverable: isDeliverable || false,
             timestamp: new Date().toISOString()
         };
 
         try {
-            await storeInMongo('step-outputs', {...stepOutput, _id: stepOutput.id});
-
-            if (isDeliverable) {
-                const deliverable: Deliverable = {
-                    ...stepOutput,
-                    isDeliverable: true
-                };
-                await storeInMongo('deliverables', {...deliverable, _id: deliverable.id});
-            }
-
-            res.status(200).send({ status: 'Output stored' });
-        } catch (error) { analyzeError(error as Error);
-            console.error('Error storing output:', error instanceof Error ? error.message : error);
+            await storeInMongo('step-outputs', workProductDocument);
+            res.status(200).send({ status: 'Output stored successfully', id: stepId });
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error(`Error storing output for step ${stepId}:`, error instanceof Error ? error.message : error);
             res.status(500).send({ error: 'Failed to store output', details: error instanceof Error ? error.message : String(error) });
+        }
+    }
+
+    private async storeDeliverable(req: express.Request, res: express.Response) {
+        const { stepId } = req.params;
+        const { agentId, missionId, originalName, mimeType } = req.query;
+        const assetDir = path.join(LARGE_ASSET_PATH, 'deliverables');
+        const assetId = uuidv4(); // Generate a unique ID for the file asset
+        const filePath = path.join(assetDir, assetId);
+
+        console.log(`Storing deliverable for step ${stepId} with assetId ${assetId}`);
+
+        if (!stepId || !agentId || !missionId || !originalName || !mimeType) {
+            return res.status(400).send({ error: 'stepId, agentId, missionId, originalName, and mimeType are required query parameters.' });
+        }
+
+        try {
+            await fs.promises.mkdir(assetDir, { recursive: true });
+
+            const writeStream = fs.createWriteStream(filePath);
+            req.pipe(writeStream);
+
+            writeStream.on('finish', async () => {
+                try {
+                    const stats = await fs.promises.stat(filePath);
+
+                    // Create the MissionFile object, which is part of the Deliverable
+                    const missionFile = {
+                        id: assetId,
+                        originalName: originalName as string,
+                        mimeType: mimeType as string,
+                        size: stats.size,
+                        storagePath: filePath,
+                    };
+
+                    // Create the full Deliverable document
+                    const deliverableDocument = {
+                        _id: `deliverable-${stepId}`, // Create a unique but predictable ID
+                        agentId: agentId as string,
+                        stepId: stepId,
+                        missionId: missionId as string,
+                        isDeliverable: true,
+                        missionFile: missionFile,
+                        fileContent: null, // Content is on disk, not in the DB document
+                        timestamp: new Date().toISOString()
+                    };
+
+                    await storeInMongo('deliverables', deliverableDocument);
+                    res.status(201).send({ message: 'Deliverable stored successfully', deliverableId: deliverableDocument._id, assetId: assetId });
+
+                } catch (dbError: any) {
+                    console.error(`Failed to store metadata for deliverable asset ${assetId}:`, dbError);
+                    // Cleanup the orphaned file if the DB write fails
+                    await fs.promises.unlink(filePath).catch(e => console.error(`Failed to cleanup asset file ${filePath} after DB failure:`, e));
+                    res.status(500).send({ error: 'Failed to store deliverable metadata' });
+                }
+            });
+
+            writeStream.on('error', (err) => {
+                console.error(`Error writing deliverable asset stream for ${assetId}:`, err);
+                res.status(500).send({ error: 'Failed to write deliverable asset to disk' });
+            });
+
+        } catch (error: any) {
+            console.error(`Error preparing to store deliverable asset ${assetId}:`, error);
+            res.status(500).send({ error: 'Failed to prepare deliverable storage location' });
         }
     }
 

@@ -10,6 +10,7 @@ export interface ModelPerformanceMetrics {
   usageCount: number;
   successCount: number;
   failureCount: number;
+  logicFailureCount?: number;
   successRate: number;
   averageLatency: number;
   averageTokenCount: number;
@@ -69,6 +70,7 @@ export interface FeedbackData {
   comments?: string;
 }
 
+
 /**
  * Model performance tracker
  */
@@ -91,6 +93,29 @@ export class ModelPerformanceTracker {
     process.on('SIGINT', this.handleExit.bind(this));
     process.on('SIGTERM', this.handleExit.bind(this));
   }
+
+  private newPerformanceMetrics(): ModelPerformanceMetrics {
+        return {
+        usageCount: 0,
+        successCount: 0,
+        failureCount: 0,
+        logicFailureCount: 0,
+        successRate: 0,
+        averageLatency: 0,
+        averageTokenCount: 0,
+        lastUsed: new Date().toISOString(),
+        consecutiveFailures: 0,
+        lastFailureTime: null,
+        blacklistedUntil: null,
+        feedbackScores: {
+          relevance: 0,
+          accuracy: 0,
+          helpfulness: 0,
+          creativity: 0,
+          overall: 0
+        }
+      };
+    }
 
   /**
    * Handle process exit - clean up interval
@@ -149,25 +174,7 @@ export class ModelPerformanceTracker {
     const modelData = this.performanceData.get(modelName);
 
     if (!modelData || !modelData.metrics[conversationType]) {
-      return {
-        usageCount: 0,
-        successCount: 0,
-        failureCount: 0,
-        successRate: 0,
-        averageLatency: 0,
-        averageTokenCount: 0,
-        lastUsed: new Date().toISOString(),
-        consecutiveFailures: 0,
-        lastFailureTime: null,
-        blacklistedUntil: null,
-        feedbackScores: {
-          relevance: 0,
-          accuracy: 0,
-          helpfulness: 0,
-          creativity: 0,
-          overall: 0
-        }
-      };
+      return this.newPerformanceMetrics();
     }
 
     return modelData.metrics[conversationType];
@@ -311,25 +318,7 @@ export class ModelPerformanceTracker {
     // Get or create metrics for conversation type
     let metrics = modelData.metrics[conversationType];
     if (!metrics) {
-      metrics = {
-        usageCount: 0,
-        successCount: 0,
-        failureCount: 0,
-        successRate: 0,
-        averageLatency: 0,
-        averageTokenCount: 0,
-        lastUsed: new Date().toISOString(),
-        consecutiveFailures: 0,
-        lastFailureTime: null,
-        blacklistedUntil: null,
-        feedbackScores: {
-          relevance: 0,
-          accuracy: 0,
-          helpfulness: 0,
-          creativity: 0,
-          overall: 0
-        }
-      };
+      metrics = this.newPerformanceMetrics();
       modelData.metrics[conversationType] = metrics;
     }
 
@@ -501,25 +490,7 @@ export class ModelPerformanceTracker {
     // Get or create metrics for conversation type
     let metrics = modelData.metrics[conversationType];
     if (!metrics) {
-      metrics = {
-        usageCount: 0,
-        successCount: 0,
-        failureCount: 0,
-        successRate: 0,
-        averageLatency: 0,
-        averageTokenCount: 0,
-        lastUsed: new Date().toISOString(),
-        consecutiveFailures: 0,
-        lastFailureTime: null,
-        blacklistedUntil: null,
-        feedbackScores: {
-          relevance: 0,
-          accuracy: 0,
-          helpfulness: 0,
-          creativity: 0,
-          overall: 0
-        }
-      };
+      metrics = this.newPerformanceMetrics();
       modelData.metrics[conversationType] = metrics;
     }
 
@@ -625,25 +596,7 @@ export class ModelPerformanceTracker {
         // Create default metrics for all supported conversation types
         const metrics: Partial<Record<LLMConversationType, ModelPerformanceMetrics>> = {};
         for (const convType of model.contentConversation) {
-          metrics[convType] = {
-            usageCount: 0,
-            successCount: 0,
-            failureCount: 0,
-            successRate: 0,
-            averageLatency: 0,
-            averageTokenCount: 0,
-            lastUsed: '',
-            consecutiveFailures: 0,
-            lastFailureTime: null,
-            blacklistedUntil: null,
-            feedbackScores: {
-              relevance: 0,
-              accuracy: 0,
-              helpfulness: 0,
-              creativity: 0,
-              overall: 0
-            }
-          };
+          metrics[convType] = this.newPerformanceMetrics();
         }
         modelData = {
           modelName: model.name, // Use unique name
@@ -830,5 +783,35 @@ export class ModelPerformanceTracker {
     } else {
       console.warn('[PerformanceTracker] setAllPerformanceData: input is not an array');
     }
+  }
+
+  /**
+   * Track a logic failure for a model
+   * @param modelName Model name
+   * @param conversationType Conversation type
+   */
+  trackLogicFailure(modelName: string, conversationType: LLMConversationType): void {
+    let modelData = this.performanceData.get(modelName);
+    if (!modelData) {
+      modelData = {
+        modelName,
+        metrics: {} as Record<LLMConversationType, ModelPerformanceMetrics>,
+        lastUpdated: new Date().toISOString()
+      };
+      this.performanceData.set(modelName, modelData);
+    }
+
+    let metrics = modelData.metrics[conversationType];
+    if (!metrics) {
+      metrics = this.newPerformanceMetrics();
+      modelData.metrics[conversationType] = metrics;
+    }
+
+    metrics.logicFailureCount = (metrics.logicFailureCount || 0) + 1;
+    modelData.lastUpdated = new Date().toISOString();
+
+    this.savePerformanceData().catch(error => {
+      console.error('[PerformanceTracker] Error saving performance data after logic failure:', error);
+    });
   }
 }

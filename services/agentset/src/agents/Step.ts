@@ -187,14 +187,11 @@ export class Step {
             this.result = params.result;
         }
         this.recommendedRole = params.recommendedRole;
-    this.persistenceManager = params.persistenceManager;
         this.retryCount = 0;
         this.maxRetries = params.maxRetries || 3;
         this.recoverableRetryCount = 0;
         this.maxRecoverableRetries = params.maxRecoverableRetries || 5;
         this.lastError = null;
-
-
 
         this.persistenceManager = params.persistenceManager;
         this.awaitsSignal = '';
@@ -614,13 +611,7 @@ export class Step {
         const hasFailureOutput = this.result.some(output => !output.success);
         this.status = hasFailureOutput ? StepStatus.ERROR : StepStatus.COMPLETED;
     
-        await this.persistenceManager.saveWorkProduct({
-            id: uuidv4(),
-            agentId: this.ownerAgentId,
-            stepId: this.id,
-            data: this.result,
-            timestamp: new Date().toISOString()
-        });
+        await this.persistenceManager.saveWorkProduct(this, this.result!);
 
         await this.logEvent({
             eventType: 'step_result',
@@ -725,12 +716,7 @@ export class Step {
                 this.result = result;
 
                 // Save the plan result
-                await this.persistenceManager.saveWorkProduct({
-                    id: uuidv4(),
-                    agentId: this.ownerAgentId, stepId: this.id,
-                    data: result,
-                    timestamp: new Date().toISOString()
-                });
+                await this.persistenceManager.saveWorkProduct(this, result);
 
                 console.log(`[Step ${this.id}] execute: Plan result will be processed by Agent for execution`);
             } else {
@@ -779,13 +765,7 @@ export class Step {
                 timestamp: new Date().toISOString()
             });
 
-            await this.persistenceManager.saveWorkProduct({
-                id: uuidv4(),
-                agentId: this.ownerAgentId,
-                stepId: this.id,
-                data: errorResult,
-                timestamp: new Date().toISOString()
-            });
+            await this.persistenceManager.saveWorkProduct(this, errorResult);
 
             // Phase 3: Trigger reflection for self-correction on errors or complex tasks
             if (this.shouldTriggerReflection()) {
@@ -1503,13 +1483,7 @@ export class Step {
                 this.result = result;
 
                 // Save the plan result
-                await this.persistenceManager.saveWorkProduct({
-                    id: uuidv4(),
-                    agentId: this.ownerAgentId,
-                    stepId: this.id,
-                    data: result,
-                    timestamp: new Date().toISOString()
-                });
+                await this.persistenceManager.saveWorkProduct(this, result);
 
                 console.log(`[Step ${this.id}] executeInternalActionVerb: Plan result will be processed by Agent for execution`);
             } else {
@@ -1532,13 +1506,7 @@ export class Step {
                 timestamp: new Date().toISOString()
             });
 
-            await this.persistenceManager.saveWorkProduct({
-                id: uuidv4(),
-                agentId: this.ownerAgentId,
-                stepId: this.id,
-                data: errorResult,
-                timestamp: new Date().toISOString()
-            });
+            await this.persistenceManager.saveWorkProduct(this, errorResult);
         } finally {
             // Restore original values
             (this as any).actionVerb = originalActionVerb;

@@ -206,8 +206,8 @@ class PlanValidator:
 
             # Handle wrappable errors (FOREACH candidates)
             wrappable_errors = validation_result.get('wrappable_errors', [])
+            logger.info(f"Found {len(wrappable_errors)} steps to wrap in FOREACH")
             if wrappable_errors:
-                logger.info(f"Found {len(wrappable_errors)} steps to wrap in FOREACH")
                 error = wrappable_errors[0]
                 step_to_wrap = next((s for s in current_plan if s.get('number') == error['step_number']), None)
                 if step_to_wrap:
@@ -834,35 +834,39 @@ Return ONLY the corrected JSON plan, no explanations."""
 
         source_output_type = None
         source_output_defs = source_plugin_def.get('outputDefinitions', [])
+        source_output_def = None
 
         # 1. Try to find direct match in plugin's output definitions by name
         direct_match_output_def = next((out for out in source_output_defs if out.get('name') == source_output_name), None)
         if direct_match_output_def:
             source_output_type = direct_match_output_def.get('type')
+            source_output_def = direct_match_output_def
 
         # 2. If no direct match, and only one output definition exists for the source plugin, use its type
         # This handles cases where the plan might use a custom output name for a plugin with a single output.
         if not source_output_type and len(source_output_defs) == 1:
             single_output_def = source_output_defs[0]
             source_output_type = single_output_def.get('type')
+            source_output_def = single_output_def
 
         if not source_output_type:
             # If we still don't have a source_output_type, it means we couldn't determine it from the plugin manifest.
             # This will cause is_mismatch to be True, which is the desired behavior for an unknown type.
-            errors.append(f"Step {step_number}: Could not determine type for output '{original_source_output_name}' from step {source_step_number}")
+            errors.append(f"Step {step_number}: Could not determine type for output '{source_output_name}' from step {source_step_number}")
             return # Cannot proceed with type compatibility if source type is unknown
+        
+        logger.info(f"Step {step_number}: Input '{input_name}' (dest_type: {dest_input_type}) vs. Source {source_step_number} output '{source_output_name}' (source_type: {source_output_type})")
 
         # Check for type mismatch
         is_mismatch = False
 
-        # Allow implicit conversions
-        if dest_input_type == 'string' and source_output_type in ['boolean', 'number']:
-            return  # Allowed
-        elif dest_input_type == 'array' and source_output_type == 'string':
-            return  # Allowed
-        else:
-            is_mismatch = (dest_input_type != source_output_type and
-                          dest_input_type != 'any' and source_output_type != 'any')
+        is_mismatch = not (
+            dest_input_type == source_output_type or
+            dest_input_type == 'any' or
+            source_output_type == 'any' or
+            (dest_input_type == 'string' and source_output_type in ['boolean', 'number']) or
+            (dest_input_type == 'array' and source_output_type == 'string')
+        )
 
         # Check if wrappable in FOREACH
         is_wrappable = (dest_input_type in ['string', 'number', 'object'] and

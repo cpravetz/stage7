@@ -56,6 +56,7 @@ interface ModelPerformanceMetrics {
   usageCount?: number;
   successCount?: number;
   failureCount?: number;
+  logicFailureCount?: number;
   successRate?: number;
   averageLatency?: number;
   averageTokenCount?: number;

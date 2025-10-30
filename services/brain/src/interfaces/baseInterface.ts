@@ -101,17 +101,8 @@ export abstract class BaseInterface {
         if (extractedJsonCandidate) {
             cleanedResponse = extractedJsonCandidate;
         } else {
-            // If extraction failed, try prose-to-JSON conversion
-            console.log('[baseInterface] No clear JSON block extracted, trying prose-to-JSON conversion.');
-            const proseJsonCandidate = this.extractJsonFromProse(cleanedResponse);
-            if (proseJsonCandidate) {
-                console.log('[baseInterface] Successfully converted prose to JSON.');
-                cleanedResponse = proseJsonCandidate;
-            } else {
-                // If prose conversion failed, proceed with general cleaning and repair
-                console.log('[baseInterface] Prose conversion failed, proceeding with general repair.');
-                cleanedResponse = this.repairCommonJsonIssues(cleanedResponse);
-            }
+            console.log('[baseInterface] No clear JSON block extracted, returning null.');
+            return null;
         }
 
         // Now, try to parse the (extracted or generally repaired) response
@@ -360,90 +351,5 @@ export abstract class BaseInterface {
         return trimmedMessages.length > 0 ? trimmedMessages : [messages[messages.length - 1]];
     }
 
-    /**
-     * Attempts to extract JSON from prose text that contains JSON embedded within it
-     */
-    private extractJsonFromProse(text: string): string | null {
-        console.log('[baseInterface] Attempting to extract JSON from prose text');
 
-        // Look for JSON objects or arrays in the text
-        const jsonPatterns = [
-            // Look for complete JSON objects
-            /\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/g,
-            // Look for JSON arrays
-            /\[[^\[\]]*(?:\[[^\[\]]*\][^\[\]]*)*\]/g,
-            // Look for JSON objects with nested structures
-            /\{(?:[^{}]|\{[^{}]*\})*\}/g
-        ];
-
-        for (const pattern of jsonPatterns) {
-            const matches = text.match(pattern);
-            if (matches) {
-                for (const match of matches) {
-                    try {
-                        // Try to parse each potential JSON match
-                        JSON.parse(match);
-                        console.log('[baseInterface] Successfully extracted JSON from prose');
-                        return match;
-                    } catch (e) {
-                        // Continue to next match
-                    }
-                }
-            }
-        }
-
-        // If no valid JSON found, try to convert prose to JSON structure
-        console.log('[baseInterface] No valid JSON found in prose, attempting prose-to-JSON conversion');
-        return this.convertProseToJson(text);
-    }
-
-    /**
-     * Attempts to convert prose text into a JSON structure
-     */
-    private convertProseToJson(text: string): string | null {
-        try {
-            // Simple heuristic: if text looks like a list or structured content, try to convert it
-            const lines = text.split('\n').filter(line => line.trim().length > 0);
-
-            if (lines.length === 0) {
-                return null;
-            }
-
-            // If it's a single line, wrap it as a simple object
-            if (lines.length === 1) {
-                return JSON.stringify({ content: text.trim() });
-            }
-
-            // If it looks like a list (multiple lines with bullets or numbers), convert to array
-            const listPattern = /^[\s]*[-*•\d+\.]\s+/;
-            if (lines.some(line => listPattern.test(line))) {
-                const items = lines.map(line => line.replace(listPattern, '').trim());
-                return JSON.stringify(items);
-            }
-
-            // If it looks like key-value pairs, try to convert to object
-            const kvPattern = /^([^:]+):\s*(.+)$/;
-            const kvPairs: Record<string, string> = {};
-            let hasKvPairs = false;
-
-            for (const line of lines) {
-                const match = line.match(kvPattern);
-                if (match) {
-                    kvPairs[match[1].trim()] = match[2].trim();
-                    hasKvPairs = true;
-                }
-            }
-
-            if (hasKvPairs) {
-                return JSON.stringify(kvPairs);
-            }
-
-            // Default: wrap the entire text as content
-            return JSON.stringify({ content: text.trim() });
-
-        } catch (e) {
-            console.log('[baseInterface] Failed to convert prose to JSON:', e);
-            return null;
-        }
-    }
 }

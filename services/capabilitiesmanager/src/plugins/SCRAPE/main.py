@@ -299,6 +299,26 @@ class ScrapePlugin:
                 self._get_input_value(inputs_map, 'websites')
             )
 
+            if url_input is None:
+                return [{
+                    "success": False,
+                    "name": "error",
+                    "resultType": PluginParameterType.ERROR,
+                    "resultDescription": "Missing required input: url",
+                    "result": None,
+                    "error": "The 'url' input (or one of its aliases: website, link, endpoint) is required but was not provided."
+                }]
+            
+            if (isinstance(url_input, (list, dict)) and not url_input) or (isinstance(url_input, str) and not url_input.strip()):
+                return [{
+                    "success": False,
+                    "name": "error",
+                    "resultType": PluginParameterType.ERROR,
+                    "resultDescription": f"Malformed or empty input for url: {url_input}",
+                    "result": None,
+                    "error": f"The 'url' input (or one of its aliases) was provided but is empty or malformed: {type(url_input).__name__} - {str(url_input)[:100]}"
+                }]
+
             urls_to_scrape = []
             # Ensure url_input is always an iterable for consistent processing
             if isinstance(url_input, str):

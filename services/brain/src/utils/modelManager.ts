@@ -33,16 +33,18 @@ export class ModelManager {
      * @param until Date until which the model is blacklisted
      */
     blacklistModel(modelName: string, until: Date): void {
-        console.log(`Blacklisting model ${modelName} until ${until.toISOString()}`);
+        const metrics = this.performanceTracker.getPerformanceMetrics(modelName, LLMConversationType.TextToText); // Use a default conversation type for fetching failure count
+        const consecutiveFailures = metrics ? metrics.consecutiveFailures : 0;
+        const backoffTime = Math.pow(2, consecutiveFailures) * 60 * 1000; // Exponential backoff in minutes
+        const blacklistUntil = new Date(Date.now() + backoffTime);
+
+        console.log(`Blacklisting model ${modelName} until ${blacklistUntil.toISOString()} due to ${consecutiveFailures} consecutive failures.`);
+
         for (const conversationType of Object.values(LLMConversationType)) {
-            console.log(`[DEBUG] Setting blacklist for ${modelName} with conversation type: ${conversationType}`);
-            const metrics = this.performanceTracker.getPerformanceMetrics(modelName, conversationType);
-            if (metrics) {
-                metrics.blacklistedUntil = until.toISOString();
-                metrics.consecutiveFailures = Math.max(metrics.consecutiveFailures, 5); // Ensure it stays blacklisted
-                console.log(`[DEBUG] Set blacklistedUntil for ${modelName}/${conversationType} to ${until.toISOString()}`);
-            } else {
-                console.log(`[DEBUG] No metrics found for ${modelName}/${conversationType}`);
+            const specificMetrics = this.performanceTracker.getPerformanceMetrics(modelName, conversationType);
+            if (specificMetrics) {
+                specificMetrics.blacklistedUntil = blacklistUntil.toISOString();
+                specificMetrics.consecutiveFailures = Math.max(specificMetrics.consecutiveFailures, 1);
             }
         }
         this.clearModelSelectionCache();
@@ -50,7 +52,6 @@ export class ModelManager {
         // Immediately save the blacklist to disk and trigger database sync
         this.performanceTracker.savePerformanceData().then(() => {
             console.log(`[ModelManager] Blacklist for ${modelName} saved to disk`);
-            // Trigger immediate database sync by emitting an event that Brain can listen to
             this.triggerImmediateDatabaseSync();
         }).catch(error => {
             console.error(`[ModelManager] Failed to save blacklist for ${modelName}:`, error);
@@ -165,51 +166,43 @@ export class ModelManager {
                 let reason = '';
                 if (excludedModels.includes(model.name)) {
                     reason = 'excluded (already tried this request)';
-                    console.log(`[ModelSelection] Skipping ${model.name}: ${reason}`);
                     return false;
                 }
                 // Enforce minimum tokenLimit for complex planning (phases 1 & 2)
                 if ((conversationType === LLMConversationType.TextToText || conversationType === LLMConversationType.TextToJSON) && model.tokenLimit < 8000) {
                     reason = `tokenLimit ${model.tokenLimit} < 8000 for ${conversationType}`;
-                    console.log(`[ModelSelection] Skipping ${model.name}: ${reason}`);
                     return false;
                 }
                 // Check if the model can handle the estimated token count
                 if (estimatedTokens > 0 && model.tokenLimit < estimatedTokens) {
                     reason = `tokenLimit ${model.tokenLimit} < estimatedTokens ${estimatedTokens}`;
-                    console.log(`[ModelSelection] Skipping ${model.name}: ${reason}`);
                     return false;
                 }
                 // Check if model supports the conversation type
                 if (!model.contentConversation.includes(conversationType)) {
                     reason = `does not support conversation type ${conversationType}`;
-                    console.log(`[ModelSelection] Skipping ${model.name}: ${reason}`);
                     return false;
                 }
                 // Check if model's interface is available
                 const interfaceInstance = interfaceManager.getInterface(model.interfaceName);
                 if (!interfaceInstance) {
                     reason = 'interface unavailable';
-                    console.log(`[ModelSelection] Skipping ${model.name}: ${reason}`);
                     return false;
                 }
                 // Check if model's service is available
                 const service = serviceManager.getService(model.serviceName);
                 if (!service) {
                     reason = 'service unavailable';
-                    console.log(`[ModelSelection] Skipping ${model.name}: ${reason}`);
                     return false;
                 }
                 if (!service.isAvailable()) {
                     reason = 'service not available';
-                    console.log(`[ModelSelection] Skipping ${model.name}: ${reason}`);
                     return false;
                 }
                 // Check if model is blacklisted
                 const isBlacklisted = this.performanceTracker.isModelBlacklisted(model.name, conversationType);
                 if (isBlacklisted) {
                     reason = 'blacklisted';
-                    console.log(`[ModelSelection] Skipping ${model.name}: ${reason}`);
                     return false;
                 } else {
                     console.log(`[ModelSelection] Considering ${model.name}: tokenLimit=${model.tokenLimit}, supports=${model.contentConversation}, not blacklisted`);
@@ -314,7 +307,8 @@ export class ModelManager {
 
         // Adjust score based on actual performance and add reliability boost
         const adjustedScore = this.performanceTracker.adjustModelScore(baseScore, model.name, conversationType);
-        const finalScore = adjustedScore + reliabilityBoost;
+        const logicFailurePenalty = (performanceMetrics.logicFailureCount || 0) * 15;
+        const finalScore = adjustedScore + reliabilityBoost - logicFailurePenalty;
 
         console.log(`Model ${model.name} score calculation: base=${baseScore}, adjusted=${adjustedScore}, reliability=${reliabilityBoost}, final=${finalScore}`);
 
@@ -407,8 +401,8 @@ export class ModelManager {
      * @param success Success flag
      * @param error Error message
      */
-    trackModelResponse(requestId: string, response: string, tokenCount: number, success: boolean, error?: string, isRetry?: boolean): void {
-        console.log(`[ModelManager] Tracking model response for request ${requestId}, success: ${success}, token count: ${tokenCount}, isRetry: ${isRetry}`);
+    trackModelResponse(requestId: string, response: string, tokenCount: number, success: boolean, error?: string, isRetry?: boolean, logicFailure: boolean = false): void {
+        console.log(`[ModelManager] Tracking model response for request ${requestId}, success: ${success}, token count: ${tokenCount}, isRetry: ${isRetry}, logicFailure: ${logicFailure}`);
 
         // Get active request
         const request = this.activeRequests.get(requestId);
@@ -421,6 +415,10 @@ export class ModelManager {
 
         // Track response in performance tracker
         this.performanceTracker.trackResponse(requestId, response, tokenCount, success, error, isRetry);
+
+        if (logicFailure) {
+            this.performanceTracker.trackLogicFailure(request.modelName, request.conversationType);
+        }
 
         // If the request failed, clear the model selection cache
         // This ensures we don't keep using a model that's failing
