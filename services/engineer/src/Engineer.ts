@@ -142,6 +142,27 @@ export class Engineer extends BaseEntity {
             }
         });
 
+        app.post('/repair', async (req, res) => {
+            try {
+                const { errorMessage, code } = req.body;
+                const codeString = Array.isArray(code) ? code.join('\n') : code;
+                const prompt = `The following code has an error: "${errorMessage}". Please repair the code and return only the fixed code with no additional text or explanation.\n\nCode:\n${codeString}`;
+
+                const response = await this.authenticatedApi.post(`http://${this.brainUrl}/chat`, {
+                    exchanges: [{ role: 'user', content: prompt }],
+                    optimization: 'accuracy',
+                    responseType: 'text'
+                });
+
+                const repairedCode = response.data.result || response.data.response || '';
+                res.send(repairedCode);
+            } catch (error) {
+                analyzeError(error as Error);
+                console.error('Failed to repair code:', error instanceof Error ? error.message : error);
+                res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+            }
+        });
+
         app.listen(this.port, () => {
             console.log(`Engineer listening at ${this.url}`);
         });

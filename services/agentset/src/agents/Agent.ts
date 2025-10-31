@@ -578,7 +578,7 @@ Please consider this context when planning and executing the mission. Provide de
                 await Promise.all(allPromises);
 
             } else if (pendingSteps.length > 0) {
-                console.log(`[Agent ${this.id}] runAgent: No executable steps, but ${pendingSteps.length} pending steps remain. Checking for permanently unsatisfied dependencies.`);
+                console.debug(`[Agent ${this.id}] runAgent: No executable steps, but ${pendingSteps.length} pending steps remain. Checking for permanently unsatisfied dependencies.`);
                 // Deadlock detection
                 for (const step of pendingSteps) {
                     if (step.areDependenciesPermanentlyUnsatisfied(this.steps)) {
@@ -591,6 +591,8 @@ Please consider this context when planning and executing the mission. Provide de
                             timestamp: new Date().toISOString()
                         });
                         console.log(`[Agent ${this.id}] Cancelling step ${step.id} (${step.actionVerb}) due to permanently unsatisfied dependencies.`);
+                    } else {
+                        console.debug(`[Agent ${this.id}] runAgent: Step ${step.id} (${step.actionVerb}) is pending but its dependencies are not yet met.`);
                     }
                 }
             } else if (!this.hasActiveWork()) {

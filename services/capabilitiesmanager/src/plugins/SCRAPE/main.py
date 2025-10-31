@@ -300,6 +300,7 @@ class ScrapePlugin:
             )
 
             if url_input is None:
+                logger.warning(f"Missing required url input from: {inputs_map}")
                 return [{
                     "success": False,
                     "name": "error",
