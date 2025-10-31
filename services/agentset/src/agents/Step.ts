@@ -718,7 +718,7 @@ export class Step {
                 // Save the plan result
                 await this.persistenceManager.saveWorkProduct(this, result);
 
-                console.log(`[Step ${this.id}] execute: Plan result will be processed by Agent for execution`);
+                console.log(`[Step ${this.id}] execute: Plan result will be processed by Agent for execution. Status: ${this.status}`);
             } else {
                 await this.finalizeStepExecution(result);
 
@@ -745,6 +745,7 @@ export class Step {
                     dependencies: this.dependencies,
                     timestamp: new Date().toISOString()
                 });
+                console.log(`[Step ${this.id}] execute: Step completed with status: ${this.status}. Result: ${JSON.stringify(this.result)}`);
 
             }
             return this.result!;
@@ -753,6 +754,8 @@ export class Step {
             this.status = StepStatus.ERROR;
             const errorResult = this.createErrorResponse(error instanceof Error ? error.message : String(error), '[Step]Error executing step', 'An error occurred during step execution. Please check the logs for details.');
             this.result = errorResult;
+
+            console.error(`[Step ${this.id}] execute: Step failed with status: ${this.status}. Error: ${error instanceof Error ? error.message : String(error)}`);
 
             await this.logEvent({
                 eventType: 'step_result',

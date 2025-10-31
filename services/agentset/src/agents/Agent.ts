@@ -218,7 +218,9 @@ export class Agent extends BaseEntity {
             if (finalStep) {
                 this.output = await this.agentPersistenceManager.loadStepWorkProduct(this.id, finalStep.id);
             }
-            console.log(`Agent ${this.id} has completed all active work.`);
+            console.log(`[Agent ${this.id}] runUntilDone: Agent has completed all active work. Final status: ${this.status}`);
+        } else {
+            console.log(`[Agent ${this.id}] runUntilDone: Agent loop exited with status: ${this.status}. No active work remaining.`);
         }
 
         return this.status;
@@ -361,9 +363,11 @@ Please consider this context when planning and executing the mission. Provide de
         const directAnswerOutput = result.find(r => r.name === 'direct_answer');
 
         if (newPlan) {
+            console.log(`[Agent ${this.id}] _handleReflectionResult: Reflection resulted in a new plan with ${newPlan.length} steps. Updating plan.`);
             this.say('Reflection resulted in a new plan. Updating plan.');
             const currentStepIndex = this.steps.findIndex(s => s.id === step.id);
             if (currentStepIndex !== -1) {
+                console.log(`[Agent ${this.id}] _handleReflectionResult: Cancelling ${this.steps.length - (currentStepIndex + 1)} subsequent steps.`);
                 for (let i = currentStepIndex + 1; i < this.steps.length; i++) {
                     this.steps[i].status = StepStatus.CANCELLED;
                 }
@@ -372,10 +376,12 @@ Please consider this context when planning and executing the mission. Provide de
             await this.updateStatus();
         } else if (directAnswerOutput && directAnswerOutput.result) {
             const directAnswer = directAnswerOutput.result;
+            console.log(`[Agent ${this.id}] _handleReflectionResult: Reflection provided a direct answer. Creating new ACCOMPLISH step.`);
             this.say(`Reflection provided a direct answer. Creating new ACCOMPLISH step to pursue this direction.`);
             this.addToConversation('system', `Reflection Direct Answer: ${directAnswer}`);
             const currentStepIndex = this.steps.findIndex(s => s.id === step.id);
             if (currentStepIndex !== -1) {
+                console.log(`[Agent ${this.id}] _handleReflectionResult: Cancelling ${this.steps.length - (currentStepIndex + 1)} subsequent steps.`);
                 for (let i = currentStepIndex + 1; i < this.steps.length; i++) {
                     this.steps[i].status = StepStatus.CANCELLED;
                 }
@@ -390,6 +396,7 @@ Please consider this context when planning and executing the mission. Provide de
             this.steps.push(newAccomplishStep);
             await this.updateStatus();
         } else {
+            console.log(`[Agent ${this.id}] _handleReflectionResult: Reflection did not provide a clear plan or answer. Continuing with the current plan.`);
             this.say('Reflection did not provide a clear plan or answer. Continuing with the current plan.');
         }
     }
@@ -571,6 +578,7 @@ Please consider this context when planning and executing the mission. Provide de
                 await Promise.all(allPromises);
 
             } else if (pendingSteps.length > 0) {
+                console.log(`[Agent ${this.id}] runAgent: No executable steps, but ${pendingSteps.length} pending steps remain. Checking for permanently unsatisfied dependencies.`);
                 // Deadlock detection
                 for (const step of pendingSteps) {
                     if (step.areDependenciesPermanentlyUnsatisfied(this.steps)) {
@@ -582,10 +590,11 @@ Please consider this context when planning and executing the mission. Provide de
                             dependencies: step.dependencies,
                             timestamp: new Date().toISOString()
                         });
-                        console.log(`[Agent ${this.id}] Cancelling step ${step.id} due to permanently unsatisfied dependencies.`);
+                        console.log(`[Agent ${this.id}] Cancelling step ${step.id} (${step.actionVerb}) due to permanently unsatisfied dependencies.`);
                     }
                 }
             } else if (!this.hasActiveWork()) {
+                console.log(`[Agent ${this.id}] runAgent: No active work found. Setting agent status to COMPLETED.`);
                 this.setAgentStatus(AgentStatus.COMPLETED, {eventType: 'agent_completed'});
                 const finalStep = this.steps.filter(s => s.status === StepStatus.COMPLETED).pop();
                 if (finalStep) {
@@ -593,6 +602,8 @@ Please consider this context when planning and executing the mission. Provide de
                 }
                 console.log(`Agent ${this.id} has completed its work.`);
                 this.say(`Result: ${JSON.stringify(this.output)}`);
+            } else {
+                console.log(`[Agent ${this.id}] runAgent: No pending or executable steps, but hasActiveWork() is true. This should not happen.`);
             }
         } catch (error) {
             console.error('Error in agent main loop:', error instanceof Error ? error.message : error);
@@ -2220,10 +2231,10 @@ Explanation: ${resolution.explanation}`);
         // --- START MODIFICATION ---
         // Check replanning depth before attempting any replanning
         if (this.replanDepth >= this.maxReplanDepth) {
-            console.warn(`[Agent ${this.id}] Maximum replanning depth (${this.maxReplanDepth}) reached in handleStepFailure. Aborting mission.`);
+            console.warn(`[Agent ${this.id}] handleStepFailure: Maximum replanning depth (${this.replanDepth}/${this.maxReplanDepth}) reached. Aborting mission.`);
             this.say(`Maximum replanning depth reached. This suggests a fundamental issue that cannot be resolved through replanning. Aborting mission.`);
             step.status = StepStatus.ERROR;
-            this.setAgentStatus(AgentStatus.ERROR, {eventType: 'agent_error', details: 'Maximum replanning depth reached'});
+            this.setAgentStatus(AgentStatus.ERROR, {eventType: 'agent_error', details: `Maximum replanning depth (${this.replanDepth}/${this.maxReplanDepth}) reached`});
             await this.updateStatus();
             return;
         }
@@ -2240,6 +2251,7 @@ Explanation: ${resolution.explanation}`);
                 error: step.lastError.message,
                 timestamp: new Date().toISOString()
             });
+            console.log(`[Agent ${this.id}] handleStepFailure: Validation error for step ${step.id}. Triggering replan.`);
             await this.replanFromFailure(step); // Call replanFromFailure
         } else if (errorType === StepErrorType.TRANSIENT && step.retryCount < step.maxRetries) {
             step.retryCount++;
@@ -2254,10 +2266,12 @@ Explanation: ${resolution.explanation}`);
                 error: step.lastError.message,
                 timestamp: new Date().toISOString()
             });
+            console.log(`[Agent ${this.id}] handleStepFailure: Transient error for step ${step.id}. Retrying (attempt ${step.retryCount}/${step.maxRetries}).`);
         } else {
             // Permanent failure
             step.status = StepStatus.ERROR;
             this.say(`Step ${step.actionVerb} failed permanently. Attempting to create a new plan to recover.`);
+            console.log(`[Agent ${this.id}] handleStepFailure: Permanent failure for step ${step.id}. Triggering replan.`);
             // Intelligent Replanning
             await this.replanFromFailure(step);
         }
@@ -2315,21 +2329,23 @@ Explanation: ${resolution.explanation}`);
 
     public async replanFromFailure(failedStep: Step): Promise<void> {
         if (this.lastFailedStep && this.lastFailedStep.id === failedStep.id) {
-            console.log(`[Agent ${this.id}] Detected repeated failure of step ${failedStep.id}. Aborting this branch of the plan to prevent infinite loop.`);
+            console.log(`[Agent ${this.id}] replanFromFailure: Detected repeated failure of the same step (${failedStep.id}). Aborting this branch of the plan to prevent infinite loop.`);
             this.say(`Step ${failedStep.actionVerb} failed again. Aborting this branch of the plan.`);
             failedStep.status = StepStatus.ERROR;
             await this.notifyDependents(failedStep.id, StepStatus.CANCELLED);
             await this.updateStatus();
+            this.setAgentStatus(AgentStatus.ERROR, {eventType: 'agent_aborted_replan_loop', details: `Repeated failure of step ${failedStep.id}`});
             return;
         }
 
         // Check replanning depth to prevent infinite recursion
         if (this.replanDepth >= this.maxReplanDepth) {
-            console.warn(`[Agent ${this.id}] Maximum replanning depth (${this.maxReplanDepth}) reached. Aborting this branch of the plan to prevent infinite recursion.`);
+            console.warn(`[Agent ${this.id}] replanFromFailure: Maximum replanning depth (${this.replanDepth}/${this.maxReplanDepth}) reached. Aborting this branch of the plan to prevent infinite recursion.`);
             this.say(`Maximum replanning depth reached. This suggests a fundamental issue that cannot be resolved through replanning. Aborting this branch of the plan.`);
             failedStep.status = StepStatus.ERROR;
             await this.notifyDependents(failedStep.id, StepStatus.CANCELLED);
             await this.updateStatus();
+            this.setAgentStatus(AgentStatus.ERROR, {eventType: 'agent_aborted_replan_depth', details: `Maximum replanning depth (${this.replanDepth}/${this.maxReplanDepth}) reached`});
             return;
         }
 
@@ -2341,7 +2357,7 @@ Explanation: ${resolution.explanation}`);
         for (const step of dependentSteps) {
             if (step.status === StepStatus.PENDING) {
                 step.status = StepStatus.CANCELLED;
-                console.log(`[Agent ${this.id}] Cancelling step ${step.id} because its dependency ${failedStepId} failed.`);
+                console.log(`[Agent ${this.id}] replanFromFailure: Cancelling step ${step.id} (${step.actionVerb}) because its dependency ${failedStepId} failed.`);
                 this.logEvent({
                     eventType: 'step_cancelled_dependency_failed',
                     agentId: this.id,
@@ -2362,11 +2378,12 @@ Explanation: ${resolution.explanation}`);
 
         // Check if this step has already been replanned or if there are too many failures
         if (this.replannedSteps.has(failedStepId) || recentFailures.length >= 2) {
-            console.warn(`[Agent ${this.id}] Multiple failures detected for action verb '${failedVerb}' or step already replanned. Aborting this branch of the plan to prevent loop.`);
+            console.warn(`[Agent ${this.id}] replanFromFailure: Multiple failures detected for action verb '${failedVerb}' or step already replanned. Aborting this branch of the plan to prevent loop.`);
             this.say(`Multiple failures for action verb '${failedVerb}'. This suggests a fundamental issue that cannot be resolved through replanning. Aborting this branch of the plan.`);
             failedStep.status = StepStatus.ERROR;
             await this.notifyDependents(failedStep.id, StepStatus.CANCELLED);
             await this.updateStatus();
+            this.setAgentStatus(AgentStatus.ERROR, {eventType: 'agent_aborted_multiple_failures', details: `Multiple failures for action verb '${failedVerb}'`});
             return;
         }
 
@@ -2374,6 +2391,7 @@ Explanation: ${resolution.explanation}`);
         this.replannedSteps.add(failedStepId);
         this.replanDepth++;
         this.lastFailedStep = failedStep;
+        console.log(`[Agent ${this.id}] replanFromFailure: Incrementing replan depth to ${this.replanDepth}.`);
 
         const errorMsg = failedStep.lastError?.message || 'Unknown error';
         const workProductsSummary = await this.getCompletedWorkProductsSummary();

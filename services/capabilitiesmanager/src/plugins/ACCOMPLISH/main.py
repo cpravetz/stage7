@@ -739,19 +739,20 @@ Plan Schema
         }}}}
 CRITICAL: The actionVerb for each step MUST be a valid, existing plugin actionVerb (from the provided list) or a descriptive, new actionVerb (e.g., 'ANALYZE_DATA', 'GENERATE_REPORT'). It MUST NOT be 'UNKNOWN' or 'NOVEL_VERB'.
 
-**DELIVERABLE IDENTIFICATION:**
-When defining outputs, identify which ones are final deliverables that the user will want to see:
-- For outputs that represent final results, reports, or completed work products, use the enhanced format:
+CRITICAL: DELIVERABLE IDENTIFICATION - VERY IMPORTANT
+When defining outputs, you MUST identify which ones are final deliverables for the user. These are the key results that the user expects to receive.
+
+- For final reports, analyses, or completed files that are meant for the user, you MUST use the enhanced format, including `"isDeliverable": true` and a `"filename"`:
   ```json
   "outputs": {{
     "final_report": {{
-      "description": "A comprehensive analysis report",
+      "description": "A comprehensive analysis",
       "isDeliverable": true,
       "filename": "market_analysis_2025.md"
     }}
   }}
   ```
-- For intermediate outputs used only by subsequent steps, use the simple string format:
+- For intermediate data or outputs used only by subsequent steps within the plan, use the simple string format (DO NOT include `isDeliverable` or `filename`):
   ```json
   "outputs": {{
     "research_data": "Raw research data for analysis"
