@@ -250,6 +250,7 @@ class PlanValidator:
         errors = []
         outputs = step.get('outputs', {})
         step_number = step.get('number', 'unknown')
+        logger.debug(f"Step {step_number}: Type of outputs in _validate_deliverable_outputs: {type(outputs)}")
 
         for output_name, output_def in outputs.items():
             if isinstance(output_def, dict):
@@ -849,42 +850,87 @@ Return ONLY the corrected JSON plan, no explanations."""
             source_output_type = single_output_def.get('type')
             source_output_def = single_output_def
 
+        # Get destination input type (from manifest)
+        dest_input_def = next((inp for inp in input_definitions if inp.get('name') == input_name), None)
+        if not dest_input_def:
+            # If input_name is not found in manifest, it might be an implicit input or an error
+            # For now, we'll log a warning and skip type checking for this input
+            logger.warning(f"Step {step_number}: Input '{input_name}' not found in manifest for plugin '{step['actionVerb']}'. Skipping type compatibility check.")
+            return
+        dest_input_type = dest_input_def.get('type')
+        if not dest_input_type:
+            errors.append(f"Step {step_number}: Input '{input_name}' in manifest for plugin '{step['actionVerb']}' is missing 'type'.")
+            return
+
+        # Find source step and its plugin definition
+        source_step = next((s for s in plan if s.get('number') == source_step_number), None)
+        if not source_step:
+            errors.append(f"Step {step_number}: Source step {source_step_number} not found for input '{input_name}'.")
+            return
+        source_action_verb = source_step.get('actionVerb')
+        source_plugin_def = plugin_map.get(source_action_verb)
+        if not source_plugin_def:
+            errors.append(f"Step {step_number}: Plugin definition for source action verb '{source_action_verb}' (step {source_step_number}) not found.")
+            return
+
+        # Get source output type (from manifest)
+        source_output_type = None
+        source_output_defs = source_plugin_def.get('outputDefinitions', [])
+        source_output_def = None
+
+        direct_match_output_def = next((out for out in source_output_defs if out.get('name') == source_output_name), None)
+        if direct_match_output_def:
+            source_output_type = direct_match_output_def.get('type')
+            source_output_def = direct_match_output_def
+        elif len(source_output_defs) == 1: # Fallback for single output plugins
+            single_output_def = source_output_defs[0]
+            source_output_type = single_output_def.get('type')
+            source_output_def = single_output_def
+
         if not source_output_type:
-            # If we still don't have a source_output_type, it means we couldn't determine it from the plugin manifest.
-            # This will cause is_mismatch to be True, which is the desired behavior for an unknown type.
-            errors.append(f"Step {step_number}: Could not determine type for output '{source_output_name}' from step {source_step_number}")
-            return # Cannot proceed with type compatibility if source type is unknown
+            errors.append(f"Step {step_number}: Could not determine type for output '{source_output_name}' from manifest of step {source_step_number} ('{source_action_verb}').")
+            return
         
         logger.info(f"Step {step_number}: Input '{input_name}' (dest_type: {dest_input_type}) vs. Source {source_step_number} output '{source_output_name}' (source_type: {source_output_type})")
 
-        # Check for type mismatch
-        is_mismatch = False
+        # --- Type Correction: Ensure plan's input_def['valueType'] matches manifest's dest_input_type ---
+        # This applies to the input_def within the plan itself, not the source_output_type
+        if 'valueType' in input_def and input_def['valueType'] != dest_input_type:
+            logger.info(f"Step {step_number}: Correcting plan's input '{input_name}' valueType from '{input_def['valueType']}' to manifest type '{dest_input_type}'")
+            input_def['valueType'] = dest_input_type
+        elif 'valueType' not in input_def:
+            # If valueType is missing in plan's input_def, add it to match manifest
+            logger.info(f"Step {step_number}: Adding missing valueType '{dest_input_type}' to plan's input '{input_name}' to match manifest.")
+            input_def['valueType'] = dest_input_type
+        # --- End Type Correction ---
 
-        is_mismatch = not (
-            dest_input_type == source_output_type or
-            dest_input_type == 'any' or
-            source_output_type == 'any' or
-            (dest_input_type == 'string' and source_output_type in ['boolean', 'number']) or
-            (dest_input_type == 'array' and source_output_type == 'string')
-        )
 
-        # Check if wrappable in FOREACH
-        is_wrappable = (dest_input_type in ['string', 'number', 'object'] and
-                       source_output_type in ['array', 'list'])
+        # Check for wrappable mismatch (string input from array/list output)
+        is_wrappable = (dest_input_type == 'string' and source_output_type in ['array', 'list'])
 
         if is_wrappable and step.get('actionVerb') != 'FOREACH':
-            actual_output_name = source_output_def.get('name')
+            actual_output_name = source_output_def.get('name') if source_output_def else source_output_name
             wrappable_errors.append({
                 "step_number": step_number,
                 "source_step_number": source_step_number,
                 "source_output_name": actual_output_name,
                 "target_input_name": input_name
             })
-        elif is_mismatch:
-            errors.append(
-                f"Step {step_number}: Input '{input_name}' expects type '{dest_input_type}', "
-                f"but received '{source_output_type}' from step {source_step_number} output '{source_output_name}'"
+        else:
+            # General type mismatch check (excluding the wrappable case, which is handled above)
+            is_mismatch = not (
+                dest_input_type == source_output_type or
+                dest_input_type == 'any' or
+                source_output_type == 'any'
+                # Removed implicit conversions like string from boolean/number or array from string
+                # as the user wants strict manifest adherence and explicit wrapping for array->string
             )
+
+            if is_mismatch:
+                errors.append(
+                    f"Step {step_number}: Input '{input_name}' expects type '{dest_input_type}' (from manifest), "
+                    f"but received '{source_output_type}' (from source manifest) from step {source_step_number} output '{source_output_name}'"
+                )
 
     def _wrap_step_in_foreach(self, plan: List[Dict[str, Any]], step_to_wrap: Dict[str, Any], 
                               source_step_number: int, source_output_name: str, target_input_name: str, 
