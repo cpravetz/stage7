@@ -559,8 +559,14 @@ A plan with no connections between steps is invalid and will be rejected.
             elif isinstance(data, dict): # Could be direct answer or plugin recommendation
                 if "direct_answer" in data:
                     answer_content = data["direct_answer"]
+                    # Ensure answer_content is a string before calling .lower()
+                    if isinstance(answer_content, dict):
+                        answer_content_str = json.dumps(answer_content)
+                    else:
+                        answer_content_str = str(answer_content)
+
                     # Check for keywords suggesting a new plan is needed
-                    if any(keyword in answer_content.lower() for keyword in ["retry", "use", "instead of", "break down", "should", "first"]):
+                    if any(keyword in answer_content_str.lower() for keyword in ["retry", "use", "instead of", "break down", "should", "first"]):
                         # Create a new goal for the ACCOMPLISH plugin
                         new_goal = f"The previous attempt failed. The advice is: '{answer_content}'. Create a new plan to accomplish the original goal: {verb_info['mission_goal']}"
                         
