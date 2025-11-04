@@ -33,6 +33,7 @@ def _create_detailed_plugin_guidance(inputs: Dict[str, Any]) -> str:
     """Create a detailed list of available plugins with input specs, descriptions, and types."""
     available_plugins_input = inputs.get('availablePlugins', {})
     available_plugins = available_plugins_input.get('value', []) if isinstance(available_plugins_input, dict) else available_plugins_input
+    
     if not available_plugins:
         return "No plugins are available for use in the plan."
 
@@ -110,6 +111,8 @@ def get_mission_goal(mission_id: str, inputs: Dict[str, Any]) -> Optional[str]:
         logger.error(f"Error fetching mission {mission_id}: {e}")
         # Don't raise, just return None and let the caller decide what to do
         return None
+
+
 
 def _extract_json_from_string(text: str) -> Optional[str]:
     """

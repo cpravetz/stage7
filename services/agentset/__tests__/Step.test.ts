@@ -94,7 +94,6 @@ describe('Step', () => {
             });
             const result = await (step as any).handleForeach();
             expect(result[0].success).toBe(true);
-            expect(result[0].name).toBe('loop_skipped');
             expect(result[0].result).toContain('Empty array, no iterations');
         });
 

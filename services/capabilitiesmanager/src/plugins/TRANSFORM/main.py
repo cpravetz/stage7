@@ -173,13 +173,13 @@ if __name__ == "__main__":
             result=None,
             error=str(e)
         ))
-    except Exception as e:
-        logger.error(f"An unexpected error occurred in TRANSFORM plugin: {e}")
+    except Exception as exc:
+        logger.error(f"An unexpected error occurred in TRANSFORM plugin: {exc}")
         sys.stdout.write(format_plugin_output(
             success=False,
             name="error",
             result_type="error",
-            description=f"An unexpected error occurred: {e}",
+            description=f"An unexpected error occurred: {exc}",
             result=None,
-            error=str(e)
+            error=str(exc)
         ))

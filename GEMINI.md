@@ -28,3 +28,56 @@ Never make assumptions or short cut an analysis because you think you know what 
 
 ## Plugin Guidance Principles
 - **Verb-Specific Guidance Location:** Plugin or verb specific guidance belongs in the manifest for that plugin, not the general prompts in our planning functions (e.g., ACCOMPLISH or REFLECT).
+
+## Example Plan Steps from Brain
+
+Here are two example plan steps as returned from the Brain, illustrating how custom output names are acceptable and how output types should be handled:
+
+```json
+[
+  {
+    "number": 1,
+    "actionVerb": "SEARCH",
+    "description": "Search for competitors of stage7 on GitHub",
+    "inputs": {
+      "searchTerm": {
+        "value": "stage7 competitors",
+        "valueType": "string"
+      }
+    },
+    "outputs": {
+      "competitors": {
+        "description": "List of competitors found on GitHub",
+        "type": "array"
+      }
+    },
+    "recommendedRole": "Researcher"
+  },
+  {
+    "number": 2,
+    "actionVerb": "SCRAPE",
+    "description": "Scrape details of the top 5 competitors from their GitHub pages",
+    "inputs": {
+      "url": {
+        "outputName": "competitors",
+        "sourceStep": 1,
+        "valueType": "string"
+      }
+    },
+    "outputs": {
+      "competitorDetails": {
+        "description": "Detailed information about the top 5 competitors",
+        "type": "array"
+      }
+    },
+    "recommendedRole": "Researcher"
+  }
+]
+```
+
+**Key points regarding these steps:**
+
+*   **Custom Output Names:** The output name `competitors` in Step 1 is acceptable, even if the manifest's canonical output name for `SEARCH` is `results`.
+*   **Output Type Alignment:** The `outputs` for `competitors` in Step 1 and `competitorDetails` in Step 2 should have a `type` property (e.g., `"type": "array"`). This is crucial for schema compliance and for enabling features like `FOREACH` wrapping.
+*   **Input Referencing:** In Step 2, the `url` input correctly references `competitors` from Step 1 using `outputName` and `sourceStep`. The `valueType` for `url` is also correctly set to `string`.
+*   **`FOREACH` Wrapping:** Once the output types are correctly set, the plan validation should identify the need for `FOREACH` wrapping for Step 2, as it consumes an array output (`competitors`) from Step 1. A new `FOREACH` step would be inserted (e.g., with `number: 50`), its `array` input would be defined as `{sourceStep: 1, outputName: competitors}`, and Step 2 (and its dependents) would become part of the `FOREACH`'s subplan, with `SCRAPE`'s `url` input redefined as `{sourceStep: 50, outputName: "item"}`.

@@ -267,15 +267,15 @@ class LangsearchSearchProvider(SearchProvider):
                 else:
                     logger.error(f"LangSearch API request failed: {str(e)}")
                     self.update_performance(success=False)
-                    return []  # Return empty results instead of raising
+                    raise  # Re-raise the exception to indicate failure
             except requests.exceptions.RequestException as e:
                 logger.error(f"LangSearch API request failed: {str(e)}")
                 self.update_performance(success=False)
-                return []  # Return empty results instead of raising
+                raise  # Re-raise the exception to indicate failure
             except Exception as e:
                 logger.error(f"LangSearch processing failed: {str(e)}")
                 self.update_performance(success=False)
-                return []  # Return empty results instead of raising
+                raise  # Re-raise the exception to indicate failure
             finally:
                 self.last_request_time = time.time()
         
@@ -328,14 +328,10 @@ class DuckDuckGoSearchProvider(SearchProvider):
 class SearxNGSearchProvider(SearchProvider):
     """Search provider for SearxNG with improved error handling."""
     def __init__(self):
-        super().__init__("SearxNG", performance_score=60)
+        super().__init__("SearxNG", performance_score=90)
         self.base_urls = [
-            'http://searxng:8080',
-            'https://searx.stream/',
-            'https://search.inetol.net/',
-            'https://search.rhscz.eu/',
-            'https://s.mble.dk/',
-            'https://search.hbubli.cc/'
+            'http://searxng:8080'
+            # Add others as appropriate.
         ]
         self.current_url_index = 0
         self.backoff_time = 5 # Increased initial backoff time in seconds

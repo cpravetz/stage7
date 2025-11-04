@@ -6,7 +6,6 @@ import { ExchangeType } from './services/baseService';
 import { BaseEntity } from '@cktmcs/shared';
 import dotenv from 'dotenv';
 import { analyzeError } from '@cktmcs/errorhandler';
-import fetch from 'node-fetch';
 import { v4 as uuidv4 } from 'uuid';
 
 dotenv.config();
@@ -219,7 +218,7 @@ export class Brain extends BaseEntity {
                         this.modelTimeoutCounts[selectedModel.name] = (this.modelTimeoutCounts[selectedModel.name] || 0) + 1;
                         if (this.modelTimeoutCounts[selectedModel.name] >= 3) {
                             console.warn(`[Brain Generate] Blacklisting model ${selectedModel.name} after 3 consecutive timeouts/system errors.`);
-                            this.modelManager.blacklistModel(selectedModel.name, new Date(Date.now() + 3600 * 1000));
+                            this.modelManager.blacklistModel(selectedModel.name, new Date(Date.now() + 3600 * 1000), conversationType);
                             this.modelTimeoutCounts[selectedModel.name] = 0;
                         }
                     } else if (isRateLimit) {
@@ -273,7 +272,6 @@ export class Brain extends BaseEntity {
         let lastError: string = '';
         let lastModelName: string | null = null;
         const excludedModels: string[] = [];
-        let repairAttempted = false;
 
         while (true) { // Infinite retry until success or no models available
             attempt++;
@@ -371,7 +369,7 @@ export class Brain extends BaseEntity {
                     // More aggressive blacklisting for specific, repeated failures
                     if (counts.timeout >= 2 || counts.json >= 3 || totalFailures >= 5) {
                         console.warn(`[Brain Chat] Blacklisting model ${selectedModel.name} due to repeated failures:`, `Timeouts: ${counts.timeout}, JSON errors: ${counts.json}, Other: ${counts.other}`);
-                        this.modelManager.blacklistModel(selectedModel.name, new Date(Date.now() + 15 * 60 * 1000)); // Blacklist for 15 minutes
+                        this.modelManager.blacklistModel(selectedModel.name, new Date(Date.now() + 15 * 60 * 1000), thread.conversationType || null); // Blacklist for 15 minutes
                         // Reset counts after blacklisting
                         this.modelFailureCounts[selectedModel.name] = { timeout: 0, json: 0, other: 0 };
                     }
@@ -446,7 +444,7 @@ export class Brain extends BaseEntity {
                 } catch (jsonError) {
                     // Blacklist model and throw to trigger retry
                     console.error(`[Brain Chat] Model ${selectedModel.name} failed to return valid JSON: ${jsonError instanceof Error ? jsonError.message : String(jsonError)}`);
-                    this.modelManager.blacklistModel(selectedModel.name, new Date());
+                    this.modelManager.blacklistModel(selectedModel.name, new Date(), thread.conversationType);
                     throw new Error('Unrecoverable JSON from model: ' + selectedModel.name);
                 }
             }
