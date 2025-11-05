@@ -131,10 +131,13 @@ if __name__ == "__main__":
                     if input_name in inputs_dict:
                         value = inputs_dict[input_name]
                         if isinstance(value, str):
-                            try:
-                                value = json.loads(value)
-                            except json.JSONDecodeError:
-                                pass # Not a json string
+                            temp_value = value
+                            while isinstance(temp_value, str):
+                                try:
+                                    temp_value = json.loads(temp_value)
+                                except json.JSONDecodeError:
+                                    break
+                            value = temp_value
                         params_to_execute[param_name] = value
                     else:
                         params_to_execute[param_name] = param_value # pass as is

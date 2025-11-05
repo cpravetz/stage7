@@ -161,13 +161,17 @@ export class AgentPersistenceManager {
         }
     }
 
-    async saveWorkProduct(step: any, result: PluginOutput[]): Promise<void> {
+    async saveWorkProduct(step: any, result: PluginOutput[], outputType?: any): Promise<void> {
         if (!step || !step.id) {
             console.error('Cannot save work product: step or step.id is missing');
             return;
         }
 
-        const isDeliverable = step.hasDeliverableOutputs();
+        let isDeliverable = step.hasDeliverableOutputs();
+        if (outputType === 'Final') {
+            isDeliverable = true;
+            result.forEach(r => (r as any).isDeliverable = true);
+        }
         const deliverableOutput = isDeliverable ? result.find(r => (r as any).isDeliverable) : undefined;
 
         // Step 1: Always save the metadata-rich WorkProduct to 'step-outputs'

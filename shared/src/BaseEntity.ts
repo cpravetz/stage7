@@ -619,7 +619,7 @@ protected async cleanup() {
 
       // Use authenticated API for HTTP communication
       const response = await this.authenticatedApi.post(`http://${postOfficeUrl}/message`, message);
-      console.log(`Successfully sent message to ${recipient} via HTTP. Response status: ${response.status}`);
+      //console.log(`Successfully sent message to ${recipient} via HTTP. Response status: ${response.status}`);
       return response.data;
     } catch (directError) {
       console.error(`Failed to send message via direct HTTP:`, directError instanceof Error ? directError.message : directError);
@@ -658,7 +658,7 @@ protected async cleanup() {
 
     try {
       await this.sendMessage('say', 'user', { message: formattedContent, persistent }, false);
-      console.log(`Successfully sent message to PostOffice: ${formattedContent}`);
+      //console.log(`Successfully sent message to PostOffice: ${formattedContent}`);
     } catch (error) {
       console.error(`Error sending message to PostOffice: ${error instanceof Error ? error.message : String(error)}`);
     }

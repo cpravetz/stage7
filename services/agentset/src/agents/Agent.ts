@@ -826,11 +826,13 @@ Please consider this context when planning and executing the mission. Provide de
         }
 
         try {
+            // Determine the output type before saving
+            const outputType = step.getOutputType(this.steps);
+
             // The new, consolidated save method in the persistence manager handles both work products and deliverables
-            await this.agentPersistenceManager.saveWorkProduct(step, data);
+            await this.agentPersistenceManager.saveWorkProduct(step, data, outputType);
 
             // UI notification logic remains here
-            const outputType = step.getOutputType(this.steps);
             const type = outputType === OutputType.FINAL ? 'Final' : outputType === OutputType.PLAN ? 'Plan' : 'Interim';
             const hasDeliverables = step.hasDeliverableOutputs();
             const workproductContent = data[0]?.result;
