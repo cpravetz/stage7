@@ -81,12 +81,16 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics, zoo
         if (networkRef.current) {
             const newScale = Math.max(0.1, zoom * factor);
             setZoom(newScale);
+            networkRef.current.moveTo({ scale: newScale });
         }
     }, [zoom, setZoom]);
 
     const handleResetZoom = useCallback(() => {
         setZoom(1);
         setPan({ x: 0, y: 0 });
+        if (networkRef.current) {
+            networkRef.current.moveTo({ scale: 1, position: { x: 0, y: 0 } });
+        }
     }, [setZoom, setPan]);
 
     
@@ -454,18 +458,13 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics, zoo
 
     return (
         <div style={{ position: 'relative', width: '100%' }} className={theme === 'dark' ? 'dark-mode' : ''}>
-            {stepOverviewOpen ? (
-                <StepOverviewDialog />
-            ) : (
-                <>
-                    <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 2, display: 'flex', gap: 8 }}>
-                        <button onClick={() => handleZoom(1.2)} title="Zoom In">+</button>
-                        <button onClick={() => handleZoom(1/1.2)} title="Zoom Out">-</button>
-                        <button onClick={handleResetZoom} title="Reset Zoom">⟳</button>
-                    </div>
-                    <div ref={containerRef} className="network-graph" />
-                </>
-            )}
+            {stepOverviewOpen && <StepOverviewDialog />}
+            <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 2, display: 'flex', gap: 8 }}>
+                <button onClick={() => handleZoom(1.2)} title="Zoom In">+</button>
+                <button onClick={() => handleZoom(1/1.2)} title="Zoom Out">-</button>
+                <button onClick={handleResetZoom} title="Reset Zoom">⟳</button>
+            </div>
+            <div ref={containerRef} className="network-graph" style={{ visibility: stepOverviewOpen ? 'hidden' : 'visible' }} />
         </div>
     );
 };

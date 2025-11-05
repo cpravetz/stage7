@@ -485,6 +485,18 @@ CONTEXT:
 
 Write a concise prose plan (5 to 10 logical steps) that explains the strategic approach.
 
+CRITICAL PLANNING PRINCIPLES:
+1. **Research First**: Never assume facts about competitors, URLs, or specific entities. Always start with research steps (SEARCH, QUERY_KNOWLEDGE_BASE) to gather current, accurate information.
+2. **Build Dependencies**: Each step should logically build on previous steps. If step 2 needs data from step 1, explicitly state this dependency.
+3. **No Hardcoded Data**: Avoid specific URLs, company names, or technical details unless they are well-known facts. Use research to discover these.
+4. **Process Results**: When you gather data (like search results), plan subsequent steps to process, analyze, or act on that data.
+
+EXAMPLE APPROACH:
+- Step 1: Research to find current information
+- Step 2: Process/analyze the research results
+- Step 3: Take action based on the processed data
+- Step 4: Validate or refine based on results
+
 IMPORTANT: Return ONLY plain text for the plan. NO markdown formatting, NO code blocks, NO special formatting.
 
 """
@@ -568,6 +580,10 @@ CRITICAL: The actionVerb for each step MUST be a valid, existing plugin actionVe
 - **CRITICAL - LINKING STEPS:** You MUST explicitly connect steps. Any step that uses the output of a previous step MUST declare this in its `inputs` using `sourceStep` and `outputName`. DO NOT simply refer to previous outputs in a `prompt` string without also adding the formal dependency in the `inputs` object. For verbs like `THINK`, `CHAT`, or `ASK_USER_QUESTION`, if the `prompt` or `question` text refers to a file or work product from a previous step, you MUST add an input that references the output of that step using `sourceStep` and `outputName`. This ensures the step waits for the file to be created.
 A plan with no connections between steps is invalid and will be rejected.
 
+- **CRITICAL - NO HARDCODED DATA:** Never use hardcoded URLs, company names, or specific technical details as constant values unless they are universally known facts (like "google.com"). Instead:
+  * Use SEARCH to find current information about competitors, companies, or resources
+  * Use the search results as inputs to subsequent steps via `sourceStep` and `outputName`
+  
 {plugin_guidance}"""
 
         for attempt in range(self.max_retries):

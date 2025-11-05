@@ -5,7 +5,7 @@ import { analyzeError } from '@cktmcs/errorhandler';
 
 export class OpenWebUIInterface extends BaseInterface {
     interfaceName: string = 'openwebui';
-    private readonly DEFAULT_TIMEOUT = 120000; // 120 seconds timeout for openwebui model (increased from 60s)
+    private readonly DEFAULT_TIMEOUT = 180000; // 180 seconds timeout for openwebui model (increased from 60s)
 
     constructor() {
         super('openwebui');
@@ -106,7 +106,7 @@ export class OpenWebUIInterface extends BaseInterface {
                     console.log('OpenWebUI response received successfully');
                     console.log(`OpenWebUI response data length: ${JSON.stringify(data).length} characters`);
                 } catch (err) {
-                    console.error('Error parsing JSON response:', err);
+                    console.error('OpenWebUI Error parsing JSON response:', err);
                     throw new Error('Failed to parse OpenWebUI response');
                 }
 
@@ -120,7 +120,7 @@ export class OpenWebUIInterface extends BaseInterface {
                     if (requireJson) {
                         const jsonResponse = await this.ensureJsonResponse(content, true, service);
                         if (jsonResponse === null) {
-                            throw new Error("Failed to extract valid JSON from the model's response.");
+                            throw new Error("OpenWebUI Failed to extract valid JSON from the model's response.");
                         }
                         return jsonResponse;
                     }

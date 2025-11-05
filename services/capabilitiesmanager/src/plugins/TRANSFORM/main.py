@@ -131,10 +131,13 @@ if __name__ == "__main__":
                     if input_name in inputs_dict:
                         value = inputs_dict[input_name]
                         if isinstance(value, str):
-                            try:
-                                value = json.loads(value)
-                            except json.JSONDecodeError:
-                                pass # Not a json string
+                            temp_value = value
+                            while isinstance(temp_value, str):
+                                try:
+                                    temp_value = json.loads(temp_value)
+                                except json.JSONDecodeError:
+                                    break
+                            value = temp_value
                         params_to_execute[param_name] = value
                     else:
                         params_to_execute[param_name] = param_value # pass as is
@@ -173,13 +176,13 @@ if __name__ == "__main__":
             result=None,
             error=str(e)
         ))
-    except Exception as e:
-        logger.error(f"An unexpected error occurred in TRANSFORM plugin: {e}")
+    except Exception as exc:
+        logger.error(f"An unexpected error occurred in TRANSFORM plugin: {exc}")
         sys.stdout.write(format_plugin_output(
             success=False,
             name="error",
             result_type="error",
-            description=f"An unexpected error occurred: {e}",
+            description=f"An unexpected error occurred: {exc}",
             result=None,
-            error=str(e)
+            error=str(exc)
         ))

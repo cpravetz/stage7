@@ -291,15 +291,9 @@ const INTERNAL_VERBS: PluginManifest[] = [
             {
                 name: 'steps',
                 description: 'The steps to be executed for each item in the array.',
-                type: PluginParameterType.PLAN,
+                type: PluginParameterType.ARRAY,
                 required: false,
-            },
-            {
-                name: 'loop_skipped',
-                description: 'Indicates if the loop was skipped due to an empty input array.',
-                type: PluginParameterType.STRING,
-                required: false,
-            },
+            }
         ],
         repository: {
             type: 'internal',
@@ -343,10 +337,45 @@ const INTERNAL_VERBS: PluginManifest[] = [
         },
         security: {
             permissions: [],
-            sandboxOptions: {allowEval: false, timeout: 1000, memory: 64, allowedAPIs: [], allowedModules: []},
+            sandboxOptions: {allowEval: true, timeout: 30000, memory: 256, allowedAPIs: [], allowedModules: []},
             trust: {
                 signature: 'internal',
             },
+        },
+        metadata: { status: PluginStatus.RUNNING } // Internal plugins are always running
+    },
+    {
+        id: 'internal-REGROUP',
+        verb: 'REGROUP',
+        version: '1.0.0',
+        description: 'Collects results from parallel streams of execution and combines them into a single array.',
+        language: 'internal',
+        inputDefinitions: [
+            {
+                name: 'steps',
+                type: PluginParameterType.ARRAY,
+                required: true,
+                description: 'An array of end steps from the instances of a subplan.'
+            }
+        ],
+        outputDefinitions: [
+            {
+                name: 'result',
+                description: 'A single array containing all the items from the input arrays.',
+                type: PluginParameterType.ARRAY,
+                required: true
+            }
+        ],
+        repository: {
+            type: 'internal',
+            url: 'internal'
+        },
+        security: {
+            permissions: [],
+            sandboxOptions: { allowEval: false, timeout: 1000, memory: 64, allowedAPIs: [], allowedModules: [] },
+            trust: {
+                signature: 'internal'
+            }
         },
         metadata: { status: PluginStatus.RUNNING } // Internal plugins are always running
     },
@@ -727,6 +756,36 @@ export class PluginRegistry {
             return plugin;
         } catch (err) {
             console.warn(`pluginRegistry: findOne failed for id=${id}:`, err);
+            return undefined;
+        }
+    }
+
+    async findByVerb(verb: string): Promise<PluginManifest | undefined> {
+        try {
+            const normalizedVerb = verb.toUpperCase();
+            const pluginId = this.verbIndex.get(normalizedVerb);
+            if (pluginId) {
+                return this.findOne(pluginId);
+            }
+
+            // Check for internal verbs - these should be in the registry
+            // but if not found, we still want to return their definitions
+            const internalVerbs = ['THINK', 'GENERATE', 'IF_THEN', 'WHILE', 'UNTIL', 'SEQUENCE', 'TIMEOUT', 'REPEAT', 'FOREACH', 'REGROUP', 'CHAT'];
+            if (internalVerbs.includes(normalizedVerb)) {
+                // Try to find the internal plugin by ID
+                const internalId = `internal-${normalizedVerb}`;
+                const internalPlugin = await this.findOne(internalId);
+                if (internalPlugin) {
+                    return internalPlugin;
+                }
+
+                // If not found in registry, log warning but don't fail
+                console.warn(`pluginRegistry: Internal verb ${normalizedVerb} not found in registry, but this is expected for API-based type lookups`);
+            }
+
+            return undefined;
+        } catch (err) {
+            console.warn(`pluginRegistry: findByVerb failed for verb=${verb}:`, err);
             return undefined;
         }
     }

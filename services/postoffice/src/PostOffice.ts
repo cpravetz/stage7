@@ -51,6 +51,11 @@ export class PostOffice extends BaseEntity {
         // Skip PostOffice registration since this is the PostOffice itself
         super(id, componentType, urlBase, port, true);
         this.app = express();
+        // Very early logging middleware to catch all requests
+        this.app.use((req: Request, res: Response, next: NextFunction) => {
+            console.log(`[PostOffice - ALL] Incoming Request: ${req.method} ${req.originalUrl}`);
+            next();
+        });
         this.server = http.createServer(this.app);
         this.wss = new WebSocket.Server({
             server: this.server,

@@ -32,7 +32,7 @@ export class ModelManager {
      * @param modelName The name of the model to blacklist
      * @param until Date until which the model is blacklisted
      */
-    blacklistModel(modelName: string, until: Date): void {
+    blacklistModel(modelName: string, until: Date, conversationType: LLMConversationType | null = null): void {
         const metrics = this.performanceTracker.getPerformanceMetrics(modelName, LLMConversationType.TextToText); // Use a default conversation type for fetching failure count
         const consecutiveFailures = metrics ? metrics.consecutiveFailures : 0;
         const backoffTime = Math.pow(2, consecutiveFailures) * 60 * 1000; // Exponential backoff in minutes
@@ -40,21 +40,29 @@ export class ModelManager {
 
         console.log(`Blacklisting model ${modelName} until ${blacklistUntil.toISOString()} due to ${consecutiveFailures} consecutive failures.`);
 
-        for (const conversationType of Object.values(LLMConversationType)) {
+        if (conversationType) {
             const specificMetrics = this.performanceTracker.getPerformanceMetrics(modelName, conversationType);
             if (specificMetrics) {
                 specificMetrics.blacklistedUntil = blacklistUntil.toISOString();
                 specificMetrics.consecutiveFailures = Math.max(specificMetrics.consecutiveFailures, 1);
+            }
+        } else {
+            for (const modelConversationType of Object.values(LLMConversationType)) {
+                const specificMetrics = this.performanceTracker.getPerformanceMetrics(modelName, modelConversationType);
+                if (specificMetrics) {
+                    specificMetrics.blacklistedUntil = blacklistUntil.toISOString();
+                    specificMetrics.consecutiveFailures = Math.max(specificMetrics.consecutiveFailures, 1);
+                }
             }
         }
         this.clearModelSelectionCache();
 
         // Immediately save the blacklist to disk and trigger database sync
         this.performanceTracker.savePerformanceData().then(() => {
-            console.log(`[ModelManager] Blacklist for ${modelName} saved to disk`);
+            console.log(`[ModelManager] Blacklist for ${modelName} Type ${conversationType ? conversationType : 'none'} saved to disk`);
             this.triggerImmediateDatabaseSync();
         }).catch(error => {
-            console.error(`[ModelManager] Failed to save blacklist for ${modelName}:`, error);
+            console.error(`[ModelManager] Failed to save blacklist for ${modelName} Type ${conversationType ? conversationType : 'none'}:`, error);
         });
     }
 
