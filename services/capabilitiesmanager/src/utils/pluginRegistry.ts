@@ -352,7 +352,7 @@ const INTERNAL_VERBS: PluginManifest[] = [
         language: 'internal',
         inputDefinitions: [
             {
-                name: 'steps',
+                name: 'stepIdsToRegroup',
                 type: PluginParameterType.ARRAY,
                 required: true,
                 description: 'An array of end steps from the instances of a subplan.'

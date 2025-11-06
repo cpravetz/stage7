@@ -437,11 +437,11 @@ class SearchPlugin:
         # 4. SearxNG as fourth fallback
         providers.append(SearxNGSearchProvider())
         
-        # 5. Brain as final fallback (always available if there's a token)
-        if '__brain_auth_token' in self.inputs or 'BRAIN_AUTH_TOKEN' in os.environ:
-            brain_provider = BrainSearchProvider(inputs=self.inputs)
-            brain_provider.performance_score = 40  # Lower initial score as it's a fallback
-            providers.append(brain_provider)
+        # 5. Brain as final fallback (always available if there's a token) - DISABLED BY GEMINI
+        # if '__brain_auth_token' in self.inputs or 'BRAIN_AUTH_TOKEN' in os.environ:
+        #     brain_provider = BrainSearchProvider(inputs=self.inputs)
+        #     brain_provider.performance_score = 40  # Lower initial score as it's a fallback
+        #     providers.append(brain_provider)
         
         if not providers:
             logger.error("No search providers were successfully initialized!")

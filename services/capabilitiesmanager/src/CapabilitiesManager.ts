@@ -696,6 +696,7 @@ export class CapabilitiesManager extends BaseEntity {
                         if (!(step.inputValues instanceof Map)) {
                             step.inputValues = new Map(Object.entries(step.inputValues || {}));
                         }
+                        console.log(`[${trace_id}] ${source_component}: Input values before validation for ${step.actionVerb}:`, JSON.stringify(Array.from(step.inputValues.entries())));
 
 
 

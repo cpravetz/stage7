@@ -331,6 +331,12 @@ export class Step {
             args: {}
         });
 
+        // NEW PHASE 0: Copy existing inputValues (e.g., from FOREACH injection)
+        // This ensures values already set in step.inputValues are considered.
+        this.inputValues.forEach((inputValue, key) => {
+            inputRunValues.set(key, { ...inputValue }); // Create a shallow copy
+        });
+
         // Phase 1: Populate with all literal values defined in the plan.
         console.log(`[Step ${this.id}] Phase 1: Processing literal inputs from references...`);
         this.inputReferences.forEach((inputRef, key) => {
@@ -536,7 +542,7 @@ export class Step {
             // Inject the loop item value into the steps that need it
             iterationSteps.forEach(step => {
                 for (const [inputName, inputRef] of step.inputReferences.entries()) {
-                    if (inputRef.outputName === 'item' && inputRef.sourceId === this.id) {
+                    if (inputRef.outputName === 'item' && (inputRef.sourceId ===  '0' || inputRef.sourceId === this.id)) {
                         let valueToPass = item;
                         if (inputName === 'url' && typeof item === 'object' && item !== null && item.hasOwnProperty('url')) {
                             valueToPass = item.url;
@@ -598,13 +604,13 @@ export class Step {
         return PluginParameterType.ANY;
     }
 
-    private async finalizeStepExecution(result: PluginOutput[]): Promise<void> {
+    private async finalizeStepExecution(result: PluginOutput[], allSteps: Step[]): Promise<void> {
         this.result = await this.mapPluginOutputsToCustomNames(result);
         // Check if any output indicates failure
         const hasFailureOutput = this.result.some(output => !output.success);
         this.status = hasFailureOutput ? StepStatus.ERROR : StepStatus.COMPLETED;
-    
-        await this.persistenceManager.saveWorkProduct(this, this.result!);
+        const outputType = this.getOutputType(allSteps);
+        await this.persistenceManager.saveWorkProduct(this, this.result!, outputType);
 
         await this.logEvent({
             eventType: 'step_result',
@@ -716,7 +722,7 @@ export class Step {
 
                 console.log(`[Step ${this.id}] execute: Plan result will be processed by Agent for execution. Status: ${this.status}`);
             } else {
-                await this.finalizeStepExecution(result);
+                await this.finalizeStepExecution(result, allSteps!);
 
                 console.log(`[Step ${this.id}] execute: Mapped plugin outputs to step.result:`, this.result?.map(r => ({ name: r.name, resultType: r.resultType })));
 
@@ -1582,7 +1588,7 @@ export class Step {
                 console.log(`[Step ${this.id}] executeInternalActionVerb: Plan result will be processed by Agent for execution`);
             } else {
                 // Map plugin output names to step-defined custom names and persist the mapped result
-                await this.finalizeStepExecution(result);
+                await this.finalizeStepExecution(result, allSteps!);
             }
         } catch (error) {
             this.status = StepStatus.ERROR;
@@ -1854,8 +1860,6 @@ export function createFromPlan(
 
         const inputSource = (task as any).inputs || {};
 
-        for (const [inputName, inputDefUntyped] of Object.entries(inputSource as Record<string, any>)) {
-            if (typeof inputDefUntyped !== 'object' || inputDefUntyped === null) continue;
 
         for (const [inputName, inputDefUntyped] of Object.entries(inputSource as Record<string, any>)) {
             if (typeof inputDefUntyped !== 'object' || inputDefUntyped === null) continue;
@@ -1863,9 +1867,26 @@ export function createFromPlan(
             // Check for dependency based on the structure of the plan's input definition
             const isDependency = inputDefUntyped.sourceStep !== undefined && inputDefUntyped.outputName !== undefined;
 
-            if (isDependency) {
-                // This is a reference input
-                const sourceStepNum = inputDefUntyped.sourceStep; // Get the step number from the plan
+            // NEW: Check for literal-wrapped references
+            let isLiteralWrappedReference = false;
+            let parsedValue: any = null;
+            if (!isDependency && inputDefUntyped.value !== undefined && typeof inputDefUntyped.value === 'string') {
+                try {
+                    parsedValue = JSON.parse(inputDefUntyped.value);
+                    if (parsedValue && typeof parsedValue === 'object' &&
+                        parsedValue.outputName !== undefined && parsedValue.sourceStep !== undefined) {
+                        isLiteralWrappedReference = true;
+                    }
+                } catch (e) {
+                    // Not a valid JSON string, or not a reference pattern
+                }
+            }
+
+            if (isDependency || isLiteralWrappedReference) {
+                // This is a reference input (either direct or literal-wrapped)
+                const referenceDef = isLiteralWrappedReference ? parsedValue : inputDefUntyped;
+
+                const sourceStepNum = referenceDef.sourceStep; // Get the step number from the plan
                 const sourceStepId = stepNumberToUUID[sourceStepNum]; // Map to UUID
 
                 if (sourceStepId) {
@@ -1873,16 +1894,16 @@ export function createFromPlan(
                     inputReferences.set(inputName, {
                         inputName,
                         value: undefined, // Value is not literal for a reference input
-                        outputName: inputDefUntyped.outputName,
+                        outputName: referenceDef.outputName,
                         sourceId: sourceStepId, // Use the UUID
-                        valueType: inputDefUntyped.valueType,
-                        args: inputDefUntyped.args || {},
+                        valueType: referenceDef.valueType || PluginParameterType.ANY, // Use provided type or default
+                        args: referenceDef.args || {},
                     });
 
                     // Populate dependencies
                     dependencies.push({
                         inputName,
-                        outputName: inputDefUntyped.outputName,
+                        outputName: referenceDef.outputName,
                         sourceStepId,
                     });
                 } else {
@@ -1890,14 +1911,23 @@ export function createFromPlan(
                 }
             } else if (inputDefUntyped.value !== undefined) {
                 // This is a literal value input
+                let valueToSet = inputDefUntyped.value;
+                // If valueType is object or json and value is a string, try to parse it
+                if ((inputDefUntyped.valueType === PluginParameterType.OBJECT || inputDefUntyped.valueType === PluginParameterType.JSON) && typeof valueToSet === 'string') {
+                    try {
+                        valueToSet = JSON.parse(valueToSet);
+                    } catch (e) {
+                        console.warn(`[createFromPlan] Failed to parse JSON string for input '${inputName}'. Passing as string. Error: ${e instanceof Error ? e.message : e}`);
+                    }
+                }
+
                 inputValues.set(inputName, {
                     inputName,
-                    value: inputDefUntyped.value,
+                    value: valueToSet,
                     valueType: inputDefUntyped.valueType,
                     args: inputDefUntyped.args || {},
                 });
             }
-        }
         }
 
         const normalizedOutputs = Step.normalizeOutputs((task as any).outputs);

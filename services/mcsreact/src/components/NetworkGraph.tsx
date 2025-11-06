@@ -78,19 +78,13 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics, zoo
 
     // Zoom controls
     const handleZoom = useCallback((factor: number) => {
-        if (networkRef.current) {
-            const newScale = Math.max(0.1, zoom * factor);
-            setZoom(newScale);
-            networkRef.current.moveTo({ scale: newScale });
-        }
+        const newScale = Math.max(0.1, zoom * factor);
+        setZoom(newScale);
     }, [zoom, setZoom]);
 
     const handleResetZoom = useCallback(() => {
         setZoom(1);
         setPan({ x: 0, y: 0 });
-        if (networkRef.current) {
-            networkRef.current.moveTo({ scale: 1, position: { x: 0, y: 0 } });
-        }
     }, [setZoom, setPan]);
 
     
@@ -291,7 +285,7 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics, zoo
     // Initialize or update the network only when data actually changes
     useEffect(() => {
         if (!containerRef.current) return;
-        
+
         if (stepOverviewOpen) return;
 
         if (dataHash === 'empty' || (dataHash === lastDataHashRef.current && nodes.length === 0)) {
@@ -358,15 +352,16 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics, zoo
         if (networkRef.current) {
             networkRef.current.setOptions(options);
             networkRef.current.setData({ nodes, edges });
-            networkRef.current.fit(); // Fit the network to the view
-            console.log('[NetworkGraph] Network updated and fitted to view');
+            // Apply current zoom and pan after updating data to prevent fit() from resetting view
+            networkRef.current.moveTo({ scale: zoom, position: pan });
+            console.log('[NetworkGraph] Network updated and view restored');
         } else {
             networkRef.current = new Network(containerRef.current, { nodes, edges }, options);
             networkRef.current.fit(); // Fit the network on initial load
             isInitializedRef.current = true;
-            
+
             const securityClient = SecurityClient.getInstance(API_BASE_URL);
-            
+
             networkRef.current.on('click', async (params) => {
                 if (params.nodes && params.nodes.length > 0) {
                     const stepId = params.nodes[0];
@@ -374,7 +369,7 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics, zoo
                     setStepOverviewOpen(true);
                     setStepOverviewError(null);
                     setStepOverview(null);
-                    
+
                     try {
                         const token = securityClient.getAccessToken();
                         const resp = await fetch(`${API_BASE_URL}/step/${stepId}`, {
@@ -386,14 +381,14 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics, zoo
                             credentials: 'include',
                             mode: 'cors'
                         });
-                        
+
                         if (!resp.ok) {
-                            const errorData = await resp.json().catch(() => ({ 
-                                message: 'Failed to fetch step overview and could not parse error response.' 
+                            const errorData = await resp.json().catch(() => ({
+                                message: 'Failed to fetch step overview and could not parse error response.'
                             }));
                             throw new Error(errorData.message || `Failed to fetch step overview. Status: ${resp.status}`);
                         }
-                        
+
                         const data = await resp.json();
                         setStepOverview(data);
                     } catch (e: any) {
@@ -417,9 +412,16 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics, zoo
                 setZoom(newScale);
                 setPan(newPosition);
             });
-            
+
         }
     }, [nodes, edges, dataHash, stepOverviewOpen, setZoom, setPan]);
+
+    // Apply zoom changes when zoom state changes
+    useEffect(() => {
+        if (networkRef.current && isInitializedRef.current) {
+            networkRef.current.moveTo({ scale: zoom, position: pan });
+        }
+    }, [zoom, pan]);
 
     // Cleanup on unmount
     useEffect(() => {

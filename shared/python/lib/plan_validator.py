@@ -820,7 +820,15 @@ Return ONLY the corrected JSON plan, no explanations."""
                     else:
                         self._validate_step_inputs(step, plugin_def, available_outputs, errors, wrappable_errors, plan, plugin_map)
                 else:
-                    errors.append(f"Step {step_number}: Plugin definition not found for actionVerb '{action_verb}'.")
+                    # For novel actionVerbs, we skip the plugin definition check.
+                    # However, we still need to validate its inputs for structural correctness and dependencies.
+                    logger.warning(f"Step {step_number}: Plugin definition not found for actionVerb '{action_verb}'. Treating as novel verb and proceeding with dependency validation.")
+                    if 'inputs' not in step or not isinstance(step['inputs'], dict):
+                        logger.info(f"Step {step_number}: 'inputs' field is missing or not a dictionary for novel verb.")
+                        errors.append(f"Step {step_number}: 'inputs' field is missing or not a dictionary for novel verb.")
+                    else:
+                        # Call _validate_step_inputs with plugin_def=None for novel verbs
+                        self._validate_step_inputs(step, None, available_outputs, errors, wrappable_errors, plan, plugin_map)
         
             errors.extend(self._validate_deliverable_outputs(step))
         
@@ -853,7 +861,7 @@ Return ONLY the corrected JSON plan, no explanations."""
         
         return {'valid': len(errors) == 0 and len(wrappable_errors) == 0, 'errors': errors, 'wrappable_errors': wrappable_errors}
 
-    def _validate_step_inputs(self, step: Dict[str, Any], plugin_def: Dict[str, Any], 
+    def _validate_step_inputs(self, step: Dict[str, Any], plugin_def: Optional[Dict[str, Any]], 
                               available_outputs: Dict[int, Set[str]], errors: List[str], 
                               wrappable_errors: List[Dict[str, Any]], plan: List[Dict[str, Any]], 
                               plugin_map: Dict[str, Any]):
@@ -861,20 +869,31 @@ Return ONLY the corrected JSON plan, no explanations."""
         step_number = step['number']
         step_number = int(step_number) # Explicit conversion
         inputs = step.get('inputs', {})
-        input_definitions = plugin_def.get('inputDefinitions', [])
-        # Validate embedded references
+        
+        # Only get input_definitions if plugin_def is provided (for known verbs)
+        input_definitions = plugin_def.get('inputDefinitions', []) if plugin_def else []
+
+        # Validate embedded references (always applicable)
         self._validate_embedded_references(step, inputs, available_outputs, errors, plan, plugin_map)
 
-        # Check required inputs
-        required_inputs = {inp['name']: inp for inp in input_definitions if inp.get('required', False)}
-        
-        for req_name in required_inputs.keys():
-            if req_name == 'missionId':  # Always injected by runtime
-                continue
-            if req_name not in inputs:
-                errors.append(f"Step {step_number}: Missing required input '{req_name}' for '{step['actionVerb']}'")
+        # Check required inputs (only for known verbs with plugin_def)
+        if plugin_def:
+            required_inputs = {inp['name']: inp for inp in input_definitions if inp.get('required', False)}
+            
+            for req_name, req_def in required_inputs.items():
+                if req_name == 'missionId':  # Always injected by runtime
+                    continue
 
-        # Validate each input
+                if req_name not in inputs:
+                    errors.append(f"Step {step_number}: Missing required input '{req_name}' for '{step['actionVerb']}'")
+                else:
+                    input_entry = inputs[req_name]
+                    # Check if it's a value-based input and if its value is empty for string types
+                    if 'value' in input_entry and req_def.get('type') == 'string':
+                        if not input_entry['value'] or (isinstance(input_entry['value'], str) and not input_entry['value'].strip()):
+                            errors.append(f"Step {step_number}: Required string input '{req_name}' for '{step['actionVerb']}' cannot be empty.")
+
+        # Validate each input (structural and dependency checks always applicable)
         for input_name, input_def in inputs.items():
             logger.info(f"  Step ${step_number} Input ${input_name}")
             # Special case for FOREACH loop items
@@ -905,7 +924,7 @@ Return ONLY the corrected JSON plan, no explanations."""
             if not has_value and not has_source_step: # If no value and no source, it's an invalid input
                 errors.append(f"Step {step_number}: Input '{input_name}' must have a 'value' or reference a 'sourceStep' and 'outputName'.")
 
-            # Validate sourceStep references if it's a dependency
+            # Validate sourceStep references if it's a dependency (always applicable)
             if has_source_step: # Implies has_output_name is also true due to previous check
                 source_step_num = input_def['sourceStep']
                 source_step_num = int(source_step_num) # Explicit conversion
@@ -916,12 +935,11 @@ Return ONLY the corrected JSON plan, no explanations."""
                         output_name = input_def['outputName']
                         if output_name not in available_outputs.get(source_step_num, set()):
                             errors.append(f"Step {step_number}: Input '{input_name}' references non-existent output '{output_name}' from step {source_step_num}")
-                
-                # Perform type compatibility check for dependency-based inputs
-                self._check_type_compatibility(step, input_name, input_def, plugin_def,
-                                               plan, plugin_map, errors, wrappable_errors)            # No 'else' branch here, as per discussion: we don't strictly type-check literal values against manifest
-            # and we don't log "skipping" messages.
 
+                # Perform type compatibility check for dependency-based inputs (only if plugin_def is available for type info)
+                if plugin_def: # Only perform this if we have a plugin_def to get dest_input_type from
+                    self._check_type_compatibility(step, input_name, input_def, plugin_def,
+                                                   plan, plugin_map, errors, wrappable_errors)
     def _check_type_compatibility(self, step: Dict[str, Any], input_name: str, input_def: Dict[str, Any],
                                   current_plugin_def: Dict[str, Any], plan: List[Dict[str, Any]],
                                   plugin_map: Dict[str, Any], errors: List[str], 
@@ -1104,7 +1122,7 @@ Return ONLY the corrected JSON plan, no explanations."""
             "actionVerb": "REGROUP",
             "description": f"Regroup results from FOREACH step {foreach_step_number}",
             "inputs": {
-                "steps": {"outputName": "steps", "sourceStep": foreach_step_number, "valueType": "array"},
+                "stepIdsToRegroup": {"outputName": "steps", "sourceStep": foreach_step_number, "valueType": "array"},
             },
             "outputs": {
                 "result": {"description": "A single array containing all the items from the input arrays.", "type": "array"}

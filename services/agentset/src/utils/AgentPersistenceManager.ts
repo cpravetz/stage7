@@ -192,7 +192,7 @@ export class AgentPersistenceManager {
                 data: serializedData,
                 isDeliverable: isDeliverable
             });
-            console.log(`Saved work product metadata for step ${step.id}`);
+            console.log(`Saved work product metadata for step ${step.id} isDeliverable=${isDeliverable}`);
 
         } catch (error) {
             analyzeError(error as Error);
@@ -200,7 +200,7 @@ export class AgentPersistenceManager {
         }
 
         // Step 2 & 3: If it's a deliverable, stream the file to the new endpoint
-        if (isDeliverable && deliverableOutput && deliverableOutput.result instanceof Buffer) {
+        if (isDeliverable && deliverableOutput && deliverableOutput.result) {
             try {
                 const fileContent: Buffer = deliverableOutput.result;
                 const queryParams = new URLSearchParams({

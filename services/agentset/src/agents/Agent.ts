@@ -472,6 +472,10 @@ Please consider this context when planning and executing the mission. Provide de
                     // No longer changing agent status, allowing the runAgent loop to continue for other steps.
                     return;
                 }
+            } else if (result && result.length > 0 && result[0].name === 'status' && result[0].result === StepStatus.WAITING) {
+                console.log(`[Agent ${this.id}] executeStep: REGROUP step ${step.id} is WAITING for dependent steps.`);
+                step.status = StepStatus.WAITING;
+                return; // Do not call handleStepSuccess, keep step in WAITING state
             } else {
                 console.log(`[Agent ${this.id}] executeStep: Result is NOT pending_user_input. Actual result: ${JSON.stringify(this.truncateLargeStrings(result))}`);
             }
@@ -1280,26 +1284,6 @@ Please consider this context when planning and executing the mission. Provide de
                     id: step.id
                 };
 
-                // --- START MODIFICATION ---
-                if (step.actionVerb === 'SCRAPE') {
-                    const urlInput = step.inputValues?.get('url');
-                    if (urlInput && typeof urlInput.value === 'string') {
-                        payload.url = urlInput.value;
-                    } else {
-                        // Log a warning or throw an error if URL is missing for SCRAPE
-                        console.warn(`[Agent ${this.id}] SCRAPE actionVerb requires a 'url' input, but it was not found or was invalid for step ${step.id}.`);
-                        // To prevent infinite loops, we should fail early here if url is truly required
-                        return [{
-                            success: false,
-                            name: 'error',
-                            resultType: PluginParameterType.ERROR,
-                            resultDescription: 'Missing required input: url for SCRAPE action',
-                            result: null,
-                            error: 'Missing required input: url'
-                        }];
-                    }
-                }
-                // --- END MODIFICATION ---
                 step.storeTempData('payload', payload);
 
                 const timeout = step.actionVerb === 'ACCOMPLISH' ? 3600000 : 1800000;
@@ -1309,8 +1293,6 @@ Please consider this context when planning and executing the mission. Provide de
                     payload,
                     { timeout }
                 );
-
-
 
                 return response.data;
             } catch (error) {

@@ -450,8 +450,14 @@ class RobustMissionPlanner:
             logger.exception(f"❌ Failed to convert prose plan to structured JSON after all retries: {e}")
             raise AccomplishError(f"Could not convert prose to structured plan: {e}", "json_conversion_error")
 
+        # Ensure availablePlugins is a direct list of manifests for the validator
+        modified_inputs = inputs.copy()
+        available_plugins_for_validator = modified_inputs.get('availablePlugins')
+        if isinstance(available_plugins_for_validator, dict) and 'value' in available_plugins_for_validator:
+            modified_inputs['availablePlugins'] = available_plugins_for_validator['value']
+
         try:
-            validated_plan = self.validator.validate_and_repair(structured_plan, goal, inputs)
+            validated_plan = self.validator.validate_and_repair(structured_plan, goal, modified_inputs)
         except Exception as e:
             logger.exception(f"❌ Failed to validate and repair the plan after all retries: {e}")
             raise AccomplishError(f"Could not validate or repair the plan: {e}", "validation_error")
@@ -565,9 +571,9 @@ After your internal analysis and self-correction is complete, provide ONLY the f
 - **`ASK_USER_QUESTION` is a Last Resort:** This tool is exclusively for obtaining subjective opinions, approvals, or choices from the user. It is *never* for offloading tasks. Generating a plan that asks the user for information you can find yourself is a critical failure.
 - **Dependencies are Crucial:** Every step that uses an output from a previous step MUST declare this in its `inputs` using `sourceStep` and `outputName`. A plan with disconnected steps is invalid.
 - **Pay Attention to `inputGuidance`:** The `inputGuidance` field in the plugin manifest provides critical information on how to use the plugin correctly. You MUST read and follow this guidance.
-- **Handling Lists (`FOREACH`):** If a step requires a single item (e.g., a URL string) but receives a list from a preceding step (e.g., search results), you MUST use a `FOREACH` loop to iterate over the list. The `inputGuidance` for the `FOREACH` plugin explains how to do this.
-- **Role Assignment:** Assign `recommendedRole` at the deliverable level, not per individual step. All steps contributing to a single output (e.g., a research report) should share the same role.
-
+        - **Handling Lists (`FOREACH`):** If a step requires a single item (e.g., a URL string) but receives a list from a preceding step (e.g., search results), you MUST use a `FOREACH` loop to iterate over the list. The `inputGuidance` for the `FOREACH` plugin explains how to do this.
+        - **Aggregating Results (`REGROUP`):** When using a `FOREACH` loop, if you need to collect the results from all iterations into a single array, you MUST follow the `FOREACH` step with a `REGROUP` step. The `REGROUP` step's `stepIdsToRegroup` input MUST be linked to the `FOREACH` step's `instanceEndStepIds` output using `sourceStep` and `outputName`. This ensures that `REGROUP` waits for all `FOREACH` iterations to complete and then collects their results.
+        - **Role Assignment:** Assign `recommendedRole` at the deliverable level, not per individual step. All steps contributing to a single output (e.g., a research report) should share the same role.
 **DELIVERABLE IDENTIFICATION:**
 When defining outputs, identify which ones are final deliverables for the user:
 - For final reports, analyses, or completed files, use the enhanced format:
