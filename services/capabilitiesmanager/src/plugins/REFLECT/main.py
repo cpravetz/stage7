@@ -4,6 +4,7 @@ REFLECT Plugin - Enhanced with self-correction capabilities
 Handles reflection on mission progress, generates plans for next steps, and learns from performance data.
 """
 
+import uuid
 import json
 import logging
 import sys
@@ -473,7 +474,7 @@ Plan Schema
     - Step inputs are generally sourced from the outputs of other steps and less often fixed with constant values.
     - All inputs for each step must be explicitly defined either as a constant `value` or by referencing an `outputName` from a `sourceStep` within the plan or from the `PARENT STEP INPUTS`. Do not assume implicit data structures or properties of inputs.
     - Use `sourceStep: 0` ONLY for inputs that are explicitly provided in the "PARENT STEP INPUTS" section above.
-    - For any other input, it MUST be the `outputName` from a *preceding step* in this plan, and `sourceStep` MUST be the `number` of that preceding step.
+    - For any other input, it MUST be the `outputName` from a *preceding step* in this plan, and `sourceStep` MUST be the `id` of that preceding step.
     - Every input in your plan MUST be resolvable either from a given constant value, a "PARENT STEP" (using `sourceStep: 0`) or from an output of a previous step in the plan.
     - CRITICAL: If you use placeholders like {{{{'{{output_name}}'}}}} within a longer string value (e.g., a prompt that references previous outputs), you MUST also declare each referenced output_name as a separate input with proper sourceStep and outputName.
 - **Mapping Outputs to Inputs:** When the output of one step is used as the input to another, the `outputName` in the input of the second step must match the `name` of the output of the first step.
@@ -600,7 +601,7 @@ A plan with no connections between steps is invalid and will be rejected.
                         
                         # Return a new step to call ACCOMPLISH
                         new_step = {
-                            "number": 1,
+                            "id": str(uuid.uuid4()),
                             "actionVerb": "ACCOMPLISH",
                             "description": "Create a new plan based on reflection.",
                             "inputs": {
@@ -681,7 +682,7 @@ A plan with no connections between steps is invalid and will be rejected.
                         "mimeType": "application/json"
                     }])
                 # If the dictionary is a single step, treat it as a plan with one step
-                elif "actionVerb" in data and "number" in data:
+                elif "actionVerb" in data and "id" in data:
                     validated_plan = self.validator.validate_and_repair([data], verb_info['mission_goal'], inputs)
                     # self._save_plan_to_librarian(verb_info['verb'], validated_plan, inputs)
                     return json.dumps([{"success": True,

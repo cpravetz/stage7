@@ -1,0 +1,944 @@
+2025-11-10 10:06:36.920 | Loaded RSA private key from /usr/src/app/services/security/keys/private.pem
+2025-11-10 10:06:36.937 | Loaded RSA public key from /usr/src/app/services/security/keys/public.pem
+2025-11-10 10:06:36.937 | Successfully loaded RSA keys for JWT signing and verification
+2025-11-10 10:06:37.920 | RSA private key for plugin signing not found (this is normal for most services)
+2025-11-10 10:06:37.962 | Loaded RSA public key for plugin verification
+2025-11-10 10:06:38.617 | Email configuration not provided. Email sending will be disabled.
+2025-11-10 10:06:40.109 | RSA key pair loaded from /usr/src/app/services/security/keys
+2025-11-10 10:06:40.134 | Attempting to connect to RabbitMQ (attempt 1/20)...
+2025-11-10 10:06:40.134 | Using RabbitMQ URL: amqp://stage7:stage7password@rabbitmq:5672
+2025-11-10 10:06:40.135 | Attempting to connect to RabbitMQ host: rabbitmq
+2025-11-10 10:06:40.135 | Connecting to RabbitMQ at amqp://stage7:stage7password@rabbitmq:5672
+2025-11-10 10:06:40.147 | Attempting to register with Consul (attempt 1/10)...
+2025-11-10 10:06:40.147 | Using Consul URL: consul:8500
+2025-11-10 10:06:40.225 | SecurityManager listening on port 5010
+2025-11-10 10:06:40.229 | [shouldBypassAuth] Bypassing auth for auth path: /v1/agent/service/register (matched /register)
+2025-11-10 10:06:40.371 | [AuthenticatedAxios] Request x04aosuv1h: Failed after 141ms: {
+2025-11-10 10:06:40.371 |   status: undefined,
+2025-11-10 10:06:40.371 |   statusText: undefined,
+2025-11-10 10:06:40.371 |   data: undefined,
+2025-11-10 10:06:40.371 |   url: 'http://consul:8500/v1/agent/service/register'
+2025-11-10 10:06:40.371 | }
+2025-11-10 10:06:41.425 | Successfully registered SecurityManager with Consul
+2025-11-10 10:06:41.425 | Failed to register service SecurityManager with Consul
+2025-11-10 10:06:45.069 | MongoTokenRepository connected to MongoDB
+2025-11-10 10:06:45.073 | MongoTokenRepository initialized with collection: tokens
+2025-11-10 10:06:45.076 | MongoTokenBlacklistRepository connected to MongoDB
+2025-11-10 10:06:45.100 | Connected to MongoDB
+2025-11-10 10:06:45.101 | MongoUserRepository initialized with collection: users
+2025-11-10 10:06:45.168 | MongoTokenBlacklistRepository initialized with collection: token_blacklist
+2025-11-10 10:06:45.187 | PostOffice not ready, waiting 1000ms before retry 1/10
+2025-11-10 10:06:49.331 | PostOffice not ready, waiting 1500ms before retry 2/10
+2025-11-10 10:06:53.350 | PostOffice not ready, waiting 2250ms before retry 3/10
+2025-11-10 10:06:55.633 | PostOffice not ready, waiting 3375ms before retry 4/10
+2025-11-10 10:06:59.093 | [shouldBypassAuth] Bypassing auth for auth path: /registerComponent (matched /register)
+2025-11-10 10:07:25.349 | Received authentication request from component
+2025-11-10 10:07:25.350 | Request body: {"componentType":"ErrorHandler","clientSecret":"stage7AuthSecret"}
+2025-11-10 10:07:25.350 | Component type: ErrorHandler, Client secret provided: Yes
+2025-11-10 10:07:25.364 | Verifying credentials for componentType: ErrorHandler
+2025-11-10 10:07:25.365 | Client verified for componentType: ErrorHandler using service registry
+2025-11-10 10:07:25.395 | Token generated for ErrorHandler with roles: error:assess
+2025-11-10 10:07:25.395 | Token for ErrorHandler saved in memory
+2025-11-10 10:07:27.048 | Received authentication request from component
+2025-11-10 10:07:27.048 | Request body: {"componentType":"ErrorHandler","clientSecret":"stage7AuthSecret"}
+2025-11-10 10:07:27.048 | Component type: ErrorHandler, Client secret provided: Yes
+2025-11-10 10:07:27.048 | Verifying credentials for componentType: ErrorHandler
+2025-11-10 10:07:27.048 | Client verified for componentType: ErrorHandler using service registry
+2025-11-10 10:07:27.060 | Token generated for ErrorHandler with roles: error:assess
+2025-11-10 10:07:27.060 | Token for ErrorHandler saved in memory
+2025-11-10 10:07:27.593 | Received authentication request from component
+2025-11-10 10:07:27.611 | Request body: {"componentType":"ErrorHandler","clientSecret":"stage7AuthSecret"}
+2025-11-10 10:07:27.611 | Component type: ErrorHandler, Client secret provided: Yes
+2025-11-10 10:07:27.611 | Verifying credentials for componentType: ErrorHandler
+2025-11-10 10:07:27.611 | Client verified for componentType: ErrorHandler using service registry
+2025-11-10 10:07:27.643 | Token generated for ErrorHandler with roles: error:assess
+2025-11-10 10:07:27.645 | Token for ErrorHandler saved in memory
+2025-11-10 10:07:33.748 | Received authentication request from component
+2025-11-10 10:07:33.748 | Request body: {"componentType":"ErrorHandler","clientSecret":"stage7AuthSecret"}
+2025-11-10 10:07:33.748 | Component type: ErrorHandler, Client secret provided: Yes
+2025-11-10 10:07:33.748 | Verifying credentials for componentType: ErrorHandler
+2025-11-10 10:07:33.748 | Client verified for componentType: ErrorHandler using service registry
+2025-11-10 10:07:33.790 | Token generated for ErrorHandler with roles: error:assess
+2025-11-10 10:07:33.790 | Token for ErrorHandler saved in memory
+2025-11-10 10:08:00.655 | SecurityManager registered successfully with PostOffice
+2025-11-10 10:08:05.721 | Connected to RabbitMQ
+2025-11-10 10:08:05.756 | Channel created successfully
+2025-11-10 10:08:05.757 | RabbitMQ channel ready
+2025-11-10 10:08:05.886 | Connection test successful - RabbitMQ connection is stable
+2025-11-10 10:08:05.886 | Creating queue: securitymanager-SecurityManager
+2025-11-10 10:08:05.918 | Binding queue to exchange: stage7
+2025-11-10 10:08:05.941 | Successfully connected to RabbitMQ and set up queues/bindings
+2025-11-10 10:08:27.394 | Received authentication request from component
+2025-11-10 10:08:27.394 | Request body: {"componentType":"ErrorHandler","clientSecret":"stage7AuthSecret"}
+2025-11-10 10:08:27.394 | Component type: ErrorHandler, Client secret provided: Yes
+2025-11-10 10:08:27.394 | Verifying credentials for componentType: ErrorHandler
+2025-11-10 10:08:27.394 | Client verified for componentType: ErrorHandler using service registry
+2025-11-10 10:08:27.404 | Token generated for ErrorHandler with roles: error:assess
+2025-11-10 10:08:27.404 | Token for ErrorHandler saved in memory
+2025-11-10 10:57:23.070 | Received authentication request from component
+2025-11-10 10:57:23.070 | Request body: {"componentType":"ErrorHandler","clientSecret":"stage7AuthSecret"}
+2025-11-10 10:57:23.070 | Component type: ErrorHandler, Client secret provided: Yes
+2025-11-10 10:57:23.070 | Verifying credentials for componentType: ErrorHandler
+2025-11-10 10:57:23.070 | Client verified for componentType: ErrorHandler using service registry
+2025-11-10 10:57:23.076 | Token generated for ErrorHandler with roles: error:assess
+2025-11-10 10:57:23.076 | Token for ErrorHandler saved in memory
+2025-11-10 10:57:23.799 | Received authentication request from component
+2025-11-10 10:57:23.799 | Request body: {"componentType":"ErrorHandler","clientSecret":"stage7AuthSecret"}
+2025-11-10 10:57:23.799 | Component type: ErrorHandler, Client secret provided: Yes
+2025-11-10 10:57:23.799 | Verifying credentials for componentType: ErrorHandler
+2025-11-10 10:57:23.799 | Client verified for componentType: ErrorHandler using service registry
+2025-11-10 10:57:23.801 | Token generated for ErrorHandler with roles: error:assess
+2025-11-10 10:57:23.801 | Token for ErrorHandler saved in memory
+2025-11-10 10:57:27.441 | Received authentication request from component
+2025-11-10 10:57:27.441 | Request body: {"componentType":"ErrorHandler","clientSecret":"stage7AuthSecret"}
+2025-11-10 10:57:27.441 | Component type: ErrorHandler, Client secret provided: Yes
+2025-11-10 10:57:27.441 | Verifying credentials for componentType: ErrorHandler
+2025-11-10 10:57:27.441 | Client verified for componentType: ErrorHandler using service registry
+2025-11-10 10:57:27.444 | Token generated for ErrorHandler with roles: error:assess
+2025-11-10 10:57:27.444 | Token for ErrorHandler saved in memory
+2025-11-10 10:57:30.736 | Received authentication request from component
+2025-11-10 10:57:30.736 | Request body: {"componentType":"ErrorHandler","clientSecret":"stage7AuthSecret"}
+2025-11-10 10:57:30.736 | Component type: ErrorHandler, Client secret provided: Yes
+2025-11-10 10:57:30.736 | Verifying credentials for componentType: ErrorHandler
+2025-11-10 10:57:30.736 | Client verified for componentType: ErrorHandler using service registry
+2025-11-10 10:57:30.741 | Token generated for ErrorHandler with roles: error:assess
+2025-11-10 10:57:30.741 | Token for ErrorHandler saved in memory
+2025-11-10 10:58:27.547 | Received authentication request from component
+2025-11-10 10:58:27.547 | Request body: {"componentType":"ErrorHandler","clientSecret":"stage7AuthSecret"}
+2025-11-10 10:58:27.547 | Component type: ErrorHandler, Client secret provided: Yes
+2025-11-10 10:58:27.547 | Verifying credentials for componentType: ErrorHandler
+2025-11-10 10:58:27.547 | Client verified for componentType: ErrorHandler using service registry
+2025-11-10 10:58:27.550 | Token generated for ErrorHandler with roles: error:assess
+2025-11-10 10:58:27.550 | Token for ErrorHandler saved in memory
+2025-11-10 11:16:18.349 | Finding token by ID: a9dd9143-9b7e-40c0-961d-98c7c5ec7256
+2025-11-10 11:16:18.525 | Token found: a9dd9143-9b7e-40c0-961d-98c7c5ec7256
+2025-11-10 11:16:18.527 | Finding user by ID: 145bd446-597c-4a79-ac3a-cb5ce7485692
+2025-11-10 11:16:18.577 | User found with ID: 145bd446-597c-4a79-ac3a-cb5ce7485692
+2025-11-10 11:16:18.600 | Saving token: 61eb79cb-6f63-4f94-95c2-029451086742
+2025-11-10 11:16:18.658 | Token saved: 61eb79cb-6f63-4f94-95c2-029451086742
+2025-11-10 11:16:23.573 | Received authentication request from component
+2025-11-10 11:16:23.573 | Request body: {"componentType":"ErrorHandler","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:16:23.573 | Component type: ErrorHandler, Client secret provided: Yes
+2025-11-10 11:16:23.573 | Verifying credentials for componentType: ErrorHandler
+2025-11-10 11:16:23.573 | Client verified for componentType: ErrorHandler using service registry
+2025-11-10 11:16:23.576 | Token generated for ErrorHandler with roles: error:assess
+2025-11-10 11:16:23.576 | Token for ErrorHandler saved in memory
+2025-11-10 11:16:23.658 | Received authentication request from component
+2025-11-10 11:16:23.659 | Request body: {"componentType":"ErrorHandler","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:16:23.659 | Component type: ErrorHandler, Client secret provided: Yes
+2025-11-10 11:16:23.659 | Verifying credentials for componentType: ErrorHandler
+2025-11-10 11:16:23.659 | Client verified for componentType: ErrorHandler using service registry
+2025-11-10 11:16:23.662 | Token generated for ErrorHandler with roles: error:assess
+2025-11-10 11:16:23.663 | Token for ErrorHandler saved in memory
+2025-11-10 11:16:26.711 | Received authentication request from component
+2025-11-10 11:16:26.711 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:16:26.711 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:16:26.711 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:16:26.711 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:16:26.715 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:16:26.715 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:16:26.722 | Received authentication request from component
+2025-11-10 11:16:26.722 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:16:26.722 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:16:26.722 | Verifying credentials for componentType: Brain
+2025-11-10 11:16:26.722 | Client verified for componentType: Brain using service registry
+2025-11-10 11:16:26.725 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:16:26.725 | Token for Brain saved in memory
+2025-11-10 11:16:28.983 | Received authentication request from component
+2025-11-10 11:16:28.983 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:16:28.983 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:16:28.983 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:16:28.983 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:16:28.986 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:16:28.986 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:16:28.992 | Received authentication request from component
+2025-11-10 11:16:28.992 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:16:28.992 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:16:28.992 | Verifying credentials for componentType: Brain
+2025-11-10 11:16:28.992 | Client verified for componentType: Brain using service registry
+2025-11-10 11:16:28.995 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:16:28.996 | Token for Brain saved in memory
+2025-11-10 11:17:30.405 | Received authentication request from component
+2025-11-10 11:17:30.406 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:30.406 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:17:30.406 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:17:30.406 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:17:30.413 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:17:30.413 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:17:30.423 | Received authentication request from component
+2025-11-10 11:17:30.423 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:30.423 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:17:30.423 | Verifying credentials for componentType: Brain
+2025-11-10 11:17:30.423 | Client verified for componentType: Brain using service registry
+2025-11-10 11:17:30.426 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:17:30.426 | Token for Brain saved in memory
+2025-11-10 11:17:31.486 | Received authentication request from component
+2025-11-10 11:17:31.486 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:31.486 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:17:31.486 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:17:31.487 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:17:31.492 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:17:31.493 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:17:31.504 | Received authentication request from component
+2025-11-10 11:17:31.504 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:31.504 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:17:31.504 | Verifying credentials for componentType: Brain
+2025-11-10 11:17:31.504 | Client verified for componentType: Brain using service registry
+2025-11-10 11:17:31.509 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:17:31.509 | Token for Brain saved in memory
+2025-11-10 11:17:31.983 | Received authentication request from component
+2025-11-10 11:17:31.983 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:31.983 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:17:31.983 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:17:31.984 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:17:31.988 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:17:31.988 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:17:31.997 | Received authentication request from component
+2025-11-10 11:17:31.997 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:31.997 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:17:31.997 | Verifying credentials for componentType: Brain
+2025-11-10 11:17:31.997 | Client verified for componentType: Brain using service registry
+2025-11-10 11:17:32.002 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:17:32.003 | Token for Brain saved in memory
+2025-11-10 11:17:32.584 | Received authentication request from component
+2025-11-10 11:17:32.585 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:32.585 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:17:32.585 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:17:32.585 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:17:32.589 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:17:32.590 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:17:32.609 | Received authentication request from component
+2025-11-10 11:17:32.609 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:32.609 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:17:32.609 | Verifying credentials for componentType: Brain
+2025-11-10 11:17:32.609 | Client verified for componentType: Brain using service registry
+2025-11-10 11:17:32.609 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:17:32.609 | Token for Brain saved in memory
+2025-11-10 11:17:33.596 | Received authentication request from component
+2025-11-10 11:17:33.596 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:33.596 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:17:33.596 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:17:33.596 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:17:33.600 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:17:33.600 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:17:33.609 | Received authentication request from component
+2025-11-10 11:17:33.609 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:33.609 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:17:33.609 | Verifying credentials for componentType: Brain
+2025-11-10 11:17:33.609 | Client verified for componentType: Brain using service registry
+2025-11-10 11:17:33.612 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:17:33.612 | Token for Brain saved in memory
+2025-11-10 11:17:33.692 | Received authentication request from component
+2025-11-10 11:17:33.692 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:33.692 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:17:33.692 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:17:33.692 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:17:33.698 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:17:33.698 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:17:33.710 | Received authentication request from component
+2025-11-10 11:17:33.711 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:33.711 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:17:33.711 | Verifying credentials for componentType: Brain
+2025-11-10 11:17:33.711 | Client verified for componentType: Brain using service registry
+2025-11-10 11:17:33.716 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:17:33.716 | Token for Brain saved in memory
+2025-11-10 11:17:34.729 | Received authentication request from component
+2025-11-10 11:17:34.729 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:34.729 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:17:34.729 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:17:34.729 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:17:34.734 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:17:34.734 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:17:34.744 | Received authentication request from component
+2025-11-10 11:17:34.745 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:34.745 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:17:34.745 | Verifying credentials for componentType: Brain
+2025-11-10 11:17:34.745 | Client verified for componentType: Brain using service registry
+2025-11-10 11:17:34.749 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:17:34.749 | Token for Brain saved in memory
+2025-11-10 11:17:34.979 | Received authentication request from component
+2025-11-10 11:17:34.979 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:34.979 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:17:34.979 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:17:34.979 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:17:34.986 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:17:34.986 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:17:34.998 | Received authentication request from component
+2025-11-10 11:17:34.998 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:34.998 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:17:34.998 | Verifying credentials for componentType: Brain
+2025-11-10 11:17:34.998 | Client verified for componentType: Brain using service registry
+2025-11-10 11:17:35.006 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:17:35.006 | Token for Brain saved in memory
+2025-11-10 11:17:35.976 | Received authentication request from component
+2025-11-10 11:17:35.977 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:35.977 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:17:35.977 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:17:35.977 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:17:35.985 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:17:35.988 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:17:36.004 | Received authentication request from component
+2025-11-10 11:17:36.004 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:36.004 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:17:36.004 | Verifying credentials for componentType: Brain
+2025-11-10 11:17:36.004 | Client verified for componentType: Brain using service registry
+2025-11-10 11:17:36.013 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:17:36.013 | Token for Brain saved in memory
+2025-11-10 11:17:36.094 | Received authentication request from component
+2025-11-10 11:17:36.094 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:36.094 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:17:36.094 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:17:36.094 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:17:36.101 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:17:36.101 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:17:36.118 | Received authentication request from component
+2025-11-10 11:17:36.118 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:36.118 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:17:36.118 | Verifying credentials for componentType: Brain
+2025-11-10 11:17:36.118 | Client verified for componentType: Brain using service registry
+2025-11-10 11:17:36.126 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:17:36.126 | Token for Brain saved in memory
+2025-11-10 11:17:37.158 | Received authentication request from component
+2025-11-10 11:17:37.159 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:37.159 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:17:37.159 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:17:37.159 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:17:37.173 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:17:37.173 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:17:37.234 | Received authentication request from component
+2025-11-10 11:17:37.234 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:37.234 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:17:37.234 | Verifying credentials for componentType: Brain
+2025-11-10 11:17:37.234 | Client verified for componentType: Brain using service registry
+2025-11-10 11:17:37.247 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:17:37.248 | Token for Brain saved in memory
+2025-11-10 11:17:37.527 | Received authentication request from component
+2025-11-10 11:17:37.528 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:37.528 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:17:37.528 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:17:37.528 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:17:37.539 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:17:37.539 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:17:37.561 | Received authentication request from component
+2025-11-10 11:17:37.561 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:37.561 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:17:37.561 | Verifying credentials for componentType: Brain
+2025-11-10 11:17:37.561 | Client verified for componentType: Brain using service registry
+2025-11-10 11:17:37.575 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:17:37.575 | Token for Brain saved in memory
+2025-11-10 11:17:37.720 | Received authentication request from component
+2025-11-10 11:17:37.720 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:37.720 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:17:37.720 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:17:37.720 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:17:37.740 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:17:37.742 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:17:37.772 | Received authentication request from component
+2025-11-10 11:17:37.772 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:37.772 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:17:37.772 | Verifying credentials for componentType: Brain
+2025-11-10 11:17:37.772 | Client verified for componentType: Brain using service registry
+2025-11-10 11:17:37.791 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:17:37.792 | Token for Brain saved in memory
+2025-11-10 11:17:37.990 | Received authentication request from component
+2025-11-10 11:17:37.990 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:37.990 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:17:37.990 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:17:37.990 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:17:38.005 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:17:38.005 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:17:38.220 | Received authentication request from component
+2025-11-10 11:17:38.220 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:38.220 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:17:38.220 | Verifying credentials for componentType: Brain
+2025-11-10 11:17:38.220 | Client verified for componentType: Brain using service registry
+2025-11-10 11:17:38.253 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:17:38.254 | Token for Brain saved in memory
+2025-11-10 11:17:39.341 | Received authentication request from component
+2025-11-10 11:17:39.341 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:39.341 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:17:39.341 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:17:39.341 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:17:39.354 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:17:39.354 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:17:39.445 | Received authentication request from component
+2025-11-10 11:17:39.445 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:39.461 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:17:39.463 | Verifying credentials for componentType: Brain
+2025-11-10 11:17:39.464 | Client verified for componentType: Brain using service registry
+2025-11-10 11:17:39.482 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:17:39.482 | Token for Brain saved in memory
+2025-11-10 11:17:40.256 | Received authentication request from component
+2025-11-10 11:17:40.256 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:40.256 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:17:40.256 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:17:40.256 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:17:40.256 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:17:40.256 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:17:40.294 | Received authentication request from component
+2025-11-10 11:17:40.294 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:40.294 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:17:40.294 | Verifying credentials for componentType: Brain
+2025-11-10 11:17:40.294 | Client verified for componentType: Brain using service registry
+2025-11-10 11:17:40.304 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:17:40.304 | Token for Brain saved in memory
+2025-11-10 11:17:40.390 | Received authentication request from component
+2025-11-10 11:17:40.390 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:40.390 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:17:40.390 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:17:40.391 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:17:40.399 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:17:40.405 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:17:40.475 | Received authentication request from component
+2025-11-10 11:17:40.475 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:40.475 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:17:40.475 | Verifying credentials for componentType: Brain
+2025-11-10 11:17:40.476 | Client verified for componentType: Brain using service registry
+2025-11-10 11:17:40.490 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:17:40.490 | Token for Brain saved in memory
+2025-11-10 11:17:40.800 | Received authentication request from component
+2025-11-10 11:17:40.801 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:40.801 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:17:40.801 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:17:40.801 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:17:40.823 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:17:40.823 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:17:40.853 | Received authentication request from component
+2025-11-10 11:17:40.853 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:40.854 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:17:40.854 | Verifying credentials for componentType: Brain
+2025-11-10 11:17:40.854 | Client verified for componentType: Brain using service registry
+2025-11-10 11:17:40.861 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:17:40.865 | Token for Brain saved in memory
+2025-11-10 11:17:41.018 | Received authentication request from component
+2025-11-10 11:17:41.019 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:41.019 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:17:41.022 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:17:41.022 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:17:41.028 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:17:41.034 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:17:41.073 | Received authentication request from component
+2025-11-10 11:17:41.073 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:41.073 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:17:41.073 | Verifying credentials for componentType: Brain
+2025-11-10 11:17:41.073 | Client verified for componentType: Brain using service registry
+2025-11-10 11:17:41.079 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:17:41.079 | Token for Brain saved in memory
+2025-11-10 11:17:41.898 | Received authentication request from component
+2025-11-10 11:17:41.900 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:41.900 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:17:41.900 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:17:41.900 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:17:41.907 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:17:41.907 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:17:41.989 | Received authentication request from component
+2025-11-10 11:17:41.994 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:41.994 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:17:41.994 | Verifying credentials for componentType: Brain
+2025-11-10 11:17:41.994 | Client verified for componentType: Brain using service registry
+2025-11-10 11:17:42.009 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:17:42.010 | Token for Brain saved in memory
+2025-11-10 11:17:42.692 | Received authentication request from component
+2025-11-10 11:17:42.692 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:42.692 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:17:42.692 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:17:42.692 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:17:42.708 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:17:42.708 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:17:42.825 | Received authentication request from component
+2025-11-10 11:17:42.825 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:42.825 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:17:42.825 | Verifying credentials for componentType: Brain
+2025-11-10 11:17:42.825 | Client verified for componentType: Brain using service registry
+2025-11-10 11:17:42.834 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:17:42.834 | Token for Brain saved in memory
+2025-11-10 11:17:43.264 | Received authentication request from component
+2025-11-10 11:17:43.264 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:43.272 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:17:43.272 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:17:43.279 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:17:43.286 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:17:43.286 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:17:43.340 | Received authentication request from component
+2025-11-10 11:17:43.340 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:43.340 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:17:43.340 | Verifying credentials for componentType: Brain
+2025-11-10 11:17:43.340 | Client verified for componentType: Brain using service registry
+2025-11-10 11:17:43.356 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:17:43.358 | Token for Brain saved in memory
+2025-11-10 11:17:43.443 | Received authentication request from component
+2025-11-10 11:17:43.443 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:43.443 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:17:43.454 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:17:43.455 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:17:43.459 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:17:43.459 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:17:43.496 | Received authentication request from component
+2025-11-10 11:17:43.496 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:43.496 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:17:43.496 | Verifying credentials for componentType: Brain
+2025-11-10 11:17:43.496 | Client verified for componentType: Brain using service registry
+2025-11-10 11:17:43.501 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:17:43.509 | Token for Brain saved in memory
+2025-11-10 11:17:44.704 | Received authentication request from component
+2025-11-10 11:17:44.704 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:44.704 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:17:44.704 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:17:44.704 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:17:44.704 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:17:44.704 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:17:44.926 | Received authentication request from component
+2025-11-10 11:17:44.926 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:44.926 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:17:44.926 | Verifying credentials for componentType: Brain
+2025-11-10 11:17:44.926 | Client verified for componentType: Brain using service registry
+2025-11-10 11:17:44.928 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:17:44.932 | Token for Brain saved in memory
+2025-11-10 11:17:45.869 | Received authentication request from component
+2025-11-10 11:17:45.885 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:45.897 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:17:45.897 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:17:45.897 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:17:45.897 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:17:45.897 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:17:46.029 | Received authentication request from component
+2025-11-10 11:17:46.029 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:46.029 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:17:46.029 | Verifying credentials for componentType: Brain
+2025-11-10 11:17:46.029 | Client verified for componentType: Brain using service registry
+2025-11-10 11:17:46.047 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:17:46.047 | Token for Brain saved in memory
+2025-11-10 11:17:46.616 | Received authentication request from component
+2025-11-10 11:17:46.618 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:46.618 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:17:46.618 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:17:46.618 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:17:46.707 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:17:46.761 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:17:47.019 | Received authentication request from component
+2025-11-10 11:17:47.035 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:47.035 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:17:47.035 | Verifying credentials for componentType: Brain
+2025-11-10 11:17:47.035 | Client verified for componentType: Brain using service registry
+2025-11-10 11:17:47.035 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:17:47.035 | Token for Brain saved in memory
+2025-11-10 11:17:47.383 | Received authentication request from component
+2025-11-10 11:17:47.387 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:47.387 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:17:47.387 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:17:47.387 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:17:47.411 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:17:47.411 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:17:47.654 | Received authentication request from component
+2025-11-10 11:17:47.655 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:47.655 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:17:47.655 | Verifying credentials for componentType: Brain
+2025-11-10 11:17:47.656 | Client verified for componentType: Brain using service registry
+2025-11-10 11:17:47.681 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:17:47.681 | Token for Brain saved in memory
+2025-11-10 11:17:48.802 | Received authentication request from component
+2025-11-10 11:17:48.802 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:48.802 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:17:48.803 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:17:48.803 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:17:48.834 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:17:48.834 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:17:49.043 | Received authentication request from component
+2025-11-10 11:17:49.043 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:49.043 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:17:49.043 | Verifying credentials for componentType: Brain
+2025-11-10 11:17:49.043 | Client verified for componentType: Brain using service registry
+2025-11-10 11:17:49.046 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:17:49.057 | Token for Brain saved in memory
+2025-11-10 11:17:49.309 | Received authentication request from component
+2025-11-10 11:17:49.309 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:49.309 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:17:49.309 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:17:49.309 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:17:49.333 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:17:49.333 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:17:49.512 | Received authentication request from component
+2025-11-10 11:17:49.513 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:49.513 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:17:49.513 | Verifying credentials for componentType: Brain
+2025-11-10 11:17:49.513 | Client verified for componentType: Brain using service registry
+2025-11-10 11:17:49.553 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:17:49.554 | Token for Brain saved in memory
+2025-11-10 11:17:49.619 | Received authentication request from component
+2025-11-10 11:17:49.619 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:49.619 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:17:49.619 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:17:49.619 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:17:49.634 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:17:49.634 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:17:49.760 | Received authentication request from component
+2025-11-10 11:17:49.760 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:49.760 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:17:49.760 | Verifying credentials for componentType: Brain
+2025-11-10 11:17:49.761 | Client verified for componentType: Brain using service registry
+2025-11-10 11:17:49.781 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:17:49.781 | Token for Brain saved in memory
+2025-11-10 11:17:50.154 | Received authentication request from component
+2025-11-10 11:17:50.158 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:50.158 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:17:50.158 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:17:50.158 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:17:50.172 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:17:50.172 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:17:50.331 | Received authentication request from component
+2025-11-10 11:17:50.331 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:50.331 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:17:50.331 | Verifying credentials for componentType: Brain
+2025-11-10 11:17:50.337 | Client verified for componentType: Brain using service registry
+2025-11-10 11:17:50.356 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:17:50.356 | Token for Brain saved in memory
+2025-11-10 11:17:50.467 | Received authentication request from component
+2025-11-10 11:17:50.467 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:50.467 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:17:50.467 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:17:50.467 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:17:50.495 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:17:50.495 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:17:50.563 | Received authentication request from component
+2025-11-10 11:17:50.563 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:50.563 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:17:50.563 | Verifying credentials for componentType: Brain
+2025-11-10 11:17:50.564 | Client verified for componentType: Brain using service registry
+2025-11-10 11:17:50.579 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:17:50.579 | Token for Brain saved in memory
+2025-11-10 11:17:51.060 | Received authentication request from component
+2025-11-10 11:17:51.060 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:51.065 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:17:51.065 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:17:51.065 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:17:51.065 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:17:51.065 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:17:51.088 | Received authentication request from component
+2025-11-10 11:17:51.093 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:51.093 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:17:51.093 | Verifying credentials for componentType: Brain
+2025-11-10 11:17:51.093 | Client verified for componentType: Brain using service registry
+2025-11-10 11:17:51.106 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:17:51.106 | Token for Brain saved in memory
+2025-11-10 11:17:51.309 | Received authentication request from component
+2025-11-10 11:17:51.309 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:51.309 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:17:51.310 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:17:51.310 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:17:51.327 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:17:51.342 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:17:51.392 | Received authentication request from component
+2025-11-10 11:17:51.393 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:51.393 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:17:51.393 | Verifying credentials for componentType: Brain
+2025-11-10 11:17:51.393 | Client verified for componentType: Brain using service registry
+2025-11-10 11:17:51.408 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:17:51.408 | Token for Brain saved in memory
+2025-11-10 11:17:51.703 | Received authentication request from component
+2025-11-10 11:17:51.703 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:51.703 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:17:51.703 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:17:51.703 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:17:51.706 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:17:51.707 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:17:51.757 | Received authentication request from component
+2025-11-10 11:17:51.757 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:51.757 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:17:51.757 | Verifying credentials for componentType: Brain
+2025-11-10 11:17:51.757 | Client verified for componentType: Brain using service registry
+2025-11-10 11:17:51.768 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:17:51.768 | Token for Brain saved in memory
+2025-11-10 11:17:51.993 | Received authentication request from component
+2025-11-10 11:17:51.993 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:51.993 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:17:51.993 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:17:51.993 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:17:52.010 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:17:52.011 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:17:52.055 | Received authentication request from component
+2025-11-10 11:17:52.055 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:52.056 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:17:52.056 | Verifying credentials for componentType: Brain
+2025-11-10 11:17:52.057 | Client verified for componentType: Brain using service registry
+2025-11-10 11:17:52.071 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:17:52.072 | Token for Brain saved in memory
+2025-11-10 11:17:54.861 | Received authentication request from component
+2025-11-10 11:17:54.861 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:54.861 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:17:54.861 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:17:54.861 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:17:54.869 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:17:54.870 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:17:54.904 | Received authentication request from component
+2025-11-10 11:17:54.904 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:54.904 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:17:54.904 | Verifying credentials for componentType: Brain
+2025-11-10 11:17:54.905 | Client verified for componentType: Brain using service registry
+2025-11-10 11:17:54.919 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:17:54.922 | Token for Brain saved in memory
+2025-11-10 11:17:55.072 | Received authentication request from component
+2025-11-10 11:17:55.073 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:55.073 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:17:55.073 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:17:55.073 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:17:55.096 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:17:55.096 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:17:55.135 | Received authentication request from component
+2025-11-10 11:17:55.135 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:55.135 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:17:55.136 | Verifying credentials for componentType: Brain
+2025-11-10 11:17:55.136 | Client verified for componentType: Brain using service registry
+2025-11-10 11:17:55.143 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:17:55.146 | Token for Brain saved in memory
+2025-11-10 11:17:55.351 | Received authentication request from component
+2025-11-10 11:17:55.351 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:55.351 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:17:55.351 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:17:55.351 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:17:55.357 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:17:55.358 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:17:55.377 | Received authentication request from component
+2025-11-10 11:17:55.378 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:55.378 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:17:55.378 | Verifying credentials for componentType: Brain
+2025-11-10 11:17:55.378 | Client verified for componentType: Brain using service registry
+2025-11-10 11:17:55.393 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:17:55.395 | Token for Brain saved in memory
+2025-11-10 11:17:56.655 | Received authentication request from component
+2025-11-10 11:17:56.655 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:56.655 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:17:56.655 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:17:56.655 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:17:56.661 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:17:56.661 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:17:56.688 | Received authentication request from component
+2025-11-10 11:17:56.688 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:56.688 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:17:56.688 | Verifying credentials for componentType: Brain
+2025-11-10 11:17:56.688 | Client verified for componentType: Brain using service registry
+2025-11-10 11:17:56.700 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:17:56.700 | Token for Brain saved in memory
+2025-11-10 11:17:56.794 | Received authentication request from component
+2025-11-10 11:17:56.794 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:56.794 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:17:56.796 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:17:56.796 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:17:56.802 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:17:56.802 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:17:56.813 | Received authentication request from component
+2025-11-10 11:17:56.813 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:56.813 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:17:56.813 | Verifying credentials for componentType: Brain
+2025-11-10 11:17:56.813 | Client verified for componentType: Brain using service registry
+2025-11-10 11:17:56.819 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:17:56.819 | Token for Brain saved in memory
+2025-11-10 11:17:57.021 | Received authentication request from component
+2025-11-10 11:17:57.021 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:57.021 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:17:57.021 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:17:57.021 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:17:57.027 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:17:57.027 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:17:57.043 | Received authentication request from component
+2025-11-10 11:17:57.043 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:57.043 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:17:57.043 | Verifying credentials for componentType: Brain
+2025-11-10 11:17:57.043 | Client verified for componentType: Brain using service registry
+2025-11-10 11:17:57.048 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:17:57.048 | Token for Brain saved in memory
+2025-11-10 11:17:58.556 | Received authentication request from component
+2025-11-10 11:17:58.556 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:58.556 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:17:58.556 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:17:58.556 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:17:58.571 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:17:58.571 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:17:58.588 | Received authentication request from component
+2025-11-10 11:17:58.589 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:58.589 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:17:58.589 | Verifying credentials for componentType: Brain
+2025-11-10 11:17:58.589 | Client verified for componentType: Brain using service registry
+2025-11-10 11:17:58.607 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:17:58.607 | Token for Brain saved in memory
+2025-11-10 11:17:59.196 | Received authentication request from component
+2025-11-10 11:17:59.196 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:59.196 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:17:59.196 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:17:59.196 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:17:59.222 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:17:59.222 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:17:59.268 | Received authentication request from component
+2025-11-10 11:17:59.268 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:17:59.268 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:17:59.268 | Verifying credentials for componentType: Brain
+2025-11-10 11:17:59.268 | Client verified for componentType: Brain using service registry
+2025-11-10 11:17:59.278 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:17:59.280 | Token for Brain saved in memory
+2025-11-10 11:18:48.184 | Received authentication request from component
+2025-11-10 11:18:48.184 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:18:48.184 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:18:48.184 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:18:48.184 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:18:48.189 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:18:48.189 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:18:48.198 | Received authentication request from component
+2025-11-10 11:18:48.198 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:18:48.198 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:18:48.198 | Verifying credentials for componentType: Brain
+2025-11-10 11:18:48.198 | Client verified for componentType: Brain using service registry
+2025-11-10 11:18:48.202 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:18:48.202 | Token for Brain saved in memory
+2025-11-10 11:18:52.198 | Received authentication request from component
+2025-11-10 11:18:52.198 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:18:52.198 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:18:52.198 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:18:52.198 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:18:52.204 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:18:52.205 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:18:52.220 | Received authentication request from component
+2025-11-10 11:18:52.220 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:18:52.220 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:18:52.220 | Verifying credentials for componentType: Brain
+2025-11-10 11:18:52.220 | Client verified for componentType: Brain using service registry
+2025-11-10 11:18:52.226 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:18:52.226 | Token for Brain saved in memory
+2025-11-10 11:18:52.835 | Received authentication request from component
+2025-11-10 11:18:52.835 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:18:52.835 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:18:52.835 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:18:52.835 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:18:52.840 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:18:52.840 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:18:52.850 | Received authentication request from component
+2025-11-10 11:18:52.850 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:18:52.850 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:18:52.850 | Verifying credentials for componentType: Brain
+2025-11-10 11:18:52.850 | Client verified for componentType: Brain using service registry
+2025-11-10 11:18:52.855 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:18:52.855 | Token for Brain saved in memory
+2025-11-10 11:18:56.462 | Received authentication request from component
+2025-11-10 11:18:56.462 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:18:56.462 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:18:56.462 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:18:56.462 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:18:56.466 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:18:56.466 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:18:56.472 | Received authentication request from component
+2025-11-10 11:18:56.472 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:18:56.472 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:18:56.472 | Verifying credentials for componentType: Brain
+2025-11-10 11:18:56.472 | Client verified for componentType: Brain using service registry
+2025-11-10 11:18:56.475 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:18:56.475 | Token for Brain saved in memory
+2025-11-10 11:18:57.760 | Received authentication request from component
+2025-11-10 11:18:57.760 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:18:57.760 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:18:57.760 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:18:57.760 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:18:57.763 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:18:57.763 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:18:57.771 | Received authentication request from component
+2025-11-10 11:18:57.771 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:18:57.771 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:18:57.771 | Verifying credentials for componentType: Brain
+2025-11-10 11:18:57.771 | Client verified for componentType: Brain using service registry
+2025-11-10 11:18:57.775 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:18:57.776 | Token for Brain saved in memory
+2025-11-10 11:18:58.106 | Received authentication request from component
+2025-11-10 11:18:58.106 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:18:58.106 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:18:58.106 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:18:58.106 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:18:58.111 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:18:58.111 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:18:58.119 | Received authentication request from component
+2025-11-10 11:18:58.119 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:18:58.119 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:18:58.119 | Verifying credentials for componentType: Brain
+2025-11-10 11:18:58.119 | Client verified for componentType: Brain using service registry
+2025-11-10 11:18:58.122 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:18:58.122 | Token for Brain saved in memory
+2025-11-10 11:19:50.266 | Received authentication request from component
+2025-11-10 11:19:50.266 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:19:50.266 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:19:50.266 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:19:50.266 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:19:50.269 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:19:50.269 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:19:50.275 | Received authentication request from component
+2025-11-10 11:19:50.275 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:19:50.275 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:19:50.275 | Verifying credentials for componentType: Brain
+2025-11-10 11:19:50.275 | Client verified for componentType: Brain using service registry
+2025-11-10 11:19:50.278 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:19:50.278 | Token for Brain saved in memory
+2025-11-10 11:19:54.279 | Received authentication request from component
+2025-11-10 11:19:54.279 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:19:54.279 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:19:54.279 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:19:54.279 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:19:54.282 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:19:54.282 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:19:54.289 | Received authentication request from component
+2025-11-10 11:19:54.289 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:19:54.289 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:19:54.289 | Verifying credentials for componentType: Brain
+2025-11-10 11:19:54.289 | Client verified for componentType: Brain using service registry
+2025-11-10 11:19:54.292 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:19:54.292 | Token for Brain saved in memory
+2025-11-10 11:19:54.933 | Received authentication request from component
+2025-11-10 11:19:54.933 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:19:54.933 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:19:54.933 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:19:54.933 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:19:54.938 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:19:54.939 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:19:54.955 | Received authentication request from component
+2025-11-10 11:19:54.955 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:19:54.955 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:19:54.955 | Verifying credentials for componentType: Brain
+2025-11-10 11:19:54.955 | Client verified for componentType: Brain using service registry
+2025-11-10 11:19:54.961 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:19:54.961 | Token for Brain saved in memory
+2025-11-10 11:19:58.516 | Received authentication request from component
+2025-11-10 11:19:58.516 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:19:58.516 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:19:58.516 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:19:58.516 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:19:58.519 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:19:58.519 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:19:58.525 | Received authentication request from component
+2025-11-10 11:19:58.525 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:19:58.525 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:19:58.525 | Verifying credentials for componentType: Brain
+2025-11-10 11:19:58.525 | Client verified for componentType: Brain using service registry
+2025-11-10 11:19:58.529 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:19:58.529 | Token for Brain saved in memory
+2025-11-10 11:19:59.880 | Received authentication request from component
+2025-11-10 11:19:59.881 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:19:59.881 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:19:59.881 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:19:59.883 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:19:59.888 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:19:59.888 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:19:59.913 | Received authentication request from component
+2025-11-10 11:19:59.913 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:19:59.913 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:19:59.913 | Verifying credentials for componentType: Brain
+2025-11-10 11:19:59.913 | Client verified for componentType: Brain using service registry
+2025-11-10 11:19:59.918 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:19:59.918 | Token for Brain saved in memory
+2025-11-10 11:20:00.241 | Received authentication request from component
+2025-11-10 11:20:00.241 | Request body: {"componentType":"CapabilitiesManager","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:20:00.241 | Component type: CapabilitiesManager, Client secret provided: Yes
+2025-11-10 11:20:00.241 | Verifying credentials for componentType: CapabilitiesManager
+2025-11-10 11:20:00.241 | Client verified for componentType: CapabilitiesManager using service registry
+2025-11-10 11:20:00.252 | Token generated for CapabilitiesManager with roles: capability:manage
+2025-11-10 11:20:00.252 | Token for CapabilitiesManager saved in memory
+2025-11-10 11:20:00.293 | Received authentication request from component
+2025-11-10 11:20:00.298 | Request body: {"componentType":"Brain","clientSecret":"stage7AuthSecret"}
+2025-11-10 11:20:00.298 | Component type: Brain, Client secret provided: Yes
+2025-11-10 11:20:00.298 | Verifying credentials for componentType: Brain
+2025-11-10 11:20:00.298 | Client verified for componentType: Brain using service registry
+2025-11-10 11:20:00.314 | Token generated for Brain with roles: llm:invoke
+2025-11-10 11:20:00.314 | Token for Brain saved in memory

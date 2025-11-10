@@ -8,7 +8,6 @@ export interface StepStat {
     verb: string;
     status: string; // This will store the string value of StepStatus enum
     dependencies: string[];
-    stepNo: number;
 }
 
 export interface AgentStatistics {
