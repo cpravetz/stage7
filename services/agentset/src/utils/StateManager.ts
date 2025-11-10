@@ -88,7 +88,6 @@ export class StateManager {
                         missionId: event.missionId,
                         ownerAgentId: agent.id,
                         actionVerb: event.actionVerb,
-                        stepNo: event.stepNo,
                         inputValues: deserializedInputValues,
                         description: event.description,
                         dependencies: event.dependencies,

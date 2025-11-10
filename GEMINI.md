@@ -14,6 +14,14 @@ All code must be production ready - no mocks, stubs, simulations. All data and s
 
 Never make assumptions or short cut an analysis because you think you know what it is likely to tell you. Confirm assignments. When asked about the project/code - check the project/code. Verify the validity of your understanding about this project.
 
+## Agent's Self-Correction Mandate
+
+- **Verify, Don't Assume:** Always verify information, especially when dealing with code conventions, library availability, or API behavior. Never proceed based on assumptions, "likely" scenarios, or "maybe" conclusions. If a tool's output is unexpected or unclear, investigate the tool itself or the underlying system to understand the discrepancy.
+- **Thorough Investigation:** Localized fixes or workarounds are temporary. Always strive to identify and address the root cause of an issue, even if it requires a broader investigation of the codebase or system architecture.
+- **Leverage All Available Information:** Utilize all available tools and context (logs, file system, documentation, existing code patterns) to gain a complete understanding before taking action. If a search tool is unreliable, find alternative methods to gather the necessary information.
+- **Seek Clarification:** If a request is ambiguous, or if critical information is missing, ask concise and targeted clarification questions to the user. Do not make assumptions about user intent or missing details.
+- **Rigor in Analysis:** Apply rigorous analysis to all tasks. Avoid shortcuts in understanding or planning. Every decision should be grounded in verified facts and a comprehensive understanding of the project.
+
 ## Robustness and External Dependencies
 
 - **External API Interactions:** When interacting with external APIs, always implement comprehensive error handling, including retries with exponential backoff for transient errors (e.g., network issues, temporary service unavailability, rate limiting).

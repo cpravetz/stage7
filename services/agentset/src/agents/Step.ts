@@ -37,7 +37,6 @@ interface ErrorContext {
 export class Step {
     readonly id: string;
     readonly missionId: string;
-    readonly stepNo: number;
     readonly actionVerb: string;
     ownerAgentId: string;
     inputReferences: Map<string, InputReference>;
@@ -94,13 +93,13 @@ export class Step {
 
         // Convert Step objects to plain objects for the detector
         const executedStepData = {
-            number: executedStep.stepNo,
+            id: executedStep.id,
             actionVerb: executedStep.actionVerb,
             outputs: Object.fromEntries(executedStep.outputs)
         };
 
         const upcomingStepsData = upcomingSteps.map(step => ({
-            number: step.stepNo,
+            id: step.id,
             actionVerb: step.actionVerb,
             inputs: Step.convertInputsToPlainObject(step)
         }));
@@ -124,7 +123,7 @@ export class Step {
             // We'll need to extract the step number from sourceId or use a different approach
             if (ref.outputName) {
                 inputs[name] = {
-                    sourceStep: ref.sourceId ? parseInt(ref.sourceId) : undefined,
+                    sourceStep: ref.sourceId,
                     outputName: ref.outputName
                 };
             } else if (ref.value !== undefined) {
@@ -233,7 +232,6 @@ export class Step {
         missionId?: string,
         ownerAgentId?: string,
         actionVerb: string,
-        stepNo: number,
         inputReferences?: Map<string, InputReference>,
         inputValues?: Map<string, InputValue>,
         description?: string,
@@ -252,7 +250,6 @@ export class Step {
         this.id = params.id || uuidv4();
         this.missionId = params.missionId || 'unknown_mission';
         this.ownerAgentId = params.ownerAgentId || 'unknown_agent'; // Default to unknown agent if not provided
-        this.stepNo = params.stepNo;
         this.actionVerb = params.actionVerb;
         this.inputReferences = params.inputReferences || new Map();
         this.inputValues = params.inputValues || new Map();
@@ -289,7 +286,6 @@ export class Step {
                 eventType: 'step_created',
                 stepId: this.id,
                 missionId: this.missionId,
-                stepNo: this.stepNo,
                 actionVerb: this.actionVerb,
                 inputValues:MapSerializer.transformForSerialization(this.inputValues),
                 inputReferences: MapSerializer.transformForSerialization(this.inputReferences),
@@ -537,7 +533,7 @@ export class Step {
             const item = inputArray[i];
             
             // Create a new set of steps for this iteration
-            const iterationSteps = createFromPlan(subPlanTemplate, this.stepNo + 1 + allNewSteps.length, this.persistenceManager, this);
+            const iterationSteps = createFromPlan(subPlanTemplate, this.persistenceManager, this);
 
             // Inject the loop item value into the steps that need it
             iterationSteps.forEach(step => {
@@ -616,7 +612,6 @@ export class Step {
             eventType: 'step_result',
             stepId: this.id,
             missionId: this.missionId,
-            stepNo: this.stepNo,
             actionVerb: this.actionVerb,
             status: this.status,
             result: this.result,
@@ -740,7 +735,6 @@ export class Step {
                     eventType: 'step_result',
                     stepId: this.id,
                     missionId: this.missionId,
-                    stepNo: this.stepNo,
                     actionVerb: this.actionVerb,
                     status: this.status,
                     result: this.result,
@@ -763,7 +757,6 @@ export class Step {
                 eventType: 'step_result',
                 stepId: this.id,
                 missionId: this.missionId,
-                stepNo: this.stepNo,
                 actionVerb: this.actionVerb,
                 status: this.status,
                 result: errorResult,
@@ -892,7 +885,6 @@ export class Step {
                 actionVerb: 'QUERY_KNOWLEDGE_BASE',
                 description: `Query knowledge base for relevant information about ${queryText}`,
                 missionId: this.missionId,
-                stepNo: this.stepNo - 0.1, // Slightly before current step
                 dependencies: [],
                 persistenceManager: this.persistenceManager
             });
@@ -968,7 +960,6 @@ export class Step {
                 actionVerb: 'SAVE_TO_KNOWLEDGE_BASE',
                 description: `Save results from ${this.actionVerb} to knowledge base`,
                 missionId: this.missionId,
-                stepNo: this.stepNo + 0.1, // Slightly after current step
                 dependencies: [],
                 persistenceManager: this.persistenceManager
             });
@@ -1030,7 +1021,6 @@ export class Step {
                 actionVerb: 'REFLECT',
                 description: `Reflect on ${this.actionVerb} execution for self-correction`,
                 missionId: this.missionId,
-                stepNo: this.stepNo + 0.2, // After knowledge save
                 dependencies: [],
                 persistenceManager: this.persistenceManager
             });
@@ -1039,7 +1029,7 @@ export class Step {
 
             // Create a simplified plan history for this step, ensuring error and result are stringified if they are objects
             const stepHistory = [{
-                stepNo: this.stepNo,
+                id: this.id,
                 actionVerb: this.actionVerb,
                 description: this.description || '',
                 success: this.status === StepStatus.COMPLETED,
@@ -1101,7 +1091,7 @@ export class Step {
 
         const stepsToExecute = result ? trueSteps : falseSteps;
         if (stepsToExecute) {
-            const newSteps = createFromPlan(stepsToExecute, this.stepNo + 1, this.persistenceManager, this);
+            const newSteps = createFromPlan(stepsToExecute, this.persistenceManager, this);
             return [{
                 success: true,
                 name: 'steps',
@@ -1130,7 +1120,7 @@ export class Step {
             const newSteps: Step[] = [];
 
             for (let i = 0; i < count; i++) {
-                const iterationSteps = createFromPlan(steps, this.stepNo + 1 + (i * steps.length), this.persistenceManager, this);
+                const iterationSteps = createFromPlan(steps, this.persistenceManager, this);
                 newSteps.push(...iterationSteps);
             }
 
@@ -1160,7 +1150,7 @@ export class Step {
 
         try {
             const steps = this.parseStepsInput(stepsInput);
-            const newSteps = createFromPlan(steps, this.stepNo + 1, this.persistenceManager, this);
+            const newSteps = createFromPlan(steps, this.persistenceManager, this);
 
             newSteps.forEach(step => {
                 step.timeout = timeoutMs;
@@ -1201,7 +1191,6 @@ export class Step {
             actionVerb: 'THINK',
             missionId: this.missionId,
             ownerAgentId: this.ownerAgentId,
-            stepNo: this.stepNo + 2 + steps.length,
             inputReferences: new Map([
                 ['prompt', {
                     inputName: 'prompt',
@@ -1216,7 +1205,7 @@ export class Step {
 
         newSteps.push(checkStep);
 
-        const iterationSteps = createFromPlan(steps, this.stepNo + 2, this.persistenceManager, this);
+        const iterationSteps = createFromPlan(steps, this.persistenceManager, this);
 
         iterationSteps.forEach(step => {
             step.dependencies.push({
@@ -1232,7 +1221,6 @@ export class Step {
             actionVerb: 'THINK',
             missionId: this.missionId,
             ownerAgentId: this.ownerAgentId,
-            stepNo: this.stepNo + 2 + steps.length,
             inputReferences: new Map([
                 ['prompt', {
                     inputName: 'prompt',
@@ -1360,14 +1348,13 @@ export class Step {
 
         const newSteps: Step[] = [];
 
-        const iterationSteps = createFromPlan(steps, this.stepNo + 1, this.persistenceManager, this);
+        const iterationSteps = createFromPlan(steps, this.persistenceManager, this);
         newSteps.push(...iterationSteps);
 
         const checkStep = new Step({
             actionVerb: 'THINK',
             missionId: this.missionId,
             ownerAgentId: this.ownerAgentId,
-            stepNo: this.stepNo + 1 + steps.length,
             inputReferences: new Map([
                 ['prompt', {
                     inputName: 'prompt',
@@ -1413,7 +1400,6 @@ export class Step {
             actionVerb: 'ACCOMPLISH',
             missionId: this.missionId,
             ownerAgentId: this.ownerAgentId,
-            stepNo: this.stepNo,
             inputReferences: new Map(),
             inputValues: new Map([...this.inputValues.entries(),
                 ['goal', {
@@ -1458,7 +1444,6 @@ export class Step {
                 actionVerb: task.actionVerb,
                 missionId: this.missionId,
                 ownerAgentId: this.ownerAgentId,
-                stepNo: this.stepNo + 1 + index,
                 inputReferences: task.inputReferences || new Map(),
                 inputValues: new Map<string, InputValue>(),
                 description: task.description || `Sequential step ${index + 1}`,
@@ -1599,7 +1584,6 @@ export class Step {
                 eventType: 'step_result',
                 stepId: this.id,
                 missionId: this.missionId,
-                stepNo: this.stepNo,
                 actionVerb: this.actionVerb,
                 status: this.status,
                 result: errorResult,
@@ -1619,7 +1603,6 @@ export class Step {
         return {
             id: this.id,
             missionId: this.missionId,
-            stepNo: this.stepNo,
             actionVerb: this.actionVerb,
             inputReferences: MapSerializer.transformForSerialization(this.inputReferences),
             inputValues: MapSerializer.transformForSerialization(this.inputValues),
@@ -1813,40 +1796,12 @@ export class Step {
 
 export function createFromPlan(
     plan: ActionVerbTask[],
-    startingStepNo: number,
     persistenceManager: AgentPersistenceManager,
     parentStep?: Step,
     agentContext?: any
 ): Step[] {
     type PlanTask = ActionVerbTask & { number?: number; outputs?: Record<string, any>; id?: string; inputs?: Record<string, InputValue>; };
     const planTasks = plan as PlanTask[];
-    const stepNumberToUUID: Record<number, string> = {};
-
-    // NEW: Helper function to recursively collect step numbers and assign UUIDs
-    function collectStepNumbersRecursively(currentPlan: PlanTask[]) {
-        currentPlan.forEach((task) => {
-            task.id = uuidv4();
-            const stepNum = task.number; // Use existing number
-            if (stepNum !== undefined) {
-                stepNumberToUUID[stepNum] = task.id;
-            } else {
-                // If a step doesn't have a number, assign one (though validator should prevent this)
-                // For now, we'll rely on the validator to ensure numbers are present.
-                console.warn(`[createFromPlan] Task ${task.actionVerb} has no number. This should be handled by the validator.`);
-            }
-
-            // Recursively process sub-plans for control flow verbs
-            if (task.actionVerb === 'FOREACH' || task.actionVerb === 'WHILE' || task.actionVerb === 'UNTIL' || task.actionVerb === 'SEQUENCE' || task.actionVerb === 'REPEAT' || task.actionVerb === 'IF_THEN') {
-                const subPlanInput = task.inputs?.steps;
-                if (subPlanInput && Array.isArray(subPlanInput.value)) {
-                    collectStepNumbersRecursively(subPlanInput.value as PlanTask[]);
-                }
-            }
-        });
-    }
-
-    // First pass: assign UUIDs to all tasks and populate stepNumberToUUID recursively.
-    collectStepNumbersRecursively(planTasks);
 
     const newSteps = planTasks.map((task, idx) => {
         const dependencies: StepDependency[] = [];
@@ -1886,8 +1841,7 @@ export function createFromPlan(
                 // This is a reference input (either direct or literal-wrapped)
                 const referenceDef = isLiteralWrappedReference ? parsedValue : inputDefUntyped;
 
-                const sourceStepNum = referenceDef.sourceStep; // Get the step number from the plan
-                const sourceStepId = stepNumberToUUID[sourceStepNum]; // Map to UUID
+                const sourceStepId = referenceDef.sourceStep; // Get the UUID directly
 
                 if (sourceStepId) {
                     // Populate inputReferences (using sourceId, and value: undefined for references)
@@ -1907,7 +1861,7 @@ export function createFromPlan(
                         sourceStepId,
                     });
                 } else {
-                    console.error(`[createFromPlan] 🚨 Unresolved sourceStep ${sourceStepNum} for input '${inputName}' in step '${task.actionVerb}'`);
+                    console.error(`[createFromPlan] 🚨 Unresolved sourceStep ${sourceStepId} for input '${inputName}' in step '${task.actionVerb}'`);
                 }
             } else if (inputDefUntyped.value !== undefined) {
                 // This is a literal value input
@@ -1932,13 +1886,11 @@ export function createFromPlan(
 
         const normalizedOutputs = Step.normalizeOutputs((task as any).outputs);
         
-        const stepNo = task.number || 0;
         const step = new Step({
-            id: task.id!,
+            id: uuidv4(),            
             missionId,
             ownerAgentId: parentStep?.ownerAgentId || '',
             actionVerb: task.actionVerb,
-            stepNo: stepNo,
             description: task.description,
             dependencies,
             inputReferences,
@@ -1946,9 +1898,9 @@ export function createFromPlan(
             outputs: normalizedOutputs,
             originalOutputDefinitions: normalizedOutputs,
             recommendedRole: task.recommendedRole,
-            persistenceManager,
+            persistenceManager
         });
-        console.log(`[createFromPlan] 📊 Created step ${step.stepNo} (${task.actionVerb}) with ${dependencies.length} dependencies:`, 
+        console.log(`[createFromPlan] 📊 Created step ${step.id} (${task.actionVerb}) with ${dependencies.length} dependencies:`, 
             dependencies.map(d => `${d.inputName} <- ${d.sourceStepId}.${d.outputName}`));
         return step;
     });
@@ -2028,7 +1980,7 @@ export function createFromPlan(
                                 sourceStepId: producingStep.id,
                                 outputName: placeholderName
                             });
-                            console.log(`[createFromPlan] ✅ Added placeholder-based dependency to ${step.actionVerb} step ${step.stepNo}: input '${inputName}' depends on Step ${producingStep.stepNo}'s output '${placeholderName}'`);
+                            console.log(`[createFromPlan] ✅ Added placeholder-based dependency to ${step.actionVerb} step ${step.id}: input '${inputName}' depends on Step ${producingStep.id}'s output '${placeholderName}'`);
                         }
                     }
                 }
