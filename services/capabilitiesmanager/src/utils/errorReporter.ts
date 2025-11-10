@@ -190,7 +190,6 @@ export function generateStructuredError({
     }
   } else {
     console.error(`StructuredError Generated [${source_component}]: ${message} (Code: ${error_code}, Trace: ${current_trace_id}, ID: ${error_id})`);
-    console.error('Contextual Info:', original_error || structuredErrorOutput.contextual_info);
   }
 
   return structuredErrorOutput;

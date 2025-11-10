@@ -62,7 +62,7 @@ export class Agent extends BaseEntity {
 
     constructor(config: AgentConfig) {
         super(config.id, 'AgentSet', `agentset`, process.env.PORT || '9000');
-        this.agentPersistenceManager = new AgentPersistenceManager(undefined, this.authenticatedApi);
+        this.agentPersistenceManager = new AgentPersistenceManager();
         this.stateManager = new StateManager(config.id, this.agentPersistenceManager);
         this.inputValues = config.inputValues instanceof Map ? config.inputValues : new Map(Object.entries(config.inputValues||{}));
         this.missionId = config.missionId;
@@ -91,6 +91,7 @@ export class Agent extends BaseEntity {
             }
             const initialStep = this.createStep(
                 config.actionVerb,
+                1,
                 this.inputValues,
                 'Initial mission step',
                 StepStatus.PENDING,
@@ -115,11 +116,12 @@ export class Agent extends BaseEntity {
         });
     }
 
-    private createStep(actionVerb: string, inputValues : Map<string, InputValue> | undefined, description : string, status: StepStatus) : Step {
+    private createStep(actionVerb: string, stepNo : number, inputValues : Map<string, InputValue> | undefined, description : string, status: StepStatus) : Step {
         const newStep = new Step({
                 actionVerb: actionVerb,
                 missionId: this.missionId,
                 ownerAgentId: this.id,
+                stepNo: stepNo,
                 inputValues: inputValues,
                 description: description,
                 status: status,
@@ -386,6 +388,7 @@ Please consider this context when planning and executing the mission. Provide de
             }
             const newAccomplishStep = this.createStep(
                 'ACCOMPLISH',
+                this.steps.length + 1,
                 new Map([['goal', { inputName: 'goal', value: directAnswer, valueType: PluginParameterType.STRING }]]),
                 `Pursue direct answer from reflection: ${directAnswer.substring(0, 100)}${directAnswer.length > 100 ? '...' : ''}`,
                 StepStatus.PENDING
@@ -612,7 +615,7 @@ Please consider this context when planning and executing the mission. Provide de
 
     private addStepsFromPlan(plan: ActionVerbTask[], parentStep: Step) {
         console.log(`[Agent ${this.id}] Parsed plan for addStepsFromPlan:`, JSON.stringify(this.truncateLargeStrings(plan), null, 2));
-        const newSteps = createFromPlan(plan, this.agentPersistenceManager, parentStep, this);
+        const newSteps = createFromPlan(plan, this.steps.length + 1, this.agentPersistenceManager, parentStep, this);
         this.steps.push(...newSteps);
     }
 
@@ -1146,11 +1149,10 @@ Please consider this context when planning and executing the mission. Provide de
             const brainResponse = response.data.response;
 
             const verificationTask: ActionVerbTask = {
-                id: uuidv4(),
-                actionVerb: 'THINK',
+                actionVerb: 'VERIFY_FACT',
                 description: `Verify the following information which was returned with low confidence: "${brainResponse}"`, 
                 inputReferences: new Map<string, InputReference>([
-                    ['prompt', { inputName: 'prompt', value: `Verify the following fact: "${brainResponse}". Provide the verified fact and indicate if it is correct.`, valueType: PluginParameterType.STRING }]
+                    ['fact', { inputName: 'fact', value: brainResponse, valueType: PluginParameterType.STRING }]
                 ]),
                 outputs: new Map<string, PluginParameterType>([
                     ['verified_fact', PluginParameterType.STRING],
@@ -1160,7 +1162,6 @@ Please consider this context when planning and executing the mission. Provide de
             };
 
             const continuationTask: ActionVerbTask = {
-                id: uuidv4(),
                 actionVerb: 'THINK',
                 description: `Re-evaluating the original prompt with a verified fact.`, 
                 inputReferences: inputs || new Map<string, InputReference>(),
@@ -1279,6 +1280,7 @@ Please consider this context when planning and executing the mission. Provide de
                     inputValues: MapSerializer.transformForSerialization(step.inputValues),
                     recommendedRole: step.recommendedRole,
                     status: step.status,
+                    stepNo: step.stepNo,
                     id: step.id
                 };
 
@@ -1485,7 +1487,7 @@ Please consider this context when planning and executing the mission. Provide de
 
     async getStatistics(globalStepMap?: Map<string, { agentId: string, step: any }>, allStepsForMission?: Step[]): Promise<AgentStatistics> {
 
-        const stepStats = this.steps.map((step, idx) => {
+        const stepStats = this.steps.map(step => {
             // Ensure step and its properties are defined before accessing
             const stepId = step?.id || 'unknown-id';
             const stepActionVerb = step?.actionVerb || 'undefined-actionVerb';
@@ -1501,6 +1503,7 @@ Please consider this context when planning and executing the mission. Provide de
                 // For now, we assume step.dependencies is complete, but you could cross-check here if needed
             }
 
+            const stepNo = step?.stepNo || 0;
             const outputType = step?.getOutputType(allStepsForMission || this.steps);
 
             return {
@@ -1508,6 +1511,7 @@ Please consider this context when planning and executing the mission. Provide de
                 verb: stepActionVerb, // Mapped to 'verb' for AgentStatistics interface
                 status: stepStatus,
                 dependencies: dependencies,
+                stepNo: stepNo,
                 outputType: outputType
             };
         }); // End of this.steps.map
@@ -1543,8 +1547,8 @@ Please consider this context when planning and executing the mission. Provide de
 
     private async hasDependentAgents(): Promise<boolean> {
         try {
-            if (!this.trafficManagerUrl) {
-                console.warn(`[Agent ${this.id || 'unknown-id'}] Cannot check dependent agents: trafficManagerUrl is undefined.`);
+            if (!this.trafficManagerUrl || !this.authenticatedApi) {
+                console.warn(`[Agent ${this.id || 'unknown-id'}] Cannot check dependent agents: trafficManagerUrl or authenticatedApi is undefined.`);
                 return false; // Cannot determine, assume false
             }
             if (!this.id) {
@@ -1739,6 +1743,7 @@ Please consider this context when planning and executing the mission. Provide de
 
             const newStep = this.createStep(
                 task.taskType,
+                this.steps.length + 1,
                 new Map<string, InputValue>(),
                 task.description,
                 StepStatus.PENDING
@@ -2017,6 +2022,7 @@ Explanation: ${resolution.explanation}`);
         // Create a new step for plan template execution
         const planStep = this.createStep(
             'EXECUTE_PLAN_TEMPLATE',
+            this.steps.length + 1,
             new Map<string, InputValue>(),
             `Execute plan template: ${templateId}`,
             StepStatus.PENDING);
@@ -2291,7 +2297,7 @@ Explanation: ${resolution.explanation}`);
         let summary = 'Completed Work Products:\n';
         for (const step of this.steps) {
             if (step.status === StepStatus.COMPLETED && step.result) {
-                summary += `Step ${step.id}: ${step.actionVerb}\n`;
+                summary += `Step ${step.stepNo}: ${step.actionVerb}\n`;
                 for (const output of step.result) {
                     if (output.resultType !== PluginParameterType.PLAN) {
                         summary += `  - ${output.name}: ${output.resultDescription}\n`;
@@ -2388,6 +2394,7 @@ ${workProductsSummary}
 
         const recoveryStep = this.createStep(
             'REFLECT',
+            this.steps.length + 1,
             new Map([
                 ['prompt', { inputName: 'prompt', value: reflectPrompt, valueType: PluginParameterType.STRING, args: {} }]
             ]),

@@ -10,7 +10,7 @@ import { StepDependency } from './Plugin';
  */
 export interface PlanInputReference {
     outputName: string;
-    sourceStep: string;
+    sourceStep: number;
     valueType?: 'string' | 'number' | 'boolean' | 'array' | 'object' | 'plan' | 'plugin' | 'any';
     args?: Record<string, any>;
 }
@@ -48,8 +48,7 @@ export type PlanOutput = string | PlanOutputDefinition;
  * A single step in a runtime plan
  */
 export interface PlanStep {
-    id: string;
-    number?: number;
+    number: number;
     actionVerb: string;
     description: string;
     inputs: Record<string, PlanInput>;
@@ -105,7 +104,7 @@ export namespace PlanInputHelpers {
      * Check if an input is a reference to another step's output
      */
     export function isReference(input: PlanInput): input is PlanInputReference {
-        return 'outputName' in input && 'sourceStep' in input && typeof (input as PlanInputReference).sourceStep === 'string';
+        return 'outputName' in input && 'sourceStep' in input;
     }
 
     /**
