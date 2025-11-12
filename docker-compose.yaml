@@ -152,6 +152,7 @@ services:
     environment:
       NODE_ENV: production
       PORT: 5100
+      NODE_OPTIONS: --max-old-space-size=4096
       SECURITYMANAGER_URL: *securitymanagerUrl
       POSTOFFICE_URL: *postofficeUrl
       RABBITMQ_URL: *rabbitmqUrl

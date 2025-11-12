@@ -100,9 +100,8 @@ export class Agent extends BaseEntity {
         
         this.setAgentStatus(this.status, {eventType: 'agent_created', inputValues: MapSerializer.transformForSerialization(this.inputValues)});
 
-        this.initRabbitMQ(); // Call init RabbitMQ
-
-        this._initializationPromise = this.initializeAgent().then(() => {
+        // Await RabbitMQ initialization before proceeding
+        this._initializationPromise = this.initRabbitMQ().then(() => this.initializeAgent()).then(() => {
             this.say(`Agent ${this.id} initialized and commencing operations.`);
             this.runUntilDone();
             return true; // Resolve with true on success
@@ -743,9 +742,9 @@ Please consider this context when planning and executing the mission. Provide de
                 return [{
                     success: true,
                     name: 'success',
-                    resultType: PluginParameterType.BOOLEAN,
+                    resultType: PluginParameterType.STRING,
                     resultDescription: 'Message sent to user.',
-                    result: true
+                    result: 'Message sent successfully.'
                 }];
             } else {
                 this.logAndSay('Error in CHAT: message is empty or not a string.');

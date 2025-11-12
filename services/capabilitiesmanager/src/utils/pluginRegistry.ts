@@ -64,7 +64,12 @@ const INTERNAL_VERBS: PluginManifest[] = [
             { name: 'file', type: PluginParameterType.OBJECT, required: false, description: 'File for generation context.' },
             { name: 'audio', type: PluginParameterType.OBJECT, required: false, description: 'Audio for generation context.' },
             { name: 'video', type: PluginParameterType.OBJECT, required: false, description: 'Video for generation context.' },
-            { name: 'image', type: PluginParameterType.OBJECT, required: false, description: 'Image for generation context.' }
+            { name: 'image', type: PluginParameterType.OBJECT, required: false, description: 'Image for generation context.' },
+            // Added missing input definitions
+            { name: 'userPainPoints', type: PluginParameterType.ARRAY, required: false, description: 'User pain points for context.' },
+            { name: 'systemEnhancements', type: PluginParameterType.ARRAY, required: false, description: 'System enhancements for context.' },
+            { name: 'businessCases', type: PluginParameterType.ARRAY, required: false, description: 'Business cases for context.' },
+            { name: 'launchPlan', type: PluginParameterType.OBJECT, required: false, description: 'Launch plan for context.' }
         ],
         outputDefinitions: [
             {

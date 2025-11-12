@@ -234,15 +234,14 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics, zoo
                 agent.steps.forEach(step => {
                     // Standard dependencies
                     if (step.dependencies && Array.isArray(step.dependencies) && step.dependencies.length > 0) {
-                        step.dependencies.forEach((depId: string) => {
-                            if (!depId || depId === 'unknown-sourceStepId') return;
+                        step.dependencies.forEach((dep: string) => {
+                            if (!dep || dep === 'unknown-sourceStepId') return;
                             newEdges.add({
-                                from: depId,
+                                from: dep,
                                 to: step.id,
                                 arrows: 'to',
                                 color: { color: agent.color || '#999999', highlight: '#FFC107', hover: '#FFC107' },
-                                width: 2,
-                                smooth: { enabled: true, type: 'cubicBezier', forceDirection: 'horizontal', roundness: 0.5 }
+                                smooth: { enabled: true, type: 'cubicBezier', roundness: 0.2 }
                             });
                         });
                     } else {

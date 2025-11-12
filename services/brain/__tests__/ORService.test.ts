@@ -6,7 +6,7 @@ describe('ORService', () => {
     const service = new ORService();
 
     expect(service.serviceName).toBe('ORService');
-    expect(service.baseUrl).toBe('https://api.openrouter.ai/api/v1/');
+    expect(service.baseUrl).toBe('https://openrouter.ai/api/v1/');
     expect(service.interfaces).toEqual(['openrouter']);
   });
 });

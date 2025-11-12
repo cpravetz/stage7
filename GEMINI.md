@@ -14,14 +14,6 @@ All code must be production ready - no mocks, stubs, simulations. All data and s
 
 Never make assumptions or short cut an analysis because you think you know what it is likely to tell you. Confirm assignments. When asked about the project/code - check the project/code. Verify the validity of your understanding about this project.
 
-## Agent's Self-Correction Mandate
-
-- **Verify, Don't Assume:** Always verify information, especially when dealing with code conventions, library availability, or API behavior. Never proceed based on assumptions, "likely" scenarios, or "maybe" conclusions. If a tool's output is unexpected or unclear, investigate the tool itself or the underlying system to understand the discrepancy.
-- **Thorough Investigation:** Localized fixes or workarounds are temporary. Always strive to identify and address the root cause of an issue, even if it requires a broader investigation of the codebase or system architecture.
-- **Leverage All Available Information:** Utilize all available tools and context (logs, file system, documentation, existing code patterns) to gain a complete understanding before taking action. If a search tool is unreliable, find alternative methods to gather the necessary information.
-- **Seek Clarification:** If a request is ambiguous, or if critical information is missing, ask concise and targeted clarification questions to the user. Do not make assumptions about user intent or missing details.
-- **Rigor in Analysis:** Apply rigorous analysis to all tasks. Avoid shortcuts in understanding or planning. Every decision should be grounded in verified facts and a comprehensive understanding of the project.
-
 ## Robustness and External Dependencies
 
 - **External API Interactions:** When interacting with external APIs, always implement comprehensive error handling, including retries with exponential backoff for transient errors (e.g., network issues, temporary service unavailability, rate limiting).
@@ -89,3 +81,28 @@ Here are two example plan steps as returned from the Brain, illustrating how cus
 *   **Output Type Alignment:** The `outputs` for `competitors` in Step 1 and `competitorDetails` in Step 2 should have a `type` property (e.g., `"type": "array"`). This is crucial for schema compliance and for enabling features like `FOREACH` wrapping.
 *   **Input Referencing:** In Step 2, the `url` input correctly references `competitors` from Step 1 using `outputName` and `sourceStep`. The `valueType` for `url` is also correctly set to `string`.
 *   **`FOREACH` Wrapping:** Once the output types are correctly set, the plan validation should identify the need for `FOREACH` wrapping for Step 2, as it consumes an array output (`competitors`) from Step 1. A new `FOREACH` step would be inserted (e.g., with `number: 50`), its `array` input would be defined as `{sourceStep: 1, outputName: competitors}`, and Step 2 (and its dependents) would become part of the `FOREACH`'s subplan, with `SCRAPE`'s `url` input redefined as `{sourceStep: 50, outputName: "item"}`.
+
+## Core Architectural Understanding
+
+*   **Agents (`@services/agentset/src/agents/Agent.ts`):**
+    *   Own and run `Step`s.
+    *   Prepare inputs for `Step` execution.
+    *   Execute internal verbs directly (e.g., `CHAT`, `ASK`).
+    *   Call `CapabilitiesManager` to handle external plugins or novel verbs.
+    *   Ensure results are saved after `Step` execution.
+    *   Manage the overall mission flow and agent lifecycle.
+
+*   **Steps (`@services/agentset/src/agents/Step.ts`):**
+    *   Represent a single, atomic unit of work within a plan.
+    *   Prepare inputs from literal values and references to outputs of previous steps.
+    *   Execute internal verbs directly (e.g., `FOREACH`, `REGROUP`, `THINK`, `GENERATE`, `CHAT`, `ASK`).
+    *   Call `CapabilitiesManager` to execute external `actionVerb`s (plugins).
+    *   Handle dependencies between steps.
+    *   Ensure their results are saved (work products and deliverables).
+
+*   **CapabilitiesManager (`@services/capabilitiesmanager/src/CapabilitiesManager.ts`):**
+    *   Acts as a central registry and executor for external plugins.
+    *   Receives `actionVerb` execution requests from `Step`s.
+    *   Looks for a registered handler (plugin, OpenAPI tool, MCP tool) for known `actionVerb`s and executes them with the provided inputs.
+    *   For unknown `actionVerb`s (novel verbs), it delegates to the `ACCOMPLISH` plugin to generate a plan to handle the novel verb.
+    *   Manages plugin lifecycle, health checks, and resource allocation for external plugins.

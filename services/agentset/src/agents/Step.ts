@@ -390,9 +390,9 @@ export class Step {
                 if (output && output.result !== undefined && output.result !== null) {
                     let value = output.result;
 
-                    // If the expected type is an object but we got a string, try to parse it.
+                    // If the expected type is an object or array but we got a string, try to parse it.
                     if ((output.resultType === PluginParameterType.OBJECT || output.resultType === PluginParameterType.ARRAY) && typeof value === 'string') {
-                        console.log(`[Step ${this.id}]   - Attempting to parse string value for dependency '${dep.sourceStepId}.${dep.outputName}'. Original value: ${value.substring(0, 200)}...`);
+                        console.log(`[Step ${this.id}]   - Attempting to parse string value for dependency '${dep.sourceStepId}.${dep.outputName}'. Original value: ${value.substring(0, Math.min(value.length, 200))}...`);
                         try {
                             value = JSON.parse(value);
                             console.log(`[Step ${this.id}]   - Successfully parsed value for dependency '${dep.sourceStepId}.${dep.outputName}'. Parsed type: ${typeof value}, isArray: ${Array.isArray(value)}`);
@@ -401,6 +401,20 @@ export class Step {
                         }
                     }
                     
+                    // NEW: If the target input expects a string but the value is an object/array, stringify it.
+                    const targetInputRef = this.inputReferences.get(dep.inputName);
+                    if (targetInputRef && targetInputRef.valueType === PluginParameterType.STRING && (typeof value === 'object' || Array.isArray(value))) {
+                        console.log(`[Step ${this.id}]   - Converting object/array to JSON string for dependency '${dep.sourceStepId}.${dep.outputName}' as target input '${dep.inputName}' expects a string.`);
+                        try {
+                            value = JSON.stringify(value);
+                        } catch (e) {
+                            console.warn(`[Step ${this.id}]   - Failed to stringify object/array for dependency '${dep.sourceStepId}.${dep.outputName}'. Error: ${e instanceof Error ? e.message : e}. Passing original value.`);
+                        }
+                    }
+
+                    // Recursively resolve any nested references within the value
+                    value = await this.recursivelyResolveInputReferences(value, allSteps);
+
                     console.log(`[Step ${this.id}]   - Populating '${dep.inputName}' from dependency '${dep.sourceStepId}.${dep.outputName}'.`);
                     inputRunValues.set(dep.inputName, {
                         inputName: dep.inputName,
@@ -416,7 +430,14 @@ export class Step {
             }
         }
 
-
+        // Phase 3: Recursively resolve references within inputValues that might contain nested references
+        console.log(`[Step ${this.id}] Phase 3: Recursively resolving nested input values...`);
+        for (const [key, inputValue] of inputRunValues.entries()) {
+            if (inputValue.value !== undefined) {
+                inputValue.value = await this.recursivelyResolveInputReferences(inputValue.value, allSteps);
+                inputRunValues.set(key, inputValue);
+            }
+        }
 
         // Phase 4: Resolve placeholders (must be last).
         console.log(`[Step ${this.id}] Phase 4: Resolving placeholders...`);
@@ -435,6 +456,108 @@ export class Step {
 
         console.log(`[Step ${this.id}] dereferenceInputsForExecution: Completed. Final inputs:`, Array.from(inputRunValues.keys()));
         return inputRunValues;
+    }
+
+    /**
+     * Recursively resolves nested input references within a given value.
+     * This is crucial for complex inputs like script_parameters that might contain
+     * references to outputs of other steps.
+     */
+    private async recursivelyResolveInputReferences(value: any, allSteps: Step[]): Promise<any> {
+        if (value === null || typeof value !== 'object') {
+            return value; // Base case: primitive value
+        }
+
+        if (Array.isArray(value)) {
+            // Recursively process each element in the array
+            return Promise.all(value.map(item => this.recursivelyResolveInputReferences(item, allSteps)));
+        }
+
+        // If it's an object, check if it's an InputReference structure
+        if (value.outputName !== undefined && value.sourceStep !== undefined) {
+            const sourceStepId = value.sourceStep;
+            const outputName = value.outputName;
+
+            let sourceStep = allSteps.find(s => s.id === sourceStepId);
+
+            if (!sourceStep) {
+                try {
+                    const stepData = await this.persistenceManager.loadStep(sourceStepId);
+                    if (stepData) {
+                        sourceStep = new Step({ ...stepData, persistenceManager: this.persistenceManager });
+                    }
+                } catch (e) {
+                    console.warn(`[Step ${this.id}]   - Error attempting to load source step ${sourceStepId} from persistence during recursive resolution:`, e instanceof Error ? e.message : e);
+                }
+            }
+
+            if (sourceStep && (!sourceStep.result || sourceStep.result.length === 0)) {
+                try {
+                    const possibleAgentId = sourceStep.ownerAgentId;
+                    const persisted = await this.persistenceManager.loadStepWorkProduct(possibleAgentId, sourceStep.id);
+                    if (persisted) {
+                        const persistedData = (persisted && (persisted.data !== undefined)) ? persisted.data : persisted;
+                        try {
+                            const transformed = MapSerializer.transformFromSerialization(persistedData) as PluginOutput[];
+                            if (Array.isArray(transformed) && transformed.length > 0) {
+                                sourceStep.result = transformed;
+                            }
+                        } catch (e) {
+                            console.warn(`[Step ${this.id}]   - Failed to transform persisted work product for step ${sourceStep.id} during recursive resolution:`, e instanceof Error ? e.message : e);
+                        }
+                    }
+                } catch (e) {
+                    console.warn(`[Step ${this.id}]   - Error attempting to hydrate source step ${sourceStepId} from persistence during recursive resolution:`, e instanceof Error ? e.message : e);
+                }
+            }
+
+            if (sourceStep?.result) {
+                const output = sourceStep.result.find(r => r.name === outputName);
+                if (output && output.result !== undefined && output.result !== null) {
+                    let resolvedValue = output.result;
+                    // If the expected type is an object or array but we got a string, try to parse it.
+                    if ((output.resultType === PluginParameterType.OBJECT || output.resultType === PluginParameterType.ARRAY) && typeof resolvedValue === 'string') {
+                        try {
+                            resolvedValue = JSON.parse(resolvedValue);
+                        } catch (e) {
+                            console.warn(`[Step ${this.id}]   - Failed to parse string to object/array for recursively resolved dependency '${sourceStepId}.${outputName}'. Error: ${e instanceof Error ? e.message : e}. Passing as string.`);
+                        }
+                    }
+
+                    // NEW: If the target input expects a string but the value is an object/array, stringify it.
+                    // We need to find the input reference for this specific nested input.
+                    // This is more complex as 'value' here is a nested part of a larger input.
+                    // For now, we'll assume if it's being resolved recursively, it's likely for a string context if it's an object/array.
+                    // A more robust solution might involve passing down the expected type from the parent input.
+                    // For simplicity, if the resolved value is an object/array and it's being inserted into a string context, stringify it.
+                    // This is a heuristic, and might need refinement.
+                    if ((typeof resolvedValue === 'object' || Array.isArray(resolvedValue)) && output.resultType === PluginParameterType.STRING) {
+                        console.log(`[Step ${this.id}]   - Converting recursively resolved object/array to JSON string as it's being used in a string context.`);
+                        try {
+                            resolvedValue = JSON.stringify(resolvedValue);
+                        } catch (e) {
+                            console.warn(`[Step ${this.id}]   - Failed to stringify recursively resolved object/array. Error: ${e instanceof Error ? e.message : e}. Passing original value.`);
+                        }
+                    }
+                    console.log(`[Step ${this.id}]   - Recursively resolved reference to '${sourceStepId}.${outputName}'.`);
+                    return resolvedValue;
+                } else {
+                    console.warn(`[Step ${this.id}]   - Recursively resolved dependency '${sourceStepId}.${outputName}' not satisfied. Named output not found.`);
+                }
+            } else {
+                console.warn(`[Step ${this.id}]   - Source step '${sourceStepId}' not found or has no result during recursive resolution.`);
+            }
+            return value; // Return original value if resolution fails
+        }
+
+        // Recursively process properties of the object
+        const newObject: { [key: string]: any } = {};
+        for (const key in value) {
+            if (Object.prototype.hasOwnProperty.call(value, key)) {
+                newObject[key] = await this.recursivelyResolveInputReferences(value[key], allSteps);
+            }
+        }
+        return newObject;
     }
 
     areDependenciesSatisfied(allSteps: Step[]): boolean {
@@ -507,10 +630,12 @@ export class Step {
     private async handleForeach(): Promise<PluginOutput[]> {
         const arrayInput = this.inputValues.get('array');
         const stepsInput = this.inputValues.get('steps');
-        console.log('Running FOREACH for Step', this.id);
-        console.log(`[Step ${this.id}] handleForeach: arrayInput =`, arrayInput);
+        console.log(`[Step ${this.id}] handleForeach: Starting execution.`);
         console.log(`[Step ${this.id}] handleForeach: arrayInput.value =`, arrayInput?.value);
+        console.log(`[Step ${this.id}] handleForeach: stepsInput.value =`, stepsInput?.value);
+
         if (!arrayInput || !arrayInput.value) {
+            console.error(`[Step ${this.id}] handleForeach: Error - FOREACH requires an "array" input.`);
             return this.createErrorResponse('FOREACH requires an "array" input.', '[Step]Error in FOREACH step');
         }
 
@@ -518,10 +643,12 @@ export class Step {
         if (Array.isArray(arrayInput.value)) {
             inputArray = arrayInput.value;
         } else {
+            console.error(`[Step ${this.id}] handleForeach: Error - FOREACH requires an "array" input that is an array. Received type: ${typeof arrayInput.value}`);
             return this.createErrorResponse('FOREACH requires an "array" input that is an array.', '[Step]Error in FOREACH step');
         }
 
         if (!stepsInput || !Array.isArray(stepsInput.value)) {
+            console.error(`[Step ${this.id}] handleForeach: Error - FOREACH requires a "steps" input of type plan. Received type: ${stepsInput ? typeof stepsInput.value : 'undefined'}`);
             return this.createErrorResponse('FOREACH requires a "steps" input of type plan.', '[Step]Error in FOREACH step');
         }
 
@@ -529,6 +656,7 @@ export class Step {
         const allNewSteps: Step[] = [];
         const endStepIds: string[] = [];
 
+        console.log(`[Step ${this.id}] handleForeach: Iterating ${inputArray.length} times.`);
         for (let i = 0; i < inputArray.length; i++) {
             const item = inputArray[i];
             
@@ -538,20 +666,15 @@ export class Step {
             // Inject the loop item value into the steps that need it
             iterationSteps.forEach(step => {
                 for (const [inputName, inputRef] of step.inputReferences.entries()) {
-                    if (inputRef.outputName === 'item' && (inputRef.sourceId ===  '0' || inputRef.sourceId === this.id)) {
-                        let valueToPass = item;
-                        if (inputName === 'url' && typeof item === 'object' && item !== null && item.hasOwnProperty('url')) {
-                            valueToPass = item.url;
-                        } else if (typeof item === 'object' && item !== null && item.hasOwnProperty(inputName)) {
-                            valueToPass = item[inputName];
-                        }
-                        step.inputValues.set(inputName, {
-                            inputName: inputName,
-                            value: valueToPass,
-                            valueType: this.inferValueType(valueToPass)
-                        });
-                    }
-                }
+                                            if (inputRef.outputName === 'item' && (inputRef.sourceId === '0' || inputRef.sourceId === this.id)) {
+                                                // Directly pass the entire 'item' from the inputArray
+                                                step.inputValues.set(inputName, {
+                                                    inputName: inputName,
+                                                    value: item, // Pass the entire item
+                                                    valueType: this.inferValueType(item)
+                                                });
+                                                console.log(`[Step ${this.id}] handleForeach: Injected item '${JSON.stringify(item)}' into step ${step.id} input '${inputName}'.`);
+                                            }                }
             });
 
             allNewSteps.push(...iterationSteps);
@@ -570,9 +693,10 @@ export class Step {
             endStepIds.push(...endSteps.map(step => step.id));
         }
 
+        console.log(`[Step ${this.id}] handleForeach: Generated ${allNewSteps.length} new steps in total.`);
         const planOutput: PluginOutput = {
             success: true,
-            name: 'newSteps', // Changed to newSteps to avoid conflict
+            name: 'newSteps', // This name is internal to FOREACH, Agent will process the PLAN resultType
             resultType: PluginParameterType.PLAN,
             resultDescription: `[Step] FOREACH created ${allNewSteps.length} new steps.`,
             result: allNewSteps
@@ -580,7 +704,7 @@ export class Step {
         console.log(`[Step ${this.id}] FOREACH created ${allNewSteps.length} new steps.`);
         const endStepsOutput: PluginOutput = {
             success: true,
-            name: 'instanceEndStepIds', 
+            name: 'steps', // Changed name to 'steps' to match the plan's output definition
             resultType: PluginParameterType.ARRAY,
             resultDescription: 'UUIDs of end steps for each subplan instance',
             result: endStepIds
@@ -1803,7 +1927,14 @@ export function createFromPlan(
     type PlanTask = ActionVerbTask & { number?: number; outputs?: Record<string, any>; id?: string; inputs?: Record<string, InputValue>; };
     const planTasks = plan as PlanTask[];
 
+    const oldTaskIdToNewStepIdMap = new Map<string, string>();
     const newSteps = planTasks.map((task, idx) => {
+        const newStepId = uuidv4(); // Generate a new UUID for this step instance
+        if (task.id) {
+            // Map the original task ID to the new step ID
+            oldTaskIdToNewStepIdMap.set(task.id, newStepId);
+        }
+
         const dependencies: StepDependency[] = [];
         const inputReferences = new Map<string, InputReference>();
         const inputValues = new Map<string, InputValue>();
@@ -1884,25 +2015,35 @@ export function createFromPlan(
             }
         }
 
-        const normalizedOutputs = Step.normalizeOutputs((task as any).outputs);
+        const normalizedOutputs = Step.normalizeOutputs((task as any).outputs) || new Map<string, string>();
+        const originalOutputDefinitions = task.outputs ? new Map(Object.entries(task.outputs)) : new Map<string, any>();
         
         const step = new Step({
-            id: uuidv4(),            
-            missionId,
-            ownerAgentId: parentStep?.ownerAgentId || '',
+            id: newStepId,
+            missionId: missionId,
+            ownerAgentId: parentStep?.ownerAgentId || agentContext?.id || 'unknown_agent',
             actionVerb: task.actionVerb,
+            inputReferences: inputReferences,
+            inputValues: inputValues,
             description: task.description,
-            dependencies,
-            inputReferences,
-            inputValues,
+            dependencies: dependencies,
             outputs: normalizedOutputs,
-            originalOutputDefinitions: normalizedOutputs,
+            originalOutputDefinitions: originalOutputDefinitions,
             recommendedRole: task.recommendedRole,
-            persistenceManager
+            persistenceManager: persistenceManager
         });
         console.log(`[createFromPlan] 📊 Created step ${step.id} (${task.actionVerb}) with ${dependencies.length} dependencies:`, 
             dependencies.map(d => `${d.inputName} <- ${d.sourceStepId}.${d.outputName}`));
         return step;
+    });
+
+    // Second pass: Update dependencies to use the new IDs
+    newSteps.forEach(step => {
+        step.dependencies.forEach(dep => {
+            if (oldTaskIdToNewStepIdMap.has(dep.sourceStepId)) {
+                dep.sourceStepId = oldTaskIdToNewStepIdMap.get(dep.sourceStepId)!;
+            }
+        });
     });
 
     // Post-creation dependency wiring (for placeholders, REFLECT, etc.)

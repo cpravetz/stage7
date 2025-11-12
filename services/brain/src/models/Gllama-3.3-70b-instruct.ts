@@ -25,8 +25,8 @@ export class GLlama3Model extends BaseModel {
         ]);
 
         super({
-            name: "groq/meta-llama/llama-3.3-70b-versatile",
-            modelName: "meta-llama/llama-3.3-70b-versatile",
+            name: "groq/meta-llama/llama-3.1-8b-instant",
+            modelName: "llama-3.1-8b-instant",
             interfaceName: "groq",
             serviceName: "GroqService",
             tokenLimit: 100000, // Adjust this value if needed
