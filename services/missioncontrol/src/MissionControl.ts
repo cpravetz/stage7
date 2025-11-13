@@ -1,6 +1,6 @@
 import express from 'express';
 import { Request, Response, NextFunction } from 'express';
-import { AgentStatistics, Mission, PluginParameterType, Status } from '@cktmcs/shared';
+import { AgentStatistics, Mission, PluginParameterType, Status, DeliverableMissionFile } from '@cktmcs/shared';
 import { v4 as uuidv4, validate as uuidValidate } from 'uuid';
 import { BaseEntity, MessageType, InputValue, MapSerializer, ServiceTokenManager } from '@cktmcs/shared';
 import { MissionStatistics } from '@cktmcs/shared';
@@ -853,9 +853,43 @@ class MissionControl extends BaseEntity {
         }
     }
 
+    private async sendSharedFilesUpdate(missionId: string) {
+        const mission = this.missions.get(missionId);
+        if (!mission) {
+            console.error(`Mission ${missionId} not found for sending shared files update.`);
+            return;
+        }
+
+        const filesToSend = (mission.attachedFiles || []).filter(file => file.isDeliverable);
+
+        for (const [clientId, missionIds] of this.clientMissions.entries()) {
+            if (missionIds.has(missionId)) {
+                this.authenticatedApi.post(`http://${this.postOfficeUrl}/message`, {
+                    type: MessageType.SHARED_FILES_UPDATE,
+                    sender: this.id,
+                    recipient: 'user',
+                    clientId: clientId,
+                    content: {
+                        missionId: missionId,
+                        files: filesToSend
+                    }
+                }).catch((error: any) => {
+                    console.error(`Error sending SHARED_FILES_UPDATE to client ${clientId}:`, error instanceof Error ? error.message : error);
+                });
+            }
+        }
+    }
+
     private async addAttachedFile(req: express.Request, res: express.Response) {
         const { missionId } = req.params;
-        const missionFile = req.body;
+        const incomingDeliverable = req.body; // This is the full deliverable document
+        const missionFile = incomingDeliverable.missionFile; // Extract the MissionFile part
+        const isDeliverable = incomingDeliverable.isDeliverable || false;
+        const stepId = incomingDeliverable.stepId;
+
+        if (!missionFile || !missionFile.id) {
+            return res.status(400).send({ error: 'Invalid mission file data provided' });
+        }
 
         let mission = this.missions.get(missionId);
         if (!mission) {
@@ -871,12 +905,19 @@ class MissionControl extends BaseEntity {
             mission.attachedFiles = [];
         }
 
+        const deliverableMissionFile: DeliverableMissionFile = {
+            ...missionFile,
+            isDeliverable: isDeliverable,
+            stepId: stepId
+        };
+
         // Avoid duplicates
-        if (!mission.attachedFiles.find(f => f.id === missionFile.id)) {
-            mission.attachedFiles.push(missionFile);
+        if (!mission.attachedFiles.find(f => f.id === deliverableMissionFile.id)) {
+            mission.attachedFiles.push(deliverableMissionFile);
             mission.updatedAt = new Date();
             await this.saveMissionState(mission);
-            this.sendStatusUpdate(mission, `File ${missionFile.originalName} added`);
+            this.sendStatusUpdate(mission, `File ${deliverableMissionFile.originalName} added`);
+            this.sendSharedFilesUpdate(missionId); // Notify clients about the updated file list
         }
 
         res.status(200).send({ status: 'File added' });
@@ -904,6 +945,7 @@ class MissionControl extends BaseEntity {
                 mission.updatedAt = new Date();
                 await this.saveMissionState(mission);
                 this.sendStatusUpdate(mission, `File ${originalFile?.originalName || fileId} removed`);
+                this.sendSharedFilesUpdate(missionId); // Notify clients about the updated file list
             }
         }
 

@@ -595,6 +595,13 @@ CRITICAL: The actionVerb for each step MUST be a valid, existing plugin actionVe
                 logger.info(f"Raw response from Brain (attempt {attempt+1}): {str(response)[:500]}...")
                 try:
                     plan = json.loads(response)
+
+                    # Check if the parsed response is an error object from the Brain
+                    if isinstance(plan, dict) and 'error' in plan:
+                        error_message = plan['error'].get('message', 'Unknown Brain error')
+                        error_type = plan['error'].get('type', 'brain_error')
+                        raise AccomplishError(f"Brain returned an error: {error_message}", error_type)
+
                 except Exception as e:
                     logger.warning(f"Attempt {attempt + 1}: JSON parsing failed: {e}. Response: {response}")
                     if attempt == self.max_retries - 1:

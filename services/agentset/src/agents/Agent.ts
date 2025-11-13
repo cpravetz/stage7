@@ -480,6 +480,14 @@ Please consider this context when planning and executing the mission. Provide de
 
             if (step.actionVerb === 'REFLECT') {
                 await this._handleReflectionResult(result, step);
+                // After handling reflection, if a new plan was generated,
+                // we need to stop processing the current step and let the runAgent loop
+                // pick up the new steps.
+                // The _handleReflectionResult method adds new steps and calls updateStatus.
+                // We should ensure the current step (the REFLECT step itself) is marked as completed
+                // and then return to allow the main loop to re-evaluate.
+                await this.handleStepSuccess(step, result); // Mark the REFLECT step as completed
+                return; // Exit executeStep for the REFLECT step
             } else if (result[0]?.resultType === PluginParameterType.PLAN) {
                 // Apply custom output name mapping for PLAN results
                 const mappedResult = await step.mapPluginOutputsToCustomNames(result);
@@ -503,6 +511,10 @@ Please consider this context when planning and executing the mission. Provide de
                     console.log(`[Agent ${this.id}] runAgent: Planning step ${step.id} generated plan:`, JSON.stringify(actualPlanArray));
                     this.addStepsFromPlan(actualPlanArray, step);
                     await this.updateStatus();
+                    // After adding new steps from a PLAN result, we should also return
+                    // to allow the main loop to re-evaluate.
+                    await this.handleStepSuccess(step, result); // Mark the planning step as completed
+                    return; // Exit executeStep for the planning step
                 } else {
                     const errorMessage = `Error: Expected a plan, but received: ${JSON.stringify(planningStepResult)}`;
                     console.error(`[Agent.ts] runAgent (${this.id}): ${errorMessage}`);
@@ -2227,6 +2239,8 @@ Explanation: ${resolution.explanation}`);
             });
             console.log(`[Agent ${this.id}] handleStepFailure: Validation error for step ${step.id}. Triggering replan.`);
             await this.replanFromFailure(step); // Call replanFromFailure
+            await this.updateStatus(); // Update status after replan
+            return;
         } else if (errorType === StepErrorType.TRANSIENT && step.retryCount < step.maxRetries) {
             step.retryCount++;
             step.status = StepStatus.PENDING;
@@ -2241,6 +2255,8 @@ Explanation: ${resolution.explanation}`);
                 timestamp: new Date().toISOString()
             });
             console.log(`[Agent ${this.id}] handleStepFailure: Transient error for step ${step.id}. Retrying (attempt ${step.retryCount}/${step.maxRetries}).`);
+            await this.updateStatus(); // Update status after retry
+            return;
         } else {
             // Permanent failure
             step.status = StepStatus.ERROR;
@@ -2248,8 +2264,9 @@ Explanation: ${resolution.explanation}`);
             console.log(`[Agent ${this.id}] handleStepFailure: Permanent failure for step ${step.id}. Triggering replan.`);
             // Intelligent Replanning
             await this.replanFromFailure(step);
+            await this.updateStatus(); // This is called after replanFromFailure
+            return;
         }
-        await this.updateStatus();
     }
 
     public getLastFailedStep(): Step | null {

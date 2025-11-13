@@ -12,6 +12,11 @@ export interface MissionFile {
     preview?: string; // small text preview (optional, truncated)
 }
 
+export interface DeliverableMissionFile extends MissionFile {
+    isDeliverable?: boolean;
+    stepId?: string;
+}
+
 export interface Mission {
     id: string;
     userId: string;  // Id of creating client
@@ -21,5 +26,5 @@ export interface Mission {
     missionContext: string;
     createdAt: Date;
     updatedAt: Date;
-    attachedFiles?: MissionFile[];  // Files attached to this mission
+    attachedFiles?: DeliverableMissionFile[];  // Files attached to this mission
 }
