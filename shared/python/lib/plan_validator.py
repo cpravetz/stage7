@@ -139,39 +139,7 @@ class PlanValidator:
         
         return None
 
-    def _analyze_plan_tree(self, plan: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Single traversal to collect step IDs and counts."""
-        step_counts = {}
-        
-        def traverse(steps):
-            for step in steps:
-                if not isinstance(step, dict):
-                    continue
-                    
-                step_id = step.get('id')
-                if step_id is not None:
-                    step_counts[step_id] = step_counts.get(step_id, 0) + 1
-                
-                sub_plan = self._get_sub_plan(step)
-                if sub_plan:
-                    traverse(sub_plan)
-        
-        traverse(plan)
-        return {'counts': step_counts}
-
-    def _find_step_in_plan(self, plan: List[Dict[str, Any]], step_id: str) -> Optional[Dict[str, Any]]:
-        """Finds a step in a potentially nested plan by its ID."""
-        for step in plan:
-            if step.get('id') == step_id:
-                return step
-            sub_plan = self._get_sub_plan(step)
-            if sub_plan:
-                found = self._find_step_in_plan(sub_plan, step_id)
-                if found:
-                    return found
-        return None
-
-    def _get_downstream_dependencies(self, start_step_id: str, plan: List[Dict[str, Any]]) -> Set[str]:
+    def _get_downstream_dependencies(self, start_step_id: str, plan: List[Dict[str, Any]], all_steps: Dict[str, Any]) -> Set[str]:
         """Builds a dependency graph and finds all downstream dependencies for a given step."""
         adj_list = {}
         
@@ -206,7 +174,7 @@ class PlanValidator:
             if current_step in adj_list:
                 for dependent_step in adj_list[current_step]:
                     if dependent_step not in visited:
-                        dependent_step_obj = self._find_step_in_plan(plan, dependent_step)
+                        dependent_step_obj = all_steps.get(dependent_step)
                         if dependent_step_obj and dependent_step_obj.get('actionVerb') == 'REFLECT':
                             logger.info(f"Excluding REFLECT step {dependent_step} from FOREACH wrapping - it should remain at top level")
                             continue
@@ -225,16 +193,35 @@ class PlanValidator:
         except ValueError:
             return False
 
+    def _recursively_update_dependencies(self, plan: List[Dict[str, Any]], moved_step_ids: Set[str], regroup_step_id: str):
+        """Recursively update dependencies pointing to moved steps."""
+        for step in plan:
+            if not isinstance(step, dict):
+                continue
+
+            # Update dependencies in the current step's inputs
+            for input_name, input_def in step.get('inputs', {}).items():
+                if isinstance(input_def, dict) and input_def.get('sourceStep') in moved_step_ids:
+                    original_source = input_def.get('sourceStep')
+                    logger.info(f"Updating step {step['id']} input '{input_name}' to reference REGROUP {regroup_step_id} result (was pointing to moved step {original_source})")
+                    input_def['sourceStep'] = regroup_step_id
+                    input_def['outputName'] = 'result'  # REGROUP's output name
+
+            # Recurse into sub-plans
+            sub_plan = self._get_sub_plan(step)
+            if sub_plan:
+                self._recursively_update_dependencies(sub_plan, moved_step_ids, regroup_step_id)
+
     def _wrap_step_in_foreach(self, plan: List[Dict[str, Any]], step_to_wrap: Dict[str, Any],
                               source_step_id: str, source_output_name: str, target_input_name: str,
-                              plugin_map: Dict[str, Any]) -> List[Dict[str, Any]]:
+                              plugin_map: Dict[str, Any], all_steps: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Wraps a step in a FOREACH loop, including all dependent steps."""
         logger.info(f"Wrapping step {step_to_wrap['id']} in FOREACH for input '{target_input_name}'")
 
         step_to_wrap_original_id = step_to_wrap['id']
 
         # Collect steps to move into subplan, ensuring they are deep-copied
-        downstream_deps = self._get_downstream_dependencies(step_to_wrap_original_id, plan)
+        downstream_deps = self._get_downstream_dependencies(step_to_wrap_original_id, plan, all_steps)
         moved_step_ids = {step_to_wrap_original_id} | downstream_deps
 
         sub_plan = []
@@ -364,14 +351,15 @@ class PlanValidator:
 
         new_plan = _rebuild_recursively(plan, moved_step_ids, foreach_step, regroup_step, step_to_wrap_original_id)
 
-        # Update any steps outside the loop that depended on the original step_to_wrap
+        # Update any steps outside the loop that depended on any of the moved steps
         for step in new_plan:
-            if step['id'] == foreach_step_id or step['id'] == regroup_step_id:
+            if step.get('id') in [foreach_step_id, regroup_step_id]:
                 continue
             
             for input_name, input_def in step.get('inputs', {}).items():
-                if isinstance(input_def, dict) and input_def.get('sourceStep') == step_to_wrap_original_id:
-                    logger.info(f"Updating step {step['id']} input '{input_name}' to reference REGROUP {regroup_step_id} result")
+                if isinstance(input_def, dict) and input_def.get('sourceStep') in moved_step_ids:
+                    original_source = input_def.get('sourceStep')
+                    logger.info(f"Updating step {step['id']} input '{input_name}' to reference REGROUP {regroup_step_id} result (was pointing to moved step {original_source})")
                     input_def['sourceStep'] = regroup_step_id
                     input_def['outputName'] = 'result' # REGROUP's output name
 
@@ -380,61 +368,387 @@ class PlanValidator:
 
     def validate_and_repair(self, plan: List[Dict[str, Any]], goal: str, inputs: Dict[str, Any],
                            attempt: int = 1, previous_errors: List[str] = []) -> List[Dict[str, Any]]:
-        """Validate and repair plan if needed, with retries. Only throw for truly critical failures."""
+        """
+        Validates and repairs a plan using a flattened, iterative approach.
+        This method first builds a comprehensive, flat representation of the entire plan,
+        then iterates through the steps to validate and repair them in a single pass.
+        """
+        logger.info(f"--- Plan Validation Attempt {attempt}/{self.max_retries} ---")
+        if attempt > self.max_retries:
+            logger.error(f"Plan validation failed after {self.max_retries} attempts. Returning original plan.")
+            return plan
+
         try:
-            logger.info(f"--- Validation Attempt {attempt}/{self.max_retries} ---")
-            logger.debug(f"Plan: {json.dumps(plan, indent=2)}")
-
-            if attempt > self.max_retries:
-                logger.warning(f"Plan validation failed after {self.max_retries} attempts. Returning plan.")
-                return plan
-
-            # Code-based repair first
-            current_plan = self._repair_plan_code_based(plan)
+            # Initialize plugin definitions from inputs
+            self.plugin_map.clear()
             available_plugins = self._initialize_plugin_map(inputs)
 
-            # Apply input alias resolution
-            current_plan = self._resolve_input_aliases(current_plan, available_plugins)
+            # 1. Build the flat representation of the plan
+            flat_plan_repr = self._build_flat_plan_representation(plan)
+            all_steps = flat_plan_repr['steps']
+            step_parents = flat_plan_repr['parents']
+            step_outputs = flat_plan_repr['outputs']
+            uuid_map = flat_plan_repr['uuid_map']
+            
+            # Apply UUID fixes throughout the entire plan structure using the generated map
+            if uuid_map:
+                plan = self._apply_uuid_map_recursive(plan, uuid_map)
+                # Re-build representation after modification
+                flat_plan_repr = self._build_flat_plan_representation(plan)
+                all_steps = flat_plan_repr['steps']
+                step_parents = flat_plan_repr['parents']
+                step_outputs = flat_plan_repr['outputs']
 
-            validation_result = self._validate_plan(current_plan, available_plugins)
+            # 2. Iteratively validate and repair
+            errors = []
+            wrappable_errors = []
+            
+            # Get a topological sort of the plan if possible, otherwise use plan order
+            execution_order = self._get_execution_order(plan, all_steps)
 
-            # Handle wrappable errors (FOREACH candidates)
-            wrappable_errors = validation_result.get('wrappable_errors', [])
-            logger.info(f"Found {len(wrappable_errors)} steps to wrap in FOREACH")
+            for step_id in execution_order:
+                step = all_steps.get(step_id)
+                if not step:
+                    continue
+
+                # Determine available outputs for the current step
+                current_available_outputs = self._get_available_outputs_for_step(step_id, execution_order, step_outputs, step_parents, all_steps)
+                
+                # Validate the step
+                step_errors, step_wrappable = self._validate_step(
+                    step,
+                    current_available_outputs,
+                    all_steps,
+                    step_parents
+                )
+                errors.extend(step_errors)
+                wrappable_errors.extend(step_wrappable)
+
+            # 3. Handle errors and decide on next actions
+            if not errors and not wrappable_errors:
+                logger.info("Plan validation successful.")
+                return plan
+
             if wrappable_errors:
-                error = wrappable_errors[0]
-                step_to_wrap = next((s for s in current_plan if s.get('id') == error['step_id']), None) # Changed 'number' to 'id'
-                if step_to_wrap:
-                    modified_plan = self._wrap_step_in_foreach(
-                        current_plan, step_to_wrap, error['source_step_id'], # Changed 'source_step_number' to 'source_step_id'
-                        error['source_output_name'], error['target_input_name'], self.plugin_map
-                    )
-                    return self.validate_and_repair(modified_plan, goal, inputs, attempt + 1, validation_result['errors'])
+                logger.info(f"Found {len(wrappable_errors)} candidates for FOREACH wrapping.")
+                # For simplicity, handle one wrappable error per attempt
+                error_to_wrap = wrappable_errors[0]
+                modified_plan = self._wrap_step_in_foreach(
+                    plan,
+                    error_to_wrap['step_id'],
+                    error_to_wrap['source_step_id'],
+                    error_to_wrap['source_output_name'],
+                    error_to_wrap['target_input_name'],
+                    self.plugin_map,
+                    all_steps
+                )
+                # After modification, re-run the entire validation process
+                return self.validate_and_repair(modified_plan, goal, inputs, attempt + 1, errors)
 
-            # Handle validation errors
-            if validation_result['valid']:
-                logger.info("Plan validation successful")
-                return current_plan
+            if errors:
+                logger.warning(f"Plan validation failed with {len(errors)} errors: {errors}")
+                # Attempt LLM repair if configured
+                if self.brain_call:
+                    try:
+                        repaired_plan = self._repair_plan_with_llm(plan, errors, goal, inputs, previous_errors)
+                        # After LLM repair, re-run the entire validation process
+                        return self.validate_and_repair(repaired_plan, goal, inputs, attempt + 1, errors)
+                    except Exception as e:
+                        logger.error(f"LLM repair failed: {e}. Returning plan as-is.")
+                        return plan
+                else:
+                    logger.warning("No brain_call configured. Cannot attempt LLM repair.")
+                    return plan
+            
+            return plan
 
-            actual_errors = validation_result['errors']
-            if not actual_errors:
-                logger.warning("Plan validation failed but no specific errors reported.")
-                return current_plan
-
-            logger.warning(f"Attempt {attempt}: Validation failed with {len(actual_errors)} errors")
-            logger.debug(f"Errors: {json.dumps(actual_errors, indent=2)}")
-
-            # Try LLM repair
-            try:
-                repaired_plan = self._repair_plan_with_llm(current_plan, actual_errors, goal, inputs, previous_errors)
-                return self.validate_and_repair(repaired_plan, goal, inputs, attempt + 1, actual_errors)
-            except Exception as e:
-                logger.error(f"LLM repair failed: {e}")
-                # Instead of throwing, return best effort plan unless truly critical
-                return current_plan
         except Exception as e:
-            logger.error(f"Critical error in plan validation: {e}")
-            raise AccomplishError(str(e), "critical_error")
+            logger.critical(f"Critical error during plan validation: {e}", exc_info=True)
+            # In case of a critical failure, return the plan to avoid losing it.
+            return plan
+
+    def _build_flat_plan_representation(self, plan: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Traverses the nested plan structure once to build a flat representation.
+        - Repairs missing or invalid UUIDs.
+        - Maps all steps by their ID.
+        - Maps the parent of each step.
+        - Maps the outputs produced by each step.
+        """
+        steps_map = {}
+        parent_map = {}
+        outputs_map = {}
+        uuid_map = {}
+
+        def traverse(sub_plan: List[Dict[str, Any]], parent_id: Optional[str]):
+            if not isinstance(sub_plan, list):
+                return
+
+            for i, step in enumerate(sub_plan):
+                if not isinstance(step, dict):
+                    continue
+
+                # --- UUID Repair ---
+                original_id = step.get('id')
+                if not original_id or not self._is_valid_uuid(original_id):
+                    new_id = str(uuid.uuid4())
+                    logger.warning(f"Replacing invalid/missing step ID '{original_id}' with '{new_id}'.")
+                    step['id'] = new_id
+                    if original_id:
+                        uuid_map[original_id] = new_id
+                
+                step_id = step['id']
+
+                # --- Populate Maps ---
+                if step_id in steps_map:
+                    # Handle duplicate IDs by creating a new one
+                    new_id = str(uuid.uuid4())
+                    logger.warning(f"Duplicate step ID '{step_id}' found. Replacing with new ID '{new_id}'.")
+                    uuid_map[step_id] = new_id
+                    step['id'] = new_id
+                    step_id = new_id
+
+                steps_map[step_id] = step
+                if parent_id:
+                    parent_map[step_id] = parent_id
+                
+                # --- Process Outputs ---
+                step_outputs = set()
+                outputs = step.get('outputs', {})
+                if isinstance(outputs, dict):
+                    for output_name, output_def in outputs.items():
+                        step_outputs.add(output_name)
+                        # Basic output repair
+                        if isinstance(output_def, str):
+                            step['outputs'][output_name] = {'description': output_def}
+                outputs_map[step_id] = step_outputs
+
+                # --- Recurse into Sub-plans ---
+                sub_plan_steps = self._get_sub_plan(step)
+                if sub_plan_steps:
+                    traverse(sub_plan_steps, step_id)
+
+        traverse(plan, None)
+        
+        return {
+            "steps": steps_map,
+            "parents": parent_map,
+            "outputs": outputs_map,
+            "uuid_map": uuid_map
+        }
+
+    def _apply_uuid_map_recursive(self, data: Any, mapping: Dict[str, str]) -> Any:
+        """
+        Recursively traverses a plan structure (dictionaries and lists) and replaces
+        any 'sourceStep' values that are keys in the provided mapping.
+        """
+        if isinstance(data, dict):
+            new_dict = {}
+            for k, v in data.items():
+                if k == 'sourceStep' and v in mapping:
+                    logger.debug(f"Updating sourceStep reference from '{v}' to '{mapping[v]}'.")
+                    new_dict[k] = mapping[v]
+                else:
+                    new_dict[k] = self._apply_uuid_map_recursive(v, mapping)
+            return new_dict
+        elif isinstance(data, list):
+            return [self._apply_uuid_map_recursive(item, mapping) for item in data]
+        else:
+            return data
+
+    def _get_execution_order(self, plan: List[Dict[str, Any]], all_steps: Dict[str, Any]) -> List[str]:
+        """
+        Determines the execution order of steps. For now, it's a simple traversal.
+        This can be enhanced with topological sort later if complex dependencies require it.
+        """
+        order = []
+        
+        def traverse(sub_plan):
+            for step in sub_plan:
+                step_id = step.get('id')
+                if step_id and step_id in all_steps:
+                    order.append(step_id)
+                    sub_plan_steps = self._get_sub_plan(step)
+                    if sub_plan_steps:
+                        traverse(sub_plan_steps)
+        
+        traverse(plan)
+        return order
+
+    def _get_available_outputs_for_step(self, step_id: str, execution_order: List[str], 
+                                        all_outputs: Dict[str, Set[str]], parents: Dict[str, str], 
+                                        all_steps: Dict[str, Any]) -> Dict[str, Set[str]]:
+        """
+        Determines all outputs available to a given step. This includes outputs from:
+        1. All preceding steps in the same sub-plan.
+        2. The direct parent step and all its ancestors.
+        3. All preceding steps in an ancestor's sub-plan.
+        """
+        available = {}
+        current_index = execution_order.index(step_id)
+        
+        # Add outputs from all preceding steps in the execution order
+        for i in range(current_index):
+            prev_step_id = execution_order[i]
+            if prev_step_id in all_outputs:
+                available[prev_step_id] = all_outputs[prev_step_id]
+
+        # Add outputs from parent hierarchy (for sub-plans)
+        # This is implicitly handled by the execution order traversal, but for FOREACH-like
+        # scopes, we need to add the parent's special outputs.
+        parent_id = parents.get(step_id)
+        while parent_id:
+            if parent_id not in available:
+                 available[parent_id] = all_outputs.get(parent_id, set())
+            
+            parent_step = all_steps.get(parent_id)
+            if parent_step and parent_step.get('actionVerb') == 'FOREACH':
+                # Add 'item' and 'index' from the FOREACH parent
+                available[parent_id].add('item')
+                available[parent_id].add('index')
+
+            parent_id = parents.get(parent_id)
+            
+        return available
+
+    def _validate_step(self, step: Dict[str, Any], available_outputs: Dict[str, Set[str]],
+                       all_steps: Dict[str, Any], parents: Dict[str, str]) -> Tuple[List[str], List[Dict[str, Any]]]:
+        """
+        Validates a single step.
+        Returns a tuple of (errors, wrappable_errors).
+        """
+        errors = []
+        wrappable_errors = []
+        step_id = step['id']
+        action_verb = step.get('actionVerb')
+
+        if not action_verb:
+            errors.append(f"Step {step_id}: Missing 'actionVerb'.")
+            return errors, wrappable_errors
+
+        plugin_def = self.plugin_map.get(action_verb.upper())
+
+        # --- Validate Inputs ---
+        inputs = step.get('inputs', {})
+        if not isinstance(inputs, dict):
+            errors.append(f"Step {step_id}: 'inputs' must be a dictionary.")
+            return errors, wrappable_errors
+
+        # Check for required inputs
+        if plugin_def:
+            for req_input in plugin_def.get('inputDefinitions', []):
+                if req_input.get('required') and req_input.get('name') not in inputs:
+                    errors.append(f"Step {step_id}: Missing required input '{req_input['name']}' for '{action_verb}'.")
+
+        # Check each input
+        for input_name, input_def in inputs.items():
+            if not isinstance(input_def, dict):
+                errors.append(f"Step {step_id}: Input '{input_name}' is not a valid dictionary.")
+                continue
+
+            if 'value' in input_def:
+                # It's a static value, could validate type here if needed
+                pass
+            elif 'sourceStep' in input_def and 'outputName' in input_def:
+                source_step_id = input_def['sourceStep']
+                output_name = input_def['outputName']
+
+                # Check if source exists and is available
+                if source_step_id == '0': # Special case for parent-provided inputs
+                    parent_id = parents.get(step_id)
+                    if not parent_id:
+                        errors.append(f"Step {step_id}: Input '{input_name}' references parent ('0'), but has no parent.")
+                    # Further validation could check if parent *can* provide this output
+                elif source_step_id not in available_outputs:
+                    errors.append(f"Step {step_id}: Input '{input_name}' references unavailable step '{source_step_id}'.")
+                elif output_name not in available_outputs.get(source_step_id, set()):
+                    errors.append(f"Step {step_id}: Input '{input_name}' references unavailable output '{output_name}' from step '{source_step_id}'.")
+                else:
+                    # --- Type Compatibility Check ---
+                    source_step = all_steps.get(source_step_id)
+                    if source_step:
+                        type_error, wrappable = self._check_type_compatibility(
+                            step, input_name, input_def, source_step, output_name
+                        )
+                        if type_error:
+                            errors.append(type_error)
+                        if wrappable:
+                            wrappable_errors.append(wrappable)
+            else:
+                errors.append(f"Step {step_id}: Input '{input_name}' must have 'value' or both 'sourceStep' and 'outputName'.")
+
+        # --- Validate Outputs ---
+        errors.extend(self._validate_deliverable_outputs(step))
+
+        return errors, wrappable_errors
+
+    def _check_type_compatibility(self, dest_step: Dict[str, Any], dest_input_name: str, dest_input_def: Dict[str, Any],
+                                  source_step: Dict[str, Any], source_output_name: str) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+        """
+        Checks type compatibility between a source output and a destination input.
+        Returns a tuple: (error_message, wrappable_error_dict).
+        One of the two will be None.
+        """
+        dest_action_verb = dest_step['actionVerb'].upper()
+        dest_plugin_def = self.plugin_map.get(dest_action_verb)
+        
+        source_action_verb = source_step['actionVerb'].upper()
+        source_plugin_def = self.plugin_map.get(source_action_verb)
+
+        # Determine destination input type
+        dest_input_type = None
+        if dest_plugin_def:
+            for in_def in dest_plugin_def.get('inputDefinitions', []):
+                if in_def.get('name') == dest_input_name:
+                    dest_input_type = in_def.get('type')
+                    break
+        if not dest_input_type:
+            return (f"Step {dest_step['id']}: Could not determine type for input '{dest_input_name}'.", None)
+
+        # Determine source output type
+        source_output_type = None
+        source_output_def = source_step.get('outputs', {}).get(source_output_name)
+        if isinstance(source_output_def, dict) and 'type' in source_output_def:
+            source_output_type = source_output_def['type']
+        
+        # Fallback to plugin definition if not in plan step
+        if not source_output_type and source_plugin_def:
+             for out_def in source_plugin_def.get('outputDefinitions', []):
+                if out_def.get('name') == source_output_name:
+                    source_output_type = out_def.get('type')
+                    break
+        
+        if not source_output_type:
+            return (f"Step {dest_step['id']}: Could not determine type for output '{source_output_name}' from step {source_step['id']}.", None)
+
+        # --- The Actual Check ---
+        
+        # Case 1: Mismatch suggests FOREACH wrapping
+        is_wrappable = dest_input_type == 'string' and source_output_type in ['array', 'list']
+        if is_wrappable:
+            wrappable_info = {
+                "step_id": dest_step['id'],
+                "source_step_id": source_step['id'],
+                "source_output_name": source_output_name,
+                "target_input_name": dest_input_name
+            }
+            return (None, wrappable_info)
+
+        # Case 2: General type mismatch
+        types_compatible = (
+            dest_input_type == source_output_type or
+            dest_input_type == 'any' or source_output_type == 'any' or
+            # Allow string-based compatibility for interpolation
+            dest_input_type == 'string' or source_output_type == 'string' or
+            (dest_input_type in ['array', 'list'] and source_output_type in ['array', 'list'])
+        )
+
+        if not types_compatible:
+            error_msg = (f"Step {dest_step['id']}: Type mismatch for input '{dest_input_name}'. "
+                         f"Expected '{dest_input_type}' but got '{source_output_type}' from step {source_step['id']}.")
+            return (error_msg, None)
+
+        return (None, None)
 
     def _find_embedded_references(self, value: str) -> Set[str]:
         """Find all embedded references in a string value (e.g., {output_name} or [output_name])."""
@@ -467,168 +781,6 @@ class PlanValidator:
 
         return errors
 
-    def _validate_embedded_references(self, step: Dict[str, Any], inputs: Dict[str, Any],
-                                     available_outputs: Dict[str, Set[str]], errors: List[str],
-                                     plan: List[Dict[str, Any]], plugin_map: Dict[str, Any]):
-        """Handle embedded references in input values."""
-        step_id = step.get('id', 'unknown')
-
-        for input_name, input_def in list(inputs.items()):
-            if not isinstance(input_def, dict) or 'value' not in input_def:
-                continue
-
-            value = input_def.get('value')
-            if not isinstance(value, str):
-                continue
-
-            referenced_outputs = self._find_embedded_references(value)
-
-            for ref_output in referenced_outputs:
-                # Skip if already properly declared
-                if ref_output in inputs and (
-                    ('outputName' in inputs[ref_output] and 'sourceStep' in inputs[ref_output]) or
-                    ('value' in inputs[ref_output] and 'valueType' in inputs[ref_output])
-                ):
-                    continue
-
-                # Find source step
-                found_source = False
-                # Iterate through previous steps in the plan to find the source
-                for prev_step in plan:
-                    if prev_step.get('id') == step_id: # Stop when we reach the current step
-                        break
-                    prev_step_id = prev_step.get('id')
-                    if prev_step_id in available_outputs and ref_output in available_outputs[prev_step_id]:
-                        if ref_output not in inputs:
-                            inputs[ref_output] = {"outputName": ref_output, "sourceStep": prev_step_id}
-                        found_source = True
-                        break
-
-                if not found_source:
-                    errors.append(
-                        f"Step {step_id}: Input '{input_name}' contains embedded reference '{{{ref_output}}}' "
-                        f"but cannot find the source"
-                    )
-
-    def _recursively_update_source_steps(self, data: Any, uuid_mapping: Dict[str, str]) -> Any:
-        """Recursively updates sourceStep UUIDs within a data structure."""
-        if isinstance(data, dict):
-            if 'sourceStep' in data and data['sourceStep'] in uuid_mapping:
-                data['sourceStep'] = uuid_mapping[data['sourceStep']]
-            for key, value in data.items():
-                data[key] = self._recursively_update_source_steps(value, uuid_mapping)
-        elif isinstance(data, list):
-            return [self._recursively_update_source_steps(item, uuid_mapping) for item in data]
-        elif isinstance(data, str):
-            # Attempt to parse string as JSON if it looks like a JSON object/array
-            if data.strip().startswith('{') or data.strip().startswith('['):
-                try:
-                    parsed_data = json.loads(data)
-                    updated_data = self._recursively_update_source_steps(parsed_data, uuid_mapping)
-                    return json.dumps(updated_data)
-                except json.JSONDecodeError:
-                    pass # Not a JSON string, treat as regular string
-        return data
-
-    def _repair_plan_code_based(self, plan: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Automatically repair common schema violations in the plan."""
-        logger.info("[Repair] Starting code-based repair...")
-        
-        if not isinstance(plan, list):
-            logger.warning("Plan is not a list")
-            return []
-
-        uuid_mapping = {}
-        steps_to_remove = set()
-
-        # First pass: Generate new UUIDs for invalid step IDs and build mapping
-        for step in plan:
-            if not isinstance(step, dict):
-                continue
-
-            current_step_id = step.get('id')
-            if current_step_id is None or not self._is_valid_uuid(current_step_id):
-                new_uuid = str(uuid.uuid4())
-                logger.warning(f"Step {current_step_id}: Invalid or missing UUID. Replacing with {new_uuid}")
-                step['id'] = new_uuid
-                if current_step_id: # Only map if there was an old ID to map from
-                    uuid_mapping[current_step_id] = new_uuid
-        
-        # Second pass: Apply UUID mapping and other repairs
-        if uuid_mapping:
-            logger.info(f"Propagating UUID changes: {uuid_mapping}")
-
-        for step in plan:
-            if not isinstance(step, dict):
-                continue
-
-            current_step_id = step.get('id')
-            if current_step_id is None:
-                continue
-
-            # Apply UUID mapping to direct sourceStep references
-            for input_name, input_def in step.get('inputs', {}).items():
-                if isinstance(input_def, dict) and 'sourceStep' in input_def:
-                    source_step_id = input_def['sourceStep']
-                    if source_step_id in uuid_mapping:
-                        logger.info(f"Updating sourceStep for step {current_step_id}, input '{input_name}': {source_step_id} -> {uuid_mapping[source_step_id]}")
-                        input_def['sourceStep'] = uuid_mapping[source_step_id]
-            
-            # Recursively update sourceStep references within 'value' fields
-            for input_name, input_def in step.get('inputs', {}).items():
-                if isinstance(input_def, dict) and 'value' in input_def:
-                    original_value = input_def['value']
-                    updated_value = self._recursively_update_source_steps(original_value, uuid_mapping)
-                    if updated_value != original_value:
-                        logger.info(f"Recursively updated sourceStep in input '{input_name}' for step {current_step_id}")
-                        input_def['value'] = updated_value
-
-            # Repair ambiguous inputs
-            for input_name, input_def in step.get('inputs', {}).items():
-                if isinstance(input_def, dict) and all(k in input_def for k in ['outputName', 'sourceStep', 'value']):
-                    logger.info(f"Input '{input_name}' has both value and source. Preferring source.")
-                    del input_def['value']
-
-            # Repair steps input for control flow
-            if step.get('actionVerb') in self.CONTROL_FLOW_VERBS:
-                steps_input = step.get('inputs', {}).get('steps')
-                if isinstance(steps_input, dict) and isinstance(steps_input.get('value'), str):
-                    try:
-                        parsed_steps = json.loads(steps_input['value'])
-                        if isinstance(parsed_steps, list):
-                            steps_input['value'] = parsed_steps
-                            steps_input['valueType'] = "array"
-                    except (json.JSONDecodeError, ValueError):
-                        logger.warning(f"Could not parse 'steps' JSON string")
-
-            # Move direct 'steps' property to inputs
-            if step.get('actionVerb') in self.CONTROL_FLOW_VERBS and 'steps' in step and isinstance(step['steps'], list):
-                logger.info(f"Step {current_step_id}: Moving 'steps' to inputs")
-                if 'inputs' not in step:
-                    step['inputs'] = {}
-                step['inputs']['steps'] = {'value': step['steps'], 'valueType': 'array'}
-                del step['steps']
-
-            # Recursively repair sub-plans
-            sub_plan = self._get_sub_plan(step)
-            if sub_plan:
-                logger.info(f"Recursively repairing sub-plan in step {current_step_id}")
-                repaired_sub = self._repair_plan_code_based(sub_plan) # Recursive call will populate uuid_mapping
-                
-                # Update the sub-plan in place
-                if 'steps' in step:
-                    step['steps'] = repaired_sub
-                elif 'inputs' in step.get('inputs', {}):
-                    step['inputs']['steps']['value'] = repaired_sub
-
-        # Filter out moved steps (this logic seems to be for SEQUENCE, not directly relevant to current issue)
-        if steps_to_remove:
-            final_plan = [step for step in plan if step.get('id') not in steps_to_remove]
-            logger.info(f"Removed {len(steps_to_remove)} steps moved into SEQUENCE blocks")
-            return final_plan
-        
-        return plan
-
     def _classify_error_type(self, error: str) -> str:
         """Classify validation errors into categories."""
         error_lower = error.lower()
@@ -644,42 +796,6 @@ class PlanValidator:
         elif 'missing required field' in error_lower:
             return 'missing_field'
         return 'generic'
-
-    def _resolve_input_aliases(self, plan: List[Dict[str, Any]], available_plugins: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Resolve input aliases for all steps based on plugin definitions."""
-        plugin_map = {plugin.get('actionVerb'): plugin for plugin in available_plugins}
-
-        for step in plan:
-            action_verb = step.get('actionVerb')
-            plugin_def = plugin_map.get(action_verb)
-            if not plugin_def:
-                continue
-
-            inputs = step.get('inputs', {})
-            input_definitions = plugin_def.get('inputDefinitions', [])
-
-            # Create alias map
-            alias_map = {}
-            for input_def in input_definitions:
-                canonical_name = input_def.get('name')
-                alias_map[canonical_name] = canonical_name
-                for alias in input_def.get('aliases', []):
-                    alias_map[alias] = canonical_name
-
-            # Rename aliases
-            inputs_to_rename = {} 
-            for input_name in list(inputs.keys()):
-                if input_name in alias_map:
-                    canonical_name = alias_map[input_name]
-                    if input_name != canonical_name and canonical_name not in inputs:
-                        inputs_to_rename[input_name] = canonical_name
-
-            # Apply renames
-            for old_name, new_name in inputs_to_rename.items():
-                logger.info(f"Step {step.get('id')}: Resolving alias '{old_name}' -> '{new_name}'")
-                inputs[new_name] = inputs.pop(old_name)
-
-        return plan
 
     def _create_focused_repair_prompt(self, step_to_repair: Dict[str, Any], errors: List[str], 
                                      plugin_definition: Dict[str, Any] = None) -> str:
@@ -800,368 +916,3 @@ Return ONLY the corrected JSON step, no explanations."""
             return repaired_data
         else:
             raise AccomplishError(f"LLM repair failed: Unexpected response format for {prompt_type} repair.", "repair_error")
-
-    def _validate_plan(self, plan: List[Dict[str, Any]], available_plugins: List[Dict[str, Any]], 
-                      parent_outputs: Dict[str, Set[str]] = None, 
-                      all_consumed_outputs: Optional[Set[Tuple[str, str]]] = None) -> Dict[str, Any]:
-        """Validate the plan against schema and plugin requirements."""
-        errors = []
-        wrappable_errors = []
-
-        if all_consumed_outputs is None:
-            all_consumed_outputs = set() # Initialize at the top-level call
-        
-        if not isinstance(plan, list):
-            return {'valid': False, 'errors': ["Plan must be a list"], 'wrappable_errors': []}
-        
-        if not plan:
-            return {'valid': True, 'errors': [], 'wrappable_errors': []}
-        
-        plugin_map = {plugin.get('verb', plugin.get('actionVerb', '')).upper(): plugin for plugin in available_plugins}
-        logger.debug(f"PlanValidator: Plugin map keys from available_plugins: {list(plugin_map.keys())}")
-        available_outputs = parent_outputs.copy() if parent_outputs else {}
-
-        # Check for duplicate step IDs
-        analysis = self._analyze_plan_tree(plan)
-        duplicate_ids = [step_id for step_id, count in analysis['counts'].items() if count > 1]
-        if duplicate_ids:
-            errors.extend([f"Duplicate step ID {step_id} found" for step_id in duplicate_ids])
-        
-        all_produced_outputs = {} # {step_id: {output_name, ...}}
-
-        # Populate available outputs and all_produced_outputs
-        for step in plan:
-            step_id = step.get('id')
-            if step_id is None:
-                continue
-                
-            step_outputs = set()
-            outputs_dict = step.get('outputs', {})
-        
-            # Repair list to dict
-            if isinstance(outputs_dict, list):
-                repaired = {}
-                for i, item in enumerate(outputs_dict):
-                    if isinstance(item, dict) and 'description' in item:
-                        base_name = re.sub(r'[^a-zA-Z0-9_]', '', item['description'].split(' ')[0]).lower() or "output"
-                        repaired[f"{base_name}_{i}"] = item
-                    else:
-                        repaired[f"output_{i}"] = {'description': str(item)}
-                step['outputs'] = repaired
-                outputs_dict = repaired
-
-            if isinstance(outputs_dict, dict):
-                action_verb = step.get('actionVerb')
-                plugin_def = self.plugin_map.get(action_verb.upper()) # Use upper for lookup
-                
-                for output_name, output_def in list(outputs_dict.items()): # Iterate over a copy
-                    # 1. Convert string descriptions to objects if they are not already
-                    if isinstance(output_def, str):
-                        outputs_dict[output_name] = {'description': output_def}
-                        output_def = outputs_dict[output_name]
-
-                    # 2. Align type from plugin manifest or ensure type for novel verbs
-                    if plugin_def:
-                        output_definitions_from_manifest = plugin_def.get('outputDefinitions', [])
-
-                        if output_definitions_from_manifest:
-                            # Try to find a direct match for output_name in manifest
-                            manifest_output_def = next((out for out in output_definitions_from_manifest if out.get('name') == output_name), None)
-
-                            # If no direct match, and only one output definition exists in manifest, use its type
-                            if not manifest_output_def and len(output_definitions_from_manifest) == 1:
-                                manifest_output_def = output_definitions_from_manifest[0]
-
-                            if manifest_output_def and 'type' in manifest_output_def:
-                                # Align the type in the plan's output definition
-                                output_def['type'] = manifest_output_def['type']
-                            else:
-                                # If plugin_def exists but no matching output definition or type, it's a schema issue
-                                errors.append(f"Step {step_id}: Output '{output_name}' in plan cannot align type with plugin manifest for '{action_verb}'.")
-                        else:
-                            # If plugin_def exists but no outputDefinitions, it's a schema issue
-                            errors.append(f"Step {step_id}: Plugin '{action_verb}' has no outputDefinitions in its manifest.")
-                    else:
-                        # For novel verbs, ensure the output has a 'type' defined in the plan itself
-                        if 'type' not in output_def:
-                            errors.append(f"Step {step_id}: Output '{output_name}' for novel verb '{action_verb}' is missing 'type' information in the plan.")
-
-                    step_outputs.add(output_name) # Add the output name to available_outputs
-                
-            available_outputs[step_id] = step_outputs
-            all_produced_outputs[step_id] = step_outputs
-        
-        # Validate each step
-        for i, step in enumerate(plan):
-            step_id = step.get('id')
-            if step_id is None:
-                errors.append(f"Step {i+1}: Missing 'id' field")
-                continue
-        
-            for field in ['actionVerb', 'inputs', 'outputs']:
-                if field not in step:
-                    errors.append(f"Step {step_id}: Missing field '{field}'")
-        
-            action_verb = step.get('actionVerb')
-            if action_verb:
-                # Convert action_verb to uppercase for case-insensitive lookup
-                upper_action_verb = action_verb.upper()
-                plugin_def = plugin_map.get(upper_action_verb)
-                logger.debug(f"DEBUG: Step {step_id} - actionVerb: '{action_verb}' (normalized: '{upper_action_verb}'), plugin_def found: {plugin_def is not None}")
-                if 'inputs' not in step or not isinstance(step['inputs'], dict):
-                    logger.info(f"Step {step_id}: 'inputs' field is missing or not a dictionary.")
-                    errors.append(f"Step {step_id}: 'inputs' field is missing or not a dictionary.")
-                else:
-                    self._validate_step_inputs(step, plugin_def, available_outputs, errors, wrappable_errors, plan, plugin_map, all_consumed_outputs)
-        
-            errors.extend(self._validate_deliverable_outputs(step))
-        
-            # Recursive validation for control flow
-            if action_verb in self.CONTROL_FLOW_VERBS:
-                sub_plan = self._get_sub_plan(step)
-                if sub_plan:
-                    logger.info(f"Recursively validating sub-plan for step {step_id}")
-                    sub_context = available_outputs.copy()
-                    if action_verb == 'FOREACH':
-                        # For FOREACH, the sub_context should see 'item' and 'index' as outputs of the FOREACH step
-                        sub_context[step_id] = {'item', 'index'}
-                    
-                    sub_result = self._validate_plan(sub_plan, available_plugins, sub_context, all_consumed_outputs) # Pass all_consumed_outputs
-                    if not sub_result['valid']:
-                        errors.extend([f"Sub-plan of step {step_id}: {e}" for e in sub_result['errors']])
-                    
-                    # Only extend wrappable_errors if the sub-plan validation didn't already handle it
-                    if not sub_result.get('handled_wrappable', False):
-                        wrappable_errors.extend(sub_result.get('wrappable_errors', []))
-        
-            # Validate recommendedRole
-            recommended_role = step.get('recommendedRole')
-            if recommended_role:
-                if recommended_role.lower() in [r.lower() for r in self.ALLOWED_ROLES]:
-                    step['recommendedRole'] = recommended_role.lower()
-                else:
-                    logger.warning(f"Step {step_id}: Invalid recommendedRole '{recommended_role}', dropping")
-                    del step['recommendedRole']
-        
-        
-        return {'valid': len(errors) == 0 and len(wrappable_errors) == 0, 'errors': errors, 'wrappable_errors': wrappable_errors}
-
-    def _validate_step_inputs(self, step: Dict[str, Any], plugin_def: Optional[Dict[str, Any]], 
-                              available_outputs: Dict[str, Set[str]], errors: List[str], 
-                              wrappable_errors: List[Dict[str, Any]], plan: List[Dict[str, Any]], 
-                              plugin_map: Dict[str, Any], all_consumed_outputs: Set[Tuple[str, str]]):
-        logger.debug(f"PlanValidator: Entered _validate_step_inputs for step {step.get('id')} ({step.get('actionVerb')})")
-        step_id = step['id']
-        inputs = step.get('inputs', {})
-        action_verb = step.get('actionVerb')
-        
-        # Only get input_definitions if plugin_def is provided (for known verbs)
-        input_definitions = plugin_def.get('inputDefinitions', []) if plugin_def else []
-
-        # Validate embedded references (always applicable)
-        self._validate_embedded_references(step, inputs, available_outputs, errors, plan, plugin_map)
-
-        # Check required inputs (only for known verbs with plugin_def)
-        if plugin_def:
-            required_inputs = {inp['name']: inp for inp in input_definitions if inp.get('required', False)}
-            
-            for req_name, req_def in required_inputs.items():
-                if req_name == 'missionId':  # Always injected by runtime
-                    continue
-
-                if req_name not in inputs:
-                    errors.append(f"Step {step_id}: Missing required input '{req_name}' for '{action_verb}'")
-                else:
-                    input_entry = inputs[req_name]
-                    # Check if it's a value-based input and if its value is empty for string types
-                    if 'value' in input_entry and req_def.get('type') == 'string':
-                        if not input_entry['value'] or (isinstance(input_entry['value'], str) and not input_entry['value'].strip()):
-                            errors.append(f"Step {step_id}: Required string input '{req_name}' for '{action_verb}' cannot be empty.")
-
-        # Validate each input (structural and dependency checks always applicable)
-        for input_name, input_def in inputs.items():
-            logger.debug(f"PlanValidator:   Step {step_id} Input {input_name}")
-            # Special case for any input referencing sourceStep "0" (parent step)
-            if isinstance(input_def, dict) and input_def.get('sourceStep') == '0':
-                logger.debug(f"PlanValidator:   Skipping validation for input '{input_name}' referencing parent step (sourceStep '0') for step {step_id}")
-                continue
-
-            # Special handling for control flow 'steps'
-            if action_verb in self.CONTROL_FLOW_VERBS and input_name == 'steps':
-                is_valid = isinstance(input_def, list) or (
-                    isinstance(input_def, dict) and isinstance(input_def.get('value'), list)
-                )
-                if not is_valid:
-                    errors.append(f"Step {step_id}: Input 'steps' must be an array")
-                continue
-
-            if not isinstance(input_def, dict):
-                errors.append(f"Step {step_id}: Input '{input_name}' must be a dictionary")
-                continue
-
-            has_value = 'value' in input_def
-            has_output_name = 'outputName' in input_def
-            has_source_step = 'sourceStep' in input_def
-
-            # Validate input structure: ensure consistency between sourceStep and outputName
-            if has_source_step != has_output_name:
-                errors.append(f"Step {step_id}: Input '{input_name}' must either have both 'sourceStep' and 'outputName' or neither.")
-            
-            if not has_value and not has_source_step: # If no value and no source, it's an invalid input
-                errors.append(f"Step {step_id}: Input '{input_name}' must have either a 'value' or a 'sourceStep' and 'outputName'.")
-            # Also check for nested dependencies within 'value' fields of object/json types
-            if has_value and input_def.get('valueType') in ['object', 'array']:
-                self._extract_and_validate_nested_dependencies(
-                    step_id, input_name, input_def['value'], available_outputs, errors, all_consumed_outputs, plan, plugin_map, wrappable_errors
-                )
-
-            # Validate sourceStep references if it's a dependency (always applicable)
-            if has_source_step: # Implies has_output_name is also true due to previous check
-                source_step_id = input_def['sourceStep']
-                if source_step_id != '0':  # '0' means parent input
-                    if source_step_id not in available_outputs:
-                        errors.append(f"Step {step_id}: Input '{input_name}' references non-existent step {source_step_id}")
-                    else: # Only check output_name if source_step_id exists
-                        output_name = input_def['outputName']
-                        if output_name not in available_outputs.get(source_step_id, set()):
-                            errors.append(f"Step {step_id}: Input '{input_name}' references non-existent output '{output_name}' from step {source_step_id}")
-                        else:
-                            all_consumed_outputs.add((source_step_id, output_name))
-
-                # Perform type compatibility check for dependency-based inputs
-                # This is now always performed if sourceStep is present, using plugin_def if available, otherwise inferring.
-                self._check_type_compatibility(step, input_name, input_def, plugin_def,
-                                               plan, plugin_map, errors, wrappable_errors)
-
-    def _extract_and_validate_nested_dependencies(self, step_id: str, input_name: str, value: Any,
-                                                  available_outputs: Dict[str, Set[str]], errors: List[str],
-                                                  all_consumed_outputs: Set[Tuple[str, str]],
-                                                  plan: List[Dict[str, Any]], plugin_map: Dict[str, Any],
-                                                  wrappable_errors: List[Dict[str, Any]]):
-        """Recursively find and validate nested dependencies in object/array input values."""
-        if isinstance(value, dict):
-            # If the dictionary is a dependency reference itself
-            if 'sourceStep' in value and 'outputName' in value:
-                source_step_id = value['sourceStep']
-                output_name = value['outputName']
-                if source_step_id != '0':
-                    if source_step_id not in available_outputs:
-                        errors.append(f"Step {step_id}: Nested input '{input_name}' references non-existent step {source_step_id}")
-                    elif output_name not in available_outputs.get(source_step_id, set()):
-                        errors.append(f"Step {step_id}: Nested input '{input_name}' references non-existent output '{output_name}' from step {source_step_id}")
-                    else:
-                        all_consumed_outputs.add((source_step_id, output_name))
-            else:
-                # Otherwise, recurse into its values
-                for k, v in value.items():
-                    self._extract_and_validate_nested_dependencies(step_id, f"{input_name}.{k}", v, available_outputs, errors, all_consumed_outputs, plan, plugin_map, wrappable_errors)
-        elif isinstance(value, list):
-            for i, item in enumerate(value):
-                self._extract_and_validate_nested_dependencies(step_id, f"{input_name}[{i}]", item, available_outputs, errors, all_consumed_outputs, plan, plugin_map, wrappable_errors)
-
-    def _check_type_compatibility(self, step: Dict[str, Any], input_name: str, input_def: Dict[str, Any],
-                                  current_plugin_def: Optional[Dict[str, Any]], plan: List[Dict[str, Any]],
-                                  plugin_map: Dict[str, Any], errors: List[str], 
-                                  wrappable_errors: List[Dict[str, Any]]):
-        """Check type compatibility between source output and destination input."""
-        step_id = step['id']
-        action_verb = step['actionVerb']
-        logger.debug(f"PlanValidator: Entered _check_type_compatibility for step {step_id} ({action_verb}), input '{input_name}'")
-
-        source_step_id = input_def['sourceStep']
-        source_output_name = input_def['outputName']
-        
-        logger.debug(f"PlanValidator:   Source: step {source_step_id} output '{source_output_name}'")
-
-        # Get destination input type - try current plugin definition first
-        dest_input_definitions = current_plugin_def.get('inputDefinitions', []) if current_plugin_def else []
-        dest_input_def = None
-        for inp_def in dest_input_definitions:
-            if inp_def.get('name') == input_name or input_name in inp_def.get('aliases', []):
-                dest_input_def = inp_def
-                break
-
-        dest_input_type = dest_input_def.get('type') if dest_input_def else None
-        logger.debug(f"PlanValidator:   Destination input type from plugin def: {dest_input_type}")
-
-        if not dest_input_def and not dest_input_type:
-            errors.append(f"Step {step_id}: Input '{input_name}' not found or aliased in manifest for plugin '{action_verb}'.")
-            return
-
-        if not dest_input_type:
-            errors.append(f"Step {step_id}: Input '{input_name}' in manifest for plugin '{action_verb}' is missing 'type'.")
-            return
-
-        # Find source step and its plugin definition
-        source_step = next((s for s in plan if s.get('id') == source_step_id), None)
-        if not source_step:
-            errors.append(f"Step {step_id}: Source step {source_step_id} not found for input '{input_name}'.")
-            return
-        source_action_verb = source_step.get('actionVerb')
-        source_plugin_def = plugin_map.get(source_action_verb.upper()) # Use upper for lookup
-        if not source_plugin_def:
-            errors.append(f"Step {step_id}: Plugin definition for source action verb '{source_action_verb}' (step {source_step_id}) not found.")
-            return
-
-        # Get source output definition from the source step in the plan
-        source_outputs_in_plan = source_step.get('outputs', {})
-        source_output_def_in_plan = source_outputs_in_plan.get(source_output_name)
-        source_output_type = None
-        actual_source_output_name = source_output_name  # Track the actual output name
-
-        # Try to get type from plan first
-        if source_output_def_in_plan and 'type' in source_output_def_in_plan:
-            source_output_type = source_output_def_in_plan['type']
-
-        if not source_output_type:
-            errors.append(f"Step {step_id}: Could not determine type for output '{source_output_name}' from source step {source_step_id} in the plan.")
-            return
-        
-        logger.debug(f"PlanValidator: Step {step_id}: Input '{input_name}' (dest_type: {dest_input_type}) vs. Source {source_step_id} output '{source_output_name}' (source_type: {source_output_type})")
-
-        # --- Type Correction: Ensure plan's input_def['valueType'] matches manifest's dest_input_type ---
-        # This applies to the input_def within the plan itself, not the source_output_type
-        if 'valueType' in input_def and input_def['valueType'] != dest_input_type:
-            logger.debug(f"PlanValidator: Step {step_id}: Correcting plan's input '{input_name}' valueType from '{input_def['valueType']}' to manifest type '{dest_input_type}'")
-            input_def['valueType'] = dest_input_type
-        elif 'valueType' not in input_def:
-            # If valueType is missing in plan's input_def, add it to match manifest
-            logger.debug(f"PlanValidator: Step {step_id}: Adding missing valueType '{dest_input_type}' to plan's input '{input_name}' to match manifest.")
-            input_def['valueType'] = dest_input_type
-        # --- End Type Correction ---
-
-
-        # Check for wrappable mismatch (string input from array/list output)
-        is_wrappable = (dest_input_type == 'string' and source_output_type in ['array', 'list'])
-        
-        logger.debug(f"PlanValidator: Step {step_id}: is_wrappable={is_wrappable} (source_output_type='{source_output_type}', dest_input_type='{dest_input_type}')")
-
-        if is_wrappable and step.get('actionVerb') != 'FOREACH':
-            # Use the actual source output name we found (handles name mismatches)
-            final_output_name = actual_source_output_name
-            wrappable_errors.append({
-                "step_id": step_id,
-                "source_step_id": source_step_id,
-                "source_output_name": final_output_name,
-                "target_input_name": input_name
-            })
-        else:
-            # General type mismatch check (excluding the wrappable case, which is handled above)
-            is_mismatch = not (
-                dest_input_type == source_output_type or
-                dest_input_type == 'any' or
-                source_output_type == 'any' or
-                dest_input_type == 'string' or
-                source_output_type == 'string' or
-                # Allow 'list' to match 'array' and vice-versa
-                (dest_input_type == 'list' and source_output_type == 'array') or
-                (dest_input_type == 'array' and source_output_type == 'list') or
-                # Allow specific list types to match generic array/list
-                (dest_input_type.startswith('list[') and (source_output_type == 'array' or source_output_type == 'list')) or
-                ((dest_input_type == 'array' or dest_input_type == 'list') and source_output_type.startswith('list['))
-            )
-            if is_mismatch:
-                errors.append(
-                    f"Step {step_id}: Input '{input_name}' expects type '{dest_input_type}' (from manifest), "
-                    f"but received '{source_output_type}' (from source manifest) from step {source_step_id} output '{source_output_name}'"
-                )
