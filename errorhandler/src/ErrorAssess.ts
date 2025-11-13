@@ -1,6 +1,7 @@
 import axios from 'axios';
 import * as fs from 'node:fs/promises';
 import path from 'path';
+import crypto from 'crypto'; // Added import
 import { ServiceTokenManager } from '@cktmcs/shared';
 
 
@@ -89,9 +90,15 @@ export const analyzeError = async (error: Error) => {
     error = new Error(String(error));
   }
 
-  //Don't analyze simple connection issues
+  // Don't analyze simple connection issues
   if (error.message.includes('ECONNREFUSED')) {
     console.error('Error is ',error.message);
+    return;
+  }
+
+  // Prevent recursive analysis if the error originated from analyzeError itself
+  if (error.message.includes('Error analyzing error:') || error.message.includes('Failed to get token for ErrorHandler')) {
+    console.error('Recursive error analysis detected, skipping further analysis for this error.');
     return;
   }
 
@@ -102,8 +109,10 @@ export const analyzeError = async (error: Error) => {
       return;
     }
 
-    // Skip already analyzed errors
-    const errorKey = `${error.name}:${error.message}`;
+    // Generate a more robust errorKey including a hash of the stack trace
+    const stackHash = error.stack ? crypto.createHash('sha256').update(error.stack).digest('hex').substring(0, 16) : 'no-stack';
+    const errorKey = `${error.name}:${error.message}:${stackHash}`;
+    
     if (analyzedErrors.has(errorKey)) {
       console.log(`Error already analyzed: ${errorKey}`);
       return;
@@ -130,7 +139,7 @@ export const analyzeError = async (error: Error) => {
       });
     } catch (healthCheckError) {
       console.error(`Brain service at ${brainUrl} is not available:`,
-        healthCheckError instanceof Error ? healthCheckError.message : String(healthCheckError));
+        healthCheckError instanceof Error ? healthCheckError.message : 'Unknown error');
       console.error('Original error:', error.message);
       processingError = false;
       return;

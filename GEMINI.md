@@ -81,3 +81,28 @@ Here are two example plan steps as returned from the Brain, illustrating how cus
 *   **Output Type Alignment:** The `outputs` for `competitors` in Step 1 and `competitorDetails` in Step 2 should have a `type` property (e.g., `"type": "array"`). This is crucial for schema compliance and for enabling features like `FOREACH` wrapping.
 *   **Input Referencing:** In Step 2, the `url` input correctly references `competitors` from Step 1 using `outputName` and `sourceStep`. The `valueType` for `url` is also correctly set to `string`.
 *   **`FOREACH` Wrapping:** Once the output types are correctly set, the plan validation should identify the need for `FOREACH` wrapping for Step 2, as it consumes an array output (`competitors`) from Step 1. A new `FOREACH` step would be inserted (e.g., with `number: 50`), its `array` input would be defined as `{sourceStep: 1, outputName: competitors}`, and Step 2 (and its dependents) would become part of the `FOREACH`'s subplan, with `SCRAPE`'s `url` input redefined as `{sourceStep: 50, outputName: "item"}`.
+
+## Core Architectural Understanding
+
+*   **Agents (`@services/agentset/src/agents/Agent.ts`):**
+    *   Own and run `Step`s.
+    *   Prepare inputs for `Step` execution.
+    *   Execute internal verbs directly (e.g., `CHAT`, `ASK`).
+    *   Call `CapabilitiesManager` to handle external plugins or novel verbs.
+    *   Ensure results are saved after `Step` execution.
+    *   Manage the overall mission flow and agent lifecycle.
+
+*   **Steps (`@services/agentset/src/agents/Step.ts`):**
+    *   Represent a single, atomic unit of work within a plan.
+    *   Prepare inputs from literal values and references to outputs of previous steps.
+    *   Execute internal verbs directly (e.g., `FOREACH`, `REGROUP`, `THINK`, `GENERATE`, `CHAT`, `ASK`).
+    *   Call `CapabilitiesManager` to execute external `actionVerb`s (plugins).
+    *   Handle dependencies between steps.
+    *   Ensure their results are saved (work products and deliverables).
+
+*   **CapabilitiesManager (`@services/capabilitiesmanager/src/CapabilitiesManager.ts`):**
+    *   Acts as a central registry and executor for external plugins.
+    *   Receives `actionVerb` execution requests from `Step`s.
+    *   Looks for a registered handler (plugin, OpenAPI tool, MCP tool) for known `actionVerb`s and executes them with the provided inputs.
+    *   For unknown `actionVerb`s (novel verbs), it delegates to the `ACCOMPLISH` plugin to generate a plan to handle the novel verb.
+    *   Manages plugin lifecycle, health checks, and resource allocation for external plugins.

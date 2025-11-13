@@ -192,7 +192,7 @@ export class AgentPersistenceManager {
                 data: serializedData,
                 isDeliverable: isDeliverable
             });
-            console.log(`Saved work product metadata for step ${step.id}`);
+            console.log(`Saved work product metadata for step ${step.id} isDeliverable=${isDeliverable}`);
 
         } catch (error) {
             analyzeError(error as Error);
@@ -200,20 +200,31 @@ export class AgentPersistenceManager {
         }
 
         // Step 2 & 3: If it's a deliverable, stream the file to the new endpoint
-        if (isDeliverable && deliverableOutput && deliverableOutput.result instanceof Buffer) {
+        if (isDeliverable && deliverableOutput && deliverableOutput.result !== undefined && deliverableOutput.result !== null) {
             try {
-                const fileContent: Buffer = deliverableOutput.result;
+                let dataToSend: string | Buffer;
+                if (deliverableOutput.result instanceof Buffer || typeof deliverableOutput.result === 'string') {
+                    dataToSend = deliverableOutput.result;
+                } else {
+                    // Convert non-string/non-Buffer results to a JSON string
+                    dataToSend = JSON.stringify(deliverableOutput.result);
+                    // Update mimeType to application/json if it was text/plain and we stringified an object/boolean
+                    if ((deliverableOutput as any).mimeType === 'text/plain' && typeof deliverableOutput.result !== 'string') {
+                        (deliverableOutput as any).mimeType = 'application/json';
+                    }
+                }
+
                 const queryParams = new URLSearchParams({
                     agentId: step.ownerAgentId,
                     missionId: step.missionId,
-                    originalName: (deliverableOutput as any).fileName || 'deliverable.bin',
+                    originalName: step.getDeliverableFilename(deliverableOutput.name) || 'deliverable.bin',
                     mimeType: (deliverableOutput as any).mimeType || 'application/octet-stream'
                 }).toString();
 
                 const url = `http://${this.librarianUrl}/deliverable/${step.id}?${queryParams}`;
 
-                await this.authenticatedApi.post(url, fileContent, {
-                    headers: { 'Content-Type': 'application/octet-stream' }
+                await this.authenticatedApi.post(url, dataToSend, {
+                    headers: { 'Content-Type': (deliverableOutput as any).mimeType || 'application/octet-stream' }
                 });
                 console.log(`Successfully streamed deliverable for step ${step.id}`);
 

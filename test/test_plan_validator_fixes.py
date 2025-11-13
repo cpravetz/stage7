@@ -22,25 +22,25 @@ def test_unique_step_numbers():
     # Create a plan with duplicate step numbers
     plan_with_duplicates = [
         {
-            "number": 1,
+            "id": "a1b2c3d4-e5f6-7890-1234-567890abcdef",
             "actionVerb": "SEARCH",
             "description": "Search for competitors",
             "inputs": {"query": {"value": "competitors"}},
             "outputs": {"results": "array"}
         },
         {
-            "number": 2,
+            "id": "b2c3d4e5-f6a7-8901-2345-67890abcdef0",
             "actionVerb": "FOREACH",
             "description": "Process each competitor",
             "inputs": {
-                "array": {"outputName": "results", "sourceStep": 1},
+                "array": {"outputName": "results", "sourceStep": "a1b2c3d4-e5f6-7890-1234-567890abcdef"},
                 "steps": {
                     "value": [
                         {
-                            "number": 1,  # Duplicate step number!
+                            "id": "a1b2c3d4-e5f6-7890-1234-567890abcdef",  # Duplicate step ID!
                             "actionVerb": "SCRAPE",
                             "description": "Scrape competitor data",
-                            "inputs": {"url": {"outputName": "item", "sourceStep": 2}},
+                            "inputs": {"url": {"outputName": "item", "sourceStep": "b2c3d4e5-f6a7-8901-2345-67890abcdef0"}},
                             "outputs": {"data": "string"}
                         }
                     ]
@@ -63,7 +63,7 @@ def test_unique_step_numbers():
     print(f"Validation result: {result}")
     
     # Check if duplicate step numbers were detected
-    duplicate_errors = [error for error in result['errors'] if 'Duplicate step number' in error]
+    duplicate_errors = [error for error in result['errors'] if 'Duplicate step ID' in error]
     if duplicate_errors:
         print("✅ SUCCESS: Duplicate step numbers detected correctly")
         for error in duplicate_errors:
@@ -81,18 +81,18 @@ def test_foreach_wrapping_prevention():
     # Create a plan where a FOREACH step has a type mismatch (should not be wrapped)
     plan_with_foreach = [
         {
-            "number": 1,
+            "id": "c3d4e5f6-a7b8-9012-3456-7890abcdef01",
             "actionVerb": "SEARCH",
             "description": "Search for data",
             "inputs": {"query": {"value": "test"}},
             "outputs": {"results": "array"}
         },
         {
-            "number": 2,
+            "id": "d4e5f6a7-b8c9-0123-4567-890abcdef012",
             "actionVerb": "FOREACH",  # This is already a FOREACH
             "description": "Process each item",
             "inputs": {
-                "array": {"outputName": "results", "sourceStep": 1},  # array -> array (type mismatch for demo)
+                "array": {"outputName": "results", "sourceStep": "c3d4e5f6-a7b8-9012-3456-7890abcdef01"},  # array -> array (type mismatch for demo)
                 "steps": {"value": []}
             },
             "outputs": {"processed": "array"}
@@ -117,7 +117,7 @@ def test_foreach_wrapping_prevention():
     print(f"Validation result: {result}")
     
     # Check if FOREACH was NOT added to wrappable_errors (since it's already a FOREACH)
-    wrappable_foreach = [error for error in result.get('wrappable_errors', []) if error.get('step_number') == 2]
+    wrappable_foreach = [error for error in result.get('wrappable_errors', []) if error.get('step_id') == "d4e5f6a7-b8c9-0123-4567-890abcdef012"]
     if not wrappable_foreach:
         print("✅ SUCCESS: FOREACH step was not marked for wrapping")
     else:

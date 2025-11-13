@@ -4,6 +4,7 @@ ACCOMPLISH Plugin - Streamlined Version
 Handles mission planning and novel action verbs with LLM-driven approach
 """
 
+import uuid
 import json
 import logging
 import time
@@ -303,7 +304,7 @@ class RobustMissionPlanner:
     """Streamlined LLM-driven mission planner"""
     
     def __init__(self):
-        self.max_retries = 3
+        self.max_retries = 5
         self.max_llm_switches = 2
         self.validator = PlanValidator(brain_call=call_brain)
     
@@ -417,7 +418,7 @@ class RobustMissionPlanner:
             }
 
         check_step = {
-            "number": len(plan) + 1,
+            "id": str(uuid.uuid4()),
             "actionVerb": "REFLECT",
             "description": "Analyze mission progress and effectiveness, determine if goals were met, and recommend next steps.",
             "inputs": reflect_inputs,
@@ -428,9 +429,6 @@ class RobustMissionPlanner:
         }
         
         plan.append(check_step)
-        
-        for i, step in enumerate(plan):
-            step['number'] = i + 1
 
         return plan
 
@@ -450,8 +448,14 @@ class RobustMissionPlanner:
             logger.exception(f"❌ Failed to convert prose plan to structured JSON after all retries: {e}")
             raise AccomplishError(f"Could not convert prose to structured plan: {e}", "json_conversion_error")
 
+        # Ensure availablePlugins is a direct list of manifests for the validator
+        modified_inputs = inputs.copy()
+        available_plugins_for_validator = modified_inputs.get('availablePlugins')
+        if isinstance(available_plugins_for_validator, dict) and 'value' in available_plugins_for_validator:
+            modified_inputs['availablePlugins'] = available_plugins_for_validator['value']
+
         try:
-            validated_plan = self.validator.validate_and_repair(structured_plan, goal, inputs)
+            validated_plan = self.validator.validate_and_repair(structured_plan, goal, modified_inputs)
         except Exception as e:
             logger.exception(f"❌ Failed to validate and repair the plan after all retries: {e}")
             raise AccomplishError(f"Could not validate or repair the plan: {e}", "validation_error")
@@ -551,7 +555,7 @@ Follow these steps to create the final JSON output:
 2.  **Verify Schema:** Carefully study the JSON SCHEMA. Your output must follow it perfectly.
 3.  **Restate the Plan as Explicit Steps:** Identify a list of steps that will be taken to achieve the Goal. Each Step should be a clear, actionable task with one or more outputs.
 4.  **Check Dependencies & Data Types:** For each step, ensure its `inputs` correctly reference the `outputName` and `sourceStep`. Crucially, verify that the `valueType` of the source output matches the expected `valueType` of the target input.
-5.  **CRITICAL - Ensure Globally Unique Step Numbers:** Every step must have a globally unique step number across the entire plan including all sub-plans at any nesting level. Do not reuse step numbers anywhere in the plan.
+5.  **CRITICAL - Ensure Globally Unique Step IDs:** Every step must have a globally unique ID (UUID) across the entire plan including all sub-plans at any nesting level. Do not reuse step IDs anywhere in the plan.
 6.  **Final Check:** Before generating the output, perform a final check to ensure the entire JSON structure is valid and fully compliant with the schema.
 
 **STEP B: Generate Final JSON (Your Final Output)**
@@ -563,26 +567,24 @@ After your internal analysis and self-correction is complete, provide ONLY the f
 - **Autonomy is Paramount:** Your goal is to *solve* the mission, not to delegate research or information gathering back to the user.
 - **Resourcefulness:** Exhaust all available tools (`SEARCH`, `SCRAPE`, `GENERATE`, `QUERY_KNOWLEDGE_BASE`) to find answers and create deliverables *before* ever considering asking the user.
 - **`ASK_USER_QUESTION` is a Last Resort:** This tool is exclusively for obtaining subjective opinions, approvals, or choices from the user. It is *never* for offloading tasks. Generating a plan that asks the user for information you can find yourself is a critical failure.
-- **Dependencies are Crucial:** Every step that uses an output from a previous step MUST declare this in its `inputs` using `sourceStep` and `outputName`. A plan with disconnected steps is invalid.
-- **Pay Attention to `inputGuidance`:** The `inputGuidance` field in the plugin manifest provides critical information on how to use the plugin correctly. You MUST read and follow this guidance.
-- **Handling Lists (`FOREACH`):** If a step requires a single item (e.g., a URL string) but receives a list from a preceding step (e.g., search results), you MUST use a `FOREACH` loop to iterate over the list. The `inputGuidance` for the `FOREACH` plugin explains how to do this.
-- **Role Assignment:** Assign `recommendedRole` at the deliverable level, not per individual step. All steps contributing to a single output (e.g., a research report) should share the same role.
-
-**DELIVERABLE IDENTIFICATION:**
+- **Autonomy is Paramount:** Your goal is to *solve* the mission, not to delegate research or information gathering back to the user.
+- **Resourcefulness:** Exhaust all available tools (`SEARCH`, `SCRAPE`, `GENERATE`, `QUERY_KNOWLEDGE_BASE`) to find answers and create deliverables *before* ever considering asking the user.
+- **`ASK_USER_QUESTION` is a Last Resort:** This tool is exclusively for obtaining subjective opinions, approvals, or choices from the user. It is *never* for offloading tasks. Generating a plan that asks the user for information you can find yourself is a critical failure.
+        - **Dependencies are Crucial:** Every step that uses an output from a previous step MUST declare this in its `inputs` using `sourceStep` and `outputName`. A plan with disconnected steps is invalid.
+         - **Handling Lists (`FOREACH`):** If a step requires a single item (e.g., a URL string) but receives a list from a preceding step (e.g., search results), you MUST use a `FOREACH` loop to iterate over the list. The `inputGuidance` for the `FOREACH` plugin explains how to do this.
+         - **Aggregating Results (`REGROUP`):** When using a `FOREACH` loop, if you need to collect the results from all iterations into a single array, you MUST follow the `FOREACH` step with a `REGROUP` step. The `REGROUP` step's `stepIdsToRegroup` input MUST be linked to the `FOREACH` step's `instanceEndStepIds` output using `sourceStep` and `outputName`. This ensures that `REGROUP` waits for all `FOREACH` iterations to complete and then collects their results.
+         - **Role Assignment:** Assign `recommendedRole` at the deliverable level, not per individual step. All steps contributing to a single output (e.g., a research report) should share the same role.**DELIVERABLE IDENTIFICATION:**
 When defining outputs, identify which ones are final deliverables for the user:
 - For final reports, analyses, or completed files, use the enhanced format:
-  `"outputs": {{ "final_report": {{ "description": "A comprehensive analysis", "isDeliverable": true, "filename": "analysis_report.md" }} }}`
-- For intermediate data used only by subsequent steps, use the simple string format:
-  `"outputs": {{ "raw_data": "Raw data for processing" }}`
+  `"outputs": {{ "final_report": {{ "description": "A comprehensive analysis", "isDeliverable": true, "filename": "market_analysis_2025.md" }} }}`
+CRITICAL: The actionVerb for each step MUST be a valid, existing plugin actionVerb.
 
-CRITICAL: The actionVerb for each step MUST be a valid, existing plugin actionVerb. **You MUST NOT create new verbs that are not directly executable or are too abstract. Focus on using existing, granular action verbs like SEARCH, SCRAPE, FILE_OPERATION, TEXT_ANALYSIS, TRANSFORM, CHAT, ASK_USER_QUESTION.**
+ - **CRITICAL - LINKING STEPS:** You MUST explicitly connect steps. Any step that uses the output of a previous step MUST declare this in its `inputs` using `sourceStep` and `outputName`. DO NOT simply refer to previous outputs in a `prompt` string without also adding the formal dependency in the `inputs` object. For verbs like `THINK`, `CHAT`, or `ASK_USER_QUESTION`, if the `prompt` or `question` text refers to a file or work product from a previous step, you MUST add an input that references the output of that step using `sourceStep` and `outputName`. This ensures the step waits for the file to be created.
+ A plan with no connections between steps is invalid and will be rejected.
+ - **CRITICAL - NO HARDCODED DATA:** Never use hardcoded URLs, company names, or specific technical details as constant values unless they are universally known facts (like "google.com"). Instead:
+   * Use SEARCH to find current information about competitors, companies, or resources
+   * Use the search results as inputs to subsequent steps via `sourceStep` and `outputName`
 
-- **CRITICAL - LINKING STEPS:** You MUST explicitly connect steps. Any step that uses the output of a previous step MUST declare this in its `inputs` using `sourceStep` and `outputName`. DO NOT simply refer to previous outputs in a `prompt` string without also adding the formal dependency in the `inputs` object. For verbs like `THINK`, `CHAT`, or `ASK_USER_QUESTION`, if the `prompt` or `question` text refers to a file or work product from a previous step, you MUST add an input that references the output of that step using `sourceStep` and `outputName`. This ensures the step waits for the file to be created.
-A plan with no connections between steps is invalid and will be rejected.
-
-- **CRITICAL - NO HARDCODED DATA:** Never use hardcoded URLs, company names, or specific technical details as constant values unless they are universally known facts (like "google.com"). Instead:
-  * Use SEARCH to find current information about competitors, companies, or resources
-  * Use the search results as inputs to subsequent steps via `sourceStep` and `outputName`
   
 {plugin_guidance}"""
 
@@ -602,14 +604,10 @@ A plan with no connections between steps is invalid and will be rejected.
                 # Type check: must be list of dicts
                 if isinstance(plan, list) and all(isinstance(step, dict) for step in plan):
                     return plan
-                # If dict with integer keys, convert to list
+                # If dict, convert to list (assuming it's a single step)
                 if isinstance(plan, dict):
-                    keys = list(plan.keys())
-                    if all(str(k).isdigit() for k in keys):
-                        sorted_steps = [plan[k] for k in sorted(keys, key=int)]
-                        if all(isinstance(step, dict) for step in sorted_steps):
-                            logger.warning(f"Attempt {attempt + 1}: LLM returned a JSON object with numeric keys. Converting to array.")
-                            return sorted_steps
+                    logger.warning(f"Attempt {attempt + 1}: LLM returned a single JSON object. Wrapping in array.")
+                    return [plan]
                 # If string or other type, log and raise recoverable error
                 logger.error(f"Attempt {attempt + 1}: Plan response is not a valid list of steps: {str(plan)[:500]}...")
                 if attempt == self.max_retries - 1:
@@ -739,7 +737,7 @@ Plan Schema
     - Step inputs are generally sourced from the outputs of other steps and less often fixed with constant values.
     - All inputs for each step must be explicitly defined either as a constant `value` or by referencing an `outputName` from a `sourceStep` within the plan or from the `PARENT STEP INPUTS`. Do not assume implicit data structures or properties of inputs.
     - Use `sourceStep: 0` ONLY for inputs that are explicitly provided in the initial mission context (the "PARENT STEP INPUTS" section if applicable, or the overall mission goal).
-    - For any other input, it MUST be the `outputName` from a *preceding step* in this plan, and `sourceStep` MUST be the `number` of that preceding step.
+    - For any other input, it MUST be the `outputName` from a *preceding step* in this plan, and `sourceStep` MUST be the `id` of that preceding step.
     - Every input in your plan MUST be resolvable either from a given constant value, a "PARENT STEP INPUT" (using `sourceStep: 0`) or from an output of a previous step in the plan.
 - **Mapping Outputs to Inputs:** When the output of one step is used as the input to another, the `outputName` in the input of the second step must match the `name` of the output of the first step.
 - **CRITICAL: Embedded References in Input Values:** If you use placeholders like {'{output_name}'} or [output_name] within a longer string value (e.g., a prompt that references previous outputs), you MUST also declare each referenced output_name as a separate input with proper sourceStep and outputName. Example:
@@ -864,7 +862,7 @@ When defining outputs, you MUST identify which ones are final deliverables for t
                         "mimeType": "application/json"
                     }])
                 # If the dictionary is a single step, treat it as a plan with one step
-                elif "actionVerb" in data and "number" in data:
+                elif "actionVerb" in data and "id" in data:
                     mission_goal = verb_info.get('mission_goal', verb_info.get('description', ''))
                     validated_plan = self.validator.validate_and_repair([data], mission_goal, inputs)
                     # self._save_plan_to_librarian(verb_info['verb'], validated_plan, inputs)

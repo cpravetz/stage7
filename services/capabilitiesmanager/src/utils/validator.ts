@@ -189,31 +189,43 @@ export const validateAndStandardizeInputs = async (
 
         const standardizedInputs = new Map<string, EnhancedInputValue>();
 
-        // First pass: Match and standardize inputs
+        // First pass: Match and standardize inputs (prioritize direct match)
         for (const inputDef of inputDefinitions) {
             const inputName = inputDef.name;
-            // Find an input key that matches the input definition name or any declared aliases.
-            const inputKey = Array.from(sanitizedInputs.keys()).find(key => {
-                if (typeof key !== 'string') return false;
-                const lowerKey = key.toLowerCase();
-                const lowerInputName = inputName.toLowerCase();
+            let inputKey: string | undefined = undefined;
 
-                // Direct match or simple pluralization handling
-                if (lowerKey === lowerInputName || lowerKey === lowerInputName + 's' || (lowerInputName.endsWith('s') && lowerKey + 's' === lowerInputName)) {
-                    return true;
-                }
+            // Prioritize direct match
+            if (sanitizedInputs.has(inputName)) {
+                inputKey = inputName;
+            } else {
+                // Find an input key that matches the input definition name or any declared aliases.
+                inputKey = Array.from(sanitizedInputs.keys()).find(key => {
+                    if (typeof key !== 'string') return false;
+                    const lowerKey = key.toLowerCase();
+                    const lowerInputName = inputName.toLowerCase();
 
-                // Check manifest-declared aliases if present
-                const aliases: string[] = (inputDef as any).aliases || [];
-                for (const a of aliases) {
-                    if (typeof a === 'string' && lowerKey === a.toLowerCase()) return true;
-                }
+                    // Direct match (already checked above, but good for robustness)
+                    if (lowerKey === lowerInputName) {
+                        return true;
+                    }
 
-                // CamelCase vs snake_case normalization: strip underscores and compare
-                if (lowerKey.replace(/_/g, '') === lowerInputName.replace(/_/g, '')) return true;
+                    // Simple pluralization handling
+                    if (lowerKey === lowerInputName + 's' || (lowerInputName.endsWith('s') && lowerKey + 's' === lowerInputName)) {
+                        return true;
+                    }
 
-                return false;
-            });
+                    // Check manifest-declared aliases if present
+                    const aliases: string[] = (inputDef as any).aliases || [];
+                    for (const a of aliases) {
+                        if (typeof a === 'string' && lowerKey === a.toLowerCase()) return true;
+                    }
+
+                    // CamelCase vs snake_case normalization: strip underscores and compare
+                    if (lowerKey.replace(/_/g, '') === lowerInputName.replace(/_/g, '')) return true;
+
+                    return false;
+                });
+            }
 
             if (inputKey) {
                 const value = sanitizedInputs.get(inputKey)!;

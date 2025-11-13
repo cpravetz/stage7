@@ -181,7 +181,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           const newProduct = {
             type: data.content.type,
             name: data.content.name,
-            url: `${API_BASE_URL}/retrieve/${data.content.id}`,
+            url: `${API_BASE_URL}/librarian/retrieve/${data.content.id}`,
             workproduct: data.content.workproduct,
             isDeliverable: data.content.isDeliverable || false
           };

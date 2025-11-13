@@ -130,13 +130,12 @@ export interface StepDependency {
 
 export interface PlanDependency {
     inputName: string;
-    sourceStepNo: number;
-    sourceStepId?: string;
+    sourceStepId: string;
     outputName: string;
 }
 
 export interface ActionVerbTask {
-    id?: string;
+    id: string;
     actionVerb: string; // Changed from verb
     inputReferences?: Map<string, InputReference>;
     //inputValues: Map<string, InputValue>; 
@@ -205,7 +204,6 @@ export type environmentType = {
 
 export interface Step {
     id: string;
-    stepNo: number;
     missionId: string;
     actionVerb: string;
     description?: string;

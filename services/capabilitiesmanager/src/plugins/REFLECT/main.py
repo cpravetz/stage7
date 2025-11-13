@@ -4,6 +4,7 @@ REFLECT Plugin - Enhanced with self-correction capabilities
 Handles reflection on mission progress, generates plans for next steps, and learns from performance data.
 """
 
+import uuid
 import json
 import logging
 import sys
@@ -417,6 +418,23 @@ class ReflectHandler:
         }
         schema_json = json.dumps(PLAN_ARRAY_SCHEMA, indent=2)
 
+        failed_step_info = ""
+        if plan_history:
+            last_step = plan_history[-1]
+            if not last_step.get('success', True):
+                failed_action_verb = last_step.get('actionVerb', 'UNKNOWN')
+                failed_error = last_step.get('error', 'No error message')
+                failed_inputs = last_step.get('inputs', {})
+                
+                failed_inputs_str = json.dumps(failed_inputs, indent=2)
+
+                failed_step_info = f"""
+FAILED STEP DETAILS:
+Action Verb: {failed_action_verb}
+Error: {failed_error}
+Inputs: {failed_inputs_str}
+"""
+
         prompt = f"""You are a JSON-only reflection and planning assistant. Your task is to analyze the provided mission data and reflection question.
 
 MISSION ID: {mission_id}
@@ -426,6 +444,8 @@ WORK PRODUCTS: {work_products}
 REFLECTION QUESTION: {question}
 
 PARENT STEP INPUTS: {json.dumps(inputs)}
+
+{failed_step_info}
 
 Your task is to reflect on the mission progress and determine the best course of action. Consider these options in order of preference:
 
@@ -438,9 +458,9 @@ Your task is to reflect on the mission progress and determine the best course of
 - **Resourcefulness:** Exhaust all available tools (`SEARCH`, `SCRAPE`, `GENERATE`, `QUERY_KNOWLEDGE_BASE`) to find answers and create deliverables *before* ever considering asking the user.
 - **`ASK_USER_QUESTION` is a Last Resort:** This tool is exclusively for obtaining subjective opinions, approvals, or choices from the user. It is *never* for offloading tasks. Generating a plan that asks the user for information you can find yourself is a critical failure.
 - **Dependencies are Crucial:** Every step that uses an output from a previous step MUST declare this in its `inputs` using `sourceStep` and `outputName`. A plan with disconnected steps is invalid.
-- **Handling Lists (`FOREACH`):** If a step requires a single item (e.g., a URL string) but receives a list from a preceding step (e.g., search results), you MUST use a `FOREACH` loop to iterate over the list.
-- **Role Assignment:** Assign `recommendedRole` at the deliverable level, not per individual step. All steps contributing to a single output (e.g., a research report) should share the same role.
-
+        - **Handling Lists (`FOREACH`):** If a step requires a single item (e.g., a URL string) but receives a list from a preceding step (e.g., search results), you MUST use a `FOREACH` loop to iterate over the list.
+        - **Aggregating Results (`REGROUP`):** When using a `FOREACH` loop, if you need to collect the results from all iterations into a single array, you MUST follow the `FOREACH` step with a `REGROUP` step. The `REGROUP` step's `stepIdsToRegroup` input MUST be linked to the `FOREACH` step's `instanceEndStepIds` output using `sourceStep` and `outputName`. This ensures that `REGROUP` waits for all `FOREACH` iterations to complete and then collects their results.
+        - **Role Assignment:** Assign `recommendedRole` at the deliverable level, not per individual step. All steps contributing to a single output (e.g., a research report) should share the same role.
 **RESPONSE FORMATS:**
 
 -   **For a Direct Answer:** {{"direct_answer": "Your answer here"}}
@@ -454,7 +474,7 @@ Plan Schema
     - Step inputs are generally sourced from the outputs of other steps and less often fixed with constant values.
     - All inputs for each step must be explicitly defined either as a constant `value` or by referencing an `outputName` from a `sourceStep` within the plan or from the `PARENT STEP INPUTS`. Do not assume implicit data structures or properties of inputs.
     - Use `sourceStep: 0` ONLY for inputs that are explicitly provided in the "PARENT STEP INPUTS" section above.
-    - For any other input, it MUST be the `outputName` from a *preceding step* in this plan, and `sourceStep` MUST be the `number` of that preceding step.
+    - For any other input, it MUST be the `outputName` from a *preceding step* in this plan, and `sourceStep` MUST be the `id` of that preceding step.
     - Every input in your plan MUST be resolvable either from a given constant value, a "PARENT STEP" (using `sourceStep: 0`) or from an output of a previous step in the plan.
     - CRITICAL: If you use placeholders like {{{{'{{output_name}}'}}}} within a longer string value (e.g., a prompt that references previous outputs), you MUST also declare each referenced output_name as a separate input with proper sourceStep and outputName.
 - **Mapping Outputs to Inputs:** When the output of one step is used as the input to another, the `outputName` in the input of the second step must match the `name` of the output of the first step.
@@ -545,8 +565,14 @@ A plan with no connections between steps is invalid and will be rejected.
                 data = json.loads(cleaned_response)
 
             if isinstance(data, list): # This is a plan
+                # Ensure availablePlugins is a direct list of manifests for the validator
+                modified_inputs = inputs.copy()
+                available_plugins_for_validator = modified_inputs.get('availablePlugins')
+                if isinstance(available_plugins_for_validator, dict) and 'value' in available_plugins_for_validator:
+                    modified_inputs['availablePlugins'] = available_plugins_for_validator['value']
+
                 # Validate and repair the plan
-                validated_plan = self.validator.validate_and_repair(data, verb_info['mission_goal'], inputs)
+                validated_plan = self.validator.validate_and_repair(data, verb_info['mission_goal'], modified_inputs)
                 
                 # Save the generated plan to Librarian
                 # self._save_plan_to_librarian(verb_info['verb'], validated_plan, inputs)
@@ -575,7 +601,7 @@ A plan with no connections between steps is invalid and will be rejected.
                         
                         # Return a new step to call ACCOMPLISH
                         new_step = {
-                            "number": 1,
+                            "id": str(uuid.uuid4()),
                             "actionVerb": "ACCOMPLISH",
                             "description": "Create a new plan based on reflection.",
                             "inputs": {
@@ -656,7 +682,7 @@ A plan with no connections between steps is invalid and will be rejected.
                         "mimeType": "application/json"
                     }])
                 # If the dictionary is a single step, treat it as a plan with one step
-                elif "actionVerb" in data and "number" in data:
+                elif "actionVerb" in data and "id" in data:
                     validated_plan = self.validator.validate_and_repair([data], verb_info['mission_goal'], inputs)
                     # self._save_plan_to_librarian(verb_info['verb'], validated_plan, inputs)
                     return json.dumps([{"success": True,
