@@ -5,10 +5,21 @@ import json
 import logging
 import re
 import copy
+import os
+import sys
 from typing import Dict, Any, List, Optional, Set, Tuple
+
+# Configure logging if not already configured
+if not logging.root.handlers:
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format='%(asctime)s - %(levelname)s - [%(funcName)s:%(lineno)d] - %(message)s'
+    )
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG) # Ensure DEBUG level is active
+
+logger.debug("plan_validator.py: Module loaded.")
 
 class AccomplishError(Exception):
     """Custom exception for ACCOMPLISH plugin errors"""
@@ -79,6 +90,7 @@ PLAN_ARRAY_SCHEMA = {
     "items": PLAN_STEP_SCHEMA,
 }
 
+logger.debug("plan_validator.py: PlanValidator class definition starting.")
 class PlanValidator:
     """Handles validation and repair of plans."""
     
@@ -250,73 +262,88 @@ class PlanValidator:
         moved_step_ids = {step_to_wrap_id} | downstream_deps
         logger.debug(f"PlanValidator: _wrap_step_in_foreach - Moved step IDs: {moved_step_ids}")
 
+        sub_plan_steps_ordered = []
+        def find_and_order_moved_steps(current_plan_segment):
+            if not isinstance(current_plan_segment, list):
+                return
+            for step in current_plan_segment:
+                if not isinstance(step, dict):
+                    continue
+                if step.get('id') in moved_step_ids:
+                    if not any(s['id'] == step.get('id') for s in sub_plan_steps_ordered):
+                        sub_plan_steps_ordered.append(step)
+                
+                sub_p = self._get_sub_plan(step)
+                if sub_p:
+                    find_and_order_moved_steps(sub_p)
+
+        find_and_order_moved_steps(plan)
+
         sub_plan = []
-        for step_id_item in sorted(list(moved_step_ids)):
-            original_step = all_steps.get(step_id_item)
-            if original_step:
-                new_step = copy.deepcopy(original_step)
-                # If this is the step that triggered the wrap, update its input
-                if new_step['id'] == step_to_wrap_id:
-                    logger.debug(f"PlanValidator: _wrap_step_in_foreach - Updating input for step {new_step['id']}.")
-                    # Check if the target_input_name is a nested reference (e.g., "script_parameters.search_results")
-                    if '.' in target_input_name or '[' in target_input_name:
-                        # Split the target_input_name into parts to traverse the nested structure
-                        parts = re.findall(r'([a-zA-Z0-9_]+)(?:\[(\d+)\])?', target_input_name)
+        for original_step in sub_plan_steps_ordered:
+            new_step = copy.deepcopy(original_step)
+            # If this is the step that triggered the wrap, update its input
+            if new_step['id'] == step_to_wrap_id:
+                logger.debug(f"PlanValidator: _wrap_step_in_foreach - Updating input for step {new_step['id']}.")
+                # Check if the target_input_name is a nested reference (e.g., "script_parameters.search_results")
+                if '.' in target_input_name or '[' in target_input_name:
+                    # Split the target_input_name into parts to traverse the nested structure
+                    parts = re.findall(r'([a-zA-Z0-9_]+)(?:\[(\d+)\])?', target_input_name)
                         
-                        current_input_level = new_step['inputs']
-                        for i, (part_name, part_index) in enumerate(parts):
-                            if part_index: # It's an array index
-                                if isinstance(current_input_level.get(part_name), dict) and 'value' in current_input_level[part_name]:
-                                    try:
-                                        list_value = json.loads(current_input_level[part_name]['value'])
-                                        if isinstance(list_value, list) and int(part_index) < len(list_value):
-                                            if i == len(parts) - 1: # Last part, update the nested reference
-                                                if isinstance(list_value[int(part_index)], dict) and 'sourceStep' in list_value[int(part_index)]:
-                                                    list_value[int(part_index)]['sourceStep'] = "0"
-                                                    list_value[int(part_index)]['outputName'] = "item"
-                                            current_input_level[part_name]['value'] = json.dumps(list_value)
-                                            current_input_level = list_value[int(part_index)] # Move deeper
-                                        else:
-                                            logger.warning(f"PlanValidator: Step {new_step['id']}: Invalid list index or not a list at '{part_name}[{part_index}]'")
-                                            break
-                                    except json.JSONDecodeError:
-                                        logger.warning(f"PlanValidator: Step {new_step['id']}: Could not parse JSON for '{part_name}' at index '{part_index}'")
-                                        break
-                                else:
-                                    logger.warning(f"PlanValidator: Step {new_step['id']}: Input '{part_name}' not found or not a dict with 'value' for index '{part_index}'")
-                                    break
-                            else: # It's a dictionary key
-                                if part_name in current_input_level and isinstance(current_input_level.get(part_name), dict):
-                                    if i == len(parts) - 1: # Last part, update the reference
-                                        current_input_level[part_name] = {
-                                            "outputName": "item",
-                                            "sourceStep": "0"  # "0" means parent step (the FOREACH step)
-                                        }
+                    current_input_level = new_step['inputs']
+                    for i, (part_name, part_index) in enumerate(parts):
+                        if part_index: # It's an array index
+                            if isinstance(current_input_level.get(part_name), dict) and 'value' in current_input_level[part_name]:
+                                try:
+                                    list_value = json.loads(current_input_level[part_name]['value'])
+                                    if isinstance(list_value, list) and int(part_index) < len(list_value):
+                                        if i == len(parts) - 1: # Last part, update the nested reference
+                                            if isinstance(list_value[int(part_index)], dict) and 'sourceStep' in list_value[int(part_index)]:
+                                                list_value[int(part_index)]['sourceStep'] = "0"
+                                                list_value[int(part_index)]['outputName'] = "item"
+                                        current_input_level[part_name]['value'] = json.dumps(list_value)
+                                        current_input_level = list_value[int(part_index)] # Move deeper
                                     else:
-                                        # If it's a nested dictionary, move deeper
-                                        if 'value' in current_input_level[part_name] and isinstance(current_input_level[part_name]['value'], str):
-                                            try:
-                                                nested_value = json.loads(current_input_level[part_name]['value'])
-                                                if isinstance(nested_value, dict):
-                                                    current_input_level = nested_value
-                                                else:
-                                                    logger.warning(f"PlanValidator: Step {new_step['id']}: Nested input '{part_name}' is not a dictionary.")
-                                                    break
-                                            except json.JSONDecodeError:
-                                                logger.warning(f"PlanValidator: Step {new_step['id']}: Could not parse JSON for nested input '{part_name}'.")
-                                                break
-                                        else:
-                                            current_input_level = current_input_level[part_name]
-                                else:
-                                    logger.warning(f"PlanValidator: Step {new_step['id']}: Input '{part_name}' not found or not a dictionary.")
+                                        logger.warning(f"PlanValidator: Step {new_step['id']}: Invalid list index or not a list at '{part_name}[{part_index}]'")
+                                        break
+                                except json.JSONDecodeError:
+                                    logger.warning(f"PlanValidator: Step {new_step['id']}: Could not parse JSON for '{part_name}' at index '{part_index}'")
                                     break
-                    else:
-                        # Original logic for direct input name
-                        if target_input_name in new_step.get('inputs', {}):
-                            new_step['inputs'][target_input_name] = {
-                                "outputName": "item",
-                                "sourceStep": "0"  # "0" means parent step (the FOREACH step)
-                            }
+                            else:
+                                logger.warning(f"PlanValidator: Step {new_step['id']}: Input '{part_name}' not found or not a dict with 'value' for index '{part_index}'")
+                                break
+                        else: # It's a dictionary key
+                            if part_name in current_input_level and isinstance(current_input_level.get(part_name), dict):
+                                if i == len(parts) - 1: # Last part, update the reference
+                                    current_input_level[part_name] = {
+                                        "outputName": "item",
+                                        "sourceStep": "0"  # "0" means parent step (the FOREACH step)
+                                    }
+                                else:
+                                    # If it's a nested dictionary, move deeper
+                                    if 'value' in current_input_level[part_name] and isinstance(current_input_level[part_name]['value'], str):
+                                        try:
+                                            nested_value = json.loads(current_input_level[part_name]['value'])
+                                            if isinstance(nested_value, dict):
+                                                current_input_level = nested_value
+                                            else:
+                                                logger.warning(f"PlanValidator: Step {new_step['id']}: Nested input '{part_name}' is not a dictionary.")
+                                                break
+                                        except json.JSONDecodeError:
+                                            logger.warning(f"PlanValidator: Step {new_step['id']}: Could not parse JSON for nested input '{part_name}'.")
+                                            break
+                                    else:
+                                        current_input_level = current_input_level[part_name]
+                            else:
+                                logger.warning(f"PlanValidator: Step {new_step['id']}: Input '{part_name}' not found or not a dictionary.")
+                                break
+                else:
+                    # Original logic for direct input name
+                    if target_input_name in new_step.get('inputs', {}):
+                        new_step['inputs'][target_input_name] = {
+                            "outputName": "item",
+                            "sourceStep": "0"  # "0" means parent step (the FOREACH step)
+                        }
                 sub_plan.append(new_step)
         logger.debug(f"PlanValidator: _wrap_step_in_foreach - Sub-plan created with {len(sub_plan)} steps.")
 
@@ -401,6 +428,7 @@ class PlanValidator:
         then iterates through the steps to validate and repair them in a single pass.
         """
         logger.info(f"--- Plan Validation Attempt {attempt}/{self.max_retries} ---")
+        logger.debug(f"PlanValidator.validate_and_repair: Starting attempt {attempt}.")
         if attempt > self.max_retries:
             logger.error(f"PlanValidator: Plan validation failed after {self.max_retries} attempts. Returning original plan.")
             return plan
@@ -589,6 +617,7 @@ class PlanValidator:
         Recursively traverses a plan structure (dictionaries and lists) and replaces
         any 'sourceStep' values that are keys in the provided mapping.
         """
+        logger.debug("PlanValidator: _apply_uuid_map_recursive called.")
         if isinstance(data, dict):
             new_dict = {}
             for k, v in data.items():
@@ -599,6 +628,7 @@ class PlanValidator:
                     new_dict[k] = self._apply_uuid_map_recursive(v, mapping)
             return new_dict
         elif isinstance(data, list):
+            logger.debug("PlanValidator: _apply_uuid_map_recursive - Recursing into list.")
             return [self._apply_uuid_map_recursive(item, mapping) for item in data]
         else:
             return data
@@ -612,6 +642,7 @@ class PlanValidator:
         order = []
         
         def traverse(sub_plan):
+            logger.debug(f"PlanValidator: _get_execution_order - traverse called for sub_plan length: {len(sub_plan) if sub_plan else 0}.")
             for step in sub_plan:
                 step_id = step.get('id')
                 if step_id and step_id in all_steps:
@@ -635,7 +666,11 @@ class PlanValidator:
         """
         logger.debug(f"PlanValidator: _get_available_outputs_for_step called for step ID: {step_id}")
         available = {}
-        current_index = execution_order.index(step_id)
+        try:
+            current_index = execution_order.index(step_id)
+        except ValueError:
+            logger.warning(f"PlanValidator: _get_available_outputs_for_step - Step ID {step_id} not found in execution_order. Returning empty available outputs.")
+            return available
         
         # Add outputs from all preceding steps in the execution order
         for i in range(current_index):
@@ -692,6 +727,7 @@ class PlanValidator:
 
         # Check for required inputs
         if plugin_def:
+            logger.debug(f"PlanValidator: _validate_step - Checking required inputs for {action_verb}.")
             for req_input in plugin_def.get('inputDefinitions', []):
                 if req_input.get('required') and req_input.get('name') not in inputs:
                     errors.append(f"Step {step_id}: Missing required input '{req_input['name']}' for '{action_verb}'.")
@@ -822,7 +858,7 @@ class PlanValidator:
             dest_input_type == source_output_type or
             dest_input_type == 'any' or source_output_type == 'any' or
             # Allow string-based compatibility for interpolation
-            dest_input_type == 'string' or source_output_type == 'string' or
+            (dest_input_type == 'string' and source_output_type in ['number', 'boolean']) or # Allow implicit conversion of number/boolean to string
             (dest_input_type in ['array', 'list', 'list[string]', 'list[number]', 'list[boolean]', 'list[object]', 'list[any]'] and source_output_type in ['array', 'list', 'list[string]', 'list[number]', 'list[boolean]', 'list[object]', 'list[any]'])
         )
 
@@ -837,8 +873,10 @@ class PlanValidator:
 
     def _find_embedded_references(self, value: str) -> Set[str]:
         """Find all embedded references in a string value (e.g., {output_name} or [output_name])."""
-        logger.debug("PlanValidator: _find_embedded_references called.")
-        return set(re.findall(r'[{[]([a-zA-Z0-9_]+)[}\]]', value))
+        logger.debug(f"PlanValidator: _find_embedded_references called for value: {value}")
+        references = set(re.findall(r'[{[]([a-zA-Z0-9_]+)[}\]]', value))
+        logger.debug(f"PlanValidator: _find_embedded_references - Found references: {references}")
+        return references
 
     def _validate_deliverable_outputs(self, step: Dict[str, Any]) -> List[str]:
         """Validate deliverable output properties."""
@@ -849,6 +887,7 @@ class PlanValidator:
         logger.debug(f"PlanValidator: Step {step_id}: Type of outputs in _validate_deliverable_outputs: {type(outputs)}")
 
         for output_name, output_def in outputs.items():
+            logger.debug(f"PlanValidator: _validate_deliverable_outputs - Checking output '{output_name}' for step {step_id}.")
             if isinstance(output_def, dict):
                 is_deliverable = output_def.get('isDeliverable', False)
                 filename = output_def.get('filename')
@@ -874,18 +913,23 @@ class PlanValidator:
 
     def _classify_error_type(self, error: str) -> str:
         """Classify validation errors into categories."""
-        logger.debug(f"PlanValidator: _classify_error_type called for error: {error}")
+        logger.debug(f"PlanValidator: _classify_error_type called for error: '{error}'")
         error_lower = error.lower()
         
         if 'missing required input' in error_lower:
+            logger.debug(f"PlanValidator: _classify_error_type - Classified as 'missing_input'.")
             return 'missing_input'
         elif 'invalid reference' in error_lower or 'sourceStep' in error_lower:
+            logger.debug(f"PlanValidator: _classify_error_type - Classified as 'invalid_reference'.")
             return 'invalid_reference'
         elif 'cannot find the source' in error_lower:
+            logger.debug(f"PlanValidator: _classify_error_type - Classified as 'unsourced_reference'.")
             return 'unsourced_reference'
         elif 'type mismatch' in error_lower or ('expected' in error_lower and 'got' in error_lower):
+            logger.debug(f"PlanValidator: _classify_error_type - Classified as 'type_mismatch'.")
             return 'type_mismatch'
         elif 'missing required field' in error_lower:
+            logger.debug(f"PlanValidator: _classify_error_type - Classified as 'missing_field'.")
             return 'missing_field'
         logger.debug(f"PlanValidator: _classify_error_type - Classified as 'generic'.")
         return 'generic'
@@ -897,6 +941,7 @@ class PlanValidator:
         primary_error_type = self._classify_error_type(errors[0]) if errors else 'generic'
         step_json = json.dumps(step_to_repair, indent=2)
         errors_text = '\n'.join([f"- {error}" for error in errors])
+        logger.debug(f"PlanValidator: _create_focused_repair_prompt - Primary error type: {primary_error_type}")
 
         if primary_error_type == 'missing_input':
             missing_input = None
@@ -996,7 +1041,9 @@ Return ONLY the corrected JSON step, no explanations."""
             logger.error("PlanValidator: _repair_plan_with_llm - Brain call not available.")
             raise AccomplishError("Brain call not available", "brain_error")
 
+        logger.debug(f"PlanValidator: _repair_plan_with_llm - Calling brain for repair.")
         response = self.brain_call(prompt, inputs, "json")
+        logger.debug(f"PlanValidator: _repair_plan_with_llm - Brain call for repair returned.")
         
         try:
             repaired_data = json.loads(response)

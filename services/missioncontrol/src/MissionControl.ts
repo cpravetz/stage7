@@ -270,6 +270,24 @@ class MissionControl extends BaseEntity {
             case MessageType.USER_MESSAGE:
                 await this.handleUserMessage(content, clientId, missionId);
                 return { missionId, status: 'message_sent' };
+            case MessageType.WORK_PRODUCT_UPDATE:
+                const workProductPayload = content; // The content of the message is the workProductPayload
+                const updateMissionId = workProductPayload.missionId;
+
+                for (const [clientId, missionIds] of this.clientMissions.entries()) {
+                    if (missionIds.has(updateMissionId)) {
+                        this.authenticatedApi.post(`http://${this.postOfficeUrl}/message`, {
+                            type: MessageType.WORK_PRODUCT_UPDATE,
+                            sender: this.id,
+                            recipient: 'user',
+                            clientId: clientId,
+                            content: workProductPayload
+                        }).catch((error: any) => {
+                            console.error(`Error sending WORK_PRODUCT_UPDATE to client ${clientId}:`, error instanceof Error ? error.message : error);
+                        });
+                    }
+                }
+                return { missionId: updateMissionId, status: 'work_product_updated' };
             default:
                 // Call the base class handler for standard message types
                 await super.handleBaseMessage(message);
@@ -596,7 +614,7 @@ class MissionControl extends BaseEntity {
 
     private async fetchAndPushStatsForMission(missionId: string, clientId: string): Promise<MissionStatistics | null> {
         try {
-            console.log(`Fetching and pushing statistics for mission ${missionId} to client ${clientId}`);
+            //console.log(`Fetching and pushing statistics for mission ${missionId} to client ${clientId}`);
     
             const [llmCallsResponse, engineerStatisticsResponse] = await Promise.all([
                 this.authenticatedApi.get(`http://${this.brainUrl}/getLLMCalls`).catch((error: any) => {
@@ -650,7 +668,7 @@ class MissionControl extends BaseEntity {
                 content: missionStats
             });
     
-            console.log(`Successfully sent statistics for mission ${missionId} to client ${clientId}`);
+            //console.log(`Successfully sent statistics for mission ${missionId} to client ${clientId}`);
             return missionStats;
     
         } catch (error) {
@@ -792,7 +810,6 @@ class MissionControl extends BaseEntity {
             if (this.clientMissions.size === 0) {
                 return;
             }
-            console.log(`Periodic statistics fetch running for ${this.clientMissions.size} client(s).`);
 
             for (const [clientId, missionIds] of this.clientMissions.entries()) {
                 for (const missionId of missionIds) {
@@ -861,6 +878,7 @@ class MissionControl extends BaseEntity {
         }
 
         const filesToSend = (mission.attachedFiles || []).filter(file => file.isDeliverable);
+        console.log(`MissionControl: Preparing SHARED_FILES_UPDATE for mission ${missionId}. Files to send:`, JSON.stringify(filesToSend, null, 2));
 
         for (const [clientId, missionIds] of this.clientMissions.entries()) {
             if (missionIds.has(missionId)) {
@@ -883,11 +901,13 @@ class MissionControl extends BaseEntity {
     private async addAttachedFile(req: express.Request, res: express.Response) {
         const { missionId } = req.params;
         const incomingDeliverable = req.body; // This is the full deliverable document
+        console.log(`MissionControl: Received addAttachedFile request for mission ${missionId} with deliverable:`, JSON.stringify(incomingDeliverable, null, 2));
         const missionFile = incomingDeliverable.missionFile; // Extract the MissionFile part
         const isDeliverable = incomingDeliverable.isDeliverable || false;
         const stepId = incomingDeliverable.stepId;
 
         if (!missionFile || !missionFile.id) {
+            console.error(`MissionControl: Invalid mission file data received for mission ${missionId}. missionFile:`, missionFile);
             return res.status(400).send({ error: 'Invalid mission file data provided' });
         }
 
@@ -918,6 +938,9 @@ class MissionControl extends BaseEntity {
             await this.saveMissionState(mission);
             this.sendStatusUpdate(mission, `File ${deliverableMissionFile.originalName} added`);
             this.sendSharedFilesUpdate(missionId); // Notify clients about the updated file list
+            console.log(`MissionControl: Added file ${deliverableMissionFile.originalName} to mission ${missionId}. attachedFiles count: ${mission.attachedFiles.length}`);
+        } else {
+            console.log(`MissionControl: File ${deliverableMissionFile.originalName} (ID: ${deliverableMissionFile.id}) already exists for mission ${missionId}. Skipping addition.`);
         }
 
         res.status(200).send({ status: 'File added' });

@@ -25,8 +25,8 @@ export class Gemini15FlashModel extends BaseModel {
         ]);
 
         super({
-            name: "google/gemini-2.0-flash-lite",
-            modelName: "gemini-2.0-flash-lite",
+            name: "google/gemini-2.5-flash-lite",
+            modelName: "gemini-2.5-flash-lite",
             interfaceName: "gemini",
             serviceName: "gemini",
             tokenLimit: 1048576, // Adjust this value if needed

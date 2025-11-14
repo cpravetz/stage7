@@ -31,8 +31,8 @@ export class Claude2Model extends BaseModel {
         ]);
 
         super({
-            name: "anthropic/claude-2",
-            modelName: "anthropic/claude-2",
+            name: "anthropic/claude-3.5-haiku-20241022",
+            modelName: "anthropic/claude-3.5-haiku-20241022",
             interfaceName: "openrouter",
             serviceName: "ORService",
             tokenLimit: 100000, // Adjust this value if you know the exact token limit for Claude 2

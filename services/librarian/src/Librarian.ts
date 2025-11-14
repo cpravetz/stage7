@@ -100,6 +100,7 @@ export class Librarian extends BaseEntity {
         this.app.post('/deliverable/:stepId', (req, res) => this.storeDeliverable(req, res));
         this.app.get('/loadDeliverable/:stepId', (req, res) => this.loadDeliverable(req, res));
         this.app.get('/loadAllDeliverables/:agentId', (req, res) => this.loadAllDeliverables(req, res));
+        this.app.get('/loadWorkProduct/:stepId', (req, res) => this.loadStepWorkProduct(req, res));
         this.app.get('/loadStepOutput/:stepId', (req, res) => this.loadStepWorkProduct(req, res));
         this.app.get('/loadAllStepOutputs/:agentId', (req, res) => this.loadAllStepOutputs(req, res));
         this.app.get('/getSavedMissions', (req, res) => this.getSavedMissions(req, res));
