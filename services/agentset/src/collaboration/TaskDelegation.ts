@@ -9,6 +9,7 @@ import { ServiceTokenManager } from '@cktmcs/shared';
 
 
 // Import AgentStatus from utils
+import { OwnershipTransferManager } from '../utils/OwnershipTransferManager';
 import { AgentStatus } from '../utils/agentStatus';
 /**
  * Task status
@@ -56,14 +57,16 @@ export class TaskDelegation {
   private agents: Map<string, Agent>;
   private trafficManagerUrl: string;
   private tokenManager: ServiceTokenManager;
+  private ownershipTransferManager: OwnershipTransferManager;
 
   private connection: amqp_connection_manager.AmqpConnectionManager | null = null;
   private channel: amqp_connection_manager.ChannelWrapper | null = null;
   private pendingDelegations: Map<string, { request: TaskDelegationRequest, delegatorId: string, recipientId: string, resolve: (response: TaskDelegationResponse) => void, reject: (error: Error) => void, timeout: NodeJS.Timeout }> = new Map(); // Map<taskId, delegationInfo>
 
-  constructor(agents: Map<string, Agent>, trafficManagerUrl: string) {
+  constructor(agents: Map<string, Agent>, trafficManagerUrl: string, ownershipTransferManager: OwnershipTransferManager) {
     this.agents = agents;
     this.trafficManagerUrl = trafficManagerUrl;
+    this.ownershipTransferManager = ownershipTransferManager;
 
     // Initialize token manager for service-to-service authentication
     const securityManagerUrl = process.env.SECURITYMANAGER_URL || 'securitymanager:5010';

@@ -34,12 +34,12 @@ Instead of replicating steps, the new system will:
 
 ### Core Changes Required
 
-#### 1. Step Location Registry
-**New Component**: `StepLocationRegistry`
-- Tracks which agent currently owns each step
-- Provides fast lookup for step location during dependency resolution
-- Handles location updates during ownership transfers
-- Integrates with TrafficManager for cross-AgentSet tracking
+#### 1. Step Location Registry in AgentSet
+**New Feature**: `AgentSet` will now include a `stepLocationRegistry`.
+- A map within `AgentSet` to track which agent currently owns each step.
+- Provides fast lookup for step location during dependency resolution.
+- Handles location updates during ownership transfers.
+- `AgentSet` will expose endpoints for cross-AgentSet tracking, integrating with the TrafficManager.
 
 #### 2. Enhanced Step Class
 **Modifications to Step.ts**:
@@ -65,10 +65,10 @@ Instead of replicating steps, the new system will:
 ## Implementation Plan
 
 ### Phase 1: Foundation 
-1. **Create StepLocationRegistry**
-   - Implement in-memory registry with persistence backing
-   - Add TrafficManager integration
-   - Create APIs for location updates and queries
+1. **Implement StepLocationRegistry in AgentSet**
+   - Add a `stepLocationRegistry` map to `AgentSet.ts`.
+   - Add TrafficManager integration for discovery.
+   - Create APIs within `AgentSet` for location updates and queries.
 
 2. **Enhance Step Class**
    - Add ownership tracking fields
@@ -87,7 +87,7 @@ Instead of replicating steps, the new system will:
    - Implement caching layer
 
 2. **Update Agent.ts**
-   - Modify dependency resolution to use location registry
+   - Modify dependency resolution to use the `AgentSet`'s location registry
    - Add remote step data fetching capabilities
    - Implement ownership transfer logic
 
@@ -108,7 +108,7 @@ Instead of replicating steps, the new system will:
    - Implement transfer confirmation protocols
 
 3. **Enhance AgentSet.ts**
-   - Add step ownership management
+   - Add step ownership management endpoints
    - Implement step transfer endpoints
    - Create ownership validation logic
 
@@ -122,6 +122,24 @@ Instead of replicating steps, the new system will:
    - Implement feature flag for new delegation system
    - Create migration tools for existing delegated steps
    - Gradual rollout with monitoring
+
+## Implementation Progress
+
+### Phase 1: Foundation (Completed)
+- **StepLocationRegistry in AgentSet**: The `stepLocationRegistry` map has been added to `AgentSet.ts`.
+- **Enhanced Step Class**: The `Step` class in `Step.ts` has been updated with ownership tracking fields (`currentOwnerAgentId`, `originalOwnerAgentId`, `delegationHistory`, `isRemotelyOwned`, `lastOwnershipChange`).
+- **Update AgentPersistenceManager**: The `AgentPersistenceManager` has been updated with `saveStepLocation` and `getStepLocation` methods.
+
+### Phase 2: Cross-Agent Communication (Completed)
+- **Implement CrossAgentDependencyResolver**: The `CrossAgentDependencyResolver` has been created in `services/agentset/src/utils/CrossAgentDependencyResolver.ts`.
+- **Update Agent.ts**: The `Agent` class has been updated to instantiate the `CrossAgentDependencyResolver` and pass it to the `Step` constructor.
+- **Enhance TrafficManager**: A placeholder `TrafficManager.ts` has been created.
+
+### Phase 3: Delegation Refactor (In Progress)
+- **Refactor TaskDelegation.ts**: This is the current focus. The `OwnershipTransferManager` has been created, and the `TaskDelegation` class is being refactored to use it.
+- **Update Step.ts**: The `Step.ts` file is being updated to correctly handle the `crossAgentResolver` in the constructor, `createFromPlan` and `dereferenceInputsForExecution` methods. This is currently in progress and has some errors.
+
+### Phase 4: Testing & Migration (Not Started)
 
 ## Risk Assessment
 
@@ -190,9 +208,10 @@ Instead of replicating steps, the new system will:
 
 ## Detailed Technical Specifications
 
-### StepLocationRegistry Interface
+### StepLocationRegistry Interface (as part of AgentSet)
 ```typescript
-interface StepLocationRegistry {
+// Implemented as part of AgentSet class
+interface IAgentSet {
   // Core location tracking
   registerStep(stepId: string, agentId: string, agentSetUrl: string): Promise<void>;
   updateStepLocation(stepId: string, newAgentId: string, newAgentSetUrl: string): Promise<void>;
@@ -279,27 +298,26 @@ interface DelegationRecord {
    - Update `loadStep()` for remote steps
    - Add ownership change logging
 
+5. **services/agentset/src/AgentSet.ts**
+   - Add `stepLocationRegistry` map.
+   - Add step transfer endpoints and location registry integration.
+   - Implement ownership validation and step location management methods.
+
 ### Files Requiring Minor Changes
 1. **services/trafficmanager/src/TrafficManager.ts**
    - Add step location tracking endpoints
    - Enhance agent location management
    - Add step ownership APIs
 
-2. **services/agentset/src/AgentSet.ts**
-   - Add step transfer endpoints
-   - Implement ownership validation
-   - Add location registry integration
-
-3. **services/agentset/src/collaboration/CollaborationManager.ts**
+2. **services/agentset/src/collaboration/CollaborationManager.ts**
    - Update message handling for transfers
    - Add ownership change notifications
    - Implement transfer protocols
 
 ### New Files to Create
-1. **services/agentset/src/utils/StepLocationRegistry.ts**
-2. **services/agentset/src/utils/CrossAgentDependencyResolver.ts**
-3. **services/agentset/src/types/DelegationTypes.ts**
-4. **services/agentset/src/utils/OwnershipTransferManager.ts**
+1. **services/agentset/src/utils/CrossAgentDependencyResolver.ts**
+2. **services/agentset/src/types/DelegationTypes.ts**
+3. **services/agentset/src/utils/OwnershipTransferManager.ts**
 
 ## Migration Strategy Details
 
@@ -341,7 +359,7 @@ interface DelegationRecord {
 ## Testing Strategy
 
 ### Unit Testing Requirements
-1. **StepLocationRegistry Tests**
+1. **StepLocationRegistry in AgentSet Tests**
    - Location registration and updates
    - Concurrent access handling
    - Data persistence and recovery
@@ -416,7 +434,7 @@ async delegateStepToSpecializedAgent(step: Step): Promise<DelegationResult> {
   );
 
   if (transferResult.success) {
-    await this.stepLocationRegistry.updateStepLocation(
+    await this.agentSet.registerStepLocation( // Changed to use agentSet
       step.id,
       targetAgent.id,
       targetAgent.agentSetUrl
@@ -446,7 +464,7 @@ async dereferenceInputsForExecution(allSteps: Step[], missionId: string): Promis
 
     if (!sourceStep) {
       // Check if step is owned by another agent
-      const stepLocation = await this.stepLocationRegistry.getStepLocation(dep.sourceStepId);
+      const stepLocation = await this.agentSet.getStepLocation(dep.sourceStepId); // Changed to use agentSet
 
       if (stepLocation && stepLocation.currentOwnerAgentId !== this.ownerAgentId) {
         // Fetch remote step data
@@ -480,11 +498,12 @@ async dereferenceInputsForExecution(allSteps: Step[], missionId: string): Promis
 }
 ```
 
-### Example 3: Location Registry Implementation
+### Example 3: Location Registry Implementation in AgentSet
 ```typescript
-export class StepLocationRegistry {
-  private locationCache = new Map<string, StepLocation>();
-  private persistenceManager: AgentPersistenceManager;
+// In AgentSet.ts
+export class AgentSet extends BaseEntity {
+  private stepLocationRegistry = new Map<string, StepLocation>();
+  // ... other properties
 
   async registerStep(stepId: string, agentId: string, agentSetUrl: string): Promise<void> {
     const location: StepLocation = {
@@ -495,7 +514,7 @@ export class StepLocationRegistry {
       delegationChain: []
     };
 
-    this.locationCache.set(stepId, location);
+    this.stepLocationRegistry.set(stepId, location);
 
     // Persist to database
     await this.persistenceManager.saveStepLocation(location);
@@ -505,7 +524,7 @@ export class StepLocationRegistry {
   }
 
   async updateStepLocation(stepId: string, newAgentId: string, newAgentSetUrl: string): Promise<void> {
-    const currentLocation = this.locationCache.get(stepId);
+    const currentLocation = this.stepLocationRegistry.get(stepId);
     if (!currentLocation) {
       throw new Error(`Step ${stepId} not found in location registry`);
     }
@@ -517,7 +536,7 @@ export class StepLocationRegistry {
       lastUpdated: new Date().toISOString()
     };
 
-    this.locationCache.set(stepId, updatedLocation);
+    this.stepLocationRegistry.set(stepId, updatedLocation);
     await this.persistenceManager.saveStepLocation(updatedLocation);
     await this.notifyTrafficManager('step_location_updated', updatedLocation);
   }

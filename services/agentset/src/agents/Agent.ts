@@ -14,6 +14,8 @@ import { Step, StepStatus, createFromPlan } from './Step';
 import { StateManager } from '../utils/StateManager';
 import { classifyStepError, StepErrorType } from '../utils/ErrorClassifier';
 import { CollaborationMessage, CollaborationMessageType, ConflictResolution as ConflictResolutionData, ConflictResolutionResponse, TaskDelegationRequest, TaskResult, KnowledgeSharing, ConflictResolutionRequest } from '../collaboration/CollaborationProtocol';
+import { CrossAgentDependencyResolver } from '../utils/CrossAgentDependencyResolver';
+import { AgentSet } from '../AgentSet';
 
 
 import * as amqp from 'amqplib';
@@ -50,6 +52,8 @@ export class Agent extends BaseEntity {
     private replanDepth: number = 0; // Track replanning depth
     private maxReplanDepth: number = 3; // Maximum replanning depth
     private _initializationPromise: Promise<boolean>;
+    private agentSet: AgentSet;
+    private crossAgentResolver: CrossAgentDependencyResolver;
 
     public get initialized(): Promise<boolean> {
         return this._initializationPromise;
@@ -60,8 +64,10 @@ export class Agent extends BaseEntity {
     private currentQuestionResolve: ((value: string) => void) | null = null;
     private delegatedSteps: Map<string, string> = new Map(); // Map<taskId, stepId>
 
-    constructor(config: AgentConfig) {
+    constructor(config: AgentConfig & { agentSet: AgentSet }) {
         super(config.id, 'AgentSet', `agentset`, process.env.PORT || '9000');
+        this.agentSet = config.agentSet;
+        this.crossAgentResolver = new CrossAgentDependencyResolver(this.agentSet);
         this.agentPersistenceManager = new AgentPersistenceManager(undefined, this.authenticatedApi);
         this.stateManager = new StateManager(config.id, this.agentPersistenceManager);
         this.inputValues = config.inputValues instanceof Map ? config.inputValues : new Map(Object.entries(config.inputValues||{}));
@@ -122,7 +128,8 @@ export class Agent extends BaseEntity {
                 inputValues: inputValues,
                 description: description,
                 status: status,
-                persistenceManager: this.agentPersistenceManager
+                persistenceManager: this.agentPersistenceManager,
+                crossAgentResolver: this.crossAgentResolver
             });
         return newStep;
     }
@@ -632,7 +639,7 @@ Please consider this context when planning and executing the mission. Provide de
 
     private addStepsFromPlan(plan: ActionVerbTask[], parentStep: Step) {
         console.log(`[Agent ${this.id}] Parsed plan for addStepsFromPlan:`, JSON.stringify(this.truncateLargeStrings(plan), null, 2));
-        const newSteps = createFromPlan(plan, this.agentPersistenceManager, parentStep, this);
+        const newSteps = createFromPlan(plan, this.agentPersistenceManager, this.crossAgentResolver, parentStep, this);
         this.steps.push(...newSteps);
     }
 

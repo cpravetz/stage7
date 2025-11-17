@@ -4,6 +4,8 @@ import { MapSerializer } from '@cktmcs/shared';
 import { MessageType } from '@cktmcs/shared'; // Ensured MessageType is here, assuming it's separate or also from shared index
 import { AgentPersistenceManager } from '../utils/AgentPersistenceManager';
 import { RuntimeForeachDetector, ForeachModification } from '../utils/RuntimeForeachDetector.js';
+import { DelegationRecord } from '../types/DelegationTypes';
+import { CrossAgentDependencyResolver } from '../utils/CrossAgentDependencyResolver';
 
 export enum StepStatus {
     PENDING = 'pending',
@@ -60,6 +62,14 @@ export class Step {
     private tempData: Map<string, any> = new Map();
     private persistenceManager: AgentPersistenceManager;
     private backoffTime: number = 1000; // Initial backoff time in ms
+    private crossAgentResolver: CrossAgentDependencyResolver;
+
+    // Ownership and Delegation
+    currentOwnerAgentId: string;
+    originalOwnerAgentId: string;
+    delegationHistory: DelegationRecord[];
+    isRemotelyOwned: boolean;
+    lastOwnershipChange: string;
 
     // Phase 2: Runtime FOREACH detection
     private static runtimeForeachDetector?: RuntimeForeachDetector;
@@ -166,7 +176,8 @@ export class Step {
             }
         } else if (Array.isArray(stepsInput.value)) {
             steps = stepsInput.value as ActionVerbTask[];
-        } else {
+        }
+        else {
             throw new Error('steps must be an array or JSON string');
         }
 
@@ -215,7 +226,8 @@ export class Step {
                     console.warn(`[Step.normalizeOutputs] Unable to parse outputs string:`, e instanceof Error ? e.message : e);
                     return new Map();
                 }
-            } else if (rawOutputs && rawOutputs._type === 'Map' && Array.isArray(rawOutputs.entries)) {
+            }
+            else if (rawOutputs && rawOutputs._type === 'Map' && Array.isArray(rawOutputs.entries)) {
                 return new Map(rawOutputs.entries);
             } else if (typeof rawOutputs === 'object') {
                 return new Map(Object.entries(rawOutputs));
@@ -245,6 +257,11 @@ export class Step {
         persistenceManager: AgentPersistenceManager,
         maxRetries?: number,
         maxRecoverableRetries?: number
+        // Ownership and Delegation
+        currentOwnerAgentId?: string;
+        delegationHistory?: DelegationRecord[];
+        lastOwnershipChange?: string;
+        crossAgentResolver: CrossAgentDependencyResolver;
     }) {
     
         console.log(`[Step constructor] params.outputs =`, params.outputs);
@@ -280,7 +297,16 @@ export class Step {
         this.lastError = null;
 
         this.persistenceManager = params.persistenceManager;
+        this.crossAgentResolver = params.crossAgentResolver;
         this.awaitsSignal = '';
+
+        // Initialize ownership and delegation fields
+        this.originalOwnerAgentId = params.ownerAgentId || 'unknown_agent';
+        this.currentOwnerAgentId = params.currentOwnerAgentId || this.originalOwnerAgentId;
+        this.delegationHistory = params.delegationHistory || [];
+        this.isRemotelyOwned = this.currentOwnerAgentId !== this.ownerAgentId;
+        this.lastOwnershipChange = params.lastOwnershipChange || new Date().toISOString();
+
         // Log step creation event (only if persistenceManager is available)
         if (this.persistenceManager) {
             this.logEvent({
@@ -353,10 +379,21 @@ export class Step {
             let sourceStep = allSteps.find(s => s.id === dep.sourceStepId);
 
             if (!sourceStep) {
+                const remoteOutput = await this.crossAgentResolver.getStepOutput(dep.sourceStepId, dep.outputName);
+                if (remoteOutput) {
+                    inputRunValues.set(dep.inputName, {
+                        inputName: dep.inputName,
+                        value: remoteOutput.result,
+                        valueType: remoteOutput.resultType,
+                        args: {}
+                    });
+                    continue;
+                }
+
                 try {
                     const stepData = await this.persistenceManager.loadStep(dep.sourceStepId);
                     if (stepData) {
-                        sourceStep = new Step({ ...stepData, persistenceManager: this.persistenceManager });
+                        sourceStep = new Step({ ...stepData, persistenceManager: this.persistenceManager, crossAgentResolver: this.crossAgentResolver });
                     }
                 } catch (e) {
                     console.warn(`[Step ${this.id}]   - Error attempting to load source step ${dep.sourceStepId} from persistence:`, e instanceof Error ? e.message : e);
@@ -517,10 +554,15 @@ export class Step {
             let sourceStep = allSteps.find(s => s.id === sourceStepId);
 
             if (!sourceStep) {
+                const remoteOutput = await this.crossAgentResolver.getStepOutput(sourceStepId, outputName);
+                if (remoteOutput) {
+                    return remoteOutput.result;
+                }
+
                 try {
                     const stepData = await this.persistenceManager.loadStep(sourceStepId);
                     if (stepData) {
-                        sourceStep = new Step({ ...stepData, persistenceManager: this.persistenceManager });
+                        sourceStep = new Step({ ...stepData, persistenceManager: this.persistenceManager, crossAgentResolver: this.crossAgentResolver });
                     }
                 } catch (e) {
                     console.warn(`[Step ${this.id}]   - Error attempting to load source step ${sourceStepId} from persistence during recursive resolution:`, e instanceof Error ? e.message : e);
@@ -713,7 +755,7 @@ export class Step {
             const item = inputArray[i];
             console.log(`[Step ${this.id}] handleForeach: Processing item ${i}:`, JSON.stringify(item));
             
-            const iterationSteps = createFromPlan(subPlanTemplate, this.persistenceManager, this);
+            const iterationSteps = createFromPlan(subPlanTemplate, this.persistenceManager, this.crossAgentResolver, this);
 
             iterationSteps.forEach(step => {
                 console.log(`[Step ${this.id}] handleForeach: Configuring step ${step.id} for item ${i}`);
@@ -1049,7 +1091,8 @@ export class Step {
                 description: `Query knowledge base for relevant information about ${queryText}`,
                 missionId: this.missionId,
                 dependencies: [],
-                persistenceManager: this.persistenceManager
+                persistenceManager: this.persistenceManager,
+                crossAgentResolver: this.crossAgentResolver
             });
 
             // Set up inputs for the query
@@ -1122,11 +1165,14 @@ export class Step {
             // Create a temporary step for saving to knowledge base
             const saveStep = new Step({
                 id: uuidv4(),
+                missionId: this.missionId,
+                ownerAgentId: this.ownerAgentId,
                 actionVerb: 'SAVE_TO_KNOWLEDGE_BASE',
                 description: `Save results from ${this.actionVerb} to knowledge base`,
-                missionId: this.missionId,
+                inputReferences: new Map<string, InputReference>(), 
                 dependencies: [],
-                persistenceManager: this.persistenceManager
+                persistenceManager: this.persistenceManager,
+                crossAgentResolver: this.crossAgentResolver
             });
 
             // Set up inputs for saving
@@ -1186,8 +1232,10 @@ export class Step {
                 actionVerb: 'REFLECT',
                 description: `Reflect on ${this.actionVerb} execution for self-correction`,
                 missionId: this.missionId,
+                inputReferences: new Map<string, InputReference>(),
                 dependencies: [],
-                persistenceManager: this.persistenceManager
+                persistenceManager: this.persistenceManager,
+                crossAgentResolver: this.crossAgentResolver
             });
 
             // Set up inputs for reflection
@@ -1256,7 +1304,7 @@ export class Step {
 
         const stepsToExecute = result ? trueSteps : falseSteps;
         if (stepsToExecute) {
-            const newSteps = createFromPlan(stepsToExecute, this.persistenceManager, this);
+            const newSteps = createFromPlan(stepsToExecute, this.persistenceManager, this.crossAgentResolver, this);
             return [{
                 success: true,
                 name: 'steps',
@@ -1285,7 +1333,7 @@ export class Step {
             const newSteps: Step[] = [];
 
             for (let i = 0; i < count; i++) {
-                const iterationSteps = createFromPlan(steps, this.persistenceManager, this);
+                const iterationSteps = createFromPlan(steps, this.persistenceManager, this.crossAgentResolver, this);
                 newSteps.push(...iterationSteps);
             }
 
@@ -1315,7 +1363,7 @@ export class Step {
 
         try {
             const steps = this.parseStepsInput(stepsInput);
-            const newSteps = createFromPlan(steps, this.persistenceManager, this);
+            const newSteps = createFromPlan(steps, this.persistenceManager, this.crossAgentResolver, this);
 
             newSteps.forEach(step => {
                 step.timeout = timeoutMs;
@@ -1366,11 +1414,12 @@ export class Step {
             ]),
             description: 'While loop condition evaluation',
             persistenceManager: this.persistenceManager,
+            crossAgentResolver: this.crossAgentResolver,
         });
 
         newSteps.push(checkStep);
 
-        const iterationSteps = createFromPlan(steps, this.persistenceManager, this);
+        const iterationSteps = createFromPlan(steps, this.persistenceManager, this.crossAgentResolver, this);
 
         iterationSteps.forEach(step => {
             step.dependencies.push({
@@ -1396,6 +1445,7 @@ export class Step {
             ]),
             description: 'While loop continuation check',
             persistenceManager: this.persistenceManager,
+            crossAgentResolver: this.crossAgentResolver,
         });
 
         newSteps.push(nextCheckStep);
@@ -1513,7 +1563,7 @@ export class Step {
 
         const newSteps: Step[] = [];
 
-        const iterationSteps = createFromPlan(steps, this.persistenceManager, this);
+        const iterationSteps = createFromPlan(steps, this.persistenceManager, this.crossAgentResolver, this);
         newSteps.push(...iterationSteps);
 
         const checkStep = new Step({
@@ -1530,6 +1580,7 @@ export class Step {
             ]),
             description: 'Until loop condition evaluation',
             persistenceManager: this.persistenceManager,
+            crossAgentResolver: this.crossAgentResolver,
         });
 
         iterationSteps.forEach(step => {
@@ -1575,7 +1626,8 @@ export class Step {
                 }]
             ]),
             description: `Generate plan for: ${goal}`,
-            persistenceManager: this.persistenceManager
+            persistenceManager: this.persistenceManager,
+            crossAgentResolver: this.crossAgentResolver
         });
 
         const accomplishResult = await executeAction(accomplishStep);
@@ -1612,7 +1664,8 @@ export class Step {
                 inputReferences: task.inputReferences || new Map(),
                 inputValues: new Map<string, InputValue>(),
                 description: task.description || `Sequential step ${index + 1}`,
-                persistenceManager: this.persistenceManager
+                persistenceManager: this.persistenceManager,
+                crossAgentResolver: this.crossAgentResolver
             });
 
             if (previousStepId) {
@@ -1761,11 +1814,17 @@ export class Step {
             inputReferences: MapSerializer.transformForSerialization(this.inputReferences),
             inputValues: MapSerializer.transformForSerialization(this.inputValues),
             description: this.description,
-            dependencies: MapSerializer.transformForSerialization(this.dependencies),
+            dependencies: this.dependencies,
             outputs: MapSerializer.transformForSerialization(this.outputs),
             status: this.status,
             result: this.result,
             recommendedRole: this.recommendedRole,
+            // Ownership and Delegation
+            originalOwnerAgentId: this.originalOwnerAgentId,
+            currentOwnerAgentId: this.currentOwnerAgentId,
+            delegationHistory: this.delegationHistory,
+            isRemotelyOwned: this.isRemotelyOwned,
+            lastOwnershipChange: this.lastOwnershipChange,
         };
     }
 
@@ -1951,6 +2010,7 @@ export class Step {
 export function createFromPlan(
     plan: ActionVerbTask[],
     persistenceManager: AgentPersistenceManager,
+    crossAgentResolver: CrossAgentDependencyResolver,
     parentStep?: Step,
     agentContext?: any
 ): Step[] {
@@ -2060,7 +2120,8 @@ export function createFromPlan(
             outputs: Step.normalizeOutputs(task.outputs),
             originalOutputDefinitions: task.outputs ? new Map(Object.entries(task.outputs)) : undefined,
             recommendedRole: task.recommendedRole,
-            persistenceManager: persistenceManager
+            persistenceManager: persistenceManager,
+            crossAgentResolver: crossAgentResolver
         });
         console.log(`[createFromPlan] 📊 Created step ${step.id} (${task.actionVerb}) with ${dependencies.length} dependencies:`, 
             dependencies.map(d => `${d.inputName} <- ${d.sourceStepId}.${d.outputName}`));
