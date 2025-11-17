@@ -300,7 +300,7 @@ export class PluginExecutor {
 
             const inputsObject: { [key: string]: InputValue } = {};
             for (const [key, value] of inputValues.entries()) {
-                inputsObject[key] = value;
+                inputsObject[key] = value.value || value;
             }
             const inputsJsonString = JSON.stringify(inputsObject);
 

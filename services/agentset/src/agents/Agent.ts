@@ -202,7 +202,11 @@ export class Agent extends BaseEntity {
         // Send initial status update to TrafficManager
         await this.updateStatus();
 
+        // Proactively check for completed delegated steps
+        await this.handleDelegatedSteps();
+
         while (this.hasActiveWork()) {
+            console.debug(`[Agent ${this.id}] runUntilDone: hasActiveWork() returned true. Continuing.`);
             await this.runAgent();
             // A short delay to prevent tight, CPU-intensive loops when the agent is truly idle but not yet completed.
             await new Promise(resolve => setTimeout(resolve, 1000));
@@ -324,11 +328,15 @@ Please consider this context when planning and executing the mission. Provide de
     }
 
     private hasActiveWork(): boolean {
-        return this.steps.some(step =>
+        const activeSteps = this.steps.filter(step =>
             step.status === StepStatus.PENDING ||
             step.status === StepStatus.RUNNING ||
             step.status === StepStatus.SUB_PLAN_RUNNING
         );
+        if (activeSteps.length === 0) {
+            console.debug(`[Agent ${this.id}] hasActiveWork: No active steps found. All steps: ${this.steps.map(s => `${s.id} (${s.actionVerb}, ${s.status})`).join(', ') || 'None'}`);
+        }
+        return activeSteps.length > 0;
     }
 
     private _extractPlanFromReflectionResult(result: PluginOutput[]): ActionVerbTask[] | null {
@@ -510,6 +518,7 @@ Please consider this context when planning and executing the mission. Provide de
                     this.say(`Generated a plan with ${actualPlanArray.length} steps`);
                     console.log(`[Agent ${this.id}] runAgent: Planning step ${step.id} generated plan:`, JSON.stringify(actualPlanArray));
                     this.addStepsFromPlan(actualPlanArray, step);
+                    console.debug(`[Agent ${this.id}] executeStep: Steps after adding new plan: ${this.steps.map(s => `${s.id} (${s.actionVerb}, ${s.status})`).join(', ')}`);
                     await this.updateStatus();
                     // After adding new steps from a PLAN result, we should also return
                     // to allow the main loop to re-evaluate.
@@ -539,7 +548,7 @@ Please consider this context when planning and executing the mission. Provide de
             }
 
             const pendingSteps = this.steps.filter(step => step.status === StepStatus.PENDING);
-            //console.log(`[Agent ${this.id}] runAgent: Pending steps: ${pendingSteps.map(s => `${s.id} (${s.actionVerb}, ${s.status})`).join(', ') || 'None'}`);
+            console.debug(`[Agent ${this.id}] runAgent: Pending steps: ${pendingSteps.map(s => `${s.id} (${s.actionVerb}, ${s.status})`).join(', ') || 'None'}`);
 
             const executableSteps = pendingSteps.filter(step => step.areDependenciesSatisfied(this.steps));
 
@@ -723,6 +732,90 @@ Please consider this context when planning and executing the mission. Provide de
             }
             default:
                 break;
+        }
+    }
+
+    private async handleDelegatedSteps(): Promise<void> {
+        const delegatedStepsToProcess = this.steps.filter(step =>
+            step.status === StepStatus.SUB_PLAN_RUNNING && step.delegatedToAgentId
+        );
+
+        for (const step of delegatedStepsToProcess) {
+            const delegatedAgentId = step.delegatedToAgentId;
+            if (!delegatedAgentId) {
+                console.warn(`[Agent ${this.id}] Delegated step ${step.id} has SUB_PLAN_RUNNING status but no delegatedToAgentId.`);
+                continue;
+            }
+
+            try {
+                // 1. Get the delegated agent's status
+                const agentStatusResponse = await this.authenticatedApi.get(`http://${this.agentSetUrl}/agent/${delegatedAgentId}`);
+                const delegatedAgentStatus = agentStatusResponse.data.status;
+
+                if (delegatedAgentStatus === AgentStatus.COMPLETED || delegatedAgentStatus === AgentStatus.ERROR) {
+                    console.log(`[Agent ${this.id}] Delegated agent ${delegatedAgentId} for step ${step.id} is ${delegatedAgentStatus}. Fetching results.`);
+
+                    // 2. Get the delegated agent's output
+                    const agentOutputResponse = await this.authenticatedApi.get(`http://${this.agentSetUrl}/agent/${delegatedAgentId}/output`);
+                    const delegatedAgentOutput = agentOutputResponse.data;
+
+                    // 3. Update the delegating step
+                    if (delegatedAgentStatus === AgentStatus.COMPLETED) {
+                        step.status = StepStatus.COMPLETED;
+                        // Directly assign the finalOutput from the delegated agent,
+                        // which should be an array of PluginOutput objects.
+                        if (Array.isArray(delegatedAgentOutput.finalOutput)) {
+                            step.result = delegatedAgentOutput.finalOutput;
+                        } else {
+                            // This case should ideally not happen if getOutput() and saveWorkProduct() are consistent.
+                            // Log a warning and attempt to wrap it as a single PluginOutput.
+                            console.warn(`[Agent ${this.id}] Delegated agent ${delegatedAgentId} finalOutput is not an array of PluginOutput. Wrapping as generic result.`);
+                            step.result = [{
+                                success: true,
+                                name: step.outputs?.keys().next().value || 'delegatedResult', // Use expected output name if available, else generic
+                                resultType: PluginParameterType.OBJECT, // Default to OBJECT
+                                result: delegatedAgentOutput.finalOutput,
+                                resultDescription: `Output from delegated agent ${delegatedAgentId}`
+                            }];
+                        }
+                        console.log(`[Agent ${this.id}] Step ${step.id} completed with result from delegated agent ${delegatedAgentId}.`);
+                    } else { // AgentStatus.ERROR
+                        step.status = StepStatus.ERROR;
+                        step.lastError = new Error(`Delegated agent ${delegatedAgentId} failed with status ${delegatedAgentStatus}.`);
+                        step.result = [{
+                            success: false,
+                            name: 'delegatedError',
+                            resultType: PluginParameterType.ERROR,
+                            result: null,
+                            error: `Delegated agent ${delegatedAgentId} failed.`,
+                            resultDescription: `Error from delegated agent ${delegatedAgentId}`
+                        }];
+                        console.error(`[Agent ${this.id}] Step ${step.id} failed due to delegated agent ${delegatedAgentId} error.`);
+                    }
+
+                    // Clean up the delegatedSteps map entry
+                    // Find the taskId associated with this step.id in delegatedSteps
+                    let taskIdToRemove: string | undefined;
+                    for (const [taskId, stepId] of this.delegatedSteps.entries()) {
+                        if (stepId === step.id) {
+                            taskIdToRemove = taskId;
+                            break;
+                        }
+                    }
+                    if (taskIdToRemove) {
+                        this.delegatedSteps.delete(taskIdToRemove);
+                        console.log(`[Agent ${this.id}] Removed delegated task ${taskIdToRemove} from map.`);
+                    }
+
+                    await this.updateStatus(); // Notify about the updated step status
+                }
+            } catch (error) {
+                console.error(`[Agent ${this.id}] Error processing delegated step ${step.id} from agent ${delegatedAgentId}:`, error instanceof Error ? error.message : error);
+                // Mark the step as error if we can't even check the delegated agent's status/output
+                step.status = StepStatus.ERROR;
+                step.lastError = new Error(`Failed to retrieve status/output for delegated agent ${delegatedAgentId}: ${error instanceof Error ? error.message : String(error)}`);
+                await this.updateStatus();
+            }
         }
     }
 
@@ -1772,7 +1865,26 @@ Please consider this context when planning and executing the mission. Provide de
                 console.log(`Received result for delegated step ${step.id}. Success: ${taskResult.success}`);
                 step.status = taskResult.success ? StepStatus.COMPLETED : StepStatus.ERROR;
                 if (taskResult.success) {
-                  step.result = MapSerializer.transformFromSerialization(taskResult.result) as PluginOutput[];
+                  let deserializedResult = MapSerializer.transformFromSerialization(taskResult.result);
+                  if (!Array.isArray(deserializedResult)) {
+                      // If it's not an array, but it's a single PluginOutput object, wrap it.
+                      if (deserializedResult && typeof deserializedResult === 'object' && 'success' in deserializedResult && 'name' in deserializedResult) {
+                          deserializedResult = [deserializedResult];
+                      } else {
+                          // If it's neither an array nor a single PluginOutput, it's an unexpected format.
+                          // Log a warning and set it to a single error PluginOutput.
+                          console.warn(`[Agent ${this.id}] Received unexpected taskResult.result format for step ${step.id}. Expected PluginOutput[] but got:`, JSON.stringify(this.truncateLargeStrings(taskResult.result)));
+                          deserializedResult = [{
+                              success: false,
+                              name: 'deserializationError',
+                              resultType: PluginParameterType.ERROR,
+                              result: null,
+                              error: 'Unexpected format for delegated task result.',
+                              resultDescription: 'Error during deserialization of delegated task result.'
+                          }];
+                      }
+                  }
+                  step.result = deserializedResult as PluginOutput[];
                   console.log(`Updated step ${step.id} with result:`, JSON.stringify(this.truncateLargeStrings(step.result), null, 2));
                   await this.saveWorkProductWithClassification(step, taskResult.result);
                 } else {
@@ -1919,6 +2031,7 @@ Explanation: ${resolution.explanation}`);
                     // Store the mapping from the delegated task ID to our internal step ID
                     this.delegatedSteps.set(delegationResponse.data.taskId, step.id);
                     step.status = StepStatus.SUB_PLAN_RUNNING; // Mark as waiting for delegation result
+                    step.delegatedToAgentId = finalRecipientId; // Set the delegated agent ID on the step
 
                     return {
                         success: true,

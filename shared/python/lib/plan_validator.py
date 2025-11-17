@@ -213,8 +213,14 @@ class PlanValidator:
         return downstream_deps
 
     def _is_valid_uuid(self, uuid_string: str) -> bool:
-        """Check if a string is a valid UUID."""
+        """Check if a string is a valid UUID and not a placeholder."""
         logger.debug(f"PlanValidator: _is_valid_uuid called for: {uuid_string}")
+        if not isinstance(uuid_string, str) or not uuid_string:
+            return False
+        # Reject known placeholder UUIDs
+        if "0000-0000-0000" in uuid_string:
+            logger.debug(f"PlanValidator: _is_valid_uuid - '{uuid_string}' is a placeholder UUID.")
+            return False
         try:
             uuid.UUID(uuid_string)
             return True
@@ -616,6 +622,7 @@ class PlanValidator:
         """
         Recursively traverses a plan structure (dictionaries and lists) and replaces
         any 'sourceStep' values that are keys in the provided mapping.
+        It also handles 'sourceStep' references embedded within JSON strings.
         """
         logger.debug("PlanValidator: _apply_uuid_map_recursive called.")
         if isinstance(data, dict):
@@ -630,6 +637,22 @@ class PlanValidator:
         elif isinstance(data, list):
             logger.debug("PlanValidator: _apply_uuid_map_recursive - Recursing into list.")
             return [self._apply_uuid_map_recursive(item, mapping) for item in data]
+        elif isinstance(data, str):
+            try:
+                # Check if the string is a JSON object or array that might contain references
+                # Avoid parsing simple strings that are not JSON objects/arrays
+                if data.strip().startswith(('{', '[')):
+                    parsed_json = json.loads(data)
+                    if isinstance(parsed_json, (dict, list)):
+                        logger.debug("PlanValidator: _apply_uuid_map_recursive - Found JSON string, recursing into it.")
+                        # Recurse into the parsed JSON
+                        repaired_json = self._apply_uuid_map_recursive(parsed_json, mapping)
+                        # Return the repaired structure as a JSON string, ensuring no extra whitespace
+                        return json.dumps(repaired_json, separators=(',', ':'))
+            except (json.JSONDecodeError, TypeError):
+                # Not a JSON string, or not a type that can be loaded, return as is
+                pass
+            return data
         else:
             return data
 

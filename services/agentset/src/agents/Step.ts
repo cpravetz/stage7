@@ -39,6 +39,7 @@ export class Step {
     readonly missionId: string;
     readonly actionVerb: string;
     ownerAgentId: string;
+    public delegatedToAgentId?: string;
     inputReferences: Map<string, InputReference>;
     inputValues: Map<string, InputValue>; 
     description?: string;
@@ -682,55 +683,54 @@ export class Step {
         const arrayInput = this.inputValues.get('array');
         const stepsInput = this.inputValues.get('steps');
         console.log(`[Step ${this.id}] handleForeach: Starting execution.`);
-        console.log(`[Step ${this.id}] handleForeach: arrayInput.value =`, arrayInput?.value);
-        console.log(`[Step ${this.id}] handleForeach: stepsInput.value =`, stepsInput?.value);
+        console.log(`[Step ${this.id}] handleForeach: arrayInput =`, JSON.stringify(arrayInput, null, 2));
+        console.log(`[Step ${this.id}] handleForeach: stepsInput =`, JSON.stringify(stepsInput, null, 2));
 
-        if (!arrayInput || !arrayInput.value) {
-            console.error(`[Step ${this.id}] handleForeach: Error - FOREACH requires an "array" input.`);
-            return this.createErrorResponse('FOREACH requires an "array" input.', '[Step]Error in FOREACH step');
+        if (!arrayInput || arrayInput.value === undefined || arrayInput.value === null) {
+            console.error(`[Step ${this.id}] handleForeach: Error - FOREACH requires a non-null "array" input.`);
+            return this.createErrorResponse('FOREACH requires a non-null "array" input.', '[Step]Error in FOREACH step');
         }
 
         let inputArray: any[];
         if (Array.isArray(arrayInput.value)) {
             inputArray = arrayInput.value;
         } else {
-            console.error(`[Step ${this.id}] handleForeach: Error - FOREACH requires an "array" input that is an array. Received type: ${typeof arrayInput.value}`);
-            return this.createErrorResponse('FOREACH requires an "array" input that is an array.', '[Step]Error in FOREACH step');
+            console.error(`[Step ${this.id}] handleForeach: Error - FOREACH "array" input must be an array. Received type: ${typeof arrayInput.value}`);
+            return this.createErrorResponse(`FOREACH "array" input must be an array. Received type: ${typeof arrayInput.value}`, '[Step]Error in FOREACH step');
         }
 
         if (!stepsInput || !Array.isArray(stepsInput.value)) {
-            console.error(`[Step ${this.id}] handleForeach: Error - FOREACH requires a "steps" input of type plan. Received type: ${stepsInput ? typeof stepsInput.value : 'undefined'}`);
-            return this.createErrorResponse('FOREACH requires a "steps" input of type plan.', '[Step]Error in FOREACH step');
+            console.error(`[Step ${this.id}] handleForeach: Error - FOREACH requires a "steps" input of type plan (array). Received type: ${stepsInput ? typeof stepsInput.value : 'undefined'}`);
+            return this.createErrorResponse('FOREACH requires a "steps" input of type plan (array).', '[Step]Error in FOREACH step');
         }
 
         const subPlanTemplate: ActionVerbTask[] = stepsInput.value;
         const allNewSteps: Step[] = [];
         const endStepIds: string[] = [];
 
-        console.log(`[Step ${this.id}] handleForeach: Iterating ${inputArray.length} times.`);
+        console.log(`[Step ${this.id}] handleForeach: Iterating over ${inputArray.length} items.`);
         for (let i = 0; i < inputArray.length; i++) {
             const item = inputArray[i];
+            console.log(`[Step ${this.id}] handleForeach: Processing item ${i}:`, JSON.stringify(item));
             
-            // Create a new set of steps for this iteration
             const iterationSteps = createFromPlan(subPlanTemplate, this.persistenceManager, this);
 
-            // Inject the loop item value into the steps that need it
             iterationSteps.forEach(step => {
+                console.log(`[Step ${this.id}] handleForeach: Configuring step ${step.id} for item ${i}`);
                 for (const [inputName, inputRef] of step.inputReferences.entries()) {
-                                            if (inputRef.outputName === 'item' && (inputRef.sourceId === '0' || inputRef.sourceId === this.id)) {
-                                                // Directly pass the entire 'item' from the inputArray
-                                                step.inputValues.set(inputName, {
-                                                    inputName: inputName,
-                                                    value: item, // Pass the entire item
-                                                    valueType: this.inferValueType(item)
-                                                });
-                                                console.log(`[Step ${this.id}] handleForeach: Injected item '${JSON.stringify(item)}' into step ${step.id} input '${inputName}'.`);
-                                            }                }
+                    if (inputRef.outputName === 'item' && (inputRef.sourceId === '0' || inputRef.sourceId === this.id)) {
+                        step.inputValues.set(inputName, {
+                            inputName: inputName,
+                            value: item,
+                            valueType: this.inferValueType(item)
+                        });
+                        console.log(`[Step ${this.id}] handleForeach:   - Injected item into step ${step.id} input '${inputName}'. Value: ${JSON.stringify(item).substring(0,100)}`);
+                    }
+                }
             });
 
             allNewSteps.push(...iterationSteps);
 
-            // Find end steps for this instance
             const allSourceStepIds = new Set<string>();
             iterationSteps.forEach(step => {
                 step.dependencies.forEach(dep => {
@@ -747,15 +747,15 @@ export class Step {
         console.log(`[Step ${this.id}] handleForeach: Generated ${allNewSteps.length} new steps in total.`);
         const planOutput: PluginOutput = {
             success: true,
-            name: 'newSteps', // This name is internal to FOREACH, Agent will process the PLAN resultType
+            name: 'newSteps',
             resultType: PluginParameterType.PLAN,
             resultDescription: `[Step] FOREACH created ${allNewSteps.length} new steps.`,
             result: allNewSteps
         };
-        console.log(`[Step ${this.id}] FOREACH created ${allNewSteps.length} new steps.`);
+        
         const endStepsOutput: PluginOutput = {
             success: true,
-            name: 'steps', // Changed name to 'steps' to match the plan's output definition
+            name: 'steps',
             resultType: PluginParameterType.ARRAY,
             resultDescription: 'UUIDs of end steps for each subplan instance',
             result: endStepIds
@@ -1104,12 +1104,14 @@ export class Step {
 
             // Prepare content to save
             let content = '';
-            if (this.result[0].resultDescription) {
+            if (this.result[0].result !== undefined && this.result[0].result !== null) {
+                if (typeof this.result[0].result === 'string') {
+                    content = this.result[0].result;
+                } else {
+                    content = JSON.stringify(this.result[0].result);
+                }
+            } else if (this.result[0].resultDescription) {
                 content = this.result[0].resultDescription;
-            } else if (typeof this.result[0].result === 'string') {
-                content = this.result[0].result;
-            } else {
-                content = JSON.stringify(this.result[0].result);
             }
 
             // Limit content length for storage
@@ -2065,11 +2067,17 @@ export function createFromPlan(
         return step;
     });
 
-    // Second pass: Update dependencies to use the new IDs
+    // Second pass: Update dependencies and inputReferences to use the new IDs
     newSteps.forEach(step => {
         step.dependencies.forEach(dep => {
             if (oldTaskIdToNewStepIdMap.has(dep.sourceStepId)) {
                 dep.sourceStepId = oldTaskIdToNewStepIdMap.get(dep.sourceStepId)!;
+            }
+        });
+        // Also update sourceId in inputReferences
+        step.inputReferences.forEach(inputRef => {
+            if (inputRef.sourceId && oldTaskIdToNewStepIdMap.has(inputRef.sourceId)) {
+                inputRef.sourceId = oldTaskIdToNewStepIdMap.get(inputRef.sourceId)!;
             }
         });
     });
