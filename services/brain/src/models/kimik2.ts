@@ -31,8 +31,8 @@ export class KimiK2Model extends BaseModel {
         ]);
 
         super({
-            name: "or/moonshotai/kimi-k2:free",
-            modelName: "moonshotai/kimi-k2:free",
+            name: "or/moonshotai/kimi-k2",
+            modelName: "moonshotai/kimi-k2",
             interfaceName: "openrouter",
             serviceName: "ORService",
             tokenLimit: 66000, // Adjust this value if you know the exact token limit for Claude 2

@@ -298,9 +298,9 @@ export class PluginExecutor {
                 pythonExecutable = isWindows ? 'python.exe' : 'python3'; // Fallback to system python
             }
 
-            const inputsObject: { [key: string]: InputValue } = {};
+            const inputsObject: { [key: string]: any } = {};
             for (const [key, value] of inputValues.entries()) {
-                inputsObject[key] = value.value || value;
+                inputsObject[key] = value.value;
             }
             const inputsJsonString = JSON.stringify(inputsObject);
 

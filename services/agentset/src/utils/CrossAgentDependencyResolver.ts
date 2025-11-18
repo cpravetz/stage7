@@ -1,4 +1,5 @@
-import { PluginOutput, StepStatus } from '@cktmcs/shared';
+import { PluginOutput } from '@cktmcs/shared';
+import { StepStatus } from '../agents/Step';
 import { AgentSet } from '../AgentSet';
 import { Step } from '../agents/Step';
 

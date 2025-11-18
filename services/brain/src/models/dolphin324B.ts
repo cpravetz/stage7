@@ -31,8 +31,8 @@ export class Dolphin324BModel extends BaseModel {
         ]);
 
         super({
-            name: "or/cognitivecomputations/dolphin3.0-mistral-24b:free",
-            modelName: "cognitivecomputations/dolphin3.0-mistral-24b:free",
+            name: "or/cognitivecomputations/dolphin3.0-mistral-24b",
+            modelName: "cognitivecomputations/dolphin3.0-mistral-24b",
             interfaceName: "openrouter",
             serviceName: "ORService",
             tokenLimit: 32000, 

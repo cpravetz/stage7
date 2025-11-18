@@ -165,6 +165,8 @@ def call_brain(prompt: str, inputs: Dict[str, Any], response_type: str = "json")
             'Authorization': f'Bearer {auth_token}'
         }
 
+        logger.debug(f"Brain URL: http://{brain_url}/chat")
+        logger.debug(f"Payload size: {len(json.dumps(payload))} bytes")
         response = requests.post(
             f"http://{brain_url}/chat",
             json=payload,

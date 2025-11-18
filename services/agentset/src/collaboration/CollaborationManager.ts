@@ -29,8 +29,7 @@ export class CollaborationManager implements CollaborationProtocol {
     this.taskDelegation = taskDelegation;
     this.conflictResolution = conflictResolution;
 
-    // Periodic checks for expired tasks/conflicts
-    setInterval(() => this.taskDelegation.checkExpiredTasks(), 60000);
+    // Periodic checks for expired conflicts
     setInterval(() => this.conflictResolution.checkExpiredConflicts(), 60000);
   }
 

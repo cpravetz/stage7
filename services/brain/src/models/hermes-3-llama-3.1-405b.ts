@@ -26,7 +26,7 @@ export class NousHermesModel extends BaseModel {
 
         super({
             name: "nousresearch/hermes-3-llama-3.1-405b",
-            modelName: "nousresearch/hermes-3-llama-3.1-405b:free",
+            modelName: "nousresearch/hermes-3-llama-3.1-405b",
             interfaceName: "openrouter",
             serviceName: "ORService",
             tokenLimit: 4096, // Adjust this value if needed

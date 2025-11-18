@@ -95,6 +95,15 @@ export abstract class BaseInterface {
             console.log('[baseInterface] Initial JSON parse failed after trimming, attempting robust extraction and repair...');
         }
 
+        // NEW: Attempt to repair common JSON issues before extraction
+        try {
+            cleanedResponse = this.repairCommonJsonIssues(cleanedResponse);
+            console.log('[baseInterface] Applied common JSON repair strategies.');
+        } catch (repairError) {
+            console.warn(`[baseInterface] Error during common JSON repair: ${repairError instanceof Error ? repairError.message : String(repairError)}`);
+            // Continue with original cleanedResponse if repair fails
+        }
+
         // Attempt robust extraction from the already trimmed response
         let extractedJsonCandidate = this.extractJsonFromText(cleanedResponse);
 

@@ -31,8 +31,8 @@ export class GLM45Model extends BaseModel {
         ]);
 
         super({
-            name: "or/z-ai/glm-4.5-air:free",
-            modelName: "z-ai/glm-4.5-air:free",
+            name: "or/z-ai/glm-4.5-air",
+            modelName: "z-ai/glm-4.5-air",
             interfaceName: "openrouter",
             serviceName: "ORService",
             tokenLimit: 130000, 

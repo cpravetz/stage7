@@ -20,21 +20,12 @@ const CAPABILITIES_MANAGER_SERVICE_URL = process.env.CAPABILITIES_MANAGER_SERVIC
 
 dotenv.config();
 
-// NOTE: Don't use this directly - use this.authenticatedApi or this.getAuthenticatedAxios() instead
-// This is kept for backward compatibility only
-const api = axios.create({
-    headers: {
-      'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
-    },
-  });
-
 interface DataVersion {
     id: string;
     data: any;
     timestamp: Date;
     version: number;
-  }
+}
 
 
 export class Librarian extends BaseEntity {

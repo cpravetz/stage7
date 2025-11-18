@@ -25,35 +25,7 @@ export enum TaskStatus {
   EXPIRED = 'expired'
 }
 
-/**
- * Delegated task
- */
-export interface DelegatedTask {
-  id: string;
-  taskType: string;
-  description: string;
-  inputs: Record<string, any>;
-  delegatedBy: string;
-  delegatedTo: string;
-  status: TaskStatus;
-  createdAt: string;
-  updatedAt: string;
-  deadline?: string;
-  priority: 'low' | 'normal' | 'high' | 'urgent';
-  result?: any;
-  error?: string;
-  metrics?: {
-    startTime?: string;
-    endTime?: string;
-    duration?: number;
-  };
-}
-
-/**
- * Task delegation system
- */
 export class TaskDelegation {
-  private tasks: Map<string, DelegatedTask> = new Map();
   private agents: Map<string, Agent>;
   private trafficManagerUrl: string;
   private tokenManager: ServiceTokenManager;
@@ -122,10 +94,23 @@ export class TaskDelegation {
           this.pendingDelegations.delete(agentId); // Remove from pending
           clearTimeout(pendingDelegation.timeout); // Clear timeout
 
-          // Now, actually delegate the task
+          // Now, attempt the ownership transfer
           try {
-            const response = await this.performDelegation(pendingDelegation.delegatorId, pendingDelegation.recipientId, pendingDelegation.request);
-            pendingDelegation.resolve(response);
+            const transferResult = await this.ownershipTransferManager.transferStep(
+              pendingDelegation.request.taskId,
+              pendingDelegation.delegatorId,
+              pendingDelegation.recipientId
+            );
+
+            if (transferResult.success) {
+              pendingDelegation.resolve({
+                taskId: pendingDelegation.request.taskId,
+                accepted: true,
+                estimatedCompletion: new Date(Date.now() + 5 * 60 * 1000).toISOString() // Default 5 minutes estimation
+              });
+            } else {
+              pendingDelegation.reject(new Error(transferResult.error || 'Failed to transfer step ownership.'));
+            }
           } catch (error) {
             pendingDelegation.reject(error as Error);
           }
@@ -172,7 +157,26 @@ export class TaskDelegation {
         return { taskId: request.taskId, accepted: false, reason: `Recipient agent ${recipientId} is in a terminal state (${recipientAgent.getStatus()}).` };
       }
       if (recipientAgent.getStatus() === AgentStatus.RUNNING) {
-        return this.performDelegation(delegatorId, recipientId, request);
+        // Perform ownership transfer
+        const transferResult = await this.ownershipTransferManager.transferStep(
+          request.taskId,
+          delegatorId,
+          recipientId
+        );
+
+        if (transferResult.success) {
+          return {
+            taskId: request.taskId,
+            accepted: true,
+            estimatedCompletion: new Date(Date.now() + 5 * 60 * 1000).toISOString() // Default 5 minutes estimation
+          };
+        } else {
+          return {
+            taskId: request.taskId,
+            accepted: false,
+            reason: transferResult.error || 'Failed to transfer step ownership.'
+          };
+        }
       }
 
       // If agent is not running, store as pending and wait for status update
@@ -194,66 +198,6 @@ export class TaskDelegation {
         reason: error instanceof Error ? error.message : String(error)
       };
     }
-  }
-
-  // New private method to perform the actual delegation
-  private async performDelegation(delegatorId: string, recipientId: string, request: TaskDelegationRequest): Promise<TaskDelegationResponse> {
-    const recipientAgent = this.agents.get(recipientId);
-
-    if (!recipientAgent) {
-      // This should ideally not happen if the agent was found earlier,
-      // but it's a safeguard against the agent being removed between checks.
-      console.error(`Agent ${recipientId} not found in agents map during performDelegation.`);
-      return {
-        taskId: request.taskId,
-        accepted: false,
-        reason: `Agent ${recipientId} not found in agents map for delegation.`
-      };
-    }
-
-    // Create task
-    const task: DelegatedTask = {
-      id: request.taskId || uuidv4(),
-      taskType: request.taskType,
-      description: request.description,
-      inputs: request.inputs,
-      delegatedBy: delegatorId,
-      delegatedTo: recipientId,
-      status: TaskStatus.PENDING,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      deadline: request.deadline,
-      priority: request.priority || 'normal'
-    };
-
-    // Store task
-    this.tasks.set(task.id, task);
-
-    // Send task to recipient agent
-    const message = {
-      type: CollaborationMessageType.TASK_DELEGATION,
-      sender: delegatorId,
-      recipient: recipientId,
-      content: task
-    };
-
-    const properTaskMessage = createCollaborationMessage(
-      message.type,
-      message.sender,
-      message.recipient,
-      message.content
-    );
-    await recipientAgent.handleCollaborationMessage(properTaskMessage);
-
-    // Update task status
-    task.status = TaskStatus.ACCEPTED;
-    task.updatedAt = new Date().toISOString();
-
-    return {
-      taskId: task.id,
-      accepted: true,
-      estimatedCompletion: this.estimateCompletionTime(task)
-    };
   }
 
   /**
@@ -327,223 +271,5 @@ export class TaskDelegation {
     }
   }
 
-  /**
-   * Estimate completion time for a task
-   * @param task Task
-   * @returns Estimated completion time
-   */
-  private estimateCompletionTime(task: DelegatedTask): string {
-    // Simple estimation based on priority
-    const now = new Date();
-    let estimatedMinutes = 5; // Default
 
-    switch (task.priority) {
-      case 'urgent':
-        estimatedMinutes = 1;
-        break;
-      case 'high':
-        estimatedMinutes = 3;
-        break;
-      case 'normal':
-        estimatedMinutes = 5;
-        break;
-      case 'low':
-        estimatedMinutes = 10;
-        break;
-    }
-
-    const estimatedCompletion = new Date(now.getTime() + estimatedMinutes * 60000);
-    return estimatedCompletion.toISOString();
-  }
-
-  /**
-   * Update task status
-   * @param taskId Task ID
-   * @param status New status
-   * @param result Task result
-   * @param error Error message
-   */
-  async updateTaskStatus(
-    taskId: string,
-    status: TaskStatus,
-    result?: any,
-    error?: string
-  ): Promise<void> {
-    const task = this.tasks.get(taskId);
-
-    if (!task) {
-      throw new Error(`Task ${taskId} not found`);
-    }
-
-    // Update task
-    task.status = status;
-    task.updatedAt = new Date().toISOString();
-
-    if (result !== undefined) {
-      task.result = result;
-    }
-
-    if (error !== undefined) {
-      task.error = error;
-    }
-
-    // Update metrics
-    if (!task.metrics) {
-      task.metrics = {};
-    }
-
-    if (status === TaskStatus.IN_PROGRESS && !task.metrics.startTime) {
-      task.metrics.startTime = new Date().toISOString();
-    }
-
-    if ((status === TaskStatus.COMPLETED || status === TaskStatus.FAILED) && !task.metrics.endTime) {
-      task.metrics.endTime = new Date().toISOString();
-
-      if (task.metrics.startTime) {
-        const startTime = new Date(task.metrics.startTime).getTime();
-        const endTime = new Date(task.metrics.endTime).getTime();
-        task.metrics.duration = (endTime - startTime) / 1000; // Duration in seconds
-      }
-    }
-
-    // Notify delegator
-    await this.notifyTaskUpdate(task);
-  }
-
-  /**
-   * Notify delegator about task update
-   * @param task Updated task
-   */
-  private async notifyTaskUpdate(task: DelegatedTask): Promise<void> {
-    try {
-      const delegatorAgent = this.agents.get(task.delegatedBy);
-
-      if (delegatorAgent) {
-        // Send task update to delegator agent
-        const message = {
-          type: task.status === TaskStatus.COMPLETED || task.status === TaskStatus.FAILED
-            ? CollaborationMessageType.TASK_RESULT
-            : CollaborationMessageType.TASK_STATUS,
-          sender: task.delegatedTo,
-          recipient: task.delegatedBy,
-          content: task
-        };
-
-        const properDelegationMessage = createCollaborationMessage(
-          message.type,
-          message.sender,
-          message.recipient,
-          message.content
-        );
-
-        await delegatorAgent.handleCollaborationMessage(properDelegationMessage);
-      } else {
-        // Try to find delegator agent in other agent sets
-        const agentLocation = await this.findAgentLocation(task.delegatedBy);
-
-        if (agentLocation) {
-          // Get a token for authentication
-          const token = await this.tokenManager.getToken();
-
-          // Forward task update to the agent's location
-          await axios.post(`http://${agentLocation}/taskUpdate`, {
-            taskId: task.id,
-            status: task.status,
-            result: task.result,
-            error: task.error
-          }, {
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`
-            }
-          });
-        }
-      }
-    } catch (error) {
-      analyzeError(error as Error);
-      console.error('Error notifying task update:', error);
-    }
-  }
-
-  /**
-   * Get task by ID
-   * @param taskId Task ID
-   * @returns Task or undefined if not found
-   */
-  getTask(taskId: string): DelegatedTask | undefined {
-    return this.tasks.get(taskId);
-  }
-
-  /**
-   * Get tasks delegated by an agent
-   * @param agentId Agent ID
-   * @returns Tasks delegated by the agent
-   */
-  getTasksDelegatedBy(agentId: string): DelegatedTask[] {
-    return Array.from(this.tasks.values())
-      .filter(task => task.delegatedBy === agentId);
-  }
-
-  /**
-   * Get tasks delegated to an agent
-   * @param agentId Agent ID
-   * @returns Tasks delegated to the agent
-   */
-  getTasksDelegatedTo(agentId: string): DelegatedTask[] {
-    return Array.from(this.tasks.values())
-      .filter(task => task.delegatedTo === agentId);
-  }
-
-  /**
-   * Cancel a task
-   * @param taskId Task ID
-   * @param agentId Agent ID requesting cancellation
-   * @returns True if cancelled, false if not found
-   */
-  async cancelTask(taskId: string, agentId: string): Promise<boolean> {
-    const task = this.tasks.get(taskId);
-
-    if (!task) {
-      return false;
-    }
-
-    // Check if agent is the delegator
-    if (task.delegatedBy !== agentId) {
-      throw new Error(`Agent ${agentId} is not the delegator of task ${taskId}`);
-    }
-
-    // Check if task can be cancelled
-    if (task.status === TaskStatus.COMPLETED ||
-        task.status === TaskStatus.FAILED ||
-        task.status === TaskStatus.CANCELLED) {
-      return false;
-    }
-
-    // Update task status
-    await this.updateTaskStatus(taskId, TaskStatus.CANCELLED);
-
-    return true;
-  }
-
-  /**
-   * Check for expired tasks
-   */
-  async checkExpiredTasks(): Promise<void> {
-    const now = new Date();
-
-    for (const [taskId, task] of this.tasks.entries()) {
-      if (task.deadline &&
-          task.status !== TaskStatus.COMPLETED &&
-          task.status !== TaskStatus.FAILED &&
-          task.status !== TaskStatus.CANCELLED &&
-          task.status !== TaskStatus.EXPIRED) {
-
-        const deadline = new Date(task.deadline);
-
-        if (now > deadline) {
-          await this.updateTaskStatus(taskId, TaskStatus.EXPIRED, undefined, 'Task deadline expired');
-        }
-      }
-    }
-  }
 }

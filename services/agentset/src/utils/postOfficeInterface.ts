@@ -16,7 +16,7 @@ export async function getServiceUrls(entity: BaseEntity): Promise<{
         const { capabilitiesManagerUrl, brainUrl, trafficManagerUrl, librarianUrl } = urls;
 
         // Check if any of the URLs are undefined or empty
-        const validCapabilitiesManagerUrl = capabilitiesManagerUrl || process.env.CAPABILITIESMANAGER_URL || 'capabilitiesmanager:5060';
+        const validCapabilitiesManagerUrl = capabilitiesManagerUrl || process.env.CAPABILITIESMANAGER_URL || 'http://capabilitiesmanager:5060';
         const validBrainUrl = brainUrl || process.env.BRAIN_URL || 'brain:5070';
         const validTrafficManagerUrl = trafficManagerUrl || process.env.TRAFFICMANAGER_URL || 'trafficmanager:5080';
         const validLibrarianUrl = librarianUrl || process.env.LIBRARIAN_URL || 'librarian:5040';

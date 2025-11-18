@@ -629,12 +629,11 @@ class MissionControl extends BaseEntity {
     
             const trafficManagerResponse = await this.authenticatedApi.get(`http://${this.trafficManagerUrl}/getAgentStatistics/${missionId}`);
             const trafficManagerStatistics = trafficManagerResponse.data;
-    
-            trafficManagerStatistics.agentStatisticsByStatus = MapSerializer.transformFromSerialization(trafficManagerStatistics.agentStatisticsByStatus);
-    
-            if (trafficManagerStatistics.agentStatisticsByStatus instanceof Map) {
-                trafficManagerStatistics.agentStatisticsByStatus.forEach((agentList: AgentStatistics[]) => {
-                    agentList.forEach((agentStat: any) => {
+            console.log(`Fetched traffic manager statistics for mission ${missionId}:`, trafficManagerStatistics);
+                        trafficManagerStatistics.agentStatistics = MapSerializer.transformFromSerialization(trafficManagerStatistics.agentStatistics);
+            
+                        if (trafficManagerStatistics.agentStatistics instanceof Map) {
+                            trafficManagerStatistics.agentStatistics.forEach((agentList: AgentStatistics[]) => {                    agentList.forEach((agentStat: any) => {
                         if (agentStat.steps && typeof agentStat.steps === 'object' && !Array.isArray(agentStat.steps)) {
                             console.warn(`MissionControl: Reconstructing steps for agent ${agentStat.id} which were an object.`);
                             try {
@@ -655,8 +654,8 @@ class MissionControl extends BaseEntity {
             const missionStats: MissionStatistics = {
                 llmCalls: llmCallsResponse.data.llmCalls,
                 activeLLMCalls: llmCallsResponse.data.activeLLMCalls,
-                agentCountByStatus: trafficManagerStatistics.agentStatisticsByType.agentCountByStatus,
-                agentStatistics: MapSerializer.transformForSerialization(trafficManagerStatistics.agentStatisticsByStatus),
+                agentCountByStatus: trafficManagerStatistics.agentCountByStatus,
+                agentStatistics: MapSerializer.transformForSerialization(trafficManagerStatistics.agentStatistics),
                 engineerStatistics: engineerStatisticsResponse.data
             };
     

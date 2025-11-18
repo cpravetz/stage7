@@ -3,7 +3,7 @@ import express from 'express';
 import axios from 'axios';
 import { AgentStatus } from '../utils/agentStatus';
 import { getServiceUrls } from '../utils/postOfficeInterface';
-import { WorkProduct, Deliverable, MapSerializer, BaseEntity, LLMConversationType } from '@cktmcs/shared';
+import { MapSerializer, BaseEntity, LLMConversationType } from '@cktmcs/shared';
 import { AgentPersistenceManager } from '../utils/AgentPersistenceManager';
 import { PluginOutput, PluginParameterType, InputValue, ExecutionContext as PlanExecutionContext, MissionFile } from '@cktmcs/shared';
 import { ActionVerbTask, InputReference } from '@cktmcs/shared';
@@ -13,7 +13,7 @@ import { analyzeError } from '@cktmcs/errorhandler';
 import { Step, StepStatus, createFromPlan } from './Step';
 import { StateManager } from '../utils/StateManager';
 import { classifyStepError, StepErrorType } from '../utils/ErrorClassifier';
-import { CollaborationMessage, CollaborationMessageType, ConflictResolution as ConflictResolutionData, ConflictResolutionResponse, TaskDelegationRequest, KnowledgeSharing, ConflictResolutionRequest } from '../collaboration/CollaborationProtocol';
+import { CollaborationMessageType, ConflictResolutionResponse, KnowledgeSharing, } from '../collaboration/CollaborationProtocol';
 import { CrossAgentDependencyResolver } from '../utils/CrossAgentDependencyResolver';
 import { AgentSet } from '../AgentSet';
 
@@ -63,11 +63,11 @@ export class Agent extends BaseEntity {
     private currentQuestionResolve: ((value: string) => void) | null = null;
 
     constructor(config: AgentConfig & { agentSet: AgentSet }) {
-        super(config.id, 'AgentSet', `agentset`, process.env.PORT || '9000');
+        super(config.id, 'Agent', config.agentSet.id, config.agentSet.port, true);
         this.agentSet = config.agentSet;
         this.crossAgentResolver = new CrossAgentDependencyResolver(this.agentSet);
         this.agentPersistenceManager = new AgentPersistenceManager(undefined, this.authenticatedApi);
-        this.stateManager = new StateManager(config.id, this.agentPersistenceManager);
+        this.stateManager = new StateManager(config.id, this.agentPersistenceManager, this.crossAgentResolver);
         this.inputValues = config.inputValues instanceof Map ? config.inputValues : new Map(Object.entries(config.inputValues||{}));
         this.missionId = config.missionId;
         this.agentSetUrl = config.agentSetUrl;
@@ -129,6 +129,7 @@ export class Agent extends BaseEntity {
                 persistenceManager: this.agentPersistenceManager,
                 crossAgentResolver: this.crossAgentResolver
             });
+        this.agentSet.registerStepLocation(newStep.id, this.id, this.agentSet.url); // Register the step with AgentSet
         return newStep;
     }
 
@@ -636,6 +637,9 @@ Please consider this context when planning and executing the mission. Provide de
         console.log(`[Agent ${this.id}] Parsed plan for addStepsFromPlan:`, JSON.stringify(this.truncateLargeStrings(plan), null, 2));
         const newSteps = createFromPlan(plan, this.agentPersistenceManager, this.crossAgentResolver, parentStep, this);
         this.steps.push(...newSteps);
+        for (const step of newSteps) {
+            this.agentSet.registerStepLocation(step.id, this.id, this.agentSet.url);
+        }
     }
 
     async getOutput(): Promise<any> {
@@ -1723,31 +1727,26 @@ Please consider this context when planning and executing the mission. Provide de
         console.log(`Agent ${this.id} received collaboration message of type ${message.type}:`, message.payload);
 
         switch (message.type) {
-
-
-
-
-          case CollaborationMessageType.KNOWLEDGE_SHARE:
-            const knowledge = message.payload as KnowledgeSharing;
-            console.log(`Received shared knowledge on topic: ${knowledge.topic}`);
-            // Add knowledge to conversation context for future reasoning
-            this.addToConversation('system', `Shared Knowledge Received on "${knowledge.topic}":\n${JSON.stringify(knowledge.content)}`);
-            // TODO: Could also store this in SharedMemory via the Librarian for more persistent recall.
+            case CollaborationMessageType.KNOWLEDGE_SHARE:
+                const knowledge = message.payload as KnowledgeSharing;
+                console.log(`Received shared knowledge on topic: ${knowledge.topic}`);
+                // Add knowledge to conversation context for future reasoning
+                this.addToConversation('system', `Shared Knowledge Received on "${knowledge.topic}":\n${JSON.stringify(knowledge.content)}`);
+                // TODO: Could also store this in SharedMemory via the Librarian for more persistent recall.
             break;
-
-          case CollaborationMessageType.CONFLICT_RESOLUTION:
-            const conflictData = message.payload as any;
-            if (conflictData.resolution) {
-              // This is a final resolution
-              await this.processConflictResolution(conflictData);
-            } else {
-              // This is a request to vote
-              console.log(`Received request to vote on conflict: ${conflictData.description}`);
-              const vote = await this.generateConflictVote(conflictData);
-              // The agent needs a way to send its vote back. This would typically be via the CollaborationManager.
-              // This part of the protocol needs to be fully defined. For now, we log it.
-              console.log(`Generated vote:`, vote);
-            }
+            case CollaborationMessageType.CONFLICT_RESOLUTION:
+                const conflictData = message.payload as any;
+                if (conflictData.resolution) {
+                    // This is a final resolution
+                    await this.processConflictResolution(conflictData);
+                } else {
+                    // This is a request to vote
+                    console.log(`Received request to vote on conflict: ${conflictData.description}`);
+                    const vote = await this.generateConflictVote(conflictData);
+                    // The agent needs a way to send its vote back. This would typically be via the CollaborationManager.
+                    // This part of the protocol needs to be fully defined. For now, we log it.
+                    console.log(`Generated vote:`, vote);
+                }
             break;
         }
     }
@@ -2138,7 +2137,6 @@ Explanation: ${resolution.explanation}`);
             return; // Return to allow the retry or replan
         }
 
-        // --- START MODIFICATION ---
         // Check replanning depth before attempting any replanning
         if (this.replanDepth >= this.maxReplanDepth) {
             console.warn(`[Agent ${this.id}] handleStepFailure: Maximum replanning depth (${this.replanDepth}/${this.maxReplanDepth}) reached. Aborting mission.`);
@@ -2148,7 +2146,6 @@ Explanation: ${resolution.explanation}`);
             await this.updateStatus();
             return;
         }
-        // --- END MODIFICATION ---
 
         if (errorType === StepErrorType.VALIDATION) {
             // For validation errors, immediately trigger replanning

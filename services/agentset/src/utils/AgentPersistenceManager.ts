@@ -1,7 +1,7 @@
 import { WorkProduct, Deliverable } from '@cktmcs/shared';
 import { MissionFile, MapSerializer, PluginOutput, createAuthenticatedAxios } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
-import { StepLocation } from '../../types/DelegationTypes';
+import { StepLocation } from './../types/DelegationTypes';
 
 
 

@@ -1,18 +1,6 @@
-// No longer using Docker API directly
 import express from 'express';
-import axios from 'axios';
-import { MapSerializer, AgentSetManagerStatistics, AgentStatistics, InputValue, MessageType, ServiceTokenManager } from '@cktmcs/shared';
+import { MapSerializer, AgentSetManagerStatistics, AgentStatistics, InputValue, MessageType, ServiceTokenManager, createAuthenticatedAxios } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
-
-// NOTE: This axios instance doesn't include authentication headers
-// We should use authenticatedApi from TrafficManager instead
-const api = axios.create({
-    headers: {
-      'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
-    },
-  });
-
 
 interface AgentSetLink {
     id: string;
@@ -21,8 +9,7 @@ interface AgentSetLink {
     maxAgents: number;
 }
 
-
-class AgentSetManager {
+export class AgentSetManager { // Export the class, not an instance
     private agentSets: Map<string, AgentSetLink> = new Map();
     private agentToSetMap: Map<string, string> = new Map();
     private maxAgentsPerSet: number;
@@ -30,64 +17,47 @@ class AgentSetManager {
     private refreshInterval: NodeJS.Timeout;
     private securityManagerUrl: string;
     private tokenManager: ServiceTokenManager;
+    private authenticatedApi: any; // Internally created authenticatedApi
 
     constructor(
         maxAgentsPerSet: number = 250,
-        postOfficeUrl: string = 'postoffice:5020',
-        securityManagerUrl: string = process.env.SECURITYMANAGER_URL || 'securitymanager:5010',
-        public authenticatedApi?: any // Optional authenticatedApi from TrafficManager
+        postOfficeUrl: string = 'http://postoffice:5020', // Ensure http:// prefix
     ) {
         this.maxAgentsPerSet = maxAgentsPerSet;
         this.postOfficeUrl = postOfficeUrl;
-        this.securityManagerUrl = securityManagerUrl;
         this.refreshInterval = setInterval(() => this.refreshAgentSets(), 60000); // Refresh every minute
 
-        // Initialize token manager for service-to-service authentication
+        // Initialize securityManagerUrl and tokenManager
+        this.securityManagerUrl = process.env.SECURITY_MANAGER_URL || 'http://securitymanager:5010';
         const serviceId = 'TrafficManager';
-        const serviceSecret = process.env.CLIENT_SECRET || 'stage7AuthSecret';
+        const serviceSecret = process.env.CLIENT_SECRET || 'defaultSecret';
         this.tokenManager = ServiceTokenManager.getInstance(
-            `${this.securityManagerUrl}`,
+            this.securityManagerUrl,
             serviceId,
             serviceSecret
         );
+
+        // Create its own authenticatedApi instance
+        this.authenticatedApi = createAuthenticatedAxios({
+            serviceId: serviceId,
+            securityManagerUrl: this.securityManagerUrl,
+            clientSecret: serviceSecret,
+        });
     }
 
     /**
-     * Helper method to use authenticatedApi when available, falling back to regular api
+     * Helper method to use authenticatedApi
      * @param method HTTP method (get, post, put, delete)
      * @param url URL to call
      * @param data Optional data for POST/PUT requests
      * @returns Promise with the response
      */
     private async apiCall(method: 'get' | 'post' | 'put' | 'delete', url: string, data?: any): Promise<any> {
-        if (this.authenticatedApi) {
+        try {
             return this.authenticatedApi[method](url, data);
-        } else {
-            // If authenticatedApi is not available, create a token and use it
-            try {
-                const token = await this.tokenManager.getToken();
-                const headers = {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                    'Authorization': `Bearer ${token}`
-                };
-
-                switch (method) {
-                    case 'get':
-                        return axios.get(url, { headers });
-                    case 'post':
-                        return axios.post(url, data, { headers });
-                    case 'put':
-                        return axios.put(url, data, { headers });
-                    case 'delete':
-                        return axios.delete(url, { headers });
-                    default:
-                        throw new Error(`Unsupported method: ${method}`);
-                }
-            } catch (error) {
-                console.error(`Error in authenticated apiCall: ${error instanceof Error ? error.message : 'No message'}`);
-                throw error;
-            }
+        } catch (error) {
+            console.error(`Error in authenticated apiCall: ${error instanceof Error ? error.message : 'No message'}`);
+            throw error;
         }
     }
 
@@ -493,6 +463,11 @@ class AgentSetManager {
             agentSetsCount: 0,
             totalAgentsCount: 0,
             agentsByStatus: new Map(),
+            agentStatisticsByType: {
+                totalAgents: 0,
+                agentCountByStatus: {},
+                agentSetCount: 0,
+            },
         };
         try {
             console.log(`AgentSetManager getting statistics from ${this.agentSets.size} AgentSets}`);
@@ -513,6 +488,7 @@ class AgentSetManager {
 
                     // Merge agentsByStatus maps properly
                     if (serializedStats.agentsByStatus instanceof Map) {
+                        console.log(`Merging agentsByStatus from AgentSet at ${agentSet.url} as Map`);
                         serializedStats.agentsByStatus.forEach((agents: AgentStatistics[], status: string) => {
                             if (!stats.agentsByStatus.has(status)) {
                                 stats.agentsByStatus.set(status, [...agents]);
@@ -522,6 +498,7 @@ class AgentSetManager {
                         });
                     } else {
                         // Handle case where it might be a plain object
+                        console.log(`Merging agentsByStatus from AgentSet at ${agentSet.url} as Object, not Map`);
                         Object.entries(serializedStats.agentsByStatus).forEach(([status, agents]) => {
                             if (!stats.agentsByStatus.has(status)) {
                                 stats.agentsByStatus.set(status, [...agents as AgentStatistics[]]);
@@ -534,11 +511,37 @@ class AgentSetManager {
                     console.error(`[AgentSetManager] Error fetching statistics from AgentSet at ${agentSet.url} for missionId: ${missionId}:`, error);
                 }
             }
-            return stats;
+            // Calculate agentCountByStatus from the aggregated agentsByStatus map
+            const agentCountByStatus: Record<string, number> = {};
+            stats.agentsByStatus.forEach((agents, status) => {
+                agentCountByStatus[status] = agents.length;
+            });
+
+            // Return the statistics in the format expected by MissionControl
+            return {
+                agentSetsCount: stats.agentSetsCount,
+                totalAgentsCount: stats.totalAgentsCount,
+                agentsByStatus: MapSerializer.transformForSerialization(stats.agentsByStatus), // Serialize the Map for transport
+                agentStatisticsByType: {
+                    totalAgents: stats.totalAgentsCount,
+                    agentCountByStatus: agentCountByStatus,
+                    agentSetCount: stats.agentSetsCount,
+                },
+            };
         } catch (error) {
             analyzeError(error as Error);
             console.error('Error fetching agent statistics:', error instanceof Error ? error.message : error);
-            return stats;
+            // On error, return a default structure to prevent upstream errors
+            return {
+                agentSetsCount: stats.agentSetsCount,
+                totalAgentsCount: stats.totalAgentsCount,
+                agentsByStatus: MapSerializer.transformForSerialization(stats.agentsByStatus),
+                agentStatisticsByType: {
+                    totalAgents: stats.totalAgentsCount,
+                    agentCountByStatus: {}, // Default to empty object on error
+                    agentSetCount: stats.agentSetsCount,
+                },
+            };
         }
     }
 

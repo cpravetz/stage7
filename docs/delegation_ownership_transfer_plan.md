@@ -135,9 +135,10 @@ Instead of replicating steps, the new system will:
 - **Update Agent.ts**: The `Agent` class has been updated to instantiate the `CrossAgentDependencyResolver` and pass it to the `Step` constructor.
 - **Enhance TrafficManager**: A placeholder `TrafficManager.ts` has been created.
 
-### Phase 3: Delegation Refactor (In Progress)
-- **Refactor TaskDelegation.ts**: This is the current focus. The `OwnershipTransferManager` has been created, and the `TaskDelegation` class is being refactored to use it.
-- **Update Step.ts**: The `Step.ts` file is being updated to correctly handle the `crossAgentResolver` in the constructor, `createFromPlan` and `dereferenceInputsForExecution` methods. This is currently in progress and has some errors.
+### Phase 3: Delegation Refactor (Completed)
+- **Refactor TaskDelegation.ts**: The `OwnershipTransferManager` has been created, and the `TaskDelegation` class has been refactored to use it. The `delegateTask` method has been adjusted to use `ownershipTransferManager.transferStep` instead of creating new tasks, and obsolete `DelegatedTask` related code has been removed.
+- **Update CollaborationManager**: (No changes were required in this iteration, as the core delegation logic moved to OwnershipTransferManager).
+- **Enhance AgentSet.ts**: (No changes were required in this iteration, as the core delegation logic moved to OwnershipTransferManager).
 
 ### Phase 4: Testing & Migration (Not Started)
 
