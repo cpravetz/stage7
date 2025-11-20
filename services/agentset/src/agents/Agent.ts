@@ -264,13 +264,11 @@ export class Agent extends BaseEntity {
                 const rabbitMessage = { agentId, status: agentStatus, missionId, timestamp };
                 const routingKey = 'agent.status.update';
                 const exchange = 'agent.events';
-                console.log(`Agent ${agentId} publishing status update to ${exchange} with routing key ${routingKey}: ${agentStatus}`);
                 this.channel.publish(exchange, routingKey, Buffer.from(JSON.stringify(rabbitMessage)));
             })(),
 
             // 2. Logic for notifyTrafficManager
             (async () => {
-                console.log(`Agent ${agentId} notifying TrafficManager of status: ${agentStatus}`);
                 const stats = await this.getStatistics();
                 const trafficManagerMessage = { agentId, status: agentStatus, statistics: stats, missionId, timestamp };
                 await this.sendMessage(MessageType.AGENT_UPDATE, 'trafficmanager', trafficManagerMessage);
@@ -334,7 +332,7 @@ Please consider this context when planning and executing the mission. Provide de
         const activeSteps = this.steps.filter(step =>
             step.status === StepStatus.PENDING ||
             step.status === StepStatus.RUNNING ||
-            step.status === StepStatus.SUB_PLAN_RUNNING
+            step.status === StepStatus.WAITING
         );
         if (activeSteps.length === 0) {
             console.debug(`[Agent ${this.id}] hasActiveWork: No active steps found. All steps: ${this.steps.map(s => `${s.id} (${s.actionVerb}, ${s.status})`).join(', ') || 'None'}`);
@@ -347,7 +345,6 @@ Please consider this context when planning and executing the mission. Provide de
         const answerOutput = result.find(r => r.name === 'answer');
 
         if (planOutput && planOutput.result && Array.isArray(planOutput.result)) {
-            console.log(`[Agent ${this.id}] _extractPlanFromReflectionResult: Extracted plan from 'plan' output.`);
             return planOutput.result as ActionVerbTask[];
         }
 
@@ -355,14 +352,13 @@ Please consider this context when planning and executing the mission. Provide de
             try {
                 const parsedResult = typeof answerOutput.result === 'string' ? JSON.parse(answerOutput.result) : answerOutput.result;
                 if (Array.isArray(parsedResult)) {
-                    console.log(`[Agent ${this.id}] _extractPlanFromReflectionResult: Extracted plan from 'answer' output.`);
                     return parsedResult as ActionVerbTask[];
                 }
             } catch (e) {
                 console.warn(`[Agent ${this.id}] _extractPlanFromReflectionResult: Failed to parse 'answer' as JSON plan, treating as prose.`);
             }
         }
-        
+                
         return null;
     }
 
@@ -371,7 +367,6 @@ Please consider this context when planning and executing the mission. Provide de
         const directAnswerOutput = result.find(r => r.name === 'direct_answer');
 
         if (newPlan) {
-            console.log(`[Agent ${this.id}] _handleReflectionResult: Reflection resulted in a new plan with ${newPlan.length} steps. Updating plan.`);
             this.say('Reflection resulted in a new plan. Updating plan.');
             const currentStepIndex = this.steps.findIndex(s => s.id === step.id);
             if (currentStepIndex !== -1) {
@@ -403,7 +398,6 @@ Please consider this context when planning and executing the mission. Provide de
             this.steps.push(newAccomplishStep);
             await this.updateStatus();
         } else {
-            console.log(`[Agent ${this.id}] _handleReflectionResult: Reflection did not provide a clear plan or answer. Continuing with the current plan.`);
             this.say('Reflection did not provide a clear plan or answer. Continuing with the current plan.');
         }
     }
@@ -414,15 +408,6 @@ Please consider this context when planning and executing the mission. Provide de
 
             // Consolidate all input preparation into one method call.
             step.inputValues = await step.dereferenceInputsForExecution(this.steps, this.missionId);
-
-            if (step.recommendedRole && step.recommendedRole !== this.role && this.role !== 'coordinator') {
-                const delegationResult = await this.delegateStepToSpecializedAgent(step);
-                if (delegationResult.success) {
-                    step.status = StepStatus.SUB_PLAN_RUNNING; // Mark as waiting for delegation result
-                    return;
-                }
-            }
-
             this.say(`Executing step: ${step.actionVerb} - ${step.description || 'No description'}`);
 
             const result = await step.execute(
@@ -443,7 +428,6 @@ Please consider this context when planning and executing the mission. Provide de
                 const internalInputValues = MapSerializer.transformFromSerialization(internalVerbData.inputValues);
                 const internalOutputs = MapSerializer.transformFromSerialization(internalVerbData.outputs);
 
-                console.log(`Agent ${this.id}: Handling internal verb: ${internalActionVerb}`);
                 // Delegate to the Step to handle the internal verb
                 await step.handleInternalVerb(
                     internalActionVerb,
@@ -525,7 +509,8 @@ Please consider this context when planning and executing the mission. Provide de
                     await this.updateStatus();
                     // After adding new steps from a PLAN result, we should also return
                     // to allow the main loop to re-evaluate.
-                    await this.handleStepSuccess(step, result); // Mark the planning step as completed
+                    step.status = StepStatus.REPLACED; // Mark the planning step as replaced
+                    step.result = mappedResult; // Ensure result is set
                     return; // Exit executeStep for the planning step
                 } else {
                     const errorMessage = `Error: Expected a plan, but received: ${JSON.stringify(planningStepResult)}`;
@@ -577,12 +562,17 @@ Please consider this context when planning and executing the mission. Provide de
                 // Create and execute delegation promises
                 for (const [role, steps] of stepsToDelegate.entries()) {
                     const delegationPromise = (async () => {
-                        console.log(`[Agent ${this.id}] Found ${steps.length} steps to delegate to role: ${role}`);
+                        //console.log(`[Agent ${this.id}] Found ${steps.length} steps to delegate to role: ${role}`);
                         const recipientId = await this._getOrCreateSpecializedAgent(role);
                         if (recipientId) {
                             for (const step of steps) {
                                 // Pass recipientId to avoid re-finding the agent for each step in the batch
-                                await this.delegateStepToSpecializedAgent(step, recipientId);
+                                const migrationResult = await this.migrateStepToSpecializedAgent(step, recipientId);
+                                if (migrationResult.success) {
+                                    // Remove the migrated step from the current agent's steps
+                                    this.steps = this.steps.filter(s => s.id !== step.id);
+                                    console.log(`[Agent ${this.id}] Removed migrated step ${step.id} from local steps.`);
+                                }
                             }
                         } else {
                             console.error(`[Agent ${this.id}] Could not find or create agent for role ${role}. Moving ${steps.length} steps to local execution.`);
@@ -594,7 +584,6 @@ Please consider this context when planning and executing the mission. Provide de
 
                 // Create local execution promises
                 if (stepsToExecuteLocally.length > 0) {
-                    console.log(`[Agent ${this.id}] Executing ${stepsToExecuteLocally.length} steps locally.`);
                     const localExecutionPromises = stepsToExecuteLocally.map(step => this.executeStep(step));
                     allPromises.push(...localExecutionPromises);
                 }
@@ -1826,7 +1815,7 @@ Explanation: ${resolution.explanation}`);
         }
     }
 
-    private async delegateStepToSpecializedAgent(step: Step, recipientId?: string): Promise<{ success: boolean, result: any }> {
+    private async migrateStepToSpecializedAgent(step: Step, recipientId?: string): Promise<{ success: boolean, result: any }> {
         try {
             const finalRecipientId = recipientId || await this._getOrCreateSpecializedAgent(step.recommendedRole!);
 
@@ -1841,7 +1830,6 @@ Explanation: ${resolution.explanation}`);
 
                 if (transferResult.success) {
                     console.log(`Successfully transferred ownership of step ${step.id} to agent ${finalRecipientId}`);
-                    step.status = StepStatus.SUB_PLAN_RUNNING; // Mark as waiting for delegation result
                     step.delegatedToAgentId = finalRecipientId; // Set the delegated agent ID on the step
 
                     return {
@@ -2196,7 +2184,7 @@ Explanation: ${resolution.explanation}`);
 
     private async pruneSteps(): Promise<void> {
         const activeStepIds = new Set(this.steps.filter(s => 
-            s.status in [StepStatus.PENDING, StepStatus.RUNNING, StepStatus.SUB_PLAN_RUNNING, StepStatus.WAITING]
+            s.status in [StepStatus.PENDING, StepStatus.RUNNING, StepStatus.WAITING]
         ).map(s => s.id));
 
         for (const step of this.steps) {

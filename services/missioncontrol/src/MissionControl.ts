@@ -901,8 +901,8 @@ class MissionControl extends BaseEntity {
         const { missionId } = req.params;
         const incomingDeliverable = req.body; // This is the full deliverable document
         console.log(`MissionControl: Received addAttachedFile request for mission ${missionId} with deliverable:`, JSON.stringify(incomingDeliverable, null, 2));
-        const missionFile = incomingDeliverable.missionFile; // Extract the MissionFile part
-        const isDeliverable = incomingDeliverable.isDeliverable || false;
+        const missionFile = incomingDeliverable.missionFile;
+        const isDeliverable = (incomingDeliverable.isDeliverable || (missionFile && missionFile.isDeliverable)) || false;
         const stepId = incomingDeliverable.stepId;
 
         if (!missionFile || !missionFile.id) {

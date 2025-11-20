@@ -148,7 +148,6 @@ export class AgentSet extends BaseEntity {
             try {
                 console.log(`Agentset Pausing agents for mission ${missionId}`);
                 const agents = Array.from(this.agents.values()).filter(agent => agent.getMissionId() === missionId);
-                console.log(`Agentset Pausing ${agents.length} agents for mission ${missionId}`);
                 for (const agent of agents) {
                     await agent.pause();
                 }
@@ -1102,7 +1101,7 @@ export class AgentSet extends BaseEntity {
             const allSteps: { id: string, verb: string, status: string, dependencies?: string[] }[] = [];
 
             for (const agent of this.agents.values()) {
-                console.log(`AgentSet: Checking agent ${agent.id} for mission ${missionId}`);
+                //console.log(`AgentSet: Checking agent ${agent.id} for mission ${missionId}`);
                 if (agent.getMissionId() === missionId) {
                     const status = agent.getStatus();
                     totalAgentCount++;
@@ -1117,7 +1116,7 @@ export class AgentSet extends BaseEntity {
                     // Get agent's detailed statistics using the agent's own getStatistics method
                     const agentStat: AgentStatistics = await agent.getStatistics();
                     agentStatisticsByStatus.get(status)!.push(agentStat);
-                    console.log('AgentSet: Collected statistics for agent', agent.id, 'Status:', status, 'Statistics:', agentStat);
+                    //console.log('AgentSet: Collected statistics for agent', agent.id, 'Status:', status, 'Statistics:', agentStat);
                     // Collect all steps for totalSteps count
                     allSteps.push(...agentStat.steps);
                 }

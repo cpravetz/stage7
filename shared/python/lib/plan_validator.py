@@ -166,7 +166,7 @@ class PlanValidator:
         """Builds a dependency graph and finds all downstream dependencies for a given step."""
         logger.debug(f"PlanValidator: _get_downstream_dependencies called for start_step_id: {start_step_id}")
         adj_list = {}
-        
+
         def build_adj_list(current_plan):
             logger.debug(f"PlanValidator: build_adj_list - traversing plan of length {len(current_plan)}.")
             for step in current_plan:
@@ -176,14 +176,16 @@ class PlanValidator:
                 if step_id not in adj_list:
                     adj_list[step_id] = []
 
+                # Add dependencies from direct inputs
                 for input_def in step.get('inputs', {}).values():
                     if isinstance(input_def, dict) and 'sourceStep' in input_def:
                         source_step = input_def['sourceStep']
-                        if source_step != '0': # Changed from 0 to '0' as sourceStep is now string
+                        if source_step != '0' and source_step in all_steps:
                             if source_step not in adj_list:
                                 adj_list[source_step] = []
                             adj_list[source_step].append(step_id)
                 
+                # Recurse into sub-plans
                 sub_plan = self._get_sub_plan(step)
                 if sub_plan:
                     logger.debug(f"PlanValidator: build_adj_list - recursing into sub-plan for step {step_id}.")
@@ -197,18 +199,14 @@ class PlanValidator:
         visited = {start_step_id}
 
         while queue:
-            current_step = queue.pop(0)
-            if current_step in adj_list:
-                for dependent_step in adj_list[current_step]:
-                    if dependent_step not in visited:
-                        dependent_step_obj = all_steps.get(dependent_step)
-                        if dependent_step_obj and dependent_step_obj.get('actionVerb') == 'REFLECT':
-                            logger.info(f"Excluding REFLECT step {dependent_step} from FOREACH wrapping - it should remain at top level")
-                            continue
+            current_step_id = queue.pop(0)
+            if current_step_id in adj_list:
+                for dependent_step_id in adj_list[current_step_id]:
+                    if dependent_step_id not in visited:
+                        downstream_deps.add(dependent_step_id)
+                        visited.add(dependent_step_id)
+                        queue.append(dependent_step_id)
                         
-                        downstream_deps.add(dependent_step)
-                        visited.add(dependent_step)
-                        queue.append(dependent_step)
         logger.debug(f"PlanValidator: _get_downstream_dependencies - Found downstream dependencies for {start_step_id}: {downstream_deps}")
         return downstream_deps
 
@@ -228,34 +226,41 @@ class PlanValidator:
             logger.debug(f"PlanValidator: _is_valid_uuid - '{uuid_string}' is not a valid UUID.")
             return False
 
-    def _recursively_update_dependencies(self, plan: List[Dict[str, Any]], moved_step_ids: Set[str], regroup_step_id: str):
-        """Recursively update dependencies pointing to moved steps."""
-        logger.debug(f"PlanValidator: _recursively_update_dependencies called.")
+    def _recursively_update_dependencies(self, plan: List[Dict[str, Any]], regroup_map: Dict[Tuple[str, str], str]):
+        """Recursively update dependencies based on the provided regroup_map."""
+        logger.debug(f"PlanValidator: _recursively_update_dependencies called with regroup_map.")
         for step in plan:
             if not isinstance(step, dict):
                 continue
 
             # Update dependencies in the current step's inputs
             for input_name, input_def in step.get('inputs', {}).items():
-                if isinstance(input_def, dict) and input_def.get('sourceStep') in moved_step_ids:
-                    original_source = input_def.get('sourceStep')
-                    logger.info(f"PlanValidator: Updating step {step['id']} input '{input_name}' to reference REGROUP {regroup_step_id} result (was pointing to moved step {original_source})")
-                    input_def['sourceStep'] = regroup_step_id
-                    input_def['outputName'] = 'result'  # REGROUP's output name
+                if isinstance(input_def, dict):
+                    original_source_id = input_def.get('sourceStep')
+                    original_output_name = input_def.get('outputName')
+                    
+                    if (original_source_id, original_output_name) in regroup_map:
+                        new_regroup_id = regroup_map[(original_source_id, original_output_name)]
+                        logger.info(f"PlanValidator: Updating step {step['id']} input '{input_name}' to reference REGROUP {new_regroup_id} (was {original_source_id}.{original_output_name})")
+                        input_def['sourceStep'] = new_regroup_id
+                        input_def['outputName'] = 'result' # All REGROUP steps use 'result' output
 
             # Recurse into sub-plans
             sub_plan = self._get_sub_plan(step)
-            if sub_plan:
+            if sub_plan and step.get('actionVerb') != 'FOREACH':
                 logger.debug(f"PlanValidator: _recursively_update_dependencies - recursing into sub-plan for step {step.get('id')}.")
-                self._recursively_update_dependencies(sub_plan, moved_step_ids, regroup_step_id)
+                self._recursively_update_dependencies(sub_plan, regroup_map)
         logger.debug("PlanValidator: _recursively_update_dependencies completed.")
 
     def _wrap_step_in_foreach(self, plan: List[Dict[str, Any]], step_to_wrap_id: str,
                               source_step_id: str, source_output_name: str, target_input_name: str,
-                              plugin_map: Dict[str, Any], all_steps: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Wraps a step in a FOREACH loop, including all dependent steps."""
+                              all_steps: Dict[str, Any], scope_id: str) -> List[Dict[str, Any]]:
+        """
+        Wraps a step and its downstream dependencies in a FOREACH loop.
+        Creates specific REGROUP steps for each unique output that is consumed by the rest of the plan.
+        """
         logger.debug(f"PlanValidator: _wrap_step_in_foreach called for step ID: {step_to_wrap_id}")
-        
+
         step_to_wrap_obj = all_steps.get(step_to_wrap_id)
         if not step_to_wrap_obj:
             logger.error(f"PlanValidator: Step to wrap with ID {step_to_wrap_id} not found in all_steps.")
@@ -263,283 +268,222 @@ class PlanValidator:
 
         logger.info(f"PlanValidator: Wrapping step {step_to_wrap_obj['id']} in FOREACH for input '{target_input_name}'")
 
-        # Collect steps to move into subplan, ensuring they are deep-copied
         downstream_deps = self._get_downstream_dependencies(step_to_wrap_id, plan, all_steps)
         moved_step_ids = {step_to_wrap_id} | downstream_deps
         logger.debug(f"PlanValidator: _wrap_step_in_foreach - Moved step IDs: {moved_step_ids}")
 
-        sub_plan_steps_ordered = []
-        def find_and_order_moved_steps(current_plan_segment):
-            if not isinstance(current_plan_segment, list):
-                return
-            for step in current_plan_segment:
-                if not isinstance(step, dict):
-                    continue
-                if step.get('id') in moved_step_ids:
-                    if not any(s['id'] == step.get('id') for s in sub_plan_steps_ordered):
-                        sub_plan_steps_ordered.append(step)
-                
-                sub_p = self._get_sub_plan(step)
-                if sub_p:
-                    find_and_order_moved_steps(sub_p)
+        sub_plan = [copy.deepcopy(all_steps[step_id]) for step_id in moved_step_ids if step_id in all_steps]
 
-        find_and_order_moved_steps(plan)
-
-        sub_plan = []
-        for original_step in sub_plan_steps_ordered:
-            new_step = copy.deepcopy(original_step)
-            # If this is the step that triggered the wrap, update its input
-            if new_step['id'] == step_to_wrap_id:
-                logger.debug(f"PlanValidator: _wrap_step_in_foreach - Updating input for step {new_step['id']}.")
-                # Check if the target_input_name is a nested reference (e.g., "script_parameters.search_results")
-                if '.' in target_input_name or '[' in target_input_name:
-                    # Split the target_input_name into parts to traverse the nested structure
-                    parts = re.findall(r'([a-zA-Z0-9_]+)(?:\[(\d+)\])?', target_input_name)
-                        
-                    current_input_level = new_step['inputs']
-                    for i, (part_name, part_index) in enumerate(parts):
-                        if part_index: # It's an array index
-                            if isinstance(current_input_level.get(part_name), dict) and 'value' in current_input_level[part_name]:
-                                try:
-                                    list_value = json.loads(current_input_level[part_name]['value'])
-                                    if isinstance(list_value, list) and int(part_index) < len(list_value):
-                                        if i == len(parts) - 1: # Last part, update the nested reference
-                                            if isinstance(list_value[int(part_index)], dict) and 'sourceStep' in list_value[int(part_index)]:
-                                                list_value[int(part_index)]['sourceStep'] = "0"
-                                                list_value[int(part_index)]['outputName'] = "item"
-                                        current_input_level[part_name]['value'] = json.dumps(list_value)
-                                        current_input_level = list_value[int(part_index)] # Move deeper
-                                    else:
-                                        logger.warning(f"PlanValidator: Step {new_step['id']}: Invalid list index or not a list at '{part_name}[{part_index}]'")
-                                        break
-                                except json.JSONDecodeError:
-                                    logger.warning(f"PlanValidator: Step {new_step['id']}: Could not parse JSON for '{part_name}' at index '{part_index}'")
-                                    break
-                            else:
-                                logger.warning(f"PlanValidator: Step {new_step['id']}: Input '{part_name}' not found or not a dict with 'value' for index '{part_index}'")
-                                break
-                        else: # It's a dictionary key
-                            if part_name in current_input_level and isinstance(current_input_level.get(part_name), dict):
-                                if i == len(parts) - 1: # Last part, update the reference
-                                    current_input_level[part_name] = {
-                                        "outputName": "item",
-                                        "sourceStep": "0"  # "0" means parent step (the FOREACH step)
-                                    }
-                                else:
-                                    # If it's a nested dictionary, move deeper
-                                    if 'value' in current_input_level[part_name] and isinstance(current_input_level[part_name]['value'], str):
-                                        try:
-                                            nested_value = json.loads(current_input_level[part_name]['value'])
-                                            if isinstance(nested_value, dict):
-                                                current_input_level = nested_value
-                                            else:
-                                                logger.warning(f"PlanValidator: Step {new_step['id']}: Nested input '{part_name}' is not a dictionary.")
-                                                break
-                                        except json.JSONDecodeError:
-                                            logger.warning(f"PlanValidator: Step {new_step['id']}: Could not parse JSON for nested input '{part_name}'.")
-                                            break
-                                    else:
-                                        current_input_level = current_input_level[part_name]
-                            else:
-                                logger.warning(f"PlanValidator: Step {new_step['id']}: Input '{part_name}' not found or not a dictionary.")
-                                break
-                else:
-                    # Original logic for direct input name
-                    if target_input_name in new_step.get('inputs', {}):
-                        new_step['inputs'][target_input_name] = {
-                            "outputName": "item",
-                            "sourceStep": "0"  # "0" means parent step (the FOREACH step)
-                        }
-                sub_plan.append(new_step)
+        for step in sub_plan:
+            if step['id'] == step_to_wrap_id:
+                step['inputs'][target_input_name] = {"outputName": "item", "sourceStep": "0"}
+                break
+        
         logger.debug(f"PlanValidator: _wrap_step_in_foreach - Sub-plan created with {len(sub_plan)} steps.")
 
-        # Create the FOREACH step
         foreach_step_id = str(uuid.uuid4())
         foreach_step = {
             "id": foreach_step_id,
             "actionVerb": "FOREACH",
             "description": f"Iterate over '{source_output_name}' from step {source_step_id}",
+            "scope_id": scope_id,
             "inputs": {
                 "array": {"outputName": source_output_name, "sourceStep": source_step_id},
                 "steps": {"value": sub_plan, "valueType": "array"}
             },
             "outputs": {
-                "steps": {"description": "The endsteps to be executed for each instance of the subplan.", "type": "array"},
+                "steps": {"description": "The end steps to be executed for each instance of the subplan.", "type": "array"},
             },
             "recommendedRole": "Coordinator"
         }
         logger.debug(f"PlanValidator: _wrap_step_in_foreach - FOREACH step created: {foreach_step_id}.")
 
-        # Create the REGROUP step
-        regroup_step_id = str(uuid.uuid4())
-        regroup_step = {
-            "id": regroup_step_id,
-            "actionVerb": "REGROUP",
-            "description": f"Regroup results from FOREACH step {foreach_step_id}",
-            "inputs": {
-                "stepIdsToRegroup": {"outputName": "steps", "sourceStep": foreach_step_id, "valueType": "array"},
-            },
-            "outputs": {
-                "result": {"description": "A single array containing all the items from the input arrays.", "type": "array"}
-            },
-            "recommendedRole": "Coordinator"
-        }
-        logger.debug(f"PlanValidator: _wrap_step_in_foreach - REGROUP step created: {regroup_step_id}.")
-
-        def _rebuild_recursively(current_plan, moved_ids, fe_step, rg_step, wrap_id):
-            output_plan = []
-            inserted_fe_rg = False
-            for s in current_plan:
-                if s.get('id') == wrap_id and not inserted_fe_rg:
-                    output_plan.append(fe_step)
-                    output_plan.append(rg_step)
-                    inserted_fe_rg = True
-                    continue
-                elif s.get('id') in moved_ids:
-                    continue
-                else:
-                    sub_p = self._get_sub_plan(s)
-                    if sub_p:
-                        logger.debug(f"PlanValidator: _rebuild_recursively - recursing into sub-plan for step {s.get('id')}.")
-                        rebuilt_sub = _rebuild_recursively(sub_p, moved_ids, fe_step, rg_step, wrap_id)
-                        if 'steps' in s:
-                            s['steps'] = rebuilt_sub
-                        elif 'inputs' in s and 'steps' in s['inputs'] and 'value' in s['inputs']['steps']:
-                            s['inputs']['steps']['value'] = rebuilt_sub
-                    output_plan.append(s)
-            return output_plan
-
-        new_plan = _rebuild_recursively(plan, moved_step_ids, foreach_step, regroup_step, step_to_wrap_id)
-
-        # Update any steps outside the loop that depended on any of the moved steps
+        # --- Multi-REGROUP Logic ---
+        new_plan = [step for step in plan if step.get('id') not in moved_step_ids]
+        
+        external_dependencies = {} # Key: (source_id, output_name), Value: list of consumer steps
         for step in new_plan:
-            if step.get('id') in [foreach_step_id, regroup_step_id]:
-                continue
-            
-            for input_name, input_def in step.get('inputs', {}).items():
+            for input_def in step.get('inputs', {}).values():
                 if isinstance(input_def, dict) and input_def.get('sourceStep') in moved_step_ids:
-                    original_source = input_def.get('sourceStep')
-                    logger.info(f"PlanValidator: Updating step {step['id']} input '{input_name}' to reference REGROUP {regroup_step_id} result (was pointing to moved step {original_source})")
-                    input_def['sourceStep'] = regroup_step_id
-                    input_def['outputName'] = 'result'
+                    source_id = input_def['sourceStep']
+                    output_name = input_def['outputName']
+                    dep_key = (source_id, output_name)
+                    if dep_key not in external_dependencies:
+                        external_dependencies[dep_key] = []
+                    external_dependencies[dep_key].append(step['id'])
 
-        logger.info(f"PlanValidator: Created FOREACH step {foreach_step_id} with {len(sub_plan)} sub-steps")
+        regroup_steps = []
+        regroup_map = {} # Key: (source_id, output_name), Value: new_regroup_id
+        
+        if external_dependencies:
+            logger.info(f"PlanValidator: Found {len(external_dependencies)} unique external dependencies on the sub-plan.")
+            for (source_id, output_name), consumers in external_dependencies.items():
+                regroup_step_id = str(uuid.uuid4())
+                regroup_map[(source_id, output_name)] = regroup_step_id
+                
+                source_step_desc = all_steps.get(source_id, {}).get('actionVerb', source_id)
+
+                regroup_step = {
+                    "id": regroup_step_id,
+                    "actionVerb": "REGROUP",
+                    "description": f"Collects '{output_name}' from all '{source_step_desc}' steps in FOREACH loop {foreach_step_id}",
+                    "scope_id": scope_id,
+                    "inputs": {
+                        "foreach_results": {"outputName": "steps", "sourceStep": foreach_step_id},
+                        "source_step_id_in_subplan": {"value": source_id, "valueType": "string"},
+                        "output_to_collect": {"value": output_name, "valueType": "string"}
+                    },
+                    "outputs": {
+                        "result": {"description": f"An array of all '{output_name}' outputs.", "type": "array"}
+                    },
+                    "recommendedRole": "Coordinator"
+                }
+                regroup_steps.append(regroup_step)
+                logger.debug(f"PlanValidator: Created REGROUP step {regroup_step_id} for {source_id}.{output_name}.")
+        else:
+            logger.info("PlanValidator: No external dependencies found on sub-plan. No REGROUP steps needed.")
+
+        # Find the position of the source step and insert the FOREACH and REGROUP steps after it
+        inserted = False
+        for i, step in enumerate(new_plan):
+            if step.get('id') == source_step_id:
+                new_plan.insert(i + 1, foreach_step)
+                new_plan[i+2:i+2] = regroup_steps # Insert all regroup steps
+                inserted = True
+                break
+        
+        if not inserted:
+            new_plan.insert(0, foreach_step)
+            new_plan[1:1] = regroup_steps
+
+        # Update dependencies in the rest of the plan using the new map
+        self._recursively_update_dependencies(new_plan, regroup_map)
+
+        logger.info(f"PlanValidator: Created FOREACH step {foreach_step_id} with {len(sub_plan)} sub-steps and {len(regroup_steps)} REGROUP steps.")
         return new_plan
 
     def validate_and_repair(self, plan: List[Dict[str, Any]], goal: str, inputs: Dict[str, Any],
                            attempt: int = 1, previous_errors: List[str] = []) -> List[Dict[str, Any]]:
         """
-        Validates and repairs a plan using a flattened, iterative approach.
-        This method first builds a comprehensive, flat representation of the entire plan,
-        then iterates through the steps to validate and repair them in a single pass.
+        Validates and transforms a plan using a recursive approach to handle
+        nested structures like FOREACH loops correctly.
         """
-        logger.info(f"--- Plan Validation Attempt {attempt}/{self.max_retries} ---")
-        logger.debug(f"PlanValidator.validate_and_repair: Starting attempt {attempt}.")
-        if attempt > self.max_retries:
-            logger.error(f"PlanValidator: Plan validation failed after {self.max_retries} attempts. Returning original plan.")
+        logger.info(f"--- Plan Validation and Transformation ---")
+        try:
+            self.plugin_map.clear()
+            self._initialize_plugin_map(inputs)
+            
+            # Start the recursive transformation
+            transformed_plan, all_steps_map = self._recursive_transform_plan(plan)
+            
+            # Final validation pass (optional, as transformation should ensure validity)
+            # errors = self._final_validation_pass(transformed_plan, all_steps_map)
+            # if errors:
+            #     logger.warning(f"Final plan has validation issues: {errors}")
+
+            return transformed_plan
+
+        except Exception as e:
+            logger.critical(f"PlanValidator: Critical error during plan validation: {e}", exc_info=True)
+            # In case of a critical failure, return the original plan to avoid losing it.
             return plan
 
-        try:
-            logger.debug("PlanValidator: validate_and_repair - Initializing plugin map.")
-            # Initialize plugin definitions from inputs
-            self.plugin_map.clear()
-            available_plugins = self._initialize_plugin_map(inputs)
+    def _transform_plan_recursive(self, plan: List[Dict[str, Any]], scope_id: str = "root") -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+        """
+        The main recursive function that traverses and transforms the plan.
+        It builds a representation of the current plan level, validates steps,
+        and recursively calls itself on sub-plans.
+        """
+        logger.debug(f"Entering _transform_plan_recursive for scope: {scope_id}")
 
-            logger.debug("PlanValidator: validate_and_repair - Building flat plan representation.")
-            # 1. Build the flat representation of the plan
-            flat_plan_repr = self._build_flat_plan_representation(plan)
-            all_steps = flat_plan_repr['steps']
-            step_parents = flat_plan_repr['parents']
-            step_outputs = flat_plan_repr['outputs']
-            uuid_map = flat_plan_repr['uuid_map']
-            
-            logger.debug(f"PlanValidator: validate_and_repair - UUID map: {uuid_map}")
-            # Apply UUID fixes throughout the entire plan structure using the generated map
-            if uuid_map:
-                logger.debug("PlanValidator: validate_and_repair - Applying UUID map recursively.")
-                plan = self._apply_uuid_map_recursive(plan, uuid_map)
-                # Re-build representation after modification
-                logger.debug("PlanValidator: validate_and_repair - Re-building flat plan representation after UUID fix.")
-                flat_plan_repr = self._build_flat_plan_representation(plan)
-                all_steps = flat_plan_repr['steps']
-                step_parents = flat_plan_repr['parents']
-                step_outputs = flat_plan_repr['outputs']
+        # Build a flat representation of the *entire* plan for reference
+        flat_repr = self._build_flat_plan_representation(plan)
+        all_steps = flat_repr['steps']
+        step_parents = flat_repr['parents']
+        step_outputs = flat_repr['outputs']
+        uuid_map = flat_repr['uuid_map']
 
-            # 2. Iteratively validate and repair
+        if uuid_map:
+            plan = self._apply_uuid_map_recursive(plan, uuid_map)
+            flat_repr = self._build_flat_plan_representation(plan)
+            all_steps = flat_repr['steps']
+            step_parents = flat_repr['parents']
+            step_outputs = flat_repr['outputs']
+
+        # Iteratively validate and repair the current plan level
+        # This loop will be restarted if a transformation occurs
+        while True:
+            made_change = False
             errors = []
             wrappable_errors = []
             
-            logger.debug("PlanValidator: validate_and_repair - Getting execution order.")
-            # Get a topological sort of the plan if possible, otherwise use plan order
             execution_order = self._get_execution_order(plan, all_steps)
-            logger.debug(f"PlanValidator: validate_and_repair - Execution order: {execution_order}")
 
             for step_id in execution_order:
                 step = all_steps.get(step_id)
                 if not step:
-                    logger.warning(f"PlanValidator: validate_and_repair - Step ID {step_id} not found in all_steps during iteration.")
                     continue
 
-                logger.debug(f"PlanValidator: validate_and_repair - Validating step: {step_id}")
-                # Determine available outputs for the current step
                 current_available_outputs = self._get_available_outputs_for_step(step_id, execution_order, step_outputs, step_parents, all_steps)
                 
-                # Validate the step
                 step_errors, step_wrappable = self._validate_step(
-                    step,
-                    current_available_outputs,
-                    all_steps,
-                    step_parents
+                    step, current_available_outputs, all_steps, step_parents
                 )
                 errors.extend(step_errors)
                 wrappable_errors.extend(step_wrappable)
-            logger.debug(f"PlanValidator: validate_and_repair - Total errors: {len(errors)}, Wrappable errors: {len(wrappable_errors)}")
-
-            # 3. Handle errors and decide on next actions
-            if not errors and not wrappable_errors:
-                logger.info("PlanValidator: Plan validation successful.")
-                return plan
 
             if wrappable_errors:
-                logger.info(f"PlanValidator: Found {len(wrappable_errors)} candidates for FOREACH wrapping.")
-                # For simplicity, handle one wrappable error per attempt
+                logger.info(f"Found {len(wrappable_errors)} candidates for FOREACH wrapping in scope {scope_id}.")
                 error_to_wrap = wrappable_errors[0]
-                modified_plan = self._wrap_step_in_foreach(
+                
+                # Generate a new scope_id for the sub-plan
+                new_scope_id = str(uuid.uuid4())
+
+                plan = self._wrap_step_in_foreach(
                     plan,
                     error_to_wrap['step_id'],
                     error_to_wrap['source_step_id'],
                     error_to_wrap['source_output_name'],
                     error_to_wrap['target_input_name'],
-                    self.plugin_map,
-                    all_steps
+                    all_steps,
+                    new_scope_id # Pass the new scope_id
                 )
-                # After modification, re-run the entire validation process
-                logger.debug("PlanValidator: validate_and_repair - Re-running validation after FOREACH wrapping.")
-                return self.validate_and_repair(modified_plan, goal, inputs, attempt + 1, errors)
-
-            if errors:
-                logger.warning(f"PlanValidator: Plan validation failed with {len(errors)} errors: {errors}")
-                # Attempt LLM repair if configured
-                if self.brain_call:
-                    try:
-                        logger.debug("PlanValidator: validate_and_repair - Attempting LLM repair.")
-                        repaired_plan = self._repair_plan_with_llm(plan, errors, goal, inputs, previous_errors)
-                        # After LLM repair, re-run the entire validation process
-                        logger.debug("PlanValidator: validate_and_repair - Re-running validation after LLM repair.")
-                        return self.validate_and_repair(repaired_plan, goal, inputs, attempt + 1, errors)
-                    except Exception as e:
-                        logger.error(f"PlanValidator: LLM repair failed: {e}. Returning plan as-is.")
-                        return plan
-                else:
-                    logger.warning("PlanValidator: No brain_call configured. Cannot attempt LLM repair.")
-                    return plan
+                
+                # A transformation was made, so we must rebuild the representation and restart the loop
+                flat_repr = self._build_flat_plan_representation(plan)
+                all_steps = flat_repr['steps']
+                step_parents = flat_repr['parents']
+                step_outputs = flat_repr['outputs']
+                made_change = True
+                break # Restart the while loop
             
-            return plan
+            # If we get through the whole plan without making a change, we're done with this level.
+            if not made_change:
+                break
+        
+        # --- Recursive Step ---
+        # After this level is stable, recurse into any sub-plans
+        for step in plan:
+            original_sub_plan = self._get_sub_plan(step)
+            if original_sub_plan:
+                logger.debug(f"Recursing into sub-plan of step {step['id']} ({step['actionVerb']})")
+                
+                # The scope_id for the sub-plan is the one defined in the step itself
+                sub_plan_scope_id = step.get('scope_id', str(uuid.uuid4()))
 
-        except Exception as e:
-            logger.critical(f"PlanValidator: Critical error during plan validation: {e}", exc_info=True)
-            # In case of a critical failure, return the plan to avoid losing it.
-            return plan
+                transformed_sub_plan, _ = self._transform_plan_recursive(
+                    original_sub_plan,
+                    scope_id=sub_plan_scope_id
+                )
+                
+                # Update the sub-plan in the parent step
+                if 'steps' in step and isinstance(step['steps'], list):
+                    step['steps'] = transformed_sub_plan
+                elif 'inputs' in step and 'steps' in step['inputs'] and 'value' in step['inputs']['steps']:
+                    step['inputs']['steps']['value'] = transformed_sub_plan
+                logger.debug(f"Finished recursion for sub-plan of step {step['id']}. Sub-plan now has {len(transformed_sub_plan)} steps.")
+
+        return plan, all_steps
 
     def _build_flat_plan_representation(self, plan: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
