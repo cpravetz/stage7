@@ -504,6 +504,10 @@ Please consider this context when planning and executing the mission. Provide de
                 if (actualPlanArray && Array.isArray(actualPlanArray)) {
                     this.say(`Generated a plan with ${actualPlanArray.length} steps`);
                     console.log(`[Agent ${this.id}] runAgent: Planning step ${step.id} generated plan:`, JSON.stringify(actualPlanArray));
+                    
+                    // Save work product before returning to ensure deliverables are reported
+                    await this.saveWorkProductWithClassification(step, mappedResult);
+
                     this.addStepsFromPlan(actualPlanArray, step);
                     console.debug(`[Agent ${this.id}] executeStep: Steps after adding new plan: ${this.steps.map(s => `${s.id} (${s.actionVerb}, ${s.status})`).join(', ')}`);
                     await this.updateStatus();

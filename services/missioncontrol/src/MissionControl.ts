@@ -897,6 +897,34 @@ class MissionControl extends BaseEntity {
         }
     }
 
+    private async _addDeliverableToMission(missionId: string, deliverableMissionFile: DeliverableMissionFile) {
+        let mission = this.missions.get(missionId);
+        if (!mission) {
+            mission = await this.loadMissionState(missionId) || undefined;
+            if (!mission) {
+                console.error(`MissionControl: Mission ${missionId} not found for adding deliverable.`);
+                return;
+            }
+            this.missions.set(missionId, mission);
+        }
+
+        if (!mission.attachedFiles) {
+            mission.attachedFiles = [];
+        }
+
+        // Avoid duplicates
+        if (!mission.attachedFiles.find(f => f.id === deliverableMissionFile.id)) {
+            mission.attachedFiles.push(deliverableMissionFile);
+            mission.updatedAt = new Date();
+            await this.saveMissionState(mission);
+            this.sendStatusUpdate(mission, `File ${deliverableMissionFile.originalName} added`);
+            this.sendSharedFilesUpdate(missionId); // Notify clients about the updated file list
+            console.log(`MissionControl: Added file ${deliverableMissionFile.originalName} to mission ${missionId}. attachedFiles count: ${mission.attachedFiles.length}`);
+        } else {
+            console.log(`MissionControl: File ${deliverableMissionFile.originalName} (ID: ${deliverableMissionFile.id}) already exists for mission ${missionId}. Skipping addition.`);
+        }
+    }
+
     private async addAttachedFile(req: express.Request, res: express.Response) {
         const { missionId } = req.params;
         const incomingDeliverable = req.body; // This is the full deliverable document
@@ -910,37 +938,13 @@ class MissionControl extends BaseEntity {
             return res.status(400).send({ error: 'Invalid mission file data provided' });
         }
 
-        let mission = this.missions.get(missionId);
-        if (!mission) {
-            // Attempt to load the mission from the librarian service
-            mission = await this.loadMissionState(missionId) || undefined;
-            if (!mission) {
-                return res.status(404).send({ error: 'Mission not found' });
-            }
-            this.missions.set(missionId, mission); // Add to in-memory map
-        }
-
-        if (!mission.attachedFiles) {
-            mission.attachedFiles = [];
-        }
-
         const deliverableMissionFile: DeliverableMissionFile = {
             ...missionFile,
             isDeliverable: isDeliverable,
             stepId: stepId
         };
 
-        // Avoid duplicates
-        if (!mission.attachedFiles.find(f => f.id === deliverableMissionFile.id)) {
-            mission.attachedFiles.push(deliverableMissionFile);
-            mission.updatedAt = new Date();
-            await this.saveMissionState(mission);
-            this.sendStatusUpdate(mission, `File ${deliverableMissionFile.originalName} added`);
-            this.sendSharedFilesUpdate(missionId); // Notify clients about the updated file list
-            console.log(`MissionControl: Added file ${deliverableMissionFile.originalName} to mission ${missionId}. attachedFiles count: ${mission.attachedFiles.length}`);
-        } else {
-            console.log(`MissionControl: File ${deliverableMissionFile.originalName} (ID: ${deliverableMissionFile.id}) already exists for mission ${missionId}. Skipping addition.`);
-        }
+        await this._addDeliverableToMission(missionId, deliverableMissionFile);
 
         res.status(200).send({ status: 'File added' });
     }
