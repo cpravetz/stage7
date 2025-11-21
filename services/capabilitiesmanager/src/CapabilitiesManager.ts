@@ -717,6 +717,15 @@ export class CapabilitiesManager extends BaseEntity {
                             });
                         }
                         // preparePluginForExecution expects PluginManifest, which DefinitionManifest extends
+                        // Add available plugins to the inputs for the plugin
+                        const availablePlugins = await this._getAvailablePluginManifests();
+                        validatedInputs.inputs.set('availablePlugins', {
+                            inputName: 'availablePlugins',
+                            value: availablePlugins,
+                            valueType: PluginParameterType.ARRAY, // Assuming it's an array of plugin manifests
+                            args: {}
+                        });
+
                         const { pluginRootPath, effectiveManifest } = await this.pluginRegistry.preparePluginForExecution(manifest);
                         const result = await this.pluginExecutor.execute(effectiveManifest, validatedInputs.inputs, pluginRootPath, trace_id);
                         res.status(200).send(MapSerializer.transformForSerialization(result));

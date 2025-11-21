@@ -16,10 +16,36 @@ from typing import Dict, List, Any, Optional, Tuple
 import logging
 import random
 import time
+import functools
 
 # Configure logging
 logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"), format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+
+def retry_on_network_error(retries=3, backoff_factor=0.5):
+    """
+    A decorator to retry a function on network-related errors with exponential backoff.
+    """
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            for attempt in range(retries):
+                try:
+                    return func(*args, **kwargs)
+                except requests.exceptions.RequestException as e:
+                    if attempt < retries - 1:
+                        sleep_time = backoff_factor * (2 ** attempt)
+                        logger.warning(f"Network error ({e}) on attempt {attempt + 1}/{retries}. Retrying in {sleep_time:.2f} seconds...")
+                        time.sleep(sleep_time)
+                    else:
+                        logger.error(f"Network error on final attempt {retries}/{retries}: {e}")
+                        raise
+            # This part should not be reachable if retries > 0
+            return None
+        return wrapper
+    return decorator
+
 
 # --- Data Classes ---
 
@@ -149,6 +175,7 @@ class GoogleWebSearchProvider(SearchProvider):
 
         self.base_url = "https://www.googleapis.com/customsearch/v1"
 
+    @retry_on_network_error()
     def search(self, search_term: str, **kwargs) -> List[Dict[str, str]]:
         try:
             if not self.api_key or not self.search_engine_id or self.search_engine_id == 'YOUR_GOOGLE_CSE_ID':
@@ -200,87 +227,78 @@ class LangsearchSearchProvider(SearchProvider):
         self.rate_limit_seconds = 1
         self.last_request_time = 0
 
+    @retry_on_network_error()
     def search(self, search_term: str, **kwargs) -> List[Dict[str, str]]:
         """Execute semantic search using LangSearch API."""
-        retries = 5
-        backoff_factor = 1.0
+        # --- Rate Limiting Logic ---
+        current_time = time.time()
+        time_since_last_request = current_time - self.last_request_time
 
-        for attempt in range(retries):
-            # --- Rate Limiting Logic ---
-            current_time = time.time()
-            time_since_last_request = current_time - self.last_request_time
+        if time_since_last_request < self.rate_limit_seconds:
+            sleep_duration = self.rate_limit_seconds - time_since_last_request
+            time.sleep(sleep_duration)
+        # --- End Rate Limiting ---
 
-            if time_since_last_request < self.rate_limit_seconds:
-                sleep_duration = self.rate_limit_seconds - time_since_last_request
-                time.sleep(sleep_duration)
-            # --- End Rate Limiting ---
+        try:
+            url = f"{self.base_url}/v1/web-search"
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+                "Accept": "application/json"
+            }
+            
+            payload = {
+                "query": search_term,
+                "count": 10
+            }
+            if 'freshness' in kwargs:
+                payload['freshness'] = kwargs['freshness']
+            if 'summary' in kwargs:
+                payload['summary'] = kwargs['summary']
+            
+            response = requests.post(url, headers=headers, json=payload, timeout=15)
+            response.raise_for_status()
+            
+            full_response = response.json()
+            data = full_response.get("data", full_response)
 
-            try:
-                url = f"{self.base_url}/v1/web-search"
-                headers = {
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                    "Accept": "application/json"
-                }
-                
-                payload = {
-                    "query": search_term,
-                    "count": 10
-                }
-                if 'freshness' in kwargs:
-                    payload['freshness'] = kwargs['freshness']
-                if 'summary' in kwargs:
-                    payload['summary'] = kwargs['summary']
-                
-                response = requests.post(url, headers=headers, json=payload, timeout=15)
-                response.raise_for_status()
-                
-                full_response = response.json()
-                data = full_response.get("data", full_response)
-
-                results = []
-                if "webPages" in data and "value" in data["webPages"]:
-                    for item in data["webPages"]["value"]:
-                        if item.get("name") and item.get("url"):
-                            results.append({"title": item.get("name", ""), "url": item.get("url", ""), "snippet": item.get("snippet", "")})
-                elif "results" in data and isinstance(data["results"], list):
-                    for item in data["results"]:
-                        if item.get("title") and item.get("url"):
-                            results.append({"title": item.get("title", ""), "url": item.get("url", ""), "snippet": item.get("snippet", "")})
-                elif "items" in data and isinstance(data["items"], list):
-                    for item in data["items"]:
-                        if item.get("title") and item.get("url"):
-                            results.append({"title": item.get("title", ""), "url": item.get("url", ""), "snippet": item.get("snippet", "")})
-                elif isinstance(data, list):
-                    for item in data:
-                        if item.get("title") and item.get("url"):
-                            results.append({"title": item.get("title", ""), "url": item.get("url", ""), "snippet": item.get("snippet", "")})
-                
-                return results
-                
-            except requests.exceptions.HTTPError as e:
-                if e.response.status_code == 429 and attempt < retries - 1:
-                    sleep_time = backoff_factor * (2 ** attempt)
-                    logger.warning(f"LangSearch rate limited (429). Retrying in {sleep_time:.2f} seconds...")
-                    time.sleep(sleep_time)
-                    continue
-                else:
-                    logger.error(f"LangSearch API request failed: {str(e)}")
-                    self.update_performance(success=False)
-                    raise  # Re-raise the exception to indicate failure
-            except requests.exceptions.RequestException as e:
+            results = []
+            if "webPages" in data and "value" in data["webPages"]:
+                for item in data["webPages"]["value"]:
+                    if item.get("name") and item.get("url"):
+                        results.append({"title": item.get("name", ""), "url": item.get("url", ""), "snippet": item.get("snippet", "")})
+            elif "results" in data and isinstance(data["results"], list):
+                for item in data["results"]:
+                    if item.get("title") and item.get("url"):
+                        results.append({"title": item.get("title", ""), "url": item.get("url", ""), "snippet": item.get("snippet", "")})
+            elif "items" in data and isinstance(data["items"], list):
+                for item in data["items"]:
+                    if item.get("title") and item.get("url"):
+                        results.append({"title": item.get("title", ""), "url": item.get("url", ""), "snippet": item.get("snippet", "")})
+            elif isinstance(data, list):
+                for item in data:
+                    if item.get("title") and item.get("url"):
+                        results.append({"title": item.get("title", ""), "url": item.get("url", ""), "snippet": item.get("snippet", "")})
+            
+            return results
+            
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 429:
+                logger.warning(f"LangSearch rate limited (429).")
+            else:
                 logger.error(f"LangSearch API request failed: {str(e)}")
-                self.update_performance(success=False)
-                raise  # Re-raise the exception to indicate failure
-            except Exception as e:
-                logger.error(f"LangSearch processing failed: {str(e)}")
-                self.update_performance(success=False)
-                raise  # Re-raise the exception to indicate failure
-            finally:
-                self.last_request_time = time.time()
-        
-        logger.error(f"LangSearch search failed after {retries} retries.")
-        return []
+            self.update_performance(success=False)
+            raise  # Re-raise the exception to indicate failure
+        except requests.exceptions.RequestException as e:
+            logger.error(f"LangSearch API request failed: {str(e)}")
+            self.update_performance(success=False)
+            raise  # Re-raise the exception to indicate failure
+        except Exception as e:
+            logger.error(f"LangSearch processing failed: {str(e)}")
+            self.update_performance(success=False)
+            raise  # Re-raise the exception to indicate failure
+        finally:
+            self.last_request_time = time.time()
 
 class DuckDuckGoSearchProvider(SearchProvider):
     """Search provider for DuckDuckGo."""
@@ -288,6 +306,7 @@ class DuckDuckGoSearchProvider(SearchProvider):
         super().__init__("DuckDuckGo", performance_score=80)
         self.base_url = "https://api.duckduckgo.com"
 
+    @retry_on_network_error()
     def search(self, search_term: str, **kwargs) -> List[Dict[str, str]]:
         try:
             params = {
@@ -296,9 +315,10 @@ class DuckDuckGoSearchProvider(SearchProvider):
                 'no_html': 1,
                 'skip_disambig': 1
             }
-            url = f"{self.base_url}/?{urllib.parse.urlencode(params)}"
-            with urllib.request.urlopen(url, timeout=10) as response:
-                data = json.loads(response.read().decode('utf-8'))
+            
+            response = requests.get(self.base_url, params=params, timeout=10)
+            response.raise_for_status()
+            data = response.json()
             
             results = []
             # Add abstract result if available
@@ -320,6 +340,10 @@ class DuckDuckGoSearchProvider(SearchProvider):
             
             return results
             
+        except requests.exceptions.RequestException as e:
+            logger.error(f"DuckDuckGo search failed: {str(e)}")
+            self.update_performance(success=False)
+            raise
         except Exception as e:
             logger.error(f"DuckDuckGo search failed: {str(e)}")
             self.update_performance(success=False)
@@ -334,13 +358,13 @@ class SearxNGSearchProvider(SearchProvider):
             # Add others as appropriate.
         ]
         self.current_url_index = 0
-        self.backoff_time = 5 # Increased initial backoff time in seconds
-        self.max_backoff_time = 60 # Maximum backoff time
 
+    @retry_on_network_error()
     def search(self, search_term: str, **kwargs) -> List[Dict[str, str]]:
-        errors = []
-        for _ in range(len(self.base_urls)):
-            searxng_url = f"{self.base_urls[self.current_url_index]}/search"
+        initial_index = self.current_url_index
+        for i in range(len(self.base_urls)):
+            instance_index = (initial_index + i) % len(self.base_urls)
+            searxng_url = f"{self.base_urls[instance_index]}/search"
             try:
                 params = {
                     'q': search_term,
@@ -357,46 +381,31 @@ class SearxNGSearchProvider(SearchProvider):
                     headers={'User-Agent': 'Mozilla/5.0 Stage7SearchBot/1.0'}
                 )
                 response.raise_for_status()
-                try:
-                    data = response.json()
-                except json.JSONDecodeError as json_e:
-                    error_msg = f"SearxNG instance {searxng_url} failed: JSONDecodeError: {json_e}. Raw response: {response.text}"
-                    logger.warning(error_msg)
-                    errors.append(error_msg)
-                    # Continue to next instance in the loop
-                    self.current_url_index = (self.current_url_index + 1) % len(self.base_urls)
-                    continue # Skip to the next iteration of the for loop
+                data = response.json()
 
                 results = []
                 for item in data.get("results", []):
                     results.append({"title": item.get("title"), "url": item.get("url"), "snippet": item.get("content")})
 
                 if results:
-                    self.backoff_time = 5 # Reset backoff time on success
+                    self.current_url_index = instance_index # Stick with the working instance
                     return results
-                    
-            except requests.exceptions.HTTPError as e:
-                if e.response.status_code == 429:
-                    error_msg = f"SearxNG instance {searxng_url} failed: 429 Client Error: Too Many Requests for url: {searxng_url}"
-                    logger.warning(f"SearxNG instance rate limited (429) - sleeping for {self.backoff_time} seconds.")
-                    time.sleep(self.backoff_time)
-                    self.backoff_time = min(self.backoff_time * 2, self.max_backoff_time) # Exponential backoff with cap
                 else:
-                    error_msg = f"SearxNG instance {searxng_url} failed: {str(e)}"
-                    logger.warning(error_msg)
-                errors.append(error_msg)
+                    logger.warning(f"SearxNG instance {searxng_url} returned no results.")
+
             except requests.exceptions.RequestException as e:
-                error_msg = f"SearxNG instance {searxng_url} failed: {str(e)}"
-                logger.warning(error_msg)
-                errors.append(error_msg)
-                
-            # Rotate to next instance
-            self.current_url_index = (self.current_url_index + 1) % len(self.base_urls)
-        
-        # If we get here, all instances failed
-        logger.error(f"All SearxNG instances failed: {'; '.join(errors)}")
-        self.update_performance(success=False)
-        raise Exception("All SearxNG instances failed")
+                logger.warning(f"SearxNG instance {searxng_url} failed: {str(e)}")
+                # The decorator will handle retries, so we just let the exception propagate
+                # after logging. The outer loop will try the next instance.
+                if i == len(self.base_urls) - 1: # If this is the last instance
+                    raise
+            except json.JSONDecodeError as e:
+                logger.warning(f"SearxNG instance {searxng_url} returned invalid JSON: {e}")
+                if i == len(self.base_urls) - 1:
+                    raise Exception(f"All SearxNG instances failed or returned invalid data. Last error: Invalid JSON from {searxng_url}") from e
+
+        # If all instances are tried and none return results
+        raise Exception("All SearxNG instances were tried, but none returned results.")
 
 # --- Plugin Logic ---
 
@@ -459,47 +468,35 @@ class SearchPlugin:
 
         for term in search_terms:
             original_term = term
-            for i in range(3): # Try up to 3 times (original + 2 generalizations)
-                term_results = []
-                term_errors = []
-                
-                # Sort providers by performance score, highest first
-                sorted_providers = sorted(self.providers, key=lambda p: p.performance_score, reverse=True)
-                
-                search_successful = False
-                for provider in sorted_providers:
-                    logger.info(f"Attempting search for '{term}' using {provider.name} (performance score: {provider.performance_score})")
-                    try:
-                        results = provider.search(term)
-                        
-                        if results:
-                            logger.info(f"{provider.name} successfully returned {len(results)} results for '{term}'.")
-                            term_results.extend(results)
-                            provider.update_performance(success=True)
-                            search_successful = True
-                            break  # Move to the next provider
-                        else:
-                            logger.warning(f"{provider.name} found no results for '{term}' - trying next provider")
-                            # Only slightly penalize for no results
-                            provider.performance_score = max(0, provider.performance_score - 5)
-                    except Exception as e:
-                        error_msg = f"{provider.name} search failed for '{term}': {e}"
-                        logger.error(error_msg)
-                        term_errors.append(error_msg)
-                        provider.update_performance(success=False)
-
-                    if search_successful:
-                        break
-                
-                if search_successful:
-                    break # Break the generalization loop if search is successful
-                else:
-                    # Generalize the search term by removing the last word
-                    term_parts = term.split()
-                    if len(term_parts) > 1:
-                        term = " ".join(term_parts[:-1])
+            term_results = []
+            
+            # Sort providers by performance score, highest first
+            sorted_providers = sorted(self.providers, key=lambda p: p.performance_score, reverse=True)
+            
+            search_successful = False
+            for provider in sorted_providers:
+                logger.info(f"Attempting search for '{term}' using {provider.name} (performance score: {provider.performance_score})")
+                try:
+                    results = provider.search(term)
+                    
+                    if results:
+                        logger.info(f"{provider.name} successfully returned {len(results)} results for '{term}'.")
+                        term_results.extend(results)
+                        provider.update_performance(success=True)
+                        search_successful = True
+                        break  # Success, so we break the provider loop
                     else:
-                        break # Cannot generalize further
+                        logger.warning(f"{provider.name} found no results for '{term}' - trying next provider.")
+                        # Only slightly penalize for no results
+                        provider.performance_score = max(0, provider.performance_score - 5)
+
+                except Exception as e:
+                    error_msg = f"{provider.name} search failed for '{term}': {e}"
+                    logger.error(error_msg)
+                    all_errors.append(error_msg)
+                    provider.update_performance(success=False)
+                    # Continue to the next provider
+                    continue
 
             if not search_successful:
                 logger.error(f"All providers failed for search term: {original_term}")
@@ -515,11 +512,8 @@ class SearchPlugin:
                         logger.error(f"BrainSearchProvider fallback also failed: {e}")
                         all_errors.append(f"BrainSearchProvider fallback failed: {e}")
 
-
             if term_results:
                 all_results.extend(term_results)
-            else:
-                all_errors.extend(term_errors)
         
         return all_results, all_errors
 

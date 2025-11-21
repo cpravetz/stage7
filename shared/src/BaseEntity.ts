@@ -40,7 +40,7 @@ export class BaseEntity implements IBaseEntity {
     this.componentType = componentType;
     this.postOfficeUrl = process.env.POSTOFFICE_URL || 'postoffice:5020'
     this.port = port;
-    this.url = `${urlBase}:${port}` //url;
+    this.url = `${urlBase}:${port}`;
     if (!this.securityManagerUrl.startsWith('http')) {
       this.securityManagerUrl = `http://${this.securityManagerUrl}`;
     }
@@ -461,7 +461,7 @@ protected async cleanup() {
         const response = await this.authenticatedApi.post(`http://${this.postOfficeUrl}/registerComponent`, {
           id: this.id,
           type: this.componentType,
-          url: this.url
+          url: `http://${this.url}`
         });
 
         if (response.status === 200) {

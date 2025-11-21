@@ -1,6 +1,8 @@
 import { WorkProduct, Deliverable } from '@cktmcs/shared';
 import { MissionFile, MapSerializer, PluginOutput, createAuthenticatedAxios } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
+import { StepLocation } from './../types/DelegationTypes';
+
 
 
 export interface AgentState {
@@ -284,6 +286,33 @@ export class AgentPersistenceManager {
             return response.data.data;
         } catch (error) { analyzeError(error as Error);
             console.error('Error loading deliverable:', error instanceof Error ? error.message : error);
+            return null;
+        }
+    }
+
+    async saveStepLocation(location: StepLocation): Promise<void> {
+        try {
+            await this.authenticatedApi.post(`http://${this.librarianUrl}/storeData`, {
+                id: location.stepId,
+                data: location,
+                storageType: 'mongo',
+                collection: 'step-locations'
+            });
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error(`Error saving step location for step ${location.stepId}:`, error instanceof Error ? error.message : error);
+        }
+    }
+
+    async getStepLocation(stepId: string): Promise<StepLocation | null> {
+        try {
+            const response = await this.authenticatedApi.get(`http://${this.librarianUrl}/loadData/${stepId}`, {
+                params: { storageType: 'mongo', collection: 'step-locations' }
+            });
+            return response.data.data;
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error(`Error loading step location for step ${stepId}:`, error instanceof Error ? error.message : error);
             return null;
         }
     }

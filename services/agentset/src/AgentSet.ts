@@ -13,51 +13,48 @@ import { DomainKnowledge } from './specialization/DomainKnowledge';
 import { TaskDelegation } from './collaboration/TaskDelegation';
 import { ConflictResolution } from './collaboration/ConflictResolution';
 import { v4 as uuidv4 } from 'uuid';
+import { OwnershipTransferManager } from './utils/OwnershipTransferManager';
 
 export class AgentSet extends BaseEntity {
     agents: Map<string, Agent> = new Map(); // Store agents by their ID
-    maxAgents: number = 250; // Example limit for agents in this set
-    persistenceManager: AgentPersistenceManager;
-    private trafficManagerUrl: string = process.env.TRAFFICMANAGER_URL || 'trafficmanager:5080';
-    private librarianUrl: string = process.env.LIBRARIAN_URL || 'librarian:5040';
-    private brainUrl: string = process.env.BRAIN_URL || 'brain:5070';
-    private app: express.Application;
-    private healthCheckInterval: NodeJS.Timeout | null = null;
-    private memoryThreshold: number = 0.8; // 80% memory threshold
-    private lifecycleManager: AgentLifecycleManager;
-    private lastMemoryCheck: number = Date.now();
-    private server: http.Server | null = null;
-
-
-    // Agent systems
-    private collaborationManager: CollaborationManager;
     private specializationFramework: SpecializationFramework;
     private domainKnowledge: DomainKnowledge;
     private taskDelegation: TaskDelegation;
     private conflictResolution: ConflictResolution;
+    ownershipTransferManager: OwnershipTransferManager;
+    private lifecycleManager: AgentLifecycleManager;
+    private collaborationManager: CollaborationManager;
+
+    // Missing properties
+    private persistenceManager: AgentPersistenceManager;
+    private trafficManagerUrl: string;
+    private librarianUrl: string;
+    private brainUrl: string;
+    private maxAgents: number = 100; // Default max agents
+    private lastMemoryCheck: string = new Date().toISOString();
+    private stepLocationRegistry: Map<string, { agentId: string; agentSetUrl: string }> = new Map();
+    private app: express.Application;
 
     constructor() {
-        // Use a fixed ID for the AgentSet to avoid multiple registrations
         super('primary-agentset', 'AgentSet', process.env.HOST || 'agentset', process.env.PORT || '5100');
-
-        // Initialize Express app
         this.app = express();
+        // Initialize URLs from environment variables or defaults, ensuring http:// prefix
+        this.trafficManagerUrl = process.env.TRAFFIC_MANAGER_URL || 'trafficmanager:5000';
+        this.librarianUrl = process.env.LIBRARIAN_URL || 'librarian:5040';
+        this.brainUrl = process.env.BRAIN_URL || 'brain:5015';
+        this.postOfficeUrl = process.env.POST_OFFICE_URL || 'postoffice:5020';
 
-        // Initialize authenticated API client
-        this.authenticatedApi = createAuthenticatedAxios({
-            serviceId: 'AgentSet',
-            securityManagerUrl: this.securityManagerUrl,
-            clientSecret: process.env.CLIENT_SECRET || 'defaultSecret',
-        });
+        // The authenticatedApi and securityManagerUrl are initialized by BaseEntity.
+        // We can access them directly after super() call.
+        // Initialize persistence manager
+        this.persistenceManager = new AgentPersistenceManager(undefined, this.authenticatedApi);
 
-        // Initialize persistence manager with authenticated API
-        this.persistenceManager = new AgentPersistenceManager(this.librarianUrl, this.authenticatedApi);
-        
         // Initialize memory and lifecycle management
         this.lifecycleManager = new AgentLifecycleManager(this.persistenceManager, this.trafficManagerUrl);
 
         // Initialize agent systems
-        this.taskDelegation = new TaskDelegation(this.agents, this.trafficManagerUrl);
+        this.ownershipTransferManager = new OwnershipTransferManager(this);
+        this.taskDelegation = new TaskDelegation(this.agents, this.trafficManagerUrl, this.ownershipTransferManager);
         this.conflictResolution = new ConflictResolution(this.agents, this.trafficManagerUrl, this.brainUrl);
         this.collaborationManager = new CollaborationManager(
             this,
@@ -68,13 +65,6 @@ export class AgentSet extends BaseEntity {
         const knowledgeDomainsArray = this.specializationFramework.getAllKnowledgeDomains();
         const knowledgeDomainsMap = new Map(knowledgeDomainsArray.map(domain => [domain.id, domain]));
         this.domainKnowledge = new DomainKnowledge(knowledgeDomainsMap, this.librarianUrl, this.brainUrl);
-
-        // Initialize authenticated API client
-        this.authenticatedApi = createAuthenticatedAxios({
-            serviceId: 'AgentSet',
-            securityManagerUrl: this.securityManagerUrl,
-            clientSecret: process.env.CLIENT_SECRET || 'defaultSecret',
-        });
 
         this.initializeServer();
 
@@ -88,7 +78,6 @@ export class AgentSet extends BaseEntity {
         // Log that we're using a fixed ID
         console.log(`AgentSet initialized with fixed ID: primary-agentset`);
     }
-
 
     // Initialize Express server to manage agent lifecycle
     private initializeServer(): void {
@@ -159,7 +148,6 @@ export class AgentSet extends BaseEntity {
             try {
                 console.log(`Agentset Pausing agents for mission ${missionId}`);
                 const agents = Array.from(this.agents.values()).filter(agent => agent.getMissionId() === missionId);
-                console.log(`Agentset Pausing ${agents.length} agents for mission ${missionId}`);
                 for (const agent of agents) {
                     await agent.pause();
                 }
@@ -187,19 +175,7 @@ export class AgentSet extends BaseEntity {
             }
         });
 
-        // Update task status
-       this.app.post('/taskUpdate', async (req: express.Request, res: express.Response): Promise<void> => {
-            try {
-                const { taskId, status, result, error } = req.body;
-                await this.collaborationManager.getTaskDelegation().updateTaskStatus(taskId, status, result, error);
-                res.status(200).send({ message: `Task ${taskId} updated` });
-            } catch (error) {
-                analyzeError(error as Error);
-                if (!res.headersSent) {
-                    res.status(500).send({ error: error instanceof Error ? error.message : String(error) });
-                }
-            }
-        });
+
 
         // Submit a vote for a conflict
        this.app.post('/conflictVote', async (req: express.Request, res: express.Response): Promise<void> => {
@@ -602,33 +578,101 @@ export class AgentSet extends BaseEntity {
        // Endpoint to get details for a specific step
        this.app.get('/agent/step/:stepId', this.getStepDetailsHandler.bind(this));
 
-       this.app.post('/saveAgent', async (req: express.Request, res: express.Response) => {
-            const { agentId } = req.body;
-            try {
-                const agent = this.agents.get(agentId);
-                if (!agent) {
-                    res.status(404).send({ error: 'Agent not found' });
-                    return;
-                }
-                await agent.saveAgentState();
-                res.status(200).send({ message: 'Agent saved successfully', agentId: agent.id });
-            } catch (error) { analyzeError(error as Error);
-                console.error('Error saving agent:', error instanceof Error ? error.message : error);
-                res.status(500).send({ error: 'Failed to save agent' });
-            }
-        });
+               this.app.post('/saveAgent', async (req: express.Request, res: express.Response) => {
+                   const { agentId } = req.body;
+                   try {
+                       const agent = this.agents.get(agentId);
+                       if (!agent) {
+                           res.status(404).send({ error: 'Agent not found' });
+                           return;
+                       }
+                       await agent.saveAgentState();
+                       res.status(200).send({ message: 'Agent saved successfully', agentId: agent.id });
+                   } catch (error) { analyzeError(error as Error);
+                       console.error('Error saving agent:', error instanceof Error ? error.message : error);
+                       res.status(500).send({ error: 'Failed to save agent' });
+                   }
+               });
+       
+               // ===== Step Location Registry Endpoints =====
+       
+               this.app.post('/step-location', async (req: express.Request, res: express.Response) => {
+                   const { stepId, agentId, agentSetUrl } = req.body;
+                   if (!stepId || !agentId || !agentSetUrl) {
+                       res.status(400).send({ error: 'stepId, agentId, and agentSetUrl are required' });
+                       return;
+                   }
+                   try {
+                       await this.registerStepLocation(stepId, agentId, agentSetUrl);
+                       res.status(201).send({ message: `Step ${stepId} registered` });
+                   } catch (error) {
+                       analyzeError(error as Error);
+                       res.status(500).send({ error: 'Failed to register step location' });
+                   }
+               });
+       
+               this.app.put('/step-location/:stepId', async (req: express.Request, res: express.Response) => {
+                   const { stepId } = req.params;
+                   const { agentId, agentSetUrl } = req.body;
+                   if (!agentId || !agentSetUrl) {
+                       res.status(400).send({ error: 'agentId and agentSetUrl are required' });
+                       return;
+                   }
+                   try {
+                       await this.updateStepLocation(stepId, agentId, agentSetUrl);
+                       res.status(200).send({ message: `Step ${stepId} location updated` });
+                   } catch (error) {
+                       analyzeError(error as Error);
+                       res.status(500).send({ error: 'Failed to update step location' });
+                   }
+               });
+       
+               this.app.get('/step-location/:stepId', async (req: express.Request, res: express.Response) => {
+                   const { stepId } = req.params;
+                   try {
+                       const location = await this.getStepLocation(stepId);
+                       if (location) {
+                           res.status(200).send(location);
+                       } else {
+                           res.status(404).send({ error: `Step ${stepId} not found` });
+                       }
+                   } catch (error) {
+                       analyzeError(error as Error);
+                       res.status(500).send({ error: 'Failed to get step location' });
+                   }
+               });
+       
+               this.app.listen(this.port, () => {
+                   console.log(`AgentSet application running on ${this.url}`);
+               });
+       
+           }
+    // ===== Step Location Registry Methods =====
 
-        this.app.listen(this.port, () => {
-            console.log(`AgentSet application running on ${this.url}`);
-        });
+    public async registerStepLocation(stepId: string, agentId: string, agentSetUrl: string): Promise<void> {
+        this.stepLocationRegistry.set(stepId, { agentId, agentSetUrl });
+        console.log(`Registered step ${stepId} to agent ${agentId} at ${agentSetUrl}`);
+    }
 
+    public async updateStepLocation(stepId: string, newAgentId: string, newAgentSetUrl: string): Promise<void> {
+        if (this.stepLocationRegistry.has(stepId)) {
+            this.stepLocationRegistry.set(stepId, { agentId: newAgentId, agentSetUrl: newAgentSetUrl });
+            console.log(`Updated step ${stepId} to new agent ${newAgentId} at ${newAgentSetUrl}`);
+        } else {
+            throw new Error(`Step with id ${stepId} not found in registry.`);
+        }
+    }
+
+    public async getStepLocation(stepId: string): Promise<{ agentId: string; agentSetUrl: string } | null> {
+        const location = this.stepLocationRegistry.get(stepId);
+        return location || null;
     }
 
     
 
     private async notifyTrafficManager(agentId: string, status: string): Promise<void> {
         try {
-            const response = await this.authenticatedApi.post(`${this.trafficManagerUrl}/agent/status`, {
+            const response = await this.authenticatedApi.post(`http://${this.trafficManagerUrl}/agent/status`, {
                 agentId,
                 status,
                 timestamp: new Date().toISOString()
@@ -713,9 +757,14 @@ export class AgentSet extends BaseEntity {
     }
 
     private async addAgent(req: express.Request, res: express.Response): Promise<void> {
-        const { agentId, actionVerb, inputs, missionId, missionContext, roleId, roleCustomizations } = req.body;
-        // console.log('Adding agent with req.body', req.body);
-        // console.log('Adding agent with inputs', inputs);
+        let { agentId, actionVerb, inputs, missionId, missionContext, roleId, roleCustomizations } = req.body;
+        
+        // If agentId is not provided in the request body, generate one
+        if (!agentId) {
+            agentId = uuidv4();
+            console.log(`Generated new agentId: ${agentId} for incoming request.`);
+        }
+
         let inputsMap: Map<string, InputValue>;
 
         if (inputs?._type === 'Map') {
@@ -751,7 +800,8 @@ export class AgentSet extends BaseEntity {
             id: agentId,
             postOfficeUrl: this.postOfficeUrl,
             agentSetUrl: this.url,
-            role: roleId
+            role: roleId,
+            agentSet: this
         };
         const newAgent = new Agent(agentConfig);
         this.agents.set(newAgent.id, newAgent);
@@ -859,7 +909,8 @@ export class AgentSet extends BaseEntity {
                 id: agentId,
                 postOfficeUrl: this.postOfficeUrl,
                 agentSetUrl: this.url,
-                role: roleId
+                role: roleId,
+                agentSet: this
             };
 
             const newAgent = new Agent(agentConfig);
@@ -1050,6 +1101,7 @@ export class AgentSet extends BaseEntity {
             const allSteps: { id: string, verb: string, status: string, dependencies?: string[] }[] = [];
 
             for (const agent of this.agents.values()) {
+                //console.log(`AgentSet: Checking agent ${agent.id} for mission ${missionId}`);
                 if (agent.getMissionId() === missionId) {
                     const status = agent.getStatus();
                     totalAgentCount++;
@@ -1062,9 +1114,9 @@ export class AgentSet extends BaseEntity {
                     // Get agent's detailed statistics
                     // Assuming Agent class has a method like toAgentStatistics() that returns AgentStatistics
                     // Get agent's detailed statistics using the agent's own getStatistics method
-                                        const agentStat: AgentStatistics = await agent.getStatistics();
+                    const agentStat: AgentStatistics = await agent.getStatistics();
                     agentStatisticsByStatus.get(status)!.push(agentStat);
-
+                    //console.log('AgentSet: Collected statistics for agent', agent.id, 'Status:', status, 'Statistics:', agentStat);
                     // Collect all steps for totalSteps count
                     allSteps.push(...agentStat.steps);
                 }

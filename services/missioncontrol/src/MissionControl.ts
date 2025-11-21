@@ -1,6 +1,6 @@
 import express from 'express';
 import { Request, Response, NextFunction } from 'express';
-import { AgentStatistics, Mission, PluginParameterType, Status } from '@cktmcs/shared';
+import { AgentStatistics, Mission, PluginParameterType, Status, DeliverableMissionFile } from '@cktmcs/shared';
 import { v4 as uuidv4, validate as uuidValidate } from 'uuid';
 import { BaseEntity, MessageType, InputValue, MapSerializer, ServiceTokenManager } from '@cktmcs/shared';
 import { MissionStatistics } from '@cktmcs/shared';
@@ -270,6 +270,24 @@ class MissionControl extends BaseEntity {
             case MessageType.USER_MESSAGE:
                 await this.handleUserMessage(content, clientId, missionId);
                 return { missionId, status: 'message_sent' };
+            case MessageType.WORK_PRODUCT_UPDATE:
+                const workProductPayload = content; // The content of the message is the workProductPayload
+                const updateMissionId = workProductPayload.missionId;
+
+                for (const [clientId, missionIds] of this.clientMissions.entries()) {
+                    if (missionIds.has(updateMissionId)) {
+                        this.authenticatedApi.post(`http://${this.postOfficeUrl}/message`, {
+                            type: MessageType.WORK_PRODUCT_UPDATE,
+                            sender: this.id,
+                            recipient: 'user',
+                            clientId: clientId,
+                            content: workProductPayload
+                        }).catch((error: any) => {
+                            console.error(`Error sending WORK_PRODUCT_UPDATE to client ${clientId}:`, error instanceof Error ? error.message : error);
+                        });
+                    }
+                }
+                return { missionId: updateMissionId, status: 'work_product_updated' };
             default:
                 // Call the base class handler for standard message types
                 await super.handleBaseMessage(message);
@@ -596,7 +614,7 @@ class MissionControl extends BaseEntity {
 
     private async fetchAndPushStatsForMission(missionId: string, clientId: string): Promise<MissionStatistics | null> {
         try {
-            console.log(`Fetching and pushing statistics for mission ${missionId} to client ${clientId}`);
+            //console.log(`Fetching and pushing statistics for mission ${missionId} to client ${clientId}`);
     
             const [llmCallsResponse, engineerStatisticsResponse] = await Promise.all([
                 this.authenticatedApi.get(`http://${this.brainUrl}/getLLMCalls`).catch((error: any) => {
@@ -611,12 +629,11 @@ class MissionControl extends BaseEntity {
     
             const trafficManagerResponse = await this.authenticatedApi.get(`http://${this.trafficManagerUrl}/getAgentStatistics/${missionId}`);
             const trafficManagerStatistics = trafficManagerResponse.data;
-    
-            trafficManagerStatistics.agentStatisticsByStatus = MapSerializer.transformFromSerialization(trafficManagerStatistics.agentStatisticsByStatus);
-    
-            if (trafficManagerStatistics.agentStatisticsByStatus instanceof Map) {
-                trafficManagerStatistics.agentStatisticsByStatus.forEach((agentList: AgentStatistics[]) => {
-                    agentList.forEach((agentStat: any) => {
+            console.log(`Fetched traffic manager statistics for mission ${missionId}:`, trafficManagerStatistics);
+                        trafficManagerStatistics.agentStatistics = MapSerializer.transformFromSerialization(trafficManagerStatistics.agentStatistics);
+            
+                        if (trafficManagerStatistics.agentStatistics instanceof Map) {
+                            trafficManagerStatistics.agentStatistics.forEach((agentList: AgentStatistics[]) => {                    agentList.forEach((agentStat: any) => {
                         if (agentStat.steps && typeof agentStat.steps === 'object' && !Array.isArray(agentStat.steps)) {
                             console.warn(`MissionControl: Reconstructing steps for agent ${agentStat.id} which were an object.`);
                             try {
@@ -637,8 +654,8 @@ class MissionControl extends BaseEntity {
             const missionStats: MissionStatistics = {
                 llmCalls: llmCallsResponse.data.llmCalls,
                 activeLLMCalls: llmCallsResponse.data.activeLLMCalls,
-                agentCountByStatus: trafficManagerStatistics.agentStatisticsByType.agentCountByStatus,
-                agentStatistics: MapSerializer.transformForSerialization(trafficManagerStatistics.agentStatisticsByStatus),
+                agentCountByStatus: trafficManagerStatistics.agentCountByStatus,
+                agentStatistics: MapSerializer.transformForSerialization(trafficManagerStatistics.agentStatistics),
                 engineerStatistics: engineerStatisticsResponse.data
             };
     
@@ -650,7 +667,7 @@ class MissionControl extends BaseEntity {
                 content: missionStats
             });
     
-            console.log(`Successfully sent statistics for mission ${missionId} to client ${clientId}`);
+            //console.log(`Successfully sent statistics for mission ${missionId} to client ${clientId}`);
             return missionStats;
     
         } catch (error) {
@@ -792,7 +809,6 @@ class MissionControl extends BaseEntity {
             if (this.clientMissions.size === 0) {
                 return;
             }
-            console.log(`Periodic statistics fetch running for ${this.clientMissions.size} client(s).`);
 
             for (const [clientId, missionIds] of this.clientMissions.entries()) {
                 for (const missionId of missionIds) {
@@ -853,18 +869,43 @@ class MissionControl extends BaseEntity {
         }
     }
 
-    private async addAttachedFile(req: express.Request, res: express.Response) {
-        const { missionId } = req.params;
-        const missionFile = req.body;
+    private async sendSharedFilesUpdate(missionId: string) {
+        const mission = this.missions.get(missionId);
+        if (!mission) {
+            console.error(`Mission ${missionId} not found for sending shared files update.`);
+            return;
+        }
 
+        const filesToSend = (mission.attachedFiles || []).filter(file => file.isDeliverable);
+        console.log(`MissionControl: Preparing SHARED_FILES_UPDATE for mission ${missionId}. Files to send:`, JSON.stringify(filesToSend, null, 2));
+
+        for (const [clientId, missionIds] of this.clientMissions.entries()) {
+            if (missionIds.has(missionId)) {
+                this.authenticatedApi.post(`http://${this.postOfficeUrl}/message`, {
+                    type: MessageType.SHARED_FILES_UPDATE,
+                    sender: this.id,
+                    recipient: 'user',
+                    clientId: clientId,
+                    content: {
+                        missionId: missionId,
+                        files: filesToSend
+                    }
+                }).catch((error: any) => {
+                    console.error(`Error sending SHARED_FILES_UPDATE to client ${clientId}:`, error instanceof Error ? error.message : error);
+                });
+            }
+        }
+    }
+
+    private async _addDeliverableToMission(missionId: string, deliverableMissionFile: DeliverableMissionFile) {
         let mission = this.missions.get(missionId);
         if (!mission) {
-            // Attempt to load the mission from the librarian service
             mission = await this.loadMissionState(missionId) || undefined;
             if (!mission) {
-                return res.status(404).send({ error: 'Mission not found' });
+                console.error(`MissionControl: Mission ${missionId} not found for adding deliverable.`);
+                return;
             }
-            this.missions.set(missionId, mission); // Add to in-memory map
+            this.missions.set(missionId, mission);
         }
 
         if (!mission.attachedFiles) {
@@ -872,12 +913,38 @@ class MissionControl extends BaseEntity {
         }
 
         // Avoid duplicates
-        if (!mission.attachedFiles.find(f => f.id === missionFile.id)) {
-            mission.attachedFiles.push(missionFile);
+        if (!mission.attachedFiles.find(f => f.id === deliverableMissionFile.id)) {
+            mission.attachedFiles.push(deliverableMissionFile);
             mission.updatedAt = new Date();
             await this.saveMissionState(mission);
-            this.sendStatusUpdate(mission, `File ${missionFile.originalName} added`);
+            this.sendStatusUpdate(mission, `File ${deliverableMissionFile.originalName} added`);
+            this.sendSharedFilesUpdate(missionId); // Notify clients about the updated file list
+            console.log(`MissionControl: Added file ${deliverableMissionFile.originalName} to mission ${missionId}. attachedFiles count: ${mission.attachedFiles.length}`);
+        } else {
+            console.log(`MissionControl: File ${deliverableMissionFile.originalName} (ID: ${deliverableMissionFile.id}) already exists for mission ${missionId}. Skipping addition.`);
         }
+    }
+
+    private async addAttachedFile(req: express.Request, res: express.Response) {
+        const { missionId } = req.params;
+        const incomingDeliverable = req.body; // This is the full deliverable document
+        console.log(`MissionControl: Received addAttachedFile request for mission ${missionId} with deliverable:`, JSON.stringify(incomingDeliverable, null, 2));
+        const missionFile = incomingDeliverable.missionFile;
+        const isDeliverable = (incomingDeliverable.isDeliverable || (missionFile && missionFile.isDeliverable)) || false;
+        const stepId = incomingDeliverable.stepId;
+
+        if (!missionFile || !missionFile.id) {
+            console.error(`MissionControl: Invalid mission file data received for mission ${missionId}. missionFile:`, missionFile);
+            return res.status(400).send({ error: 'Invalid mission file data provided' });
+        }
+
+        const deliverableMissionFile: DeliverableMissionFile = {
+            ...missionFile,
+            isDeliverable: isDeliverable,
+            stepId: stepId
+        };
+
+        await this._addDeliverableToMission(missionId, deliverableMissionFile);
 
         res.status(200).send({ status: 'File added' });
     }
@@ -904,6 +971,7 @@ class MissionControl extends BaseEntity {
                 mission.updatedAt = new Date();
                 await this.saveMissionState(mission);
                 this.sendStatusUpdate(mission, `File ${originalFile?.originalName || fileId} removed`);
+                this.sendSharedFilesUpdate(missionId); // Notify clients about the updated file list
             }
         }
 

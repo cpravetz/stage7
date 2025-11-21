@@ -262,7 +262,7 @@ export class PostOffice extends BaseEntity {
             if (!librarianUrl) {
                 res.status(404).send({ error: 'Librarian not registered' });
             }
-            const response = await this.authenticatedApi.get(`http://${librarianUrl}/loadWorkProduct/${req.params.id}`);
+            const response = await this.authenticatedApi.get(`${librarianUrl}/loadWorkProduct/${req.params.id}`);
             res.status(200).send(response.data);
         }
         catch (error) {
@@ -384,7 +384,7 @@ export class PostOffice extends BaseEntity {
                         // Send pause message to MissionControl
                         const missionControlUrl = this.getComponentUrl('MissionControl');
                         if (missionControlUrl) {
-                            await this.authenticatedApi.post(`http://${missionControlUrl}/message`, {
+                            await this.authenticatedApi.post(`${missionControlUrl}/message`, {
                                 type: MessageType.PAUSE,
                                 sender: 'PostOffice',
                                 recipient: 'MissionControl',
@@ -450,7 +450,7 @@ export class PostOffice extends BaseEntity {
             // Since we've disabled token verification, we'll use a default userId
             const userId = 'system';
 
-            const response = await this.authenticatedApi.post(`http://${missionControlUrl}/message`, {
+            const response = await this.authenticatedApi.post(`${missionControlUrl}/message`, {
                 type: MessageType.CREATE_MISSION,
                 sender: 'PostOffice',
                 recipient: 'MissionControl',
@@ -513,7 +513,7 @@ export class PostOffice extends BaseEntity {
             // Since we've disabled token verification, we'll use a default userId
             const userId = 'system';
 
-            const response = await this.authenticatedApi.post(`http://${missionControlUrl}/loadMission`, {
+            const response = await this.authenticatedApi.post(`${missionControlUrl}/loadMission`, {
                 missionId,
                 clientId,
                 // Add userId to the payload
@@ -728,7 +728,7 @@ export class PostOffice extends BaseEntity {
                     const librarianUrl = this.getComponentUrl('Librarian');
                     if (librarianUrl) {
                         const missionFile = this.fileUploadManager.fileUploadServiceInstance.convertToMissionFile(uploadedFile);
-                        await this.authenticatedApi.post(`http://${librarianUrl}/storeData`, {
+                        await this.authenticatedApi.post(`${librarianUrl}/storeData`, {
                             id: uploadedFile.id,
                             data: missionFile,
                             collection: 'files',
@@ -785,7 +785,7 @@ export class PostOffice extends BaseEntity {
 
             console.log(`Using userId: ${userId} for getSavedMissions`);
 
-            const response = await this.authenticatedApi.get(`http://${librarianUrl}/getSavedMissions`, {
+            const response = await this.authenticatedApi.get(`${librarianUrl}/getSavedMissions`, {
                 params: { userId }
             });
             res.status(200).send(response.data);
@@ -806,10 +806,8 @@ export class PostOffice extends BaseEntity {
                 return res.status(404).json({ error: 'Librarian service not available' });
             }
 
-            console.log(`Retrieving model performance data from Librarian at ${librarianUrl}`);
-
             try {
-                const response = await this.authenticatedApi.post(`http://${librarianUrl}/queryData`, {
+                const response = await this.authenticatedApi.post(`${librarianUrl}/queryData`, {
                     collection: 'mcsdata',
                     limit: 1,
                     query: { _id: 'model-performance-data' }
@@ -880,7 +878,7 @@ export class PostOffice extends BaseEntity {
             const metric = req.query.metric as string || 'overall';
 
             try {
-                const response = await this.authenticatedApi.post(`http://${librarianUrl}/queryData`, {
+                const response = await this.authenticatedApi.post(`${librarianUrl}/queryData`, {
                     collection: 'mcsdata',
                     limit: 1,
                     query: { _id: 'model-performance-data' }
@@ -1004,7 +1002,7 @@ export class PostOffice extends BaseEntity {
                 return res.status(404).json({ error: 'Brain service not available' });
             }
             console.log(`Submitting model evaluation to Brain at ${brainUrl}`);
-            await this.authenticatedApi.post(`http://${brainUrl}/evaluations`, {
+            await this.authenticatedApi.post(`${brainUrl}/evaluations`, {
                 modelName,
                 conversationType,
                 requestId,
@@ -1033,7 +1031,7 @@ export class PostOffice extends BaseEntity {
                 return res.status(503).json({ error: 'AgentSet service not available' });
             }
             // Forward the request to AgentSet
-            const response = await this.authenticatedApi.get(`http://${agentSetUrl}/agent/step/${stepId}`);
+            const response = await this.authenticatedApi.get(`${agentSetUrl}/agent/step/${stepId}`);
             return res.status(200).json(response.data);
         } catch (error) {
             analyzeError(error as Error);
@@ -1051,7 +1049,7 @@ export class PostOffice extends BaseEntity {
             }
     
             // Forward the DELETE request to MissionControl
-            const response = await this.authenticatedApi.delete(`http://${missionControlUrl}/missions/${missionId}/files/${fileId}`);
+            const response = await this.authenticatedApi.delete(`${missionControlUrl}/missions/${missionId}/files/${fileId}`);
             
             res.status(response.status).send(response.data);
         } catch (error) {
@@ -1074,7 +1072,7 @@ export class PostOffice extends BaseEntity {
 
             // Attempt 1: Search for the file in the 'deliverables' collection
             try {
-                const deliverableResponse = await this.authenticatedApi.get(`http://${librarianUrl}/loadData/${fileId}`, {
+                const deliverableResponse = await this.authenticatedApi.get(`${librarianUrl}/loadData/${fileId}`, {
                     params: { collection: 'deliverables', storageType: 'mongo' }
                 });
 
@@ -1100,7 +1098,7 @@ export class PostOffice extends BaseEntity {
 
             // Attempt 2: If not found as a deliverable, search within 'missions.attachedFiles' (user uploads)
             if (!fileToDownload) {
-                const missionFileQueryResult = await this.authenticatedApi.post(`http://${librarianUrl}/queryData`, {
+                const missionFileQueryResult = await this.authenticatedApi.post(`${librarianUrl}/queryData`, {
                     collection: 'missions',
                     query: { "attachedFiles.id": fileId },
                     limit: 1
@@ -1151,7 +1149,7 @@ export class PostOffice extends BaseEntity {
             if (!librarianUrl) {
                 return res.status(503).send({ error: 'Librarian service not available' });
             }
-            const response = await this.authenticatedApi.post(`http://${librarianUrl}/queryData`, {
+            const response = await this.authenticatedApi.post(`${librarianUrl}/queryData`, {
                 collection: 'toolSources',
                 query: {}
             });
@@ -1170,7 +1168,7 @@ export class PostOffice extends BaseEntity {
             if (!librarianUrl) {
                 return res.status(503).send({ error: 'Librarian service not available' });
             }
-            await this.authenticatedApi.post(`http://${librarianUrl}/storeData`, {
+            await this.authenticatedApi.post(`${librarianUrl}/storeData`, {
                 collection: 'toolSources',
                 data: newToolSource,
                 id: newToolSource.id
@@ -1190,7 +1188,7 @@ export class PostOffice extends BaseEntity {
             if (!librarianUrl) {
                 return res.status(503).send({ error: 'Librarian service not available' });
             }
-            await this.authenticatedApi.delete(`http://${librarianUrl}/deleteData/${id}`, {
+            await this.authenticatedApi.deleteget(`${librarianUrl}/deleteData/${id}`, {
                 params: { collection: 'toolSources' }
             });
             res.status(204).send();
@@ -1207,7 +1205,7 @@ export class PostOffice extends BaseEntity {
             if (!librarianUrl) {
                 return res.status(503).send({ error: 'Librarian service not available' });
             }
-            const response = await this.authenticatedApi.post(`http://${librarianUrl}/queryData`, {
+            const response = await this.authenticatedApi.post(`${librarianUrl}/queryData`, {
                 collection: 'pendingTools',
                 query: { status: 'pending' }
             });
@@ -1230,7 +1228,7 @@ export class PostOffice extends BaseEntity {
             }
 
             // 1. Fetch the pending tool
-            const pendingToolResponse = await this.authenticatedApi.get(`http://${librarianUrl}/loadData/${id}`, {
+            const pendingToolResponse = await this.authenticatedApi.get(`${librarianUrl}/loadData/${id}`, {
                 params: { collection: 'pendingTools' }
             });
             const pendingTool: PendingTool = pendingToolResponse.data.data;
@@ -1241,7 +1239,7 @@ export class PostOffice extends BaseEntity {
 
             // 2. Update the pending tool status to 'approved'
             pendingTool.status = 'approved';
-            await this.authenticatedApi.post(`http://${librarianUrl}/storeData`, {
+            await this.authenticatedApi.post(`${librarianUrl}/storeData`, {
                 collection: 'pendingTools',
                 data: pendingTool,
                 id: pendingTool.id
@@ -1264,7 +1262,7 @@ export class PostOffice extends BaseEntity {
             }
 
             // 1. Fetch the pending tool
-            const pendingToolResponse = await this.authenticatedApi.get(`http://${librarianUrl}/loadData/${id}`, {
+            const pendingToolResponse = await this.authenticatedApi.get(`${librarianUrl}/loadData/${id}`, {
                 params: { collection: 'pendingTools' }
             });
             const pendingTool: PendingTool = pendingToolResponse.data.data;
@@ -1275,7 +1273,7 @@ export class PostOffice extends BaseEntity {
 
             // 2. Update the pending tool status to 'rejected'
             pendingTool.status = 'rejected';
-            await this.authenticatedApi.post(`http://${librarianUrl}/storeData`, {
+            await this.authenticatedApi.post(`${librarianUrl}/storeData`, {
                 collection: 'pendingTools',
                 data: pendingTool,
                 id: pendingTool.id

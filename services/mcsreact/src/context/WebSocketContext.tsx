@@ -196,39 +196,6 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             return [...prev, newProduct];
           }
         });
-        // If the backend included attachedFiles with this work product, merge them into the
-        // sharedFiles state so the Files tab shows newly created/attached files immediately.
-        try {
-          const attached = data.content && (data.content.attachedFiles || data.content.attached_files || []);
-          if (attached && Array.isArray(attached) && attached.length > 0) {
-            setSharedFiles((prev: LocalMissionFile[]) => {
-              const map = new Map<string, LocalMissionFile>();
-              // seed with existing files
-              for (const f of prev) map.set(f.id, f);
-
-              // normalize and upsert attached files
-              for (const af of attached) {
-                const id = af.id || af.storageId || af.storage_id || uuidv4();
-                const normalized: LocalMissionFile = {
-                  id,
-                  originalName: af.originalName || af.filename || af.name || 'file',
-                  size: af.size || af.size_bytes || 0,
-                  mimeType: af.mimeType || af.mime_type || 'application/octet-stream',
-                  uploadedAt: af.uploadedAt || af.uploaded_at || new Date().toISOString(),
-                  uploadedBy: af.uploadedBy || af.uploaded_by || 'system',
-                  description: af.description || af.desc || undefined
-                };
-                map.set(id, normalized);
-              }
-
-              const merged = Array.from(map.values());
-              if (JSON.stringify(prev) === JSON.stringify(merged)) return prev;
-              return merged;
-            });
-          }
-        } catch (e) {
-          console.error('Failed to merge attachedFiles from work product update', e);
-        }
         break;
         
       case MessageType.STATISTICS:

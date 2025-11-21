@@ -31,8 +31,8 @@ export class Qwen3CoderModel extends BaseModel {
         ]);
 
         super({
-            name: "or/qwen/qwen3-coder:free",
-            modelName: "qwen/qwen3-coder:free",
+            name: "or/qwen/qwen3-coder",
+            modelName: "qwen/qwen3-coder",
             interfaceName: "openrouter",
             serviceName: "ORService",
             tokenLimit: 260000, 

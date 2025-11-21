@@ -1,14 +1,17 @@
 import { AgentState, AgentPersistenceManager } from './AgentPersistenceManager';
 import { Step } from '../agents/Step';
 import { MapSerializer } from '@cktmcs/shared';
+import { CrossAgentDependencyResolver } from './CrossAgentDependencyResolver';
 
 export class StateManager {
     private agentPersistenceManager: AgentPersistenceManager;
     private agentId: string;
+    private crossAgentResolver: CrossAgentDependencyResolver;
 
-    constructor(agentId: string, agentPersistenceManager: AgentPersistenceManager) {
+    constructor(agentId: string, agentPersistenceManager: AgentPersistenceManager, crossAgentResolver: CrossAgentDependencyResolver) {
         this.agentId = agentId;
         this.agentPersistenceManager = agentPersistenceManager;
+        this.crossAgentResolver = crossAgentResolver;
     }
 
     async saveState(agent: any): Promise<void> {
@@ -94,7 +97,8 @@ export class StateManager {
                         outputs: deserializedOutputs,
                         status: event.status,
                         recommendedRole: event.recommendedRole,
-                        persistenceManager: this.agentPersistenceManager
+                        persistenceManager: this.agentPersistenceManager,
+                        crossAgentResolver: this.crossAgentResolver
                     });
                 });
 

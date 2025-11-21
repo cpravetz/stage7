@@ -96,7 +96,7 @@ export class ServiceDiscoveryManager {
       if (this.serviceDiscovery) {
         try {
           // Extract host and port from URL
-          const urlObj = new URL(url.startsWith('http') ? url : `http://${url}`);
+          const urlObj = new URL(url);
           const host = urlObj.hostname;
           const port = parseInt(urlObj.port || '80', 10);
           
@@ -104,7 +104,7 @@ export class ServiceDiscoveryManager {
           await this.serviceDiscovery.registerService(
             id,
             type,
-            url,
+            host+':'+port.toString(),
             [type.toLowerCase()],
             port
           );

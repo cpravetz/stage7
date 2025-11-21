@@ -1,108 +1,35 @@
-All code in our system is production-ready, efficient, and scalable. We never use placeholders, stubs, or mocks in our code. Nor do we leave TODO items in place of working code. All data and state issues are to be resolved within the code, not thrown unless a higher level of scop is needed - and then they are handled there. Our system is intended to grow through the development of new plugins and discovery of available tools. The core capabilitiesManager executes Steps as requested by the agent. The ACCOMPLISH actionVerb is intended to determine how to achieve a mission or step objective by providing an LLM generated answer, creating a new plan of steps or recommending the development of a new plugin for mechanical task likely to repeat.
+## Critical Heuristic for Problem Resolution: A Structured Approach
 
-### Hierarchy of Work Units
+When tackling complex issues, especially those involving data flow, type systems, and inter-service communication, a structured and iterative approach is paramount. This heuristic outlines a robust process to move beyond superficial fixes and address root causes effectively.
 
-To ensure clarity and consistency in how we define and manage work, the following hierarchy of work units is established:
+1.  **Initial Problem Statement & Observation:**
+    *   Clearly articulate the observed problem (e.g., "X is undefined," "Component Y is not rendering correctly").
+    *   Note the immediate symptoms and any error messages.
 
-*   **Mission:** The highest-level, overarching objective or ultimate goal that the entire agent system is tasked to achieve. It defines the complete scope of work.
-*   **Stage:** A major segment of a Mission, representing a significant milestone or a distinct, often sequential, phase of work. Stages are particularly useful for structuring complex missions, akin to phases in a waterfall project. A Mission can comprise multiple Stages.
-*   **Phase:** A logical grouping of related Tasks within a Stage (or directly within a Mission for more agile or iterative plans). Phases represent a coherent set of activities designed to achieve a specific intermediate outcome or deliverable. A Stage can contain multiple Phases, and a Phase encompasses one or more Tasks.
-*   **Task:** A coherent, self-contained unit of work aimed at producing one logical, tangible output or outcome. A Task consists of one or more Steps and represents a meaningful chunk of work that, when completed, directly contributes to the Phase's objective. Tasks are the primary units for which a specialized agent might take ownership.
-*   **Step:** The smallest, atomic unit of work that an agent can execute. A Step typically corresponds to a single `actionVerb` (plugin call) with specific inputs and expected outputs. A Task is composed of one or more Steps.
+2.  **Avoid Premature "Band-Aid" Fixes:**
+    *   Resist the urge to apply quick, localized fixes (e.g., optional chaining, default values) without understanding the underlying cause. These often mask the true problem, leading to technical debt and future complications.
+    *   If a temporary fix is absolutely necessary for immediate progress, explicitly label it as such and prioritize its replacement with a root-cause solution.
 
-All code must be production ready - no mocks, stubs, simulations. All data and state issues are resolved in the system, not thrown as errors. Unknown verbs are expected and permitted in plans. We develop for classes and generalizations, not hardcoding for very specific items or for this particular mission from the test run. We do not create default values for missing data - we find the reason it is missing.
+3.  **Deep Dive into Root Cause Analysis:**
+    *   **Trace Data Flow:** Systematically map the journey of relevant data from its origin (where it's created/generated) through all transformations, transmissions, and consumption points. Identify all involved components, services, and functions.
+    *   **Examine All Relevant Type Definitions:** Scrutinize every interface, type, and class definition involved in the data's lifecycle. Look for discrepancies between declared types and actual data structures.
+    *   **Verify API/Component Contracts:** For data exchanged between services or components, meticulously compare the *expected* data structure (by the consumer) with the *provided* data structure (by the producer). This includes implicit contracts derived from code usage, even if not explicitly typed.
+    *   **Question Assumptions:** Challenge every assumption about how data *should* be structured or where it *should* originate. The problem often lies in a mismatch between assumptions and reality.
+    *   **Identify the Point of Discrepancy:** Pinpoint precisely where the data's actual structure deviates from its expected structure, or where a type definition fails to accurately represent the data.
 
-Never make assumptions or short cut an analysis because you think you know what it is likely to tell you. Confirm assignments. When asked about the project/code - check the project/code. Verify the validity of your understanding about this project.
+4.  **Ideate and Evaluate Comprehensive Solutions:**
+    *   **Brainstorm Options:** Based on the identified root cause, generate multiple potential solutions.
+    *   **Consider Architectural Alignment:** Evaluate each solution against the project's architectural principles. Does it centralize logic appropriately? Does it maintain separation of concerns? Does it introduce unnecessary coupling?
+    *   **Prioritize Type Consistency:** Solutions that bring type definitions into alignment across the system are generally preferred, as they enhance maintainability and prevent future errors.
+    *   **Assess Impact:** Consider the downstream and upstream effects of each solution. Will it require changes in other parts of the system? Is the rework justified by the robustness gained?
 
-## Robustness and External Dependencies
+5.  **Implement the Chosen Solution:**
+    *   Apply the selected fix, focusing on correcting the root cause identified in step 3.
+    *   Ensure all related code (e.g., data generation, type definitions, data consumption) is updated to reflect the chosen solution.
 
-- **External API Interactions:** When interacting with external APIs, always implement comprehensive error handling, including retries with exponential backoff for transient errors (e.g., network issues, temporary service unavailability, rate limiting).
-- **Rate Limiting:** Design plugins and services to gracefully handle rate limits imposed by external APIs. Do not crash or throw unhandled errors; instead, implement intelligent retry mechanisms and, where applicable, switch to alternative providers or degrade gracefully.
-- **Fallback Mechanisms:** For critical functionalities relying on external services (e.g., search, data retrieval), implement robust fallback strategies. If a primary service fails or becomes unavailable, automatically attempt to use alternative providers or internal mechanisms to ensure continued operation, even if with reduced performance or scope.
-- **Dependency Stability:** Ensure that critical internal services (like Security Manager, Brain, Librarian) are stable and highly available. Failures in these core services will cascade and impact mission success.
-- **Plan Validation Error Handling:** Plan validation should not throw exceptions for data or state issues like type mismatches (e.g., boolean to string) or non-existent outputs. Instead, the validator should attempt to automatically repair these issues (e.g., by inserting TRANSFORM steps for type conversions, or by logging warnings and attempting to proceed with reasonable defaults for missing outputs) and continue the planning process. The system should prioritize graceful degradation and self-correction over hard failures.
+6.  **Rigorous Verification:**
+    *   **Type Checking:** Run the project's type checker (e.g., TypeScript compiler) to confirm that all type errors are resolved and no new ones have been introduced. This is a non-negotiable step.
+    *   **Functional Testing:** Execute relevant tests (unit, integration, end-to-end) to ensure the original problem is resolved and no regressions have been introduced.
+    *   **Runtime Observation:** If possible, observe the system at runtime to confirm the correct behavior and data flow.
 
-## Planning Code Awareness of External Tools
-
-- **ACCOMPLISH and REFLECT Plugins:** The planning code within the ACCOMPLISH and REFLECT plugins must be fully aware of all active and cleared MCP tools and OpenAPI tools. This includes leveraging the enhanced tool discovery and context-aware search capabilities provided by the Librarian service to ensure optimal tool selection and utilization in generated plans.
-
-## Plugin Guidance Principles
-- **Verb-Specific Guidance Location:** Plugin or verb specific guidance belongs in the manifest for that plugin, not the general prompts in our planning functions (e.g., ACCOMPLISH or REFLECT).
-
-## Example Plan Steps from Brain
-
-Here are two example plan steps as returned from the Brain, illustrating how custom output names are acceptable and how output types should be handled:
-
-```json
-[
-  {
-    "number": 1,
-    "actionVerb": "SEARCH",
-    "description": "Search for competitors of stage7 on GitHub",
-    "inputs": {
-      "searchTerm": {
-        "value": "stage7 competitors",
-        "valueType": "string"
-      }
-    },
-    "outputs": {
-      "competitors": {
-        "description": "List of competitors found on GitHub",
-        "type": "array"
-      }
-    },
-    "recommendedRole": "Researcher"
-  },
-  {
-    "number": 2,
-    "actionVerb": "SCRAPE",
-    "description": "Scrape details of the top 5 competitors from their GitHub pages",
-    "inputs": {
-      "url": {
-        "outputName": "competitors",
-        "sourceStep": 1,
-        "valueType": "string"
-      }
-    },
-    "outputs": {
-      "competitorDetails": {
-        "description": "Detailed information about the top 5 competitors",
-        "type": "array"
-      }
-    },
-    "recommendedRole": "Researcher"
-  }
-]
-```
-
-**Key points regarding these steps:**
-
-*   **Custom Output Names:** The output name `competitors` in Step 1 is acceptable, even if the manifest's canonical output name for `SEARCH` is `results`.
-*   **Output Type Alignment:** The `outputs` for `competitors` in Step 1 and `competitorDetails` in Step 2 should have a `type` property (e.g., `"type": "array"`). This is crucial for schema compliance and for enabling features like `FOREACH` wrapping.
-*   **Input Referencing:** In Step 2, the `url` input correctly references `competitors` from Step 1 using `outputName` and `sourceStep`. The `valueType` for `url` is also correctly set to `string`.
-*   **`FOREACH` Wrapping:** Once the output types are correctly set, the plan validation should identify the need for `FOREACH` wrapping for Step 2, as it consumes an array output (`competitors`) from Step 1. A new `FOREACH` step would be inserted (e.g., with `number: 50`), its `array` input would be defined as `{sourceStep: 1, outputName: competitors}`, and Step 2 (and its dependents) would become part of the `FOREACH`'s subplan, with `SCRAPE`'s `url` input redefined as `{sourceStep: 50, outputName: "item"}`.
-
-## Core Architectural Understanding
-
-*   **Agents (`@services/agentset/src/agents/Agent.ts`):**
-    *   Own and run `Step`s.
-    *   Prepare inputs for `Step` execution.
-    *   Execute internal verbs directly (e.g., `CHAT`, `ASK`).
-    *   Call `CapabilitiesManager` to handle external plugins or novel verbs.
-    *   Ensure results are saved after `Step` execution.
-    *   Manage the overall mission flow and agent lifecycle.
-
-*   **Steps (`@services/agentset/src/agents/Step.ts`):**
-    *   Represent a single, atomic unit of work within a plan.
-    *   Prepare inputs from literal values and references to outputs of previous steps.
-    *   Execute internal verbs directly (e.g., `FOREACH`, `REGROUP`, `THINK`, `GENERATE`, `CHAT`, `ASK`).
-    *   Call `CapabilitiesManager` to execute external `actionVerb`s (plugins).
-    *   Handle dependencies between steps.
-    *   Ensure their results are saved (work products and deliverables).
-
-*   **CapabilitiesManager (`@services/capabilitiesmanager/src/CapabilitiesManager.ts`):**
-    *   Acts as a central registry and executor for external plugins.
-    *   Receives `actionVerb` execution requests from `Step`s.
-    *   Looks for a registered handler (plugin, OpenAPI tool, MCP tool) for known `actionVerb`s and executes them with the provided inputs.
-    *   For unknown `actionVerb`s (novel verbs), it delegates to the `ACCOMPLISH` plugin to generate a plan to handle the novel verb.
-    *   Manages plugin lifecycle, health checks, and resource allocation for external plugins.
+This structured approach minimizes the risk of introducing new bugs, ensures long-term maintainability, and fosters a deeper understanding of the codebase.

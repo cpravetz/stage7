@@ -26,7 +26,7 @@ export class LiquidLFM40BModel extends BaseModel {
 
         super({
             name: "liquid/lfm-40b",
-            modelName: "liquid/lfm-40b:free",
+            modelName: "liquid/lfm-40b",
             interfaceName: "openrouter",
             serviceName: "ORService",
             tokenLimit: 4096, // Adjust this value if needed

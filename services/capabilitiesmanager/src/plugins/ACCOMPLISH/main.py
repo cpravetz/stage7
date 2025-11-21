@@ -165,6 +165,8 @@ def call_brain(prompt: str, inputs: Dict[str, Any], response_type: str = "json")
             'Authorization': f'Bearer {auth_token}'
         }
 
+        logger.debug(f"Brain URL: http://{brain_url}/chat")
+        logger.debug(f"Payload size: {len(json.dumps(payload))} bytes")
         response = requests.post(
             f"http://{brain_url}/chat",
             json=payload,
@@ -455,7 +457,9 @@ class RobustMissionPlanner:
             modified_inputs['availablePlugins'] = available_plugins_for_validator['value']
 
         try:
+            logger.debug("Before calling validator.validate_and_repair.")
             validated_plan = self.validator.validate_and_repair(structured_plan, goal, modified_inputs)
+            logger.debug("After calling validator.validate_and_repair.")
         except Exception as e:
             logger.exception(f"❌ Failed to validate and repair the plan after all retries: {e}")
             raise AccomplishError(f"Could not validate or repair the plan: {e}", "validation_error")
@@ -593,8 +597,18 @@ CRITICAL: The actionVerb for each step MUST be a valid, existing plugin actionVe
                 response = call_brain(prompt, inputs, "json")
                 # Log raw response for debugging
                 logger.info(f"Raw response from Brain (attempt {attempt+1}): {str(response)[:500]}...")
+                
+                logger.debug(f"Attempt {attempt + 1}: Before json.loads(response).")
                 try:
                     plan = json.loads(response)
+                    logger.debug(f"Attempt {attempt + 1}: After json.loads(response). Plan type: {type(plan)}")
+
+                    # Check if the parsed response is an error object from the Brain
+                    if isinstance(plan, dict) and 'error' in plan:
+                        error_message = plan['error'].get('message', 'Unknown Brain error')
+                        error_type = plan['error'].get('type', 'brain_error')
+                        raise AccomplishError(f"Brain returned an error: {error_message}", error_type)
+
                 except Exception as e:
                     logger.warning(f"Attempt {attempt + 1}: JSON parsing failed: {e}. Response: {response}")
                     if attempt == self.max_retries - 1:
@@ -603,6 +617,7 @@ CRITICAL: The actionVerb for each step MUST be a valid, existing plugin actionVe
 
                 # Type check: must be list of dicts
                 if isinstance(plan, list) and all(isinstance(step, dict) for step in plan):
+                    logger.debug(f"Attempt {attempt + 1}: Plan is a valid list of dictionaries.")
                     return plan
                 # If dict, convert to list (assuming it's a single step)
                 if isinstance(plan, dict):

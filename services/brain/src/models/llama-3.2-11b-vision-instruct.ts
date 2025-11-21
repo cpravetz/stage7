@@ -14,7 +14,7 @@ export class LlamaVisionModel extends BaseModel {
 
         super({
             name: "meta-llama/llama-3.2-11b-vision-instruct",
-            modelName: "meta-llama/llama-3.2-11b-vision-instruct:free",
+            modelName: "meta-llama/llama-3.2-11b-vision-instruct",
             interfaceName: 'openrouter',
             serviceName: 'ORService',
             tokenLimit: 4096, // Adjust this value if needed

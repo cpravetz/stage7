@@ -32,6 +32,11 @@ export interface AgentSetManagerStatistics {
     agentSetsCount: number;
     totalAgentsCount: number;
     agentsByStatus: Map<string, Array<AgentStatistics>>; // Implicitly uses new AgentStatistics
+    agentStatisticsByType: {
+        totalAgents: number;
+        agentCountByStatus: Record<string, number>;
+        agentSetCount: number;
+    };
 }
 
 export interface AgentSetStatistics {

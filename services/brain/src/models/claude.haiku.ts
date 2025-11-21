@@ -26,8 +26,8 @@ export class ClaudeHaikuModel extends BaseModel {
         ]);
 
         super({
-            name: "anthropic/claude-3-haiku-20240307",
-            modelName: "claude-3-haiku-20240307",
+            name: "anthropic/claude-3.5-haiku-20241022",
+            modelName: "claude-3-haiku-20241022",
             interfaceName: "anthropic",
             serviceName: "AntService",
             tokenLimit: 200000, // Adjust this value if you know the exact token limit for Claude Haiku

@@ -20,21 +20,12 @@ const CAPABILITIES_MANAGER_SERVICE_URL = process.env.CAPABILITIES_MANAGER_SERVIC
 
 dotenv.config();
 
-// NOTE: Don't use this directly - use this.authenticatedApi or this.getAuthenticatedAxios() instead
-// This is kept for backward compatibility only
-const api = axios.create({
-    headers: {
-      'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
-    },
-  });
-
 interface DataVersion {
     id: string;
     data: any;
     timestamp: Date;
     version: number;
-  }
+}
 
 
 export class Librarian extends BaseEntity {
@@ -100,6 +91,7 @@ export class Librarian extends BaseEntity {
         this.app.post('/deliverable/:stepId', (req, res) => this.storeDeliverable(req, res));
         this.app.get('/loadDeliverable/:stepId', (req, res) => this.loadDeliverable(req, res));
         this.app.get('/loadAllDeliverables/:agentId', (req, res) => this.loadAllDeliverables(req, res));
+        this.app.get('/loadWorkProduct/:stepId', (req, res) => this.loadStepWorkProduct(req, res));
         this.app.get('/loadStepOutput/:stepId', (req, res) => this.loadStepWorkProduct(req, res));
         this.app.get('/loadAllStepOutputs/:agentId', (req, res) => this.loadAllStepOutputs(req, res));
         this.app.get('/getSavedMissions', (req, res) => this.getSavedMissions(req, res));
