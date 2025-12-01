@@ -7,6 +7,8 @@ import { BaseEntity } from '@cktmcs/shared';
 import dotenv from 'dotenv';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { v4 as uuidv4 } from 'uuid';
+import { redisCache } from '@cktmcs/shared';
+import crypto from 'crypto';
 
 dotenv.config();
 
@@ -165,6 +167,18 @@ export class Brain extends BaseEntity {
                     this.modelManager.getModel(modelName) :
                     this.modelManager.selectModel(optimization, conversationType, excludedModels);
 
+                // If selection failed, attempt a safer fallback: use any available, not-blacklisted model
+                // that hasn't been excluded yet. This prevents quitting prematurely when strict
+                // selection constraints filter out all models.
+                if (!selectedModel) {
+                    const fallbackModels = this.modelManager.getAvailableAndNotBlacklistedModels(conversationType)
+                        .filter(m => !excludedModels.includes(m.name));
+                    if (fallbackModels.length > 0) {
+                        console.log(`[Brain Generate] selectModel returned null; falling back to first available model: ${fallbackModels[0].name}`);
+                        selectedModel = fallbackModels[0];
+                    }
+                }
+
                 if (!selectedModel || !selectedModel.isAvailable() || !selectedModel.service) {
                     if (attempt === 1) {
                         console.log(`[Brain Generate] No suitable model found on attempt ${attempt}`);
@@ -262,6 +276,19 @@ export class Brain extends BaseEntity {
         const requestId = uuidv4();
         console.log(`[Brain Chat] Request ${requestId} received`);
 
+        const cacheKey = `brain-chat-${crypto.createHash('sha256').update(JSON.stringify(req.body)).digest('hex')}`;
+        try {
+            const cachedResponse = await redisCache.get<any>(cacheKey);
+            if (cachedResponse) {
+                console.log(`[Brain Chat] Cache hit for request ${requestId}. Returning cached response.`);
+                res.json(cachedResponse);
+                return;
+            }
+        } catch (error) {
+            analyzeError(error as Error);
+        }
+
+        console.log(`[Brain Chat] Cache miss for request ${requestId}. Proceeding with LLM call.`);
         // No retry limit - keep trying until we find a working model
         const thread = this.createThreadFromRequest(req);
 
@@ -286,6 +313,16 @@ export class Brain extends BaseEntity {
                     estimatedTokens
                 );
 
+                // If no model was returned by selectModel, try a relaxed fallback selection
+                if (!selectedModel) {
+                    const fallbackModels = this.modelManager.getAvailableAndNotBlacklistedModels(thread.conversationType || LLMConversationType.TextToText)
+                        .filter(m => !excludedModels.includes(m.name));
+                    if (fallbackModels.length > 0) {
+                        console.log(`[Brain Chat] selectModel returned null; falling back to first available model: ${fallbackModels[0].name}`);
+                        selectedModel = fallbackModels[0];
+                    }
+                }
+
                 if (!selectedModel) {
                     lastError = `No model could be selected for the specified criteria.`;
                     console.log(`[Brain Chat] Attempt ${attempt}: ${lastError}`);
@@ -306,11 +343,18 @@ export class Brain extends BaseEntity {
                 const prompt = thread.exchanges.map((e: any) => e.content).join(' ');
                 trackingRequestId = this.modelManager.trackModelRequest(selectedModel.name, thread.conversationType || LLMConversationType.TextToText, prompt);
 
-                await this._chatWithModel(selectedModel, thread, res, trackingRequestId);
+                const response = await this._chatWithModel(selectedModel, thread, trackingRequestId);
 
                 if (selectedModel.name in this.modelTimeoutCounts) {
                     this.modelTimeoutCounts[selectedModel.name] = 0;
                 }
+                
+                try {
+                    await redisCache.set(cacheKey, response, 3600); // Cache for 1 hour
+                } catch (error) {
+                    analyzeError(error as Error);
+                }
+                res.json(response);
 
                 return;
 
@@ -401,7 +445,7 @@ export class Brain extends BaseEntity {
         }
     }
 
-    private async _chatWithModel(selectedModel: any, thread: any, res: express.Response, requestId: string): Promise<void> {
+    private async _chatWithModel(selectedModel: any, thread: any, requestId: string): Promise<any> {
         this.llmCalls++;
         this.activeLLMCalls++;
         console.log(`[Brain Chat] Using model ${selectedModel.modelName} for request ${requestId}`);
@@ -432,7 +476,7 @@ export class Brain extends BaseEntity {
             if (thread.conversationType === LLMConversationType.TextToJSON) {
                 try {
                     // Use ensureJsonResponse to validate/repair
-                    const jsonResponse = await selectedModel.llminterface.ensureJsonResponse(modelResponse);
+                    const jsonResponse = await selectedModel.llminterface.ensureJsonResponse(modelResponse, true, selectedModel.service);
                     if (jsonResponse) {
                         const parsed = JSON.parse(jsonResponse);
                         if (Object.keys(parsed).length === 0 || (Object.keys(parsed).length === 1 && parsed.content)) {
@@ -442,10 +486,56 @@ export class Brain extends BaseEntity {
                         logicFailure = true;
                     }
                 } catch (jsonError) {
-                    // Blacklist model and throw to trigger retry
                     console.error(`[Brain Chat] Model ${selectedModel.name} failed to return valid JSON: ${jsonError instanceof Error ? jsonError.message : String(jsonError)}`);
-                    this.modelManager.blacklistModel(selectedModel.name, new Date(), thread.conversationType);
-                    throw new Error('Unrecoverable JSON from model: ' + selectedModel.name);
+                    // Before blacklisting, attempt an on-the-spot regeneration with a strict JSON-only system prompt.
+                    try {
+                        console.log(`[Brain Chat] Attempting regeneration with strict JSON enforcement for model ${selectedModel.name}`);
+
+                        // Prepare a regeneration message list: ensure a system instruction to output only valid JSON
+                        const regenExchanges = [{ role: 'system', content: 'You must respond with a single, valid JSON array (start with [ and end with ]). Do not include any explanation, markdown, or extra text.' }, ...thread.exchanges];
+
+                        const regenResponse = await selectedModel.llminterface.chat(
+                            selectedModel.service,
+                            regenExchanges,
+                            {
+                                max_length: thread.max_length || selectedModel.tokenLimit,
+                                temperature: 0.0,
+                                modelName: selectedModel.modelName,
+                                responseType: 'json'
+                            }
+                        );
+
+                        // Try to validate/repair regen response using interface helper
+                        const regenJson = await selectedModel.llminterface.ensureJsonResponse(regenResponse, true, selectedModel.service);
+                        if (regenJson) {
+                            const parsed = JSON.parse(regenJson);
+                            if (Object.keys(parsed).length === 0 || (Object.keys(parsed).length === 1 && parsed.content)) {
+                                // Consider as logic failure, will fall through to blacklist below
+                                console.warn(`[Brain Chat] Regenerated JSON appears empty or invalid from model ${selectedModel.name}`);
+                            } else {
+                                // Successful regeneration — treat as valid response
+                                modelResponse = regenJson;
+                                console.log(`[Brain Chat] Regeneration succeeded for model ${selectedModel.name}`);
+                                // Continue processing as if original response was valid
+                            }
+                        } else {
+                            console.warn(`[Brain Chat] Regeneration produced no valid JSON for model ${selectedModel.name}`);
+                        }
+                    } catch (regenErr) {
+                        console.warn(`[Brain Chat] Regeneration attempt failed for model ${selectedModel.name}: ${regenErr instanceof Error ? regenErr.message : String(regenErr)}`);
+                    }
+
+                    // If regeneration didn't produce a usable JSON, blacklist and throw to trigger retry
+                    try {
+                        // If modelResponse was replaced by a successful regenJson above, do not blacklist
+                        if (!modelResponse || (typeof modelResponse === 'string' && modelResponse.trim().length === 0)) {
+                            console.error(`[Brain Chat] Unrecoverable JSON from model ${selectedModel.name}, blacklisting.`);
+                            this.modelManager.blacklistModel(selectedModel.name, new Date(), thread.conversationType);
+                            throw new Error('Unrecoverable JSON from model: ' + selectedModel.name);
+                        }
+                    } catch (finalErr) {
+                        throw finalErr;
+                    }
                 }
             }
 
@@ -462,17 +552,18 @@ export class Brain extends BaseEntity {
                 finalResponse = (modelResponse as any).result || modelResponse;
             }
 
-            res.json({
+            return {
                 result: finalResponse,
                 confidence: confidence,
                 model: selectedModel.modelName,
                 requestId: requestId
-            });
+            };
         } catch (err) {
             this.activeLLMCalls = Math.max(0, this.activeLLMCalls - 1);
             throw err;
         }
     }
+
 
     getAvailableModels(): string[] {
         return this.modelManager.getAvailableModels();
@@ -703,7 +794,12 @@ export class Brain extends BaseEntity {
                 temperature: body.temperature,
                 ...body.optionals
             },
-            responseType: body.responseType || (body.conversationType === LLMConversationType.TextToJSON) ? 'json' : 'text'
+            // Determine responseType explicitly: prefer provided `responseType`,
+            // otherwise derive from conversationType. Parentheses are important
+            // to avoid coerced truthy evaluation causing incorrect JSON selection.
+            responseType: (typeof body.responseType === 'string' && body.responseType.length > 0)
+                ? body.responseType
+                : (body.conversationType === LLMConversationType.TextToJSON ? 'json' : 'text')
         };
 
         console.log('[Brain Debug] Final thread object:', JSON.stringify({

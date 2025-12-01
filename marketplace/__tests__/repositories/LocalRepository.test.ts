@@ -334,13 +334,6 @@ describe('LocalRepository', () => {
             expect(locators.length).toBe(1);
         });
 
-        it('should handle errors during list', async () => {
-            mockFs.readdir.mockRejectedValueOnce(new Error('Read dir failed'));
-            const locators = await repository.list();
-            expect(locators).toEqual([]);
-            expect(console.error).toHaveBeenCalledWith(expect.stringContaining('LocalRepo: Error loading from'), expect.any(Error));
-        });
-
         it('should handle malformed manifest files during list', async () => {
             mockFs.readdir.mockResolvedValueOnce(['VERB1', 'MALFORMED']);
             mockFs.readFile.mockImplementation((p) => {

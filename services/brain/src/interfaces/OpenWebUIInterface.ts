@@ -1,18 +1,28 @@
 import { BaseInterface } from './baseInterface';
 import { LLMConversationType } from '@cktmcs/shared';
 import { BaseService, ExchangeType } from '../services/baseService';
-import { analyzeError } from '@cktmcs/errorhandler';
 
 export class OpenWebUIInterface extends BaseInterface {
     interfaceName: string = 'openwebui';
-    private readonly DEFAULT_TIMEOUT = 210000; // 210 seconds timeout for openwebui model (increased from 60s)
+    private readonly DEFAULT_TIMEOUT = 300000; // 300 seconds timeout for openwebui model (increased from 60s)
 
     constructor() {
         super('openwebui');
         console.log(`OpenWebUIInterface initialized with DEFAULT_TIMEOUT: ${this.DEFAULT_TIMEOUT}ms`);
     }
 
-    async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string, responseType?: string } = {}): Promise<string> {
+    async chat(
+        service: BaseService,
+        messages: ExchangeType,
+        options: {
+            max_length?: number,
+            temperature?: number,
+            modelName?: string,
+            responseType?: string,
+            streamCallback?: (chunk: string) => void,
+            signal?: AbortSignal,
+        } = {}
+    ): Promise<string> {
         try {
             if (!service || !service.isAvailable()) {
                 throw new Error('OpenWebUI service is not available');
@@ -42,95 +52,114 @@ export class OpenWebUIInterface extends BaseInterface {
             // Ensure all messages have valid content (not undefined or null)
             const formattedMessages = contentParts.map(msg => ({
                 role: msg.role,
-                content: msg.content || '' // Ensure content is never undefined or null
+                content: msg.content || '', // Ensure content is never undefined or null
             }));
 
-            // Log the formatted messages for debugging
             console.log('Formatted messages for OpenWebUI:', JSON.stringify(formattedMessages));
 
             // Prepare request body
             const body = JSON.stringify({
                 model: options.modelName,
                 messages: formattedMessages,
-                // Optional parameters
                 temperature: options.temperature || 0.3,
                 max_tokens: options.max_length || 4096,
-                stream: false // Disable streaming for simplicity
+                stream: !!options.streamCallback
             });
 
             console.log(`Sending request to OpenWebUI at ${baseUrl}/api/chat/completions`);
 
-            // Create AbortController for timeout
+            // Controller and timeout setup
             const controller = new AbortController();
             const timeoutId = setTimeout(() => {
                 controller.abort();
                 console.error(`OpenWebUI request timed out after ${this.DEFAULT_TIMEOUT}ms`);
             }, this.DEFAULT_TIMEOUT);
 
+            const signalToUse = options.signal || controller.signal;
+
             try {
-                // Make the actual API call with timeout
                 const response = await fetch(`${baseUrl}/api/chat/completions`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                         'Authorization': `Bearer ${apiKey}`
                     },
-                    body: body,
-                    signal: controller.signal
+                    body,
+                    signal: signalToUse
                 });
 
-                // Clear the timeout since we got a response
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error(`OpenWebUI API error (${response.status}): ${errorText}`);
+                    throw new Error(`OpenWebUI API error: ${response.status} - ${errorText}`);
+                }
+
                 clearTimeout(timeoutId);
 
-                if (!response.ok) {
+                if (!options.streamCallback) {
+                    let data;
                     try {
-                        const errorText = await response.text();
-                        console.error(`OpenWebUI API error (${response.status}): ${errorText}`);
-
-                        // If we get a 400 error with 'content' in the error message, it's likely a formatting issue
-                        if (response.status === 400 && errorText.includes('content')) {
-                            console.error('Content format error detected. Request body was:', body);
-                            throw new Error(`OpenWebUI API content format error: ${response.status} - ${errorText}`);
-                        }
-
-                        throw new Error(`OpenWebUI API error: ${response.status} - ${errorText}`);
+                        data = await response.json();
+                        console.log('OpenWebUI response received successfully');
                     } catch (err) {
-                        console.error('Error parsing error response:', err);
-                        throw new Error(`OpenWebUI API error: ${response.status}`);
+                        console.error('OpenWebUI Error parsing JSON response:', err);
+                        throw new Error('Failed to parse OpenWebUI response');
                     }
-                }
 
-                let data;
-                try {
-                    data = await response.json();
-                    console.log('OpenWebUI response received successfully');
-                    console.log(`OpenWebUI response data length: ${JSON.stringify(data).length} characters`);
-                } catch (err) {
-                    console.error('OpenWebUI Error parsing JSON response:', err);
-                    throw new Error('Failed to parse OpenWebUI response');
-                }
+                    if (data && data.choices && data.choices.length > 0 && data.choices[0].message && data.choices[0].message.content) {
+                        let content = data.choices[0].message.content;
+                        // Sanitize text responses to remove control characters that break downstream consumers
+                        content = this.sanitizeString(content);
+                        console.log(`OpenWebUI: Received response with content: ${content.substring(0, 140)}... (truncated)`);
 
-                // Extract the response content
-                if (data && data.choices && data.choices.length > 0 && data.choices[0].message && data.choices[0].message.content) {
-                    const content = data.choices[0].message.content;
-                    console.log(`OpenWebUI: Received response with content: ${content.substring(0, 140)}... (truncated)`);
-
-                    // --- Ensure JSON if required ---
-                    const requireJson = options.responseType === 'json';
-                    if (requireJson) {
-                        const jsonResponse = await this.ensureJsonResponse(content, true, service);
-                        if (jsonResponse === null) {
-                            throw new Error("OpenWebUI Failed to extract valid JSON from the model's response.");
+                        const requireJson = options.responseType === 'json';
+                        if (requireJson) {
+                            // ensureJsonResponse expects raw text; sanitizeString above preserves JSON structural chars
+                            const jsonResponse = await this.ensureJsonResponse(content, true, service);
+                            if (jsonResponse === null) {
+                                throw new Error("OpenWebUI Failed to extract valid JSON from the model's response.");
+                            }
+                            // sanitize final JSON string (removes control chars inside any string fields)
+                            return this.sanitizeResponse(jsonResponse, 'json');
                         }
-                        return jsonResponse;
+                        return this.sanitizeResponse(content, 'text');
+                    } else {
+                        console.error('Unexpected response format from OpenWebUI:', JSON.stringify(data));
+                        throw new Error('Unexpected response format from OpenWebUI');
                     }
-                    return content;
-                } else {
-                    console.error('Unexpected response format from OpenWebUI:', JSON.stringify(data));
-                    throw new Error('Unexpected response format from OpenWebUI');
                 }
+
+                const reader = response.body?.getReader();
+                if (!reader) {
+                    throw new Error('ReadableStream not supported in response body');
+                }
+
+                const decoder = new TextDecoder('utf-8');
+                let done = false;
+                let accumulated = '';
+
+                while (!done) {
+                    const { value, done: doneReading } = await reader.read();
+                    done = doneReading;
+                    if (value) {
+                        const chunk = decoder.decode(value, { stream: true });
+                        accumulated += chunk;
+                        options.streamCallback(chunk);
+                    }
+                }
+
+                if (options.responseType === 'json') {
+                    const jsonResponse = await this.ensureJsonResponse(accumulated, true, service);
+                    if (jsonResponse === null) {
+                        throw new Error("OpenWebUI Failed to extract valid JSON from the streamed response.");
+                    }
+                    return this.sanitizeResponse(jsonResponse, 'json');
+                }
+
+                // Sanitize streamed text
+                return this.sanitizeResponse(accumulated, 'text');
+
             } catch (fetchError: unknown) {
-                // Clear the timeout if there was an error
                 clearTimeout(timeoutId);
 
                 if (fetchError instanceof Error && fetchError.name === 'AbortError') {
@@ -191,7 +220,7 @@ export class OpenWebUIInterface extends BaseInterface {
 
             // Apply JSON cleanup for TextToJSON conversion type
             if (conversionType === LLMConversationType.TextToJSON) {
-                return this.ensureJsonResponse(response, true);
+                return this.ensureJsonResponse(response, true, service);
             }
 
             return response;

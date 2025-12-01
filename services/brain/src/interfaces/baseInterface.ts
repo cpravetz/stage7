@@ -360,5 +360,68 @@ export abstract class BaseInterface {
         return trimmedMessages.length > 0 ? trimmedMessages : [messages[messages.length - 1]];
     }
 
+    /**
+     * Remove non-printable/control characters from a string while preserving Unicode letters/punctuation.
+     * This avoids removing non-ASCII characters (e.g., emoji, non-Latin scripts) but strips control chars
+     * that can break browser APIs like `btoa`.
+     */
+    protected sanitizeString(input: string): string {
+        if (!input || typeof input !== 'string') return input;
+        // Remove C0 and C1 control characters (U+0000..U+001F, U+007F..U+009F)
+        return input.replace(/[\u0000-\u001F\u007F-\u009F]/g, '');
+    }
+
+    /**
+     * Recursively sanitize a response payload. For responseType 'json' or 'text' we sanitize strings;
+     * for other (binary) types we return the original value unmodified.
+     */
+    protected sanitizeResponse(response: any, responseType?: string): any {
+        if (response === null || response === undefined) return response;
+
+        const isJsonType = responseType === 'json' || responseType === 'application/json' || responseType === 'text/json';
+        const isTextType = responseType === 'text' || responseType === 'text/plain' || typeof response === 'string';
+
+        if (isTextType && typeof response === 'string') {
+            return this.sanitizeString(response);
+        }
+
+        if (isJsonType || (typeof response === 'object' && !Buffer.isBuffer(response))) {
+            // Recursively sanitize strings inside objects/arrays
+            const sanitizeRec = (obj: any): any => {
+                if (obj === null || obj === undefined) return obj;
+                if (typeof obj === 'string') return this.sanitizeString(obj);
+                if (Array.isArray(obj)) return obj.map(item => sanitizeRec(item));
+                if (typeof obj === 'object') {
+                    const out: any = {};
+                    for (const k of Object.keys(obj)) {
+                        try {
+                            out[k] = sanitizeRec(obj[k]);
+                        } catch (e) {
+                            out[k] = obj[k];
+                        }
+                    }
+                    return out;
+                }
+                return obj;
+            };
+
+            try {
+                // If response is a JSON string, parse, sanitize, and re-stringify
+                if (typeof response === 'string') {
+                    const parsed = JSON.parse(response);
+                    return JSON.stringify(sanitizeRec(parsed), null, 2);
+                }
+                return sanitizeRec(response);
+            } catch (e) {
+                // If parsing fails, fall back to sanitizing the raw string form
+                if (typeof response === 'string') return this.sanitizeString(response);
+                return response;
+            }
+        }
+
+        // For binary data or unknown types, return as-is
+        return response;
+    }
+
 
 }

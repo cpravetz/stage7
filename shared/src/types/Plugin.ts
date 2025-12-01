@@ -9,6 +9,7 @@ export enum PluginParameterType {
     ERROR = 'error',
     DIRECT_ANSWER = "DIRECT_ANSWER",
     JSON = 'json',
+    NULL = 'null',
     ANY = 'any' // Retained from a previous version, useful for flexibility
 }
 
@@ -182,6 +183,7 @@ export interface PluginOutput {
     result: any;
     resultDescription: string,
     error?: string,
+    isDeliverable?: boolean; // Added isDeliverable property
     mimeType?: string,
     fileName?: string, // Optional suggested filename for the result
     trace_id?: string, // Optional trace ID for tracking the output

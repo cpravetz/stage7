@@ -211,7 +211,7 @@ def call_brain(prompt: str, inputs: Dict[str, Any], response_type: str = "json")
             f"http://{brain_url}/chat",
             json=payload,
             headers=headers,
-            timeout=60  # Reduced timeout to 60 seconds
+            timeout=360  # Increased timeout to 360 seconds (6 minutes) to match Brain's max LLM timeout
         )
 
         if response.status_code != 200:
@@ -564,7 +564,33 @@ A plan with no connections between steps is invalid and will be rejected.
                 cleaned_response = self._clean_brain_response(str(brain_response))
                 data = json.loads(cleaned_response)
 
-            if isinstance(data, list): # This is a plan
+            # Extract plan array - handle both direct arrays and wrapped arrays
+            # If the LLM returns a single step object, this is INVALID and should be rejected
+            plan_array = None
+            if isinstance(data, list):
+                plan_array = data
+            elif isinstance(data, dict):
+                # Check if this dict is itself a step (has actionVerb or id) - this is INVALID
+                if 'actionVerb' in data or 'id' in data:
+                    logger.error(f"REFLECT: LLM returned a single step object instead of a plan array. This is invalid and will be rejected.")
+                    # Don't set plan_array - let it fall through to the direct_answer handling
+                    # The system will treat this as "mission not accomplished" and may retry
+                else:
+                    # Otherwise, check if any property contains an array of step-like objects
+                    for key, value in data.items():
+                        if isinstance(value, list) and len(value) > 0:
+                            # Check if it looks like a plan (array of objects with step-like properties)
+                            if all(isinstance(item, dict) and ('actionVerb' in item or 'id' in item) for item in value):
+                                logger.info(f"REFLECT: Extracting plan from '{key}' key in response ({len(value)} steps)")
+                                plan_array = value
+                                break
+                            # If it's an array of dicts but doesn't have step markers, still try it
+                            elif all(isinstance(item, dict) for item in value):
+                                logger.info(f"REFLECT: Found array of objects in '{key}' key, assuming it's a plan ({len(value)} steps)")
+                                plan_array = value
+                                break
+
+            if plan_array is not None:
                 # Ensure availablePlugins is a direct list of manifests for the validator
                 modified_inputs = inputs.copy()
                 available_plugins_for_validator = modified_inputs.get('availablePlugins')
@@ -572,12 +598,12 @@ A plan with no connections between steps is invalid and will be rejected.
                     modified_inputs['availablePlugins'] = available_plugins_for_validator['value']
 
                 # Validate and repair the plan
-                validated_plan = self.validator.validate_and_repair(data, verb_info['mission_goal'], modified_inputs)
-                
+                validated_plan = self.validator.validate_and_repair(plan_array, verb_info['mission_goal'], modified_inputs)
+
                 # Save the generated plan to Librarian
                 # self._save_plan_to_librarian(verb_info['verb'], validated_plan, inputs)
 
-                return json.dumps([{ 
+                return json.dumps([{
                     "success": True,
                     "name": "plan",
                     "resultType": "plan",
@@ -629,15 +655,34 @@ A plan with no connections between steps is invalid and will be rejected.
                         plan_from_answer = _extract_json_from_string(answer_content)
                         if plan_from_answer:
                             plan_data = json.loads(plan_from_answer)
-                            validated_plan = self.validator.validate_and_repair(plan_data, verb_info['mission_goal'], inputs)
-                            return json.dumps([{ 
-                                "success": True,
-                                "name": "plan",
-                                "resultType": "plan",
-                                "resultDescription": f"Plan created from reflection",
-                                "result": validated_plan,
-                                "mimeType": "application/json"
-                            }])
+
+                            # Extract plan array - handle both direct arrays and wrapped arrays
+                            extracted_plan = None
+                            if isinstance(plan_data, list):
+                                extracted_plan = plan_data
+                            elif isinstance(plan_data, dict):
+                                # Check if any property contains an array of step-like objects
+                                for key, value in plan_data.items():
+                                    if isinstance(value, list) and len(value) > 0:
+                                        if all(isinstance(item, dict) and ('actionVerb' in item or 'id' in item) for item in value):
+                                            logger.info(f"REFLECT: Extracting plan from '{key}' in answer string ({len(value)} steps)")
+                                            extracted_plan = value
+                                            break
+                                        elif all(isinstance(item, dict) for item in value):
+                                            logger.info(f"REFLECT: Found array in '{key}' in answer, assuming it's a plan ({len(value)} steps)")
+                                            extracted_plan = value
+                                            break
+
+                            if extracted_plan:
+                                validated_plan = self.validator.validate_and_repair(extracted_plan, verb_info['mission_goal'], inputs)
+                                return json.dumps([{
+                                    "success": True,
+                                    "name": "plan",
+                                    "resultType": "plan",
+                                    "resultDescription": f"Plan created from reflection",
+                                    "result": validated_plan,
+                                    "mimeType": "application/json"
+                                }])
                     except (json.JSONDecodeError, TypeError):
                         # If parsing fails, treat it as a direct text answer
                         pass

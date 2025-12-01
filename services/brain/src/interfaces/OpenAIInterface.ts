@@ -120,9 +120,9 @@ export class OpenAIInterface extends BaseInterface {
                 if (jsonResponse === null) {
                     throw new Error("Failed to extract valid JSON from the model's response.");
                 }
-                return jsonResponse;
+                return this.sanitizeResponse(jsonResponse, 'json');
             }
-            return fullResponse || '';
+            return this.sanitizeResponse(fullResponse || '', 'text');
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             console.error('Error generating response from OpenAI:', errorMessage);
@@ -217,7 +217,7 @@ export class OpenAIInterface extends BaseInterface {
                 model: modelName || 'whisper-1',
             });
 
-            return response.text;
+            return this.sanitizeResponse(response.text, 'text');
         } catch (error) {
             console.error('Error transcribing audio with OpenAI:', error instanceof Error ? error.message : error);
             //analyzeError(error as Error);
@@ -246,7 +246,7 @@ export class OpenAIInterface extends BaseInterface {
                 throw new Error('OpenAI returned empty response');
             }
 
-            return response.choices[0].message.content;
+            return this.sanitizeResponse(response.choices[0].message.content, 'text');
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             console.error(`OAI Interface: Error generating code with ${service.serviceName}:`, errorMessage);
@@ -298,7 +298,7 @@ export class OpenAIInterface extends BaseInterface {
             if (jsonResponse === null) {
                 throw new Error("Failed to extract valid JSON from the model's response.");
             }
-            return jsonResponse;
+            return this.sanitizeResponse(jsonResponse, 'json');
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             console.error(`OpenAI Interface: Error generating JSON with ${service.serviceName}:`, errorMessage);
@@ -377,7 +377,7 @@ export class OpenAIInterface extends BaseInterface {
                 throw new Error('OpenAI returned empty response');
             }
 
-            return response.choices[0].message.content;
+            return this.sanitizeResponse(response.choices[0].message.content, 'text');
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             console.error(`OAI TextToText: Error generating response with ${service.serviceName}:`, errorMessage);

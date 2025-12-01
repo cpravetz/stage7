@@ -521,7 +521,7 @@ export class AgentSetManager { // Export the class, not an instance
             return {
                 agentSetsCount: stats.agentSetsCount,
                 totalAgentsCount: stats.totalAgentsCount,
-                agentsByStatus: MapSerializer.transformForSerialization(stats.agentsByStatus), // Serialize the Map for transport
+                agentsByStatus: stats.agentsByStatus, // Serialize the Map for transport
                 agentStatisticsByType: {
                     totalAgents: stats.totalAgentsCount,
                     agentCountByStatus: agentCountByStatus,

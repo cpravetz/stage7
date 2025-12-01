@@ -1,5 +1,5 @@
 import { WorkProduct, Deliverable } from '@cktmcs/shared';
-import { MissionFile, MapSerializer, PluginOutput, createAuthenticatedAxios } from '@cktmcs/shared';
+import { OutputType, MissionFile, MapSerializer, PluginOutput, createAuthenticatedAxios } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { StepLocation } from './../types/DelegationTypes';
 
@@ -41,6 +41,7 @@ export interface StepEvent {
 
 export class AgentPersistenceManager {
     private librarianUrl: string;
+    private missionControlUrl: string;
     private authenticatedApi: any;
     private securityManagerUrl: string;
 
@@ -49,6 +50,7 @@ export class AgentPersistenceManager {
         authenticatedApi?: any
     ) {
         this.librarianUrl = librarianUrl;
+        this.missionControlUrl = process.env.MISSIONCONTROL_URL || 'missioncontrol:5030';
         this.securityManagerUrl = process.env.SECURITYMANAGER_URL || 'securitymanager:5010';
 
         // If authenticatedApi is provided, use it, otherwise create a new one
@@ -163,24 +165,27 @@ export class AgentPersistenceManager {
         }
     }
 
-    async saveWorkProduct(step: any, result: PluginOutput[], outputType?: any): Promise<void> {
+    async saveWorkProduct(step: any, result: PluginOutput[], outputType: OutputType = OutputType.INTERIM): Promise<void> {
         if (!step || !step.id) {
             console.error('Cannot save work product: step or step.id is missing');
             return;
         }
 
-        let isDeliverable = step.hasDeliverableOutputs();
-        if (outputType === 'Final') {
-            isDeliverable = true;
-            result.forEach(r => (r as any).isDeliverable = true);
-        }
-        const deliverableOutput = isDeliverable ? result.find(r => (r as any).isDeliverable) : undefined;
+        // Determine if any output of this step is marked as deliverable
+        // This relies on the `isDeliverable` property being correctly set on the PluginOutput objects
+        // by mapPluginOutputsToCustomNames.
+        const stepHasDeliverableOutputs = result.some(r => r.isDeliverable);
+
+        // Find the actual deliverable output object that needs to be streamed
+        const deliverableOutput = result.find(r => r.isDeliverable);
 
         // Step 1: Always save the metadata-rich WorkProduct to 'step-outputs'
         try {
-            // Exclude large file content from this payload
+            // Exclude large file content from this payload if it's going to be streamed separately.
+            // The `isDeliverable` flag is already on the PluginOutput objects in `result`.
             const metadataResult = result.map(r => {
-                if ((r as any).isDeliverable && r.result instanceof Buffer) {
+                if (r.isDeliverable && r.result instanceof Buffer) {
+                    // Create a copy to modify without affecting the original result array
                     return { ...r, result: `[File Content Stored Separately as Deliverable for Step ${step.id}]` };
                 }
                 return r;
@@ -192,9 +197,10 @@ export class AgentPersistenceManager {
                 agentId: step.ownerAgentId,
                 stepId: step.id,
                 data: serializedData,
-                isDeliverable: isDeliverable
+                outputType: outputType, // Add the output type to the metadata
+                isDeliverable: stepHasDeliverableOutputs // Overall flag for the step
             });
-            console.log(`Saved work product metadata for step ${step.id} isDeliverable=${isDeliverable}`);
+            console.log(`Saved work product metadata for step ${step.id} isDeliverable=${stepHasDeliverableOutputs}`);
 
         } catch (error) {
             analyzeError(error as Error);
@@ -202,7 +208,7 @@ export class AgentPersistenceManager {
         }
 
         // Step 2 & 3: If it's a deliverable, stream the file to the new endpoint
-        if (isDeliverable && deliverableOutput && deliverableOutput.result !== undefined && deliverableOutput.result !== null) {
+        if (deliverableOutput && deliverableOutput.result !== undefined && deliverableOutput.result !== null) {
             try {
                 let dataToSend: string | Buffer;
                 if (deliverableOutput.result instanceof Buffer || typeof deliverableOutput.result === 'string') {
@@ -211,28 +217,58 @@ export class AgentPersistenceManager {
                     // Convert non-string/non-Buffer results to a JSON string
                     dataToSend = JSON.stringify(deliverableOutput.result);
                     // Update mimeType to application/json if it was text/plain and we stringified an object/boolean
-                    if ((deliverableOutput as any).mimeType === 'text/plain' && typeof deliverableOutput.result !== 'string') {
-                        (deliverableOutput as any).mimeType = 'application/json';
+                    if (deliverableOutput.mimeType === 'text/plain' && typeof deliverableOutput.result !== 'string') {
+                        deliverableOutput.mimeType = 'application/json';
                     }
                 }
 
                 const queryParams = new URLSearchParams({
                     agentId: step.ownerAgentId,
                     missionId: step.missionId,
-                    originalName: step.getDeliverableFilename(deliverableOutput.name) || 'deliverable.bin',
-                    mimeType: (deliverableOutput as any).mimeType || 'application/octet-stream'
+                    // Use fileName from deliverableOutput, fallback to a generic name
+                    originalName: deliverableOutput.fileName || `deliverable_${deliverableOutput.name}.bin`,
+                    mimeType: deliverableOutput.mimeType || 'application/octet-stream'
                 }).toString();
 
                 const url = `http://${this.librarianUrl}/deliverable/${step.id}?${queryParams}`;
 
-                await this.authenticatedApi.post(url, dataToSend, {
-                    headers: { 'Content-Type': (deliverableOutput as any).mimeType || 'application/octet-stream' }
+                const uploadResponse = await this.authenticatedApi.post(url, dataToSend, {
+                    headers: { 'Content-Type': deliverableOutput.mimeType || 'application/octet-stream' }
                 });
-                console.log(`Successfully streamed deliverable for step ${step.id}`);
+                console.log(`Successfully streamed deliverable for step ${step.id} output '${deliverableOutput.name}'`);
+
+                // Fetch the full deliverable metadata from Librarian to get the canonical missionFile object
+                let missionFile: any | null = null;
+                try {
+                    const deliverableResp = await this.authenticatedApi.get(`http://${this.librarianUrl}/loadDeliverable/${step.id}`);
+                    if (deliverableResp && deliverableResp.data && deliverableResp.data.data) {
+                        missionFile = deliverableResp.data.data.missionFile;
+                    }
+                } catch (err) {
+                    console.warn(`Failed to fetch deliverable metadata from Librarian for step ${step.id}:`, err instanceof Error ? err.message : err);
+                }
+
+                // Notify MissionControl to attach the uploaded file to the mission
+                try {
+                    const incomingDeliverable: any = {
+                        isDeliverable: true,
+                        stepId: step.id,
+                        missionFile: missionFile || {
+                            id: uploadResponse?.data?.assetId || `deliverable_${step.id}`,
+                            originalName: deliverableOutput.fileName || `deliverable_${deliverableOutput.name}.bin`,
+                            mimeType: deliverableOutput.mimeType || 'application/octet-stream'
+                        }
+                    };
+
+                    await this.authenticatedApi.post(`http://${this.missionControlUrl}/missions/${step.missionId}/files/add`, incomingDeliverable);
+                    console.log(`Notified MissionControl to attach deliverable for step ${step.id} to mission ${step.missionId}`);
+                } catch (err) {
+                    console.warn(`Failed to notify MissionControl about deliverable for step ${step.id}:`, err instanceof Error ? err.message : err);
+                }
 
             } catch (error) {
                 analyzeError(error as Error);
-                console.error(`Error streaming deliverable for step ${step.id}:`, error instanceof Error ? error.message : String(error));
+                console.error(`Error streaming deliverable for step ${step.id} output '${deliverableOutput.name}':`, error instanceof Error ? error.message : String(error));
             }
         }
     }

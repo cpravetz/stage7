@@ -1,7 +1,7 @@
 import { BaseModel, ModelScore } from './baseModel';
 import { LLMConversationType } from '@cktmcs/shared';
 
-export class DeepSeekR1Model extends BaseModel {
+export class ORNvidiaModel extends BaseModel {
     constructor() {
         const scoresByConversationType = new Map<LLMConversationType, ModelScore>([
             [LLMConversationType.TextToText, {
@@ -10,13 +10,13 @@ export class DeepSeekR1Model extends BaseModel {
                 creativityScore: 85,
                 speedScore: 90
             }],
-            [LLMConversationType.TextToCode, {
+            [LLMConversationType.ImageToText, {
                 costScore: 100,
                 accuracyScore: 88,
                 creativityScore: 85,
                 speedScore: 90
             }],
-            [LLMConversationType.CodeToText, {
+            [LLMConversationType.TextToCode, {
                 costScore: 100,
                 accuracyScore: 88,
                 creativityScore: 85,
@@ -31,16 +31,16 @@ export class DeepSeekR1Model extends BaseModel {
         ]);
 
         super({
-            name: "or/tngtech/deepseek-r1t2-chimera:free",
-            modelName: "tngtech/deepseek-r1t2-chimera:free",
+            name: "or/nvidia/nemotron-nano-12b-v2-vl:free",
+            modelName: "nvidia/nemotron-nano-12b-v2-vl:free",
             interfaceName: "openrouter",
             serviceName: "ORService",
-            tokenLimit: 164000, 
+            tokenLimit: 128000, 
             scoresByConversationType: scoresByConversationType,
-            contentConversation: [LLMConversationType.TextToText, LLMConversationType.CodeToText, LLMConversationType.TextToCode, LLMConversationType.TextToJSON]
+            contentConversation: [LLMConversationType.TextToText, LLMConversationType.ImageToText, LLMConversationType.TextToCode, LLMConversationType.TextToJSON]
         });
     }
 }
 
-const aiModel = new DeepSeekR1Model();
+const aiModel = new ORNvidiaModel();
 export default aiModel;

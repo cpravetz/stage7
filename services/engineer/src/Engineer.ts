@@ -24,6 +24,8 @@ import {
 } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { PluginMarketplace } from '@cktmcs/marketplace';
+import { redisCache } from '@cktmcs/shared';
+import crypto from 'crypto';
 // Removed createHash as it wasn't used in the provided snippets
 import { promises as fs } from 'fs';
 import { exec } from 'child_process';
@@ -861,6 +863,17 @@ Context: ${contextString}`;
     }
 
     async validateTool(manifest: any, code?: string): Promise<{ valid: boolean; issues: string[] }> {
+        const cacheKey = `validate-tool-${crypto.createHash('sha256').update(JSON.stringify({ manifest, code })).digest('hex')}`;
+        try {
+            const cachedResult = await redisCache.get<{ valid: boolean; issues: string[] }>(cacheKey);
+            if (cachedResult) {
+                console.log(`[Engineer] Cache hit for tool validation: ${manifest.id}`);
+                return cachedResult;
+            }
+        } catch (error) {
+            analyzeError(error as Error);
+        }
+
         const issues: string[] = [];
 
         try {
@@ -881,10 +894,18 @@ Context: ${contextString}`;
                 }
             }
 
-            return {
+            const result = {
                 valid: issues.length === 0,
                 issues
             };
+
+            try {
+                await redisCache.set(cacheKey, result, 3600); // Cache for 1 hour
+            } catch (error) {
+                analyzeError(error as Error);
+            }
+
+            return result;
 
         } catch (error) {
             analyzeError(error as Error);

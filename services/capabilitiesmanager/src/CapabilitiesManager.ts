@@ -1201,6 +1201,71 @@ export class CapabilitiesManager extends BaseEntity {
         }
     }
 
+    /**
+     * Handle RPC requests for plugin type information via RabbitMQ
+     * Called by RuntimeForeachDetector to get plugin type definitions without HTTP timeouts
+     */
+    protected async handleSyncMessage(message: any): Promise<any> {
+        const trace_id = `${this.id}-rpc-${uuidv4().substring(0, 8)}`;
+        
+        try {
+            // Check if this is a plugin type request
+            if (message.actionVerb) {
+                console.log(`[${trace_id}] Handling RPC request for plugin type: ${message.actionVerb}`);
+                
+                const actionVerb = message.actionVerb.toUpperCase();
+                
+                // Look up the plugin manifest from the plugin registry
+                try {
+                    // Fetch plugin manifest by verb (not by id)
+                    const manifest = await this.pluginRegistry.fetchOneByVerb(actionVerb);
+                    if (!manifest) {
+                        console.log(`[${trace_id}] Plugin ${actionVerb} not found`);
+                        return {
+                            success: false,
+                            notFound: true,
+                            message: `Plugin ${actionVerb} not found`
+                        };
+                    }
+                    
+                    // Extract type information from the manifest
+                    const typeInfo = {
+                        actionVerb: actionVerb,
+                        inputDefinitions: (manifest.inputDefinitions || []).map((input: PluginParameter) => ({
+                            name: input.name,
+                            type: input.type || 'string',
+                            aliases: input.aliases
+                        })),
+                        outputDefinitions: (manifest.outputDefinitions || []).map((outDef: PluginParameter) => ({
+                            name: outDef.name || 'result',
+                            type: outDef.type || 'string'
+                        }))
+                    };
+
+                    console.log(`[${trace_id}] Returning type info for ${actionVerb}:`, typeInfo);
+                    
+                    return {
+                        success: true,
+                        data: typeInfo
+                    };
+                    
+                } catch (error) {
+                    console.error(`[${trace_id}] Error fetching plugin ${actionVerb}:`, error);
+                    return {
+                        success: false,
+                        error: 'Failed to fetch plugin type information',
+                        details: error instanceof Error ? error.message : String(error)
+                    };
+                }
+            }
+        } catch (error) {
+            console.error(`[${trace_id}] Error in handleSyncMessage:`, error);
+        }
+        
+        // Fall back to parent implementation for other message types
+        return await super.handleSyncMessage(message);
+    }
+
 }
 export const capabilitiesManager = new CapabilitiesManager();
 export default CapabilitiesManager;

@@ -9,8 +9,8 @@
     "test": "jest"
   },
   "dependencies": {
-    "@cktmcs/shared": "file:../../shared",
     "@cktmcs/errorhandler": "file:../../errorhandler",
+    "@cktmcs/shared": "file:../../shared",
     "axios": "^1.12.0",
     "body-parser": "^1.19.0",
     "cors": "^2.8.5",
@@ -21,7 +21,7 @@
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
-    "@types/express": "^5.0.0",
+    "@types/express": "^5.0.5",
     "@types/jest": "^29.5.14",
     "@types/mime-types": "^2.1.4",
     "@types/supertest": "^6.0.2",
@@ -34,11 +34,11 @@
     "typescript": "^5.6.3"
   },
   "jest": {
-      "preset": "ts-jest",
-      "testEnvironment": "node"
+    "preset": "ts-jest",
+    "testEnvironment": "node"
   },
   "overrides": {
     "glob": "^10.4.5",
-      "inflight": "^2.0.0"
+    "inflight": "^2.0.0"
   }
 }

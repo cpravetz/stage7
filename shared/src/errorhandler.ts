@@ -1,12 +1,12 @@
 /**
- * Simple error analysis and handling utility
+ * Simple error reporting and handling utility
  */
 
 /**
  * Analyzes an error and logs appropriate information
  * @param error The error to analyze
  */
-export function analyzeError(error: Error): void {
+export function reportError(error: Error): void {
   console.error('Error details:');
   console.error(`- Message: ${error.message}`);
   console.error(`- Name: ${error.name}`);

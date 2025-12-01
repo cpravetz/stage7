@@ -1,11 +1,17 @@
 import { v4 as uuidv4 } from 'uuid';
-import { PluginParameterType, PluginOutput, InputReference, InputValue, StepDependency, ActionVerbTask, ExecutionContext as PlanExecutionContext, PlanTemplate, OutputType, PredefinedRoles } from '@cktmcs/shared'; // Added ActionVerbTask and OutputType
+import { PluginParameterType, PluginOutput, InputReference, InputValue, StepDependency, ActionVerbTask as ActionVerbTaskShared, ExecutionContext as PlanExecutionContext, PlanTemplate, OutputType, PredefinedRoles } from '@cktmcs/shared'; // Added ActionVerbTask and OutputType
 import { MapSerializer } from '@cktmcs/shared';
 import { MessageType } from '@cktmcs/shared'; // Ensured MessageType is here, assuming it's separate or also from shared index
 import { AgentPersistenceManager } from '../utils/AgentPersistenceManager';
 import { RuntimeForeachDetector, ForeachModification } from '../utils/RuntimeForeachDetector.js';
 import { DelegationRecord } from '../types/DelegationTypes';
 import { CrossAgentDependencyResolver } from '../utils/CrossAgentDependencyResolver';
+import { Agent } from './Agent.js';
+
+//FIXME: This is a temporary fix for the typescript error
+interface ActionVerbTask extends ActionVerbTaskShared {
+    inputs: any;
+}
 
 export enum StepStatus {
     PENDING = 'pending',
@@ -125,6 +131,32 @@ export class Step {
             upcomingStepsData
         );
     }
+
+    private truncateLargeStrings(obj: any, maxLength: number = 500): any {
+        if (obj === null || typeof obj !== 'object') {
+            return obj;
+        }
+
+        if (Array.isArray(obj)) {
+            return obj.map(item => this.truncateLargeStrings(item, maxLength));
+        }
+
+        const newObj: { [key: string]: any } = {};
+        for (const key in obj) {
+            if (Object.prototype.hasOwnProperty.call(obj, key)) {
+                const value = obj[key];
+                if (typeof value === 'string' && value.length > maxLength) {
+                    newObj[key] = `[Truncated string, length: ${value.length}]`;
+                } else if (typeof value === 'object') {
+                    newObj[key] = this.truncateLargeStrings(value, maxLength);
+                } else {
+                    newObj[key] = value;
+                }
+            }
+        }
+        return newObj;
+    }
+
 
     /**
      * Convert Step inputs to plain object format for the detector
@@ -271,6 +303,12 @@ export class Step {
     }) {
     
         console.log(`[Step constructor] params.outputs =`, params.outputs);
+        
+        // Enforce non-null actionVerb: this is a fundamental requirement
+        if (!params.actionVerb || typeof params.actionVerb !== 'string' || params.actionVerb.trim().length === 0) {
+            throw new Error(`[Step constructor] actionVerb is required and must be a non-empty string. Provided: ${JSON.stringify(params.actionVerb)}`);
+        }
+        
         this.id = params.id || uuidv4();
         this.templateId = params.templateId;
         this.scope_id = params.scope_id;
@@ -352,10 +390,10 @@ export class Step {
 
     public async dereferenceInputsForExecution(allSteps: Step[], missionId: string): Promise<Map<string, InputValue>> {
         console.log(`[Step ${this.id}] dereferenceInputsForExecution: Starting consolidated input preparation...`);
-        const inputRunValues = new Map<string, InputValue>();
+        const resolved = new Map<string, InputValue>();
 
-        // Ensure missionId is always present in inputRunValues from the start.
-        inputRunValues.set('missionId', {
+        // Ensure missionId is always present in resolved from the start.
+        resolved.set('missionId', {
             inputName: 'missionId',
             value: missionId,
             valueType: PluginParameterType.STRING,
@@ -363,16 +401,14 @@ export class Step {
         });
 
         // NEW PHASE 0: Copy existing inputValues (e.g., from FOREACH injection)
-        // This ensures values already set in step.inputValues are considered.
         this.inputValues.forEach((inputValue, key) => {
-            inputRunValues.set(key, { ...inputValue }); // Create a shallow copy
+            resolved.set(key, { ...inputValue }); // Create a shallow copy
         });
 
         // Phase 1: Populate with all literal values defined in the plan.
-        console.log(`[Step ${this.id}] Phase 1: Processing literal inputs from references...`);
         this.inputReferences.forEach((inputRef, key) => {
             if (inputRef.value !== undefined) {
-                inputRunValues.set(key, {
+                resolved.set(key, {
                     inputName: key,
                     value: inputRef.value,
                     valueType: inputRef.valueType,
@@ -382,36 +418,45 @@ export class Step {
         });
 
         // Phase 2: Resolve dependencies and overwrite literals if necessary.
-        console.log(`[Step ${this.id}] Phase 2: Resolving dependencies...`);
         for (const dep of this.dependencies) {
-            let sourceStep = allSteps.find(s => s.id === dep.sourceStepId);
-
-            if (!sourceStep) {
-                const remoteOutput = await this.crossAgentResolver.getStepOutput(dep.sourceStepId, dep.outputName);
-                if (remoteOutput) {
-                    inputRunValues.set(dep.inputName, {
-                        inputName: dep.inputName,
-                        value: remoteOutput.result,
-                        valueType: remoteOutput.resultType,
-                        args: {}
-                    });
+            try {
+                if (!dep.sourceStepId) {
+                    console.warn(`[Step ${this.id}] Dependency '${dep.inputName}' has no sourceStepId. Skipping resolution.`);
                     continue;
                 }
 
-                try {
-                    const stepData = await this.persistenceManager.loadStep(dep.sourceStepId);
-                    if (stepData) {
-                        sourceStep = new Step({ ...stepData, persistenceManager: this.persistenceManager, crossAgentResolver: this.crossAgentResolver });
-                    }
-                } catch (e) {
-                    console.warn(`[Step ${this.id}]   - Error attempting to load source step ${dep.sourceStepId} from persistence:`, e instanceof Error ? e.message : e);
-                }
-            }
+                let sourceStep: Step | null | undefined = allSteps.find(s => s.id === dep.sourceStepId);
 
-            // If sourceStep exists but has no result in-memory, attempt to hydrate from persistence.
-            if (sourceStep && (!sourceStep.result || sourceStep.result.length === 0)) {
-                try {
-                    const possibleAgentId = sourceStep.ownerAgentId;
+                if (!sourceStep) {
+                    const remoteOutput = await this.crossAgentResolver.getStepOutput(dep.sourceStepId, dep.outputName);
+                    if (remoteOutput) {
+                        const value = remoteOutput.result;
+                        if (value === undefined || value === null) {
+                            console.warn(`[Step ${this.id}] Input '${dep.inputName}' resolved to ${value}. Reference: sourceStep=${dep.sourceStepId}, output=${dep.outputName}`);
+                        } else {
+                            console.debug(`[Step ${this.id}] Input '${dep.inputName}' resolved to: ${JSON.stringify(value).substring(0, 100)}`);
+                        }
+                        resolved.set(dep.inputName, {
+                            inputName: dep.inputName,
+                            value: value,
+                            valueType: remoteOutput.resultType,
+                            args: {}
+                        });
+                        continue;
+                    }
+                    try {
+                        const stepData = await this.persistenceManager.loadStep(dep.sourceStepId);
+                        if (stepData) {
+                            sourceStep = new Step({ ...stepData, persistenceManager: this.persistenceManager, crossAgentResolver: this.crossAgentResolver });
+                        }
+                    } catch (e) {
+                         console.warn(`[Step ${this.id}]   - Error attempting to load source step ${dep.sourceStepId} from persistence:`, e instanceof Error ? e.message : e);
+                    }
+                }
+
+                if (sourceStep && (!sourceStep.result || sourceStep.result.length === 0)) {
+                     try {
+                        const possibleAgentId = sourceStep.ownerAgentId;
                         const persisted = await this.persistenceManager.loadStepWorkProduct(possibleAgentId, sourceStep.id);
                         if (persisted) {
                             const persistedData = (persisted && (persisted.data !== undefined)) ? persisted.data : persisted;
@@ -419,96 +464,57 @@ export class Step {
                                 const transformed = MapSerializer.transformFromSerialization(persistedData) as PluginOutput[];
                                 if (Array.isArray(transformed) && transformed.length > 0) {
                                     sourceStep.result = transformed;
-                                    //console.log(`[Step ${this.id}]   - Hydrated source step ${sourceStep.id} result from persistence. Keys:`, sourceStep.result.map(r => r.name));
                                 }
                             } catch (e) {
                                 console.warn(`[Step ${this.id}]   - Failed to transform persisted work product for step ${sourceStep.id}:`, e instanceof Error ? e.message : e);
                             }
                         }
                     } catch (e) {
-                    console.warn(`[Step ${this.id}]   - Error attempting to hydrate source step ${dep.sourceStepId} from persistence:`, e instanceof Error ? e.message : e);
-                }
-            }
-
-            if (sourceStep?.result) {
-                console.log(`[Step ${this.id}] DEBUG: Source step ${dep.sourceStepId} results found for dependency '${dep.inputName}'. Checking for output '${dep.outputName}'.`);
-                const output = sourceStep.result.find(r => r.name === dep.outputName);
-
-                if (output && output.result !== undefined && output.result !== null) {
-                    let value = output.result;
-                    console.log(`[Step ${this.id}] DEBUG: Found output '${dep.outputName}' from step '${dep.sourceStepId}'. Original value type: ${typeof value}, isArray: ${Array.isArray(value)}, value: ${JSON.stringify(value).substring(0, 200)}...`);
-
-                    // If the expected type is an object or array but we got a string, try to parse it.
-                    if ((output.resultType === PluginParameterType.OBJECT || output.resultType === PluginParameterType.ARRAY) && typeof value === 'string') {
-                        console.log(`[Step ${this.id}]   - Attempting to parse string value for dependency '${dep.sourceStepId}.${dep.outputName}'. Original value: ${value.substring(0, Math.min(value.length, 200))}...`);
-                        try {
-                            value = JSON.parse(value);
-                            console.log(`[Step ${this.id}]   - Successfully parsed value for dependency '${dep.sourceStepId}.${dep.outputName}'. Parsed type: ${typeof value}, isArray: ${Array.isArray(value)}`);
-                        } catch (e) {
-                            console.warn(`[Step ${this.id}]   - Failed to parse string to object/array for dependency '${dep.sourceStepId}.${dep.outputName}'. Error: ${e instanceof Error ? e.message : e}. Passing as string.`);
-                        }
+                        console.warn(`[Step ${this.id}]   - Error attempting to hydrate source step ${dep.sourceStepId} from persistence:`, e instanceof Error ? e.message : e);
                     }
-                    
-                    const targetInputRef = this.inputReferences.get(dep.inputName);
-                    if (targetInputRef && targetInputRef.valueType === PluginParameterType.STRING && (typeof value === 'object' || Array.isArray(value))) {
-                        console.log(`[Step ${this.id}]   - Target input '${dep.inputName}' expects a string, but received object/array from dependency '${dep.sourceStepId}.${dep.outputName}'.`);
-                        
-                        // Check if the object/array has a property with the same name as the input
-                        if (typeof value === 'object' && value !== null && !Array.isArray(value) && Object.prototype.hasOwnProperty.call(value, dep.inputName)) {
-                            let propertyValue = (value as any)[dep.inputName];
-                            console.log(`[Step ${this.id}]   - Found matching property '${dep.inputName}' in the object. Attempting to use its value.`);
-                            if (typeof propertyValue !== 'string') {
-                                try {
-                                    value = JSON.stringify(propertyValue);
-                                    console.log(`[Step ${this.id}]   - Stringified property value for '${dep.inputName}'.`);
-                                } catch (e) {
-                                    console.warn(`[Step ${this.id}]   - Failed to stringify property value for '${dep.inputName}'. Error: ${e instanceof Error ? e.message : e}. Using original property value.`);
-                                    value = propertyValue; // Fallback to original property value if stringification fails
-                                }
-                            } else {
-                                value = propertyValue;
-                            }
+                }
+
+                if (sourceStep?.result) {
+                    const output = sourceStep.result.find(r => r.name === dep.outputName);
+
+                    if (output && output.result !== undefined && output.result !== null) {
+                        let value = output.result;
+                         if (value === undefined || value === null) {
+                            console.warn(`[Step ${this.id}] Input '${dep.inputName}' resolved to ${value}. Reference: sourceStep=${dep.sourceStepId}, output=${dep.outputName}`);
                         } else {
-                            // No matching property, stringify the entire object/array
-                            console.log(`[Step ${this.id}]   - No matching property '${dep.inputName}' found. Stringifying the entire object/array.`);
-                            try {
-                                value = JSON.stringify(value);
-                            } catch (e) {
-                                console.warn(`[Step ${this.id}]   - Failed to stringify object/array for dependency '${dep.sourceStepId}.${dep.outputName}'. Error: ${e instanceof Error ? e.message : e}. Passing original value.`);
-                            }
+                            console.debug(`[Step ${this.id}] Input '${dep.inputName}' resolved to: ${JSON.stringify(value).substring(0, 100)}`);
                         }
+                        
+                        value = await this.recursivelyResolveInputReferences(value, allSteps, resolved, this.inputReferences.get(dep.inputName)?.valueType, dep.inputName);
+
+                        resolved.set(dep.inputName, {
+                            inputName: dep.inputName,
+                            value: value,
+                            valueType: output.resultType,
+                            args: {}
+                        });
+                    } else {
+                        throw new Error(`Dependency '${dep.sourceStepId}.${dep.outputName}' not satisfied.`);
                     }
-
-                    // Recursively resolve any nested references within the value
-                    value = await this.recursivelyResolveInputReferences(value, allSteps, inputRunValues, targetInputRef?.valueType, dep.inputName);
-                    console.log(`[Step ${this.id}]   - Value after recursive resolution for '${dep.inputName}': ${JSON.stringify(value).substring(0, 200)}...`);
-
-                    console.log(`[Step ${this.id}] DEBUG: Populating '${dep.inputName}' from dependency '${dep.sourceStepId}.${dep.outputName}'. Final resolved value: ${JSON.stringify(value).substring(0, 200)}...`);
-                    inputRunValues.set(dep.inputName, {
-                        inputName: dep.inputName,
-                        value: value,
-                        valueType: output.resultType,
-                        args: {}
-                    });
                 } else {
-                    console.log(`[Step ${this.id}] DEBUG: Dependency '${dep.sourceStepId}.${dep.outputName}' not satisfied. Named output not found or its result is null/undefined.`);
+                     throw new Error(`Source step '${dep.sourceStepId}' not found or had no result.`);
                 }
-            } else {
-                console.log(`[Step ${this.id}] DEBUG: Source step '${dep.sourceStepId}' not found or had no result.`);
+            } catch (error) {
+                const errorMessage = error instanceof Error ? error.message : String(error);
+                console.error(`[Step ${this.id}] Failed to resolve input '${dep.inputName}': ${errorMessage}`);
+                resolved.set(`__failed_${dep.inputName}`, { inputName: `__failed_${dep.inputName}`, value: undefined, valueType: PluginParameterType.ERROR });
             }
         }
 
         // Phase 3: Recursively resolve references within inputValues that might contain nested references
-        console.log(`[Step ${this.id}] Phase 3: Recursively resolving nested input values...`);
-        for (const [key, inputValue] of inputRunValues.entries()) {
+        for (const [key, inputValue] of resolved.entries()) {
             if (inputValue.value !== undefined) {
-                inputValue.value = await this.recursivelyResolveInputReferences(inputValue.value, allSteps, inputRunValues, inputValue.valueType);
-                inputRunValues.set(key, inputValue);
+                inputValue.value = await this.recursivelyResolveInputReferences(inputValue.value, allSteps, resolved, inputValue.valueType);
+                resolved.set(key, inputValue);
             }
         }
 
         // Phase 4: Resolve placeholders (must be last).
-        console.log(`[Step ${this.id}] Phase 4: Resolving placeholders...`);
         const findOutputFromSteps = (outputName: string): any | null => {
             for (const step of allSteps.slice().reverse()) {
                 if (step.status === StepStatus.COMPLETED && step.result) {
@@ -520,10 +526,17 @@ export class Step {
             }
             return null;
         };
-        this.resolvePlaceholdersInInputRunValues(inputRunValues, findOutputFromSteps);
+        this.resolvePlaceholdersInInputRunValues(resolved, findOutputFromSteps);
+        
+        // NEW: Check if we're missing required inputs
+        for (const [inputName, value] of resolved.entries()) {
+            if (value.value === undefined && !inputName.startsWith('__')) {
+                console.warn(`[Step ${this.id}] Required input '${inputName}' is undefined after resolution.`);
+            }
+        }
 
-        console.log(`[Step ${this.id}] dereferenceInputsForExecution: Completed. Final inputs:`, Array.from(inputRunValues.keys()));
-        return inputRunValues;
+        console.log(`[Step ${this.id}] dereferenceInputsForExecution: Completed. Final inputs:`, Array.from(resolved.keys()));
+        return resolved;
     }
 
     /**
@@ -532,12 +545,15 @@ export class Step {
      * references to outputs of other steps.
      */
     private async recursivelyResolveInputReferences(value: any, allSteps: Step[], inputRunValues: Map<string, InputValue>, expectedValueType?: PluginParameterType, currentInputName?: string): Promise<any> {
+
+
         if (value === null || typeof value !== 'object') {
+    
             return value; // Base case: primitive value
         }
 
         if (Array.isArray(value)) {
-            // Recursively process each element in the array
+            console.debug(`[Step ${this.id}]   - Value is an array. Recursing into each element.`);
             return Promise.all(value.map(item => this.recursivelyResolveInputReferences(item, allSteps, inputRunValues, expectedValueType, currentInputName)));
         }
 
@@ -545,13 +561,15 @@ export class Step {
         if (value.outputName !== undefined && value.sourceStep !== undefined) {
             const sourceStepId = value.sourceStep;
             const outputName = value.outputName;
+            console.debug(`[Step ${this.id}]   - Value is an InputReference structure: sourceStepId='${sourceStepId}', outputName='${outputName}'`);
+
 
             // Special handling for sourceStep: '0' which refers to the current item from a parent control step (e.g., FOREACH, DELEGATE)
             if (sourceStepId === '0') {
-                console.log(`[Step ${this.id}] DEBUG: Resolving sourceStep: '0' reference for outputName: '${outputName}' from current step's inputRunValues.`);
+                console.debug(`[Step ${this.id}] DEBUG: Resolving sourceStep: '0' reference for outputName: '${outputName}' from current step's inputRunValues.`);
                 const injectedValue = inputRunValues.get(outputName);
                 if (injectedValue && injectedValue.value !== undefined) {
-                    console.log(`[Step ${this.id}] DEBUG: Successfully resolved sourceStep: '0' reference. Value: ${JSON.stringify(injectedValue.value).substring(0, 200)}...`);
+                    console.debug(`[Step ${this.id}] DEBUG: Successfully resolved sourceStep: '0' reference. Value: ${JSON.stringify(this.truncateLargeStrings(injectedValue.value))}`);
                     return injectedValue.value;
                 } else {
                     console.warn(`[Step ${this.id}] WARN: Could not find injected value for outputName: '${outputName}' in inputRunValues for sourceStep: '0'. Returning original reference.`);
@@ -560,17 +578,22 @@ export class Step {
             }
 
             let sourceStep = allSteps.find(s => s.id === sourceStepId);
+            console.debug(`[Step ${this.id}]   - Source step found locally: ${!!sourceStep}`);
 
             if (!sourceStep) {
+                console.debug(`[Step ${this.id}]   - Source step not found locally. Attempting remote resolution.`);
                 const remoteOutput = await this.crossAgentResolver.getStepOutput(sourceStepId, outputName);
                 if (remoteOutput) {
+                    console.debug(`[Step ${this.id}]   - Resolved remotely. Value: ${JSON.stringify(this.truncateLargeStrings(remoteOutput.result))}`);
                     return remoteOutput.result;
                 }
+                console.debug(`[Step ${this.id}]   - Remote resolution failed. Attempting to load source step from persistence.`);
 
                 try {
                     const stepData = await this.persistenceManager.loadStep(sourceStepId);
                     if (stepData) {
                         sourceStep = new Step({ ...stepData, persistenceManager: this.persistenceManager, crossAgentResolver: this.crossAgentResolver });
+                        console.debug(`[Step ${this.id}]   - Source step loaded from persistence.`);
                     }
                 } catch (e) {
                     console.warn(`[Step ${this.id}]   - Error attempting to load source step ${sourceStepId} from persistence during recursive resolution:`, e instanceof Error ? e.message : e);
@@ -578,6 +601,7 @@ export class Step {
             }
 
             if (sourceStep && (!sourceStep.result || sourceStep.result.length === 0)) {
+                console.debug(`[Step ${this.id}]   - Source step found, but result missing. Attempting to hydrate result from persistence.`);
                 try {
                     const possibleAgentId = sourceStep.ownerAgentId;
                     const persisted = await this.persistenceManager.loadStepWorkProduct(possibleAgentId, sourceStep.id);
@@ -587,6 +611,7 @@ export class Step {
                             const transformed = MapSerializer.transformFromSerialization(persistedData) as PluginOutput[];
                             if (Array.isArray(transformed) && transformed.length > 0) {
                                 sourceStep.result = transformed;
+                                console.debug(`[Step ${this.id}]   - Hydrated source step ${sourceStep.id} result from persistence. Keys: ${sourceStep.result.map(r => r.name).join(', ')}`);
                             }
                         } catch (e) {
                             console.warn(`[Step ${this.id}]   - Failed to transform persisted work product for step ${sourceStep.id} during recursive resolution:`, e instanceof Error ? e.message : e);
@@ -601,10 +626,14 @@ export class Step {
                 const output = sourceStep.result.find(r => r.name === outputName);
                 if (output && output.result !== undefined && output.result !== null) {
                     let resolvedValue = output.result;
+                    console.debug(`[Step ${this.id}]   - Found output '${outputName}' from source step '${sourceStepId}'. Original resolvedValue type: ${typeof resolvedValue}, isArray: ${Array.isArray(resolvedValue)}, value: ${JSON.stringify(this.truncateLargeStrings(resolvedValue))}`);
+
                     // If the expected type is an object or array but we got a string, try to parse it.
                     if ((output.resultType === PluginParameterType.OBJECT || output.resultType === PluginParameterType.ARRAY) && typeof resolvedValue === 'string') {
+                        console.debug(`[Step ${this.id}]   - Attempting to parse string resolvedValue for dependency '${sourceStepId}.${outputName}'.`);
                         try {
                             resolvedValue = JSON.parse(resolvedValue);
+                            console.debug(`[Step ${this.id}]   - Successfully parsed resolvedValue. Parsed type: ${typeof resolvedValue}, isArray: ${Array.isArray(resolvedValue)}`);
                         } catch (e) {
                             console.warn(`[Step ${this.id}]   - Failed to parse string to object/array for recursively resolved dependency '${sourceStepId}.${outputName}'. Error: ${e instanceof Error ? e.message : e}. Passing as string.`);
                         }
@@ -614,16 +643,16 @@ export class Step {
                     // Use currentInputName if provided, otherwise fallback to outputName
                     const propertyToExtract = currentInputName || outputName;
                     if (expectedValueType === PluginParameterType.STRING && (typeof resolvedValue === 'object' || Array.isArray(resolvedValue))) {
-                        console.log(`[Step ${this.id}]   - Recursively resolved value for '${outputName}' expects a string, but received object/array.`);
+                        console.debug(`[Step ${this.id}]   - Recursively resolved value for '${outputName}' expects a string, but received object/array. currentInputName: ${currentInputName}, propertyToExtract: ${propertyToExtract}`);
                         
                         // Check if the object/array has a property with the same name as the inputName (which acts as the input name here)
                         if (typeof resolvedValue === 'object' && resolvedValue !== null && !Array.isArray(resolvedValue) && Object.prototype.hasOwnProperty.call(resolvedValue, propertyToExtract)) {
                             let propertyValue = (resolvedValue as any)[propertyToExtract];
-                            console.log(`[Step ${this.id}]   - Found matching property '${propertyToExtract}' in the object. Using its value.`);
+                            console.debug(`[Step ${this.id}]   - Found matching property '${propertyToExtract}' in the object. Using its value.`);
                             if (typeof propertyValue !== 'string') {
                                 try {
                                     resolvedValue = JSON.stringify(propertyValue);
-                                    console.log(`[Step ${this.id}]   - Stringified property value for '${propertyToExtract}'.`);
+                                    console.debug(`[Step ${this.id}]   - Stringified property value for '${propertyToExtract}'.`);
                                 } catch (e) {
                                     console.warn(`[Step ${this.id}]   - Failed to stringify property value for '${propertyToExtract}'. Error: ${e instanceof Error ? e.message : e}. Using original property value.`);
                                     resolvedValue = propertyValue; // Fallback to original property value if stringification fails
@@ -633,7 +662,7 @@ export class Step {
                             }
                         } else {
                             // No matching property, stringify the entire object/array
-                            console.log(`[Step ${this.id}]   - No matching property '${propertyToExtract}' found. Stringifying the entire object/array.`);
+                            console.debug(`[Step ${this.id}]   - No matching property '${propertyToExtract}' found. Stringifying the entire object/array.`);
                             try {
                                 resolvedValue = JSON.stringify(resolvedValue);
                             } catch (e) {
@@ -641,7 +670,7 @@ export class Step {
                             }
                         }
                     }
-                    console.log(`[Step ${this.id}]   - Recursively resolved reference to '${sourceStepId}.${outputName}'.`);
+                    console.debug(`[Step ${this.id}]   - Recursively resolved reference to '${sourceStepId}.${outputName}'. Final resolvedValue: ${JSON.stringify(this.truncateLargeStrings(resolvedValue))}`);
                     return resolvedValue;
                 } else {
                     console.warn(`[Step ${this.id}]   - Recursively resolved dependency '${sourceStepId}.${outputName}' not satisfied. Named output not found.`);
@@ -649,6 +678,7 @@ export class Step {
             } else {
                 console.warn(`[Step ${this.id}]   - Source step '${sourceStepId}' not found or has no result during recursive resolution.`);
             }
+            console.debug(`[Step ${this.id}]   - Resolution failed for reference. Returning original value.`);
             return value; // Return original value if resolution fails
         }
 
@@ -659,24 +689,38 @@ export class Step {
                 newObject[key] = await this.recursivelyResolveInputReferences(value[key], allSteps, inputRunValues, undefined, key);
             }
         }
+        console.debug(`[Step ${this.id}] recursivelyResolveInputReferences: Exiting with newObject: ${JSON.stringify(this.truncateLargeStrings(newObject))}`);
         return newObject;
     }
 
-    areDependenciesSatisfied(allSteps: Step[]): boolean {
-        return this.dependencies.every(dep => {
+    async areDependenciesSatisfied(allSteps: Step[]): Promise<boolean> {
+        for (const dep of this.dependencies) {
             if (!dep.sourceStepId) {
-                return true;
+                console.warn(`[areDependenciesSatisfied] Step ${this.id} dependency '${dep.inputName}' has no sourceStepId. Skipping check.`);
+                continue; // Skip dependencies without a sourceStepId
             }
-            const sourceStep = allSteps.find(s => s.id === dep.sourceStepId);
+
+            let sourceStep: Step | null | undefined = allSteps.find(s => s.id === dep.sourceStepId);
+
+            // If sourceStep not found locally, try to get it from crossAgentResolver
+            if (!sourceStep) {
+                sourceStep = await this.crossAgentResolver.getStepDetails(dep.sourceStepId);
+                if (!sourceStep) {
+                    // If still not found, or crossAgentResolver returns null, dependency is not satisfied
+                    console.log(`[areDependenciesSatisfied] Step ${this.id} dependency on ${dep.sourceStepId} (output: ${dep.outputName}) is not satisfied: source step not found.`);
+                    return false;
+                }
+            }
 
             // Source step must exist and be completed.
-            if (!sourceStep || sourceStep.status !== StepStatus.COMPLETED) {
+            if (sourceStep.status !== StepStatus.COMPLETED) {
+                console.log(`[areDependenciesSatisfied] Step ${this.id} dependency on ${dep.sourceStepId} (output: ${dep.outputName}) is not satisfied: source step status is ${sourceStep.status}.`);
                 return false;
             }
 
             // If dependency is just a signal (like for control flow), we don't need to check for a named output.
             if (dep.inputName.startsWith('__')) {
-                return true;
+                continue; // Move to next dependency
             }
 
             // For regular dependencies, the named output must exist in the source step's result.
@@ -685,31 +729,55 @@ export class Step {
                 console.warn(`[areDependenciesSatisfied] Step ${this.id} dependency on output '${dep.outputName}' from step ${sourceStep.id} is not met because the output is not in the result or is null/undefined.`);
                 return false;
             }
-
-            return true;
-        });
+        }
+        return true; // All dependencies are satisfied        
     }
 
-    areDependenciesPermanentlyUnsatisfied(allSteps: Step[]): boolean {
-        return this.dependencies.some(dep => {
+    async areDependenciesPermanentlyUnsatisfied(allSteps: Step[]): Promise<boolean> {
+        for (const dep of this.dependencies) {
             if (!dep.sourceStepId) {
-                return false; // Cannot determine, assume not unsatisfied
+                continue; // Skip dependencies without a sourceStepId, not permanently unsatisfied
             }
-            const sourceStep = allSteps.find(s => s.id === dep.sourceStepId);
+
+            let sourceStep: Step | null | undefined = allSteps.find(s => s.id === dep.sourceStepId);
+
+            // If sourceStep not found locally, try to get it from crossAgentResolver
             if (!sourceStep) {
-                return true; // Source step doesn't exist, permanently unsatisfied
+                console.log(`[areDependenciesPermanentlyUnsatisfied] Source step ${dep.sourceStepId} not found locally for dependency '${dep.inputName}'. Attempting remote resolution.`);
+                sourceStep = await this.crossAgentResolver.getStepDetails(dep.sourceStepId);
+                if (!sourceStep) {
+                    // If still not found, or crossAgentResolver returns null, it's permanently unsatisfied
+                    console.warn(`[areDependenciesPermanentlyUnsatisfied] Step ${this.id} dependency on ${dep.sourceStepId} (output: ${dep.outputName}) is permanently unsatisfied: source step not found locally or remotely.`);
+                    return true;
+                }
             }
+
             const isTerminated = sourceStep.status === StepStatus.COMPLETED ||
                                  sourceStep.status === StepStatus.ERROR ||
                                  sourceStep.status === StepStatus.CANCELLED;
-
+            
+            // If the source step is terminated, and the dependency is not satisfied, it's permanently unsatisfied.
             if (isTerminated) {
-                // The source step is finished. Now check if the dependency is actually met.
-                const isSatisfied = this.areDependenciesSatisfied(allSteps);
-                return !isSatisfied; // If it's terminated and not satisfied, it's permanently unsatisfied.
+                // If the source step is an error or cancelled, it's permanently unsatisfied regardless of output presence.
+                if (sourceStep.status === StepStatus.ERROR || sourceStep.status === StepStatus.CANCELLED) {
+                    console.warn(`[areDependenciesPermanentlyUnsatisfied] Step ${this.id} dependency on ${dep.sourceStepId} (output: ${dep.outputName}) is permanently unsatisfied: source step terminated with status ${sourceStep.status}.`);
+                    return true;
+                }
+                
+                // Otherwise, check if the required output exists for a completed step.
+                // If dep.inputName starts with '__', it's a signal, no output check needed.
+                if (dep.inputName.startsWith('__')) {
+                    continue; // Signal dependency, considered satisfied if sourceStep is completed
+                }
+
+                const outputExists = sourceStep.result?.some(r => r.name === dep.outputName && r.result !== null && r.result !== undefined);
+                if (!outputExists) {
+                    console.warn(`[areDependenciesPermanentlyUnsatisfied] Step ${this.id} dependency on output '${dep.outputName}' from step ${sourceStep.id} is permanently unsatisfied because the output is not in the result or is null/undefined even after completion.`);
+                    return true;
+                }
             }
-            return false; // Source step is still running or pending, so not permanently unsatisfied yet.
-        });
+        }
+        return false; // No permanently unsatisfied dependencies found
     }
 
     isEndpoint(allSteps: Step[]): boolean {
@@ -728,593 +796,255 @@ export class Step {
         }
         return OutputType.INTERIM;
     }
-
-    private async handleForeach(): Promise<PluginOutput[]> {
-        const arrayInput = this.inputValues.get('array');
-        const stepsInput = this.inputValues.get('steps');
-        const batchSizeInput = this.inputValues.get('batch_size');
-        const batchSize = typeof batchSizeInput?.value === 'number' ? batchSizeInput.value : null;
-
-        console.log(`[Step ${this.id}] handleForeach: Starting execution. Batch size: ${batchSize || 'N/A'}`);
-
-        if (!arrayInput || arrayInput.value === undefined || arrayInput.value === null) {
-            return this.createErrorResponse('FOREACH requires a non-null "array" input.', '[Step]Error in FOREACH step');
-        }
-
-        let inputArray: any[];
-        if (Array.isArray(arrayInput.value)) {
-            inputArray = arrayInput.value;
-        } else {
-            return this.createErrorResponse(`FOREACH "array" input must be an array. Received type: ${typeof arrayInput.value}`, '[Step]Error in FOREACH step');
-        }
-
-        if (!stepsInput || !Array.isArray(stepsInput.value)) {
-            return this.createErrorResponse('FOREACH requires a "steps" input of type plan (array).', '[Step]Error in FOREACH step');
-        }
-
-        const subPlanTemplate: ActionVerbTask[] = stepsInput.value;
-        const allNewSteps: Step[] = [];
-        
-        const startIndex = this.currentIndex || 0;
-        const endIndex = batchSize ? Math.min(startIndex + batchSize, inputArray.length) : inputArray.length;
-        const batch = inputArray.slice(startIndex, endIndex);
-
-        console.log(`[Step ${this.id}] handleForeach: Processing batch from index ${startIndex} to ${endIndex} (Total items: ${inputArray.length}).`);
-
-        for (let i = 0; i < batch.length; i++) {
-            const item = batch[i];
-            const itemIndex = startIndex + i;
-            console.log(`[Step ${this.id}] handleForeach: Processing item ${itemIndex}:`, JSON.stringify(item));
-            
-            const iterationSteps = createFromPlan(subPlanTemplate, this.persistenceManager, this.crossAgentResolver, this);
-
-            iterationSteps.forEach(step => {
-                // Tag each new step with the FOREACH loop's scope ID
-                (step as any).scope_id = this.scope_id;
-
-                console.log(`[Step ${this.id}] handleForeach: Configuring step ${step.id} for item ${itemIndex}`);
-                for (const [inputName, inputRef] of step.inputReferences.entries()) {
-                    if (inputRef.outputName === 'item' && (inputRef.sourceId === '0' || inputRef.sourceId === this.id)) {
-                        step.inputValues.set(inputName, {
-                            inputName: inputName,
-                            value: item,
-                            valueType: this.inferValueType(item)
-                        });
-                    }
-                    // Allow sub-plan to access the index
-                    if (inputRef.outputName === 'index' && (inputRef.sourceId === '0' || inputRef.sourceId === this.id)) {
-                        step.inputValues.set(inputName, {
-                            inputName: inputName,
-                            value: itemIndex,
-                            valueType: PluginParameterType.NUMBER
-                        });
-                    }
-                }
-            });
-
-            allNewSteps.push(...iterationSteps);
-        }
-
-        // Update the index for the next batch
-        this.currentIndex = endIndex;
-
-        const isCompleted = this.currentIndex >= inputArray.length;
-        const executionStatus = isCompleted ? 'completed' : 'in_progress';
-
-        console.log(`[Step ${this.id}] handleForeach: Generated ${allNewSteps.length} new steps in this batch. Execution status: ${executionStatus}.`);
-        
-        const planOutput: PluginOutput = {
-            success: true,
-            name: 'newSteps',
-            resultType: PluginParameterType.PLAN,
-            resultDescription: `[Step] FOREACH created ${allNewSteps.length} new steps.`,
-            result: allNewSteps
-        };
-        
-        const stepsOutput: PluginOutput = {
-            success: true,
-            name: 'steps',
-            resultType: PluginParameterType.ARRAY,
-            resultDescription: 'Array of all instantiated subplan steps in this batch',
-            result: allNewSteps
-        };
-
-        const statusOutput: PluginOutput = {
-            success: true,
-            name: 'execution_status',
-            resultType: PluginParameterType.STRING,
-            resultDescription: `FOREACH execution status.`,
-            result: executionStatus
-        };
-
-        return [planOutput, stepsOutput, statusOutput];
+    
+    public storeTempData(key: string, value: any): void {
+        this.tempData.set(key, value);
+    }
+    
+    public getTempData(key: string): any {
+        return this.tempData.get(key);
     }
 
-
-
-    private inferValueType(value: any): PluginParameterType {
-        if (typeof value === 'string') return PluginParameterType.STRING;
-        if (typeof value === 'number') return PluginParameterType.NUMBER;
-        if (typeof value === 'boolean') return PluginParameterType.BOOLEAN;
-        if (Array.isArray(value)) return PluginParameterType.ARRAY;
-        if (typeof value === 'object' && value !== null) return PluginParameterType.OBJECT;
-        return PluginParameterType.ANY;
+    public clearTempData(): void {
+        this.tempData.clear();
     }
 
-    private async finalizeStepExecution(result: PluginOutput[], allSteps: Step[]): Promise<void> {
-        this.result = await this.mapPluginOutputsToCustomNames(result);
-        // Check if any output indicates failure
-        const hasFailureOutput = this.result.some(output => !output.success);
-        this.status = hasFailureOutput ? StepStatus.ERROR : StepStatus.COMPLETED;
-        const outputType = this.getOutputType(allSteps);
-        await this.persistenceManager.saveWorkProduct(this, this.result!, outputType);
-
-        await this.logEvent({
-            eventType: 'step_result',
-            stepId: this.id,
+    public toJSON() {
+        return {
+            id: this.id,
+            templateId: this.templateId,
+            scope_id: this.scope_id,
             missionId: this.missionId,
             actionVerb: this.actionVerb,
+            ownerAgentId: this.ownerAgentId,
+            delegatedToAgentId: this.delegatedToAgentId,
+            inputReferences: MapSerializer.transformForSerialization(this.inputReferences),
+            inputValues: MapSerializer.transformForSerialization(this.inputValues),
+            description: this.description,
+            dependencies: this.dependencies,
+            outputs: MapSerializer.transformForSerialization(this.outputs),
+            originalOutputDefinitions: this.originalOutputDefinitions,
             status: this.status,
             result: this.result,
-            dependencies: this.dependencies,
-            timestamp: new Date().toISOString()
-        });
+            timeout: this.timeout,
+            recommendedRole: this.recommendedRole,
+            awaitsSignal: this.awaitsSignal,
+            retryCount: this.retryCount,
+            maxRetries: this.maxRetries,
+            recoverableRetryCount: this.recoverableRetryCount,
+            maxRecoverableRetries: this.maxRecoverableRetries,
+            lastError: this.lastError,
+            errorContext: this.errorContext,
+            currentIndex: this.currentIndex,
+            currentOwnerAgentId: this.currentOwnerAgentId,
+            originalOwnerAgentId: this.originalOwnerAgentId,
+            delegationHistory: this.delegationHistory,
+            isRemotelyOwned: this.isRemotelyOwned,
+            lastOwnershipChange: this.lastOwnershipChange,
+        };
     }
 
-    async execute(
+    public async execute(
         executeAction: (step: Step) => Promise<PluginOutput[]>,
         thinkAction: (inputValues: Map<string, InputValue>, actionVerb: string) => Promise<PluginOutput[]>,
         delegateAction: (inputValues: Map<string, InputValue>) => Promise<PluginOutput[]>,
         askAction: (inputValues: Map<string, InputValue>) => Promise<PluginOutput[]>,
-        allSteps?: Step[]
+        allSteps: Step[],
+        agent: Agent,
     ): Promise<PluginOutput[]> {
-        console.log(`[Step ${this.id}] execute: Executing step ${this.actionVerb}...`);
-        console.log(`[Step ${this.id}] execute: step.outputs (custom output names) =`, this.outputs ? Array.from(this.outputs.keys()) : []);
-
-        // Note: Input preparation is now handled in executeAction (executeActionWithCapabilitiesManager)
-        // which calls prepareInputValuesForExecution. This avoids duplicate processing.
-        console.log(`[Step ${this.id}] execute: Input values before execution:`, this.inputValues);
         this.status = StepStatus.RUNNING;
-
-        // Phase 1: Query knowledge base before execution (for research tasks)
-        let knowledgeResults: PluginOutput[] | null = null;
-        if (this.shouldQueryKnowledgeBase()) {
-            knowledgeResults = await this.queryKnowledgeBase(executeAction);
-            if (knowledgeResults && knowledgeResults.length > 0) {
-                // Add knowledge context to step inputs if relevant information was found
-                const knowledgeContent = knowledgeResults[0].result;
-                if (knowledgeContent && Array.isArray(knowledgeContent) && knowledgeContent.length > 0) {
-                    const relevantInfo = knowledgeContent.map(item => item.document).join('\n\n');
-                    this.inputValues.set('knowledgeContext', {
-                        inputName: 'knowledgeContext',
-                        value: `Relevant knowledge from previous work:\n${relevantInfo}`,
-                        valueType: PluginParameterType.STRING
-                    });
-                    console.log(`[Step ${this.id}] Added knowledge context from ${knowledgeContent.length} previous results`);
-                }
-            }
-        }
+        this.logEvent({
+            eventType: 'step_execution_start',
+            stepId: this.id,
+            actionVerb: this.actionVerb,
+            timestamp: new Date().toISOString()
+        });
 
         try {
             let result: PluginOutput[];
+
             switch (this.actionVerb) {
+                // Internal Control Flow Verbs
+                case 'DECIDE':
+                    result = await this.handleDecide(agent);
+                    break;
+                case 'REPEAT':
+                    result = await this.handleRepeat(agent);
+                    break;
+                case 'WHILE':
+                    result = await this.handleWhile(agent);
+                    break;
+                case 'UNTIL':
+                    result = await this.handleUntil(agent);
+                    break;
+                case 'SEQUENCE':
+                    result = await this.handleSequence(agent);
+                    break;
+                case 'FOREACH':
+                    console.debug(`[Step ${this.id}] execute: Handling FOREACH verb internally.`);
+                    result = await this.handleForeach(agent);
+                    break;
+                case 'REGROUP':
+                    result = await this.handleRegroup(allSteps);
+                    break;
+                case 'TIMEOUT':
+                    result = await this.handleTimeout(agent);
+                    break;
+                
+                // Verbs handled by Agent methods
                 case 'THINK':
                 case 'GENERATE':
                     result = await thinkAction(this.inputValues, this.actionVerb);
                     break;
-                case 'DELEGATE':
-                    result = await this.handleDelegate(executeAction);
+                case 'DELEGATE': // DELEGATE is often used to create sub-agents
+                    result = await delegateAction(this.inputValues);
                     break;
-                case 'CHAT':
                 case 'ASK':
-                case MessageType.REQUEST:
+                case 'ASK_USER_QUESTION':
+                case 'CHAT':
                     result = await askAction(this.inputValues);
                     break;
-                case 'IF_THEN':
-                    result = await this.handleDecide();
-                    break;
-                case 'REPEAT':
-                    result = await this.handleRepeat();
-                    break;
-                case 'WHILE':
-                    result = await this.handleWhile();
-                    break;
-                case 'UNTIL':
-                    result = await this.handleUntil();
-                    break;
-                case 'SEQUENCE':
-                    result = await this.handleSequence();
-                    break;
-                case 'TIMEOUT':
-                    result = await this.handleTimeout();
-                    break;
-                case 'FOREACH':
-                    result = await this.handleForeach();
-                    break;
-                case 'REGROUP':
-                    result = await this.handleRegroup(allSteps!);
-                    break;
+
+                // Default to external plugin execution
                 default:
                     result = await executeAction(this);
+                    break;
             }
+            
+            // If the result indicates a new plan, we don't set the step to COMPLETED here.
+            // The agent will handle the plan and update the step status (e.g., REPLACED).
+            const isPlanResult = result.some(r => r.resultType === PluginParameterType.PLAN);
+            const isWaitingResult = result.some(r => r.name === 'status' && r.result === StepStatus.WAITING);
 
-            if (!Array.isArray(result)) {
-                result = [result];
+            if (!isPlanResult && !isWaitingResult) {
+                this.status = StepStatus.COMPLETED;
             }
+            
+            this.result = result;
 
-            console.log(`[Step ${this.id}] execute: Raw plugin outputs:`, result.map(r => ({ name: r.name, resultType: r.resultType })));
-
-            result.forEach(resultItem => {
-                if (!resultItem.mimeType) { resultItem.mimeType = 'text/plain'; }
-            });
-
-            await this.finalizeStepExecution(result, allSteps!);
-
-            console.log(`[Step ${this.id}] execute: Mapped plugin outputs to step.result:`, this.result?.map(r => ({ name: r.name, resultType: r.resultType })));
-
-            // Phase 2: Save results to knowledge base after successful execution
-            if (this.shouldSaveToKnowledgeBase()) {
-                await this.saveToKnowledgeBase(executeAction);
-            }
-
-            // Phase 3: Trigger reflection for self-correction on complex tasks
-            if (this.shouldTriggerReflection()) {
-                await this.triggerReflection(executeAction);
-            }
-
-            await this.logEvent({
-                eventType: 'step_result',
+            this.logEvent({
+                eventType: 'step_execution_finish',
                 stepId: this.id,
-                missionId: this.missionId,
-                actionVerb: this.actionVerb,
                 status: this.status,
-                result: this.result,
-                dependencies: this.dependencies,
+                result: this.truncateLargeStrings(result),
                 timestamp: new Date().toISOString()
             });
-            console.log(`[Step ${this.id}] execute: Step completed with status: ${this.status}. Result: ${JSON.stringify(this.result)}`);
-            return this.result!;
+
+            return result;
 
         } catch (error) {
             this.status = StepStatus.ERROR;
-            const errorResult = this.createErrorResponse(error instanceof Error ? error.message : String(error), '[Step]Error executing step', 'An error occurred during step execution. Please check the logs for details.');
-            this.result = errorResult;
+            this.lastError = error;
+            const errorMessage = error instanceof Error ? error.message : String(error);
 
-            console.error(`[Step ${this.id}] execute: Step failed with status: ${this.status}. Error: ${error instanceof Error ? error.message : String(error)}`);
-
-            await this.logEvent({
-                eventType: 'step_result',
+            this.logEvent({
+                eventType: 'step_execution_error',
                 stepId: this.id,
-                missionId: this.missionId,
-                actionVerb: this.actionVerb,
-                status: this.status,
-                result: errorResult,
+                error: errorMessage,
                 timestamp: new Date().toISOString()
             });
 
-            await this.persistenceManager.saveWorkProduct(this, errorResult);
-
-            // Phase 3: Trigger reflection for self-correction on errors or complex tasks
-            if (this.shouldTriggerReflection()) {
-                await this.triggerReflection(executeAction);
-            }
-
-            return errorResult;
+            return this.createErrorResponse(
+                `Step ${this.id} (${this.actionVerb}) failed during execution.`,
+                '[Step] Execution Error',
+                errorMessage
+            );
         }
     }
-
-    private updateStatus(status: StepStatus, result?: PluginOutput[]): void {
-        this.status = status;
-        if (result) {
-            this.result = result;
+    
+    public hasDeliverableOutputs(): boolean {
+        if (!this.originalOutputDefinitions) return false;
+        for (const outDef of Object.values(this.originalOutputDefinitions)) {
+            if (outDef.isDeliverable) return true;
         }
-        this.logEvent({
-            eventType: 'step_status_changed',
-            stepId: this.id,
-            missionId: this.missionId,
-            newStatus: status,
-            result: result,
-            timestamp: new Date().toISOString()
-        });
+        return false;
     }
 
-    /**
-     * Check if this step should query the knowledge base before execution
-     */
-    private shouldQueryKnowledgeBase(): boolean {
-        const researchTasks = ['SEARCH', 'SCRAPE', 'TEXT_ANALYSIS', 'ACCOMPLISH'];
-        return researchTasks.includes(this.actionVerb);
-    }
-
-    /**
-     * Check if this step should save results to the knowledge base after execution
-     */
-    private shouldSaveToKnowledgeBase(): boolean {
-        const knowledgeGeneratingTasks = ['SEARCH', 'SCRAPE', 'TEXT_ANALYSIS', 'ACCOMPLISH'];
-        return knowledgeGeneratingTasks.includes(this.actionVerb) && this.status === StepStatus.COMPLETED;
-    }
-
-    /**
-     * Check if this step should trigger reflection for self-correction
-     */
-    private shouldTriggerReflection(): boolean {
-        // Trigger reflection for complex tasks or when there are errors
-        const complexTasks = ['ACCOMPLISH', 'CODE_EXECUTOR', 'DELEGATE'];
-        return complexTasks.includes(this.actionVerb) || this.status === StepStatus.ERROR;
-    }
-
-    /**
-     * Determine the knowledge domain for this step based on context
-     */
-    private determineKnowledgeDomain(): string {
-        // Extract domain from step description or use action verb as fallback
-        const description = this.description?.toLowerCase() || '';
-
-        if (description.includes('ai') || description.includes('artificial intelligence') || description.includes('machine learning')) {
-            return 'ai_development';
-        } else if (description.includes('research') || description.includes('analysis') || description.includes('study')) {
-            return 'research_findings';
-        } else if (description.includes('code') || description.includes('programming') || description.includes('development')) {
-            return 'software_development';
-        } else if (description.includes('data') || description.includes('database') || description.includes('analytics')) {
-            return 'data_analysis';
-        } else {
-            // Use action verb as domain
-            return this.actionVerb.toLowerCase() + '_results';
+    public async mapPluginOutputsToCustomNames(pluginOutputs: PluginOutput[]): Promise<PluginOutput[]> {
+        // If there are no custom output names defined, return the original plugin outputs
+        if (!this.outputs || this.outputs.size === 0) {
+            return pluginOutputs;
         }
-    }
-
-    /**
-     * Extract keywords from step description and inputs
-     */
-    private extractKeywords(): string[] {
-        const keywords: string[] = [];
-
-        // Add action verb as a keyword
-        keywords.push(this.actionVerb.toLowerCase());
-
-        // Extract keywords from description
-        if (this.description) {
-            const words = this.description.toLowerCase()
-                .replace(/[^\w\s]/g, ' ')
-                .split(/\s+/)
-                .filter(word => word.length > 3);
-            keywords.push(...words.slice(0, 5)); // Take first 5 meaningful words
-        }
-
-        // Extract keywords from input values
-        this.inputValues.forEach((inputValue, inputName) => {
-            if (typeof inputValue.value === 'string' && inputValue.value.length < 100) {
-                const inputWords = inputValue.value.toLowerCase()
-                    .replace(/[^\w\s]/g, ' ')
-                    .split(/\s+/)
-                    .filter(word => word.length > 3);
-                keywords.push(...inputWords.slice(0, 3)); // Take first 3 words from each input
-            }
-        });
-
-        // Remove duplicates and return
-        return [...new Set(keywords)];
-    }
-
-    /**
-     * Query the knowledge base before executing this step
-     */
-    private async queryKnowledgeBase(executeAction: (step: Step) => Promise<PluginOutput[]>): Promise<PluginOutput[] | null> {
-        try {
-            console.log(`[Step ${this.id}] Querying knowledge base before execution...`);
-
-            const domain = this.determineKnowledgeDomain();
-            const keywords = this.extractKeywords();
-            const queryText = keywords.join(' ');
-
-            // Create a temporary step for querying knowledge base
-            const queryStep = new Step({
-                id: uuidv4(),
-                actionVerb: 'QUERY_KNOWLEDGE_BASE',
-                description: `Query knowledge base for relevant information about ${queryText}`,
-                missionId: this.missionId,
-                dependencies: [],
-                persistenceManager: this.persistenceManager,
-                crossAgentResolver: this.crossAgentResolver
-            });
-
-            // Set up inputs for the query
-            queryStep.inputValues.set('queryText', {
-                inputName: 'queryText',
-                value: queryText,
-                valueType: PluginParameterType.STRING
-            });
-
-            queryStep.inputValues.set('domains', {
-                inputName: 'domains',
-                value: [domain],
-                valueType: PluginParameterType.ARRAY
-            });
-
-            queryStep.inputValues.set('maxResults', {
-                inputName: 'maxResults',
-                value: 3,
-                valueType: PluginParameterType.NUMBER
-            });
-
-            // Execute the query
-            const queryResult = await executeAction(queryStep);
-
-            if (queryResult && queryResult.length > 0 && queryResult[0].success) {
-                console.log(`[Step ${this.id}] Found relevant knowledge in domain '${domain}'`);
-                return queryResult;
+    
+        const mappedOutputs: PluginOutput[] = [];
+        const originalOutputNames = Array.from(this.outputs.values());
+    
+        for (const pluginOutput of pluginOutputs) {
+            // Find which custom name this plugin output corresponds to
+            const customName = [...this.outputs.entries()].find(([_, originalName]) => originalName === pluginOutput.name)?.[0];
+            
+            if (customName) {
+                // If a mapping is found, create a new output object with the custom name
+                mappedOutputs.push({
+                    ...pluginOutput,
+                    name: customName,
+                });
             } else {
-                console.log(`[Step ${this.id}] No relevant knowledge found in domain '${domain}'`);
-                return null;
-            }
-        } catch (error) {
-            console.warn(`[Step ${this.id}] Error querying knowledge base:`, error);
-            return null; // Don't fail the main step if knowledge query fails
-        }
-    }
-
-    /**
-     * Save results to the knowledge base after successful execution
-     */
-    private async saveToKnowledgeBase(executeAction: (step: Step) => Promise<PluginOutput[]>): Promise<void> {
-        try {
-            if (!this.result || this.result.length === 0 || !this.result[0].success) {
-                console.log(`[Step ${this.id}] Skipping knowledge base save - no successful results`);
-                return;
-            }
-
-            console.log(`[Step ${this.id}] Saving results to knowledge base...`);
-
-            const domain = this.determineKnowledgeDomain();
-            const keywords = this.extractKeywords();
-
-            // Prepare content to save
-            let content = '';
-            if (this.result[0].result !== undefined && this.result[0].result !== null) {
-                if (typeof this.result[0].result === 'string') {
-                    content = this.result[0].result;
-                } else {
-                    content = JSON.stringify(this.result[0].result);
+                // If no mapping is found for this specific output, but there are other outputs defined,
+                // we should not include it unless it's a special output type like 'error' or 'plan'.
+                if (pluginOutput.name === 'error' || pluginOutput.resultType === PluginParameterType.PLAN) {
+                    mappedOutputs.push(pluginOutput);
                 }
-            } else if (this.result[0].resultDescription) {
-                content = this.result[0].resultDescription;
             }
-
-            // Limit content length for storage
-            if (content.length > 2000) {
-                content = content.substring(0, 2000) + '... [truncated]';
+        }
+    
+        // If no outputs were mapped and there were outputs defined, it might be an issue.
+        // However, we'll stick to the logic of only returning what's explicitly mapped.
+        return mappedOutputs;
+    }
+    
+    private resolvePlaceholdersInInputRunValues(inputRunValues: Map<string, InputValue>, findOutputFromSteps: (outputName: string) => any | null) {
+        for (const [key, inputValue] of inputRunValues.entries()) {
+            if (typeof inputValue.value === 'string') {
+                inputValue.value = inputValue.value.replace(/\{([^\}]+)\}/g, (match, outputName) => {
+                    const resolvedValue = findOutputFromSteps(outputName);
+                    if (resolvedValue !== null) {
+                        return typeof resolvedValue === 'string' ? resolvedValue : JSON.stringify(resolvedValue);
+                    }
+                    return match; // Keep placeholder if not found
+                });
+            } else if (typeof inputValue.value === 'object' && inputValue.value !== null) {
+                // Recursively resolve placeholders in nested objects and arrays
+                const resolveInObject = (obj: any): any => {
+                    if (Array.isArray(obj)) {
+                        return obj.map(item => resolveInObject(item));
+                    }
+                    if (typeof obj === 'object' && obj !== null) {
+                        const newObj: { [key: string]: any } = {};
+                        for (const prop in obj) {
+                            if (Object.prototype.hasOwnProperty.call(obj, prop)) {
+                                newObj[prop] = resolveInObject(obj[prop]);
+                            }
+                        }
+                        return newObj;
+                    }
+                    if (typeof obj === 'string') {
+                        return obj.replace(/\{([^\}]+)\}/g, (match, outputName) => {
+                            const resolvedValue = findOutputFromSteps(outputName);
+                            if (resolvedValue !== null) {
+                                return typeof resolvedValue === 'string' ? resolvedValue : JSON.stringify(resolvedValue);
+                            }
+                            return match; // Keep placeholder if not found
+                        });
+                    }
+                    return obj;
+                };
+                inputValue.value = resolveInObject(inputValue.value);
             }
-
-            // Create a temporary step for saving to knowledge base
-            const saveStep = new Step({
-                id: uuidv4(),
-                missionId: this.missionId,
-                ownerAgentId: this.ownerAgentId,
-                actionVerb: 'SAVE_TO_KNOWLEDGE_BASE',
-                description: `Save results from ${this.actionVerb} to knowledge base`,
-                inputReferences: new Map<string, InputReference>(), 
-                dependencies: [],
-                persistenceManager: this.persistenceManager,
-                crossAgentResolver: this.crossAgentResolver
-            });
-
-            // Set up inputs for saving
-            saveStep.inputValues.set('domain', {
-                inputName: 'domain',
-                value: domain,
-                valueType: PluginParameterType.STRING
-            });
-
-            saveStep.inputValues.set('keywords', {
-                inputName: 'keywords',
-                value: keywords,
-                valueType: PluginParameterType.ARRAY
-            });
-
-            saveStep.inputValues.set('content', {
-                inputName: 'content',
-                value: content,
-                valueType: PluginParameterType.STRING
-            });
-
-            saveStep.inputValues.set('metadata', {
-                inputName: 'metadata',
-                value: {
-                    sourceStep: this.actionVerb,
-                    stepId: this.id,
-                    missionId: this.missionId,
-                    timestamp: new Date().toISOString()
-                },
-                valueType: PluginParameterType.OBJECT
-            });
-
-            // Execute the save
-            const saveResult = await executeAction(saveStep);
-
-            if (saveResult && saveResult.length > 0 && saveResult[0].success) {
-                console.log(`[Step ${this.id}] Successfully saved results to knowledge base domain '${domain}'`);
-            } else {
-                console.warn(`[Step ${this.id}] Failed to save results to knowledge base`);
-            }
-        } catch (error) {
-            console.warn(`[Step ${this.id}] Error saving to knowledge base:`, error);
-            // Don't fail the main step if knowledge save fails
         }
     }
-
-    /**
-     * Trigger reflection for self-correction after complex tasks or errors
-     */
-    private async triggerReflection(executeAction: (step: Step) => Promise<PluginOutput[]>): Promise<void> {
-        try {
-            console.log(`[Step ${this.id}] Triggering reflection for self-correction...`);
-
-            // Create a temporary step for reflection
-            const reflectStep = new Step({
-                id: uuidv4(),
-                actionVerb: 'REFLECT',
-                description: `Reflect on ${this.actionVerb} execution for self-correction`,
-                missionId: this.missionId,
-                inputReferences: new Map<string, InputReference>(),
-                dependencies: [],
-                persistenceManager: this.persistenceManager,
-                crossAgentResolver: this.crossAgentResolver
-            });
-
-            // Set up inputs for reflection
-
-            // Create a simplified plan history for this step, ensuring error and result are stringified if they are objects
-            const stepHistory = [{
-                id: this.id,
-                actionVerb: this.actionVerb,
-                description: this.description || '',
-                success: this.status === StepStatus.COMPLETED,
-                error: this.status === StepStatus.ERROR 
-                    ? (typeof this.lastError === 'string' ? this.lastError : JSON.stringify(this.lastError || this.result?.[0]?.error || 'Unknown error'))
-                    : undefined,
-                result: typeof this.result?.[0]?.resultDescription === 'string' 
-                    ? this.result[0].resultDescription 
-                    : JSON.stringify(this.result?.[0]?.result || 'No result description')
-            }];
-
-            reflectStep.inputValues.set('plan_history', {
-                inputName: 'plan_history',
-                value: JSON.stringify(stepHistory), 
-                valueType: PluginParameterType.STRING
-            });
-
-            reflectStep.inputValues.set('question', {
-                inputName: 'question',
-                value: this.status === StepStatus.ERROR
-                    ? `What went wrong with the ${this.actionVerb} step and how can it be improved?`
-                    : `How can the ${this.actionVerb} step execution be optimized for better performance?`,
-                valueType: PluginParameterType.STRING
-            });
-
-            // Add agent ID for self-correction if available
-            const agentId = this.ownerAgentId; // Extract agent ID from step ID
-            reflectStep.inputValues.set('agentId', {
-                inputName: 'agentId',
-                value: agentId,
-                valueType: PluginParameterType.STRING
-            });
-
-            // Execute the reflection
-            const reflectResult = await executeAction(reflectStep);
-
-            if (reflectResult && reflectResult.length > 0 && reflectResult[0].success) {
-                console.log(`[Step ${this.id}] Reflection completed successfully for agent ${agentId}`);
-            } else {
-                console.warn(`[Step ${this.id}] Reflection failed or returned no results`);
-            }
-        } catch (error) {
-            console.warn(`[Step ${this.id}] Error during reflection:`, error);
-            // Don't fail the main step if reflection fails
-        }
+    
+    private async handleDelegate(executeAction: (step: Step) => Promise<PluginOutput[]>): Promise<PluginOutput[]> {
+        return [{
+            success: true,
+            name: 'steps',
+            resultType: PluginParameterType.PLAN,
+            resultDescription: '[Step]New steps created from decision',
+            result: []
+        }];
     }
 
-    private async handleDecide(): Promise<PluginOutput[]> {
+    private async handleDecide(agent?: any): Promise<PluginOutput[]> {
         const condition = this.inputValues.get('condition')?.value;
         const trueSteps = this.inputValues.get('trueSteps')?.value as ActionVerbTask[];
         const falseSteps = this.inputValues.get('falseSteps')?.value as ActionVerbTask[];
@@ -1328,7 +1058,7 @@ export class Step {
 
         const stepsToExecute = result ? trueSteps : falseSteps;
         if (stepsToExecute) {
-            const newSteps = createFromPlan(stepsToExecute, this.persistenceManager, this.crossAgentResolver, this);
+            const newSteps = createFromPlan(stepsToExecute, this.persistenceManager, this.crossAgentResolver, this, agent);
             return [{
                 success: true,
                 name: 'steps',
@@ -1340,7 +1070,7 @@ export class Step {
         return [];
     }
 
-    private async handleRepeat(): Promise<PluginOutput[]> {
+    private async handleRepeat(agent?: any): Promise<PluginOutput[]> {
         const count = this.inputValues.get('count')?.value as number;
         if (!count) {
             return this.createErrorResponse('Missing required input: count', '[Step]Error in REPEAT step', 'Missing required input: count');
@@ -1357,7 +1087,7 @@ export class Step {
             const newSteps: Step[] = [];
 
             for (let i = 0; i < count; i++) {
-                const iterationSteps = createFromPlan(steps, this.persistenceManager, this.crossAgentResolver, this);
+                const iterationSteps = createFromPlan(steps, this.persistenceManager, this.crossAgentResolver, this, agent);
                 newSteps.push(...iterationSteps);
             }
 
@@ -1377,7 +1107,7 @@ export class Step {
         }
     }
 
-    private async handleTimeout(): Promise<PluginOutput[]> {
+    private async handleTimeout(agent?: any): Promise<PluginOutput[]> {
         const timeoutMs = this.inputValues.get('timeout')?.value as number;
         const stepsInput = this.inputValues.get('steps');
 
@@ -1387,7 +1117,7 @@ export class Step {
 
         try {
             const steps = this.parseStepsInput(stepsInput);
-            const newSteps = createFromPlan(steps, this.persistenceManager, this.crossAgentResolver, this);
+            const newSteps = createFromPlan(steps, this.persistenceManager, this.crossAgentResolver, this, agent);
 
             newSteps.forEach(step => {
                 step.timeout = timeoutMs;
@@ -1409,7 +1139,7 @@ export class Step {
         }
     }
 
-    private async handleWhile(): Promise<PluginOutput[]> {
+    private async handleWhile(agent?: any): Promise<PluginOutput[]> {
         const conditionInput = this.inputValues.get('condition');
         const stepsInput = this.inputValues.get('steps');
         const maxIterations = 100;
@@ -1440,10 +1170,12 @@ export class Step {
             persistenceManager: this.persistenceManager,
             crossAgentResolver: this.crossAgentResolver,
         });
-
+        if (agent) {
+            agent.agentSet.registerStepLocation(checkStep.id, agent.id, agent.agentSetUrl);
+        }
         newSteps.push(checkStep);
 
-        const iterationSteps = createFromPlan(steps, this.persistenceManager, this.crossAgentResolver, this);
+        const iterationSteps = createFromPlan(steps, this.persistenceManager, this.crossAgentResolver, this, agent);
 
         iterationSteps.forEach(step => {
             step.dependencies.push({
@@ -1471,7 +1203,9 @@ export class Step {
             persistenceManager: this.persistenceManager,
             crossAgentResolver: this.crossAgentResolver,
         });
-
+        if (agent) {
+            agent.agentSet.registerStepLocation(nextCheckStep.id, agent.id, agent.agentSetUrl);
+        }
         newSteps.push(nextCheckStep);
 
         return [{
@@ -1482,101 +1216,7 @@ export class Step {
             result: newSteps
         }];
     }
-
-    private async handleRegroup(allSteps: Step[]): Promise<PluginOutput[]> {
-        console.log(`[Step ${this.id}] Handling REGROUP step with new logic...`);
-
-        // 1. Get the new inputs created by the plan_validator.py
-        const foreachResultsInput = this.inputValues.get('foreach_results');
-        const sourceStepIdInSubplanInput = this.inputValues.get('source_step_id_in_subplan');
-        const outputToCollectInput = this.inputValues.get('output_to_collect');
-
-        if (!foreachResultsInput || !Array.isArray(foreachResultsInput.value)) {
-            return this.createErrorResponse('REGROUP requires a "foreach_results" array input.', '[Step]Error in REGROUP step');
-        }
-        if (!sourceStepIdInSubplanInput || typeof sourceStepIdInSubplanInput.value !== 'string') {
-            return this.createErrorResponse('REGROUP requires a "source_step_id_in_subplan" string input.', '[Step]Error in REGROUP step');
-        }
-        if (!outputToCollectInput || typeof outputToCollectInput.value !== 'string') {
-            return this.createErrorResponse('REGROUP requires an "output_to_collect" string input.', '[Step]Error in REGROUP step');
-        }
-
-        const instantiatedSteps: Step[] = foreachResultsInput.value;
-        const templateIdToFind = sourceStepIdInSubplanInput.value;
-        const outputNameToCollect = outputToCollectInput.value;
-
-        console.log(`[Step ${this.id}] REGROUP: Looking for instances of templateId '${templateIdToFind}' and collecting output '${outputNameToCollect}'.`);
-
-        // 2. Find all the runtime step instances that were created from our target template step
-        //    within the same scope.
-        const targetStepInstances = instantiatedSteps.filter(step => 
-            step.templateId === templateIdToFind && step.scope_id === this.scope_id
-        );
-
-        if (targetStepInstances.length === 0) {
-            console.warn(`[Step ${this.id}] REGROUP: Found no step instances for templateId '${templateIdToFind}'. This might be an error in the plan. Returning empty array.`);
-            return [{
-                success: true,
-                name: 'aggregatedResult',
-                resultType: PluginParameterType.ARRAY,
-                resultDescription: `[Step] REGROUP found no steps to aggregate.`,
-                result: []
-            }];
-        }
-        
-        console.log(`[Step ${this.id}] REGROUP: Found ${targetStepInstances.length} instances to check.`);
-
-        // 3. Check if all target steps are finished and collect their result handles.
-        const collectedResultHandles: any[] = [];
-        const failedResults: PluginOutput[] = [];
-
-        for (const instance of targetStepInstances) {
-            const currentStepState = allSteps.find(s => s.id === instance.id);
-
-            if (!currentStepState || currentStepState.status !== StepStatus.COMPLETED) {
-                this.status = StepStatus.WAITING;
-                console.log(`[Step ${this.id}] REGROUP: Waiting for step ${instance.id} (template: ${templateIdToFind}) to complete. Current status: ${currentStepState?.status || 'not found'}.`);
-                return [{
-                    success: true, name: 'status', resultType: PluginParameterType.STRING,
-                    resultDescription: 'REGROUP is waiting for dependent steps to finish.', result: StepStatus.WAITING
-                }];
-            }
-
-            if (currentStepState.result) {
-                const output = currentStepState.result.find(r => r.name === outputNameToCollect);
-                if (output && output.result !== undefined && output.result !== null) {
-                    if (output.success) {
-                        // Instead of the raw result, we collect the handle to the result.
-                        // We assume the step's result IS the handle.
-                        collectedResultHandles.push(output.result);
-                    } else {
-                        failedResults.push(output);
-                    }
-                } else {
-                     console.warn(`[Step ${this.id}] REGROUP: Completed step ${instance.id} is missing the required output '${outputNameToCollect}'.`);
-                }
-            }
-        }
-
-        console.log(`[Step ${this.id}] REGROUP: All ${targetStepInstances.length} dependent steps are complete. Aggregating ${collectedResultHandles.length} result handles.`);
-
-        // 4. Save the collected array of handles as a new artifact and return a handle to it.
-        if (failedResults.length > 0) {
-            console.warn(`[Step ${this.id}] REGROUP: Completed with ${failedResults.length} failed dependencies. These were ignored.`);
-        }
-
-        // The final result is the array of handles. This array itself is now treated as the work product.
-        // The persistence manager will save this and subsequent steps will receive a handle to this array.
-        return [{
-            success: true,
-            name: 'aggregatedResult', // This output name is what other steps will refer to.
-            resultType: PluginParameterType.ARRAY, // The conceptual type is an array.
-            resultDescription: `[Step] REGROUP successfully created a collection of ${collectedResultHandles.length} result handles.`,
-            result: collectedResultHandles // The result IS the array of handles.
-        }];
-    }
-
-    private async handleUntil(): Promise<PluginOutput[]> {
+    private async handleUntil(agent?: any): Promise<PluginOutput[]> {
         const conditionInput = this.inputValues.get('condition');
         const stepsInput = this.inputValues.get('steps');
 
@@ -1589,7 +1229,7 @@ export class Step {
 
         const newSteps: Step[] = [];
 
-        const iterationSteps = createFromPlan(steps, this.persistenceManager, this.crossAgentResolver, this);
+        const iterationSteps = createFromPlan(steps, this.persistenceManager, this.crossAgentResolver, this, agent);
         newSteps.push(...iterationSteps);
 
         const checkStep = new Step({
@@ -1608,6 +1248,9 @@ export class Step {
             persistenceManager: this.persistenceManager,
             crossAgentResolver: this.crossAgentResolver,
         });
+        if (agent) {
+            agent.agentSet.registerStepLocation(checkStep.id, agent.id, agent.agentSetUrl);
+        }
 
         iterationSteps.forEach(step => {
             checkStep.dependencies.push({
@@ -1627,51 +1270,7 @@ export class Step {
             result: newSteps
         }];
     }
-
-    private async handleDelegate(executeAction: (step: Step) => Promise<PluginOutput[]>): Promise<PluginOutput[]> {
-        const goal = this.inputValues.get('goal')?.value ||
-                    this.inputValues.get('task')?.value ||
-                    this.inputValues.get('description')?.value ||
-                    this.description;
-
-        if (!goal) {
-            return this.createErrorResponse('Goal, task, or description input is required for DELEGATE action', '[Step]Error in DELEGATE step', 'Missing required input: goal/task/description');
-        }
-
-        const accomplishStep = new Step({
-            actionVerb: 'ACCOMPLISH',
-            missionId: this.missionId,
-            ownerAgentId: this.ownerAgentId,
-            inputReferences: new Map(),
-            inputValues: new Map([...this.inputValues.entries(),
-                ['goal', {
-                    inputName: 'goal',
-                    value: goal,
-                    valueType: PluginParameterType.STRING,
-                    args: {}
-                }]
-            ]),
-            description: `Generate plan for: ${goal}`,
-            persistenceManager: this.persistenceManager,
-            crossAgentResolver: this.crossAgentResolver
-        });
-
-        const accomplishResult = await executeAction(accomplishStep);
-
-        if (accomplishResult && accomplishResult.length > 0 && accomplishResult[0].success) {
-            return [{
-                success: true,
-                name: 'delegatedPlan',
-                resultType: PluginParameterType.PLAN,
-                resultDescription: 'Plan generated from delegation',
-                result: accomplishResult[0].result
-            }];
-        } else {
-            return this.createErrorResponse(accomplishResult?.[0]?.error || 'Unknown error in delegation planning', '[Step]Error in DELEGATE step', 'Failed to generate plan for delegation');
-        }
-    }
-
-    private async handleSequence(): Promise<PluginOutput[]> {
+    private async handleSequence(agent?: any): Promise<PluginOutput[]> {
         const stepsInput = this.inputValues.get('steps');
 
         if (!stepsInput) {
@@ -1693,6 +1292,9 @@ export class Step {
                 persistenceManager: this.persistenceManager,
                 crossAgentResolver: this.crossAgentResolver
             });
+            if (agent) {
+                agent.agentSet.registerStepLocation(newStep.id, agent.id, agent.agentSetUrl);
+            }
 
             if (previousStepId) {
                 newStep.dependencies.push({
@@ -1715,542 +1317,297 @@ export class Step {
         }];
     }
 
-    public clearTempData(): void {
-        this.tempData.clear();
-        if (this.result) {
-            this.result = this.result.map(output => ({
-                ...output,
-                result: typeof output.result === 'string' ? output.result : null
-            }));
+    private inferValueType(value: any): PluginParameterType {
+        switch (typeof value) {
+            case 'string':
+                return PluginParameterType.STRING;
+            case 'number':
+                return PluginParameterType.NUMBER;
+            case 'boolean':
+                return PluginParameterType.BOOLEAN;
+            case 'object':
+                if (value === null) return PluginParameterType.NULL;
+                if (Array.isArray(value)) return PluginParameterType.ARRAY;
+                return PluginParameterType.OBJECT;
+            default:
+                return PluginParameterType.STRING; // Default to string for unknown types
         }
     }
 
-    public storeTempData(key: string, data: any): void {
-        this.tempData.set(key, data);
-    }
+	private async handleForeach(agent?: any): Promise<PluginOutput[]> {
+        const arrayInput = this.inputValues.get('array');
+        const stepsInput = this.inputValues.get('steps');
+        const batchSizeInput = this.inputValues.get('batch_size');
+        const batchSize = typeof batchSizeInput?.value === 'number' ? batchSizeInput.value : null;
 
-    public getTempData(key: string): any {
-        return this.tempData.get(key);
-    }
+        console.log(`[Step ${this.id}] handleForeach: Starting execution. Batch size: ${batchSize || 'N/A'}`);
+        console.debug(`[Step ${this.id}] handleForeach: Raw array input: ${JSON.stringify(this.truncateLargeStrings(arrayInput))}`);
+        console.debug(`[Step ${this.id}] handleForeach: Raw steps input: ${JSON.stringify(this.truncateLargeStrings(stepsInput))}`);
 
+
+        if (!arrayInput || arrayInput.value === undefined || arrayInput.value === null) {
+            return this.createErrorResponse('FOREACH requires a non-null "array" input.', '[Step]Error in FOREACH step');
+        }
+
+        let inputArray: any[];
+        if (Array.isArray(arrayInput.value)) {
+            inputArray = arrayInput.value;
+        } else {
+            return this.createErrorResponse(`FOREACH "array" input must be an array. Received type: ${typeof arrayInput.value}`, '[Step]Error in FOREACH step');
+        }
+        console.debug(`[Step ${this.id}] handleForeach: Input array length: ${inputArray.length}`);
+
+
+        if (!stepsInput || !Array.isArray(stepsInput.value)) {
+            return this.createErrorResponse('FOREACH requires a "steps" input of type plan (array).', '[Step]Error in FOREACH step');
+        }
+
+        const subPlanTemplate: ActionVerbTask[] = stepsInput.value;
+        console.debug(`[Step ${this.id}] handleForeach: Sub-plan template has ${subPlanTemplate.length} steps.`);
+        
+        const allNewSteps: Step[] = [];
+        
+        const startIndex = this.currentIndex || 0;
+        const endIndex = batchSize ? Math.min(startIndex + batchSize, inputArray.length) : inputArray.length;
+        const batch = inputArray.slice(startIndex, endIndex);
+
+        console.log(`[Step ${this.id}] handleForeach: Processing batch from index ${startIndex} to ${endIndex} (Total items: ${inputArray.length}).`);
+
+        for (let i = 0; i < batch.length; i++) {
+            const item = batch[i];
+            const itemIndex = startIndex + i;
+            console.log(`[Step ${this.id}] handleForeach: Processing item ${itemIndex}:`, JSON.stringify(this.truncateLargeStrings(item)));
+            
+            const iterationSteps = createFromPlan(subPlanTemplate, this.persistenceManager, this.crossAgentResolver, this, agent);
+
+            iterationSteps.forEach(step => {
+                // Tag each new step with the FOREACH loop's scope ID
+                (step as any).scope_id = this.scope_id;
+
+                console.debug(`[Step ${this.id}] handleForeach: Configuring step ${step.id} for item ${itemIndex}`);
+                for (const [inputName, inputRef] of step.inputReferences.entries()) {
+                    if (inputRef.outputName === 'item' && (inputRef.sourceId === '0' || inputRef.sourceId === this.id)) {
+                        step.inputValues.set(inputName, {
+                            inputName: inputName,
+                            value: item,
+                            valueType: this.inferValueType(item)
+                        });
+                        console.debug(`[Step ${this.id}] handleForeach: Injected item into step ${step.id} input ${inputName}`);
+                    }
+                    // Allow sub-plan to access the index
+                    if (inputRef.outputName === 'index' && (inputRef.sourceId === '0' || inputRef.sourceId === this.id)) {
+                        step.inputValues.set(inputName, {
+                            inputName: inputName,
+                            value: itemIndex,
+                            valueType: PluginParameterType.NUMBER
+                        });
+                        console.debug(`[Step ${this.id}] handleForeach: Injected index into step ${step.id} input ${inputName}`);
+                    }
+                }
+            });
+
+            allNewSteps.push(...iterationSteps);
+        }
+
+        // Update the index for the next batch
+        this.currentIndex = endIndex;
+
+        const isCompleted = this.currentIndex >= inputArray.length;
+        const executionStatus = isCompleted ? 'completed' : 'in_progress';
+
+        console.log(`[Step ${this.id}] handleForeach: Generated ${allNewSteps.length} new steps in this batch. Execution status: ${executionStatus}.`);
+        console.debug(`[Step ${this.id}] handleForeach: All new steps: ${allNewSteps.map(s => s.id).join(', ')}`);
+        
+        const planOutput: PluginOutput = {
+            success: true,
+            name: 'newSteps',
+            resultType: PluginParameterType.PLAN,
+            resultDescription: `[Step] FOREACH created ${allNewSteps.length} new steps.`,
+            result: allNewSteps
+        };
+        
+        const stepsOutput: PluginOutput = {
+            success: true,
+            name: 'steps',
+            resultType: PluginParameterType.ARRAY,
+            resultDescription: 'Array of all instantiated subplan steps in this batch',
+            result: allNewSteps
+        };
+
+        const statusOutput: PluginOutput = {
+            success: true,
+            name: 'execution_status',
+            resultType: PluginParameterType.STRING,
+            resultDescription: `FOREACH execution status.`,
+            result: executionStatus
+        };
+
+        return [planOutput, stepsOutput, statusOutput];
+    }
+    
+    private async handleRegroup(allSteps: Step[]): Promise<PluginOutput[]> {
+        const stepIdsToRegroupInput = this.inputValues.get('stepIdsToRegroup');
+
+        if (!stepIdsToRegroupInput || !Array.isArray(stepIdsToRegroupInput.value)) {
+            return this.createErrorResponse('REGROUP requires a "stepIdsToRegroup" input of type array.', '[Step]Error in REGROUP step');
+        }
+
+        const stepIds: string[] = stepIdsToRegroupInput.value;
+        const regroupedResults: any[] = [];
+        let allCompleted = true;
+
+        for (const stepId of stepIds) {
+            const step = allSteps.find(s => s.id === stepId);
+            if (!step) {
+                // If a step is not found, we can't complete the regroup.
+                // This could be a temporary state if steps are still being created.
+                allCompleted = false;
+                break;
+            }
+
+            if (step.status === StepStatus.COMPLETED) {
+                if (step.result) {
+                    regroupedResults.push(...step.result);
+                }
+            } else if (step.status === StepStatus.ERROR || step.status === StepStatus.CANCELLED) {
+                // If any step in the group failed, the regroup fails.
+                return this.createErrorResponse(`Step ${stepId} in the regroup set failed with status ${step.status}.`, '[Step]Error in REGROUP step');
+            } else {
+                // If any step is not yet completed, we have to wait.
+                allCompleted = false;
+            }
+        }
+
+        if (allCompleted) {
+            this.status = StepStatus.COMPLETED;
+            return [{
+                success: true,
+                name: 'regrouped_results',
+                resultType: PluginParameterType.ARRAY,
+                resultDescription: 'The aggregated results from the regrouped steps.',
+                result: regroupedResults
+            }];
+        }
+
+        return [{
+            success: true,
+            name: 'status',
+            resultType: PluginParameterType.STRING,
+            resultDescription: 'Waiting for all steps in the regroup set to complete.',
+            result: 'waiting'
+        }];
+    }
+    
+    private async triggerReflection(executeAction: (step: Step) => Promise<PluginOutput[]>): Promise<void> {
+        console.log(`[Step ${this.id}] triggerReflection: Triggering reflection for step ${this.actionVerb}`);
+    }
+    
     public async handleInternalVerb(
-        internalActionVerb: string,
-        internalInputValues: Map<string, InputValue>,
-        internalOutputs: Map<string, string>,
+        actionVerb: string,
+        inputValues: Map<string, InputValue>,
+        outputs: Map<string, string>,
         executeAction: (step: Step) => Promise<PluginOutput[]>,
         thinkAction: (inputValues: Map<string, InputValue>, actionVerb: string) => Promise<PluginOutput[]>,
         delegateAction: (inputValues: Map<string, InputValue>) => Promise<PluginOutput[]>,
         askAction: (inputValues: Map<string, InputValue>) => Promise<PluginOutput[]>,
-        allSteps?: Step[]
+        allSteps: Step[],
     ): Promise<void> {
-        // Temporarily update the step's actionVerb, inputValues, and outputs
-        // so the internal handlers can use them.
-        const originalActionVerb = this.actionVerb;
-        const originalInputValues = this.inputValues;
-        const originalOutputs = this.outputs;
-
-        (this as any).actionVerb = internalActionVerb;
-        this.inputValues = internalInputValues;
-        this.outputs = internalOutputs;
-
-        try {
-            let result: PluginOutput[];
-            switch (internalActionVerb) {
-                case 'THINK':
-                case 'GENERATE':
-                    result = await thinkAction(this.inputValues, internalActionVerb);
-                    if (!Array.isArray(result)) result = [result];
-                    break;
-                case 'DELEGATE':
-                    result = await this.handleDelegate(executeAction);
-                    break;
-                case 'CHAT':
-                case 'ASK':
-                case MessageType.REQUEST:
-                    console.log('Using askAction for '+ internalActionVerb);
-                    result = await askAction(this.inputValues);
-                    break;
-                case 'IF_THEN':
-                    result = await this.handleDecide();
-                    break;
-                case 'REPEAT':
-                    result = await this.handleRepeat();
-                    break;
-                case 'WHILE':
-                    result = await this.handleWhile();
-                    break;
-                case 'UNTIL':
-                    result = await this.handleUntil();
-                    break;
-                case 'SEQUENCE':
-                    result = await this.handleSequence();
-                    break;
-                case 'TIMEOUT':
-                    result = await this.handleTimeout();
-                    break;
-                case 'FOREACH':
-                    result = await this.handleForeach();
-                    break;
-                default:
-                    // This should ideally not be reached if CapabilitiesManager correctly identifies internal verbs
-                    // and only sends known internal verbs.
-                    console.warn(`[Step] Unknown internal action verb: ${internalActionVerb}. Falling back to external execution.`);
-                    result = await executeAction(this);
-            }
-
-            if (!Array.isArray(result)) {
-                result = [result];
-            }
-
-            result.forEach(resultItem => {
-                if (!resultItem.mimeType) { resultItem.mimeType = 'text/plain'; }
-            });
-
-            // Map plugin output names to step-defined custom names and persist the mapped result
-            await this.finalizeStepExecution(result, allSteps!);
-        } catch (error) {
-            this.status = StepStatus.ERROR;
-            const errorResult = this.createErrorResponse(error instanceof Error ? error.message : String(error), '[Step]Error executing internal step', 'An error occurred during internal step execution. Please check the logs for details.');
-            this.result = errorResult;
-
-            await this.logEvent({
-                eventType: 'step_result',
-                stepId: this.id,
-                missionId: this.missionId,
-                actionVerb: this.actionVerb,
-                status: this.status,
-                result: errorResult,
-                timestamp: new Date().toISOString()
-            });
-
-            await this.persistenceManager.saveWorkProduct(this, errorResult);
-        } finally {
-            // Restore original values
-            (this as any).actionVerb = originalActionVerb;
-            this.inputValues = originalInputValues;
-            this.outputs = originalOutputs;
-        }
-    }
-
-    toJSON() {
-        return {
-            id: this.id,
-            missionId: this.missionId,
-            actionVerb: this.actionVerb,
-            inputReferences: MapSerializer.transformForSerialization(this.inputReferences),
-            inputValues: MapSerializer.transformForSerialization(this.inputValues),
-            description: this.description,
-            dependencies: this.dependencies,
-            outputs: MapSerializer.transformForSerialization(this.outputs),
-            status: this.status,
-            result: this.result,
-            recommendedRole: this.recommendedRole,
-            // Ownership and Delegation
-            originalOwnerAgentId: this.originalOwnerAgentId,
-            currentOwnerAgentId: this.currentOwnerAgentId,
-            delegationHistory: this.delegationHistory,
-            isRemotelyOwned: this.isRemotelyOwned,
-            lastOwnershipChange: this.lastOwnershipChange,
-        };
-    }
-
-    public applyModifications(modifications: StepModification): void {
-        if (modifications.description !== undefined) {
-            this.description = modifications.description;
-            this.logEvent({ eventType: 'step_description_updated', stepId: this.id, newDescription: this.description });
-        }
-        if (modifications.inputValues) {
-            this.inputValues = new Map(modifications.inputValues);
-            this.logEvent({ eventType: 'step_inputs_replaced', stepId: this.id });
-        }
-        if (modifications.updateInputs) {
-            if (!this.inputValues) this.inputValues = new Map<string, InputValue>();
-            modifications.updateInputs.forEach((value, key) => {
-                this.inputValues.set(key, value);
-            });
-            this.logEvent({ eventType: 'step_inputs_updated', stepId: this.id });
-        }
-        if (modifications.status) {
-            this.updateStatus(modifications.status);
-        }
-        if (modifications.actionVerb) {
-            console.warn(`Agent ${this.ownerAgentId}: Step ${this.id} actionVerb changed from ${this.actionVerb} to ${modifications.actionVerb}. This might have execution implications.`);
-            (this as any).actionVerb = modifications.actionVerb;
-            this.logEvent({ eventType: 'step_actionVerb_updated', stepId: this.id, oldActionVerb: this.actionVerb, newActionVerb: modifications.actionVerb });
-        }
-        if (modifications.recommendedRole) {
-            this.recommendedRole = modifications.recommendedRole;
-            this.logEvent({ eventType: 'step_recommendedRole_updated', stepId: this.id, newRecommendedRole: this.recommendedRole });
-        }
-    }
-
-    /**
-     * Resolve placeholders in inputRunValues using both local inputs and step outputs
-     */
-    private resolvePlaceholdersInInputRunValues(inputRunValues: Map<string, InputValue>, findOutputFromSteps: (outputName: string) => string | null): void {
-        for (const [inputName, inputValue] of inputRunValues.entries()) {
-            if (typeof inputValue.value === 'string') {
-                const resolvedValue = this.resolvePlaceholdersInString(inputValue.value, inputRunValues, findOutputFromSteps);
-                if (resolvedValue !== inputValue.value) {
-                    console.log(`[Step ${this.id}] Resolved placeholder in ${inputName}: "${inputValue.value}" -> "${resolvedValue}"`);
-                    inputValue.value = resolvedValue;
-                }
-            }
-        }
-    }
-
-    /**
-     * Resolve placeholders in a string using both local inputs and step outputs
-     */
-    private resolvePlaceholdersInString(text: string, inputRunValues: Map<string, InputValue>, findOutputFromSteps: (outputName: string) => any | null): any {
-        const placeholderRegex = /^\{([^\}]+)\}\$/;
-        const match = text.match(placeholderRegex);
-
-        if (match) {
-            const placeholderName = match[1];
-            const localInput = inputRunValues.get(placeholderName);
-            if (localInput && localInput.value !== undefined) {
-                return localInput.value;
-            }
-            const resolvedValue = findOutputFromSteps(placeholderName);
-            if (resolvedValue !== null) {
-                return resolvedValue;
-            }
-        }
-
-        return text.replace(/\{([^\}]+)\}/g, (match, placeholderName) => {
-            const localInput = inputRunValues.get(placeholderName);
-            if (localInput && localInput.value !== undefined) {
-                if (typeof localInput.value === 'string') {
-                    return localInput.value;
-                } else {
-                    return JSON.stringify(localInput.value);
-                }
-            }
-
-            const resolvedValue = findOutputFromSteps(placeholderName);
-            if (resolvedValue !== null) {
-                if (typeof resolvedValue === 'string') {
-                    return resolvedValue;
-                } else {
-                    return JSON.stringify(resolvedValue);
-                }
-            }
-
-            console.warn(`[Step ${this.id}] Could not resolve placeholder ${match} - not found in local inputs or completed steps`);
-            return match;
-        });
-    }
-
-    /**
-     * Maps plugin output names to step-defined custom output names.
-     * This ensures that when other steps reference outputs, they can use the custom names.
-     */
-    async mapPluginOutputsToCustomNames(pluginOutputs: PluginOutput[]): Promise<PluginOutput[]> {
-        console.log(`[Step ${this.id}] mapPluginOutputsToCustomNames: this.outputs =`, this.outputs);
-        if (!this.outputs || this.outputs.size === 0) {
-            // No custom output names defined, return plugin outputs as-is
-            return pluginOutputs;
-        }
-
-        // For single output plugins, map to the single custom name
-        if (pluginOutputs.length === 1 && this.outputs.size === 1) {
-            const customName = Array.from(this.outputs.keys())[0];
-            const pluginOutput = pluginOutputs[0];
-
-            return [{
-                ...pluginOutput,
-                name: customName  // Replace plugin name with custom name
-            }];
-        }
-
-        // For multiple outputs, try to map by position or keep original names
-        // This is a more complex case that may need enhancement based on actual usage
-        const customNames = Array.from(this.outputs.keys());
-        return pluginOutputs.map((output, index) => {
-            if (index < customNames.length) {
-                return {
-                    ...output,
-                    name: customNames[index]
-                };
-            }
-            return output; // Keep original name if no custom name available
-        });
-    }
-
-    /**
-     * Check if a specific output is marked as a deliverable
-     */
-    isOutputDeliverable(outputName: string): boolean {
-        if (!this.originalOutputDefinitions) {
-            return false;
-        }
-
-        const outputDef = this.originalOutputDefinitions.get(outputName);
-        return typeof outputDef === 'object' && outputDef !== null && outputDef.isDeliverable === true;
-    }
-
-    /**
-     * Get the filename for a deliverable output
-     */
-    getDeliverableFilename(outputName: string): string | undefined {
-        if (!this.originalOutputDefinitions) {
-            return undefined;
-        }
-
-        const outputDef = this.originalOutputDefinitions.get(outputName);
-        if (typeof outputDef === 'object' && outputDef !== null) {
-            return outputDef.filename;
-        }
-        return undefined;
-    }
-
-    /**
-     * Get the original output definition from the plan
-     */
-    getOriginalOutputDefinition(outputName: string): string | any {
-        if (!this.originalOutputDefinitions) {
-            return this.outputs.get(outputName) || '';
-        }
-
-        return this.originalOutputDefinitions.get(outputName) || this.outputs.get(outputName) || '';
-    }
-
-    /**
-     * Check if this step has any deliverable outputs
-     */
-    hasDeliverableOutputs(): boolean {
-        if (!this.originalOutputDefinitions) {
-            return false;
-        }
-
-        for (const [outputName, _] of this.outputs) {
-            if (this.isOutputDeliverable(outputName)) {
-                return true;
-            }
-        }
-        return false;
+        console.log(`[Step ${this.id}] handleInternalVerb: Handling internal verb ${actionVerb}`);
     }
 }
 
-export function createFromPlan(
-    plan: ActionVerbTask[],
-    persistenceManager: AgentPersistenceManager,
-    crossAgentResolver: CrossAgentDependencyResolver,
-    parentStep?: Step,
-    agentContext?: any
-): Step[] {
-    type PlanTask = ActionVerbTask & { number?: number; outputs?: Record<string, any>; id?: string; inputs?: Record<string, InputValue>; };
-    const planTasks = plan as PlanTask[];
+export function createFromPlan(plan: ActionVerbTask[], persistenceManager: AgentPersistenceManager, crossAgentResolver: CrossAgentDependencyResolver, parentStep?: Step, agent?: any): Step[] {
+    const newSteps: Step[] = [];
+    const stepMap: Map<string, Step> = new Map(); // Map task.id -> Step for dependency resolution
 
-    const oldTaskIdToNewStepIdMap = new Map<string, string>();
-    const newSteps = planTasks.map((task, idx) => {
-        const newStepId = uuidv4(); // Generate a new UUID for this step instance
-        if (task.id) {
-            // Map the original task ID to the new step ID
-            oldTaskIdToNewStepIdMap.set(task.id, newStepId);
-        }
-
-        const dependencies: StepDependency[] = [];
-        const inputReferences = new Map<string, InputReference>();
-        const inputValues = new Map<string, InputValue>();
-
-        const missionId = parentStep?.missionId || agentContext?.missionId;
-        if (!missionId) {
-            throw new Error('Cannot create step from plan without a missionId from parentStep or agentContext');
-        }
-
-        const inputSource = (task as any).inputs || {};
-
-
-        for (const [inputName, inputDefUntyped] of Object.entries(inputSource as Record<string, any>)) {
-            if (typeof inputDefUntyped !== 'object' || inputDefUntyped === null) continue;
-
-            // Check for dependency based on the structure of the plan's input definition
-            const isDependency = inputDefUntyped.sourceStep !== undefined && inputDefUntyped.outputName !== undefined;
-
-            // NEW: Check for literal-wrapped references
-            let isLiteralWrappedReference = false;
-            let parsedValue: any = null;
-            if (!isDependency && inputDefUntyped.value !== undefined && typeof inputDefUntyped.value === 'string') {
-                try {
-                    parsedValue = JSON.parse(inputDefUntyped.value);
-                    if (parsedValue && typeof parsedValue === 'object' &&
-                        parsedValue.outputName !== undefined && parsedValue.sourceStep !== undefined) {
-                        isLiteralWrappedReference = true;
-                    }
-                } catch (e) {
-                    // Not a valid JSON string, or not a reference pattern
+    // Pre-validation: Check for broken input references before creating steps
+    // This fails early if plan has references to non-existent steps (Fix #3)
+    const planTaskIds = new Set(plan.map(t => t.id || uuidv4()));
+    const brokenReferences: string[] = [];
+    
+    plan.forEach(task => {
+        if (task.inputs) {
+            for (const key in task.inputs) {
+                const input = task.inputs[key];
+                if (input.sourceStep && !planTaskIds.has(input.sourceStep)) {
+                    brokenReferences.push(
+                        `[createFromPlan] Task "${task.id}": input "${key}" references ` +
+                        `non-existent step "${input.sourceStep}"`
+                    );
+                }
+                // Also catch empty string values that might indicate incomplete references
+                if (input.value === "" && key !== 'context' && key !== 'notes' && 
+                    key !== 'comments' && key !== 'description') {
+                    console.warn(
+                        `[createFromPlan] Task "${task.id}": input "${key}" has empty string value. ` +
+                        `This might indicate a broken reference or incomplete plan generation.`
+                    );
                 }
             }
+        }
+    });
+    
+    // Fail fast if any broken references detected (Fix #3)
+    if (brokenReferences.length > 0) {
+        const errorMsg = `[createFromPlan] PLAN VALIDATION ERROR: Found ${brokenReferences.length} broken references:\n` +
+                        brokenReferences.join('\n');
+        console.error(errorMsg);
+        throw new Error(errorMsg);
+    }
 
-            if (isDependency || isLiteralWrappedReference) {
-                // This is a reference input (either direct or literal-wrapped)
-                const referenceDef = isLiteralWrappedReference ? parsedValue : inputDefUntyped;
-
-                const sourceStepId = referenceDef.sourceStep; // Get the UUID directly
-
-                if (sourceStepId) {
-                    // Populate inputReferences (using sourceId, and value: undefined for references)
-                    inputReferences.set(inputName, {
-                        inputName,
-                        value: undefined, // Value is not literal for a reference input
-                        outputName: referenceDef.outputName,
-                        sourceId: sourceStepId, // Use the UUID
-                        valueType: referenceDef.valueType || PluginParameterType.ANY, // Use provided type or default
-                        args: referenceDef.args || {},
-                    });
-
-                    // Populate dependencies
-                    dependencies.push({
-                        inputName,
-                        outputName: referenceDef.outputName,
-                        sourceStepId,
-                    });
-                } else {
-                    console.error(`[createFromPlan] 🚨 Unresolved sourceStep ${sourceStepId} for input '${inputName}' in step '${task.actionVerb}'`);
-                }
-            } else if (inputDefUntyped.value !== undefined) {
-                // This is a literal value input
-                let valueToSet = inputDefUntyped.value;
-                // If valueType is object or json and value is a string, try to parse it
-                if ((inputDefUntyped.valueType === PluginParameterType.OBJECT || inputDefUntyped.valueType === PluginParameterType.JSON) && typeof valueToSet === 'string') {
-                    try {
-                        valueToSet = JSON.parse(valueToSet);
-                    } catch (e) {
-                        console.warn(`[createFromPlan] Failed to parse JSON string for input '${inputName}'. Passing as string. Error: ${e instanceof Error ? e.message : e}`);
-                    }
-                }
-
-                inputValues.set(inputName, {
-                    inputName,
-                    value: valueToSet,
-                    valueType: inputDefUntyped.valueType,
-                    args: inputDefUntyped.args || {},
-                });
-            }
+    // Pass 1: Create all steps and wire up explicit sourceStep dependencies
+    plan.forEach(task => {
+        if (!task.id || typeof task.id !== 'string') {
+            console.warn(`[createFromPlan] Warning: Task in plan is missing a valid 'id'. Assigning a new one. Task: ${JSON.stringify(task)}`);
+            task.id = uuidv4();
         }
 
-        const normalizedOutputs = Step.normalizeOutputs((task as any).outputs) || new Map<string, string>();
-        const originalOutputDefinitions = task.outputs ? new Map(Object.entries(task.outputs)) : new Map<string, any>();
-        
-        const step = new Step({
-            id: newStepId,
-            templateId: task.id, // This is the crucial link
-            scope_id: (task as any).scope_id, // Pass scope_id from plan
-            missionId: missionId,
-            ownerAgentId: parentStep?.ownerAgentId || agentContext?.id || 'unknown_agent',
+        const newStep = new Step({
+            id: task.id,
+            templateId: task.id,
+            scope_id: parentStep?.scope_id,
+            missionId: parentStep?.missionId,
+            ownerAgentId: parentStep?.ownerAgentId,
             actionVerb: task.actionVerb,
-            inputReferences: inputReferences,
-            inputValues: inputValues,
             description: task.description,
-            dependencies: dependencies,
             outputs: Step.normalizeOutputs(task.outputs),
-            originalOutputDefinitions: task.outputs ? new Map(Object.entries(task.outputs)) : undefined,
+            originalOutputDefinitions: task.outputs,
             recommendedRole: task.recommendedRole,
             persistenceManager: persistenceManager,
-            crossAgentResolver: crossAgentResolver
-        });
-        console.log(`[createFromPlan] 📊 Created step ${step.id} (${task.actionVerb}) with ${dependencies.length} dependencies:`, 
-            dependencies.map(d => `${d.inputName} <- ${d.sourceStepId}.${d.outputName}`));
-        return step;
-    });
-
-    // Second pass: Update dependencies and inputReferences to use the new IDs
-    newSteps.forEach(step => {
-        step.dependencies.forEach(dep => {
-            if (oldTaskIdToNewStepIdMap.has(dep.sourceStepId)) {
-                dep.sourceStepId = oldTaskIdToNewStepIdMap.get(dep.sourceStepId)!;
-            }
-        });
-        // Also update sourceId in inputReferences
-        step.inputReferences.forEach(inputRef => {
-            if (inputRef.sourceId && oldTaskIdToNewStepIdMap.has(inputRef.sourceId)) {
-                inputRef.sourceId = oldTaskIdToNewStepIdMap.get(inputRef.sourceId)!;
-            }
-        });
-    });
-
-    // Post-creation dependency wiring (for placeholders, REFLECT, etc.)
-    if (parentStep && newSteps.length > 0) {
-        parentStep.outputs.forEach((outputType, outputName) => {
-            const producingStep = [...newSteps].reverse().find(s => s.outputs.has(outputName));
-            if (producingStep) {
-                parentStep.dependencies.push({
-                    inputName: outputName,
-                    sourceStepId: producingStep.id,
-                    outputName: outputName,
-                });
-                parentStep.inputReferences.set(outputName, {
-                    inputName: outputName,
-                    outputName: outputName,
-                    sourceId: producingStep.id,
-                    valueType: outputType as PluginParameterType,
-                    args: {},
-                });
-            }
+            crossAgentResolver: crossAgentResolver,
         });
 
-        if (parentStep.actionVerb === 'ACCOMPLISH' && parentStep.outputs.size === 0) {
-            const lastSubStep = newSteps[newSteps.length - 1];
-            const completionInputName = `__completion_${lastSubStep.id}`;
-
-            if (!parentStep.dependencies.some(dep => dep.sourceStepId === lastSubStep.id)) {
-                parentStep.dependencies.push({
-                    inputName: completionInputName,
-                    sourceStepId: lastSubStep.id,
-                    outputName: 'result'
-                });
-                parentStep.inputReferences.set(completionInputName, {
-                    inputName: completionInputName,
-                    outputName: 'result',
-                    valueType: PluginParameterType.ANY,
-                    args: { isCompletionSignal: true },
-                });
+        // Wire up explicit dependencies from inputs with sourceStep
+        if (task.inputs) {
+            for (const key in task.inputs) {
+                const input = task.inputs[key];
+                if (input.sourceStep) {
+                    const dep: StepDependency = {
+                        sourceStepId: input.sourceStep,
+                        outputName: input.outputName!,
+                        inputName: key
+                    };
+                    newStep.dependencies.push(dep);
+                    newStep.inputReferences.set(key, { 
+                        inputName: key,
+                        outputName: input.outputName, 
+                        sourceId: input.sourceStep,
+                        valueType: input.valueType,
+                        args: input.args
+                    });
+                } else if (input.value !== undefined) {
+                    newStep.inputReferences.set(key, { ...input, sourceId: parentStep ? parentStep.id : '0' });
+                }
             }
         }
-    }
+        stepMap.set(task.id, newStep);
+        newSteps.push(newStep);
+    });
 
-    const reflectSteps = newSteps.filter(step => step.actionVerb === 'REFLECT');
-    const nonReflectSteps = newSteps.filter(step => step.actionVerb !== 'REFLECT');
-
-    if (reflectSteps.length > 0) {
-        reflectSteps.forEach(reflectStep => {
-            nonReflectSteps.forEach(otherStep => {
-                if (!reflectStep.dependencies.some(d => d.sourceStepId === otherStep.id)) {
-                    reflectStep.dependencies.push({
-                        inputName: `__dependency_${otherStep.id}`,
-                        sourceStepId: otherStep.id,
-                        outputName: 'result'
-                    });
-                }
-            });
-        });
-    }
-
+    // Pass 3: Register steps with agent
     newSteps.forEach(step => {
-        for (const [inputName, inputRef] of step.inputReferences.entries()) {
-            if (inputRef.value && typeof inputRef.value === 'string') {
-                const placeholderRegex = /\{([^\}]+)\}/g;
-                let match;
-                while ((match = placeholderRegex.exec(inputRef.value)) !== null) {
-                    const placeholderName = match[1].trim();
-                    
-                    const producingStep = newSteps.find(s => s.id !== step.id && s.outputs.has(placeholderName));
-
-                    if (producingStep) {
-                        const dependencyExists = step.dependencies.some(d => d.sourceStepId === producingStep.id && d.outputName === placeholderName);
-                        if (!dependencyExists) {
-                            step.dependencies.push({
-                                inputName: inputName,
-                                sourceStepId: producingStep.id,
-                                outputName: placeholderName
-                            });
-                            console.log(`[createFromPlan] ✅ Added placeholder-based dependency to ${step.actionVerb} step ${step.id}: input '${inputName}' depends on Step ${producingStep.id}'s output '${placeholderName}'`);
-                        }
-                    }
-                }
-            }
+        if (agent) {
+            agent.agentSet.registerStepLocation(step.id, agent.id, agent.agentSetUrl);
         }
     });
 

@@ -142,7 +142,7 @@ export class HuggingfaceInterface extends BaseInterface {
                 response += chunk.choices[0]?.delta?.content || "";
             }
             response = response.replace(/```/g, '');
-            return response;
+            return this.sanitizeResponse(response, 'text');
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             console.error('Error generating response from Huggingface:', errorMessage);
@@ -235,9 +235,9 @@ export class HuggingfaceInterface extends BaseInterface {
                     if (jsonResponse === null) {
                         throw new Error("Failed to extract valid JSON from the model's response.");
                     }
-                    return jsonResponse;
+                    return this.sanitizeResponse(jsonResponse, 'json');
                 }
-                return out || 'No response generated';
+                return this.sanitizeResponse(out || 'No response generated', 'text');
             } catch (streamError) {
                 const streamErrorMessage = streamError instanceof Error ? streamError.message : String(streamError);
                 console.error('Error in Huggingface stream:', streamErrorMessage);
@@ -265,7 +265,7 @@ export class HuggingfaceInterface extends BaseInterface {
                             top_p: 0.7,
                         }
                     });
-                    return response.generated_text || 'No response generated';
+                    return this.sanitizeResponse(response.generated_text || 'No response generated', 'text');
                 } catch (fallbackError) {
                     // Check if the fallback error is also a monthly credits exceeded error
                     const fallbackErrorMessage = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
@@ -320,7 +320,7 @@ export class HuggingfaceInterface extends BaseInterface {
                     temperature: args.temperature || 0.3,
                 },
             });
-            return response.generated_text;
+            return this.sanitizeResponse(response.generated_text, 'text');
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             console.error('Error in Huggingface text generation:', errorMessage);
@@ -355,7 +355,7 @@ export class HuggingfaceInterface extends BaseInterface {
         if (jsonResponse === null) {
             throw new Error("Failed to extract valid JSON from the model's response.");
         }
-        return jsonResponse;
+        return this.sanitizeResponse(jsonResponse, 'json');
     }
 
     async convertTextToImage(args: ConvertParamsType): Promise<Blob| undefined> {
@@ -433,7 +433,7 @@ export class HuggingfaceInterface extends BaseInterface {
                 model: modelName || 'facebook/wav2vec2-large-960h-lv60-self',
                 data: audioArrayBuffer,
             });
-            return response.text;
+            return this.sanitizeResponse(response.text, 'text');
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             console.error('Error in Huggingface audio-to-text:', errorMessage);
@@ -471,7 +471,7 @@ export class HuggingfaceInterface extends BaseInterface {
                 model: modelName || 'nlpconnect/vit-gpt2-image-captioning',
                 data: imageArrayBuffer,
             });
-            return response.generated_text;
+            return this.sanitizeResponse(response.generated_text, 'text');
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             console.error('Error in Huggingface image-to-text:', errorMessage);

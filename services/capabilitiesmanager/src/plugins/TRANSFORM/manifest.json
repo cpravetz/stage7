@@ -16,8 +16,8 @@
         {
             "name": "script_parameters",
             "required": false,
-            "type": "json",
-            "description": "Parameters to be passed to the script. Available as a 'params' variable in the script context. The values within 'params' will already be deserialized Python objects (dictionaries, lists, strings, numbers, booleans). Therefore, the Python script should NOT call json.loads() on these values. If referencing outputs from previous steps, embed them directly. For example, to pass 'metrics' from sourceStep 4: '{\"metrics\": {\"outputName\": \"metrics\", \"sourceStep\": 4}}'. The TRANSFORM plugin will make its contents available to the Python script via the 'params' dictionary, with values already converted to native Python types.",
+            "type": "any",
+            "description": "Parameters to be passed to the script. Available as a 'params' variable in the script context. The values within 'params' will already be deserialized Python objects (dictionaries, lists, strings, numbers, booleans). Therefore, the Python script should NOT call json.loads() on these values. If referencing outputs from previous steps, embed them directly. For example, to pass 'metrics' from sourceStep 4: '{\"metrics\": {\"outputName\": \"metrics\", \"sourceStep\": 4}}'. The TRANSFORM plugin will make its contents available to the Python script via the 'params' dictionary, with values already converted to native Python types. Accepts any type (string, number, boolean, array, object) to prevent unnecessary FOREACH wrapping.",
             "aliases": ["params","parameters","args"]
         }
     ],

@@ -1,7 +1,7 @@
 import { BaseModel, ModelScore } from './baseModel';
 import { LLMConversationType } from '@cktmcs/shared';
 
-export class DeepSeekR1Model extends BaseModel {
+export class ORGROQModel extends BaseModel {
     constructor() {
         const scoresByConversationType = new Map<LLMConversationType, ModelScore>([
             [LLMConversationType.TextToText, {
@@ -31,16 +31,16 @@ export class DeepSeekR1Model extends BaseModel {
         ]);
 
         super({
-            name: "or/tngtech/deepseek-r1t2-chimera:free",
-            modelName: "tngtech/deepseek-r1t2-chimera:free",
+            name: "or/x-ai/grok-4.1-fast:free",
+            modelName: "x-ai/grok-4.1-fast:free",
             interfaceName: "openrouter",
             serviceName: "ORService",
-            tokenLimit: 164000, 
+            tokenLimit: 1500000, 
             scoresByConversationType: scoresByConversationType,
             contentConversation: [LLMConversationType.TextToText, LLMConversationType.CodeToText, LLMConversationType.TextToCode, LLMConversationType.TextToJSON]
         });
     }
 }
 
-const aiModel = new DeepSeekR1Model();
+const aiModel = new ORGROQModel();
 export default aiModel;

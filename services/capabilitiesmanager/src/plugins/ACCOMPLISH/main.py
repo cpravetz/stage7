@@ -151,12 +151,15 @@ def call_brain(prompt: str, inputs: Dict[str, Any], response_type: str = "json")
             conversation_type = "TextToText"
             system_message = "You are an autonomous agent. Your primary goal is to accomplish the user's mission by creating and executing plans.  Be resourceful and proactive."
 
+        # Explicitly set responseType so Brain.createThreadFromRequest doesn't infer it
+        # from message content. Use 'json' for structured outputs and 'text' for prose.
         payload = {
             "messages": [
                 {"role": "system", "content": system_message},
                 {"role": "user", "content": prompt}
             ],
             "conversationType": conversation_type,
+            "responseType": "json" if response_type == 'json' else 'text',
             "temperature": 0.1
         }
 
@@ -198,7 +201,7 @@ def call_brain(prompt: str, inputs: Dict[str, Any], response_type: str = "json")
                 return extracted_json_str
             except json.JSONDecodeError as e:
                 logger.warning(f"Extracted JSON is still invalid: {e}. Full raw response: {raw_brain_response}") # Log full raw response on error
-                # Fallback to raw response if extraction leads to invalid JSON
+                # Fallback to raw response if extraction fails
                 progress.checkpoint("brain_call_success_with_warning")
                 return raw_brain_response
         else:
@@ -386,6 +389,7 @@ class RobustMissionPlanner:
         )
 
         # Create REFLECT step with proper dependencies on the last step's outputs
+        # This ensures REFLECT waits for the plan to complete before running
         reflect_inputs = {
             "missionId": {"value": mission_id, "valueType": "string"},
             "plan_history": {
@@ -395,6 +399,14 @@ class RobustMissionPlanner:
             "question": {"value": reflection_question, "valueType": "string"},
             "availablePlugins": inputs.get('availablePlugins', {})
         }
+
+        # Add dependency on the last step's first output to ensure execution order
+        # This makes REFLECT wait for all previous steps to complete
+        if last_step_outputs:
+            reflect_inputs[last_step_outputs[0]] = {
+                "outputName": last_step_outputs[0],
+                "sourceStep": last_step['id']
+            }
 
         try:
             auth_token = get_auth_token(inputs)
@@ -435,9 +447,149 @@ class RobustMissionPlanner:
         return plan
 
     def create_plan(self, goal: str, mission_goal: Optional[str], mission_id: Optional[str], inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Create a robust plan using a decoupled, multi-phase LLM approach with retries."""
+        """Create plan with mission-level awareness"""
         progress.checkpoint("planning_start")
 
+        # Ensure availablePlugins is a direct list of manifests for the validator
+        modified_inputs = inputs.copy()
+        available_plugins_for_validator = modified_inputs.get('availablePlugins')
+        if isinstance(available_plugins_for_validator, dict) and 'value' in available_plugins_for_validator:
+            modified_inputs['availablePlugins'] = available_plugins_for_validator['value']
+
+        # NEW: Check if this is a mission root or an agent context
+        is_mission_root = self._is_mission_root_context(mission_id, inputs)
+        
+        if is_mission_root:
+            logger.info(f"ACCOMPLISH: Mission root context detected. Generating unified multi-role plan.")
+            structured_plan = self._generate_unified_mission_plan(goal, mission_goal, mission_id, inputs)
+        else:
+            logger.info(f"ACCOMPLISH: Agent context detected. Generating role-specific plan.")
+            agent_role = inputs.get('agentRole', {}).get('value', 'General')
+            structured_plan = self._generate_role_specific_plan(goal, mission_goal, mission_id, agent_role, inputs)
+        
+        # Validate with awareness of context
+        modified_inputs['__plan_context'] = 'mission_root' if is_mission_root else 'agent_specific'
+        
+        try:
+            logger.debug("Before calling validator.validate_and_repair.")
+            validated_plan = self.validator.validate_and_repair(structured_plan, goal, modified_inputs)
+            logger.debug("After calling validator.validate_and_repair.")
+        except Exception as e:
+            logger.exception(f"❌ Failed to validate and repair the plan after all retries: {e}")
+            raise AccomplishError(f"Could not validate or repair the plan: {e}", "validation_error")
+
+        try:
+            mission_id_for_check = mission_id
+            plan_with_checks = self._inject_progress_checks(validated_plan, goal, mission_id_for_check, inputs)
+            return plan_with_checks
+        except Exception as e:
+            logger.exception(f"❌ Failed to inject progress checks: {e}")
+            return validated_plan
+
+    def _is_mission_root_context(self, mission_id: str, inputs: Dict[str, Any]) -> bool:
+        """Determine if this ACCOMPLISH is at mission root level"""
+        # Check if this is being called from MissionControl (no parent step)
+        parent_step_id = inputs.get('__parent_step_id')
+        if not parent_step_id:
+            return True
+        
+        # Check if parent step is also ACCOMPLISH
+        parent_action_verb = inputs.get('__parent_action_verb')
+        if parent_action_verb == 'ACCOMPLISH':
+            return False  # This is delegated ACCOMPLISH, not root
+        
+        return True
+
+    def _generate_unified_mission_plan(self, goal: str, mission_goal: str, 
+                                        mission_id: str, inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Generate a plan with explicit multi-role orchestration"""
+        plugin_guidance = _create_detailed_plugin_guidance(inputs)
+        schema_json = json.dumps(PLAN_ARRAY_SCHEMA, indent=2)
+            
+        prompt = f"""You are generating a unified mission plan that will be executed by multiple specialized agents.
+
+    MISSION GOAL: {mission_goal or goal}
+
+    Your plan must:
+    1. Identify the sequence of logical work items
+    2. Specify the RECOMMENDED ROLE for each step (Researcher, Domain Expert, Coder, Critic, Coordinator, etc.)
+    3. Explicitly define data flow: which step outputs feed into which step inputs
+    4. Group steps by role where possible to minimize context switching
+    5. End with a REFLECT step by the Critic role for final validation
+
+    Format each step with:
+    - actionVerb: what action to perform
+    - recommendedRole: who should execute it (required!)
+    - inputs: what data it needs (reference upstream steps)
+    - outputs: what it produces
+    - description: clear instructions
+
+    Output as JSON array of step objects.
+
+    **THE JSON SCHEMA FOR THE ENTIRE PLAN (ARRAY OF STEPS):**
+    ---
+    {schema_json}
+    ---
+
+    {plugin_guidance}"""
+
+        max_retries = 3
+        for attempt in range(max_retries):
+            response = call_brain(prompt, inputs, "json")
+            try:
+                plan = json.loads(response)
+
+                # Validate that we got a proper plan (array of steps)
+                if isinstance(plan, list):
+                    if len(plan) == 0:
+                        logger.warning(f"Attempt {attempt + 1}: LLM returned an empty plan array.")
+                        if attempt < max_retries - 1:
+                            prompt = f"{prompt}\n\nPREVIOUS ATTEMPT FAILED: You returned an empty array. The response MUST be a JSON array of step objects. Please generate a complete plan with multiple steps to accomplish the goal."
+                            continue
+                        return []
+                    return plan
+
+                # If dict, check if it's a wrapper containing an array or an invalid single step
+                if isinstance(plan, dict):
+                    # Check if this dict is itself a step (has actionVerb or id) - this is INVALID
+                    if 'actionVerb' in plan or 'id' in plan:
+                        logger.warning(f"Attempt {attempt + 1}: LLM returned a single step object instead of a plan array. This is invalid.")
+                        if attempt < max_retries - 1:
+                            prompt = f"{prompt}\n\nPREVIOUS ATTEMPT FAILED: You returned a single step object instead of an array. The response MUST be a JSON array of step objects, not a single step. Even if the plan has only one step, it must be wrapped in an array: [{{...}}]. Please try again and return a proper plan array."
+                            continue
+                        logger.error("LLM failed to return a valid plan array after multiple attempts.")
+                        return []
+
+                    # Otherwise, look for any property that contains an array of step-like objects
+                    for key, value in plan.items():
+                        if isinstance(value, list) and len(value) > 0:
+                            # Check if it looks like a plan (array of objects with step-like properties)
+                            if all(isinstance(item, dict) and ('actionVerb' in item or 'id' in item) for item in value):
+                                logger.info(f"Extracting plan from '{key}' key in LLM response ({len(value)} steps)")
+                                return value
+                            # If it's an array but doesn't look like steps, continue checking other keys
+                            elif all(isinstance(item, dict) for item in value):
+                                logger.info(f"Found array in '{key}' key, assuming it's a plan ({len(value)} steps)")
+                                return value
+
+                # If we get here, the response format is invalid
+                logger.warning(f"Attempt {attempt + 1}: LLM response was not a valid plan format: {response[:500]}...")
+                if attempt < max_retries - 1:
+                    prompt = f"{prompt}\n\nPREVIOUS ATTEMPT FAILED: The response format was invalid. You MUST return a JSON array of step objects. Example: [{{\"id\": \"...\", \"actionVerb\": \"SEARCH\", \"description\": \"...\", \"inputs\": {{}}, \"outputs\": {{}} }}, ...]. Please try again."
+                    continue
+                return []
+
+            except json.JSONDecodeError as e:
+                logger.error(f"Attempt {attempt + 1}: Failed to parse unified plan from LLM: {e}. Response: {response[:500]}...")
+                if attempt < max_retries - 1:
+                    prompt = f"{prompt}\n\nPREVIOUS ATTEMPT FAILED: The response was not valid JSON. Error: {e}. Please ensure your response is valid JSON."
+                    continue
+                raise AccomplishError(f"Could not parse unified plan: {e}", "json_conversion_error")
+
+        return []
+
+    def _generate_role_specific_plan(self, goal: str, mission_goal: Optional[str], mission_id: str, agent_role: str, inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Generates a plan tailored for a specific agent role."""
         try:
             prose_plan = self._get_prose_plan(goal, mission_goal, inputs)
         except Exception as e:
@@ -449,33 +601,8 @@ class RobustMissionPlanner:
         except Exception as e:
             logger.exception(f"❌ Failed to convert prose plan to structured JSON after all retries: {e}")
             raise AccomplishError(f"Could not convert prose to structured plan: {e}", "json_conversion_error")
-
-        # Ensure availablePlugins is a direct list of manifests for the validator
-        modified_inputs = inputs.copy()
-        available_plugins_for_validator = modified_inputs.get('availablePlugins')
-        if isinstance(available_plugins_for_validator, dict) and 'value' in available_plugins_for_validator:
-            modified_inputs['availablePlugins'] = available_plugins_for_validator['value']
-
-        try:
-            logger.debug("Before calling validator.validate_and_repair.")
-            validated_plan = self.validator.validate_and_repair(structured_plan, goal, modified_inputs)
-            logger.debug("After calling validator.validate_and_repair.")
-        except Exception as e:
-            logger.exception(f"❌ Failed to validate and repair the plan after all retries: {e}")
-            raise AccomplishError(f"Could not validate or repair the plan: {e}", "validation_error")
-
-        try:
-            mission_id_input = inputs.get('missionId')
-            mission_id_for_check = None
-            if isinstance(mission_id_input, dict) and 'value' in mission_id_input:
-                mission_id_for_check = mission_id_input['value']
-            else:
-                mission_id_for_check = mission_id_input
-            plan_with_checks = self._inject_progress_checks(validated_plan, goal, mission_id_for_check, inputs)
-            return plan_with_checks
-        except Exception as e:
-            logger.exception(f"❌ Failed to inject progress checks: {e}")
-            return validated_plan
+        
+        return structured_plan
 
 
     def _get_prose_plan(self, goal: str, mission_goal: Optional[str], inputs: Dict[str, Any]) -> str:
@@ -484,29 +611,35 @@ class RobustMissionPlanner:
         context_input = inputs.get('context')
         context = context_input if context_input is not None else ''
         full_goal = f"MISSION: {mission_goal}\n\nTASK: {goal}" if mission_goal and mission_goal != goal else goal
-        prompt = f"""You are an expert strategic planner and an autonomous agent. Your core purpose is to accomplish the user's mission and complete tasks *for* the user, not to delegate them back. Your goal is to be resourceful and solve problems independently. Create a comprehensive, well-thought plan to achieve the given goal:
+        prompt = f"""You are an expert strategic planner and an autonomous agent. Your core purpose is to accomplish the user's mission by breaking it down into logical, functional steps. Your goal is to be resourceful and solve problems independently.
 
 GOAL: {full_goal}
 
 CONTEXT:
 {context}
 
+Create a comprehensive, high-level to mid-level functional plan to achieve the given goal. The plan should be a sequence of logical steps that describe *what* needs to be done, not the low-level implementation details. Think in terms of functional outcomes for each step.
+
 Write a concise prose plan (5 to 10 logical steps) that explains the strategic approach.
 
 CRITICAL PLANNING PRINCIPLES:
-1. **Research First**: Never assume facts about competitors, URLs, or specific entities. Always start with research steps (SEARCH, QUERY_KNOWLEDGE_BASE) to gather current, accurate information.
-2. **Build Dependencies**: Each step should logically build on previous steps. If step 2 needs data from step 1, explicitly state this dependency.
-3. **No Hardcoded Data**: Avoid specific URLs, company names, or technical details unless they are well-known facts. Use research to discover these.
-4. **Process Results**: When you gather data (like search results), plan subsequent steps to process, analyze, or act on that data.
+1. **Focus on Functional Decomposition**: Break the goal down into distinct phases or functional areas of work. For example, instead of "run search command", think "gather intelligence on competitors".
+2. **Logical Flow**: Each step should logically follow from the previous one, creating a clear narrative for how the goal will be achieved.
+3. **Avoid Implementation Details**: Do not mention specific tool names, commands, or actionVerbs. Focus on the 'what' and 'why' of each step, not the 'how'.
+4. **High-Level Abstraction**: The plan should be at a strategic level. It will be converted into a more detailed, executable plan in a later phase.
 
-EXAMPLE APPROACH:
-- Step 1: Research to find current information
-- Step 2: Process/analyze the research results
-- Step 3: Take action based on the processed data
-- Step 4: Validate or refine based on results
+EXAMPLE OF GOOD HIGH-LEVEL STEPS:
+- "Analyze the competitive landscape to identify key differentiators."
+- "Develop a content strategy to target identified user personas."
+- "Create a proof-of-concept for the new feature."
+
+EXAMPLE OF BAD LOW-LEVEL STEPS (AVOID THESE):
+- "Use the SEARCH plugin to find competitor websites."
+- "Call the SCRAPE tool on the list of URLs."
+- "Write the results to a file using FILE_OPERATION."
+
 
 IMPORTANT: Return ONLY plain text for the plan. NO markdown formatting, NO code blocks, NO special formatting.
-
 """
 
         for attempt in range(self.max_retries):
@@ -571,23 +704,17 @@ After your internal analysis and self-correction is complete, provide ONLY the f
 - **Autonomy is Paramount:** Your goal is to *solve* the mission, not to delegate research or information gathering back to the user.
 - **Resourcefulness:** Exhaust all available tools (`SEARCH`, `SCRAPE`, `GENERATE`, `QUERY_KNOWLEDGE_BASE`) to find answers and create deliverables *before* ever considering asking the user.
 - **`ASK_USER_QUESTION` is a Last Resort:** This tool is exclusively for obtaining subjective opinions, approvals, or choices from the user. It is *never* for offloading tasks. Generating a plan that asks the user for information you can find yourself is a critical failure.
-- **Autonomy is Paramount:** Your goal is to *solve* the mission, not to delegate research or information gathering back to the user.
-- **Resourcefulness:** Exhaust all available tools (`SEARCH`, `SCRAPE`, `GENERATE`, `QUERY_KNOWLEDGE_BASE`) to find answers and create deliverables *before* ever considering asking the user.
-- **`ASK_USER_QUESTION` is a Last Resort:** This tool is exclusively for obtaining subjective opinions, approvals, or choices from the user. It is *never* for offloading tasks. Generating a plan that asks the user for information you can find yourself is a critical failure.
-        - **Dependencies are Crucial:** Every step that uses an output from a previous step MUST declare this in its `inputs` using `sourceStep` and `outputName`. A plan with disconnected steps is invalid.
-         - **Handling Lists (`FOREACH`):** If a step requires a single item (e.g., a URL string) but receives a list from a preceding step (e.g., search results), you MUST use a `FOREACH` loop to iterate over the list. The `inputGuidance` for the `FOREACH` plugin explains how to do this.
-         - **Aggregating Results (`REGROUP`):** When using a `FOREACH` loop, if you need to collect the results from all iterations into a single array, you MUST follow the `FOREACH` step with a `REGROUP` step. The `REGROUP` step's `stepIdsToRegroup` input MUST be linked to the `FOREACH` step's `instanceEndStepIds` output using `sourceStep` and `outputName`. This ensures that `REGROUP` waits for all `FOREACH` iterations to complete and then collects their results.
-         - **Role Assignment:** Assign `recommendedRole` at the deliverable level, not per individual step. All steps contributing to a single output (e.g., a research report) should share the same role.**DELIVERABLE IDENTIFICATION:**
-When defining outputs, identify which ones are final deliverables for the user:
+- **Dependencies are Crucial:** Every step that uses an output from a previous step MUST declare this in its `inputs` using `sourceStep` and `outputName`. A plan with disconnected steps is invalid.
+- **Role Assignment:** Assign `recommendedRole` at the deliverable level, not per individual step. All steps contributing to a single output (e.g., a research report) should share the same role.
+
+**DELIVERABLE IDENTIFICATION:**
+When defining outputs, identify which ones are deliverables for the user:
 - For final reports, analyses, or completed files, use the enhanced format:
   `"outputs": {{ "final_report": {{ "description": "A comprehensive analysis", "isDeliverable": true, "filename": "market_analysis_2025.md" }} }}`
-CRITICAL: The actionVerb for each step MUST be a valid, existing plugin actionVerb.
 
  - **CRITICAL - LINKING STEPS:** You MUST explicitly connect steps. Any step that uses the output of a previous step MUST declare this in its `inputs` using `sourceStep` and `outputName`. DO NOT simply refer to previous outputs in a `prompt` string without also adding the formal dependency in the `inputs` object. For verbs like `THINK`, `CHAT`, or `ASK_USER_QUESTION`, if the `prompt` or `question` text refers to a file or work product from a previous step, you MUST add an input that references the output of that step using `sourceStep` and `outputName`. This ensures the step waits for the file to be created.
  A plan with no connections between steps is invalid and will be rejected.
- - **CRITICAL - NO HARDCODED DATA:** Never use hardcoded URLs, company names, or specific technical details as constant values unless they are universally known facts (like "google.com"). Instead:
-   * Use SEARCH to find current information about competitors, companies, or resources
-   * Use the search results as inputs to subsequent steps via `sourceStep` and `outputName`
+`
 
   
 {plugin_guidance}"""
@@ -619,10 +746,35 @@ CRITICAL: The actionVerb for each step MUST be a valid, existing plugin actionVe
                 if isinstance(plan, list) and all(isinstance(step, dict) for step in plan):
                     logger.debug(f"Attempt {attempt + 1}: Plan is a valid list of dictionaries.")
                     return plan
-                # If dict, convert to list (assuming it's a single step)
+                # If dict, find any property that contains an array of step-like objects
                 if isinstance(plan, dict):
-                    logger.warning(f"Attempt {attempt + 1}: LLM returned a single JSON object. Wrapping in array.")
-                    return [plan]
+                    # First check if this is a single step object (INVALID)
+                    if 'actionVerb' in plan or 'id' in plan:
+                        logger.warning(f"Attempt {attempt + 1}: LLM returned a single step object instead of a plan array. This is invalid.")
+                        if attempt == self.max_retries - 1:
+                            raise AccomplishError("LLM failed to return a valid plan array after multiple attempts - returned single step object", "invalid_plan_format")
+                        # Add error feedback to the prompt for next attempt
+                        error_feedback = "\n\nPREVIOUS ATTEMPT FAILED: You returned a single step object instead of an array. The response MUST be a JSON array of step objects, not a single step. Even if the plan has only one step, it must be wrapped in an array: [{{...}}]. Please try again and return a proper plan array."
+                        continue
+
+                    # Otherwise, look for array properties
+                    for key, value in plan.items():
+                        if isinstance(value, list) and len(value) > 0:
+                            # Check if it looks like a plan (array of objects with step-like properties)
+                            if all(isinstance(item, dict) and ('actionVerb' in item or 'id' in item) for item in value):
+                                logger.debug(f"Attempt {attempt + 1}: Extracting plan from '{key}' key ({len(value)} steps)")
+                                return value
+                            # If it's an array of dicts but doesn't have step markers, still try it
+                            elif all(isinstance(item, dict) for item in value):
+                                logger.debug(f"Attempt {attempt + 1}: Found array of objects in '{key}' key, assuming it's a plan ({len(value)} steps)")
+                                return value
+
+                    # If no array property found and not a single step, the format is invalid
+                    logger.warning(f"Attempt {attempt + 1}: LLM returned a dict with no array properties.")
+                    if attempt == self.max_retries - 1:
+                        raise AccomplishError("LLM failed to return a valid plan array - returned dict with no array properties", "invalid_plan_format")
+                    continue
+
                 # If string or other type, log and raise recoverable error
                 logger.error(f"Attempt {attempt + 1}: Plan response is not a valid list of steps: {str(plan)[:500]}...")
                 if attempt == self.max_retries - 1:
@@ -769,9 +921,9 @@ Plan Schema
 CRITICAL: The actionVerb for each step MUST be a valid, existing plugin actionVerb (from the provided list) or a descriptive, new actionVerb (e.g., 'ANALYZE_DATA', 'GENERATE_REPORT'). It MUST NOT be 'UNKNOWN' or 'NOVEL_VERB'.
 
 CRITICAL: DELIVERABLE IDENTIFICATION - VERY IMPORTANT
-When defining outputs, you MUST identify which ones are final deliverables for the user. These are the key results that the user expects to receive.
+When defining outputs, you MUST identify which ones are deliverables for the user. These are the key results that the user expects to receive.
 
-- For final reports, analyses, or completed files that are meant for the user, you MUST use the enhanced format, including `"isDeliverable": true` and a `"filename"`:
+- For reports, analyses, or completed files that are meant for the user, you MUST use the enhanced format, including `"isDeliverable": true` and a `"filename"`:
   ```json
   "outputs": {{
     "final_report": {{
@@ -857,7 +1009,31 @@ When defining outputs, you MUST identify which ones are final deliverables for t
                     "mimeType": "application/json"
                 }])
             elif isinstance(data, dict): # Could be direct answer or plugin recommendation
-                if "direct_answer" in data:
+                # First check if any property contains an array of step-like objects
+                plan_array = None
+                for key, value in data.items():
+                    if isinstance(value, list) and len(value) > 0:
+                        if all(isinstance(item, dict) and ('actionVerb' in item or 'id' in item) for item in value):
+                            logger.info(f"Found plan array in '{key}' property for novel verb")
+                            plan_array = value
+                            break
+                        elif all(isinstance(item, dict) for item in value):
+                            logger.info(f"Found array of objects in '{key}' property, assuming it's a plan")
+                            plan_array = value
+                            break
+
+                if plan_array:
+                    mission_goal = verb_info.get('mission_goal', verb_info.get('description', ''))
+                    validated_plan = self.validator.validate_and_repair(plan_array, mission_goal, inputs)
+                    # self._save_plan_to_librarian(verb_info['verb'], validated_plan, inputs)
+                    return json.dumps([{"success": True,
+                        "name": "plan",
+                        "resultType": "plan",
+                        "resultDescription": f"Plan created for novel verb '{verb_info['verb']}'",
+                        "result": validated_plan,
+                        "mimeType": "application/json"
+                    }])
+                elif "direct_answer" in data:
                     return json.dumps([{ 
                         "success": True,
                         "name": "direct_answer",

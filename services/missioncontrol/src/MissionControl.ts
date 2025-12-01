@@ -274,6 +274,75 @@ class MissionControl extends BaseEntity {
                 const workProductPayload = content; // The content of the message is the workProductPayload
                 const updateMissionId = workProductPayload.missionId;
 
+                // Handle deliverable file attachment if marked as deliverable
+                if (workProductPayload.isDeliverable && workProductPayload.workproduct) {
+                    try {
+                        console.log(`MissionControl: Work product marked as deliverable for mission ${updateMissionId}:`, workProductPayload.name);
+                        
+                        // Check if a deliverable already exists for this step (to avoid duplicates)
+                        let existingDeliverable: any = null;
+                        try {
+                            existingDeliverable = await this.authenticatedApi.get(
+                                `http://${this.librarianUrl}/loadDeliverable/${workProductPayload.stepId}`
+                            );
+                        } catch (err) {
+                            // 404 or other error is fine—just means it doesn't exist yet
+                            if (err instanceof Error && err.message.includes('404')) {
+                                console.log(`No existing deliverable found for step ${workProductPayload.stepId}`);
+                            }
+                        }
+
+                        // If deliverable does not already exist in the deliverables collection, create it
+                        if (!existingDeliverable || !existingDeliverable.data || !existingDeliverable.data.data) {
+                            const fileId = uuidv4();
+                            const deliverableMissionFile = {
+                                id: fileId,
+                                originalName: workProductPayload.fileName || `${workProductPayload.name || workProductPayload.type}_${workProductPayload.stepId}.txt`,
+                                mimeType: workProductPayload.mimeType || 'text/plain',
+                                size: typeof workProductPayload.workproduct === 'string' 
+                                    ? workProductPayload.workproduct.length 
+                                    : JSON.stringify(workProductPayload.workproduct).length,
+                                uploadedAt: new Date(),
+                                uploadedBy: 'Agent',
+                                storagePath: `deliverables/${updateMissionId}/${fileId}`,
+                                description: workProductPayload.name || 'Deliverable from agent step',
+                                isDeliverable: true,
+                                stepId: workProductPayload.stepId
+                            };
+
+                            // Save the deliverable content to the Librarian only if it doesn't already exist
+                            const deliverable = {
+                                id: `deliverable-${fileId}`,
+                                missionId: updateMissionId,
+                                missionFile: deliverableMissionFile,
+                                content: workProductPayload.workproduct,
+                                stepId: workProductPayload.stepId,
+                                stepName: workProductPayload.name,
+                                agentId: workProductPayload.agentId,
+                                createdAt: new Date(),
+                                mimeType: workProductPayload.mimeType || 'text/plain'
+                            };
+
+                            await this.authenticatedApi.post(`http://${this.librarianUrl}/storeData`, {
+                                id: deliverable.id,
+                                data: deliverable,
+                                collection: 'deliverables',
+                                storageType: 'mongo'
+                            });
+                            console.log(`MissionControl: Saved deliverable content to Librarian for ${deliverableMissionFile.originalName}`);
+
+                            // Add the file to the mission
+                            await this._addDeliverableToMission(updateMissionId, deliverableMissionFile);
+                            console.log(`MissionControl: Added deliverable file ${deliverableMissionFile.originalName} to mission ${updateMissionId}`);
+                        } else {
+                            console.log(`MissionControl: Deliverable for step ${workProductPayload.stepId} already exists, skipping duplicate save`);
+                        }
+                    } catch (error) {
+                        console.error(`MissionControl: Error handling deliverable for work product:`, error instanceof Error ? error.message : error);
+                        // Continue to forward the message to clients even if file handling fails
+                    }
+                }
+
                 for (const [clientId, missionIds] of this.clientMissions.entries()) {
                     if (missionIds.has(updateMissionId)) {
                         this.authenticatedApi.post(`http://${this.postOfficeUrl}/message`, {

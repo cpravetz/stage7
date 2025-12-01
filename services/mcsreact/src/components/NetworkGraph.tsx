@@ -87,6 +87,33 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics, zoo
         setPan({ x: 0, y: 0 });
     }, [setZoom, setPan]);
 
+    // Sanitize string by removing control characters and other non-printable ranges
+    const sanitizeString = (s: string) => {
+        if (!s || typeof s !== 'string') return '';
+        // Remove C0 control chars and C1 control chars ranges
+        return s.replace(/[\u0000-\u001F\u007F-\u009F]/g, '');
+    };
+
+    // Encode UTF-8 string to base64 in a browser-safe way
+    const utf8ToB64 = (s: string) => {
+        try {
+            const encoder = new TextEncoder();
+            const bytes = encoder.encode(s);
+            let binary = '';
+            for (let i = 0; i < bytes.length; i++) {
+                binary += String.fromCharCode(bytes[i]);
+            }
+            return btoa(binary);
+        } catch (e) {
+            // Fallback: try btoa on sanitized string (may still fail)
+            try {
+                return btoa(sanitizeString(s));
+            } catch (e2) {
+                return '';
+            }
+        }
+    };
+
     
 
     // Memoize the processed data and create a hash to detect real changes
@@ -111,9 +138,10 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics, zoo
             return { nodes: new DataSet<Node>(), edges: new DataSet<Edge>(), dataHash: 'empty' };
         }
 
-        // Create a hash of the data to detect actual changes
+        // Create a hash of the data to detect actual changes — sanitize and use UTF-8-safe base64
         const dataString = JSON.stringify(Array.from(statsMap.entries()));
-        const dataHash = btoa(dataString).slice(0, 32); // Simple hash
+        const safeString = sanitizeString(dataString);
+        const dataHash = (safeString === '[]' || safeString === '') ? 'empty' : utf8ToB64(safeString).slice(0, 32);
 
         // If data hasn't changed, return empty datasets (will be handled by effect)
         if (dataHash === lastDataHashRef.current && networkRef.current) {

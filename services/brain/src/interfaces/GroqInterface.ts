@@ -78,7 +78,7 @@ export class GroqInterface extends BaseInterface {
         if (jsonResponse === null) {
             throw new Error("Failed to extract valid JSON from the model's response.");
         }
-        return jsonResponse;
+        return this.sanitizeResponse(jsonResponse, 'json');
     }
 
     chat = async (service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string, responseType:string, response_format?: any }): Promise<string> => {
@@ -164,9 +164,9 @@ export class GroqInterface extends BaseInterface {
                         if (jsonResponse === null) {
                             throw new Error("Failed to extract valid JSON from the model's response.");
                         }
-                        return jsonResponse;
+                        return this.sanitizeResponse(jsonResponse, 'json');
                     }
-                    return content;
+                    return this.sanitizeResponse(content, 'text');
                 }
 
                 return '';

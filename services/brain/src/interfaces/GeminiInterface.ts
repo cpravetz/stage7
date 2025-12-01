@@ -98,7 +98,7 @@ export class GeminiInterface extends BaseInterface {
         if (jsonResponse === null) {
             throw new Error("Failed to extract valid JSON from the model's response.");
         }
-        return jsonResponse;
+        return this.sanitizeResponse(jsonResponse, 'json');
     }
 
     async convertImageToText(args: ConvertParamsType): Promise<string> {
@@ -160,7 +160,7 @@ export class GeminiInterface extends BaseInterface {
             // Generate content with the image and prompt
             const result = await model.generateContent([imagePart, promptPart]);
             const response = result.response;
-            return response.text();
+            return this.sanitizeResponse(response.text(), 'text');
         } catch (error) {
             console.error('Error in Gemini image analysis:', error instanceof Error ? error.message : error);
             throw error;
@@ -211,7 +211,7 @@ export class GeminiInterface extends BaseInterface {
 
                 // If we get here, try the alternative approach
                 if (response.text) {
-                    return response.text();
+                    return this.sanitizeResponse(response.text(), 'text');
                 }
 
                 // If we have parts directly on the response
@@ -226,7 +226,7 @@ export class GeminiInterface extends BaseInterface {
 
                 const result = await model.generateContent(prompt);
                 const response = result.response;
-                return response.text();
+                return this.sanitizeResponse(response.text(), 'text');
             }
 
 
@@ -310,9 +310,9 @@ export class GeminiInterface extends BaseInterface {
                     if (jsonResponse === null) {
                         throw new Error("Failed to extract valid JSON from the model's response.");
                     }
-                    return jsonResponse;
+                    return this.sanitizeResponse(jsonResponse, 'json');
                 }
-                return response.text();
+                return this.sanitizeResponse(response.text(), 'text');
             } else {
                 // For chat conversations, use startChat and sendMessage
                 const chat = model.startChat({
@@ -332,9 +332,9 @@ export class GeminiInterface extends BaseInterface {
                     if (jsonResponse === null) {
                         throw new Error("Failed to extract valid JSON from the model's response.");
                     }
-                    return jsonResponse;
+                    return this.sanitizeResponse(jsonResponse, 'json');
                 }
-                return fullResponse;
+                return this.sanitizeResponse(fullResponse, 'text');
             }
         } catch (error) {
             console.error('Error generating response from Gemini:', error instanceof Error ? error.message : error);

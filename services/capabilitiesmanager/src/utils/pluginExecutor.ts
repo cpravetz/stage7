@@ -299,9 +299,9 @@ export class PluginExecutor {
             }
 
             const inputsObject: { [key: string]: any } = {};
-            for (const [key, value] of inputValues.entries()) {
+            inputValues.forEach((value, key) => {
                 inputsObject[key] = value.value;
-            }
+            });
             const inputsJsonString = JSON.stringify(inputsObject);
 
             return new Promise<PluginOutput[]>((resolve, reject) => {

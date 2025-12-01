@@ -74,10 +74,10 @@ export class AnthropicInterface extends BaseInterface {
                 if (jsonResponse === null) {
                     throw new Error("Failed to extract valid JSON from the model's response.");
                 }
-                return jsonResponse;
+                return this.sanitizeResponse(jsonResponse, 'json');
             }
     
-            return fullResponse || '';
+            return this.sanitizeResponse(fullResponse || '', 'text');
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             console.error('Error generating response from Anthropic:', errorMessage);
@@ -145,7 +145,7 @@ export class AnthropicInterface extends BaseInterface {
         if (jsonResponse === null) {
             throw new Error("Failed to extract valid JSON from the model's response.");
         }
-        return jsonResponse;
+        return this.sanitizeResponse(jsonResponse, 'json');
     }
 
     async convert(service: BaseService, conversionType: LLMConversationType, convertParams: ConvertParamsType): Promise<any> {

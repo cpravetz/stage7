@@ -113,7 +113,7 @@ export class TrafficManager extends BaseEntity {
                     llmCalls: 0, // Default or retrieve from other sources if available
                     activeLLMCalls: 0, // Default or retrieve from other sources if available
                     agentCountByStatus: agentSetManagerStats.agentStatisticsByType.agentCountByStatus,
-                    agentStatistics: agentSetManagerStats.agentsByStatus, // Assign the raw Map here
+                    agentStatistics: agentSetManagerStats.agentsByStatus, 
                     engineerStatistics: { newPlugins: [] } // Default or retrieve from other sources if available
                 };
 
