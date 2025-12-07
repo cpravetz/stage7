@@ -3,6 +3,7 @@ import bodyParser from 'body-parser';
 import { OptimizationType, ModelManager, modelManagerInstance } from './utils/modelManager';
 import { LLMConversationType } from '@cktmcs/shared';
 import { ExchangeType } from './services/baseService';
+import { ConvertParamsType } from './interfaces/baseInterface';
 import { BaseEntity } from '@cktmcs/shared';
 import dotenv from 'dotenv';
 import { analyzeError } from '@cktmcs/errorhandler';
@@ -42,6 +43,14 @@ export class Brain extends BaseEntity {
         super('Brain', 'Brain', `brain`, process.env.PORT || '5020');
         this.modelManager = modelManagerInstance;
 
+        (async () => {
+            try {
+                await redisCache.connect();
+            } catch (error) {
+                console.error(`[Brain] Failed to connect to Redis on startup:`, error);
+            }
+        })();
+
         this.modelManager.triggerImmediateDatabaseSync = () => {
             console.log('[Brain] Immediate database sync triggered by blacklist change');
             this.syncPerformanceDataToLibrarian();
@@ -59,8 +68,8 @@ export class Brain extends BaseEntity {
 
         // Use BaseEntity's verifyToken method which already handles health check bypassing
         app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
-            // Allow admin endpoints, chat, and feedback without authentication
-            if (req.path === '/chat' || req.path === '/feedback' || req.path.startsWith('/admin/')) {
+            // Allow admin endpoints, chat, feedback, and reportLogicFailure without authentication
+            if (req.path === '/chat' || req.path === '/feedback' || req.path === '/reportLogicFailure' || req.path.startsWith('/admin/')) {
                 return next();
             }
             // BaseEntity.verifyToken already handles health check endpoints
@@ -91,6 +100,33 @@ export class Brain extends BaseEntity {
                 await this.generate(req, res);
             } catch (error) {
                 next(error);
+            }
+        });
+
+        app.post('/reportLogicFailure', async (req: express.Request, res: express.Response) => {
+            try {
+                const { requestId, reason } = req.body;
+
+                if (!requestId) {
+                    res.status(400).json({ error: 'Missing requestId' });
+                    return;
+                }
+
+                console.log(`[Brain] Received logic failure report for request ${requestId}: ${reason || 'No reason provided'}`);
+
+                // Get the request from the model manager to find which model was used
+                const request = this.modelManager.getActiveRequest(requestId);
+                if (request) {
+                    console.log(`[Brain] Tracking logic failure for model ${request.modelName}, conversation type ${request.conversationType}`);
+                    this.modelManager.trackLogicFailure(request.modelName, request.conversationType);
+                    res.json({ success: true, message: 'Logic failure recorded' });
+                } else {
+                    console.warn(`[Brain] No active request found for ${requestId}, cannot track logic failure`);
+                    res.status(404).json({ error: 'Request not found' });
+                }
+            } catch (error) {
+                console.error('[Brain] Error handling logic failure report:', error);
+                res.status(500).json({ error: 'Failed to record logic failure' });
             }
         });
 
@@ -143,12 +179,13 @@ export class Brain extends BaseEntity {
 
     async generate(req: express.Request, res: express.Response) {
         // No retry limit - keep trying until we find a working model
-    const modelName = req.body.modelName;
-    const optimization = req.body.optimization || 'accuracy';
-    const conversationType = req.body.conversationType || LLMConversationType.TextToText;
-    const convertParams = req.body.convertParams;
+        const modelNameRequest = req.body.modelName; // Requested model name from the agent
+        const optimization = req.body.optimization || 'accuracy';
+        const conversationType = req.body.type || req.body.conversationType || LLMConversationType.TextToText; // Use 'type' from agent request if present
+        const promptFromAgent = req.body.prompt;
+        const contentType = req.body.contentType || this.determineMimeType(promptFromAgent); // Ensure contentType is present
 
-    console.log(`[Brain Generate] Request params - modelName: ${modelName || 'none'}, optimization: ${optimization}, conversationType: ${conversationType}`);
+        console.log(`[Brain Generate] Request params - modelName: ${modelNameRequest || 'none'}, optimization: ${optimization}, conversationType: ${conversationType}, contentType: ${contentType}`);
 
         let attempt = 0;
         let lastError: string = '';
@@ -163,8 +200,8 @@ export class Brain extends BaseEntity {
             let trackingRequestId: string = '';
 
             try {
-                selectedModel = modelName && attempt === 1 ?
-                    this.modelManager.getModel(modelName) :
+                selectedModel = modelNameRequest && attempt === 1 ?
+                    this.modelManager.getModel(modelNameRequest) :
                     this.modelManager.selectModel(optimization, conversationType, excludedModels);
 
                 // If selection failed, attempt a safer fallback: use any available, not-blacklisted model
@@ -191,17 +228,30 @@ export class Brain extends BaseEntity {
 
                 lastModelName = selectedModel.name;
 
-                const filteredConvertParams = this.filterInternalParameters(convertParams || {});
-                const modelConvertParams = { ...filteredConvertParams };
-                modelConvertParams.max_length = selectedModel.tokenLimit || modelConvertParams.max_length ?
-                    Math.min(modelConvertParams.max_length, 8192) : 8192;
+                // Construct ConvertParamsType object explicitly
+                const modelConvertParams: ConvertParamsType = {
+                    prompt: promptFromAgent,
+                    contentType: contentType, // Now guaranteed to be present
+                    modelName: selectedModel.modelName, // Use the selected model's actual name
+                    // Pass through other relevant fields from req.body
+                    file: req.body.file,
+                    audio: req.body.audio,
+                    video: req.body.video,
+                    image: req.body.image,
+                    trace_id: req.body.trace_id,
+                    ...this.filterInternalParameters(req.body) // Include other filtered optional parameters
+                };
 
-                const prompt = JSON.stringify(modelConvertParams);
-                trackingRequestId = this.modelManager.trackModelRequest(selectedModel.name, conversationType, prompt);
+                // Apply max_length after other parameters for correct min calculation
+                modelConvertParams.max_length = selectedModel.tokenLimit || modelConvertParams.max_length ?
+                    Math.min(modelConvertParams.max_length || selectedModel.tokenLimit, 8192) : 8192;
+
+                const requestTrackingPrompt = modelConvertParams.prompt || ''; // Use the actual prompt for tracking
+                trackingRequestId = this.modelManager.trackModelRequest(selectedModel.name, conversationType, requestTrackingPrompt);
 
                 this.llmCalls++;
                 this.activeLLMCalls++;
-                console.log(`[Brain Generate] Attempt ${attempt}: Using model ${selectedModel.modelName}-${conversationType}`);
+                console.log(`[Brain Generate] Attempt ${attempt}: Using model ${selectedModel.modelName} for conversation type ${conversationType} with content type ${contentType}`);
 
                 const result = await selectedModel.llminterface?.convert(selectedModel.service, conversationType, modelConvertParams);
                 this.activeLLMCalls = Math.max(0, this.activeLLMCalls - 1);
@@ -211,7 +261,7 @@ export class Brain extends BaseEntity {
                     this.modelTimeoutCounts[selectedModel.name] = 0;
                 }
 
-                res.json({ result: result, mimeType: 'text/plain' });
+                res.json({ result: result, mimeType: contentType || 'text/plain' });
                 return;
 
             } catch (error) {

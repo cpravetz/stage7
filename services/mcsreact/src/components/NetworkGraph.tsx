@@ -124,44 +124,44 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics, zoo
         let statsMap: Map<string, Array<AgentStatistics>>;
         if (agentStatistics instanceof Map) {
             statsMap = agentStatistics;
+            console.log('[NetworkGraph] agentStatistics is already a Map');
         } else {
             try {
                 statsMap = MapSerializer.transformFromSerialization(agentStatistics);
+                console.log('[NetworkGraph] agentStatistics deserialized');
             } catch (e) {
                 console.error('[NetworkGraph] Error transforming statistics:', e);
                 return { nodes: new DataSet<Node>(), edges: new DataSet<Edge>(), dataHash: '' };
             }
         }
-
+        console.log('[NetworkGraph] statsMap:', statsMap.size);
         if (!statsMap || typeof statsMap.get !== 'function' || statsMap.size === 0) {
             console.log('[NetworkGraph] No valid statistics data in map: ',statsMap);
             return { nodes: new DataSet<Node>(), edges: new DataSet<Edge>(), dataHash: 'empty' };
         }
 
-        // Create a hash of the data to detect actual changes — sanitize and use UTF-8-safe base64
         const dataString = JSON.stringify(Array.from(statsMap.entries()));
         const safeString = sanitizeString(dataString);
         const dataHash = (safeString === '[]' || safeString === '') ? 'empty' : utf8ToB64(safeString).slice(0, 32);
 
-        // If data hasn't changed, return empty datasets (will be handled by effect)
         if (dataHash === lastDataHashRef.current && networkRef.current) {
             console.log('[NetworkGraph] Data unchanged, keeping existing network');
-            // Return empty datasets to signal no update needed
             return { 
                 nodes: new DataSet<Node>(), 
                 edges: new DataSet<Edge>(), 
                 dataHash 
             };
         }
+        console.log('[NetworkGraph] Data changed, rebuilding network');
 
         const newNodes = new DataSet<Node>();
         const newEdges = new DataSet<Edge>();
 
-        // Build lookup tables and nodes
+        // Build lookup tables
         const stepIdToAgentId: Record<string, string> = {};
         const stepIdToStep: Record<string, any> = {};
-        const agentIdToSteps: Record<string, any[]> = {};
-        const stepIdToDependents: Record<string, Set<string>> = {};
+        const allDependencies: Record<string, Set<string>> = {};
+        const allDependents: Record<string, Set<string>> = {};
 
         const inputNodeColor = isDarkMode 
             ? { background: '#424242', border: '#90a4ae' } 
@@ -172,37 +172,111 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics, zoo
             ? { background: '#385739', border: '#66bb6a' }
             : { background: '#e8f5e9', border: '#388e3c' };
         const outputFontColor = isDarkMode ? '#f5f5f5' : '#222';
-
-        // Create nodes and build lookup tables
-        for (const [statusCategory, agents] of statsMap.entries()) {
+        
+        // 1st pass: Collect all steps, agents, and dependencies
+        for (const agents of statsMap.values()) {
             if (!Array.isArray(agents)) continue;
             
             agents.forEach((agent: AgentStatistics) => {
-                const agentColor = agent.color || '#999999';
                 if (!agent.steps || !Array.isArray(agent.steps)) return;
                 
-                agentIdToSteps[agent.agentId] = agent.steps;
-                
                 agent.steps.forEach(step => {
-                    stepIdToAgentId[step.id] = agent.agentId;
+                    stepIdToAgentId[step.id] = agent.id || 'unknown-agentId';
                     stepIdToStep[step.id] = step;
                     
-                    // Build dependents map
+                    if (!allDependencies[step.id]) allDependencies[step.id] = new Set();
+                    
+                    // From `dependencies` array
                     if (step.dependencies && Array.isArray(step.dependencies)) {
                         step.dependencies.forEach(depId => {
-                            if (!depId) return;
-                            if (!stepIdToDependents[depId]) stepIdToDependents[depId] = new Set();
-                            stepIdToDependents[depId].add(step.id);
+                            if (depId && depId !== 'unknown-sourceStepId') {
+                                allDependencies[step.id].add(depId);
+                            }
                         });
                     }
-                    
+
+                    // From `inputReferences` map
+                    if (step.inputReferences) {
+                        try {
+                            const inputRefs = step.inputReferences instanceof Map 
+                                ? step.inputReferences
+                                : MapSerializer.transformFromSerialization(step.inputReferences);
+
+                            for (const inputRef of inputRefs.values()) {
+                                if (inputRef && inputRef.sourceStep && inputRef.sourceStep !== 'unknown-sourceStepId' && inputRef.sourceStep !== '0') {
+                                    allDependencies[step.id].add(inputRef.sourceStep);
+                                }
+                            }
+                        } catch(e) {
+                            console.error(`[NetworkGraph] Failed to process inputReferences for step ${step.id}`, e);
+                        }
+                    }
+                });
+            });
+        }
+        
+        // 2nd pass: Build dependents map
+        for (const stepId in allDependencies) {
+            allDependencies[stepId].forEach(depId => {
+                if (stepIdToStep[depId]) { // Only create dependents for actual steps
+                    if (!allDependents[depId]) allDependents[depId] = new Set();
+                    allDependents[depId].add(stepId);
+                }
+            });
+        }
+        
+        // 3rd pass: Create nodes and edges
+        for (const agents of statsMap.values()) {
+            if (!Array.isArray(agents)) continue;
+
+            agents.forEach((agent: AgentStatistics) => {
+                const agentColor = agent.color || '#999999';
+                if (!agent.steps || !Array.isArray(agent.steps)) return;
+
+                const agentInputNodeId = `agent-input-${agent.id}`;
+                const agentOutputNodeId = `agent-output-${agent.id}`;
+
+                let hasInputSteps = false;
+                let hasOutputSteps = false;
+
+                // Determine if agent I/O nodes are needed
+                agent.steps.forEach(step => {
+                    const stepDependencies = allDependencies[step.id] || new Set();
+                    const intraAgentDependencies = Array.from(stepDependencies).filter(depId => stepIdToAgentId[depId] === agent.id);
+                    if (intraAgentDependencies.length === 0) {
+                        hasInputSteps = true;
+                    }
+
+                    const stepDependents = allDependents[step.id] || new Set();
+                    const intraAgentDependents = Array.from(stepDependents).filter(depId => stepIdToAgentId[depId] === agent.id);
+                    if (intraAgentDependents.length === 0) {
+                        hasOutputSteps = true;
+                    }
+                });
+
+                // Add agent I/O nodes only if they are used
+                if (hasInputSteps) {
+                    newNodes.add({
+                        id: agentInputNodeId, label: `AGENT\nINPUT`, color: inputNodeColor,
+                        borderWidth: 2, font: { color: inputFontColor }, group: agent.id, shape: 'ellipse',
+                    });
+                }
+                if (hasOutputSteps) {
+                    newNodes.add({
+                        id: agentOutputNodeId, label: `AGENT\nOUTPUT`, color: outputNodeColor,
+                        borderWidth: 2, font: { color: outputFontColor }, group: agent.id, shape: 'ellipse',
+                    });
+                }
+                
+                // Create step nodes and edges
+                agent.steps.forEach(step => {
                     const stepStatusBorderColor = getStepStatusBorderColor(step.status);
                     const fontColor = getContrastYIQ(agentColor);
                     
                     if (!newNodes.get(step.id)) {
                         newNodes.add({
                             id: step.id,
-                            label: `${step.verb}\n(${step.status.toUpperCase()})`,
+                            label: `${step.actionVerb || step.verb}\n(${step.status.toUpperCase()})`,
                             color: {
                                 background: agentColor,
                                 border: stepStatusBorderColor,
@@ -210,102 +284,59 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ agentStatistics, zoo
                                 hover: { background: agentColor, border: '#FFC107' }
                             },
                             borderWidth: 3,
-                            group: agent.agentId,
+                            group: agent.id,
                             font: { color: fontColor }
                         });
                     }
-                });
-            });
-        }
 
-        // Create edges
-        for (const [statusCategory, agents] of statsMap.entries()) {
-            if (!Array.isArray(agents)) continue;
-            
-            agents.forEach((agent: AgentStatistics) => {
-                if (!agent.steps || !Array.isArray(agent.steps)) return;
-                
-                const agentInputIds: string[] = Array.isArray((agent as any).inputIds) ? (agent as any).inputIds : [];
-                const agentOutputIds: string[] = Array.isArray((agent as any).outputIds) ? (agent as any).outputIds : [];
-                
-                // Add input nodes (if not already present)
-                agentInputIds.forEach((inputId: string) => {
-                    if (!newNodes.get(inputId)) {
-                        newNodes.add({
-                            id: inputId,
-                            label: `AGENT INPUT\n${inputId}`,
-                            color: inputNodeColor,
-                            borderWidth: 2,
-                            font: { color: inputFontColor },
-                            group: agent.agentId,
-                            shape: 'ellipse',
-                        });
-                    }
-                });
-                
-                // Add output nodes (if not already present)
-                agentOutputIds.forEach((outputId: string) => {
-                    if (!newNodes.get(outputId)) {
-                        newNodes.add({
-                            id: outputId,
-                            label: `AGENT OUTPUT\n${outputId}`,
-                            color: outputNodeColor,
-                            borderWidth: 2,
-                            font: { color: outputFontColor },
-                            group: agent.agentId,
-                            shape: 'ellipse',
-                        });
-                    }
-                });
-                
-                // Step-to-step and agent input/output edges
-                agent.steps.forEach(step => {
-                    // Standard dependencies
-                    if (step.dependencies && Array.isArray(step.dependencies) && step.dependencies.length > 0) {
-                        step.dependencies.forEach((dep: string) => {
-                            if (!dep || dep === 'unknown-sourceStepId') return;
-                            newEdges.add({
-                                from: dep,
+                    const stepDependencies = allDependencies[step.id] || new Set();
+                    const stepDependents = allDependents[step.id] || new Set();
+                    
+                    // Edges from dependencies to this step
+                    stepDependencies.forEach(depId => {
+                        if (stepIdToStep[depId]) {
+                            const fromAgentId = stepIdToAgentId[depId];
+                            const toAgentId = agent.id;
+                            const edgeColor = (fromAgentId === toAgentId) ? (agent.color || '#999999') : '#FF5722'; // Orange for inter-agent
+
+                            newEdges.update({ // Use update to avoid duplicates
+                                id: `${depId}-${step.id}`,
+                                from: depId,
                                 to: step.id,
                                 arrows: 'to',
-                                color: { color: agent.color || '#999999', highlight: '#FFC107', hover: '#FFC107' },
+                                color: { color: edgeColor, highlight: '#FFC107', hover: '#FFC107' },
                                 smooth: { enabled: true, type: 'cubicBezier', roundness: 0.2 }
                             });
-                        });
-                    } else {
-                        // No dependencies: connect agent input(s) to this step
-                        agentInputIds.forEach((inputId: string) => {
-                            newEdges.add({
-                                from: inputId,
-                                to: step.id,
-                                arrows: 'to',
-                                color: { color: '#607d8b', highlight: '#FFC107', hover: '#FFC107' },
-                                width: 2,
-                                dashes: true,
-                                smooth: { enabled: true, type: 'cubicBezier', forceDirection: 'horizontal', roundness: 0.5 }
-                            });
+                        }
+                    });
+
+                    // Edge from agent input node if it's an input step
+                    const intraAgentDependencies = Array.from(stepDependencies).filter(depId => stepIdToAgentId[depId] === agent.id);
+                    if (intraAgentDependencies.length === 0 && hasInputSteps) {
+                         newEdges.update({ // Use update to avoid duplicates
+                            id: `${agentInputNodeId}-${step.id}`,
+                            from: agentInputNodeId, to: step.id, arrows: 'to',
+                            color: { color: '#607d8b', highlight: '#FFC107', hover: '#FFC107' },
+                            width: 2, dashes: true,
+                            smooth: { enabled: true, type: 'cubicBezier', forceDirection: 'horizontal', roundness: 0.5 }
                         });
                     }
                     
-                    // No dependents: connect this step to agent output(s)
-                    const dependents = stepIdToDependents[step.id];
-                    if (!dependents || dependents.size === 0) {
-                        agentOutputIds.forEach((outputId: string) => {
-                            newEdges.add({
-                                from: step.id,
-                                to: outputId,
-                                arrows: 'to',
-                                color: { color: '#388e3c', highlight: '#FFC107', hover: '#FFC107' },
-                                width: 2,
-                                dashes: true,
-                                smooth: { enabled: true, type: 'cubicBezier', forceDirection: 'horizontal', roundness: 0.5 }
-                            });
+                    // Edge to agent output node if it's an output step
+                    const intraAgentDependents = Array.from(stepDependents).filter(depId => stepIdToAgentId[depId] === agent.id);
+                    if (intraAgentDependents.length === 0 && hasOutputSteps) {
+                        newEdges.update({ // Use update to avoid duplicates
+                            id: `${step.id}-${agentOutputNodeId}`,
+                            from: step.id, to: agentOutputNodeId, arrows: 'to',
+                            color: { color: '#388e3c', highlight: '#FFC107', hover: '#FFC107' },
+                            width: 2, dashes: true,
+                            smooth: { enabled: true, type: 'cubicBezier', forceDirection: 'horizontal', roundness: 0.5 }
                         });
                     }
                 });
             });
         }
-
+        
         return { nodes: newNodes, edges: newEdges, dataHash };
     }, [agentStatistics, theme]);
 

@@ -93,16 +93,31 @@ export class Agent extends BaseEntity {
         console.log(`[Agent ${this.id}] createEndOfMissionReflect: Preparing REFLECT step at mission end.`);
         const workProductsSummary = await this.getCompletedWorkProductsSummary();
 
-        const reflectPrompt = `Context: Mission ID: ${this.missionId}\nMission Goal: ${this.missionContext || '[no mission context]'}\n\nCompleted Work Products:\n${workProductsSummary}\n\nTask: Did we accomplish the mission?\n- If YES: return an empty JSON array [] and include a short direct_answer string that states the mission is accomplished.\n- If NO: return a JSON array of step objects (a plan) that when executed will achieve the mission. The response MUST be valid JSON only: either an empty array [] or an array of step objects. Each step object should be in the form { \"actionVerb\": \"ACCOMPLISH\" | other verb, \"description\": \"...\", \"inputs\": { ... } }. Do not include any prose outside the JSON.`;
+        // Build plan history from all steps
+        const planHistory = this.steps.map(step => ({
+            id: step.id,
+            actionVerb: step.actionVerb,
+            description: step.description,
+            status: step.status,
+            inputs: step.inputValues ? MapSerializer.transformForSerialization(step.inputValues) : {},
+            outputs: step.outputs || {},
+            result: step.result || []
+        }));
+
+        const reflectQuestion = `Did we accomplish the mission? If YES, return an empty JSON array []. If NO, return a JSON array of step objects (a plan) that when executed will achieve the mission.`;
 
         const recoveryStep = this.createStep('REFLECT', new Map([
-            ['prompt', { inputName: 'prompt', value: reflectPrompt, valueType: PluginParameterType.STRING, args: {} }]
+            ['missionId', { inputName: 'missionId', value: this.missionId, valueType: PluginParameterType.STRING, args: {} }],
+            ['plan_history', { inputName: 'plan_history', value: JSON.stringify(planHistory), valueType: PluginParameterType.STRING, args: {} }],
+            ['work_products', { inputName: 'work_products', value: workProductsSummary, valueType: PluginParameterType.STRING, args: {} }],
+            ['question', { inputName: 'question', value: reflectQuestion, valueType: PluginParameterType.STRING, args: {} }],
+            ['agentId', { inputName: 'agentId', value: this.id, valueType: PluginParameterType.STRING, args: {} }]
         ]), `End-of-mission reflection: did we accomplish the mission?`, StepStatus.PENDING);
         recoveryStep.recommendedRole = this.role;
         this.steps.push(recoveryStep);
         await this.logEvent({ eventType: 'step_created', ...recoveryStep.toJSON() });
         await this.updateStatus();
-        console.log(`[Agent ${this.id}] createEndOfMissionReflect: REFLECT step ${recoveryStep.id} created.`);
+        console.log(`[Agent ${this.id}] createEndOfMissionReflect: REFLECT step ${recoveryStep.id} created with plan history of ${planHistory.length} steps.`);
     }
 
     // Properties for lifecycle management
@@ -314,7 +329,6 @@ export class Agent extends BaseEntity {
         // was accomplished and, if not, to generate a recovery plan.
         while (true) {
             while (await this.hasActiveWork()) {
-                console.debug(`[Agent ${this.id}] runUntilDone: hasActiveWork() returned true. Continuing.`);
                 await this.runAgent();
                 // A short delay to prevent tight, CPU-intensive loops when the agent is truly idle but not yet completed.
                 await new Promise(resolve => setTimeout(resolve, 1000));
@@ -451,6 +465,8 @@ Please consider this context when planning and executing the mission. Provide de
     }
 
     private async hasActiveWork(): Promise<boolean> {
+        console.log(`[Agent ${this.id}] DEBUG: Agent.hasActiveWork: Checking for active work. Total steps: ${this.steps.length}.`);
+        console.log(`[Agent ${this.id}] DEBUG: Agent.hasActiveWork: Step statuses: ${this.steps.map(s => `${s.id.substring(0, 8)}... (${s.status})`).join(', ')}`);
         // 1. Check for locally active steps
         const localActiveSteps = this.steps.filter(step =>
             step.status === StepStatus.PENDING ||
@@ -459,40 +475,19 @@ Please consider this context when planning and executing the mission. Provide de
         );
 
         if (localActiveSteps.length > 0) {
+            console.log(`[Agent ${this.id}] DEBUG: Agent.hasActiveWork: Found ${localActiveSteps.length} local active steps. Returning true.`);
             return true;
         }
 
         // 2. Check for delegated steps
-        for (const delegatedStepId of this.delegatedStepIds) {
-            const delegatedStep = await this.crossAgentResolver.getStepDetails(delegatedStepId);
-            if (delegatedStep) {
-                // If a delegated step is not yet completed, errored, or cancelled,
-                // then this agent still has active work related to it.
-                if (delegatedStep.status === StepStatus.PENDING ||
-                    delegatedStep.status === StepStatus.RUNNING ||
-                    delegatedStep.status === StepStatus.WAITING ||
-                    delegatedStep.status === StepStatus.REPLACED) // If it's replaced, it's still being handled remotely
-                {
-                    console.debug(`[Agent ${this.id}] hasActiveWork: Found active delegated step ${delegatedStepId} (${delegatedStep.actionVerb}, ${delegatedStep.status}).`);
-                    return true;
-                } else if (delegatedStep.status === StepStatus.COMPLETED ||
-                           delegatedStep.status === StepStatus.ERROR ||
-                           delegatedStep.status === StepStatus.CANCELLED) {
-                    // If a delegated step is finished, remove it from our tracking list
-                    this.delegatedStepIds.delete(delegatedStepId);
-                    console.debug(`[Agent ${this.id}] hasActiveWork: Delegated step ${delegatedStepId} is ${delegatedStep.status}, removed from tracking.`);
-                }
-            } else {
-                // If the delegated step is no longer found (e.g., pruned from registry), stop tracking it.
-                this.delegatedStepIds.delete(delegatedStepId);
-                console.warn(`[Agent ${this.id}] hasActiveWork: Delegated step ${delegatedStepId} not found in registry, removed from tracking.`);
-            }
+        // If we have any delegated steps being tracked, assume they're still active
+        // The delegated agent will notify us when they're complete via the step completion callback
+        if (this.delegatedStepIds.size > 0) {
+            console.log(`[Agent ${this.id}] DEBUG: Agent.hasActiveWork: Found ${this.delegatedStepIds.size} delegated steps. Returning true.`);
+            return true;
         }
 
-        if (localActiveSteps.length === 0 && this.delegatedStepIds.size === 0) {
-            console.debug(`[Agent ${this.id}] hasActiveWork: No local or delegated active steps found.`);
-        }
-
+        console.log(`[Agent ${this.id}] DEBUG: Agent.hasActiveWork: No active steps found. Returning false.`);
         return false;
     }
 
@@ -693,7 +688,7 @@ Please consider this context when planning and executing the mission. Provide de
             }
 
             const pendingSteps = this.steps.filter(step => step.status === StepStatus.PENDING);
-            console.debug(`[Agent ${this.id}] runAgent: Pending steps: ${pendingSteps.map(s => `${s.id} (${s.actionVerb}, ${s.status})`).join(', ') || 'None'}`);
+            //console.debug(`[Agent ${this.id}] runAgent: Pending steps: ${pendingSteps.map(s => `${s.id} (${s.actionVerb}, ${s.status})`).join(', ') || 'None'}`);
 
             const executableSteps: Step[] = [];
             for (const step of pendingSteps) {
@@ -777,9 +772,11 @@ Please consider this context when planning and executing the mission. Provide de
     }
 
     private addStepsFromPlan(plan: ActionVerbTask[], parentStep: Step) {
-        console.log(`[Agent ${this.id}] Parsed plan for addStepsFromPlan:`, JSON.stringify(this.truncateLargeStrings(plan), null, 2));
+        console.log(`[Agent ${this.id}] DEBUG: Agent.addStepsFromPlan: Received plan with ${plan.length} steps.`);
         const newSteps = createFromPlan(plan, this.agentPersistenceManager, this.crossAgentResolver, parentStep, this);
         this.steps.push(...newSteps);
+        console.log(`[Agent ${this.id}] DEBUG: Agent.addStepsFromPlan: this.steps now contains ${this.steps.length} steps.`);
+        console.log(`[Agent ${this.id}] DEBUG: Agent.addStepsFromPlan: Current step statuses: ${this.steps.map(s => `${s.id.substring(0, 8)}... (${s.status})`).join(', ')}`);
         for (const step of newSteps) {
             this.agentSet.registerStepLocation(step.id, this.id, this.agentSet.url);
         }
@@ -797,82 +794,72 @@ Please consider this context when planning and executing the mission. Provide de
             console.warn(`[Agent ${this.id}] rewireDependenciesForReplacedStep: No workstream steps provided for replaced step ${replacedStep.id}`);
             return;
         }
-
+    
         // Identify the final step(s) of the workstream (steps that have no dependents within the workstream)
         const workstreamStepIds = new Set(workstreamSteps.map(s => s.id));
         const finalSteps = workstreamSteps.filter(step => {
-            // A step is a final step if no other step in the workstream depends on it
             const hasDependents = workstreamSteps.some(otherStep =>
                 otherStep.dependencies.some(dep => dep.sourceStepId === step.id)
             );
             return !hasDependents;
         });
-
+    
         if (finalSteps.length === 0) {
             console.warn(`[Agent ${this.id}] rewireDependenciesForReplacedStep: No final steps found in workstream for replaced step ${replacedStep.id}. Using last step as fallback.`);
             finalSteps.push(workstreamSteps[workstreamSteps.length - 1]);
         }
-
+    
         console.log(`[Agent ${this.id}] rewireDependenciesForReplacedStep: Identified ${finalSteps.length} final step(s) in workstream: ${finalSteps.map(s => s.id).join(', ')}`);
+    
+        // Get all steps for this mission from all agents in the agent set
+        const allMissionSteps: Step[] = [];
+        for (const agent of this.agentSet.agents.values()) {
+            if (agent.missionId === this.missionId) {
+                allMissionSteps.push(...agent.getSteps());
+            }
+        }
 
-        // Find all steps that depend on the replaced step
-        const dependentSteps = this.steps.filter(step =>
+        // Find all steps across the entire mission that depend on the replaced step
+        const dependentSteps = allMissionSteps.filter(step =>
             step.dependencies.some(dep => dep.sourceStepId === replacedStep.id)
         );
-
-        console.log(`[Agent ${this.id}] rewireDependenciesForReplacedStep: Found ${dependentSteps.length} step(s) that depend on replaced step ${replacedStep.id}`);
-
+    
+        console.log(`[Agent ${this.id}] rewireDependenciesForReplacedStep: Found ${dependentSteps.length} mission-wide step(s) that depend on replaced step ${replacedStep.id}`);
+    
         // For each dependent step, rewire its dependencies
         for (const dependentStep of dependentSteps) {
             console.log(`[Agent ${this.id}] rewireDependenciesForReplacedStep: Rewiring dependencies for step ${dependentStep.id} (${dependentStep.actionVerb})`);
-
-            // Find dependencies on the replaced step
+    
             const depsOnReplacedStep = dependentStep.dependencies.filter(dep => dep.sourceStepId === replacedStep.id);
-
+    
             for (const dep of depsOnReplacedStep) {
                 // Remove the old dependency
-                const depIndex = dependentStep.dependencies.indexOf(dep);
-                if (depIndex !== -1) {
-                    dependentStep.dependencies.splice(depIndex, 1);
-                }
-
-                // Add new dependencies to the final step(s)
-                // If there's only one final step, rewire to it
-                // If there are multiple final steps, we need to pick the one that produces the expected output
-                let targetFinalStep = finalSteps[0]; // Default to first final step
-
-                // Try to find a final step that has an output matching the expected output name
-                const matchingFinalStep = finalSteps.find(fs =>
-                    fs.outputs && fs.outputs.has(dep.outputName)
-                );
-
+                dependentStep.dependencies = dependentStep.dependencies.filter(d => d !== dep);
+    
+                let targetFinalStep = finalSteps[0];
+    
+                const matchingFinalStep = finalSteps.find(fs => fs.outputs && fs.outputs.has(dep.outputName));
+    
                 if (matchingFinalStep) {
                     targetFinalStep = matchingFinalStep;
-                } else if (finalSteps.length === 1) {
-                    // If there's only one final step, use it and assume output mapping will happen
-                    targetFinalStep = finalSteps[0];
                 } else {
-                    // Multiple final steps but none match the output name
-                    // Use the first one and log a warning
                     console.warn(`[Agent ${this.id}] rewireDependenciesForReplacedStep: Could not find final step with output '${dep.outputName}'. Using first final step ${finalSteps[0].id}`);
                 }
-
-                // Add the new dependency
+    
                 const newDep: StepDependency = {
                     inputName: dep.inputName,
                     sourceStepId: targetFinalStep.id,
                     outputName: dep.outputName
                 };
                 dependentStep.dependencies.push(newDep);
-
-                // Update the input reference as well
+    
                 if (dependentStep.inputReferences.has(dep.inputName)) {
                     const inputRef = dependentStep.inputReferences.get(dep.inputName)!;
                     inputRef.sourceId = targetFinalStep.id;
                     dependentStep.inputReferences.set(dep.inputName, inputRef);
                 }
-
-                console.log(`[Agent ${this.id}] rewireDependenciesForReplacedStep: Rewired dependency '${dep.inputName}' from step ${replacedStep.id} to step ${targetFinalStep.id} (output: ${dep.outputName})`);
+    
+                console.log(`[Agent ${this.id}] rewireDependenciesForReplacedStep: Rewired dependency '${dep.inputName}' for step ${dependentStep.id} from ${replacedStep.id} to ${targetFinalStep.id}`);
             }
         }
     }
@@ -1257,13 +1244,13 @@ Please consider this context when planning and executing the mission. Provide de
             outputName = 'generated_content';
             outputDescription = 'Content generated by LLM service.';
 
-            const conversationType = inputs.get('conversationType')?.value as LLMConversationType || LLMConversationType.TextToText;
             const modelName = inputs.get('modelName')?.value;
             const optimization = inputs.get('optimization')?.value;
             const file = inputs.get('file')?.value;
             const audio = inputs.get('audio')?.value;
             const video = inputs.get('video')?.value;
             const image = inputs.get('image')?.value;
+            const conversationType = inputs.get('conversationType')?.value as LLMConversationType || LLMConversationType.TextToText;
 
             brainRequestBody = {
                 type: conversationType,
@@ -1274,7 +1261,8 @@ Please consider this context when planning and executing the mission. Provide de
                 audio: audio,
                 video: video,
                 image: image,
-                trace_id: this.id // Assuming agent ID can be used as trace_id
+                trace_id: this.id,
+                contentType: this.getMimeTypeFromConversationType(conversationType), // Added contentType
             };
         } else { // THINK logic
             brainEndpoint = 'chat';
@@ -1551,17 +1539,11 @@ Please consider this context when planning and executing the mission. Provide de
                 const timeout = step.actionVerb === 'ACCOMPLISH' ? 3600000 : 1800000;
 
                 // Create an AbortController for this execution so we can cancel when pausing/aborting
-                try {
-                    if (this.executionAbortController) {
-                        // If an existing controller exists, abort it to ensure a clean start
-                        try { this.executionAbortController.abort(); } catch {}
-                        this.executionAbortController = null;
-                    }
-                } catch (e) {
-                    // ignore
+                // NOTE: We do NOT abort existing controllers here because the agent may be executing
+                // multiple steps concurrently. Only pause/abort should trigger controller abortion.
+                if (!this.executionAbortController) {
+                    this.executionAbortController = new AbortController();
                 }
-
-                this.executionAbortController = new AbortController();
                 const signal = this.executionAbortController.signal;
 
                 const response = await this.authenticatedApi.post(
@@ -1646,6 +1628,10 @@ Please consider this context when planning and executing the mission. Provide de
             result: result,
             timestamp: new Date().toISOString()
         });
+
+        // If this step was delegated to us, notify the original owner
+        await this.notifyStepCompletion(step);
+
         await this.updateStatus();
     }
     
@@ -1659,10 +1645,49 @@ Please consider this context when planning and executing the mission. Provide de
             error: error.message,
             timestamp: new Date().toISOString()
         });
+
+        // If this step was delegated to us, notify the original owner
+        await this.notifyStepCompletion(step);
+
         await this.updateStatus();
     }
 
 
+
+    /**
+     * Notify the original owner agent when a delegated step completes or fails.
+     * This allows the delegating agent to remove the step from its tracking list.
+     */
+    private async notifyStepCompletion(step: Step): Promise<void> {
+        // Check if this step was delegated to us (ownerAgentId != current agent id)
+        if (step.ownerAgentId && step.ownerAgentId !== this.id) {
+            try {
+                const ownerAgent = this.agentSet.agents.get(step.ownerAgentId);
+                if (ownerAgent) {
+                    // Owner is on the same AgentSet, call directly
+                    ownerAgent.handleDelegatedStepCompletion(step.id, step.status);
+                    console.log(`[Agent ${this.id}] Notified owner agent ${step.ownerAgentId} about completion of delegated step ${step.id} (${step.status})`);
+                } else {
+                    // Owner might be on a different AgentSet, send HTTP notification
+                    // For now, we'll skip remote notifications as all agents are on the same AgentSet
+                    console.warn(`[Agent ${this.id}] Owner agent ${step.ownerAgentId} not found for delegated step ${step.id}`);
+                }
+            } catch (error) {
+                console.error(`[Agent ${this.id}] Error notifying owner agent about step completion:`, error);
+            }
+        }
+    }
+
+    /**
+     * Handle notification that a delegated step has completed or failed.
+     * Remove it from the delegatedStepIds tracking set.
+     */
+    public handleDelegatedStepCompletion(stepId: string, status: StepStatus): void {
+        if (this.delegatedStepIds.has(stepId)) {
+            this.delegatedStepIds.delete(stepId);
+            console.log(`[Agent ${this.id}] Removed delegated step ${stepId} from tracking (status: ${status})`);
+        }
+    }
 
     // Add new method to handle cleanup
     private async notifyDependents(failedStepId: string, status: StepStatus): Promise<void> {
@@ -2014,6 +2039,23 @@ Please consider this context when planning and executing the mission. Provide de
             }
         }
         return newObj;
+    }
+
+    private getMimeTypeFromConversationType(conversationType: LLMConversationType): string {
+        switch (conversationType) {
+            case LLMConversationType.TextToText:
+                return 'text/plain';
+            case LLMConversationType.TextToCode:
+                return 'application/json'; // Often code is generated as structured JSON
+            case LLMConversationType.TextToImage:
+                return 'image/png'; // Common output for image generation
+            case LLMConversationType.TextToAudio:
+                return 'audio/mpeg'; // Common output for audio generation (e.g., MP3)
+            case LLMConversationType.TextToVideo:
+                return 'video/mp4'; // Common output for video generation (e.g., MP4)
+            default:
+                return 'text/plain';
+        }
     }
 
 

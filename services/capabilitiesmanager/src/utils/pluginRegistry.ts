@@ -57,19 +57,12 @@ const INTERNAL_VERBS: PluginManifest[] = [
         description: 'Uses LLM services to generate content from a prompt or other content. Services include image creation, audio transcription, image editing, etc.',
         language: 'internal',
         inputDefinitions: [
-            { name: 'conversationType', type: PluginParameterType.STRING, required: true, description: 'Type of content to generate.' },
-            { name: 'modelName', type: PluginParameterType.STRING, required: false, description: 'The specific model to use.' },
             { name: 'optimization', type: PluginParameterType.STRING, required: false, description: 'Optimization strategy.' },
             { name: 'prompt', type: PluginParameterType.STRING, required: false, description: 'Text prompt for generation.' },
             { name: 'file', type: PluginParameterType.OBJECT, required: false, description: 'File for generation context.' },
             { name: 'audio', type: PluginParameterType.OBJECT, required: false, description: 'Audio for generation context.' },
             { name: 'video', type: PluginParameterType.OBJECT, required: false, description: 'Video for generation context.' },
             { name: 'image', type: PluginParameterType.OBJECT, required: false, description: 'Image for generation context.' },
-            // Added missing input definitions
-            { name: 'userPainPoints', type: PluginParameterType.ARRAY, required: false, description: 'User pain points for context.' },
-            { name: 'systemEnhancements', type: PluginParameterType.ARRAY, required: false, description: 'System enhancements for context.' },
-            { name: 'businessCases', type: PluginParameterType.ARRAY, required: false, description: 'Business cases for context.' },
-            { name: 'launchPlan', type: PluginParameterType.OBJECT, required: false, description: 'Launch plan for context.' }
         ],
         outputDefinitions: [
             {
@@ -169,36 +162,6 @@ const INTERNAL_VERBS: PluginManifest[] = [
             {
                 name: 'steps',
                 description: 'The steps to be executed in the loop.',
-                type: PluginParameterType.PLAN,
-                required: false,
-            },
-        ],
-        repository: {
-            type: 'internal',
-            url: 'internal',
-        },
-        security: {
-            permissions: [],
-            sandboxOptions: {allowEval: true, timeout: 30000, memory: 256, allowedAPIs: [], allowedModules: []},
-            trust: {
-                signature: 'internal',
-            },
-        },
-        metadata: { status: PluginStatus.RUNNING } // Internal plugins are always running
-    },
-    {
-        id: 'internal-SEQUENCE',
-        verb: 'SEQUENCE',
-        version: '1.0.0',
-        description: 'Execute steps in strict sequential order / no concurrency.',
-        language: 'internal',
-        inputDefinitions: [
-            { name: 'steps', type: PluginParameterType.ARRAY, required: true, description: 'Steps to execute sequentially.' }
-        ],
-        outputDefinitions: [
-            {
-                name: 'steps',
-                description: 'The steps to be executed sequentially.',
                 type: PluginParameterType.PLAN,
                 required: false,
             },
@@ -775,7 +738,7 @@ export class PluginRegistry {
 
             // Check for internal verbs - these should be in the registry
             // but if not found, we still want to return their definitions
-            const internalVerbs = ['THINK', 'GENERATE', 'IF_THEN', 'WHILE', 'UNTIL', 'SEQUENCE', 'TIMEOUT', 'REPEAT', 'FOREACH', 'REGROUP', 'CHAT'];
+            const internalVerbs = ['THINK', 'GENERATE', 'IF_THEN', 'WHILE', 'UNTIL', 'TIMEOUT', 'REPEAT', 'FOREACH', 'REGROUP', 'CHAT'];
             if (internalVerbs.includes(normalizedVerb)) {
                 // Try to find the internal plugin by ID
                 const internalId = `internal-${normalizedVerb}`;

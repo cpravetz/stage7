@@ -311,9 +311,18 @@ def parse_inputs(inputs_str: str) -> Dict[str, Any]:
 class ReflectHandler:
     """Handles reflection requests by generating schema-compliant plans"""
 
-    def __init__(self):
+    def __init__(self, inputs: Dict[str, Any]):
         self.validator = PlanValidator(brain_call=call_brain)
         self.max_retries = 3
+        
+        # Initialize the validator with available plugins
+        try:
+            available_plugins_raw = inputs.get('availablePlugins', {})
+            available_plugins = available_plugins_raw.get('value', []) if isinstance(available_plugins_raw, dict) else (available_plugins_raw or [])
+            self.validator = PlanValidator(brain_call=call_brain, available_plugins=available_plugins)
+        except Exception as e:
+            logger.error(f"Failed to initialize PlanValidator with plugins: {e}")
+            self.validator = PlanValidator(brain_call=call_brain)
 
     def handle(self, inputs: Dict[str, Any]) -> str:
         try:
@@ -841,7 +850,7 @@ A plan with no connections between steps is invalid and will be rejected.
 def reflect(inputs: Dict[str, Any]) -> str:
     """Main reflection logic."""
     try:
-        handler = ReflectHandler()
+        handler = ReflectHandler(inputs)
         return handler.handle(inputs)
     except Exception as e:
         logger.error(f"REFLECT plugin failed: {e}")

@@ -43,20 +43,13 @@ export class CapabilitiesManager extends BaseEntity {
     private serviceId = 'CapabilitiesManager';
     private authenticatedLibrarianApi!: AxiosInstance;
 
-    private failedPluginLookups: Map<string, number> = new Map(); // actionVerb -> last failure timestamp
-    private static readonly PLUGIN_LOOKUP_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
-
-    // Cache for input transformations: missionId -> { actionVerb -> { originalInput -> transformedInput } }
-    private inputTransformationCache: Map<string, Map<string, Map<string, string>>> = new Map();
-    private planCache: Map<string, PluginOutput[]> = new Map();
     private activeOperations: Map<string, { resources: Set<string>, startTime: number }> = new Map();
     private resourceUsage: Map<string, { inUse: boolean, lastAccessed: number }> = new Map();
 
     constructor() {
         super('CapabilitiesManager', 'CapabilitiesManager', `capabilitiesmanager`, process.env.PORT || '5060');
         const trace_id = `${this.serviceId}-constructor-${uuidv4().substring(0,8)}`;
-        // Retry logic for initialization
-                const authenticatedLibrarianApi = this.authenticatedApi.api;
+        const authenticatedLibrarianApi = this.authenticatedApi.api;
         authenticatedLibrarianApi.defaults.baseURL = this.librarianUrl;
         this.authenticatedLibrarianApi = authenticatedLibrarianApi;
         this.pluginRegistry = new PluginRegistry(authenticatedLibrarianApi);
@@ -548,21 +541,6 @@ export class CapabilitiesManager extends BaseEntity {
         }
     }
 
-    private async rollbackTransaction(opId: string): Promise<void> {
-        const operation = this.activeOperations.get(opId);
-        if (operation) {
-            // Release all resources
-            operation.resources.forEach(resourceId => {
-                const resource = this.resourceUsage.get(resourceId);
-                if (resource) {
-                    resource.inUse = false;
-                    resource.lastAccessed = Date.now();
-                }
-            });
-            this.activeOperations.delete(opId);
-        }
-    }
-
     private normalizePluginOutput(output: any): PluginOutput {
         const normalized: PluginOutput = {
             success: output.success ?? false,
@@ -609,6 +587,17 @@ export class CapabilitiesManager extends BaseEntity {
             outputs: MapSerializer.transformFromSerialization(req.body.outputs || {}) instanceof Map ? MapSerializer.transformFromSerialization(req.body.outputs || {}) : new Map(Object.entries(MapSerializer.transformFromSerialization(req.body.outputs || {}))),
             missionId: req.body.missionId || uuidv4() // Ensure missionId is always present
         } as Step;
+        
+        const availablePlugins = await this._getAvailablePluginManifests();
+        if (!step.inputValues) {
+            step.inputValues = new Map<string, InputValue>();
+        }
+        step.inputValues.set('availablePlugins', {
+            inputName: 'availablePlugins',
+            value: availablePlugins,
+            valueType: PluginParameterType.ARRAY, 
+            args: {}
+        });
 
 
         if (!step.actionVerb || typeof step.actionVerb !== 'string') {
@@ -626,14 +615,6 @@ export class CapabilitiesManager extends BaseEntity {
         try {
             opId = await this.beginTransaction(trace_id, step);
 
-            // Redirect 'ACCOMPLISH' to executeAccomplishPlugin
-            if (step.actionVerb === 'ACCOMPLISH' && step.inputValues) {
-                const result = await this.executeAccomplishPlugin(step.inputValues, trace_id);
-                console.log(`[${trace_id}] ${source_component}: Result from executeAccomplishPlugin - typeof: ${typeof result}, isArray: ${Array.isArray(result)}`);
-                await this.commitTransaction(opId);
-                res.status(200).send(MapSerializer.transformForSerialization(result.map(r => this.normalizePluginOutput(r))));
-                return;
-            }
             // Query PluginRegistry for the handler for this actionVerb
             // The handlerResult.handler will be a PluginManifest (or DefinitionManifest)
             const handlerResult = await this.getHandlerForActionVerb(step.actionVerb, trace_id);
@@ -717,15 +698,6 @@ export class CapabilitiesManager extends BaseEntity {
                             });
                         }
                         // preparePluginForExecution expects PluginManifest, which DefinitionManifest extends
-                        // Add available plugins to the inputs for the plugin
-                        const availablePlugins = await this._getAvailablePluginManifests();
-                        validatedInputs.inputs.set('availablePlugins', {
-                            inputName: 'availablePlugins',
-                            value: availablePlugins,
-                            valueType: PluginParameterType.ARRAY, // Assuming it's an array of plugin manifests
-                            args: {}
-                        });
-
                         const { pluginRootPath, effectiveManifest } = await this.pluginRegistry.preparePluginForExecution(manifest);
                         const result = await this.pluginExecutor.execute(effectiveManifest, validatedInputs.inputs, pluginRootPath, trace_id);
                         res.status(200).send(MapSerializer.transformForSerialization(result));
@@ -789,11 +761,6 @@ export class CapabilitiesManager extends BaseEntity {
             }
         }
     }
-
-    /**
-     * Classify error types to determine appropriate handling strategy
-     */
-
 
     /**
      * Find the best handler (plugin or plan template) for an actionVerb.
@@ -899,15 +866,6 @@ export class CapabilitiesManager extends BaseEntity {
                     args: {}
                 });
 
-                // Add available plugins to the inputs for ACCOMPLISH
-                const availablePlugins = await this._getAvailablePluginManifests();
-                accomplishInputs.set('availablePlugins', {
-                    inputName: 'availablePlugins',
-                    value: availablePlugins,
-                    valueType: PluginParameterType.ARRAY,
-                    args: {}
-                });
-
                 const accomplishResultArray = await this.executeAccomplishPlugin(accomplishInputs, trace_id);
                 
                 if (!accomplishResultArray[0].success) {
@@ -954,19 +912,6 @@ export class CapabilitiesManager extends BaseEntity {
     private async executeAccomplishPlugin(inputs: Map<string, InputValue>, trace_id: string): Promise<PluginOutput[]> {
         const source_component = "CapabilitiesManager.executeAccomplishPlugin";
         try {            
-
-
-            const accomplishInputs : Map<string, InputValue> = new Map(inputs); // Start with all provided inputs
-
-            // Add available plugins to the inputs for ACCOMPLISH
-            const availablePlugins = await this._getAvailablePluginManifests();
-            accomplishInputs.set('availablePlugins', {
-                inputName: 'availablePlugins',
-                value: availablePlugins,
-                valueType: PluginParameterType.ARRAY,
-                args: {}
-            });
-
             const accomplishPluginManifest = await this.pluginRegistry.fetchOneByVerb('ACCOMPLISH');
             if (!accomplishPluginManifest) {
                 throw generateStructuredError({
@@ -997,7 +942,7 @@ export class CapabilitiesManager extends BaseEntity {
                     source_component
                 });
             }
-            const result = await this.pluginExecutor.execute(effectiveManifest, accomplishInputs, pluginRootPath, trace_id);
+            const result = await this.pluginExecutor.execute(effectiveManifest, inputs, pluginRootPath, trace_id);
             if (!Array.isArray(result)) {
                 return [result];
             }

@@ -48,34 +48,6 @@ export class PluginExecutor {
         const source_component = "PluginExecutor.execute";
         console.log(`[${trace_id}] ${source_component}: Executing plugin ${pluginToExecute.id} v${pluginToExecute.version} (${pluginToExecute.verb}) at ${actualPluginRootPath}`);
 
-        // Validate and standardize inputs before execution
-        const validationResult = await validateAndStandardizeInputs(pluginToExecute, inputsForPlugin);
-        if (!validationResult.success) {
-            const errorDetails = validationResult.validationType ? 
-                `${validationResult.error} (Type: ${validationResult.validationType})` : 
-                validationResult.error;
-
-            // Convert validation errors to 400 status with detailed error structure
-            throw generateStructuredError({
-                error_code: GlobalErrorCodes.INVALID_INPUT,
-                severity: ErrorSeverity.VALIDATION,
-                message: errorDetails || 'Input validation failed',
-                contextual_info: {
-                    plugin_id: pluginToExecute.id,
-                    plugin_verb: pluginToExecute.verb,
-                    version: pluginToExecute.version,
-                    validation_type: validationResult.validationType,
-                    provided_inputs: Array.from(inputsForPlugin.keys())
-                },
-                http_status: 400,
-                trace_id_param: trace_id,
-                source_component
-            });
-        }
-
-        // Use validated inputs for execution
-        inputsForPlugin = validationResult.inputs!;
-
         try {
             const permissionErrors = validatePluginPermissions(pluginToExecute);
             if (permissionErrors.length > 0) {
@@ -300,7 +272,7 @@ export class PluginExecutor {
 
             const inputsObject: { [key: string]: any } = {};
             inputValues.forEach((value, key) => {
-                inputsObject[key] = value.value;
+                inputsObject[key] = value;
             });
             const inputsJsonString = JSON.stringify(inputsObject);
 

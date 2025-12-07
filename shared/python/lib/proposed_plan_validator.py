@@ -28,61 +28,6 @@ class AccomplishError(Exception):
         super().__init__(message)
         self.error_type = error_type
 
-# Plan step schema for validation
-PLAN_STEP_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "id": {"type": "string", "format": "uuid", "description": "Unique step ID (UUID)"},
-        "actionVerb": {"type": "string","description": "The action to be performed in this step. It may be one of the plugin actionVerbs or a new actionVerb for a new type of task."},
-        "description": {"type": "string","description": "A thorough description of the task to be performed in this step so that an agent or LLM can execute without needing external context beyond the inputs and output specification."},
-        "inputs": {
-            "type": "object",
-            "patternProperties": {
-                "^[a-zA-Z][a-zA-Z0-9_]*$": {
-                    "type": "object",
-                    "properties": {
-                        "value": {"type": "string","description": "Constant string value for this input"},
-                        "valueType": {"type": "string", "enum": ["string", "number", "boolean", "array", "object", "plan", "plugin", "any"],"description": "The natural type of the Constant input value"},
-                        "outputName": {"type": "string","description": "Reference to an output from a previous step at the same level or higher"},
-                        "sourceStep": {"type": "string", "format": "uuid", "description": "The step ID (UUID) that produces the output for this input. Use '0' to refer to an input from the parent step."}, 
-                        "args": {"type": "object","description": "Additional arguments for the input"}
-                    },
-                    "oneOf": [
-                        {"required": ["value", "valueType"]},
-                        {"required": ["outputName", "sourceStep"]}
-                    ],
-                    "additionalProperties": False,
-                }
-            },
-            "additionalProperties": False,
-        },
-        "outputs": {
-            "type": "object",
-            "patternProperties": {
-                "^[a-zA-Z][a-zA-Z0-9_]*$": {
-                    "type": "object",
-                    "properties": {
-                        "description": {"type": "string","description": "Thorough description of the expected output"},
-                        "type": {"type": "string", "enum": ["string", "number", "boolean", "array", "object", "plan", "plugin", "any", "list", "list[string]", "list[number]", "list[boolean]", "list[object]", "list[any]"],"description": "The type of the output"},
-                        "isDeliverable": {"type": "boolean","description": "Whether this output is a final deliverable for the user"},
-                        "filename": {"type": "string","description": "User-friendly filename for when the output is a deliverable"}
-                    },
-                    "required": ["description", "type"],
-                    "additionalProperties": False
-                }
-            },
-            "additionalProperties": False,
-        },
-        "recommendedRole": {"type": "string", "description": "Suggested role type for the agent executing this step. Allowed values are Coordinator, Researcher, Coder, Creative, Critic, Executor, and Domain Expert"}
-    },
-    "required": ["id", "actionVerb", "inputs", "outputs"],
-    "additionalProperties": False
-}
-
-PLAN_ARRAY_SCHEMA = {
-    "type": "array",
-    "items": PLAN_STEP_SCHEMA,
-}
 
 class ErrorType(Enum):
     """Structured error types for better error handling"""
@@ -604,24 +549,13 @@ class PlanValidator:
         # Validate required inputs (only for known plugins)
         if plugin_def:
             for req_input in plugin_def.get('inputDefinitions', []):
-                if req_input.get('required'):
-                    # Check if the required input is present by its canonical name or any of its aliases
-                    input_found = False
-                    if req_input['name'] in inputs:
-                        input_found = True
-                    elif req_input.get('aliases'):
-                        for alias in req_input['aliases']:
-                            if alias in inputs:
-                                input_found = True
-                                break
-                    
-                    if not input_found:
-                        errors.append(StructuredError(
-                            ErrorType.MISSING_INPUT,
-                            f"Missing required input '{req_input['name']}' (or its aliases: {', '.join(req_input['aliases']) if req_input.get('aliases') else 'None'}) for '{action_verb}'",
-                            step_id=step_id,
-                            input_name=req_input['name']
-                        ))
+                if req_input.get('required') and req_input.get('name') not in inputs:
+                    errors.append(StructuredError(
+                        ErrorType.MISSING_INPUT,
+                        f"Missing required input '{req_input['name']}' for '{action_verb}'",
+                        step_id=step_id,
+                        input_name=req_input['name']
+                    ))
 
         # Validate each input
         for input_name, input_def in inputs.items():
@@ -921,8 +855,7 @@ class PlanValidator:
                 "inputs": {
                     "foreach_results": {"outputName": "steps", "sourceStep": foreach_step_id},
                     "source_step_id_in_subplan": {"value": source_id, "valueType": "string"},
-                    "output_to_collect": {"value": output_name, "valueType": "string"},
-                    "stepIdsToRegroup": [source_id]
+                    "output_to_collect": {"value": output_name, "valueType": "string"}
                 },
                 "outputs": {
                     "result": {"description": f"Array of all '{output_name}' outputs.", "type": "array"}
@@ -945,8 +878,7 @@ class PlanValidator:
                         "inputs": {
                             "foreach_results": {"outputName": "steps", "sourceStep": foreach_step_id},
                             "source_step_id_in_subplan": {"value": final_step_id, "valueType": "string"},
-                            "output_to_collect": {"value": final_output_name, "valueType": "string"},
-                            "stepIdsToRegroup": [final_step_id]
+                            "output_to_collect": {"value": final_output_name, "valueType": "string"}
                         },
                         "outputs": {
                             "result": {"description": f"Array of all '{final_output_name}' outputs.", "type": "array"}

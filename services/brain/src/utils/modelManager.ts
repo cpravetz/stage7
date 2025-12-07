@@ -459,6 +459,27 @@ export class ModelManager {
     }
 
     /**
+     * Get an active request by ID
+     * @param requestId Request ID
+     * @returns The active request or undefined
+     */
+    public getActiveRequest(requestId: string): { modelName: string; conversationType: LLMConversationType; startTime: number } | undefined {
+        return this.activeRequests.get(requestId);
+    }
+
+    /**
+     * Track a logic failure for a model
+     * @param modelName Model name
+     * @param conversationType Conversation type
+     */
+    public trackLogicFailure(modelName: string, conversationType: LLMConversationType): void {
+        console.log(`[ModelManager] Tracking logic failure for model ${modelName}, conversation type ${conversationType}`);
+        this.performanceTracker.trackLogicFailure(modelName, conversationType);
+        // Clear cache so next selection considers the updated logic failure count
+        this.clearModelSelectionCache();
+    }
+
+    /**
      * Clear the model selection cache
      * This should be called when a model is blacklisted or when model availability changes
      */

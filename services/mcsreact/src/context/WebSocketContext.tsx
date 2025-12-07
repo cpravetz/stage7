@@ -206,6 +206,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           let statsToSet = { ...data.content };
           if (statsToSet.agentStatistics && statsToSet.agentStatistics._type === 'Map') {
             statsToSet.agentStatistics = MapSerializer.transformFromSerialization(statsToSet.agentStatistics);
+            console.log('statsToSet Deserialized');
           }
           
           // Only update if data actually changed

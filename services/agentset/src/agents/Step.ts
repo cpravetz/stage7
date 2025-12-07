@@ -27,7 +27,7 @@ export enum StepStatus {
 
 export interface StepModification {
     description?: string;
-    inputValues?: Map<string, InputValue>; // For complete replacement of inputs
+    inputValues: Map<string, InputValue>; // For complete replacement of inputs
     updateInputs?: Map<string, InputValue>; // For merging/updating specific inputs
     status?: StepStatus;
     actionVerb?: string;
@@ -44,6 +44,7 @@ interface ErrorContext {
 }
 
 export class Step {
+    readonly parentStepId?: string;
     readonly id: string;
     readonly templateId?: string;
     readonly scope_id?: string;
@@ -277,6 +278,7 @@ export class Step {
     }
 
     constructor(params: {
+        parentStepId?: string,
         id?: string,
         templateId?: string,
         scope_id?: string,
@@ -309,6 +311,7 @@ export class Step {
             throw new Error(`[Step constructor] actionVerb is required and must be a non-empty string. Provided: ${JSON.stringify(params.actionVerb)}`);
         }
         
+        this.parentStepId = params.parentStepId;
         this.id = params.id || uuidv4();
         this.templateId = params.templateId;
         this.scope_id = params.scope_id;
@@ -419,6 +422,9 @@ export class Step {
 
         // Phase 2: Resolve dependencies and overwrite literals if necessary.
         for (const dep of this.dependencies) {
+            if (dep.sourceStepId === '0') {
+                continue; // Skip parent-provided dependencies in this loop; they are injected, not resolved from another step's output.
+            }
             try {
                 if (!dep.sourceStepId) {
                     console.warn(`[Step ${this.id}] Dependency '${dep.inputName}' has no sourceStepId. Skipping resolution.`);
@@ -694,7 +700,27 @@ export class Step {
     }
 
     async areDependenciesSatisfied(allSteps: Step[]): Promise<boolean> {
+        let parentChecked = false;
+        let parentSatisfied = false;
+
         for (const dep of this.dependencies) {
+            if (dep.sourceStepId === '0') {
+                if (!parentChecked) {
+                    const parentStep = this.parentStepId ? allSteps.find(s => s.id === this.parentStepId) : undefined;
+                    if (!parentStep) {
+                        console.log(`[areDependenciesSatisfied] Step ${this.id} dependency on parent is not satisfied: parent step not found.`);
+                        return false; // Parent not found
+                    }
+                    parentSatisfied = await parentStep.areDependenciesSatisfied(allSteps);
+                    parentChecked = true;
+                }
+                if (!parentSatisfied) {
+                    console.log(`[areDependenciesSatisfied] Step ${this.id} dependency on parent is not satisfied: parent is not ready.`);
+                    return false;
+                }
+                continue; // This dependency is conceptually satisfied if parent is ready.
+            }
+
             if (!dep.sourceStepId) {
                 console.warn(`[areDependenciesSatisfied] Step ${this.id} dependency '${dep.inputName}' has no sourceStepId. Skipping check.`);
                 continue; // Skip dependencies without a sourceStepId
@@ -734,7 +760,26 @@ export class Step {
     }
 
     async areDependenciesPermanentlyUnsatisfied(allSteps: Step[]): Promise<boolean> {
+        let parentChecked = false;
+        let parentPermanentlyUnsatisfied = false;
+
         for (const dep of this.dependencies) {
+            if (dep.sourceStepId === '0') {
+                if (!parentChecked) {
+                    const parentStep = this.parentStepId ? allSteps.find(s => s.id === this.parentStepId) : undefined;
+                    // If parent doesn't exist, we can't determine its status, so we don't consider this permanently unsatisfied yet.
+                    if (parentStep) { 
+                        parentPermanentlyUnsatisfied = await parentStep.areDependenciesPermanentlyUnsatisfied(allSteps);
+                    }
+                    parentChecked = true;
+                }
+                if (parentPermanentlyUnsatisfied) {
+                    console.warn(`[areDependenciesPermanentlyUnsatisfied] Step ${this.id} is permanently unsatisfied because its parent ${this.parentStepId} is.`);
+                    return true;
+                }
+                continue;
+            }
+
             if (!dep.sourceStepId) {
                 continue; // Skip dependencies without a sourceStepId, not permanently unsatisfied
             }
@@ -743,28 +788,22 @@ export class Step {
 
             // If sourceStep not found locally, try to get it from crossAgentResolver
             if (!sourceStep) {
-                console.log(`[areDependenciesPermanentlyUnsatisfied] Source step ${dep.sourceStepId} not found locally for dependency '${dep.inputName}'. Attempting remote resolution.`);
+                //console.log(`[areDependenciesPermanentlyUnsatisfied] Source step ${dep.sourceStepId} not found locally for dependency '${dep.inputName}'. Attempting remote resolution.`);
                 sourceStep = await this.crossAgentResolver.getStepDetails(dep.sourceStepId);
                 if (!sourceStep) {
-                    // If still not found, or crossAgentResolver returns null, it's permanently unsatisfied
-                    console.warn(`[areDependenciesPermanentlyUnsatisfied] Step ${this.id} dependency on ${dep.sourceStepId} (output: ${dep.outputName}) is permanently unsatisfied: source step not found locally or remotely.`);
-                    return true;
+                    //console.debug(`[areDependenciesPermanentlyUnsatisfied] Source step ${dep.sourceStepId} not found locally or remotely for dependency '${dep.inputName}'. This might be a timing issue - NOT marking as permanently unsatisfied.`);
+                    continue; // Don't mark as permanently unsatisfied, give it more time
                 }
             }
 
-            const isTerminated = sourceStep.status === StepStatus.COMPLETED ||
-                                 sourceStep.status === StepStatus.ERROR ||
-                                 sourceStep.status === StepStatus.CANCELLED;
-            
-            // If the source step is terminated, and the dependency is not satisfied, it's permanently unsatisfied.
-            if (isTerminated) {
-                // If the source step is an error or cancelled, it's permanently unsatisfied regardless of output presence.
-                if (sourceStep.status === StepStatus.ERROR || sourceStep.status === StepStatus.CANCELLED) {
-                    console.warn(`[areDependenciesPermanentlyUnsatisfied] Step ${this.id} dependency on ${dep.sourceStepId} (output: ${dep.outputName}) is permanently unsatisfied: source step terminated with status ${sourceStep.status}.`);
-                    return true;
-                }
-                
-                // Otherwise, check if the required output exists for a completed step.
+            // Check if the source step is in a terminal error state
+            if (sourceStep.status === StepStatus.ERROR || sourceStep.status === StepStatus.CANCELLED) {
+                console.warn(`[areDependenciesPermanentlyUnsatisfied] Step ${this.id} dependency on ${dep.sourceStepId} (output: ${dep.outputName}) is permanently unsatisfied: source step terminated with status ${sourceStep.status}.`);
+                return true;
+            }
+
+            // If the source step is COMPLETED, check if the required output exists
+            if (sourceStep.status === StepStatus.COMPLETED) {
                 // If dep.inputName starts with '__', it's a signal, no output check needed.
                 if (dep.inputName.startsWith('__')) {
                     continue; // Signal dependency, considered satisfied if sourceStep is completed
@@ -776,6 +815,9 @@ export class Step {
                     return true;
                 }
             }
+
+            // If the source step is PENDING, RUNNING, WAITING, or REPLACED, the dependency is NOT permanently unsatisfied
+            // It's just not satisfied YET - give it more time
         }
         return false; // No permanently unsatisfied dependencies found
     }
@@ -811,6 +853,7 @@ export class Step {
 
     public toJSON() {
         return {
+            parentStepId: this.parentStepId,
             id: this.id,
             templateId: this.templateId,
             scope_id: this.scope_id,
@@ -1529,7 +1572,7 @@ export function createFromPlan(plan: ActionVerbTask[], persistenceManager: Agent
         if (task.inputs) {
             for (const key in task.inputs) {
                 const input = task.inputs[key];
-                if (input.sourceStep && !planTaskIds.has(input.sourceStep)) {
+                if (input.sourceStep && input.sourceStep !== '0' && !planTaskIds.has(input.sourceStep)) {
                     brokenReferences.push(
                         `[createFromPlan] Task "${task.id}": input "${key}" references ` +
                         `non-existent step "${input.sourceStep}"`
@@ -1555,7 +1598,7 @@ export function createFromPlan(plan: ActionVerbTask[], persistenceManager: Agent
         throw new Error(errorMsg);
     }
 
-    // Pass 1: Create all steps and wire up explicit sourceStep dependencies
+    // Pass 1: Create all steps and wire up dependencies
     plan.forEach(task => {
         if (!task.id || typeof task.id !== 'string') {
             console.warn(`[createFromPlan] Warning: Task in plan is missing a valid 'id'. Assigning a new one. Task: ${JSON.stringify(task)}`);
@@ -1563,6 +1606,7 @@ export function createFromPlan(plan: ActionVerbTask[], persistenceManager: Agent
         }
 
         const newStep = new Step({
+            parentStepId: parentStep?.id,
             id: task.id,
             templateId: task.id,
             scope_id: parentStep?.scope_id,
@@ -1577,31 +1621,83 @@ export function createFromPlan(plan: ActionVerbTask[], persistenceManager: Agent
             crossAgentResolver: crossAgentResolver,
         });
 
-        // Wire up explicit dependencies from inputs with sourceStep
+        // Wire up dependencies and values from the plan task
         if (task.inputs) {
             for (const key in task.inputs) {
                 const input = task.inputs[key];
-                if (input.sourceStep) {
+
+                if (input.sourceStep === '0') {
+                    if (parentStep) {
+                        // This input refers to the parent step's context.
+                        // Look for the value in the parent's resolved inputs first.
+                        const parentInputValue = parentStep.inputValues.get(input.outputName);
+                        if (parentInputValue && parentInputValue.value !== undefined) {
+                            newStep.inputValues.set(key, parentInputValue);
+                            continue;
+                        }
+
+                        // If not found, look in the parent's references.
+                        const parentInputRef = parentStep.inputReferences.get(input.outputName);
+                        if (parentInputRef) {
+                            // The new step now depends on whatever the parent depended on.
+                            const dep: StepDependency = {
+                                sourceStepId: parentInputRef.sourceId || '0',
+                                outputName: parentInputRef.outputName!,
+                                inputName: key
+                            };
+                            newStep.dependencies.push(dep);
+                            newStep.inputReferences.set(key, { ...parentInputRef, inputName: key });
+                        } else {
+                            // This case handles implicit parent outputs (e.g., 'item' from FOREACH)
+                            const dep: StepDependency = { sourceStepId: '0', outputName: input.outputName!, inputName: key };
+                            newStep.dependencies.push(dep);
+                            newStep.inputReferences.set(key, { inputName: key, outputName: input.outputName, sourceId: '0', valueType: input.valueType, args: input.args });
+                        }
+                    } else {
+                        // No parent step exists, this is a broken reference. Validation should catch this.
+                        const dep: StepDependency = { sourceStepId: '0', outputName: input.outputName!, inputName: key };
+                        newStep.dependencies.push(dep);
+                    }
+                } else if (input.sourceStep) {
+                    // This is a standard dependency on another step within the current plan.
                     const dep: StepDependency = {
                         sourceStepId: input.sourceStep,
                         outputName: input.outputName!,
                         inputName: key
                     };
                     newStep.dependencies.push(dep);
-                    newStep.inputReferences.set(key, { 
+                    newStep.inputReferences.set(key, {
                         inputName: key,
-                        outputName: input.outputName, 
+                        outputName: input.outputName,
                         sourceId: input.sourceStep,
                         valueType: input.valueType,
                         args: input.args
                     });
                 } else if (input.value !== undefined) {
-                    newStep.inputReferences.set(key, { ...input, sourceId: parentStep ? parentStep.id : '0' });
+                    // This is a static value.
+                    newStep.inputValues.set(key, {
+                        inputName: key,
+                        value: input.value,
+                        valueType: input.valueType,
+                        args: input.args
+                    });
                 }
             }
         }
         stepMap.set(task.id, newStep);
         newSteps.push(newStep);
+    });
+
+    // Pass 2: Second pass for wiring dependencies that might not have been available in the first pass
+    // This is crucial if a step references another step later in the plan array.
+    newSteps.forEach(step => {
+        for (const dep of step.dependencies) {
+            if (!stepMap.has(dep.sourceStepId) && dep.sourceStepId !== '0') {
+                 console.warn(`[createFromPlan] Second Pass: Could not find source step ${dep.sourceStepId} for dependency ${dep.inputName} in step ${step.id}. This might be an inter-agent dependency.`);
+            }
+        }
+
+
     });
 
     // Pass 3: Register steps with agent

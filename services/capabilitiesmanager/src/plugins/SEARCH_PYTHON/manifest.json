@@ -9,7 +9,7 @@
       "required": true,
       "type": "string",
       "description": "The term to search for using intelligent provider fallback",
-      "aliases": ["query","keywords","terms","q"]
+            "aliases": ["query","keywords","terms","q", "search_query"]
     }
   ],
   "outputDefinitions": [

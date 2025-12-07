@@ -24,7 +24,7 @@ export class ORNvidiaModel extends BaseModel {
             }],
             [LLMConversationType.TextToJSON, {
                 costScore: 100,
-                accuracyScore: 92,
+                accuracyScore: 62,
                 creativityScore: 80,
                 speedScore: 90
             }]

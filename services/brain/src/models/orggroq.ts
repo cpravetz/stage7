@@ -6,7 +6,7 @@ export class ORGROQModel extends BaseModel {
         const scoresByConversationType = new Map<LLMConversationType, ModelScore>([
             [LLMConversationType.TextToText, {
                 costScore: 100,
-                accuracyScore: 88,
+                accuracyScore: 58,
                 creativityScore: 85,
                 speedScore: 90
             }],
@@ -24,8 +24,8 @@ export class ORGROQModel extends BaseModel {
             }],
             [LLMConversationType.TextToJSON, {
                 costScore: 100,
-                accuracyScore: 92,
-                creativityScore: 80,
+                accuracyScore: 52,
+                creativityScore: 70,
                 speedScore: 90
             }]
         ]);
