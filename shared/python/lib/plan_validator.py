@@ -211,7 +211,7 @@ class PlanValidator:
             logger.info(f"Validation attempt {attempt + 1}/{self.max_retries}")
             
             # Validate and transform using the index
-            result = self._validate_and_transform(plan, index, tracker)
+            result = self._validate_and_transform(plan, index, tracker, inputs)
             
             if result.is_valid:
                 logger.info(f"Plan successfully validated after {attempt + 1} attempts")
@@ -230,7 +230,7 @@ class PlanValidator:
                 logger.warning(f"No improvement from transformations. Attempting LLM repair.")
                 try:
                     repaired_plan = self._repair_plan_with_llm(
-                        plan, result.get_error_messages(), goal, inputs
+                        plan, result.errors, goal, inputs
                     )
                     
                     # Validate that repair actually improved things
@@ -259,7 +259,8 @@ class PlanValidator:
 
     def _validate_and_transform(self, plan: List[Dict[str, Any]], 
                                index: PlanIndex,
-                               tracker: TransformationTracker) -> ValidationResult:
+                               tracker: TransformationTracker,
+                               accomplish_inputs: Dict[str, Any]) -> ValidationResult:
         """
         Single validation and transformation pass using the index.
         """
@@ -270,7 +271,8 @@ class PlanValidator:
             plan, 
             scope_id="root",
             index=index,
-            tracker=tracker
+            tracker=tracker,
+            accomplish_inputs=accomplish_inputs
         )
         
         result.plan = transformed_plan
@@ -437,6 +439,7 @@ class PlanValidator:
                                   scope_id: str,
                                   index: PlanIndex,
                                   tracker: TransformationTracker,
+                                  accomplish_inputs: Dict[str, Any]
                                   ) -> Tuple[List[Dict[str, Any]], List[StructuredError], List[str], List[str]]:
         """
         Recursive validation and transformation with convergence guarantees.
@@ -466,7 +469,7 @@ class PlanValidator:
             )
             
             step_errors, step_wrappable = self._validate_step(
-                step, available_outputs, index.steps, index.parents
+                step, available_outputs, index.steps, index.parents, accomplish_inputs
             )
             errors.extend(step_errors)
             wrappable_errors.extend(step_wrappable)
@@ -515,7 +518,8 @@ class PlanValidator:
                         sub_plan,
                         scope_id=sub_scope_id,
                         index=index,
-                        tracker=tracker
+                        tracker=tracker,
+                        accomplish_inputs=accomplish_inputs
                     )
                 
                 errors.extend(sub_errors)
@@ -563,7 +567,8 @@ class PlanValidator:
     def _validate_step(self, step: Dict[str, Any], 
                       available_outputs: Dict[str, Dict[str, str]],
                       all_steps: Dict[str, Any], 
-                      parents: Dict[str, str]) -> Tuple[List[StructuredError], List[Dict[str, Any]]]:
+                      parents: Dict[str, str],
+                      accomplish_inputs: Dict[str, Any]) -> Tuple[List[StructuredError], List[Dict[str, Any]]]:
         """
         Validates a single step with structured error reporting.
         """
@@ -586,11 +591,10 @@ class PlanValidator:
         # For novel verbs, require description
         if is_novel_verb:
             if not step.get('description') or not isinstance(step.get('description'), str) or step.get('description').strip() == '':
-                errors.append(StructuredError(
-                    ErrorType.MISSING_FIELD,
-                    f"Novel actionVerb '{action_verb}' requires a non-empty 'description'",
-                    step_id=step_id
-                ))
+                # Auto-generate a description instead of throwing an error
+                generated_description = f"Execute the action '{action_verb}' with the provided inputs to achieve the step's goal."
+                step['description'] = generated_description
+                logger.info(f"Auto-generated missing description for novel verb '{action_verb}' in step {step_id}")
 
         inputs = step.get('inputs', {})
         if not isinstance(inputs, dict):
@@ -650,14 +654,8 @@ class PlanValidator:
 
                 if source_step_id == '0':
                     parent_id = parents.get(step_id)
-                    if not parent_id:
-                        errors.append(StructuredError(
-                            ErrorType.INVALID_REFERENCE,
-                            f"Input '{input_name}' references parent ('0'), but step has no parent",
-                            step_id=step_id,
-                            input_name=input_name
-                        ))
-                    else:
+                    if parent_id:
+                        # This is a sub-plan (e.g., FOREACH), handle as before
                         parent_outputs = available_outputs.get(parent_id, {})
                         if output_name not in parent_outputs:
                             errors.append(StructuredError(
@@ -678,6 +676,18 @@ class PlanValidator:
                                 errors.append(type_error)
                             if wrappable:
                                 wrappable_errors.append(wrappable)
+                    else:
+                        # This is a top-level step referencing the main inputs
+                        if output_name not in accomplish_inputs:
+                            errors.append(StructuredError(
+                                ErrorType.INVALID_REFERENCE,
+                                f"Input '{input_name}' references parent output '{output_name}', which is not a valid parent input.",
+                                step_id=step_id,
+                                input_name=input_name,
+                                output_name=output_name
+                            ))
+                        # If the input exists, we assume it's valid. A type check could be added here if needed.
+
                                 
                 elif source_step_id not in available_outputs:
                     errors.append(StructuredError(
@@ -813,7 +823,7 @@ class PlanValidator:
             types_compatible = (
                 dest_input_type == source_output_type or
                 dest_input_type == 'any' or source_output_type == 'any' or
-                (dest_input_type == 'string' and source_output_type in ['number', 'boolean']) or
+                (dest_input_type == 'string' and source_output_type in ['number', 'boolean', 'object']) or
                 (dest_input_type in ['array', 'list', 'list[string]', 'list[number]', 'list[boolean]', 'list[object]', 'list[any]'] 
                  and source_output_type in ['array', 'list', 'list[string]', 'list[number]', 'list[boolean]', 'list[object]', 'list[any]'])
             )
@@ -1177,18 +1187,17 @@ class PlanValidator:
                 filename = output_def.get('filename')
                 description = output_def.get('description')
 
+                if is_deliverable and (not filename or not isinstance(filename, str)):
+                    output_type = output_def.get('type', 'txt')
+                    extension = 'json' if output_type in ['object', 'array'] else 'txt'
+                    generated_filename = f"{step_id}_{output_name}.{extension}"
+                    output_def['filename'] = generated_filename
+                    logger.info(f"Auto-generated missing filename '{generated_filename}' for deliverable output '{output_name}' in step {step_id}")
+
                 if not description:
                     errors.append(StructuredError(
                         ErrorType.MISSING_FIELD,
                         f"Output '{output_name}' requires 'description'",
-                        step_id=step_id,
-                        output_name=output_name
-                    ))
-
-                if is_deliverable and not filename:
-                    errors.append(StructuredError(
-                        ErrorType.MISSING_FIELD,
-                        f"Output '{output_name}' marked deliverable but missing 'filename'",
                         step_id=step_id,
                         output_name=output_name
                     ))
@@ -1251,45 +1260,180 @@ class PlanValidator:
         except ValueError:
             return False
 
+    def _get_error_signature(self, error: StructuredError, all_steps: Dict[str, Any]) -> str:
+        """Generates a specific signature for an error to group similar errors."""
+        base_signature = error.error_type.name
+
+        if error.error_type == ErrorType.TYPE_MISMATCH and error.step_id and error.source_step_id:
+            try:
+                dest_step = all_steps.get(error.step_id)
+                source_step = all_steps.get(error.source_step_id)
+                dest_input_name = error.input_name
+                source_output_name = error.output_name
+
+                if not dest_step or not source_step or not dest_input_name or not source_output_name:
+                    return base_signature
+
+                # Get source type
+                source_output_def = source_step.get('outputs', {}).get(source_output_name, {})
+                source_type = source_output_def.get('type', 'any')
+
+                # Get destination type
+                dest_plugin_def = self.plugin_map.get(dest_step.get('actionVerb', '').upper())
+                dest_type = 'any'
+                if dest_plugin_def:
+                    for in_def in dest_plugin_def.get('inputDefinitions', []):
+                        if in_def.get('name') == dest_input_name:
+                            dest_type = in_def.get('type', 'any')
+                            break
+                
+                return f"{base_signature}:{source_type}->{dest_type}"
+            except Exception:
+                return base_signature # Fallback
+
+        elif error.error_type == ErrorType.MISSING_INPUT and error.step_id and error.input_name:
+            step = all_steps.get(error.step_id)
+            if step:
+                action_verb = step.get('actionVerb', 'UNKNOWN_VERB')
+                return f"{base_signature}:{action_verb.upper()}.{error.input_name}"
+
+        return base_signature
+
     def _repair_plan_with_llm(self, plan: List[Dict[str, Any]], 
-                             errors: List[str], 
+                             errors: List[StructuredError], 
                              goal: str,
                              inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Ask LLM to repair the plan."""
-        logger.info(f"Attempting LLM repair with {len(errors)} errors")
+        """
+        Ask LLM to repair the plan by sending a batch of focused requests for each error type.
+        This version includes a sanity check and uses specific error signatures for more targeted repairs.
+        """
+        logger.info(f"Attempting LLM repair with {len(errors)} structured errors using a signature-based, batched approach.")
         
-        plan_json = json.dumps(plan, indent=2)
-        errors_text = '\n'.join([f"- {error}" for error in errors])
-        
-        prompt = f"""The following JSON plan has validation errors. Fix them while preserving intent.
+        # Build index once for signature generation
+        index = self._build_plan_index(plan)
+        all_steps = index.steps
 
-ERRORS:
-{errors_text}
+        # Group errors by specific signature
+        grouped_errors: Dict[str, List[str]] = {}
+        for error in errors:
+            signature = self._get_error_signature(error, all_steps)
+            if signature not in grouped_errors:
+                grouped_errors[signature] = []
+            grouped_errors[signature].append(error.to_string())
 
-PLAN:
-{plan_json}
+        error_priority = [
+            "CIRCULAR_DEPENDENCY", "INVALID_REFERENCE",
+            "MISSING_INPUT:REFLECT.question",
+            "TYPE_MISMATCH:array->string", "TYPE_MISMATCH:list->string",
+            "TYPE_MISMATCH" # Generic fallback
+        ]
 
-Return ONLY the corrected JSON plan as a valid JSON array. No explanations or markdown.
+        current_plan = copy.deepcopy(plan)
+        initial_error_count = len(errors)
+
+        processed_signatures = set()
+
+        # Function to process a signature
+        def process_signature(signature):
+            nonlocal current_plan
+            if signature in grouped_errors and signature not in processed_signatures:
+                error_messages = grouped_errors[signature]
+                logger.info(f"--- LLM Repair Cycle: Targeting signature '{signature}' ({len(error_messages)} issues) ---")
+
+                # --- Custom Prompt Logic ---
+                if signature in ["TYPE_MISMATCH:array->string", "TYPE_MISMATCH:list->string"]:
+                    specific_instructions = """This error commonly occurs when an output that is a list or array is passed to an input that expects a single item (like a string).
+The standard solution is to wrap the receiving step in a `FOREACH` loop.
+**Action:** For each error listed, please modify the plan to wrap the consumer step in a `FOREACH` block to correctly process the array input. Do not modify the producing step."""
+                elif signature.startswith("MISSING_INPUT:"):
+                    specific_instructions = "This error indicates a required input is missing. Please add the missing input field to the specified step, providing a valid value or reference."
+                else:
+                    specific_instructions = "Please fix the errors as described. Pay close attention to step IDs and input/output names."
+
+                prompt = f"""A JSON plan designed to accomplish a goal has validation issues. Your task is to act as a precise repair tool. You must correct ONLY the specific errors listed under the signature '{signature}'.
+
+**Goal:** {goal}
+
+**CRITICAL INSTRUCTIONS:**
+1.  **DO NOT** add or remove any steps from the plan unless the fix specifically requires it (e.g., adding a FOREACH wrapper).
+2.  **DO NOT** invent new `actionVerb`s. Only use existing ones from the plan.
+3.  **ONLY** modify the fields necessary to fix the specified errors. Keep all other parts of the plan identical.
+4.  If fixing an error requires changing a `sourceStep` or `outputName`, ensure the new reference is valid within the plan's context.
+
+**Specific Guidance for this Error Type:**
+{specific_instructions}
+
+**Errors to Fix for signature `{signature}`:**
+- {chr(10).join("- " + msg for msg in error_messages)}
+
+**Current Plan (contains the errors listed above):**
+```json
+{json.dumps(current_plan, indent=2)}
+```
+
+Return ONLY the corrected JSON plan as a valid JSON array. Do not include any explanations, comments, or surrounding markdown.
 """
+                
+                current_plan = self._call_llm_for_repair(prompt, inputs, current_plan, signature)
+                processed_signatures.add(signature)
 
+        # Process prioritized errors first
+        for signature in error_priority:
+            # Handle partial matches (like TYPE_MISMATCH)
+            for s_key in list(grouped_errors.keys()):
+                if s_key.startswith(signature):
+                    process_signature(s_key)
+
+        # Process any remaining errors
+        for signature in list(grouped_errors.keys()):
+            if signature not in processed_signatures:
+                process_signature(signature)
+        
+        final_error_count = len(self._quick_validation_check(current_plan, self._build_plan_index(current_plan)).errors)
+        logger.info(f"LLM repair process finished. Initial errors: {initial_error_count}, Final errors: {final_error_count}.")
+        return current_plan
+
+    def _call_llm_for_repair(self, prompt: str, inputs: Dict[str, Any], current_plan: List[Dict[str, Any]], signature: str) -> List[Dict[str, Any]]:
+        """Helper function to call the LLM and handle response and validation."""
         if not self.brain_call:
             raise AccomplishError("Brain call not available", "brain_error")
 
-        response_str, request_id = self.brain_call(prompt, inputs, "json")
-        
         try:
+            temp_index = self._build_plan_index(current_plan)
+            validation_before = self._quick_validation_check(current_plan, temp_index)
+
+            response_tuple = self.brain_call(prompt, inputs, "json")
+            if not isinstance(response_tuple, tuple) or len(response_tuple) != 2:
+                logger.error(f"LLM call for signature '{signature}' returned an unexpected format: {response_tuple}. Skipping this batch.")
+                return current_plan
+                
+            response_str, request_id = response_tuple
             repaired_data = json.loads(response_str)
-        except json.JSONDecodeError as e:
-            logger.error(f"LLM repair returned invalid JSON: {e}")
-            raise AccomplishError(f"LLM repair failed: {e}", "repair_error")
 
-        if not isinstance(repaired_data, list):
-            if isinstance(repaired_data, dict) and 'steps' in repaired_data:
-                repaired_data = repaired_data['steps']
-            else:
-                raise AccomplishError("LLM repair returned invalid format", "repair_error")
+            if not isinstance(repaired_data, list):
+                if isinstance(repaired_data, dict) and 'plan' in repaired_data and isinstance(repaired_data['plan'], list):
+                    repaired_data = repaired_data['plan']
+                elif isinstance(repaired_data, dict) and 'steps' in repaired_data and isinstance(repaired_data['steps'], list):
+                    repaired_data = repaired_data['steps']
+                else:
+                    raise AccomplishError(f"LLM repair for {signature} returned a dictionary without a 'plan' or 'steps' list.", "repair_error")
 
-        if repaired_data == plan:
-            logger.warning("LLM repair made no changes")
+            temp_index_after = self._build_plan_index(repaired_data)
+            validation_after = self._quick_validation_check(repaired_data, temp_index_after)
             
-        return repaired_data				
+            if len(validation_after.errors) < len(validation_before.errors):
+                logger.info(f"LLM repair for signature '{signature}' was ACCEPTED. Error count reduced from {len(validation_before.errors)} to {len(validation_after.errors)}.")
+                return repaired_data
+            else:
+                logger.warning(f"LLM repair for signature '{signature}' was REJECTED. It did not reduce the error count. Before: {len(validation_before.errors)}, After: {len(validation_after.errors)}. Reverting.")
+                return current_plan
+
+        except json.JSONDecodeError as e:
+            logger.error(f"LLM repair for signature '{signature}' returned invalid JSON: {e}. Skipping this batch.")
+            return current_plan
+        except AccomplishError as e:
+            logger.error(f"Error processing LLM response for signature '{signature}': {e}. Skipping this batch.")
+            return current_plan
+        except Exception as e:
+            logger.error(f"An unexpected error occurred during LLM repair for signature '{signature}': {e}. Skipping this batch.")
+            return current_plan

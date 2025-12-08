@@ -167,6 +167,8 @@ export class Agent extends BaseEntity {
         
         this.setAgentStatus(this.status, {eventType: 'agent_created', inputValues: MapSerializer.transformForSerialization(this.inputValues)});
 
+        this.updateStatus = this.updateStatus.bind(this);
+
         // Await RabbitMQ initialization before proceeding
         this._initializationPromise = this.initRabbitMQ().then(() => this.initializeAgent()).then(() => {
             this.say(`Agent ${this.id} initialized and commencing operations.`);

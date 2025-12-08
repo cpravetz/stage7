@@ -444,7 +444,7 @@ Error: {failed_error}
 Inputs: {failed_inputs_str}
 """
 
-        prompt = f"""You are a JSON-only reflection and planning assistant. Your task is to analyze the provided mission data and reflection question.
+        prompt = f"""You are a JSON-only reflection and planning assistant. Your primary task is to analyze the provided mission data and create a new plan if the mission has failed or is incomplete.
 
 MISSION ID: {mission_id}
 MISSION GOAL: {mission_goal}
@@ -456,10 +456,10 @@ PARENT STEP INPUTS: {json.dumps(inputs)}
 
 {failed_step_info}
 
-Your task is to reflect on the mission progress and determine the best course of action. Consider these options in order of preference:
+Your task is to analyze the mission's progress and determine the best course of action.
 
-1.  **Provide a Direct Answer:** If the reflection question can be answered directly with the given context and the mission is complete or no further action is needed, provide a JSON object with a single key "direct_answer".
-2.  **Create a Plan:** If the mission is NOT complete and requires multiple steps to achieve the remaining objectives, generate a new, concise plan to achieve the remaining objectives. The plan should be a JSON array of steps following the established schema.
+- **If the mission has failed or is incomplete, you MUST generate a new, concise plan to achieve the remaining objectives.**
+- **If and ONLY IF the mission is already successfully and fully completed, provide a direct answer.**
 
 **CRITICAL PLANNING PRINCIPLES (STRICTLY ENFORCED):**
 ---
@@ -472,8 +472,8 @@ Your task is to reflect on the mission progress and determine the best course of
         - **Role Assignment:** Assign `recommendedRole` at the deliverable level, not per individual step. All steps contributing to a single output (e.g., a research report) should share the same role.
 **RESPONSE FORMATS:**
 
--   **For a Direct Answer:** {{"direct_answer": "Your answer here"}}
--   **For a Plan:** A JSON array of steps defined with the schema below.
+-   **For an Incomplete/Failed Mission:** A JSON array of steps that form a new plan, following the schema below.
+-   **For a Completed Mission:** {{"direct_answer": "The mission is complete."}}
 
 Plan Schema
 {schema_json}
