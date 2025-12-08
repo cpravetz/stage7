@@ -34,4 +34,5 @@ export * from './security/pluginSigning';
 export * from './security/ServiceTokenManager';
 //export * from './security/authMiddleware';
 export * from './errorhandler';
+export * from './caching/RedisCache';
 // Add any other exports here

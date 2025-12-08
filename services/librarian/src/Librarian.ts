@@ -4,7 +4,7 @@ import bodyParser from 'body-parser';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
-import { storeInRedis, loadFromRedis, deleteFromRedis } from './utils/redisUtils';
+import { redisCache } from '@cktmcs/shared';
 import { storeInMongo, loadFromMongo, loadManyFromMongo, aggregateInMongo, deleteManyFromMongo } from './utils/mongoUtils';
 import { WorkProduct, Deliverable } from '@cktmcs/shared';
 import { BaseEntity, MapSerializer } from '@cktmcs/shared';
@@ -16,6 +16,7 @@ import { knowledgeStore } from './knowledgeStore';
 const LARGE_ASSET_PATH = process.env.LARGE_ASSET_PATH || '/usr/src/app/shared/librarian-assets';
 const ENGINEER_SERVICE_URL = process.env.ENGINEER_SERVICE_URL || 'http://engineer:5050';
 const CAPABILITIES_MANAGER_SERVICE_URL = process.env.CAPABILITIES_MANAGER_SERVICE_URL || 'http://capabilitiesmanager:5000';
+const MISSIONCONTROL_SERVICE_URL = process.env.MISSIONCONTROL_URL || 'http://missioncontrol:5030';
 
 
 dotenv.config();
@@ -362,9 +363,16 @@ export class Librarian extends BaseEntity {
             if (storageType === 'mongo') {
                 const documentToStore = { ...data, _id: id ? id : undefined };
                 result = await storeInMongo(collection, documentToStore);
+                if (id) {
+                    try {
+                        await redisCache.del(`librarian:${collection}:${id}`);
+                    } catch (error) {
+                        analyzeError(error as Error);
+                    }
+                }
             } else if (storageType === 'redis') {
                 id = id || uuidv4();
-                result = await storeInRedis(`data:${id}`, JSON.stringify(data));
+                await redisCache.set(`data:${id}`, data);
                 result = id;
             } else {
                 console.log('storeData failed for invalid storage type');
@@ -391,10 +399,35 @@ export class Librarian extends BaseEntity {
 
         try {
             let data;
+            const cacheKey = `librarian:${collection}:${id}`;
+
+            // 1. Try to get from cache first
+            if (storageType === 'mongo') { // Only cache mongo requests
+                try {
+                    data = await redisCache.get(cacheKey);
+                    if (data) {
+                        console.log(`[Librarian] Cache hit for ${cacheKey}`);
+                        return res.status(200).send({ data });
+                    }
+                } catch (error) {
+                    analyzeError(error as Error);
+                }
+            }
+            
+            console.log(`[Librarian] Cache miss for ${cacheKey}`);
+
             if (storageType === 'redis') {
-                data = await loadFromRedis(`data:${id}`);
+                data = await redisCache.get(`data:${id}`);
             } else if (storageType === 'mongo') {
                 data = await loadFromMongo(collection as string, {_id: id });
+                // 4. Store in cache if found in Mongo
+                if (data) {
+                    try {
+                        await redisCache.set(cacheKey, data);
+                    } catch (error) {
+                        analyzeError(error as Error);
+                    }
+                }
             } else {
                 console.log(`loadData failed for invalid storage type: ${storageType}.`);
                 return res.status(400).send({ error: 'Invalid storage type' });
@@ -629,7 +662,7 @@ export class Librarian extends BaseEntity {
 
         try {
             await deleteManyFromMongo('data_versions', { id });
-            await deleteFromRedis(`data:${id}`);
+            await redisCache.del(`data:${id}`);
 
             res.status(200).send({ message: 'Data deleted successfully' });
         } catch (error) { analyzeError(error as Error);

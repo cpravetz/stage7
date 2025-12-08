@@ -116,6 +116,8 @@ services:
         condition: service_healthy
       securitymanager:
         condition: service_started
+      redis:
+        condition: service_started
     env_file:
       - services/brain/.env
     environment:
@@ -126,6 +128,8 @@ services:
       POSTOFFICE_URL: *postofficeUrl
       RABBITMQ_URL: *rabbitmqUrl
       CONSUL_URL: *consulUrl
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
       BRAIN_CLIENT_SECRET: *sharedSecret
       CLIENT_SECRET: *sharedSecret
     volumes:
@@ -149,10 +153,14 @@ services:
         condition: service_healthy
       securitymanager:
         condition: service_started
+      redis:
+        condition: service_started
     environment:
       NODE_ENV: production
       PORT: 5100
       NODE_OPTIONS: --max-old-space-size=4096
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
       SECURITYMANAGER_URL: *securitymanagerUrl
       POSTOFFICE_URL: *postofficeUrl
       RABBITMQ_URL: *rabbitmqUrl
@@ -413,7 +421,7 @@ services:
       - "8600:8600/udp"  # DNS interface
     volumes:
       - consul_data:/consul/data
-    command: agent -server -ui -bootstrap-expect=1 -client=0.0.0.0
+    command: agent -server -ui -bootstrap-expect=1 -client=0.0.0.0 -rejoin -node=consul-server-1
     healthcheck:
       test: ["CMD", "consul", "members"]
       interval: 10s

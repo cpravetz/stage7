@@ -65,7 +65,10 @@
     "security": {
         "permissions": [
             "net.fetch"
-        ]
+        ],
+        "sandboxOptions": {
+            "timeout": 420000
+        }
     },
     "entryPoint": {
         "main": "main.py"

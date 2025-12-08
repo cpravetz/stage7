@@ -112,39 +112,45 @@ if __name__ == "__main__":
         # Extract script and script_parameters directly from inputs_dict
         # They are already raw values due to the parsing above
         script = inputs_dict.get("script", "")
-        script_parameters = inputs_dict.get("script_parameters", {})
+        # Get raw script_parameters value, could be dict or json string
+        raw_script_parameters = inputs_dict.get("script_parameters", {})
 
         if not script:
             raise TransformError("Missing required 'script' input")
 
         params_to_execute = {}
-        if isinstance(script_parameters, str):
+        # Flexibly handle script_parameters: try to parse if string, otherwise use directly
+        parsed_script_parameters = {}
+        if isinstance(raw_script_parameters, str):
             try:
-                script_parameters = json.loads(script_parameters) if script_parameters.strip() else {}
+                parsed_script_parameters = json.loads(raw_script_parameters) if raw_script_parameters.strip() else {}
             except json.JSONDecodeError:
                 raise TransformError("Invalid JSON string for 'script_parameters'")
+        elif isinstance(raw_script_parameters, dict):
+            parsed_script_parameters = raw_script_parameters
+        else:
+            raise TransformError(f"'script_parameters' must be a JSON object or string, got {type(raw_script_parameters)}")
 
-        if isinstance(script_parameters, dict):
-            for param_name, param_value in script_parameters.items():
+        if isinstance(parsed_script_parameters, dict):
+            for param_name, param_value in parsed_script_parameters.items():
                 if isinstance(param_value, dict) and 'outputName' in param_value:
                     input_name = param_value['outputName']
                     if input_name in inputs_dict:
                         value = inputs_dict[input_name]
+                        # Attempt to load JSON values that might still be strings
                         if isinstance(value, str):
-                            temp_value = value
-                            while isinstance(temp_value, str):
-                                try:
-                                    temp_value = json.loads(temp_value)
-                                except json.JSONDecodeError:
-                                    break
-                            value = temp_value
+                            try:
+                                value = json.loads(value)
+                            except json.JSONDecodeError:
+                                pass # Not a JSON string, keep as is
                         params_to_execute[param_name] = value
                     else:
-                        params_to_execute[param_name] = param_value # pass as is
+                        params_to_execute[param_name] = param_value # pass as is if not in inputs_dict
                 else:
                     params_to_execute[param_name] = param_value
         else:
-            raise TransformError(f"'script_parameters' must be a JSON object or string, got {type(script_parameters)}")
+            # This case should ideally be caught by the initial parsing logic
+            raise TransformError(f"Unexpected non-dict 'script_parameters' after parsing: {type(parsed_script_parameters)}")
 
         transform_output = execute_transform(script, params_to_execute)
 

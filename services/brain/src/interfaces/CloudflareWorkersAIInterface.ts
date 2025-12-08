@@ -50,7 +50,7 @@ export class CloudflareWorkersAIInterface extends BaseInterface {
         if (jsonResponse === null) {
             throw new Error("Failed to extract valid JSON from the model's response.");
         }
-        return jsonResponse;
+        return this.sanitizeResponse(jsonResponse, 'json');
     }
 
     async convert(service: BaseService, conversionType: LLMConversationType, convertParams: ConvertParamsType): Promise<any> {
@@ -110,9 +110,9 @@ export class CloudflareWorkersAIInterface extends BaseInterface {
                 if (jsonResponse === null) {
                     throw new Error("Failed to extract valid JSON from the model's response.");
                 }
-                return jsonResponse;
+                return this.sanitizeResponse(jsonResponse, 'json');
             }
-            return content;
+            return this.sanitizeResponse(content, 'text');
         } catch (error) {
             console.error('Error generating response from Cloudflare Workers AI:', error instanceof Error ? error.message : error);
             throw error;

@@ -29,7 +29,7 @@ export class GLlama3Model extends BaseModel {
             modelName: "llama-3.1-8b-instant",
             interfaceName: "groq",
             serviceName: "GroqService",
-            tokenLimit: 128000, // Adjust this value if needed
+            tokenLimit: 4096, // Adjust this value if needed
             scoresByConversationType: scoresByConversationType,
             contentConversation: [LLMConversationType.TextToText, LLMConversationType.TextToCode, LLMConversationType.TextToJSON]
         });

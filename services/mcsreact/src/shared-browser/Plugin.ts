@@ -9,6 +9,7 @@ export enum PluginParameterType {
     ERROR = 'error',
     DIRECT_ANSWER = "DIRECT_ANSWER",
     JSON = 'json',
+    NULL = 'null',
     ANY = 'any' // Retained from a previous version, useful for flexibility
 }
 

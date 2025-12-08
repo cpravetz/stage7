@@ -31,8 +31,8 @@ export class DeepSeekR1Model extends BaseModel {
         ]);
 
         super({
-            name: "or/deepseek-ai/DeepSeek-R1",
-            modelName: "deepseek-ai/DeepSeek-R1",
+            name: "or/tngtech/deepseek-r1t2-chimera:free",
+            modelName: "tngtech/deepseek-r1t2-chimera:free",
             interfaceName: "openrouter",
             serviceName: "ORService",
             tokenLimit: 164000, 

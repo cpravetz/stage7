@@ -211,7 +211,7 @@ def call_brain(prompt: str, inputs: Dict[str, Any], response_type: str = "json")
             f"http://{brain_url}/chat",
             json=payload,
             headers=headers,
-            timeout=60  # Reduced timeout to 60 seconds
+            timeout=360  # Increased timeout to 360 seconds (6 minutes) to match Brain's max LLM timeout
         )
 
         if response.status_code != 200:
@@ -311,9 +311,18 @@ def parse_inputs(inputs_str: str) -> Dict[str, Any]:
 class ReflectHandler:
     """Handles reflection requests by generating schema-compliant plans"""
 
-    def __init__(self):
+    def __init__(self, inputs: Dict[str, Any]):
         self.validator = PlanValidator(brain_call=call_brain)
         self.max_retries = 3
+        
+        # Initialize the validator with available plugins
+        try:
+            available_plugins_raw = inputs.get('availablePlugins', {})
+            available_plugins = available_plugins_raw.get('value', []) if isinstance(available_plugins_raw, dict) else (available_plugins_raw or [])
+            self.validator = PlanValidator(brain_call=call_brain, available_plugins=available_plugins)
+        except Exception as e:
+            logger.error(f"Failed to initialize PlanValidator with plugins: {e}")
+            self.validator = PlanValidator(brain_call=call_brain)
 
     def handle(self, inputs: Dict[str, Any]) -> str:
         try:
@@ -435,7 +444,7 @@ Error: {failed_error}
 Inputs: {failed_inputs_str}
 """
 
-        prompt = f"""You are a JSON-only reflection and planning assistant. Your task is to analyze the provided mission data and reflection question.
+        prompt = f"""You are a JSON-only reflection and planning assistant. Your primary task is to analyze the provided mission data and create a new plan if the mission has failed or is incomplete.
 
 MISSION ID: {mission_id}
 MISSION GOAL: {mission_goal}
@@ -447,10 +456,10 @@ PARENT STEP INPUTS: {json.dumps(inputs)}
 
 {failed_step_info}
 
-Your task is to reflect on the mission progress and determine the best course of action. Consider these options in order of preference:
+Your task is to analyze the mission's progress and determine the best course of action.
 
-1.  **Provide a Direct Answer:** If the reflection question can be answered directly with the given context and the mission is complete or no further action is needed, provide a JSON object with a single key "direct_answer".
-2.  **Create a Plan:** If the mission is NOT complete and requires multiple steps to achieve the remaining objectives, generate a new, concise plan to achieve the remaining objectives. The plan should be a JSON array of steps following the established schema.
+- **If the mission has failed or is incomplete, you MUST generate a new, concise plan to achieve the remaining objectives.**
+- **If and ONLY IF the mission is already successfully and fully completed, provide a direct answer.**
 
 **CRITICAL PLANNING PRINCIPLES (STRICTLY ENFORCED):**
 ---
@@ -463,8 +472,8 @@ Your task is to reflect on the mission progress and determine the best course of
         - **Role Assignment:** Assign `recommendedRole` at the deliverable level, not per individual step. All steps contributing to a single output (e.g., a research report) should share the same role.
 **RESPONSE FORMATS:**
 
--   **For a Direct Answer:** {{"direct_answer": "Your answer here"}}
--   **For a Plan:** A JSON array of steps defined with the schema below.
+-   **For an Incomplete/Failed Mission:** A JSON array of steps that form a new plan, following the schema below.
+-   **For a Completed Mission:** {{"direct_answer": "The mission is complete."}}
 
 Plan Schema
 {schema_json}
@@ -564,7 +573,33 @@ A plan with no connections between steps is invalid and will be rejected.
                 cleaned_response = self._clean_brain_response(str(brain_response))
                 data = json.loads(cleaned_response)
 
-            if isinstance(data, list): # This is a plan
+            # Extract plan array - handle both direct arrays and wrapped arrays
+            # If the LLM returns a single step object, this is INVALID and should be rejected
+            plan_array = None
+            if isinstance(data, list):
+                plan_array = data
+            elif isinstance(data, dict):
+                # Check if this dict is itself a step (has actionVerb or id) - this is INVALID
+                if 'actionVerb' in data or 'id' in data:
+                    logger.error(f"REFLECT: LLM returned a single step object instead of a plan array. This is invalid and will be rejected.")
+                    # Don't set plan_array - let it fall through to the direct_answer handling
+                    # The system will treat this as "mission not accomplished" and may retry
+                else:
+                    # Otherwise, check if any property contains an array of step-like objects
+                    for key, value in data.items():
+                        if isinstance(value, list) and len(value) > 0:
+                            # Check if it looks like a plan (array of objects with step-like properties)
+                            if all(isinstance(item, dict) and ('actionVerb' in item or 'id' in item) for item in value):
+                                logger.info(f"REFLECT: Extracting plan from '{key}' key in response ({len(value)} steps)")
+                                plan_array = value
+                                break
+                            # If it's an array of dicts but doesn't have step markers, still try it
+                            elif all(isinstance(item, dict) for item in value):
+                                logger.info(f"REFLECT: Found array of objects in '{key}' key, assuming it's a plan ({len(value)} steps)")
+                                plan_array = value
+                                break
+
+            if plan_array is not None:
                 # Ensure availablePlugins is a direct list of manifests for the validator
                 modified_inputs = inputs.copy()
                 available_plugins_for_validator = modified_inputs.get('availablePlugins')
@@ -572,12 +607,12 @@ A plan with no connections between steps is invalid and will be rejected.
                     modified_inputs['availablePlugins'] = available_plugins_for_validator['value']
 
                 # Validate and repair the plan
-                validated_plan = self.validator.validate_and_repair(data, verb_info['mission_goal'], modified_inputs)
-                
+                validated_plan = self.validator.validate_and_repair(plan_array, verb_info['mission_goal'], modified_inputs)
+
                 # Save the generated plan to Librarian
                 # self._save_plan_to_librarian(verb_info['verb'], validated_plan, inputs)
 
-                return json.dumps([{ 
+                return json.dumps([{
                     "success": True,
                     "name": "plan",
                     "resultType": "plan",
@@ -629,15 +664,34 @@ A plan with no connections between steps is invalid and will be rejected.
                         plan_from_answer = _extract_json_from_string(answer_content)
                         if plan_from_answer:
                             plan_data = json.loads(plan_from_answer)
-                            validated_plan = self.validator.validate_and_repair(plan_data, verb_info['mission_goal'], inputs)
-                            return json.dumps([{ 
-                                "success": True,
-                                "name": "plan",
-                                "resultType": "plan",
-                                "resultDescription": f"Plan created from reflection",
-                                "result": validated_plan,
-                                "mimeType": "application/json"
-                            }])
+
+                            # Extract plan array - handle both direct arrays and wrapped arrays
+                            extracted_plan = None
+                            if isinstance(plan_data, list):
+                                extracted_plan = plan_data
+                            elif isinstance(plan_data, dict):
+                                # Check if any property contains an array of step-like objects
+                                for key, value in plan_data.items():
+                                    if isinstance(value, list) and len(value) > 0:
+                                        if all(isinstance(item, dict) and ('actionVerb' in item or 'id' in item) for item in value):
+                                            logger.info(f"REFLECT: Extracting plan from '{key}' in answer string ({len(value)} steps)")
+                                            extracted_plan = value
+                                            break
+                                        elif all(isinstance(item, dict) for item in value):
+                                            logger.info(f"REFLECT: Found array in '{key}' in answer, assuming it's a plan ({len(value)} steps)")
+                                            extracted_plan = value
+                                            break
+
+                            if extracted_plan:
+                                validated_plan = self.validator.validate_and_repair(extracted_plan, verb_info['mission_goal'], inputs)
+                                return json.dumps([{
+                                    "success": True,
+                                    "name": "plan",
+                                    "resultType": "plan",
+                                    "resultDescription": f"Plan created from reflection",
+                                    "result": validated_plan,
+                                    "mimeType": "application/json"
+                                }])
                     except (json.JSONDecodeError, TypeError):
                         # If parsing fails, treat it as a direct text answer
                         pass
@@ -796,7 +850,7 @@ A plan with no connections between steps is invalid and will be rejected.
 def reflect(inputs: Dict[str, Any]) -> str:
     """Main reflection logic."""
     try:
-        handler = ReflectHandler()
+        handler = ReflectHandler(inputs)
         return handler.handle(inputs)
     except Exception as e:
         logger.error(f"REFLECT plugin failed: {e}")

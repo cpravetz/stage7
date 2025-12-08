@@ -43,6 +43,13 @@ export interface AgentStep {
   startTime?: number;
   endTime?: number;
   dependencies?: string[];
+  actionVerb?: string; // Added
+  ownerAgentId?: string; // Added
+  inputReferences?: SerializedMap; // Added
+  inputValues?: SerializedMap; // Added
+  description?: string; // Added
+  outputs?: any; // Added - could be SerializedMap or other structure
+  result?: any; // Added - could be an array of PluginOutput or other structure
 }
 
 export interface AgentStatistics {

@@ -4,9 +4,12 @@
  * This module provides runtime detection of FOREACH needs during step execution.
  * It integrates with the Step execution logic to dynamically insert FOREACH loops
  * when array outputs are consumed by steps expecting scalar inputs.
+ * 
+ * Uses RabbitMQ messaging instead of HTTP calls for reliable, timeout-safe communication
+ * with CapabilitiesManager.
  */
 
-import { PluginOutput, InputValue } from '@cktmcs/shared';
+import { PluginOutput, InputValue, MessageQueueClient } from '@cktmcs/shared';
 import { Step } from '../agents/Step';
 
 export interface ForeachModification {
@@ -32,12 +35,29 @@ export interface RuntimeTypeInfo {
 }
 
 export class RuntimeForeachDetector {
-    private capabilitiesManagerUrl: string;
-    private authToken?: string;
+    private mqClient: MessageQueueClient | null = null;
+    private requestTimeout: number = 10000; // 10 second timeout for type info requests
 
-    constructor(capabilitiesManagerUrl: string, authToken?: string) {
-        this.capabilitiesManagerUrl = capabilitiesManagerUrl.replace(/\/$/, '');
-        this.authToken = authToken;
+    constructor(capabilitiesManagerUrl?: string, authToken?: string) {
+        // Initialize MessageQueueClient for RabbitMQ communication
+        // capabilitiesManagerUrl and authToken are kept for backward compatibility but not used
+        // since all communication is now via RabbitMQ
+        if (!this.mqClient) {
+            this.mqClient = new MessageQueueClient();
+        }
+        console.log('[RuntimeForeachDetector] Initialized with RabbitMQ messaging (HTTP deprecated)');
+    }
+
+    /**
+     * Ensure RabbitMQ connection is established
+     */
+    private async ensureConnected(): Promise<void> {
+        if (this.mqClient && !this.mqClient.isConnected()) {
+            await this.mqClient.connect({
+                heartbeat: 60,
+                reconnectDelay: 5000
+            });
+        }
     }
 
     /**
@@ -150,33 +170,47 @@ export class RuntimeForeachDetector {
     }
 
     /**
-     * Fetch plugin type information from CapabilitiesManager
+     * Fetch plugin type information from CapabilitiesManager via RabbitMQ
+     * Uses RPC pattern for synchronous request/response with built-in timeout
      */
     private async getPluginTypeInfo(actionVerb: string): Promise<RuntimeTypeInfo | null> {
         try {
-            const url = `${this.capabilitiesManagerUrl}/plugins/types/${actionVerb}`;
-            const headers: Record<string, string> = {
-                'Content-Type': 'application/json'
-            };
+            await this.ensureConnected();
 
-            if (this.authToken) {
-                headers['Authorization'] = `Bearer ${this.authToken}`;
+            if (!this.mqClient) {
+                throw new Error('RabbitMQ client not initialized');
             }
 
-            const response = await fetch(url, { headers });
+            console.log(`[RuntimeForeachDetector] Requesting type info for ${actionVerb} via RabbitMQ RPC`);
 
-            if (response.status === 404) {
-                return null; // Plugin not found
+            // Send RPC request to CapabilitiesManager with timeout
+            const response = await this.mqClient.sendRpcRequest(
+                'stage7',  // exchange
+                'capabilitiesmanager.getPluginTypes',  // routing key
+                {
+                    actionVerb: actionVerb,
+                    requestId: Date.now()
+                },
+                this.requestTimeout  // 10 second timeout
+            );
+
+            if (response && response.success) {
+                console.log(`[RuntimeForeachDetector] Received type info for ${actionVerb}`);
+                return response.data;
+            } else if (response && response.notFound) {
+                console.warn(`[RuntimeForeachDetector] Plugin ${actionVerb} not found`);
+                return null;
+            } else {
+                throw new Error(`Invalid response from CapabilitiesManager: ${JSON.stringify(response)}`);
             }
-
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-            }
-
-            return await response.json();
 
         } catch (error) {
-            console.error(`[RuntimeForeachDetector] Failed to fetch type info for ${actionVerb}:`, error);
+            if (error instanceof Error && error.message.includes('timed out')) {
+                console.error(`[RuntimeForeachDetector] RPC timeout when fetching type info for ${actionVerb} (${this.requestTimeout}ms). Defaulting to FOREACH.`);
+            } else {
+                console.error(`[RuntimeForeachDetector] Failed to fetch type info for ${actionVerb} via RabbitMQ:`, error);
+            }
+            // Return null on any error; caller will assume FOREACH is needed
             return null;
         }
     }
@@ -228,11 +262,9 @@ export class RuntimeForeachDetector {
 }
 
 /**
- * Create a RuntimeForeachDetector instance from environment variables
+ * Create a RuntimeForeachDetector instance with RabbitMQ messaging
  */
 export function createRuntimeForeachDetector(): RuntimeForeachDetector {
-    const capabilitiesManagerUrl = process.env.CAPABILITIES_MANAGER_URL || 'http://capabilitiesmanager:5060';
-    const authToken = process.env.AUTH_TOKEN;
-    
-    return new RuntimeForeachDetector(capabilitiesManagerUrl, authToken);
+    // No longer need HTTP URLs since we use RabbitMQ RPC
+    return new RuntimeForeachDetector();
 }

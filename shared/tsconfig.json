@@ -12,7 +12,7 @@
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "rootDir": "./src",
-    "types": ["node","jest"],
+
     "skipLibCheck": true,
     "preserveSymlinks": true,
     "resolveJsonModule": true,

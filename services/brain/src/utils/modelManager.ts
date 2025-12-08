@@ -168,53 +168,63 @@ export class ModelManager {
         console.log(`Total models loaded: ${this.models.size}`);
 
         // Get all available models that support the conversation type
+        const filterReasons: Map<string, string[]> = new Map();
         const availableModels = Array.from(this.models.values())
             .filter(model => {
-                // Enhanced logging for every model considered
-                let reason = '';
+                const reasons: string[] = [];
+
                 if (excludedModels.includes(model.name)) {
-                    reason = 'excluded (already tried this request)';
+                    reasons.push('excluded (already tried this request)');
+                    filterReasons.set(model.name, reasons);
                     return false;
                 }
-                // Enforce minimum tokenLimit for complex planning (phases 1 & 2)
-                if ((conversationType === LLMConversationType.TextToText || conversationType === LLMConversationType.TextToJSON) && model.tokenLimit < 8000) {
-                    reason = `tokenLimit ${model.tokenLimit} < 8000 for ${conversationType}`;
-                    return false;
-                }
+
+
                 // Check if the model can handle the estimated token count
                 if (estimatedTokens > 0 && model.tokenLimit < estimatedTokens) {
-                    reason = `tokenLimit ${model.tokenLimit} < estimatedTokens ${estimatedTokens}`;
+                    reasons.push(`tokenLimit ${model.tokenLimit} < estimatedTokens ${estimatedTokens}`);
+                    filterReasons.set(model.name, reasons);
                     return false;
                 }
+
                 // Check if model supports the conversation type
                 if (!model.contentConversation.includes(conversationType)) {
-                    reason = `does not support conversation type ${conversationType}`;
+                    reasons.push(`does not support conversation type ${conversationType}`);
+                    filterReasons.set(model.name, reasons);
                     return false;
                 }
+
                 // Check if model's interface is available
                 const interfaceInstance = interfaceManager.getInterface(model.interfaceName);
                 if (!interfaceInstance) {
-                    reason = 'interface unavailable';
+                    reasons.push('interface unavailable');
+                    filterReasons.set(model.name, reasons);
                     return false;
                 }
+
                 // Check if model's service is available
                 const service = serviceManager.getService(model.serviceName);
                 if (!service) {
-                    reason = 'service unavailable';
+                    reasons.push('service unavailable');
+                    filterReasons.set(model.name, reasons);
                     return false;
                 }
                 if (!service.isAvailable()) {
-                    reason = 'service not available';
+                    reasons.push('service not available');
+                    filterReasons.set(model.name, reasons);
                     return false;
                 }
+
                 // Check if model is blacklisted
                 const isBlacklisted = this.performanceTracker.isModelBlacklisted(model.name, conversationType);
                 if (isBlacklisted) {
-                    reason = 'blacklisted';
+                    reasons.push('blacklisted');
+                    filterReasons.set(model.name, reasons);
                     return false;
-                } else {
-                    console.log(`[ModelSelection] Considering ${model.name}: tokenLimit=${model.tokenLimit}, supports=${model.contentConversation}, not blacklisted`);
                 }
+
+                // If we reach here, model is considered available
+                console.log(`[ModelSelection] Considering ${model.name}: tokenLimit=${model.tokenLimit}, supports=${model.contentConversation}, not blacklisted`);
                 return true;
             });
 
@@ -222,20 +232,11 @@ export class ModelManager {
             console.log(`No available models found for conversation type ${conversationType}`);
             console.log(`Total models checked: ${this.models.size}`);
 
-            // Debug: Show why each model was filtered out
-            Array.from(this.models.values()).forEach(model => {
-                const supportsConversation = model.contentConversation.includes(conversationType);
-                const interfaceInstance = interfaceManager.getInterface(model.interfaceName);
-                const service = serviceManager.getService(model.serviceName);
-                const serviceAvailable = service ? service.isAvailable() : false;
-                const isBlacklisted = this.performanceTracker.isModelBlacklisted(model.name, conversationType);
-
-                //console.log(`Model ${model.name}:`);
-                //console.log(`  - Supports ${conversationType}: ${supportsConversation}`);
-                //console.log(`  - Interface available: ${!!interfaceInstance}`);
-                //console.log(`  - Service available: ${serviceAvailable}`);
-                //console.log(`  - Blacklisted: ${isBlacklisted}`);
-            });
+            // Log per-model filter reasons to aid debugging why selection failed
+            for (const model of Array.from(this.models.values())) {
+                const reasons = filterReasons.get(model.name) || ['not considered (unexpected)'];
+                console.log(`[ModelSelection Debug] Model ${model.name}: ${reasons.join('; ')}`);
+            }
 
             return null;
         }
@@ -299,19 +300,41 @@ export class ModelManager {
         // Get performance metrics for reliability boost
         const performanceMetrics = this.performanceTracker.getPerformanceMetrics(model.name, conversationType);
 
-        // Apply reliability boost for models with good track records
+        // Compute a more balanced reliability boost that reduces bias toward
+        // heavily-used models and gives a small exploration bonus to under-used models.
+        // This is a universal fix (no hardcoding of any model names).
         let reliabilityBoost = 0;
-        if (performanceMetrics.usageCount > 5) { // Only consider models with some usage history
-            // Boost score based on success rate and low consecutive failures
-            const successRateBoost = performanceMetrics.successRate * 20; // Up to 20 point boost for 100% success rate
-            const failuresPenalty = Math.min(performanceMetrics.consecutiveFailures * 10, 50); // Up to 50 point penalty
+        const usageCount = performanceMetrics?.usageCount || 0;
+        const successRate = performanceMetrics?.successRate || 0;
+        const consecutiveFailures = performanceMetrics?.consecutiveFailures || 0;
+
+        if (usageCount > 0) {
+            // Scale the success-rate based boost with diminishing returns using log(1+usageCount)
+            const usageFactor = Math.log10(1 + usageCount);
+            const successRateBoost = successRate * 10 * usageFactor; // scaled boost
+            const failuresPenalty = Math.min(consecutiveFailures * 10, 50);
             reliabilityBoost = successRateBoost - failuresPenalty;
 
-            // Extra boost for models that haven't failed recently
-            if (performanceMetrics.consecutiveFailures === 0) {
-                reliabilityBoost += 10;
+            // Small stability bonus for models without recent failures
+            if (consecutiveFailures === 0) {
+                reliabilityBoost += 5;
             }
+        } else {
+            // Provide a small baseline for models with no history to avoid starving new models
+            reliabilityBoost = 3;
         }
+
+        // Exploration bonus for under-used models to avoid over-reuse of popular models
+        const explorationThreshold = 5;
+        if (usageCount < explorationThreshold) {
+            const explorationBonus = (explorationThreshold - usageCount) * 3; // up to +15
+            reliabilityBoost += explorationBonus;
+        }
+
+        // Cap reliability boost to avoid overwhelming base score adjustments
+        const MAX_BOOST = 30;
+        const MIN_BOOST = -50;
+        reliabilityBoost = Math.max(MIN_BOOST, Math.min(MAX_BOOST, reliabilityBoost));
 
         // Adjust score based on actual performance and add reliability boost
         const adjustedScore = this.performanceTracker.adjustModelScore(baseScore, model.name, conversationType);
@@ -433,6 +456,27 @@ export class ModelManager {
         if (!success) {
             this.clearModelSelectionCache();
         }
+    }
+
+    /**
+     * Get an active request by ID
+     * @param requestId Request ID
+     * @returns The active request or undefined
+     */
+    public getActiveRequest(requestId: string): { modelName: string; conversationType: LLMConversationType; startTime: number } | undefined {
+        return this.activeRequests.get(requestId);
+    }
+
+    /**
+     * Track a logic failure for a model
+     * @param modelName Model name
+     * @param conversationType Conversation type
+     */
+    public trackLogicFailure(modelName: string, conversationType: LLMConversationType): void {
+        console.log(`[ModelManager] Tracking logic failure for model ${modelName}, conversation type ${conversationType}`);
+        this.performanceTracker.trackLogicFailure(modelName, conversationType);
+        // Clear cache so next selection considers the updated logic failure count
+        this.clearModelSelectionCache();
     }
 
     /**

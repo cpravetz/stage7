@@ -113,15 +113,12 @@ export class TrafficManager extends BaseEntity {
                     llmCalls: 0, // Default or retrieve from other sources if available
                     activeLLMCalls: 0, // Default or retrieve from other sources if available
                     agentCountByStatus: agentSetManagerStats.agentStatisticsByType.agentCountByStatus,
-                    agentStatistics: agentSetManagerStats.agentsByStatus, // Assign the raw Map here
+                    agentStatistics: agentSetManagerStats.agentsByStatus, 
                     engineerStatistics: { newPlugins: [] } // Default or retrieve from other sources if available
                 };
 
-                // Apply MapSerializer.transformForSerialization to the entire missionStats object
-                const serializedMissionStats = MapSerializer.transformForSerialization(missionStats);
-
                 console.log(`TrafficManager: Retrieved and mapped mission statistics for mission ${missionId}`);
-                res.status(200).send(serializedMissionStats); // Send the serialized object
+                res.status(200).send(MapSerializer.transformForSerialization(missionStats)); // Send the missionStats object directly
             } catch (error) {
                 console.error('Error getting agent statistics:', error);
                 res.status(500).send({ error: 'Failed to get agent statistics' });

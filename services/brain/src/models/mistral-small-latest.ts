@@ -6,9 +6,9 @@ export class MistralSmallModel extends BaseModel {
         const scoresByConversationType = new Map<LLMConversationType, ModelScore>([
             [LLMConversationType.TextToText, {
                 costScore: 90,
-                accuracyScore: 85,
-                creativityScore: 80,
-                speedScore: 95
+                accuracyScore: 55,
+                creativityScore: 60,
+                speedScore: 70
             }],
             [LLMConversationType.TextToCode, {
                 costScore: 90,
@@ -17,10 +17,12 @@ export class MistralSmallModel extends BaseModel {
                 speedScore: 95
             }],
             [LLMConversationType.TextToJSON, {
+                // Lowered accuracy/creativity/speed scores for TextToJSON (planning/reflect tasks)
+                // to make this model less likely to be selected for structured output generation.
                 costScore: 90,
-                accuracyScore: 85,
-                creativityScore: 80,
-                speedScore: 95
+                accuracyScore: 40,
+                creativityScore: 30,
+                speedScore: 70
             }]
         ]);
 

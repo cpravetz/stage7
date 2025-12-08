@@ -12,7 +12,7 @@
     "paths": {
       "@cktmcs/shared": ["../../shared"]
     },
-    "types": ["express", "jest"],
+
     "resolveJsonModule": true,           // Allow importing JSON modules
     "sourceMap": true                    // Generate source maps for debugging
   },

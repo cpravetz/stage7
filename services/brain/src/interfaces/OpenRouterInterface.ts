@@ -115,7 +115,7 @@ export class OpenRouterInterface extends BaseInterface {
         if (jsonResponse === null) {
             throw new Error("Failed to extract valid JSON from the model's response.");
         }
-        return jsonResponse;
+        return this.sanitizeResponse(jsonResponse, 'json');
     }
 
     async convertTextToImage(args: ConvertParamsType): Promise<string> {
@@ -200,10 +200,10 @@ export class OpenRouterInterface extends BaseInterface {
             if (jsonResponse === null) {
                 throw new Error("Failed to extract valid JSON from the model's response.");
             }
-            return jsonResponse;
+            return this.sanitizeResponse(jsonResponse, 'json');
         }
 
-        return fullResponse || '';
+        return this.sanitizeResponse(fullResponse || '', 'text');
     }
 
     async convert(service: BaseService, conversionType: LLMConversationType, convertParams: ConvertParamsType): Promise<any> {

@@ -1,8 +1,7 @@
 import express from 'express';
-import * as http from 'http';
 import { Agent } from './agents/Agent';
-import { MapSerializer, BaseEntity, createAuthenticatedAxios, PluginParameterType, OutputType } from '@cktmcs/shared';
-import { AgentStatistics, AgentSetStatistics, InputValue } from '@cktmcs/shared';
+import { MapSerializer, BaseEntity, PluginParameterType, redisCache } from '@cktmcs/shared';
+import { AgentStatistics, InputValue } from '@cktmcs/shared';
 import { AgentPersistenceManager } from './utils/AgentPersistenceManager';
 import { AgentLifecycleManager } from './lifecycle/AgentLifecycleManager';
 import { analyzeError } from '@cktmcs/errorhandler';
@@ -26,13 +25,12 @@ export class AgentSet extends BaseEntity {
     private collaborationManager: CollaborationManager;
 
     // Missing properties
-    private persistenceManager: AgentPersistenceManager;
+    public persistenceManager: AgentPersistenceManager;
     private trafficManagerUrl: string;
     private librarianUrl: string;
     private brainUrl: string;
     private maxAgents: number = 100; // Default max agents
     private lastMemoryCheck: string = new Date().toISOString();
-    private stepLocationRegistry: Map<string, { agentId: string; agentSetUrl: string }> = new Map();
     private app: express.Application;
 
     constructor() {
@@ -47,7 +45,7 @@ export class AgentSet extends BaseEntity {
         // The authenticatedApi and securityManagerUrl are initialized by BaseEntity.
         // We can access them directly after super() call.
         // Initialize persistence manager
-        this.persistenceManager = new AgentPersistenceManager(undefined, this.authenticatedApi);
+        this.persistenceManager = new AgentPersistenceManager(this.librarianUrl, this.authenticatedApi);
 
         // Initialize memory and lifecycle management
         this.lifecycleManager = new AgentLifecycleManager(this.persistenceManager, this.trafficManagerUrl);
@@ -66,8 +64,6 @@ export class AgentSet extends BaseEntity {
         const knowledgeDomainsMap = new Map(knowledgeDomainsArray.map(domain => [domain.id, domain]));
         this.domainKnowledge = new DomainKnowledge(knowledgeDomainsMap, this.librarianUrl, this.brainUrl);
 
-        this.initializeServer();
-
         // Set up garbage collection
         setInterval(() => {
             if (global.gc) {
@@ -77,6 +73,20 @@ export class AgentSet extends BaseEntity {
 
         // Log that we're using a fixed ID
         console.log(`AgentSet initialized with fixed ID: primary-agentset`);
+    }
+
+    async initialize(): Promise<void> {
+        // Connect to Redis before starting the server
+        try {
+            await redisCache.connect();
+            console.log('[AgentSet] Redis connection established successfully');
+        } catch (error) {
+            console.error('[AgentSet] Failed to connect to Redis:', error);
+            console.warn('[AgentSet] Continuing without Redis - step location registry will not work!');
+        }
+
+        // Initialize the server after Redis is connected
+        this.initializeServer();
     }
 
     // Initialize Express server to manage agent lifecycle
@@ -375,15 +385,22 @@ export class AgentSet extends BaseEntity {
         });
 
         // Find an agent with a specific role
-       this.app.post('/findAgentWithRole', (req: express.Request, res: express.Response): void => {
+        this.app.post('/findAgentWithRole', (req: express.Request, res: express.Response): void => {
             try {
                 const { roleId, missionId } = req.body;
-                                const agentId = this.specializationFramework.findBestAgentForTask(roleId, '', [], missionId);
-
-                if (agentId) {
-                    res.status(200).send({ agentId });
+        
+                // Find an existing agent with the same role and mission that is in an active state
+                const existingAgent = Array.from(this.agents.values()).find(agent =>
+                    agent.getRole() === roleId &&
+                    agent.getMissionId() === missionId &&
+                    (agent.getStatus() === 'running' || agent.getStatus() === 'waiting')
+                );
+        
+                if (existingAgent) {
+                    console.log(`[AgentSet] Found existing active agent ${existingAgent.id} for role ${roleId} in mission ${missionId}.`);
+                    res.status(200).send({ agentId: existingAgent.id, status: existingAgent.getStatus() });
                 } else {
-                    // No agent with the role exists - return null to let current agent handle the task
+                    console.log(`[AgentSet] No existing active agent found for role ${roleId} in mission ${missionId}.`);
                     res.status(200).send({ agentId: null });
                 }
             } catch (error) {
@@ -650,21 +667,28 @@ export class AgentSet extends BaseEntity {
     // ===== Step Location Registry Methods =====
 
     public async registerStepLocation(stepId: string, agentId: string, agentSetUrl: string): Promise<void> {
-        this.stepLocationRegistry.set(stepId, { agentId, agentSetUrl });
-        console.log(`Registered step ${stepId} to agent ${agentId} at ${agentSetUrl}`);
+        const success = await redisCache.set(`step-location:${stepId}`, { agentId, agentSetUrl }, 86400); // 24-hour TTL
+        if (success) {
+            console.log(`Registered step ${stepId} to agent ${agentId} at ${agentSetUrl}`);
+        } else {
+            console.error(`FAILED to register step ${stepId} to agent ${agentId} at ${agentSetUrl} - Redis not ready (status: ${redisCache.getStatus()})`);
+        }
     }
 
     public async updateStepLocation(stepId: string, newAgentId: string, newAgentSetUrl: string): Promise<void> {
-        if (this.stepLocationRegistry.has(stepId)) {
-            this.stepLocationRegistry.set(stepId, { agentId: newAgentId, agentSetUrl: newAgentSetUrl });
+        const success = await redisCache.set(`step-location:${stepId}`, { agentId: newAgentId, agentSetUrl: newAgentSetUrl }, 86400); // 24-hour TTL
+        if (success) {
             console.log(`Updated step ${stepId} to new agent ${newAgentId} at ${newAgentSetUrl}`);
         } else {
-            throw new Error(`Step with id ${stepId} not found in registry.`);
+            console.error(`FAILED to update step ${stepId} to new agent ${newAgentId} at ${newAgentSetUrl} - Redis not ready (status: ${redisCache.getStatus()})`);
         }
     }
 
     public async getStepLocation(stepId: string): Promise<{ agentId: string; agentSetUrl: string } | null> {
-        const location = this.stepLocationRegistry.get(stepId);
+        const location = await redisCache.get<{ agentId: string; agentSetUrl: string }>(`step-location:${stepId}`);
+        if (!location) {
+            console.debug(`[AgentSet] Step location not found for step ${stepId} (Redis status: ${redisCache.getStatus()})`);
+        }
         return location || null;
     }
 
@@ -844,6 +868,23 @@ export class AgentSet extends BaseEntity {
 
     private async createSpecializedAgent(req: express.Request, res: express.Response): Promise<void> {
         const { roleId, missionId, missionContext } = req.body;
+        // If a missionId is provided, check mission status in Librarian to avoid creating agents for paused/finished missions
+        if (missionId) {
+            try {
+                const missionResp = await this.authenticatedApi.get(`http://${this.librarianUrl}/loadData/${missionId}`, {
+                    params: { collection: 'missions', storageType: 'mongo' }
+                });
+                const mission = missionResp.data?.data;
+                if (mission && mission.status && (mission.status === 'paused' || mission.status === 'completed' || mission.status === 'aborted')) {
+                    res.status(400).send({ error: `Cannot create agent for mission ${missionId} with status ${mission.status}` });
+                    return;
+                }
+            } catch (err) {
+                console.error(`Could not verify mission ${missionId} status before creating specialized agent:`, err instanceof Error ? err.message : err);
+                res.status(500).send({ error: `Could not verify mission status. Agent not created.` });
+                return;
+            }
+        }
         const agentId = uuidv4();
         const agentConfig = {
             agentId: agentId,
@@ -1185,7 +1226,8 @@ export class AgentSet extends BaseEntity {
                 res.status(404).send({ error: `Step with id ${stepId} not found` });
                 return;
             }
-            res.status(200).send(stepDetails);
+            const sanitized = this.sanitizeForClient(stepDetails);
+            res.status(200).send(sanitized);
         } catch (error) {
             analyzeError(error as Error);
             console.error(`Error fetching step details for step ${stepId}:`, error instanceof Error ? error.message : String(error));
@@ -1193,6 +1235,29 @@ export class AgentSet extends BaseEntity {
                 res.status(500).send({ error: `Failed to fetch step details for step ${stepId}` });
             }
         }
+    }
+
+    // Recursively sanitize strings in objects/arrays to remove control characters
+    private sanitizeForClient(obj: any): any {
+        if (obj === null || obj === undefined) return obj;
+        if (typeof obj === 'string') {
+            return obj.replace(/[\u0000-\u001F\u007F-\u009F]/g, '');
+        }
+        if (Array.isArray(obj)) {
+            return obj.map(item => this.sanitizeForClient(item));
+        }
+        if (typeof obj === 'object') {
+            const out: any = {};
+            for (const key of Object.keys(obj)) {
+                try {
+                    out[key] = this.sanitizeForClient(obj[key]);
+                } catch (e) {
+                    out[key] = obj[key];
+                }
+            }
+            return out;
+        }
+        return obj;
     }
 
     private async getStepDetails(stepId: string): Promise<any | null> {
@@ -1316,4 +1381,8 @@ export class AgentSet extends BaseEntity {
     }
 }
 
-new AgentSet(); // Start the AgentSet application
+// Start the AgentSet application
+(async () => {
+    const agentSet = new AgentSet();
+    await agentSet.initialize();
+})();

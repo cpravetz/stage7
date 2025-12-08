@@ -619,6 +619,44 @@ export class ModelPerformanceTracker {
       }
     }
 
+    // Auto-derive feedback scores for any metrics that have usage but lack explicit feedback.
+    for (const modelData of data) {
+      for (const [convKey, metrics] of Object.entries(modelData.metrics)) {
+        try {
+          const m = metrics as ModelPerformanceMetrics;
+          // Only derive when we have some usage but feedback is still zero
+          const hasUsage = (m.usageCount || 0) > 0;
+          const overallZero = !m.feedbackScores || (m.feedbackScores.overall === 0 && m.feedbackScores.relevance === 0 && m.feedbackScores.accuracy === 0 && m.feedbackScores.helpfulness === 0 && m.feedbackScores.creativity === 0);
+
+          if (hasUsage && overallZero) {
+            // Heuristic derivation (0..1 range)
+            const successRate = Math.max(0, Math.min(1, m.successRate || 0));
+            // Normalize latency - assume reasonable window of 0..10000ms
+            const latencyNorm = Math.max(0, Math.min(1, (m.averageLatency || 0) / 10000));
+            // Token count effect (smaller is better) - normalize by a heuristic 0..20000 tokens
+            const tokenNorm = Math.max(0, Math.min(1, (m.averageTokenCount || 0) / 20000));
+
+            const derivedOverall = (successRate * 0.7) + ((1 - latencyNorm) * 0.2) + ((1 - tokenNorm) * 0.1);
+            const derivedRelevance = derivedOverall; // best-effort mapping
+            const derivedAccuracy = successRate * 0.9 + 0.1 * derivedOverall;
+            const derivedHelpfulness = derivedOverall * 0.9;
+            const derivedCreativity = Math.max(0.1, derivedOverall * 0.5);
+
+            m.feedbackScores = {
+              relevance: Math.max(0, Math.min(1, derivedRelevance)),
+              accuracy: Math.max(0, Math.min(1, derivedAccuracy)),
+              helpfulness: Math.max(0, Math.min(1, derivedHelpfulness)),
+              creativity: Math.max(0, Math.min(1, derivedCreativity)),
+              overall: Math.max(0, Math.min(1, derivedOverall))
+            };
+          }
+        } catch (e) {
+          // Fail safe: do not throw during reporting
+          console.warn('[PerformanceTracker] Failed to derive feedback for model metrics', e);
+        }
+      }
+    }
+
     return data;
   }
 

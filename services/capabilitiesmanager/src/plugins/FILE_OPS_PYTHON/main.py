@@ -157,12 +157,16 @@ class FileOperationPlugin:
         return default
 
     def _get_mission_control_url(self, inputs: Dict[str, Any]) -> str:
-        return self._get_input_value(inputs, 'missioncontrol_url') or self._get_input_value(inputs, 'missionControlUrl') or os.environ.get('MISSIONCONTROL_URL')
+        url = self._get_input_value(inputs, 'missioncontrol_url') or self._get_input_value(inputs, 'missionControlUrl') or os.environ.get('MISSIONCONTROL_URL')
+        if url and (url.startswith('http://') or url.startswith('https://')):
+            return url.split('://', 1)[1]
+        return url
 
     def _get_librarian_url(self, inputs: Dict[str, Any]) -> str:
-        # Helper to get the Librarian URL from environment variables
-        # In a real scenario, this might come from a service discovery mechanism
-        return self._get_input_value(inputs, 'librarian_url') or self._get_input_value(inputs, 'librarianUrl') or os.environ.get('LIBRARIAN_URL')
+        url = self._get_input_value(inputs, 'librarian_url') or self._get_input_value(inputs, 'librarianUrl') or os.environ.get('LIBRARIAN_URL')
+        if url and (url.startswith('http://') or url.startswith('https://')):
+            return url.split('://', 1)[1]
+        return url
 
     def _read_operation(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         file_id = self._get_input_value(inputs, 'fileId')

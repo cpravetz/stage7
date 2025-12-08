@@ -72,9 +72,9 @@ export class MistralInterface extends BaseInterface {
                     if (jsonResponse === null) {
                         throw new Error("Failed to extract valid JSON from the model's response.");
                     }
-                    return jsonResponse;
+                    return this.sanitizeResponse(jsonResponse, 'json');
                 }
-                return content;
+                return this.sanitizeResponse(content, 'text');
             } else {
                 console.error('Unexpected response format from Mistral:', JSON.stringify(response.data));
                 throw new Error('Unexpected response format from Mistral');

@@ -80,8 +80,11 @@ export class AgentLifecycleManager {
    * Register an agent with the lifecycle manager
    * @param agent Agent to register
    */
-  registerAgent(agent: Agent): void {
+  async registerAgent(agent: Agent): Promise<void> {
     this.agents.set(agent.id, agent);
+
+    // Save agent state to persistence layer
+    this.persistenceManager.saveAgent(agent.toAgentState());
 
     // Initialize agent versions
     if (!this.agentVersions.has(agent.id)) {
@@ -207,16 +210,8 @@ export class AgentLifecycleManager {
     // Create state ID for this version
     const stateId = `${agentId}-v${newVersion}`;
 
-    // Save agent state with this state ID
-    const agentState = {
-        ...agent,
-        inputs: agent.inputValues || new Map<string, any>(), // Ensure inputs is always defined
-        missionContext: agent.getMissionContext ? agent.getMissionContext() : ''
-    };
-    await this.persistenceManager.saveAgent({
-        ...agentState
-    });
-
+    // Save agent state with this state ID, ensuring the full state is captured
+    await this.persistenceManager.saveAgent(agent.toAgentState());
     // Create new version
     const version: AgentVersion = {
       version: newVersion,
@@ -296,6 +291,7 @@ export class AgentLifecycleManager {
 
     try {
       // Send pause message to agent
+      agent.status = AgentStatus.PAUSED;
       await agent.handleMessage({
         type: MessageType.PAUSE,
         sender: 'lifecycle-manager',
@@ -309,6 +305,7 @@ export class AgentLifecycleManager {
         timestamp: new Date().toISOString()
       });
 
+      await this.persistenceManager.saveAgent(agent.toAgentState());
       console.log(`Paused agent ${agentId}`);
     } catch (error) {
       analyzeError(error as Error);
@@ -329,6 +326,7 @@ export class AgentLifecycleManager {
 
     try {
       // Send resume message to agent
+      agent.status = AgentStatus.RUNNING;
       await agent.handleMessage({
         type: MessageType.RESUME,
         sender: 'lifecycle-manager',
@@ -342,6 +340,7 @@ export class AgentLifecycleManager {
         timestamp: new Date().toISOString()
       });
 
+      await this.persistenceManager.saveAgent(agent.toAgentState());
       console.log(`Resumed agent ${agentId}`);
     } catch (error) {
       analyzeError(error as Error);
@@ -362,6 +361,7 @@ export class AgentLifecycleManager {
 
     try {
       // Send abort message to agent
+      agent.status = AgentStatus.ABORTED;
       await agent.handleMessage({
         type: MessageType.ABORT,
         sender: 'lifecycle-manager',
@@ -375,6 +375,7 @@ export class AgentLifecycleManager {
         timestamp: new Date().toISOString()
       });
 
+      await this.persistenceManager.saveAgent(agent.toAgentState());
       console.log(`Aborted agent ${agentId}`);
     } catch (error) {
       analyzeError(error as Error);
@@ -474,6 +475,26 @@ export class AgentLifecycleManager {
 
     // Update events
     this.lifecycleEvents.set(agentId, events);
+  }
+
+  /**
+   * Updates the status of an agent and persists the change.
+   * @param agentId The ID of the agent to update.
+   * @param status The new status for the agent.
+   */
+  async updateAgentStatus(agentId: string, status: AgentStatus): Promise<void> {
+    const agent = this.agents.get(agentId);
+    if (!agent) {
+      console.warn(`Attempted to update status for non-existent agent ${agentId}`);
+      return;
+    }
+
+    agent.status = status;
+    try {
+      await this.persistenceManager.saveAgent(agent.toAgentState());
+    } catch (error) {
+      console.error(`Failed to save agent ${agentId} state after status update:`, error);
+    }
   }
 
   /**
@@ -593,5 +614,3 @@ export class AgentLifecycleManager {
     this.checkpointIntervals.clear();
   }
 }
-
-

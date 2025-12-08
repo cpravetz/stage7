@@ -81,8 +81,7 @@ export class TaskDelegation {
     if (!msg) return;
 
     try {
-      const content = JSON.parse(msg.content.toString());
-      const { agentId, status } = content;
+      const { agentId, status } = JSON.parse(msg.content.toString());
 
       console.log(`TaskDelegation received status update for agent ${agentId}: ${status}`);
 

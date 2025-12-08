@@ -224,7 +224,6 @@ export class LocalRepository implements PluginRepository {
             for (const dir of dirs) {
                 try {
                     const manifestPath = path.join(this.baseDir, dir, 'manifest.json');
-                    console.log('LocalRepo: Loading from ', manifestPath)
                     const manifestContent = await fs.readFile(manifestPath, 'utf-8');
                     let manifest: any;
                     try {

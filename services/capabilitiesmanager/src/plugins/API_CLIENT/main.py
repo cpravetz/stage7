@@ -154,6 +154,53 @@ def execute_plugin(inputs):
             except Exception as cleanup_err:
                 print(f"Failed to clean up temp dir {temp_dir}: {cleanup_err}")
 
+def parse_inputs(inputs_str):
+    """Parse and normalize the plugin stdin JSON payload into a dict.
+
+    Handles multiple input formats:
+    - Plain dict: {"method": "GET", "url": "..."}
+    - Array of pairs: [["method", "GET"], ["url", "..."]]
+    - Map format: {"_type": "Map", "entries": [["method", "GET"], ...]}
+    """
+    try:
+        payload = json.loads(inputs_str)
+        inputs_dict = {}
+
+        # Case 1: Plain dict (most common from pluginExecutor.ts)
+        if isinstance(payload, dict):
+            # Check for Map format with entries
+            if payload.get('_type') == 'Map' and isinstance(payload.get('entries'), list):
+                for entry in payload.get('entries', []):
+                    if isinstance(entry, list) and len(entry) == 2:
+                        key, value = entry
+                        inputs_dict[key] = value
+            else:
+                # Plain dict - copy all non-meta keys
+                for key, value in payload.items():
+                    if key not in ('_type', 'entries'):
+                        inputs_dict[key] = value
+
+        # Case 2: Array of [key, value] pairs
+        elif isinstance(payload, list):
+            for item in payload:
+                if isinstance(item, list) and len(item) == 2:
+                    key, value = item
+                    inputs_dict[key] = value
+                else:
+                    logger.debug(f"Skipping invalid input item in array: {item}")
+
+        else:
+            logger.warning(f"Unexpected input format: {type(payload).__name__}")
+
+        return inputs_dict
+
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse input JSON: {e}")
+        raise
+    except Exception as e:
+        logger.error(f"Input parsing failed: {e}")
+        raise
+
 def main():
     """Main entry point for the plugin."""
     try:
@@ -172,14 +219,7 @@ def main():
             }]
         else:
             # Parse the input data
-            inputs_array = json.loads(input_data)
-            inputs_dict = {}
-            for item in inputs_array:
-                if isinstance(item, list) and len(item) == 2:
-                    key, val = item
-                    inputs_dict[key] = val
-                else:
-                    logger.warning(f"Skipping invalid input item: {item}")
+            inputs_dict = parse_inputs(input_data)
 
             # Execute the plugin
             result = execute_plugin(inputs_dict)
