@@ -715,7 +715,7 @@ export class Step {
                     parentChecked = true;
                 }
                 if (!parentSatisfied) {
-                    console.log(`[areDependenciesSatisfied] Step ${this.id} dependency on parent is not satisfied: parent is not ready.`);
+                    //console.log(`[areDependenciesSatisfied] Step ${this.id} dependency on parent is not satisfied: parent is not ready.`);
                     return false;
                 }
                 continue; // This dependency is conceptually satisfied if parent is ready.
@@ -733,14 +733,14 @@ export class Step {
                 sourceStep = await this.crossAgentResolver.getStepDetails(dep.sourceStepId);
                 if (!sourceStep) {
                     // If still not found, or crossAgentResolver returns null, dependency is not satisfied
-                    console.log(`[areDependenciesSatisfied] Step ${this.id} dependency on ${dep.sourceStepId} (output: ${dep.outputName}) is not satisfied: source step not found.`);
+                    //console.log(`[areDependenciesSatisfied] Step ${this.id} dependency on ${dep.sourceStepId} (output: ${dep.outputName}) is not satisfied: source step not found.`);
                     return false;
                 }
             }
 
             // Source step must exist and be completed.
             if (sourceStep.status !== StepStatus.COMPLETED) {
-                console.log(`[areDependenciesSatisfied] Step ${this.id} dependency on ${dep.sourceStepId} (output: ${dep.outputName}) is not satisfied: source step status is ${sourceStep.status}.`);
+                //console.log(`[areDependenciesSatisfied] Step ${this.id} dependency on ${dep.sourceStepId} (output: ${dep.outputName}) is not satisfied: source step status is ${sourceStep.status}.`);
                 return false;
             }
 

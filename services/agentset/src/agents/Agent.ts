@@ -106,13 +106,21 @@ export class Agent extends BaseEntity {
 
         const reflectQuestion = `Did we accomplish the mission? If YES, return an empty JSON array []. If NO, return a JSON array of step objects (a plan) that when executed will achieve the mission.`;
 
-        const recoveryStep = this.createStep('REFLECT', new Map([
+        const availablePlugins = this.inputValues?.get('availablePlugins');
+
+        const reflectInputs = new Map<string, InputValue>([
             ['missionId', { inputName: 'missionId', value: this.missionId, valueType: PluginParameterType.STRING, args: {} }],
             ['plan_history', { inputName: 'plan_history', value: JSON.stringify(planHistory), valueType: PluginParameterType.STRING, args: {} }],
             ['work_products', { inputName: 'work_products', value: workProductsSummary, valueType: PluginParameterType.STRING, args: {} }],
             ['question', { inputName: 'question', value: reflectQuestion, valueType: PluginParameterType.STRING, args: {} }],
             ['agentId', { inputName: 'agentId', value: this.id, valueType: PluginParameterType.STRING, args: {} }]
-        ]), `End-of-mission reflection: did we accomplish the mission?`, StepStatus.PENDING);
+        ]);
+
+        if (availablePlugins) {
+            reflectInputs.set('availablePlugins', availablePlugins);
+        }
+
+        const recoveryStep = this.createStep('REFLECT', reflectInputs, `End-of-mission reflection: did we accomplish the mission?`, StepStatus.PENDING);
         recoveryStep.recommendedRole = this.role;
         this.steps.push(recoveryStep);
         await this.logEvent({ eventType: 'step_created', ...recoveryStep.toJSON() });

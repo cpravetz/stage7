@@ -363,10 +363,17 @@ class RobustMissionPlanner:
         try:
             available_plugins_raw = inputs.get('availablePlugins', {})
             available_plugins = available_plugins_raw.get('value', []) if isinstance(available_plugins_raw, dict) else (available_plugins_raw or [])
-            self.validator = PlanValidator(brain_call=call_brain, available_plugins=available_plugins)
+            self.validator = PlanValidator(
+                brain_call=call_brain, 
+                available_plugins=available_plugins,
+                report_logic_failure_call=report_logic_failure_to_brain
+            )
         except Exception as e:
             logger.error(f"Failed to initialize PlanValidator with plugins: {e}")
-            self.validator = PlanValidator(brain_call=call_brain)
+            self.validator = PlanValidator(
+                brain_call=call_brain,
+                report_logic_failure_call=report_logic_failure_to_brain
+            )
 
     def plan(self, inputs: Dict[str, Any]) -> str:
         """Main interface method - create plan and return as JSON string"""
@@ -512,16 +519,18 @@ class RobustMissionPlanner:
         agent_role = inputs.get('agentRole', {}).get('value', 'General')
         structured_plan = self._generate_role_specific_plan(goal, mission_goal, mission_id, agent_role, inputs)
         
-        # Validate with awareness of context
-        # This is now handled by passing availablePlugins to the validator constructor
-        
-        try:
-            logger.debug("Before calling validator.validate_and_repair.")
-            validated_plan = self.validator.validate_and_repair(structured_plan, goal, modified_inputs)
-            logger.debug("After calling validator.validate_and_repair.")
-        except Exception as e:
-            logger.exception(f"❌ Failed to validate and repair the plan after all retries: {e}")
-            raise AccomplishError(f"Could not validate or repair the plan: {e}", "validation_error")
+        logger.debug("Before calling validator.validate_and_repair.")
+        validation_result = self.validator.validate_and_repair(structured_plan, goal, modified_inputs)
+        logger.debug("After calling validator.validate_and_repair.")
+
+        if not validation_result.is_valid:
+            error_summary = "; ".join(validation_result.get_error_messages()[:3])
+            raise AccomplishError(
+                f"Plan validation failed with {len(validation_result.errors)} un-fixable errors: {error_summary}",
+                "validation_error"
+            )
+            
+        validated_plan = validation_result.plan
 
         try:
             mission_id_for_check = mission_id
@@ -782,10 +791,17 @@ class NovelVerbHandler:
         try:
             available_plugins_raw = inputs.get('availablePlugins', {})
             available_plugins = available_plugins_raw.get('value', []) if isinstance(available_plugins_raw, dict) else (available_plugins_raw or [])
-            self.validator = PlanValidator(brain_call=call_brain, available_plugins=available_plugins)
+            self.validator = PlanValidator(
+                brain_call=call_brain, 
+                available_plugins=available_plugins,
+                report_logic_failure_call=report_logic_failure_to_brain
+            )
         except Exception as e:
             logger.error(f"Failed to initialize PlanValidator in NovelVerbHandler with plugins: {e}")
-            self.validator = PlanValidator(brain_call=call_brain)
+            self.validator = PlanValidator(
+                brain_call=call_brain,
+                report_logic_failure_call=report_logic_failure_to_brain
+            )
 
         except Exception as e:
             logger.error(f"Failed to initialize verb discovery service: {e}")

@@ -96,6 +96,20 @@ def execute_plugin(operation, inputs):
     """
     Main entry point for the DATA_TOOLKIT plugin.
     """
+    # Normalize inputs by resolving aliases
+    alias_map = {
+        "json_object": ["jsonObject", "jsonStr", "json"],
+        "csv_data": ["csv", "csvString", "csvStringData"],
+        "json_string": ["json_string_validate", "jsonStringToValidate", "jsonToValidate"]
+    }
+    
+    for primary_name, aliases in alias_map.items():
+        if primary_name not in inputs:
+            for alias in aliases:
+                if alias in inputs:
+                    inputs[primary_name] = inputs.pop(alias)
+                    break # Move to the next primary name once an alias is found
+
     operations = {
         "query_json": query_json,
         "validate_json": validate_json,

@@ -197,24 +197,26 @@ def execute_plugin(inputs: Any) -> List[Dict[str, Any]]:
                 error="Inputs must be a dictionary or list with one dictionary"
             ).to_dict()]
 
-        # Extract required inputs
-        query_text_input = inputs.get('queryText')
-        if isinstance(query_text_input, dict) and 'value' in query_text_input:
-            query_text = query_text_input['value']
-        else:
-            query_text = query_text_input
+        def _get_input(key, aliases=[], default=None):
+            """Helper to get input value by checking primary key and aliases."""
+            val = inputs.get(key)
+            if val is None:
+                for alias in aliases:
+                    val = inputs.get(alias)
+                    if val is not None:
+                        break
+            
+            if val is None:
+                return default
 
-        domains_input = inputs.get('domains', [])
-        if isinstance(domains_input, dict) and 'value' in domains_input:
-            domains = domains_input['value']
-        else:
-            domains = domains_input
+            if isinstance(val, dict) and 'value' in val:
+                return val['value']
+            return val
 
-        max_results_input = inputs.get('maxResults', 5)
-        if isinstance(max_results_input, dict) and 'value' in max_results_input:
-            max_results = max_results_input['value']
-        else:
-            max_results = max_results_input
+        # Extract required inputs using the helper
+        query_text = _get_input('queryText', ['query', 'searchText', 'text'])
+        domains = _get_input('domains', ['collections', 'collectionNames'], default=[])
+        max_results = _get_input('maxResults', ['limit'], default=5)
         
         # Validate required inputs
         if not query_text:

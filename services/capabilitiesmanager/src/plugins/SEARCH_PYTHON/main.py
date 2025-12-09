@@ -521,6 +521,13 @@ def execute_plugin(inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Main plugin execution function."""
     try:
         search_term_input = inputs.get('searchTerm')
+        # Check aliases if primary name not found
+        if not search_term_input:
+            aliases = ["query", "keywords", "terms", "q", "search_query"]
+            for alias in aliases:
+                search_term_input = inputs.get(alias)
+                if search_term_input:
+                    break
         if not search_term_input:
             return [PluginOutput(False, "error", "error", None, "Missing required input: searchTerm").to_dict()]
 
@@ -602,7 +609,17 @@ def parse_inputs(inputs_str: str) -> Dict[str, Any]:
                         inputs[key] = {'value': raw_value}
             return inputs
 
-        # If none of the above, treat as a single search term string
+        # If none of the above, check for aliases of searchTerm
+        search_term_aliases = ["query", "keywords", "terms", "q", "search_query"]
+        for alias in search_term_aliases:
+            if alias in payload:
+                if isinstance(payload[alias], dict):
+                    inputs['searchTerm'] = payload[alias]
+                else:
+                    inputs['searchTerm'] = {'value': payload[alias]}
+                return inputs
+        
+        # If none of the above and no alias found, treat as a single search term string
         inputs['searchTerm'] = {'value': str(payload)}
         return inputs
     except Exception as e:

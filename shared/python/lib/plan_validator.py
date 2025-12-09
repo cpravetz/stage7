@@ -44,7 +44,7 @@ PLAN_STEP_SCHEMA = {
                         "value": {"type": "string","description": "Constant string value for this input"},
                         "valueType": {"type": "string", "enum": ["string", "number", "boolean", "array", "object", "plan", "plugin", "any"],"description": "The natural type of the Constant input value"},
                         "outputName": {"type": "string","description": "Reference to an output from a previous step at the same level or higher"},
-                        "sourceStep": {"type": "string", "format": "uuid", "description": "The step ID (UUID) that produces the output for this input. Use '0' to refer to an input from the parent step."}, 
+                        "sourceStep": {"type": "string", "format": "uuid", "description": "The step ID (UUID) that produces the output for this input. Use '0' to refer to an input from the parent step."},
                         "args": {"type": "object","description": "Additional arguments for the input"}
                     },
                     "oneOf": [
@@ -168,12 +168,12 @@ class PlanValidator:
     CONTROL_FLOW_VERBS = {'WHILE', 'SEQUENCE', 'IF_THEN', 'UNTIL', 'FOREACH', 'REPEAT', 'REGROUP'}
     ALLOWED_ROLES = {'coordinator', 'researcher', 'coder', 'creative', 'critic', 'executor', 'domain expert'}
     
-    def __init__(self, brain_call=None, available_plugins: List[Dict[str, Any]] = None):
+    def __init__(self, brain_call: callable = None, available_plugins: List[Dict[str, Any]] = None, report_logic_failure_call: callable = None):
         self.brain_call = brain_call
-        self.plugin_map = {}
+        self.report_logic_failure_call = report_logic_failure_call
         self.max_retries = 3
-        if available_plugins:
-            self._initialize_plugin_map_from_list(available_plugins)
+        # Initialize plugin_map from the provided list
+        self._initialize_plugin_map_from_list(available_plugins or [])
 
     def _initialize_plugin_map_from_list(self, available_plugins: List[Dict[str, Any]]):
         """Initializes the plugin map from a list of plugin manifests."""
@@ -189,73 +189,52 @@ class PlanValidator:
         logger.info(f"PlanValidator: Initialized plugin_map with {len(self.plugin_map)} entries.")
 
     def validate_and_repair(self, plan: List[Dict[str, Any]], goal: str, 
-                           inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
+                           inputs: Dict[str, Any]) -> ValidationResult:
         """
-        Validates and transforms a plan with improved convergence guarantees.
+        Validates and attempts to repair a plan, returning a final validation result.
+        This function no longer raises an exception on failure.
         """
         logger.info(f"--- Plan Validation and Transformation (Enhanced) ---")
         logger.info(f"INPUT PLAN: {len(plan)} steps")
         
-        # UUID assignment happens ONCE at the very beginning
         plan, uuid_map = self._assign_consistent_uuids(plan)
         if uuid_map:
             logger.info(f"Applied UUID mapping with {len(uuid_map)} replacements")
             plan = self._apply_uuid_map_recursive(plan, uuid_map)
         
-        # Build initial index
         index = self._build_plan_index(plan)
         tracker = TransformationTracker()
-        best_result = None
+        current_result = None
         
         for attempt in range(self.max_retries):
             logger.info(f"Validation attempt {attempt + 1}/{self.max_retries}")
             
-            # Validate and transform using the index
-            result = self._validate_and_transform(plan, index, tracker, inputs)
+            current_result = self._validate_and_transform(plan, index, tracker, inputs)
             
-            if result.is_valid:
+            if current_result.is_valid:
                 logger.info(f"Plan successfully validated after {attempt + 1} attempts")
-                return result.plan
+                return current_result
             
-            # Check if we're making progress
-            if best_result is None or result.is_improved_over(best_result):
-                logger.info(f"Improvement: {len(result.errors)} errors (was {len(best_result.errors) if best_result else 'N/A'})")
-                best_result = result
-                plan = result.plan
-                
-                # Rebuild index after transformation
+            logger.warning(f"Validation attempt {attempt + 1} found {len(current_result.errors)} errors.")
+
+            # If programmatic transforms were applied, they might have fixed something.
+            # The loop will continue and re-validate.
+            if current_result.transformations_applied:
+                plan = current_result.plan
                 index = self._build_plan_index(plan)
-            else:
-                # No improvement from transformations, try LLM repair
-                logger.warning(f"No improvement from transformations. Attempting LLM repair.")
-                try:
-                    repaired_plan = self._repair_plan_with_llm(
-                        plan, result.errors, goal, inputs
-                    )
-                    
-                    # Validate that repair actually improved things
-                    repair_check = self._quick_validation_check(repaired_plan, index)
-                    if repair_check.is_improved_over(result):
-                        logger.info("LLM repair improved the plan")
-                        plan = repaired_plan
-                        index = self._build_plan_index(plan)
-                        best_result = repair_check
-                    else:
-                        logger.warning("LLM repair did not improve the plan, reverting")
-                        break
-                except Exception as e:
-                    logger.warning(f"LLM repair failed: {e}")
-                    break
+                continue
+
+            # No improvement from programmatic transforms, try LLM repair
+            logger.warning("No improvement from programmatic transformations. Attempting LLM repair.")
+            try:
+                plan = self._repair_plan_with_llm(plan, current_result.errors, goal, inputs)
+                index = self._build_plan_index(plan) # Re-index after potential repair
+            except Exception as e:
+                logger.error(f"LLM repair failed: {e}. Aborting repair attempts.")
+                break # Exit the loop and return the last known result
         
-        if best_result and not best_result.is_valid:
-            error_summary = "; ".join(best_result.get_error_messages()[:3])
-            raise AccomplishError(
-                f"Plan validation failed after {self.max_retries} attempts. "
-                f"Best attempt had {len(best_result.errors)} errors: {error_summary}",
-                "validation_error"
-            )
-        
-        return best_result.plan if best_result else plan
+        # After all attempts, return the last result, which will contain the remaining errors
+        return current_result
 
     def _validate_and_transform(self, plan: List[Dict[str, Any]], 
                                index: PlanIndex,
@@ -281,45 +260,6 @@ class PlanValidator:
         result.transformations_applied = transformations
         result.is_valid = len(errors) == 0
         
-        return result
-
-    def _quick_validation_check(self, plan: List[Dict[str, Any]], 
-                                index: PlanIndex) -> ValidationResult:
-        """
-        Quick validation check without transformations for comparing plans.
-        """
-        result = ValidationResult(plan=plan)
-        errors = []
-        
-        # Just check basic structure and references
-        all_step_ids = {step.get('id') for step in self._flatten_plan(plan) if step.get('id')}
-        
-        for step in self._flatten_plan(plan):
-            step_id = step.get('id', 'unknown')
-            
-            # Check basic structure
-            if not step.get('actionVerb'):
-                errors.append(StructuredError(
-                    ErrorType.MISSING_FIELD,
-                    "Missing actionVerb",
-                    step_id=step_id
-                ))
-            
-            # Check references
-            for input_name, input_def in step.get('inputs', {}).items():
-                if isinstance(input_def, dict) and 'sourceStep' in input_def:
-                    source_id = input_def['sourceStep']
-                    if source_id != '0' and source_id not in all_step_ids:
-                        errors.append(StructuredError(
-                            ErrorType.INVALID_REFERENCE,
-                            f"Input '{input_name}' references non-existent step {source_id}",
-                            step_id=step_id,
-                            input_name=input_name,
-                            source_step_id=source_id
-                        ))
-        
-        result.errors = errors
-        result.is_valid = len(errors) == 0
         return result
 
     def _flatten_plan(self, plan: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -420,14 +360,17 @@ class PlanValidator:
             if not isinstance(step, dict):
                 continue
 
-            for input_name, input_def in step.get('inputs', {}).items():
-                if isinstance(input_def, dict) and 'sourceStep' in input_def:
-                    original_source_id = input_def['sourceStep']
-                    if original_source_id in uuid_map:
-                        new_source_id = uuid_map[original_source_id]
-                        if new_source_id != original_source_id:
-                            logger.debug(f"Remapped sourceStep {original_source_id} -> {new_source_id}")
-                            input_def['sourceStep'] = new_source_id
+            # Ensure inputs is a dictionary before trying to iterate
+            step_inputs = step.get('inputs', {})
+            if isinstance(step_inputs, dict):
+                for input_name, input_def in step_inputs.items():
+                    if isinstance(input_def, dict) and 'sourceStep' in input_def:
+                        original_source_id = input_def['sourceStep']
+                        if original_source_id in uuid_map:
+                            new_source_id = uuid_map[original_source_id]
+                            if new_source_id != original_source_id:
+                                logger.debug(f"Remapped sourceStep {original_source_id} -> {new_source_id}")
+                                input_def['sourceStep'] = new_source_id
 
             sub_plan = self._get_sub_plan(step)
             if sub_plan:
@@ -1088,12 +1031,16 @@ class PlanValidator:
         in_degree: Dict[str, int] = {}
         
         for step in plan:
+            if not isinstance(step, dict):
+                continue
             step_id = step.get('id')
             if step_id:
                 adj[step_id] = []
                 in_degree[step_id] = 0
 
         for step in plan:
+            if not isinstance(step, dict):
+                continue
             step_id = step.get('id')
             if not step_id:
                 continue
@@ -1394,46 +1341,39 @@ Return ONLY the corrected JSON plan as a valid JSON array. Do not include any ex
         return current_plan
 
     def _call_llm_for_repair(self, prompt: str, inputs: Dict[str, Any], current_plan: List[Dict[str, Any]], signature: str) -> List[Dict[str, Any]]:
-        """Helper function to call the LLM and handle response and validation."""
+        """Helper function to call the LLM and return the repaired plan data."""
         if not self.brain_call:
             raise AccomplishError("Brain call not available", "brain_error")
 
+        request_id = None
         try:
-            temp_index = self._build_plan_index(current_plan)
-            validation_before = self._quick_validation_check(current_plan, temp_index)
-
             response_tuple = self.brain_call(prompt, inputs, "json")
             if not isinstance(response_tuple, tuple) or len(response_tuple) != 2:
-                logger.error(f"LLM call for signature '{signature}' returned an unexpected format: {response_tuple}. Skipping this batch.")
+                logger.error(f"LLM call for signature '{signature}' returned an unexpected format. Skipping repair.")
                 return current_plan
                 
             response_str, request_id = response_tuple
             repaired_data = json.loads(response_str)
 
-            if not isinstance(repaired_data, list):
-                if isinstance(repaired_data, dict) and 'plan' in repaired_data and isinstance(repaired_data['plan'], list):
-                    repaired_data = repaired_data['plan']
-                elif isinstance(repaired_data, dict) and 'steps' in repaired_data and isinstance(repaired_data['steps'], list):
-                    repaired_data = repaired_data['steps']
-                else:
-                    raise AccomplishError(f"LLM repair for {signature} returned a dictionary without a 'plan' or 'steps' list.", "repair_error")
-
-            temp_index_after = self._build_plan_index(repaired_data)
-            validation_after = self._quick_validation_check(repaired_data, temp_index_after)
-            
-            if len(validation_after.errors) < len(validation_before.errors):
-                logger.info(f"LLM repair for signature '{signature}' was ACCEPTED. Error count reduced from {len(validation_before.errors)} to {len(validation_after.errors)}.")
+            if isinstance(repaired_data, list):
                 return repaired_data
-            else:
-                logger.warning(f"LLM repair for signature '{signature}' was REJECTED. It did not reduce the error count. Before: {len(validation_before.errors)}, After: {len(validation_after.errors)}. Reverting.")
-                return current_plan
+            elif isinstance(repaired_data, dict):
+                if 'plan' in repaired_data and isinstance(repaired_data['plan'], list):
+                    return repaired_data['plan']
+                if 'steps' in repaired_data and isinstance(repaired_data['steps'], list):
+                    return repaired_data['steps']
+            
+            # If we reach here, the format is wrong
+            error_message = f"LLM repair for {signature} returned a dictionary without a 'plan' or 'steps' list."
+            if self.report_logic_failure_call:
+                self.report_logic_failure_call(request_id, inputs, error_message)
+            raise AccomplishError(error_message, "repair_error")
 
-        except json.JSONDecodeError as e:
-            logger.error(f"LLM repair for signature '{signature}' returned invalid JSON: {e}. Skipping this batch.")
-            return current_plan
-        except AccomplishError as e:
-            logger.error(f"Error processing LLM response for signature '{signature}': {e}. Skipping this batch.")
+        except (json.JSONDecodeError, AccomplishError) as e:
+            logger.error(f"Error processing LLM repair response for signature '{signature}': {e}. Reverting to previous plan.")
+            if self.report_logic_failure_call and request_id:
+                self.report_logic_failure_call(request_id, inputs, f"LLM repair failed with error: {e}")
             return current_plan
         except Exception as e:
-            logger.error(f"An unexpected error occurred during LLM repair for signature '{signature}': {e}. Skipping this batch.")
+            logger.error(f"An unexpected error occurred during LLM repair for signature '{signature}': {e}. Reverting.")
             return current_plan

@@ -88,33 +88,25 @@ class GetUserInputPlugin:
     def execute(self, inputs_map: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Execute the ASK_USER_QUESTION plugin asynchronously"""
         try:
-            # Extract inputs
-            question = None
-            choices = None
-            answer_type = 'text'
-            clientId = None
+            def _get_input(key, aliases=[]):
+                val = inputs_map.get(key)
+                if val is None:
+                    for alias in aliases:
+                        val = inputs_map.get(alias)
+                        if val is not None:
+                            break
+                if val is None:
+                    return None
+                
+                if isinstance(val, dict) and 'value' in val:
+                    return val['value']
+                return val
 
-            for key, value in inputs_map.items():
-                if key == 'question':
-                    if isinstance(value, dict) and 'value' in value:
-                        question = value['value']
-                    else:
-                        question = value
-                elif key == 'choices':
-                    if isinstance(value, dict) and 'value' in value:
-                        choices = value['value']
-                    else:
-                        choices = value
-                elif key == 'answerType':
-                    if isinstance(value, dict) and 'value' in value:
-                        answer_type = value['value']
-                    else:
-                        answer_type = value
-                elif key == 'clientId':
-                    if isinstance(value, dict) and 'value' in value:
-                        clientId = value['value']
-                    else:
-                        clientId = value
+            # Extract inputs using the helper
+            question = _get_input('question', ['prompt', 'msg', 'text'])
+            choices = _get_input('choices')
+            answer_type = _get_input('answerType') or 'text'
+            clientId = _get_input('clientId')
 
             if not question:
                 return [{
@@ -125,8 +117,6 @@ class GetUserInputPlugin:
                     "result": None,
                     "error": "No question provided to ASK_USER_QUESTION plugin"
                 }]
-
-
 
             # Add condition: if question includes 'upload', set answerType to 'File'
             if 'upload' in question.lower():
