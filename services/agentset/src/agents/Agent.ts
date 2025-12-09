@@ -566,10 +566,6 @@ Please consider this context when planning and executing the mission. Provide de
             step.inputValues = await step.dereferenceInputsForExecution(this.steps, this.missionId);
             this.say(`Executing step: ${step.actionVerb} - ${step.description || 'No description'}`);
 
-            if (step.actionVerb === 'FOREACH') {
-                console.debug(`[Agent ${this.id}] executeStep: Calling execute for FOREACH step ${step.id}`);
-            }
-
             const result = await step.execute(
                 this.executeActionWithCapabilitiesManager.bind(this),
                 this.useBrainForReasoning.bind(this),
@@ -654,8 +650,6 @@ Please consider this context when planning and executing the mission. Provide de
                     const workstreamStartIndex = this.steps.length;
                     this.addStepsFromPlan(actualPlanArray, step);
                     const workstreamSteps = this.steps.slice(workstreamStartIndex);
-
-                    console.debug(`[Agent ${this.id}] executeStep: Steps after adding new plan: ${this.steps.map(s => `${s.id} (${s.actionVerb}, ${s.status})`).join(', ')}`);
 
                     // Rewire dependencies: steps that depended on the REPLACED step should now depend on the workstream endpoints
                     this.rewireDependenciesForReplacedStep(step, workstreamSteps);
@@ -781,7 +775,6 @@ Please consider this context when planning and executing the mission. Provide de
         const newSteps = createFromPlan(plan, this.agentPersistenceManager, this.crossAgentResolver, parentStep, this);
         this.steps.push(...newSteps);
         console.log(`[Agent ${this.id}] DEBUG: Agent.addStepsFromPlan: this.steps now contains ${this.steps.length} steps.`);
-        console.log(`[Agent ${this.id}] DEBUG: Agent.addStepsFromPlan: Current step statuses: ${this.steps.map(s => `${s.id.substring(0, 8)}... (${s.status})`).join(', ')}`);
         for (const step of newSteps) {
             this.agentSet.registerStepLocation(step.id, this.id, this.agentSet.url);
         }
