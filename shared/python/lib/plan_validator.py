@@ -227,7 +227,7 @@ class PlanValidator:
             # No improvement from programmatic transforms, try LLM repair
             logger.warning("No improvement from programmatic transformations. Attempting LLM repair.")
             try:
-                plan = self._repair_plan_with_llm(plan, current_result.errors, goal, inputs)
+                plan = self._repair_plan_with_llm(plan, current_result.errors, goal, inputs, tracker)
                 index = self._build_plan_index(plan) # Re-index after potential repair
             except Exception as e:
                 logger.error(f"LLM repair failed: {e}. Aborting repair attempts.")
@@ -1249,7 +1249,8 @@ class PlanValidator:
     def _repair_plan_with_llm(self, plan: List[Dict[str, Any]], 
                              errors: List[StructuredError], 
                              goal: str,
-                             inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
+                             inputs: Dict[str, Any],
+                             tracker: TransformationTracker) -> List[Dict[str, Any]]:
         """
         Ask LLM to repair the plan by sending a batch of focused requests for each error type.
         This version includes a sanity check and uses specific error signatures for more targeted repairs.
@@ -1336,7 +1337,7 @@ Return ONLY the corrected JSON plan as a valid JSON array. Do not include any ex
             if signature not in processed_signatures:
                 process_signature(signature)
         
-        final_error_count = len(self._quick_validation_check(current_plan, self._build_plan_index(current_plan)).errors)
+        final_error_count = len(self._validate_and_transform(current_plan, self._build_plan_index(current_plan), tracker, inputs).errors)
         logger.info(f"LLM repair process finished. Initial errors: {initial_error_count}, Final errors: {final_error_count}.")
         return current_plan
 

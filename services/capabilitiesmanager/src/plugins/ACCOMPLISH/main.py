@@ -600,12 +600,6 @@ EXAMPLE OF GOOD HIGH-LEVEL STEPS:
 - "Develop a content strategy to target identified user personas."
 - "Create a proof-of-concept for the new feature."
 
-EXAMPLE OF BAD LOW-LEVEL STEPS (AVOID THESE):
-- "Use the SEARCH plugin to find competitor websites."
-- "Call the SCRAPE tool on the list of URLs."
-- "Write the results to a file using FILE_OPERATION."
-
-
 IMPORTANT: Return ONLY plain text for the plan. NO markdown formatting, NO code blocks, NO special formatting.
 """
 
@@ -658,7 +652,7 @@ Follow these steps to create the final JSON output:
 **STEP A: Internal Analysis & Self-Correction (Your Internal Monologue)**
 1.  **Analyze:** Read the Goal and Prose Plan to fully understand the user's intent and the required sequence of actions.
 2.  **Verify Schema:** Carefully study the JSON SCHEMA. Your output must follow it perfectly.
-3.  **Restate the Plan as Explicit Steps:** Identify a list of steps that will be taken to achieve the Goal. Each Step should be a clear, actionable task with one or more outputs.
+3.  **Restate the Plan as Explicit Steps:** Identify a list of steps that will be taken to achieve the Goal. Each Step should be a clear, actionable task with one or more outputs. Use known actionVerbs when suitable.
 4.  **Check Dependencies & Data Types:** For each step, ensure its `inputs` correctly reference the `outputName` and `sourceStep`. Crucially, verify that the `valueType` of the source output matches the expected `valueType` of the target input.
 5.  **CRITICAL - USE UNIQUE STRING IDs:** Every single step in the plan MUST have a unique string identifier in the "id" field. This ID does NOT have to be a UUID, but it MUST be unique within the entire plan. For example: "step_1", "step_2", etc. Do NOT reuse IDs.
 6.  **Final Check:** Before generating the output, perform a final check to ensure the entire JSON structure is valid and fully compliant with the schema.
