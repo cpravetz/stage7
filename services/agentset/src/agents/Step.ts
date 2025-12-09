@@ -1,17 +1,11 @@
 import { v4 as uuidv4 } from 'uuid';
-import { PluginParameterType, PluginOutput, InputReference, InputValue, StepDependency, ActionVerbTask as ActionVerbTaskShared, ExecutionContext as PlanExecutionContext, PlanTemplate, OutputType, PredefinedRoles } from '@cktmcs/shared'; // Added ActionVerbTask and OutputType
+import { PluginParameterType, PluginOutput, InputReference, InputValue, StepDependency, ActionVerbTask, ExecutionContext as PlanExecutionContext, PlanTemplate, OutputType, PredefinedRoles } from '@cktmcs/shared'; 
 import { MapSerializer } from '@cktmcs/shared';
-import { MessageType } from '@cktmcs/shared'; // Ensured MessageType is here, assuming it's separate or also from shared index
 import { AgentPersistenceManager } from '../utils/AgentPersistenceManager';
 import { RuntimeForeachDetector, ForeachModification } from '../utils/RuntimeForeachDetector.js';
 import { DelegationRecord } from '../types/DelegationTypes';
 import { CrossAgentDependencyResolver } from '../utils/CrossAgentDependencyResolver';
 import { Agent } from './Agent.js';
-
-//FIXME: This is a temporary fix for the typescript error
-interface ActionVerbTask extends ActionVerbTaskShared {
-    inputs: any;
-}
 
 export enum StepStatus {
     PENDING = 'pending',
@@ -22,7 +16,6 @@ export enum StepStatus {
     CANCELLED = 'cancelled',
     WAITING = 'waiting',
     REPLACED = 'replaced',
- 
 }
 
 export interface StepModification {
@@ -32,7 +25,6 @@ export interface StepModification {
     status?: StepStatus;
     actionVerb?: string;
     recommendedRole?: string;
-
 }
 
 interface ErrorContext {
@@ -72,7 +64,6 @@ export class Step {
     currentIndex?: number; // For stateful FOREACH batching
     private tempData: Map<string, any> = new Map();
     private persistenceManager: AgentPersistenceManager;
-    private backoffTime: number = 1000; // Initial backoff time in ms
     private crossAgentResolver: CrossAgentDependencyResolver;
 
     // Ownership and Delegation

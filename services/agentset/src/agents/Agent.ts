@@ -5,7 +5,7 @@ import { AgentStatus } from '../utils/agentStatus';
 import { getServiceUrls } from '../utils/postOfficeInterface';
 import { MapSerializer, BaseEntity, LLMConversationType } from '@cktmcs/shared';
 import { AgentPersistenceManager } from '../utils/AgentPersistenceManager';
-import { PluginOutput, PluginParameterType, InputValue, ExecutionContext as PlanExecutionContext, MissionFile, ActionVerbTask as ActionVerbTaskShared, StepDependency } from '@cktmcs/shared';
+import { PluginOutput, PluginParameterType, InputValue, ExecutionContext as PlanExecutionContext, ActionVerbTask, StepDependency } from '@cktmcs/shared';
 import { AgentConfig, AgentStatistics, OutputType } from '@cktmcs/shared';
 import { MessageType } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
@@ -16,11 +16,6 @@ import { AgentSet } from '../AgentSet';
 import { StateManager } from '../utils/StateManager';
 import * as amqp from 'amqplib';
 import * as amqp_connection_manager from 'amqp-connection-manager';
-
-//FIXME: This is a temporary fix for the typescript error
-interface ActionVerbTask extends ActionVerbTaskShared {
-    inputs: any;
-}
 
 export class Agent extends BaseEntity {
 

@@ -1,8 +1,8 @@
-# Verb Discovery Architecture Proposal
+# Enhanced Verb Discovery & Tool Integration Architecture
 
 ## Executive Summary
 
-This document proposes a Chroma-powered verb discovery system to solve the scalability problem of static verb manifests in the ACCOMPLISH plugin. The solution leverages the existing knowledge graph infrastructure to create a dynamic, semantic verb discovery capability.
+This document presents a comprehensive architecture for dynamic verb discovery and tool integration, combining the best elements from previous proposals into a unified, phased approach. The solution leverages existing Chroma-powered knowledge graph infrastructure while incorporating reactive discovery mechanisms and future-proof evolutionary concepts.
 
 ## Problem Analysis
 
@@ -12,26 +12,38 @@ This document proposes a Chroma-powered verb discovery system to solve the scala
 2. **Token Limit Constraints**: As MCP Tools and plugins grow, static lists hit LLM context window limits
 3. **Discovery Problem**: LLMs cannot discover verbs that exist but aren't included in static lists
 4. **Redundant Verb Creation**: System creates novel verbs when existing ones could accomplish the task
+5. **Tool Integration Complexity**: Multiple tool types (Python, OpenAPI, MCP) require unified management
 
 ### Current Infrastructure Analysis
 
-The system already has sophisticated Chroma-based knowledge graph capabilities:
+The system already has sophisticated capabilities:
 
 - **ChromaDB Integration**: Fully operational instance with semantic search
 - **KnowledgeStore**: `services/librarian/src/knowledgeStore/index.ts` handles vector database interactions
 - **Embedding Function**: Uses `Xenova/all-MiniLM-L6-v2` sentence-transformer model
 - **REST API**: Librarian exposes `/knowledge/query` and `/knowledge/save` endpoints
-- **QUERY_KNOWLEDGE_BASE Plugin**: Existing semantic search capability for knowledge domains
+- **PluginMarketplace**: Unified management system for all tool types
+- **CapabilitiesManager**: Central execution dispatcher for all action verbs
 
-## Proposed Solution Architecture
+## Unified Architecture Proposal
 
-### Core Strategy: Extend Existing Knowledge Graph
+### Core Strategy: Phased Evolution with Discovery-First Approach
 
-Instead of creating separate infrastructure, **extend the current knowledge graph** to include verb manifests:
+```mermaid
+graph TD
+    A[Current State: Static Verb Lists] --> B[Phase 1: Chroma-Powered Discovery]
+    B --> C[Phase 2: Reactive Tool Discovery]
+    C --> D[Phase 3: Context-Aware Knowledge Graph]
+    D --> E[Phase 4: AI-Driven Tool Engineering]
+```
+
+### Phase 1: Chroma-Powered Semantic Discovery (Current Focus)
+
+#### Architecture Overview
 
 ```
 ┌───────────────────────────────────────────────────────┐
-│                Verb Discovery Architecture            │
+│            Enhanced Verb Discovery Architecture        │
 ├───────────────────────────────────────────────────────┤
 │  ┌─────────────┐    ┌───────────────────────────────┐  │
 │  │  ACCOMPLISH  │    │      NovelVerbHandler         │  │
@@ -48,6 +60,7 @@ Instead of creating separate infrastructure, **extend the current knowledge grap
 │  │  Librarian API      │    │  KnowledgeStore        │  │
 │  │  /verbs/discover     │    │  (Extended)            │  │
 │  │  /verbs/register     │    │                        │  │
+│  │  /tools/search       │    │                        │  │
 │  └──────────┬─────────┘    └──────────┬─────────────┘  │
 │             │                        │               │
 │             │                        │               │
@@ -65,9 +78,7 @@ Instead of creating separate infrastructure, **extend the current knowledge grap
 └───────────────────────────────────────────────────────┘
 ```
 
-## Detailed Implementation Plan
-
-### 1. Chroma Verb Collection Structure
+#### Chroma Collection Structure
 
 **Collection: "verbs"**
 - **Documents**: Verb manifests in JSON format
@@ -85,233 +96,115 @@ Instead of creating separate infrastructure, **extend the current knowledge grap
   ```
 - **Embeddings**: Semantic vectors generated from combined text fields
 
-### 2. KnowledgeStore Extension
+**Collection: "tools"**
+- **Documents**: Tool manifests (MCP, OpenAPI, Python plugins)
+- **Metadata Schema**:
+  ```json
+  {
+    "toolId": "weather-api-v1",
+    "name": "Weather API Tool",
+    "type": "openapi",
+    "actionVerbs": ["GET_WEATHER", "FORECAST"],
+    "capabilities": ["weather_data", "meteorological_information"],
+    "description": "Provides current weather and forecast data"
+  }
+  ```
 
-Add verb-specific methods to `services/librarian/src/knowledgeStore/index.ts`:
+### Phase 2: Reactive Tool Discovery (Enhanced NovelVerbHandler)
 
-```typescript
-public async registerVerb(verbManifest: any): Promise<void> {
-    try {
-        const collection = await this.getOrCreateCollection('verbs');
-        const id = verbManifest.verb;
+#### Discovery Workflow
 
-        // Sanitize and prepare metadata
-        const metadata = {
-            verb: verbManifest.verb,
-            description: verbManifest.description,
-            capabilities: verbManifest.capabilities || [],
-            category: verbManifest.category || 'other',
-            examples: verbManifest.examples || []
-        };
+1. **Intent-Based Planning**: ACCOMPLISH planner generates plans using logical, descriptive action verbs
+2. **Reactive Discovery**: When encountering unknown verbs, NovelVerbHandler:
+   - First performs semantic search on both verbs and tools collections
+   - Attempts to find existing capabilities that match the intent
+   - Substitutes discovered verbs/tools when high-confidence matches found
+   - Falls back to decomposition or tool creation when no matches exist
 
-        await collection.upsert({
-            ids: [id],
-            documents: [JSON.stringify(verbManifest)],
-            metadatas: [metadata],
-        });
-
-        console.log(`Registered verb ${id} in knowledge base`);
-    } catch (error) {
-        console.error(`Failed to register verb:`, error);
-        throw new Error(`Failed to register verb: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
-}
-
-public async discoverVerbs(capabilityDescription: string, maxResults: number = 5): Promise<any[]> {
-    try {
-        const collection = await this.getOrCreateCollection('verbs');
-
-        const results = await collection.query({
-            nResults: maxResults,
-            queryTexts: [capabilityDescription],
-        });
-
-        if (!results.distances) {
-            console.warn('Warning: results.distances is null or undefined.');
-            return [];
-        }
-
-        console.log(`Discovered ${results.ids[0].length} verbs for capability: "${capabilityDescription}"`);
-
-        return results.ids[0].map((id, index) => ({
-            id,
-            document: results.documents[0][index],
-            metadata: results.metadatas[0][index],
-            distance: results.distances ? results.distances[0][index] : null,
-        }));
-
-    } catch (error) {
-        console.error(`Failed to discover verbs:`, error);
-        throw new Error(`Failed to discover verbs: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
-}
-```
-
-### 3. Librarian API Extension
-
-Add verb discovery endpoints to `services/librarian/src/Librarian.ts`:
+#### Enhanced NovelVerbHandler Logic
 
 ```typescript
-private async discoverVerbs(req: express.Request, res: express.Response) {
-    const { capabilityDescription, maxResults = 5 } = req.body;
+async function handleUnknownVerb(verbInfo: VerbInfo, context: ExecutionContext) {
+    // 1. Semantic search for existing verbs
+    const verbMatches = await knowledgeStore.discoverVerbs(verbInfo.description);
 
-    if (!capabilityDescription) {
-        return res.status(400).send({ error: 'capabilityDescription is required' });
-    }
+    // 2. Semantic search for tools that can fulfill the capability
+    const toolMatches = await knowledgeStore.searchTools(verbInfo.description);
 
-    try {
-        const results = await knowledgeStore.discoverVerbs(capabilityDescription, maxResults);
-        res.status(200).send({ data: results });
-    } catch (error) {
-        console.error('Error in discoverVerbs:', error instanceof Error ? error.message : error);
-        res.status(500).send({ error: 'Failed to discover verbs', details: error instanceof Error ? error.message : String(error) });
-    }
-}
+    // 3. Evaluate matches and select best option
+    const bestMatch = selectBestMatch(verbMatches, toolMatches);
 
-private async registerVerb(req: express.Request, res: express.Response) {
-    const { verbManifest } = req.body;
-
-    if (!verbManifest || !verbManifest.verb) {
-        return res.status(400).send({ error: 'verbManifest with verb property is required' });
-    }
-
-    try {
-        await knowledgeStore.registerVerb(verbManifest);
-        res.status(200).send({ status: 'Verb registered successfully' });
-    } catch (error) {
-        console.error('Error in registerVerb:', error instanceof Error ? error.message : error);
-        res.status(500).send({ error: 'Failed to register verb', details: error instanceof Error ? error.message : String(error) });
+    if (bestMatch) {
+        // Substitute and execute
+        return executeWithSubstitution(bestMatch, context);
+    } else {
+        // Fall back to decomposition or tool creation
+        return originalNovelVerbHandling(verbInfo, context);
     }
 }
 ```
 
-### 4. ACCOMPLISH Plugin Integration
+### Phase 3: Context-Aware Knowledge Graph (Future)
 
-Modify `services/capabilitiesmanager/src/plugins/ACCOMPLISH/main.py`:
+#### Architecture Enhancement
 
-```python
-def _create_detailed_plugin_guidance(inputs: Dict[str, Any]) -> str:
-    """Create plugin guidance with dynamic verb discovery section"""
-    available_plugins_input = inputs.get('availablePlugins', {})
-    available_plugins = available_plugins_input.get('value', []) if isinstance(available_plugins_input, dict) else available_plugins
+- **Graph Database Integration**: Neo4j managed by Librarian
+- **Contextual Entity Linking**: Tools connected to domain entities (Airline, Restaurant, etc.)
+- **Disambiguation Engine**: Graph traversal for precise tool selection based on context
 
-    guidance_lines = ["\n--- AVAILABLE PLUGINS ---"]
+### Phase 4: AI-Driven Tool Engineering (Future)
 
-    if available_plugins:
-        for plugin in available_plugins:
-            if isinstance(plugin, dict):
-                action_verb = plugin.get('verb', 'UNKNOWN')
-                description = plugin.get('description', 'No description available.')
-                guidance_lines.append(f"- {action_verb}: {description}")
-    else:
-        guidance_lines.append("No static plugins available - using dynamic discovery")
+#### Engineer Agent Enhancement
 
-    guidance_lines.append("--------------------")
-
-    # Add dynamic verb discovery protocol
-    guidance_lines.append("\n--- DYNAMIC VERB DISCOVERY PROTOCOL ---")
-    guidance_lines.append("When you need capabilities not listed above:")
-    guidance_lines.append("1. Describe the capability you need in natural language")
-    guidance_lines.append("2. The system will automatically discover existing verbs that match")
-    guidance_lines.append("3. Use discovered verbs instead of creating new ones")
-    guidance_lines.append("4. Only create novel verbs if no suitable existing verbs are found")
-    guidance_lines.append("Example: Need to 'create visual content' → discovers GENERATE, DRAW, CREATE_IMAGE verbs")
-    guidance_lines.append("--------------------")
-
-    return "\n".join(guidance_lines)
-```
-
-### 5. NovelVerbHandler Enhancement
-
-Add dynamic discovery to the novel verb handling process:
-
-```python
-def _ask_brain_for_verb_handling(self, verb_info: Dict[str, Any], inputs: Dict[str, Any]) -> str:
-    """Ask Brain how to handle the novel verb with dynamic discovery"""
-    verb = verb_info['verb']
-    description = verb_info.get('description', 'No description provided')
-    context = verb_info.get('context', description)
-    schema_json = json.dumps(PLAN_ARRAY_SCHEMA, indent=2)
-    plugin_guidance = _create_detailed_plugin_guidance(inputs)
-
-    # Add dynamic verb discovery section
-    discovery_section = """
-**DYNAMIC VERB DISCOVERY:**
-Before creating a novel verb, attempt to discover existing verbs that can accomplish similar goals.
-
-**DISCOVERY PROTOCOL:**
-1. Analyze what capability the novel verb '{verb}' is trying to accomplish
-2. The system will automatically query the verb discovery service
-3. Use any discovered verbs instead of creating new ones
-4. Only create novel verbs if discovery returns no suitable matches
-
-**EXAMPLES:**
-- Need: "Find information about companies" → Discovers: SEARCH, SCRAPE, QUERY_KNOWLEDGE_BASE
-- Need: "Create a visual representation" → Discovers: GENERATE, DRAW, CREATE_IMAGE
-- Need: "Process a list of items" → Discovers: FOREACH, ITERATE, PROCESS_LIST
-""".format(verb=verb)
-
-    prompt = f"""You are an expert system analyst. A user wants to use a novel action verb "{verb}" that is not currently supported.
-
-VERB: {verb}
-DESCRIPTION: {description}
-CONTEXT: {context}
-
-{discovery_section}
-
-**CRITICAL CONSTRAINTS:**
-- You MUST NOT use the novel verb "{verb}" in your plan - use available plugins instead
-- First attempt verb discovery to find existing verbs that match the capability
-- Use existing action verbs from the available plugins listed below
-- Only create novel verbs if discovery returns no suitable matches
-- Break down the task into granular, atomic steps using available tools
-
-{plugin_guidance}"""
-```
+1. **Autonomous Tool Wrapping**: Generate plugin wrappers for external APIs
+2. **Verification Testing**: Auto-generate and run basic functionality tests
+3. **Registration Pipeline**: Seamless integration into PluginMarketplace
 
 ## Implementation Roadmap
 
-### Phase 1: Infrastructure Extension (2-3 days)
-- ✅ Extend KnowledgeStore with verb-specific methods
-- ✅ Add Librarian API endpoints for verb discovery
-- ✅ Create verb registration pipeline
-- ✅ Set up Chroma collection for verbs
+### Phase 1: Core Discovery Infrastructure (2-3 weeks)
 
-### Phase 2: Integration Layer (3-4 days)
-- ✅ Modify ACCOMPLISH plugin to use discovery API
-- ✅ Update NovelVerbHandler with discovery logic
-- ✅ Add fallback mechanisms for discovery failures
-- ✅ Implement caching for performance optimization
+- [x] Extend KnowledgeStore with verb-specific methods
+- [x] Add Librarian API endpoints for verb discovery
+- [x] Create verb registration pipeline
+- [x] Set up Chroma collections for verbs and tools
+- [ ] Enhance NovelVerbHandler with discovery logic
+- [ ] Add fallback mechanisms for discovery failures
+- [ ] Implement caching for performance optimization
 
-### Phase 3: LLM Training (2 days)
-- ✅ Enhance system prompts with discovery protocols
-- ✅ Add examples of discovery usage patterns
-- ✅ Implement verb selection guidance
-- ✅ Update documentation and examples
+### Phase 2: Integration & Testing (3-4 weeks)
 
-### Phase 4: Testing & Optimization (3 days)
-- ✅ Performance testing of discovery queries
-- ✅ Failure mode testing and fallback verification
-- ✅ Optimization of semantic search parameters
-- ✅ Integration testing with existing workflows
+- [ ] Modify ACCOMPLISH plugin to use discovery API
+- [ ] Update NovelVerbHandler with full discovery workflow
+- [ ] Integrate with PluginMarketplace for tool discovery
+- [ ] Performance testing of discovery queries
+- [ ] Failure mode testing and fallback verification
+- [ ] Integration testing with existing workflows
+
+### Phase 3: Advanced Features (Future Phases)
+
+- [ ] Knowledge graph implementation for context-aware discovery
+- [ ] Engineer agent enhancements for autonomous tool creation
+- [ ] External tool governance and "Airlock" process
+- [ ] Health monitoring and automatic deactivation
 
 ## Key Benefits
 
 1. **Unlimited Scalability**: No more token limit constraints
-2. **Intelligent Discovery**: Semantic matching finds relevant verbs
+2. **Intelligent Discovery**: Semantic matching finds relevant verbs and tools
 3. **Resource Optimization**: Reduces redundant verb creation
 4. **Architectural Consistency**: Leverages existing knowledge graph
 5. **Proven Technology**: Uses working Chroma + sentence-transformers stack
-6. **Maintainability**: Centralized knowledge management
-7. **Performance**: Optimized vector search capabilities
+6. **Future-Proof**: Phased approach allows gradual enhancement
+7. **Unified Management**: Single discovery interface for all tool types
 
 ## Success Metrics
 
-- **Discovery Accuracy**: 90%+ of capability queries return relevant verbs
+- **Discovery Accuracy**: 90%+ of capability queries return relevant verbs/tools
 - **Performance**: <100ms average discovery query time
 - **Adoption Rate**: 80%+ reduction in novel verb creation
 - **System Stability**: Zero downtime during transition
-- **User Satisfaction**: Improved plan quality metrics
+- **Coverage**: 95%+ of existing tools discoverable via semantic search
 
 ## Risk Mitigation
 
@@ -321,4 +214,12 @@ CONTEXT: {context}
 4. **Comprehensive Testing**: Extensive unit and integration tests
 5. **Documentation**: Complete API and usage documentation
 
-This architecture proposal provides a robust, scalable solution that leverages the existing knowledge graph infrastructure while solving the core verb discovery problem.
+## Relationship to Other Architectures
+
+This document represents the **Discovery Architecture** component of the overall system. It works in conjunction with:
+
+- **Tool Integration Architecture** (`mcp-tool-integration.md`): Handles tool registration, management, and execution
+- **PluginMarketplace**: Provides unified tool management interface
+- **CapabilitiesManager**: Executes discovered verbs and tools
+
+The discovery architecture focuses on **how tools are found**, while the integration architecture focuses on **how tools are managed and executed**.

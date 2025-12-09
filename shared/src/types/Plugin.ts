@@ -144,6 +144,7 @@ export interface ActionVerbTask {
     description?: string;
     dependencies?: PlanDependency[];
     recommendedRole?: string;
+    inputs?: any;
 }
 
 // Assuming InputValue is also defined in this file or another commonly imported one
