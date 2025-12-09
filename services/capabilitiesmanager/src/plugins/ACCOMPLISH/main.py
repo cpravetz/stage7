@@ -363,10 +363,17 @@ class RobustMissionPlanner:
         try:
             available_plugins_raw = inputs.get('availablePlugins', {})
             available_plugins = available_plugins_raw.get('value', []) if isinstance(available_plugins_raw, dict) else (available_plugins_raw or [])
-            self.validator = PlanValidator(brain_call=call_brain, available_plugins=available_plugins)
+            self.validator = PlanValidator(
+                brain_call=call_brain, 
+                available_plugins=available_plugins,
+                report_logic_failure_call=report_logic_failure_to_brain
+            )
         except Exception as e:
             logger.error(f"Failed to initialize PlanValidator with plugins: {e}")
-            self.validator = PlanValidator(brain_call=call_brain)
+            self.validator = PlanValidator(
+                brain_call=call_brain,
+                report_logic_failure_call=report_logic_failure_to_brain
+            )
 
     def plan(self, inputs: Dict[str, Any]) -> str:
         """Main interface method - create plan and return as JSON string"""
@@ -512,16 +519,18 @@ class RobustMissionPlanner:
         agent_role = inputs.get('agentRole', {}).get('value', 'General')
         structured_plan = self._generate_role_specific_plan(goal, mission_goal, mission_id, agent_role, inputs)
         
-        # Validate with awareness of context
-        # This is now handled by passing availablePlugins to the validator constructor
-        
-        try:
-            logger.debug("Before calling validator.validate_and_repair.")
-            validated_plan = self.validator.validate_and_repair(structured_plan, goal, modified_inputs)
-            logger.debug("After calling validator.validate_and_repair.")
-        except Exception as e:
-            logger.exception(f"❌ Failed to validate and repair the plan after all retries: {e}")
-            raise AccomplishError(f"Could not validate or repair the plan: {e}", "validation_error")
+        logger.debug("Before calling validator.validate_and_repair.")
+        validation_result = self.validator.validate_and_repair(structured_plan, goal, modified_inputs)
+        logger.debug("After calling validator.validate_and_repair.")
+
+        if not validation_result.is_valid:
+            error_summary = "; ".join(validation_result.get_error_messages()[:3])
+            raise AccomplishError(
+                f"Plan validation failed with {len(validation_result.errors)} un-fixable errors: {error_summary}",
+                "validation_error"
+            )
+            
+        validated_plan = validation_result.plan
 
         try:
             mission_id_for_check = mission_id
@@ -591,12 +600,6 @@ EXAMPLE OF GOOD HIGH-LEVEL STEPS:
 - "Develop a content strategy to target identified user personas."
 - "Create a proof-of-concept for the new feature."
 
-EXAMPLE OF BAD LOW-LEVEL STEPS (AVOID THESE):
-- "Use the SEARCH plugin to find competitor websites."
-- "Call the SCRAPE tool on the list of URLs."
-- "Write the results to a file using FILE_OPERATION."
-
-
 IMPORTANT: Return ONLY plain text for the plan. NO markdown formatting, NO code blocks, NO special formatting.
 """
 
@@ -649,7 +652,7 @@ Follow these steps to create the final JSON output:
 **STEP A: Internal Analysis & Self-Correction (Your Internal Monologue)**
 1.  **Analyze:** Read the Goal and Prose Plan to fully understand the user's intent and the required sequence of actions.
 2.  **Verify Schema:** Carefully study the JSON SCHEMA. Your output must follow it perfectly.
-3.  **Restate the Plan as Explicit Steps:** Identify a list of steps that will be taken to achieve the Goal. Each Step should be a clear, actionable task with one or more outputs.
+3.  **Restate the Plan as Explicit Steps:** Identify a list of steps that will be taken to achieve the Goal. Each Step should be a clear, actionable task with one or more outputs. Use known actionVerbs when suitable.
 4.  **Check Dependencies & Data Types:** For each step, ensure its `inputs` correctly reference the `outputName` and `sourceStep`. Crucially, verify that the `valueType` of the source output matches the expected `valueType` of the target input.
 5.  **CRITICAL - USE UNIQUE STRING IDs:** Every single step in the plan MUST have a unique string identifier in the "id" field. This ID does NOT have to be a UUID, but it MUST be unique within the entire plan. For example: "step_1", "step_2", etc. Do NOT reuse IDs.
 6.  **Final Check:** Before generating the output, perform a final check to ensure the entire JSON structure is valid and fully compliant with the schema.
@@ -782,10 +785,17 @@ class NovelVerbHandler:
         try:
             available_plugins_raw = inputs.get('availablePlugins', {})
             available_plugins = available_plugins_raw.get('value', []) if isinstance(available_plugins_raw, dict) else (available_plugins_raw or [])
-            self.validator = PlanValidator(brain_call=call_brain, available_plugins=available_plugins)
+            self.validator = PlanValidator(
+                brain_call=call_brain, 
+                available_plugins=available_plugins,
+                report_logic_failure_call=report_logic_failure_to_brain
+            )
         except Exception as e:
             logger.error(f"Failed to initialize PlanValidator in NovelVerbHandler with plugins: {e}")
-            self.validator = PlanValidator(brain_call=call_brain)
+            self.validator = PlanValidator(
+                brain_call=call_brain,
+                report_logic_failure_call=report_logic_failure_to_brain
+            )
 
         except Exception as e:
             logger.error(f"Failed to initialize verb discovery service: {e}")

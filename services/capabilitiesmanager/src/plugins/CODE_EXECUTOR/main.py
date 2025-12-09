@@ -104,6 +104,18 @@ if __name__ == "__main__":
         else:
             # If it's not a list, assume it's already a dictionary (for direct testing or older formats)
             inputs_dict = inputs_list
+        
+        # Normalize aliases to their primary names
+        alias_map = {
+            "language": ["lang", "languageName"],
+            "code": ["snippet", "program", "source"]
+        }
+        for primary_name, aliases in alias_map.items():
+            if primary_name not in inputs_dict:
+                for alias in aliases:
+                    if alias in inputs_dict:
+                        inputs_dict[primary_name] = inputs_dict.pop(alias)
+                        break
 
         print(execute_plugin(inputs_dict))
     except json.JSONDecodeError as e:

@@ -1,3 +1,74 @@
+# DEPRECATED: MCP Evolution Proposal
+
+## Deprecation Notice
+
+**This document has been deprecated and replaced by two focused architecture documents:**
+
+1. **Enhanced Verb Discovery & Tool Integration Architecture** (`verb-discovery-architecture-proposal.md`)
+2. **Enhanced MCP and OpenAPI Tool Integration & Management Architecture** (`mcp-tool-integration.md`)
+
+## Migration Guide
+
+### What's Changed
+
+The concepts from this document have been distributed and enhanced across the two new architecture documents:
+
+| Original Concept | New Location | Enhancements |
+|------------------|--------------|--------------|
+| Reactive Tool Discovery | `verb-discovery-architecture-proposal.md` | Enhanced with Chroma-powered semantic search, phased implementation |
+| NovelVerbHandler improvements | `verb-discovery-architecture-proposal.md` | Integrated with knowledge graph, better discovery workflow |
+| Knowledge Graph for disambiguation | `verb-discovery-architecture-proposal.md` | Future phase with clearer implementation path |
+| AI-Driven Tool Engineering | `verb-discovery-architecture-proposal.md` | Future phase with Engineer agent enhancements |
+| Tool Definition Structures | `mcp-tool-integration.md` | Enhanced with discovery metadata, better type definitions |
+| PluginMarketplace integration | `mcp-tool-integration.md` | Unified architecture with discovery integration |
+| External Tool Governance | Both documents | Distributed appropriately between discovery and integration |
+
+### Why the Change
+
+1. **Clearer Separation of Concerns**:
+   - Discovery Architecture: Focuses on how tools are found
+   - Integration Architecture: Focuses on how tools are managed and executed
+
+2. **Better Implementation Path**:
+   - Phased approach with clear priorities
+   - Current focus on core discovery infrastructure
+   - Future phases for advanced features
+
+3. **Enhanced Technical Depth**:
+   - More detailed implementation guidance
+   - Better integration with existing systems
+   - Comprehensive success metrics and risk mitigation
+
+4. **Improved Maintainability**:
+   - Smaller, focused documents
+   - Clearer relationships between components
+   - Better separation of current vs future work
+
+### For Readers of This Document
+
+If you were looking for:
+
+- **Tool discovery mechanisms**: See `verb-discovery-architecture-proposal.md`
+- **Tool integration and management**: See `mcp-tool-integration.md`
+- **Phased evolution approach**: Both documents contain phased implementation plans
+- **Governance and security**: Primarily in `mcp-tool-integration.md`
+
+### Historical Context
+
+This document represented an early attempt to unify discovery and integration concepts into a single evolutionary architecture. Through analysis, we determined that:
+
+1. The scope was too broad for effective implementation
+2. Discovery and integration have different concerns and audiences
+3. A phased approach with separate focused documents provides better guidance
+
+The core vision of evolving from "planner-as-tool-user" to "system-as-capability-fulfiller" remains valid and is implemented across both new architecture documents.
+
+## Archived Content
+
+For historical reference, the original content of this proposal is preserved below:
+
+---
+
 # Proposal: An Advanced, Search-Driven Framework for Tool Discovery and Fulfillment
 
 ## 1. Current State Assessment
@@ -36,6 +107,7 @@ This phase reframes tool discovery as a reactive process, triggered when the sys
 This phase makes the system self-expanding by teaching the `Engineer` agent how to create new tools by wrapping existing services.
 
 1.  **Enhance the `Engineer` Agent:** When the `Engineer` receives a "Find or Build" request for a new `actionVerb` (e.g., `RESERVE_LUTECE_TABLE`), its internal process will be:
+
     1.  **Search External Definitions:** First, search for any existing, un-integrated MCP or OpenAPI tool definitions that match the requested capability.
     2.  **Wrap Existing Tool:** If a matching external tool is found, the `Engineer` will **autonomously generate the boilerplate code for a new Python or TypeScript plugin** that acts as a simple, validated client for that tool's API.
     3.  **Build from Scratch:** Only if no existing tool can be found to wrap will the `Engineer` proceed with writing a new implementation from scratch.

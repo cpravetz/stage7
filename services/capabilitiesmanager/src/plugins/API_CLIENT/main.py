@@ -16,6 +16,25 @@ import hashlib
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+def _get_input(inputs: dict, key: str, aliases: list = [], default=None):
+    """Safely gets a value from inputs, checking aliases, and extracting from {'value':...} wrapper."""
+    raw_val = inputs.get(key)
+    
+    if raw_val is None:
+        for alias in aliases:
+            raw_val = inputs.get(alias)
+            if raw_val is not None:
+                break
+    
+    if raw_val is None:
+        return default
+
+    if isinstance(raw_val, dict) and 'value' in raw_val:
+        # Return the value, but if it's None, return the default
+        return raw_val['value'] if raw_val['value'] is not None else default
+    
+    return raw_val if raw_val is not None else default
+
 seen_hashes = set()
 
 def execute_plugin(inputs):
@@ -40,39 +59,12 @@ def execute_plugin(inputs):
         temp_dir = tempfile.mkdtemp(prefix="api_client_")
         os.environ["API_CLIENT_TEMP_DIR"] = temp_dir
 
-        # Extract inputs, handling both wrapped and raw values
-        method = None
-        url = None
-        headers = {}
-        body = {}
-        auth = {}
-
-        for key, value in inputs.items():
-            if key == 'method':
-                if isinstance(value, dict) and 'value' in value:
-                    method = value['value']
-                else:
-                    method = value
-            elif key == 'url':
-                if isinstance(value, dict) and 'value' in value:
-                    url = value['value']
-                else:
-                    url = value
-            elif key == 'headers':
-                if isinstance(value, dict) and 'value' in value:
-                    headers = value['value'] if value['value'] else {}
-                else:
-                    headers = value if value else {}
-            elif key == 'body':
-                if isinstance(value, dict) and 'value' in value:
-                    body = value['value'] if value['value'] else {}
-                else:
-                    body = value if value else {}
-            elif key == 'auth':
-                if isinstance(value, dict) and 'value' in value:
-                    auth = value['value'] if value['value'] else {}
-                else:
-                    auth = value if value else {}
+        # Extract inputs using a helper that handles aliases and data wrappers
+        method = _get_input(inputs, 'method', ['httpMethod', 'verb', 'http_method'])
+        url = _get_input(inputs, 'url', ['endpoint', 'uri'])
+        headers = _get_input(inputs, 'headers', ['http_headers', 'hdrs', 'header'], default={})
+        body = _get_input(inputs, 'body', ['payload', 'data'], default={})
+        auth = _get_input(inputs, 'auth', ['authentication', 'credentials', 'auth_info'], default={})
 
         if not method or not url:
             return [{

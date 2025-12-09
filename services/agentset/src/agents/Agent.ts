@@ -5,7 +5,7 @@ import { AgentStatus } from '../utils/agentStatus';
 import { getServiceUrls } from '../utils/postOfficeInterface';
 import { MapSerializer, BaseEntity, LLMConversationType } from '@cktmcs/shared';
 import { AgentPersistenceManager } from '../utils/AgentPersistenceManager';
-import { PluginOutput, PluginParameterType, InputValue, ExecutionContext as PlanExecutionContext, MissionFile, ActionVerbTask as ActionVerbTaskShared, StepDependency } from '@cktmcs/shared';
+import { PluginOutput, PluginParameterType, InputValue, ExecutionContext as PlanExecutionContext, ActionVerbTask, StepDependency } from '@cktmcs/shared';
 import { AgentConfig, AgentStatistics, OutputType } from '@cktmcs/shared';
 import { MessageType } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
@@ -16,11 +16,6 @@ import { AgentSet } from '../AgentSet';
 import { StateManager } from '../utils/StateManager';
 import * as amqp from 'amqplib';
 import * as amqp_connection_manager from 'amqp-connection-manager';
-
-//FIXME: This is a temporary fix for the typescript error
-interface ActionVerbTask extends ActionVerbTaskShared {
-    inputs: any;
-}
 
 export class Agent extends BaseEntity {
 
@@ -106,13 +101,21 @@ export class Agent extends BaseEntity {
 
         const reflectQuestion = `Did we accomplish the mission? If YES, return an empty JSON array []. If NO, return a JSON array of step objects (a plan) that when executed will achieve the mission.`;
 
-        const recoveryStep = this.createStep('REFLECT', new Map([
+        const availablePlugins = this.inputValues?.get('availablePlugins');
+
+        const reflectInputs = new Map<string, InputValue>([
             ['missionId', { inputName: 'missionId', value: this.missionId, valueType: PluginParameterType.STRING, args: {} }],
             ['plan_history', { inputName: 'plan_history', value: JSON.stringify(planHistory), valueType: PluginParameterType.STRING, args: {} }],
             ['work_products', { inputName: 'work_products', value: workProductsSummary, valueType: PluginParameterType.STRING, args: {} }],
             ['question', { inputName: 'question', value: reflectQuestion, valueType: PluginParameterType.STRING, args: {} }],
             ['agentId', { inputName: 'agentId', value: this.id, valueType: PluginParameterType.STRING, args: {} }]
-        ]), `End-of-mission reflection: did we accomplish the mission?`, StepStatus.PENDING);
+        ]);
+
+        if (availablePlugins) {
+            reflectInputs.set('availablePlugins', availablePlugins);
+        }
+
+        const recoveryStep = this.createStep('REFLECT', reflectInputs, `End-of-mission reflection: did we accomplish the mission?`, StepStatus.PENDING);
         recoveryStep.recommendedRole = this.role;
         this.steps.push(recoveryStep);
         await this.logEvent({ eventType: 'step_created', ...recoveryStep.toJSON() });

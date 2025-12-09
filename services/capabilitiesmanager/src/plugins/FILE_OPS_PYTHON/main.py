@@ -150,11 +150,23 @@ class FileOperationPlugin:
                 "error": str(e)
             }])
 
-    def _get_input_value(self, inputs: Dict[str, Any], key: str, default: Any = None) -> Any:
-        """Safely gets a value from the parsed inputs dictionary."""
-        if key in inputs and isinstance(inputs[key], dict):
-            return inputs[key].get('value', default)
-        return default
+    def _get_input_value(self, inputs: Dict[str, Any], key: str, aliases: list = [], default: Any = None) -> Any:
+        """Safely gets a value from the parsed inputs dictionary, checking aliases."""
+        raw_val = inputs.get(key)
+        if raw_val is None:
+            for alias in aliases:
+                raw_val = inputs.get(alias)
+                if raw_val is not None:
+                    break
+        
+        if raw_val is None:
+            return default
+
+        if isinstance(raw_val, dict):
+            # Handles {'value': ...} wrapper
+            return raw_val.get('value', default)
+        
+        return raw_val
 
     def _get_mission_control_url(self, inputs: Dict[str, Any]) -> str:
         url = self._get_input_value(inputs, 'missioncontrol_url') or self._get_input_value(inputs, 'missionControlUrl') or os.environ.get('MISSIONCONTROL_URL')
@@ -169,9 +181,9 @@ class FileOperationPlugin:
         return url
 
     def _read_operation(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
-        file_id = self._get_input_value(inputs, 'fileId')
-        path = self._get_input_value(inputs, 'path')
-        mission_id = self._get_input_value(inputs, 'missionId') or self._get_input_value(inputs, 'mission_id')
+        file_id = self._get_input_value(inputs, 'fileId', ['file_id', 'id', 'missionFileId'])
+        path = self._get_input_value(inputs, 'path', ['filePath', 'fileName', 'filename', 'pathName'])
+        mission_id = self._get_input_value(inputs, 'missionId', ['mission_id'])
         librarian_url = self._get_librarian_url(inputs)
 
         if not librarian_url:
@@ -215,31 +227,16 @@ class FileOperationPlugin:
             raise ValueError("Either 'fileId' or both 'path' and 'missionId' are required for 'read' operation.")
 
     def _write_operation(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
-        path = self._get_input_value(inputs, 'path')
-        content_raw = inputs.get('content') # Get raw content input
+        path = self._get_input_value(inputs, 'path', ['filePath', 'fileName', 'filename', 'pathName'])
+        content_input = self._get_input_value(inputs, 'content', ['body', 'text', 'data', 'fileContent'])
 
-        # Ensure content_raw is converted to a string if it's not already
-        if isinstance(content_raw, (dict, list)):
-            content_str = json.dumps(content_raw, indent=4)
-        elif isinstance(content_raw, bool):
-            content_str = str(content_raw)
-        elif not isinstance(content_raw, str):
-            content_str = str(content_raw)
+        # Ensure content is a string
+        if not isinstance(content_input, str):
+            content_for_file = json.dumps(content_input, indent=4)
         else:
-            content_str = content_raw
+            content_for_file = content_input
 
-        # Now content_str is guaranteed to be a string.
-        # The existing logic to extract content from a JSON string can remain.
-        try:
-            content_data = json.loads(content_str)
-            if isinstance(content_data, dict) and 'content' in content_data:
-                content_for_file = content_data['content']
-            else:
-                content_for_file = content_str
-        except (json.JSONDecodeError, TypeError):
-            content_for_file = content_str
-            
-        mission_id = self._get_input_value(inputs, 'missionId') or self._get_input_value(inputs, 'mission_id')
+        mission_id = self._get_input_value(inputs, 'missionId', ['mission_id'])
         mission_control_url = self._get_mission_control_url(inputs)
         librarian_url = self._get_librarian_url(inputs)
 
@@ -295,21 +292,17 @@ class FileOperationPlugin:
         return {"success": True, "name": "file", "resultType": "object", "resultDescription": f"Successfully wrote to file {path}", "result": mission_file}
 
     def _append_operation(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
-        path = self._get_input_value(inputs, 'path')
-        content_to_append_raw = inputs.get('content') # Get raw content input
-        mission_id = self._get_input_value(inputs, 'missionId') or self._get_input_value(inputs, 'mission_id')
+        path = self._get_input_value(inputs, 'path', ['filePath', 'fileName', 'filename', 'pathName'])
+        content_to_append = self._get_input_value(inputs, 'content', ['body', 'text', 'data', 'fileContent'])
+        mission_id = self._get_input_value(inputs, 'missionId', ['mission_id'])
         mission_control_url = self._get_mission_control_url(inputs)
         librarian_url = self._get_librarian_url(inputs)
-        
+
         # Convert content to append to string to prevent errors
-        if isinstance(content_to_append_raw, (dict, list)):
-            content_to_append_str = json.dumps(content_to_append_raw, indent=4)
-        elif isinstance(content_to_append_raw, bool):
-            content_to_append_str = str(content_to_append_raw)
-        elif not isinstance(content_to_append_raw, str):
-            content_to_append_str = str(content_to_append_raw)
+        if not isinstance(content_to_append, str):
+            content_to_append_str = json.dumps(content_to_append, indent=4)
         else:
-            content_to_append_str = content_to_append_raw
+            content_to_append_str = content_to_append
 
         existing_content = ''
         try:
@@ -373,8 +366,8 @@ class FileOperationPlugin:
         return {"success": True, "name": "files", "resultType": "array", "resultDescription": f"Files in mission {mission_id}", "result": file_names}
 
     def _delete_operation(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
-        path = self._get_input_value(inputs, 'path')
-        mission_id = self._get_input_value(inputs, 'missionId') or self._get_input_value(inputs, 'mission_id')
+        path = self._get_input_value(inputs, 'path', ['filePath', 'fileName', 'filename', 'pathName'])
+        mission_id = self._get_input_value(inputs, 'missionId', ['mission_id'])
         mission_control_url = self._get_mission_control_url(inputs)
         librarian_url = self._get_librarian_url(inputs)
 
