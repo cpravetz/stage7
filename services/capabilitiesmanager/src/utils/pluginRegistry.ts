@@ -553,8 +553,18 @@ export class PluginRegistry {
     private async indexPlugin(manifest: PluginManifest): Promise<void> {
         try {
             // Do not await this, let it run in the background
-            console.log(`[PluginRegistry] Attempting to index plugin ${manifest.verb} with Librarian at ${this.librarianApi.defaults.baseURL}/tools/index`);
-            this.librarianApi.post('/tools/index', { manifest });
+            console.log(`[PluginRegistry] Attempting to index plugin ${manifest.verb} with Librarian at ${this.librarianApi.defaults.baseURL}/verbs/register`);
+            
+            const discoveryData = {
+                id: manifest.id,
+                verb: manifest.verb,
+                description: manifest.description,
+                semanticDescription: manifest.semanticDescription,
+                capabilityKeywords: manifest.capabilityKeywords,
+                usageExamples: manifest.usageExamples,
+            };
+
+            this.librarianApi.post('/verbs/register', discoveryData);
             console.log(`Initiated indexing for plugin ${manifest.verb} with Librarian.`);
         } catch (error: any) {
             console.error(`Failed to initiate indexing for plugin ${manifest.verb}:`, error.isAxiosError ? error.response?.data : error.message);

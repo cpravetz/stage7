@@ -62,5 +62,17 @@ export interface PluginManifest {
     };
 
     metadata?: PluginMetadata;
-    configuration?: PluginConfigurationItem[];
-}
+        configuration?: PluginConfigurationItem[];
+    
+        // Discovery metadata
+        semanticDescription?: string;
+        capabilityKeywords?: string[];
+        usageExamples?: string[];
+    
+        // Health status
+        healthStatus?: {
+            status: 'healthy' | 'unhealthy' | 'unknown';
+            lastChecked: string; // ISO 8601
+        };
+    }
+    

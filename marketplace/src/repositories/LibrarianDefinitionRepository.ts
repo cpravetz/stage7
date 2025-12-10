@@ -2,6 +2,7 @@ import {
     PluginManifest,
     PluginLocator,
     PluginRepository,
+    PluginStatus,
     RepositoryConfig,
     OpenAPITool,
     MCPTool,
@@ -284,6 +285,43 @@ export class LibrarianDefinitionRepository implements PluginRepository {
             console.error(`LibrarianDefinitionRepository: Error storing definition ${toolDefinition.id}:`, error);
             throw error;
         }
+
+        // After storing, index for discovery
+        try {
+            await this.indexForDiscovery(manifest);
+        } catch (error) {
+            console.warn(`LibrarianDefinitionRepository: Failed to index verb '${manifest.verb}' for discovery after storing. This might need manual re-indexing.`, error);
+            // We don't re-throw here, as the primary store operation succeeded.
+        }
+    }
+
+    async indexForDiscovery(manifest: PluginManifest): Promise<void> {
+        const { verb, description, semanticDescription, capabilityKeywords, usageExamples, id } = manifest;
+    
+        if (!verb) {
+            console.warn('LibrarianDefinitionRepository: Manifest must have a verb to be indexed for discovery.');
+            return;
+        }
+    
+        const discoveryData = {
+            id: id,
+            verb,
+            description,
+            semanticDescription,
+            capabilityKeywords,
+            usageExamples,
+        };
+    
+        try {
+            await this.makeRequest(() => this.authenticatedApi.post(`${this.getLibrarianUrl()}/verbs/register`, 
+                discoveryData
+            ));
+            console.log(`LibrarianDefinitionRepository: Indexed verb '${verb}' for discovery.`);
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error(`LibrarianDefinitionRepository: Error indexing verb '${verb}' for discovery:`, error);
+            throw error;
+        }
     }
 
     async delete(id: string, version?: string): Promise<void> {
@@ -335,5 +373,19 @@ export class LibrarianDefinitionRepository implements PluginRepository {
         // For now, assume one version or version is part of the ID.
         const manifest = await this.fetch(pluginId);
         return manifest ? [manifest] : undefined;
+    }
+
+    async updateToolStatus(toolId: string, status: PluginStatus, reason?: string): Promise<void> {
+        try {
+            await this.makeRequest(() => this.authenticatedApi.put(`${this.getLibrarianUrl()}/tools/${toolId}/status`, {
+                status,
+                reason,
+            }));
+            console.log(`LibrarianDefinitionRepository: Updated status for tool ${toolId} to ${status}.`);
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error(`LibrarianDefinitionRepository: Error updating status for tool ${toolId}:`, error);
+            throw error;
+        }
     }
 }

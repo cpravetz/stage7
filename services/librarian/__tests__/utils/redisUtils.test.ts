@@ -1,4 +1,4 @@
-import { storeInRedis, loadFromRedis, deleteFromRedis } from '../src/utils/redisUtils';
+import { storeInRedis, loadFromRedis, deleteFromRedis } from 'utils/redisUtils';
 import { createClient, RedisClientType } from 'redis';
 
 // Mock external dependencies

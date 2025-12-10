@@ -12,6 +12,7 @@ import { ToolSource, PendingTool } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';
 import { v4 as uuidv4 } from 'uuid';
 import { knowledgeStore } from './knowledgeStore';
+import rateLimit from 'express-rate-limit';
 
 const LARGE_ASSET_PATH = process.env.LARGE_ASSET_PATH || '/usr/src/app/shared/librarian-assets';
 const ENGINEER_SERVICE_URL = process.env.ENGINEER_SERVICE_URL || 'http://engineer:5050';
@@ -101,11 +102,24 @@ export class Librarian extends BaseEntity {
         this.app.post('/tools/search', (req, res) => this.searchTools(req, res));
         this.app.post('/knowledge/save', (req, res) => this.saveKnowledge(req, res));
         this.app.post('/knowledge/query', (req, res) => this.queryKnowledge(req, res));
+        this.app.post('/verbs/register', (req, res) => this.registerVerbForDiscovery(req, res));
+        this.app.post('/verbs/discover', (req, res) => this.discoverVerbs(req, res));
+        this.app.post('/tools/index', (req, res) => this.indexTool(req, res));
 
         // Tool Source Management
         this.app.post('/tools/sources', (req, res) => this.addToolSource(req, res));
         this.app.get('/tools/sources', (req, res) => this.getToolSources(req, res));
         this.app.delete('/tools/sources/:id', (req, res) => this.deleteToolSource(req, res));
+
+        const discoveryLimiter = rateLimit({
+            windowMs: 15 * 60 * 1000, // 15 minutes
+            max: 100, // Limit each IP to 100 requests per windowMs
+            standardHeaders: true,
+            legacyHeaders: false, 
+        });
+
+        this.app.post('/verbs/discover', discoveryLimiter, (req, res) => this.discoverVerbs(req, res));
+        this.app.post('/tools/search', discoveryLimiter, (req, res) => this.searchTools(req, res));
 
         // Pending Tool Review
         this.app.get('/tools/pending', (req, res) => this.getPendingTools(req, res));
@@ -823,7 +837,75 @@ export class Librarian extends BaseEntity {
         }
     }
 
+    private async registerVerbForDiscovery(req: express.Request, res: express.Response) {
+        if (!this.isCallerAuthorized(req)) {
+            return res.status(403).send({ error: 'Access denied: Caller not authorized.' });
+        }
+        const { id, verb, description, semanticDescription, capabilityKeywords, usageExamples } = req.body;
+
+        if (!id || !verb) {
+            return res.status(400).send({ error: 'Verb ID and verb are required for registration.' });
+        }
+
+        // Construct content for embedding
+        let content = `${verb}: ${description || ''}`;
+        if (semanticDescription) {
+            content += ` ${semanticDescription}`;
+        }
+        if (capabilityKeywords && capabilityKeywords.length > 0) {
+            content += ` Keywords: ${capabilityKeywords.join(', ')}.`;
+        }
+        if (usageExamples && usageExamples.length > 0) {
+            content += ` Usage examples: ${usageExamples.join('; ')}.`;
+        }
+
+        const metadata = {
+            id,
+            verb,
+            description,
+            semanticDescription,
+            capabilityKeywords,
+            usageExamples,
+        };
+
+        try {
+            await knowledgeStore.save('verbs', content, metadata);
+            res.status(200).send({ status: `Verb '${verb}' registered for discovery successfully.` });
+        } catch (error) {
+            console.error('Error in registerVerbForDiscovery:', error instanceof Error ? error.message : error);
+            res.status(500).send({ error: 'Failed to register verb for discovery', details: error instanceof Error ? error.message : String(error) });
+        }
+    }
+
+    private async discoverVerbs(req: express.Request, res: express.Response) {
+        if (!this.isCallerAuthorized(req)) {
+            return res.status(403).send({ error: 'Access denied: Caller not authorized.' });
+        }
+        const { queryText, maxResults = 1 } = req.body;
+
+        if (!queryText) {
+            return res.status(400).send({ error: 'queryText is required for verb discovery.' });
+        }
+
+        try {
+            let results = await knowledgeStore.query('verbs', queryText, maxResults);
+            
+            // Filter results based on healthStatus.status
+            results = results.filter((result: any) => 
+                result.metadata?.healthStatus?.status === 'healthy'
+            );
+
+            res.status(200).send({ data: results });
+        } catch (error) {
+            console.error('Error in discoverVerbs:', error instanceof Error ? error.message : error);
+            res.status(500).send({ error: 'Failed to discover verbs', details: error instanceof Error ? error.message : String(error) });
+        }
+    }
+
     private async indexTool(req: express.Request, res: express.Response) {
+        if (!this.isCallerAuthorized(req)) {
+            return res.status(403).send({ error: 'Access denied: Caller not authorized.' });
+        }
         const { manifest, entities } = req.body;
 
         if (!manifest || !manifest.verb || !manifest.id) {
@@ -846,6 +928,9 @@ export class Librarian extends BaseEntity {
     }
 
     private async searchTools(req: express.Request, res: express.Response) {
+        if (!this.isCallerAuthorized(req)) {
+            return res.status(403).send({ error: 'Access denied: Caller not authorized.' });
+        }
         const { queryText, maxResults = 1, contextEntities = [] } = req.body;
 
         if (!queryText) {
@@ -854,6 +939,11 @@ export class Librarian extends BaseEntity {
 
         try {
             let results = await knowledgeStore.query('tools', queryText, maxResults);
+            
+            // Filter results based on healthStatus.status
+            results = results.filter((result: any) => 
+                result.metadata?.healthStatus?.status === 'healthy'
+            );
 
             if (contextEntities.length > 0) {
                 // Filter or re-rank results based on contextEntities
