@@ -156,9 +156,15 @@ async function handleUnknownVerb(verbInfo: VerbInfo, context: ExecutionContext) 
 
 #### Engineer Agent Enhancement
 
+The Engineer service provides the foundation for AI-driven tool engineering. For detailed architecture information, see [`engineer-plugin-architecture.md`](docs/engineer-plugin-architecture.md).
+
+Key capabilities include:
+
 1. **Autonomous Tool Wrapping**: Generate plugin wrappers for external APIs
 2. **Verification Testing**: Auto-generate and run basic functionality tests
 3. **Registration Pipeline**: Seamless integration into PluginMarketplace
+4. **Multi-language Support**: Python, JavaScript, and containerized plugins
+5. **Comprehensive Validation**: Structure, code, and security validation
 
 ## Implementation Roadmap
 

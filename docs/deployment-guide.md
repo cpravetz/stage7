@@ -31,7 +31,6 @@ Create a `.env` file in the project root by copying the `.env.example` file and 
 
 #### Security
 - `CLIENT_SECRET`: A shared secret for client authentication.
-- `SHARED_CLIENT_SECRET`: A shared secret for all services in simple deployments.
 - `JWT_SECRET`: The secret key for signing JWT tokens.
 - `JWT_REFRESH_SECRET`: The secret key for refreshing JWT tokens.
 - `ENCRYPTION_KEY`: A key for encrypting sensitive data.

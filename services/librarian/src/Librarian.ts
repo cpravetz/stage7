@@ -50,7 +50,14 @@ export class Librarian extends BaseEntity {
     private isCallerAuthorized(req: express.Request): boolean {
       const user = (req as any).user;
       if (!user) return false;
-      return user.sub === 'SecurityManager' || user.componentType === 'SecurityManager';
+      if (user.sub === 'SecurityManager' || user.componentType === 'SecurityManager') {
+        return true;
+      }
+      // Also allow CapabilitiesManager to register verbs
+      if (user.componentType === 'CapabilitiesManager' && user.permissions?.includes('capability:manage')) {
+        return true;
+      }
+      return false;
     }
 
     private setupRoutes() {

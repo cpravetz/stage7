@@ -285,44 +285,9 @@ export class LibrarianDefinitionRepository implements PluginRepository {
             console.error(`LibrarianDefinitionRepository: Error storing definition ${toolDefinition.id}:`, error);
             throw error;
         }
-
-        // After storing, index for discovery
-        try {
-            await this.indexForDiscovery(manifest);
-        } catch (error) {
-            console.warn(`LibrarianDefinitionRepository: Failed to index verb '${manifest.verb}' for discovery after storing. This might need manual re-indexing.`, error);
-            // We don't re-throw here, as the primary store operation succeeded.
-        }
     }
 
-    async indexForDiscovery(manifest: PluginManifest): Promise<void> {
-        const { verb, description, semanticDescription, capabilityKeywords, usageExamples, id } = manifest;
-    
-        if (!verb) {
-            console.warn('LibrarianDefinitionRepository: Manifest must have a verb to be indexed for discovery.');
-            return;
-        }
-    
-        const discoveryData = {
-            id: id,
-            verb,
-            description,
-            semanticDescription,
-            capabilityKeywords,
-            usageExamples,
-        };
-    
-        try {
-            await this.makeRequest(() => this.authenticatedApi.post(`${this.getLibrarianUrl()}/verbs/register`, 
-                discoveryData
-            ));
-            console.log(`LibrarianDefinitionRepository: Indexed verb '${verb}' for discovery.`);
-        } catch (error) {
-            analyzeError(error as Error);
-            console.error(`LibrarianDefinitionRepository: Error indexing verb '${verb}' for discovery:`, error);
-            throw error;
-        }
-    }
+
 
     async delete(id: string, version?: string): Promise<void> {
         // ID here is toolId-actionVerb. We need to delete the parent tool definition.

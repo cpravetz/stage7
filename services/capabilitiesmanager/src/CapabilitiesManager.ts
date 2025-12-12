@@ -49,20 +49,21 @@ export class CapabilitiesManager extends BaseEntity {
     constructor() {
         super('CapabilitiesManager', 'CapabilitiesManager', `capabilitiesmanager`, process.env.PORT || '5060');
         const trace_id = `${this.serviceId}-constructor-${uuidv4().substring(0,8)}`;
-        const authenticatedLibrarianApi = this.authenticatedApi.api;
-        authenticatedLibrarianApi.defaults.baseURL = this.librarianUrl;
-        this.authenticatedLibrarianApi = authenticatedLibrarianApi;
-        this.pluginRegistry = new PluginRegistry(authenticatedLibrarianApi);
+        
+        // Authenticated API instance will be configured after registration
         this.containerManager = new ContainerManager();
         
         // Start periodic cleanup of stale resources
         setInterval(() => this.cleanupStaleResources(), 5 * 60 * 1000); // Every 5 minutes
+        
         // Initialize PluginContextManager with a direct reference to avoid circular calls
         this.pluginContextManager = new PluginContextManager(`localhost:${process.env.PORT || '5060'}`);
+        
         const source_component = "CapabilitiesManager.constructor";
         let attempts = 0;
         const maxAttempts = 3;
         const retryDelayMs = 2000;
+
         const tryInitialize = async () => {
             attempts++;
             try {
@@ -99,29 +100,36 @@ export class CapabilitiesManager extends BaseEntity {
     private async initialize(trace_id: string) {
         const source_component = "CapabilitiesManager.initialize";
         try {
-            // Ensure PluginRegistry is initialized before other dependent services
-            if (this.pluginRegistry && typeof this.pluginRegistry.initialize === 'function') {
-                try {
-                    await this.pluginRegistry.initialize(); // Await PluginRegistry initialization
-                    this.initializationStatus.pluginRegistry = true;
-                    console.log(`[${trace_id}] ${source_component}: PluginRegistry initialized.`);
-                } catch (error: any) {
-                    generateStructuredError({
-                        error_code: GlobalErrorCodes.PLUGIN_REGISTRY_INITIALIZATION_FAILED,
-                        severity: ErrorSeverity.WARNING,
-                        message: "PluginRegistry initialization failed, continuing with limited functionality.",
-                        source_component,
-                        original_error: error,
-                        trace_id_param: trace_id
-                    });
-                    // Continue initialization even if plugin registry fails
+            // Step 1: Ensure the service is registered with PostOffice to get an auth token.
+            if (!this.registeredWithPostOffice) {
+                console.log(`[${trace_id}] ${source_component}: Registering with PostOffice...`);
+                await this.registerWithPostOffice(15, 2000);
+                if (!this.registeredWithPostOffice) {
+                    throw new Error("CRITICAL - Failed to register with PostOffice after multiple attempts. Cannot initialize.");
                 }
-            } else {
+                console.log(`[${trace_id}] ${source_component}: Successfully registered with PostOffice.`);
+            }
+
+            // Step 2: Now that we are authenticated, create and configure the Librarian API client.
+            const authenticatedLibrarianApi = this.authenticatedApi.api;
+            authenticatedLibrarianApi.defaults.baseURL = this.librarianUrl;
+            this.authenticatedLibrarianApi = authenticatedLibrarianApi;
+            
+            // Step 3: Create the PluginRegistry with the authenticated API client.
+            this.pluginRegistry = new PluginRegistry(this.authenticatedLibrarianApi);
+
+            // Step 4: Initialize the PluginRegistry, which can now make authenticated calls.
+            try {
+                await this.pluginRegistry.initialize();
+                this.initializationStatus.pluginRegistry = true;
+                console.log(`[${trace_id}] ${source_component}: PluginRegistry initialized.`);
+            } catch (error: any) {
                 generateStructuredError({
-                    error_code: GlobalErrorCodes.PLUGIN_REGISTRY_NOT_AVAILABLE,
+                    error_code: GlobalErrorCodes.PLUGIN_REGISTRY_INITIALIZATION_FAILED,
                     severity: ErrorSeverity.WARNING,
-                    message: "PluginRegistry or its initialize method is not available.",
+                    message: "PluginRegistry initialization failed, continuing with limited functionality.",
                     source_component,
+                    original_error: error,
                     trace_id_param: trace_id
                 });
             }
@@ -139,36 +147,18 @@ export class CapabilitiesManager extends BaseEntity {
                     original_error: error,
                     trace_id_param: trace_id
                 });
-                // Continue without ConfigManager - use default configurations
             }
 
             const missionControlUrl = await this.getServiceUrl('MissionControl') || process.env.MISSIONCONTROL_URL || 'missioncontrol:5030';
-            // Initialize PluginExecutor after ConfigManager is available
             this.pluginExecutor = new PluginExecutor(this.configManager, this.containerManager, this.librarianUrl, this.securityManagerUrl, missionControlUrl);
             console.log(`[${trace_id}] ${source_component}: PluginExecutor initialized.`);
 
             await this.start(trace_id);
-            this.startHealthCheckWorker(); // Re-enabled
+            this.startHealthCheckWorker();
 
-            if (!this.registeredWithPostOffice) {
-                //console.log(`[${trace_id}] ${source_component}: Registering with PostOffice...`);
-                await this.registerWithPostOffice(15, 2000);
-                if (this.registeredWithPostOffice) {
-                    //console.log(`[${trace_id}] ${source_component}: Successfully registered with PostOffice.`);
-                } else {
-                    generateStructuredError({
-                        error_code: GlobalErrorCodes.INTERNAL_ERROR_CM,
-                        severity: ErrorSeverity.CRITICAL,
-                        message: "CRITICAL - Failed to register with PostOffice after multiple attempts.",
-                        source_component,
-                        trace_id_param: trace_id
-                    });
-                }
-            }
-
-            // Mark overall initialization as complete
             this.initializationStatus.overall = true;
             console.log(`[${trace_id}] ${source_component}: CapabilitiesManager initialization completed.`);
+
 
         } catch (error: any) {
             throw generateStructuredError({
@@ -588,16 +578,16 @@ export class CapabilitiesManager extends BaseEntity {
             missionId: req.body.missionId || uuidv4() // Ensure missionId is always present
         } as Step;
         
-        const availablePlugins = await this._getAvailablePluginManifests();
-        if (!step.inputValues) {
-            step.inputValues = new Map<string, InputValue>();
-        }
-        step.inputValues.set('availablePlugins', {
-            inputName: 'availablePlugins',
-            value: availablePlugins,
-            valueType: PluginParameterType.ARRAY, 
-            args: {}
-        });
+        // const availablePlugins = await this._getAvailablePluginManifests();
+        // if (!step.inputValues) {
+        //     step.inputValues = new Map<string, InputValue>();
+        // }
+        // step.inputValues.set('availablePlugins', {
+        //     inputName: 'availablePlugins',
+        //     value: availablePlugins,
+        //     valueType: PluginParameterType.ARRAY, 
+        //     args: {}
+        // });
 
 
         if (!step.actionVerb || typeof step.actionVerb !== 'string') {

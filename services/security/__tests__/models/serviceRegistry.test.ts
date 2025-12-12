@@ -1,4 +1,4 @@
-import { verifyComponentCredentials, getServiceRoles, serviceExists, getAllServices } from '../src/models/serviceRegistry';
+import { verifyComponentCredentials, getServiceRoles, serviceExists, getAllServices } from '../../src/models/serviceRegistry';
 
 describe('serviceRegistry', () => {
     let originalProcessEnv: NodeJS.ProcessEnv;
@@ -53,7 +53,6 @@ describe('serviceRegistry', () => {
 
         it('should return true for valid shared secret if NODE_ENV is development', async () => {
             process.env.NODE_ENV = 'development';
-            process.env.SHARED_CLIENT_SECRET = 'dev-shared-secret';
             reimportModule();
 
             const isValid = await verifyComponentCredentials('UnknownService', 'dev-shared-secret');
@@ -75,7 +74,6 @@ describe('serviceRegistry', () => {
 
         it('should return false for valid shared secret if NODE_ENV is production', async () => {
             process.env.NODE_ENV = 'production';
-            process.env.SHARED_CLIENT_SECRET = 'prod-shared-secret';
             reimportModule();
 
             const isValid = await verifyComponentCredentials('UnknownService', 'prod-shared-secret');

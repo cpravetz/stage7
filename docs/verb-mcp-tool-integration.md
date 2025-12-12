@@ -303,6 +303,17 @@ interface DiscoveryMetadata {
 3. **Health Status Integration**: Discovery results filter out unhealthy tools
 4. **Access Control Integration**: Discovery respects access policies
 
+### 3. Engineer Service Integration
+
+The Engineer service (`services/engineer/src/Engineer.ts`) plays a crucial role in tool creation and integration:
+
+1. **Tool Generation**: Creates new plugins and tools based on requirements
+2. **Onboarding Workflow**: Handles the complete tool onboarding process
+3. **Validation Services**: Provides comprehensive validation for generated tools
+4. **Security Integration**: Implements plugin signing and permission analysis
+
+For detailed information on the Engineer service architecture, see [`engineer-plugin-architecture.md`](docs/engineer-plugin-architecture.md).
+
 ## Implementation Roadmap
 
 ### Phase 1: Core Integration Infrastructure (3-4 weeks)

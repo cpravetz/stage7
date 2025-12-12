@@ -30,11 +30,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def _create_detailed_plugin_guidance(inputs: Dict[str, Any]) -> str:
+def _create_detailed_plugin_guidance(available_plugins: List[Dict[str, Any]]) -> str:
     """Create a detailed list of available plugins with input specs, descriptions, and types."""
-    available_plugins_input = inputs.get('availablePlugins', {})
-    available_plugins = available_plugins_input.get('value', []) if isinstance(available_plugins_input, dict) else available_plugins_input
-    
     if not available_plugins:
         return "No plugins are available for use in the plan."
 
@@ -80,14 +77,41 @@ class ProgressTracker:
 progress = ProgressTracker()
 
 def get_auth_token(inputs: Dict[str, Any]) -> str:
-    """Get authentication token from inputs"""
+    """Get the specific authentication token for the Brain service from inputs."""
     if '__brain_auth_token' in inputs:
         token_data = inputs['__brain_auth_token']
         if isinstance(token_data, dict) and 'value' in token_data:
             return token_data['value']
         elif isinstance(token_data, str):
             return token_data
-    raise ReflectError("No authentication token found", "auth_error")
+    raise ReflectError("No Brain authentication token found", "auth_error")
+
+def discover_tools(query: str, inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Discover tools/plugins by querying the Librarian service's /tools/search endpoint."""
+    if inputs.get('__disable_tool_discovery', {}).get('value', False):
+        logger.info("Tool discovery is explicitly disabled.")
+        return []
+    try:
+        auth_token = get_auth_token(inputs)
+        librarian_url_input = inputs.get('librarian_url')
+        if isinstance(librarian_url_input, dict) and 'value' in librarian_url_input:
+            librarian_url = librarian_url_input['value']
+        else:
+            librarian_url = librarian_url_input if librarian_url_input is not None else 'librarian:5040'
+
+        headers = {'Authorization': f'Bearer {auth_token}'}
+        logger.info(f"Discovering tools from Librarian with query: {query}")
+        response = requests.get(f"http://{librarian_url}/tools/search?q={query}", headers=headers, timeout=10)
+        response.raise_for_status()
+        discovered_plugins = response.json()
+        if discovered_plugins and isinstance(discovered_plugins, list):
+            logger.info(f"Successfully discovered {len(discovered_plugins)} plugins from Librarian.")
+            return discovered_plugins
+        logger.info("Tool discovery returned no plugins.")
+        return []
+    except Exception as e:
+        logger.warning(f"Tool discovery via /tools/search failed: {e}. Proceeding without discovered tools.")
+        return []
 
 def get_mission_goal(mission_id: str, inputs: Dict[str, Any]) -> Optional[str]:
     """Fetches the mission goal from the Librarian service."""
@@ -314,15 +338,6 @@ class ReflectHandler:
     def __init__(self, inputs: Dict[str, Any]):
         self.validator = PlanValidator(brain_call=call_brain)
         self.max_retries = 3
-        
-        # Initialize the validator with available plugins
-        try:
-            available_plugins_raw = inputs.get('availablePlugins', {})
-            available_plugins = available_plugins_raw.get('value', []) if isinstance(available_plugins_raw, dict) else (available_plugins_raw or [])
-            self.validator = PlanValidator(brain_call=call_brain, available_plugins=available_plugins)
-        except Exception as e:
-            logger.error(f"Failed to initialize PlanValidator with plugins: {e}")
-            self.validator = PlanValidator(brain_call=call_brain)
 
     def handle(self, inputs: Dict[str, Any]) -> str:
         try:
@@ -330,6 +345,15 @@ class ReflectHandler:
 
             # Extract reflection information
             reflection_info = self._extract_reflection_info(inputs)
+
+            # --- Verb Discovery Integration ---
+            query = reflection_info.get("question") or reflection_info.get("mission_goal", "general planning")
+            logger.info(f"REFLECT: Discovering tools for query: {query}")
+            discovered_plugins = discover_tools(query, inputs)
+            
+            # Update validator with discovered plugins
+            self.validator.set_available_plugins(discovered_plugins)
+            # --- End Verb Discovery Integration ---
 
             # Get mission goal
             mission_goal = get_mission_goal(reflection_info.get("missionId"), inputs)
@@ -344,13 +368,13 @@ class ReflectHandler:
                 self._perform_self_correction(agent_id, reflection_info, inputs)
 
             # Ask Brain for reflection handling approach
-            brain_response = self._ask_brain_for_reflection_handling(reflection_info, inputs)
+            brain_response = self._ask_brain_for_reflection_handling(reflection_info, inputs, discovered_plugins)
 
             # Interpret and format response
             return self._format_response(brain_response, reflection_info, inputs)
 
         except Exception as e:
-            logger.error(f"Reflection handling failed: {e}")
+            logger.error(f"Reflection handling failed: {e}", exc_info=True)
             return json.dumps([{
                 "success": False,
                 "name": "error",
@@ -412,7 +436,7 @@ class ReflectHandler:
             "agentId": agent_id,
         }
     
-    def _ask_brain_for_reflection_handling(self, reflection_info: Dict[str, Any], inputs: Dict[str, Any]) -> str:
+    def _ask_brain_for_reflection_handling(self, reflection_info: Dict[str, Any], inputs: Dict[str, Any], discovered_plugins: List[Dict[str, Any]]) -> str:
         """Ask Brain how to handle the reflection request"""
         mission_goal = reflection_info['mission_goal']
         plan_history = reflection_info['plan_history']
@@ -420,12 +444,8 @@ class ReflectHandler:
         question = reflection_info['question']
         mission_id = reflection_info['missionId']
 
-        PLAN_ARRAY_SCHEMA = {
-            "type": "array",
-            "items": PLAN_STEP_SCHEMA,
-            "description": "A list of sequential steps to accomplish a goal."
-        }
         schema_json = json.dumps(PLAN_ARRAY_SCHEMA, indent=2)
+        plugin_guidance = _create_detailed_plugin_guidance(discovered_plugins)
 
         failed_step_info = ""
         if plan_history:
@@ -452,7 +472,7 @@ PLAN HISTORY: {plan_history}
 WORK PRODUCTS: {work_products}
 REFLECTION QUESTION: {question}
 
-PARENT STEP INPUTS: {json.dumps(inputs)}
+{plugin_guidance}
 
 {failed_step_info}
 
@@ -463,43 +483,30 @@ Your task is to analyze the mission's progress and determine the best course of 
 
 **CRITICAL PLANNING PRINCIPLES (STRICTLY ENFORCED):**
 ---
-- **Direct, Actionable Plans:** Prioritize using concrete, executable `actionVerbs`. Your goal is to produce the most direct and actionable plan possible. Avoid creating abstract or novel verbs if the task can be accomplished with a sequence of known verbs.
+- **Direct, Actionable Plans:** Prioritize using concrete, executable `actionVerbs` from the discovered `Available Plugins`. Your goal is to produce the most direct and actionable plan possible.
 - **Autonomy is Paramount:** Your goal is to *solve* the mission, not to delegate research or information gathering back to the user.
 - **Resourcefulness:** Exhaust all available tools (`SEARCH`, `SCRAPE`, `GENERATE`, `QUERY_KNOWLEDGE_BASE`) to find answers and create deliverables *before* ever considering asking the user.
 - **Create Deliverables with `FILE_OPERATION`:** If a step's output is marked with `isDeliverable: true`, you **MUST** add a subsequent step using `FILE_OPERATION` with the `write` operation to save the output to the specified `filename`. This is essential for the user to see the work.
 - **Share Work Before Asking:** Before generating an `ASK_USER_QUESTION` step that refers to a work product, you **MUST** ensure a preceding `FILE_OPERATION` step saves that product to a file for the user to review.
 - **`ASK_USER_QUESTION` is a Last Resort:** This tool is exclusively for obtaining subjective opinions, approvals, or choices from the user. It is *never* for offloading tasks. Generating a plan that asks the user for information you can find yourself is a critical failure.
 - **Dependencies are Crucial:** Every step that uses an output from a previous step MUST declare this in its `inputs` using `sourceStep` and `outputName`. A plan with disconnected steps is invalid.
-        - **Handling Lists (`FOREACH`):** If a step requires a single item (e.g., a URL string) but receives a list from a preceding step (e.g., search results), you MUST use a `FOREACH` loop to iterate over the list.
-        - **Aggregating Results (`REGROUP`):** When using a `FOREACH` loop, if you need to collect the results from all iterations into a single array, you MUST follow the `FOREACH` step with a `REGROUP` step. The `REGROUP` step's `stepIdsToRegroup` input MUST be linked to the `FOREACH` step's `instanceEndStepIds` output using `sourceStep` and `outputName`. This ensures that `REGROUP` waits for all `FOREACH` iterations to complete and then collects their results.
-        - **Role Assignment:** Assign `recommendedRole` at the deliverable level, not per individual step. All steps contributing to a single output (e.g., a research report) should share the same role.
+- **Handling Lists (`FOREACH`):** If a step requires a single item (e.g., a URL string) but receives a list from a preceding step (e.g., search results), you MUST use a `FOREACH` loop to iterate over the list.
+- **Aggregating Results (`REGROUP`):** When using a `FOREACH` loop, if you need to collect the results from all iterations into a single array, you MUST follow the `FOREACH` step with a `REGROUP` step. The `REGROUP` step's `stepIdsToRegroup` input MUST be linked to the `FOREACH` step's `instanceEndStepIds` output using `sourceStep` and `outputName`. This ensures that `REGROUP` waits for all `FOREACH` iterations to complete and then collects their results.
+- **Role Assignment:** Assign `recommendedRole` at the deliverable level, not per individual step. All steps contributing to a single output (e.g., a research report) should share the same role.
+
 **RESPONSE FORMATS:**
 
 -   **For an Incomplete/Failed Mission:** A JSON array of steps that form a new plan, following the schema below.
 -   **For a Completed Mission:** {{"direct_answer": "The mission is complete."}}
 
-Plan Schema
+Plan Schema:
 {schema_json}
 
 - **CRITICAL for REQUIRED Inputs:** For each step, you MUST examine the `inputDefinitions` for the corresponding `actionVerb` and ensure that all `required` inputs are present in the step's `inputs` object. If an input is marked `required: true`, it MUST be provided.
 - **CRITICAL for Plan Inputs, sourceStep:**
-    - Step inputs are generally sourced from the outputs of other steps and less often fixed with constant values.
-    - All inputs for each step must be explicitly defined either as a constant `value` or by referencing an `outputName` from a `sourceStep` within the plan or from the `PARENT STEP INPUTS`. Do not assume implicit data structures or properties of inputs.
-    - Use `sourceStep: 0` ONLY for inputs that are explicitly provided in the "PARENT STEP INPUTS" section above.
+    - Use `sourceStep: '0'` ONLY for inputs that are explicitly provided in the initial mission context (the "PARENT STEP INPUTS" section if applicable, or the overall mission goal).
     - For any other input, it MUST be the `outputName` from a *preceding step* in this plan, and `sourceStep` MUST be the `id` of that preceding step.
-    - Every input in your plan MUST be resolvable either from a given constant value, a "PARENT STEP" (using `sourceStep: 0`) or from an output of a previous step in the plan.
-    - CRITICAL: If you use placeholders like {{{{'{{output_name}}'}}}} within a longer string value (e.g., a prompt that references previous outputs), you MUST also declare each referenced output_name as a separate input with proper sourceStep and outputName.
-- **Mapping Outputs to Inputs:** When the output of one step is used as the input to another, the `outputName` in the input of the second step must match the `name` of the output of the first step.
-
-**Role Assignment Strategy:**
-- Assign `recommendedRole` at the **deliverable level**, not per-step optimization
-- All steps contributing to a single coherent output (e.g., "research report", "code module", "analysis document") should share the same `recommendedRole`
-- Only change `recommendedRole` when transitioning to a fundamentally different type of deliverable
-- Example: Steps 1-5 all produce research for a report → all get `recommendedRole: "researcher"`
-- Counter-example: Don't switch roles between gathering data (step 1) and formatting it (step 2) if they're part of the same research deliverable
-
-**CRITICAL - LINKING STEPS:** You MUST explicitly connect steps. Any step that uses the output of a previous step MUST declare this in its `inputs` using `sourceStep` and `outputName`. DO NOT simply refer to previous outputs in a `prompt` string without also adding the formal dependency in the `inputs` object. For verbs like `THINK`, `CHAT`, or `ASK_USER_QUESTION`, if the `prompt` or `question` text refers to a file or work product from a previous step, you MUST add an input that references the output of that step using `sourceStep` and `outputName`. This ensures the step waits for the file to be created.
-A plan with no connections between steps is invalid and will be rejected.
+- **CRITICAL - LINKING STEPS:** You MUST explicitly connect steps. Any step that uses the output of a previous step MUST declare this in its `inputs` using `sourceStep` and `outputName`. A plan with no connections between steps is invalid and will be rejected.
 
 """
 
@@ -603,24 +610,15 @@ A plan with no connections between steps is invalid and will be rejected.
                                 break
 
             if plan_array is not None:
-                # Ensure availablePlugins is a direct list of manifests for the validator
-                modified_inputs = inputs.copy()
-                available_plugins_for_validator = modified_inputs.get('availablePlugins')
-                if isinstance(available_plugins_for_validator, dict) and 'value' in available_plugins_for_validator:
-                    modified_inputs['availablePlugins'] = available_plugins_for_validator['value']
-
                 # Validate and repair the plan
-                validated_plan = self.validator.validate_and_repair(plan_array, verb_info['mission_goal'], modified_inputs)
-
-                # Save the generated plan to Librarian
-                # self._save_plan_to_librarian(verb_info['verb'], validated_plan, inputs)
+                validated_plan_result = self.validator.validate_and_repair(plan_array, verb_info['mission_goal'], inputs)
 
                 return json.dumps([{
                     "success": True,
                     "name": "plan",
                     "resultType": "plan",
                     "resultDescription": f"Plan created from reflection",
-                    "result": validated_plan,
+                    "result": validated_plan_result.plan,
                     "mimeType": "application/json"
                 }])
             elif isinstance(data, dict): # Could be direct answer or plugin recommendation
@@ -686,13 +684,13 @@ A plan with no connections between steps is invalid and will be rejected.
                                             break
 
                             if extracted_plan:
-                                validated_plan = self.validator.validate_and_repair(extracted_plan, verb_info['mission_goal'], inputs)
+                                validated_plan_result = self.validator.validate_and_repair(extracted_plan, verb_info['mission_goal'], inputs)
                                 return json.dumps([{
                                     "success": True,
                                     "name": "plan",
                                     "resultType": "plan",
                                     "resultDescription": f"Plan created from reflection",
-                                    "result": validated_plan,
+                                    "result": validated_plan_result.plan,
                                     "mimeType": "application/json"
                                 }])
                     except (json.JSONDecodeError, TypeError):
@@ -718,16 +716,6 @@ A plan with no connections between steps is invalid and will be rejected.
                         "result": data["value"],
                         "mimeType": "application/json"
                     }])
-                elif "value" in data and "valueType" in data:
-                    # Handle the case where the response is an InputValue-like object
-                    return json.dumps([{ 
-                        "success": True,
-                        "name": "answer",
-                        "resultType": "string",
-                        "resultDescription": f"Direct answer from reflection",
-                        "result": data["value"],
-                        "mimeType": "application/json"
-                    }])
                 elif "plugin" in data:
                     plugin_data = data["plugin"]
                     return json.dumps([{ 
@@ -740,13 +728,12 @@ A plan with no connections between steps is invalid and will be rejected.
                     }])
                 # If the dictionary is a single step, treat it as a plan with one step
                 elif "actionVerb" in data and "id" in data:
-                    validated_plan = self.validator.validate_and_repair([data], verb_info['mission_goal'], inputs)
-                    # self._save_plan_to_librarian(verb_info['verb'], validated_plan, inputs)
+                    validated_plan_result = self.validator.validate_and_repair([data], verb_info['mission_goal'], inputs)
                     return json.dumps([{"success": True,
                         "name": "plan",
                         "resultType": "plan",
                         "resultDescription": f"Plan created from reflection",
-                        "result": validated_plan,
+                        "result": validated_plan_result.plan,
                         "mimeType": "application/json"
                     }])
                 else:
@@ -760,7 +747,7 @@ A plan with no connections between steps is invalid and will be rejected.
                         "mimeType": "application/json"
                     }])
             else:
-                # Truly unexpected format (e.g., non-JSON string that wasn't caught by _clean_brain_response)
+                # Truly unexpected format
                 return json.dumps([{ 
                     "success": False,
                     "name": "error",
@@ -771,7 +758,7 @@ A plan with no connections between steps is invalid and will be rejected.
                 }])
 
         except (json.JSONDecodeError, TypeError) as e:
-            logger.error(f"Failed to parse or process Brain response in _format_response: {e}")
+            logger.error(f"Failed to parse or process Brain response in _format_response: {e}", exc_info=True)
             logger.error(f"Raw Brain response (type: {type(brain_response)}): {str(brain_response)[:500]}...")
             return json.dumps([{ 
                 "success": False,

@@ -12,6 +12,7 @@ const RETRY_DELAY_MS = parseInt(process.env.RETRY_DELAY_MS || '1000', 10);
 const HEALTH_CHECK_PATHS = ['/healthy', '/ready', '/health', '/status'];
 
 // Auth paths that should bypass authentication
+// Note: Only true authentication endpoints should be here, not service endpoints that have their own auth
 const AUTH_PATHS = ['/auth/', '/login', '/register', '/public-key', '/refresh-token', '/registerComponent'];
 
 /**
@@ -65,44 +66,47 @@ function log(level: 'debug' | 'info' | 'warn' | 'error', message: string, data?:
  * Only health check endpoints and authentication endpoints should bypass auth
  */
 function shouldBypassAuth(path: string): boolean {
-  // Normalize the path - remove trailing slashes and ensure it starts with a slash
-  const normalizedPath = path.endsWith('/') ? path.slice(0, -1) : path;
-  const finalPath = normalizedPath.startsWith('/') ? normalizedPath : `/${normalizedPath}`;
+    // Normalize the path - remove trailing slashes and ensure it starts with a slash
+    const normalizedPath = path.endsWith('/') ? path.slice(0, -1) : path;
+    const finalPath = normalizedPath.startsWith('/') ? normalizedPath : `/${normalizedPath}`;
 
-  // Check for exact health check paths
-  if (HEALTH_CHECK_PATHS.some(p => finalPath === p)) {
-    console.log(`[shouldBypassAuth] Bypassing auth for health check path: ${finalPath}`);
-    return true;
-  }
-
-  // Check for health check paths with additional segments
-  if (HEALTH_CHECK_PATHS.some(p => finalPath.startsWith(`${p}/`))) {
-    console.log(`[shouldBypassAuth] Bypassing auth for health check path with segments: ${finalPath}`);
-    return true;
-  }
-
-  // Check for /ready with query parameters
-  if (finalPath.startsWith('/ready?')) {
-    console.log(`[shouldBypassAuth] Bypassing auth for ready path with query params: ${finalPath}`);
-    return true;
-  }
-
-  // Check for auth paths
-  for (const authPath of AUTH_PATHS) {
-    // For /registerComponent, check for exact match
-    if (authPath === '/registerComponent' && finalPath === authPath) {
-      console.log(`[shouldBypassAuth] Bypassing auth for registerComponent: ${finalPath}`);
-      return true;
+    // Check for exact health check paths
+    if (HEALTH_CHECK_PATHS.some(p => finalPath === p)) {
+        console.log(`[shouldBypassAuth] Bypassing auth for health check path: ${finalPath}`);
+        return true;
     }
 
-    // For other auth paths, check if the path includes the auth path
-    if (authPath !== '/registerComponent' && finalPath.includes(authPath)) {
-      console.log(`[shouldBypassAuth] Bypassing auth for auth path: ${finalPath} (matched ${authPath})`);
-      return true;
+    // Check for health check paths with additional segments
+    if (HEALTH_CHECK_PATHS.some(p => finalPath.startsWith(`${p}/`))) {
+        console.log(`[shouldBypassAuth] Bypassing auth for health check path with segments: ${finalPath}`);
+        return true;
     }
-  }
 
-  return false;
+    // Check for /ready with query parameters
+    if (finalPath.startsWith('/ready?')) {
+        console.log(`[shouldBypassAuth] Bypassing auth for ready path with query params: ${finalPath}`);
+        return true;
+    }
+
+    // Check for auth paths - these are true authentication endpoints only
+    for (const authPath of AUTH_PATHS) {
+        // Use startsWith for prefix paths, and exact match for others
+        if (authPath.endsWith('/')) {
+            if (finalPath.startsWith(authPath)) {
+                console.log(`[shouldBypassAuth] Bypassing auth for authentication path: ${finalPath} (matched prefix ${authPath})`);
+                return true;
+            }
+        } else {
+            if (finalPath === authPath) {
+                console.log(`[shouldBypassAuth] Bypassing auth for authentication path: ${finalPath} (matched exact ${authPath})`);
+                return true;
+            }
+        }
+    }
+
+    // Log when a path is NOT bypassing auth (for debugging)
+    console.log(`[shouldBypassAuth] Requiring authentication for path: ${finalPath}`);
+    return false;
 }
 
 /**
@@ -216,6 +220,11 @@ export function createAuthenticatedAxios(
       if (shouldBypassAuth(path)) {
         log('debug', `[AuthenticatedAxios] Request ${requestId}: Skipping authentication for path: ${path}`, undefined, instanceLogLevel);
         return config;
+      }
+
+      // Special logging for paths that previously bypassed auth but shouldn't
+      if (path.includes('/verbs/register') || path.includes('/tools/search') || path.includes('/tools/index')) {
+        log('warn', `[AuthenticatedAxios] Request ${requestId}: Path ${path} now requires authentication (previously bypassed)`, undefined, instanceLogLevel);
       }
 
       // Get token and set Authorization header with validation

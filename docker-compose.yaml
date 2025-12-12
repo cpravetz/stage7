@@ -22,7 +22,7 @@ services:
       MISSIONCONTROL_URL: &missioncontrolUrl missioncontrol:5030
       RABBITMQ_URL: &rabbitmqUrl amqp://stage7:stage7password@rabbitmq:5672
       CONSUL_URL: &consulUrl consul:8500
-      POSTOFFICE_CLIENT_SECRET: &sharedSecret stage7AuthSecret
+      POSTOFFICE_SECRET: &sharedSecret stage7AuthSecret
       CLIENT_SECRET: *sharedSecret
       # Temporarily allow bootstrapping without RabbitMQ to unblock other services
       ALLOW_READY_WITHOUT_RABBITMQ: "true"
@@ -71,7 +71,7 @@ services:
       BRAIN_URL: &brainUrl brain:5070
       ENGINEER_URL: &engineerUrl engineer:5050
 
-      MISSIONCONTROL_CLIENT_SECRET: *sharedSecret
+      MISSIONCONTROL_SECRET: *sharedSecret
       CLIENT_SECRET: *sharedSecret
     ports:
       - "5030:5030"
@@ -98,7 +98,7 @@ services:
       RABBITMQ_URL: *rabbitmqUrl
       CONSUL_URL: *consulUrl
       LIBRARIAN_URL: *librarianUrl
-      TRAFFICMANAGER_CLIENT_SECRET: *sharedSecret
+      TRAFFICMANAGER_SECRET: *sharedSecret
       CLIENT_SECRET: *sharedSecret
     volumes:
       - ./shared/keys:/usr/src/app/shared/keys
@@ -130,7 +130,7 @@ services:
       CONSUL_URL: *consulUrl
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      BRAIN_CLIENT_SECRET: *sharedSecret
+      BRAIN_SECRET: *sharedSecret
       CLIENT_SECRET: *sharedSecret
     volumes:
       - ./shared/keys:/usr/src/app/shared/keys
@@ -169,7 +169,7 @@ services:
       LIBRARIAN_URL: *librarianUrl
       MISSIONCONTROL_URL: *missioncontrolUrl
       BRAIN_URL: *brainUrl
-      AGENTSET_CLIENT_SECRET: *sharedSecret
+      AGENTSET_SECRET: *sharedSecret
       CLIENT_SECRET: *sharedSecret
     volumes:
       - ./shared/keys:/usr/src/app/shared/keys
@@ -208,7 +208,7 @@ services:
       BRAIN_URL: *brainUrl
       LIBRARIAN_URL: *librarianUrl
       CAPABILITIESMANAGER_URL: *capabilitiesmanagerUrl
-      ENGINEER_CLIENT_SECRET: *sharedSecret
+      ENGINEER_SECRET: *sharedSecret
       CLIENT_SECRET: *sharedSecret
       GITHUB_USERNAME: &githubUsername 'cpravetz'
       GIT_DEFAULT_BRANCH: &gitDefaultBranch main
@@ -252,7 +252,7 @@ services:
       LIBRARIAN_URL: *librarianUrl
       BRAIN_URL: *brainUrl
       ENGINEER_URL: &engineerUrl
-      CAPABILITIESMANAGER_CLIENT_SECRET: *sharedSecret
+      CAPABILITIESMANAGER_SECRET: *sharedSecret
       CLIENT_SECRET: *sharedSecret
       LOCAL_PLUGIN_PATH: /usr/src/app/services//capabilitiesmanager/src/plugins
       GITHUB_TOKEN: ${GITHUB_TOKEN}
@@ -299,7 +299,7 @@ services:
       POSTOFFICE_URL: *postofficeUrl
       RABBITMQ_URL: *rabbitmqUrl
       CONSUL_URL: *consulUrl
-      LIBRARIAN_CLIENT_SECRET: *sharedSecret
+      LIBRARIAN_SECRET: *sharedSecret
       CLIENT_SECRET: *sharedSecret
     volumes:
       - ./shared/keys:/usr/src/app/shared/keys
@@ -339,15 +339,15 @@ services:
       ADMIN_SECRET: adminSecret
       LIBRARIAN_URL: *librarianUrl
       # Using a single shared client secret for all services
-      SECURITYMANAGER_CLIENT_SECRET: *sharedSecret
-      POSTOFFICE_CLIENT_SECRET: *sharedSecret
-      MISSIONCONTROL_CLIENT_SECRET: *sharedSecret
-      TRAFFICMANAGER_CLIENT_SECRET: *sharedSecret
-      BRAIN_CLIENT_SECRET: *sharedSecret
-      AGENTSET_CLIENT_SECRET: *sharedSecret
-      ENGINEER_CLIENT_SECRET: *sharedSecret
-      CAPABILITIESMANAGER_CLIENT_SECRET: *sharedSecret
-      LIBRARIAN_CLIENT_SECRET: *sharedSecret
+      SECURITYMANAGER_SECRET: *sharedSecret
+      POSTOFFICE_SECRET: *sharedSecret
+      MISSIONCONTROL_SECRET: *sharedSecret
+      TRAFFICMANAGER_SECRET: *sharedSecret
+      BRAIN_SECRET: *sharedSecret
+      AGENTSET_SECRET: *sharedSecret
+      ENGINEER_SECRET: *sharedSecret
+      CAPABILITIESMANAGER_SECRET: *sharedSecret
+      LIBRARIAN_SECRET: *sharedSecret
       CLIENT_SECRET: *sharedSecret
       # JWT configuration
       JWT_ALGORITHM: RS256
@@ -358,7 +358,7 @@ services:
       ACCEPT_ANY_SERVICE: "false"
       ACCEPT_ANY_SECRET: "false"
       # Shared secret for all services
-      SHARED_CLIENT_SECRET: *sharedSecret
+      SHARED_SECRET: *sharedSecret
     volumes:
       - ./services/security/keys:/usr/src/app/services/security/keys
       - ./shared/keys:/usr/src/app/shared/keys
