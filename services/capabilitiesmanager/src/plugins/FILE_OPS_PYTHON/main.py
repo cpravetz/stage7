@@ -229,25 +229,12 @@ class FileOperationPlugin:
     def _write_operation(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         path = self._get_input_value(inputs, 'path', ['filePath', 'fileName', 'filename', 'pathName'])
         content_input = self._get_input_value(inputs, 'content', ['body', 'text', 'data', 'fileContent'])
-
-        # Ensure content is a string
-        if not isinstance(content_input, str):
-            content_for_file = json.dumps(content_input, indent=4)
-        else:
-            content_for_file = content_input
-
         mission_id = self._get_input_value(inputs, 'missionId', ['mission_id'])
         mission_control_url = self._get_mission_control_url(inputs)
         librarian_url = self._get_librarian_url(inputs)
 
-        if not all([path, content_for_file, mission_id, mission_control_url, librarian_url]):
-            missing_params = [
-                p for p, v in {
-                    'path': path, 'content': content_for_file, 'missionId': mission_id,
-                    'MISSIONCONTROL_URL': mission_control_url, 'LIBRARIAN_URL': librarian_url
-                }.items() if not v
-            ]
-            raise ValueError(f"Missing required parameters: {', '.join(missing_params)}")
+        if not all([mission_id, mission_control_url, librarian_url]):
+            raise ValueError("Missing required parameters: 'missionId', MISSIONCONTROL_URL, and LIBRARIAN_URL.")
 
         headers = {}
         try:
@@ -256,11 +243,24 @@ class FileOperationPlugin:
         except ValueError:
             pass # Continue without auth header if token not found
 
-        file_id = str(uuid.uuid4())
-        file_name = os.path.basename(path)
-        mime_type = 'text/plain' # Assuming text for now
+        # Ensure content is a string
+        if not isinstance(content_input, str):
+            content_for_file = json.dumps(content_input, indent=4)
+            mime_type = 'application/json' # Content was a structured object, saved as JSON
+        else:
+            content_for_file = content_input
+            mime_type = 'text/plain' # Content was already a string, saved as plain text
 
         # Store file content in Librarian
+        file_id = str(uuid.uuid4())
+        file_name = os.path.basename(path)
+
+        # Retrieve stepId from inputs
+        step_id = self._get_input_value(inputs, 'stepId', ['step_id'])
+        if not step_id:
+            logger.warning("Step ID is missing for FILE_OPERATION, using a placeholder.")
+            step_id = "unknown_step" # Fallback if stepId is not provided
+            
         librarian_payload = {
             'id': f'step-output-{file_id}',
             'data': {
@@ -285,8 +285,17 @@ class FileOperationPlugin:
             'description': f"Output from plugin write: {path}"
         }
 
+        # Construct the deliverable_payload as expected by MissionControl
+        deliverable_payload = {
+            'missionFile': mission_file,
+            'isDeliverable': True,  # Mark as deliverable
+            'stepId': step_id,      # Include stepId
+            # other fields that MissionControl might expect at the top level of the deliverable document
+            # for example: missionId, agentId, etc.
+        }
+
         # Add the file metadata to the mission in MissionControl
-        add_file_response = requests.post(f"http://{mission_control_url}/missions/{mission_id}/files/add", json=mission_file, headers=headers)
+        add_file_response = requests.post(f"http://{mission_control_url}/missions/{mission_id}/files/add", json=deliverable_payload, headers=headers)
         add_file_response.raise_for_status()
 
         return {"success": True, "name": "file", "resultType": "object", "resultDescription": f"Successfully wrote to file {path}", "result": mission_file}

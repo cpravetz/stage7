@@ -61,7 +61,7 @@
   },
   "overrides": {
     "typescript": "^5.6.3",
-    "glob": "^11.0.1",
+    "glob": "^11.1.0",
     "inflight": "^2.0.0",
     "uuid": "^10.0.0",
     "@svgr/webpack": "^8.1.0",

@@ -356,14 +356,14 @@ export class Agent extends BaseEntity {
             }
 
             // If we've already reflected (or agent isn't running), finalize.
-            if (this.status === AgentStatus.RUNNING) { // Only change status if it was still running
-                this.setAgentStatus(AgentStatus.COMPLETED, {eventType: 'agent_completed'});
+            if (!this.hasActiveWork() && this.reflectionDone && this.status === AgentStatus.RUNNING) {
+                console.log(`[Agent ${this.id}] runUntilDone: No active work and reflection done. Finalizing mission.`);
+                this.setAgentStatus(AgentStatus.COMPLETED, { eventType: 'agent_completed' });
                 const finalStep = this.steps.filter(s => s.status === StepStatus.COMPLETED).pop();
                 if (finalStep) {
                     this.output = await this.agentPersistenceManager.loadStepWorkProduct(this.id, finalStep.id);
                 }
-                console.log(`[Agent ${this.id}] runUntilDone: Agent has completed all active work. Final status: ${this.status}`);
-            } else {
+            } else if (this.status !== AgentStatus.COMPLETED) {
                 console.log(`[Agent ${this.id}] runUntilDone: Agent loop exited with status: ${this.status}. No active work remaining.`);
             }
 
@@ -470,8 +470,6 @@ Please consider this context when planning and executing the mission. Provide de
     }
 
     private async hasActiveWork(): Promise<boolean> {
-        console.log(`[Agent ${this.id}] DEBUG: Agent.hasActiveWork: Checking for active work. Total steps: ${this.steps.length}.`);
-        console.log(`[Agent ${this.id}] DEBUG: Agent.hasActiveWork: Step statuses: ${this.steps.map(s => `${s.id.substring(0, 8)}... (${s.status})`).join(', ')}`);
         // 1. Check for locally active steps
         const localActiveSteps = this.steps.filter(step =>
             step.status === StepStatus.PENDING ||
@@ -480,7 +478,6 @@ Please consider this context when planning and executing the mission. Provide de
         );
 
         if (localActiveSteps.length > 0) {
-            console.log(`[Agent ${this.id}] DEBUG: Agent.hasActiveWork: Found ${localActiveSteps.length} local active steps. Returning true.`);
             return true;
         }
 
@@ -488,11 +485,9 @@ Please consider this context when planning and executing the mission. Provide de
         // If we have any delegated steps being tracked, assume they're still active
         // The delegated agent will notify us when they're complete via the step completion callback
         if (this.delegatedStepIds.size > 0) {
-            console.log(`[Agent ${this.id}] DEBUG: Agent.hasActiveWork: Found ${this.delegatedStepIds.size} delegated steps. Returning true.`);
             return true;
         }
 
-        console.log(`[Agent ${this.id}] DEBUG: Agent.hasActiveWork: No active steps found. Returning false.`);
         return false;
     }
 
@@ -522,7 +517,7 @@ Please consider this context when planning and executing the mission. Provide de
         const newPlan = this._extractPlanFromReflectionResult(result);
         const directAnswerOutput = result.find(r => r.name === 'direct_answer');
 
-        if (newPlan) {
+        if (newPlan && newPlan.length > 0) {
             this.say('Reflection resulted in a new plan. Updating plan.');
             const currentStepIndex = this.steps.findIndex(s => s.id === step.id);
             if (currentStepIndex !== -1) {
@@ -532,6 +527,20 @@ Please consider this context when planning and executing the mission. Provide de
                 }
             }
             this.addStepsFromPlan(newPlan, step);
+            // After adding new steps from a PLAN result, we need to ensure reflectionDone is reset
+            // so that if these new steps also lead to a state of no active work,
+            // a new end-of-mission REFLECT step can be created if needed.
+            this.reflectionDone = false;
+            await this.updateStatus();
+        } else if (newPlan && newPlan.length === 0) {
+            // If reflection returns an empty plan, it means the mission is accomplished
+            this.say('Reflection indicates the mission is complete.');
+            this.setAgentStatus(AgentStatus.COMPLETED, {eventType: 'agent_mission_accomplished'});
+            // Additionally, set the final output of the agent
+            const finalStep = this.steps.filter(s => s.status === StepStatus.COMPLETED).pop();
+            if (finalStep) {
+                this.output = await this.agentPersistenceManager.loadStepWorkProduct(this.id, finalStep.id);
+            }
             await this.updateStatus();
         } else if (directAnswerOutput && directAnswerOutput.result) {
             const directAnswer = directAnswerOutput.result;
@@ -695,7 +704,6 @@ Please consider this context when planning and executing the mission. Provide de
                     executableSteps.push(step);
                 }
             }
-            console.debug(`[Agent ${this.id}] runAgent: Executable steps: ${executableSteps.map(s => `${s.id} (${s.actionVerb}, ${s.status})`).join(', ') || 'None'}`);
 
             if (executableSteps.length > 0) {
                 const stepsToDelegate = new Map<string, Step[]>();

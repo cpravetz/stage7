@@ -1124,14 +1124,14 @@ export class PostOffice extends BaseEntity {
                 return res.status(404).send({ error: 'File not found on storage.' });
             }
 
-            // Get the file content using FileUploadManager's service
-            const fileBuffer = await this.fileUploadManager.fileUploadServiceInstance.getFile(fileToDownload.id, fileToDownload.storagePath);
+            // Get the file stream using FileUploadManager's service
+            const fileStream = await this.fileUploadManager.fileUploadServiceInstance.getFile(fileToDownload.id, fileToDownload.storagePath);
 
             // Set appropriate headers for file download
             res.setHeader('Content-Disposition', `attachment; filename="${fileToDownload.originalName}"`);
             res.setHeader('Content-Type', fileToDownload.mimeType);
-            res.setHeader('Content-Length', fileBuffer.length.toString());
-            res.send(fileBuffer);
+            // Don't set Content-Length here, as we are streaming. It will be handled automatically.
+            fileStream.pipe(res);
 
         } catch (error) {
             analyzeError(error as Error);

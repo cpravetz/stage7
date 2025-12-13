@@ -954,17 +954,17 @@ export class Step {
                 this.status = StepStatus.COMPLETED;
             }
             
-            this.result = result;
+            this.result = await this.mapPluginOutputsToCustomNames(result);
 
             this.logEvent({
                 eventType: 'step_execution_finish',
                 stepId: this.id,
                 status: this.status,
-                result: this.truncateLargeStrings(result),
+                result: this.truncateLargeStrings(this.result),
                 timestamp: new Date().toISOString()
             });
 
-            return result;
+            return this.result;
 
         } catch (error) {
             this.status = StepStatus.ERROR;
@@ -995,36 +995,48 @@ export class Step {
     }
 
     public async mapPluginOutputsToCustomNames(pluginOutputs: PluginOutput[]): Promise<PluginOutput[]> {
-        // If there are no custom output names defined, return the original plugin outputs
+        // If there are no custom output names defined in the plan, return the original plugin outputs.
         if (!this.outputs || this.outputs.size === 0) {
             return pluginOutputs;
         }
     
-        const mappedOutputs: PluginOutput[] = [];
-        const originalOutputNames = Array.from(this.outputs.values());
+        const customOutputKeys = Array.from(this.outputs.keys());
+        const mappablePluginOutputs = pluginOutputs.filter(
+            p => p.name !== 'error' && p.resultType !== PluginParameterType.PLAN && p.name !== 'status'
+        );
     
-        for (const pluginOutput of pluginOutputs) {
-            // Find which custom name this plugin output corresponds to
-            const customName = [...this.outputs.entries()].find(([_, originalName]) => originalName === pluginOutput.name)?.[0];
+        // Simple 1-to-1 mapping: If there's one output defined in the plan and one result from the plugin,
+        // rename the plugin's result to match the plan's definition. This is the most common case.
+        if (customOutputKeys.length === 1 && mappablePluginOutputs.length === 1) {
+            const customName = customOutputKeys[0];
+            const originalOutput = mappablePluginOutputs[0];
             
-            if (customName) {
-                // If a mapping is found, create a new output object with the custom name
-                mappedOutputs.push({
-                    ...pluginOutput,
+            if (originalOutput.name !== customName) {
+                console.log(`[Step ${this.id}] Remapping single plugin output '${originalOutput.name}' to planned output name '${customName}'.`);
+    
+                const mappedOutput: PluginOutput = {
+                    ...originalOutput,
                     name: customName,
-                });
-            } else {
-                // If no mapping is found for this specific output, but there are other outputs defined,
-                // we should not include it unless it's a special output type like 'error' or 'plan'.
-                if (pluginOutput.name === 'error' || pluginOutput.resultType === PluginParameterType.PLAN) {
-                    mappedOutputs.push(pluginOutput);
-                }
+                };
+    
+                // Return the mapped output, plus any special unmapped outputs
+                return [
+                    mappedOutput,
+                    ...pluginOutputs.filter(p => !mappablePluginOutputs.includes(p))
+                ];
             }
         }
     
-        // If no outputs were mapped and there were outputs defined, it might be an issue.
-        // However, we'll stick to the logic of only returning what's explicitly mapped.
-        return mappedOutputs;
+        // If names already match, no remapping is needed
+        const allNamesMatch = mappablePluginOutputs.every(p => customOutputKeys.includes(p.name));
+        if (allNamesMatch && mappablePluginOutputs.length > 0) {
+            console.log(`[Step ${this.id}] All plugin output names already match planned output names. No remapping needed.`);
+            return pluginOutputs;
+        }
+    
+        // More complex mapping for multiple outputs could be added here.
+        console.warn(`[Step ${this.id}] mapPluginOutputsToCustomNames: Unhandled mapping scenario. Custom outputs: ${customOutputKeys.join(', ')}, Plugin results: ${mappablePluginOutputs.map(p => p.name).join(', ')}. Returning original outputs.`);
+        return pluginOutputs;
     }
     
     private resolvePlaceholdersInInputRunValues(inputRunValues: Map<string, InputValue>, findOutputFromSteps: (outputName: string) => any | null) {

@@ -78,13 +78,19 @@ progress = ProgressTracker()
 
 def get_auth_token(inputs: Dict[str, Any]) -> str:
     """Get the specific authentication token for the Brain service from inputs."""
-    if '__brain_auth_token' in inputs:
+    if '__auth_token' in inputs: # Check for the standard token name first
+        token_data = inputs['__auth_token']
+        if isinstance(token_data, dict) and 'value' in token_data:
+            return token_data['value']
+        elif isinstance(token_data, str):
+            return token_data
+    elif '__brain_auth_token' in inputs: # Fallback to the older/specific name
         token_data = inputs['__brain_auth_token']
         if isinstance(token_data, dict) and 'value' in token_data:
             return token_data['value']
         elif isinstance(token_data, str):
             return token_data
-    raise ReflectError("No Brain authentication token found", "auth_error")
+    raise ReflectError("No authentication token found", "auth_error")
 
 def discover_tools(query: str, inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Discover tools/plugins by querying the Librarian service's /tools/search endpoint."""
@@ -101,7 +107,7 @@ def discover_tools(query: str, inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
 
         headers = {'Authorization': f'Bearer {auth_token}'}
         logger.info(f"Discovering tools from Librarian with query: {query}")
-        response = requests.get(f"http://{librarian_url}/tools/search?q={query}", headers=headers, timeout=10)
+        response = requests.post(f"http://{librarian_url}/tools/search", headers=headers, json={"queryText": query}, timeout=10)
         response.raise_for_status()
         discovered_plugins = response.json()
         if discovered_plugins and isinstance(discovered_plugins, list):
@@ -336,8 +342,22 @@ class ReflectHandler:
     """Handles reflection requests by generating schema-compliant plans"""
 
     def __init__(self, inputs: Dict[str, Any]):
-        self.validator = PlanValidator(brain_call=call_brain)
         self.max_retries = 3
+
+        # Extract librarian info for PlanValidator
+        librarian_url_input = inputs.get('librarian_url')
+        if isinstance(librarian_url_input, dict) and 'value' in librarian_url_input:
+            librarian_url = librarian_url_input['value']
+        else:
+            librarian_url = librarian_url_input if librarian_url_input is not None else 'librarian:5040'
+        
+        auth_token = get_auth_token(inputs) # Use the updated get_auth_token
+        
+        librarian_info = {
+            'url': librarian_url,
+            'auth_token': auth_token
+        }
+        self.validator = PlanValidator(brain_call=call_brain, librarian_info=librarian_info)
 
     def handle(self, inputs: Dict[str, Any]) -> str:
         try:

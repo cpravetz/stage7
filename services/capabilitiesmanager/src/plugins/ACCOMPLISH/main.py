@@ -50,6 +50,31 @@ def get_auth_token(inputs: Dict[str, Any]) -> str:
             return token_data
     raise AccomplishError("No Brain authentication token found", "auth_error")
 
+def _get_cm_auth_token(inputs: Dict[str, Any]) -> str:
+    """Get the CapabilitiesManager's authentication token from inputs."""
+    if '__auth_token' in inputs:
+        token_data = inputs['__auth_token']
+        if isinstance(token_data, dict) and 'value' in token_data:
+            return token_data['value']
+        elif isinstance(token_data, str):
+            return token_data
+    raise AccomplishError("No CapabilitiesManager authentication token found", "auth_error")
+
+def _get_librarian_info(inputs: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract librarian URL and CM auth token from inputs."""
+    librarian_url_input = inputs.get('librarian_url')
+    if isinstance(librarian_url_input, dict) and 'value' in librarian_url_input:
+        librarian_url = librarian_url_input['value']
+    else:
+        librarian_url = librarian_url_input if librarian_url_input is not None else 'librarian:5040'
+    
+    cm_auth_token = _get_cm_auth_token(inputs)
+
+    return {
+        'url': librarian_url,
+        'auth_token': cm_auth_token
+    }
+
 def discover_tools(query: str, inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Discover tools/plugins by querying the Librarian service's /tools/search endpoint."""
     if inputs.get('__disable_tool_discovery', {}).get('value', False):
@@ -370,15 +395,19 @@ def _create_detailed_plugin_guidance(available_plugins: List[Dict[str, Any]]) ->
 class RobustMissionPlanner:
     """Streamlined LLM-driven mission planner"""
     
-    def __init__(self, discovered_plugins: List[Dict[str, Any]]):
+    def __init__(self, discovered_plugins: List[Dict[str, Any]], inputs: Dict[str, Any]): # Add inputs parameter
         self.max_retries = 5
         self.max_llm_switches = 2
         
-        # Initialize the validator with the discovered plugins
+        # Prepare librarian_info
+        librarian_info = _get_librarian_info(inputs)
+
+        # Initialize the validator with the discovered plugins and librarian_info
         self.validator = PlanValidator(
             brain_call=call_brain,
             available_plugins=discovered_plugins,
-            report_logic_failure_call=report_logic_failure_to_brain
+            report_logic_failure_call=report_logic_failure_to_brain,
+            librarian_info=librarian_info # Pass librarian_info
         )
         self.discovered_plugins = discovered_plugins
 
@@ -716,13 +745,17 @@ When defining outputs, you MUST identify which ones are deliverables for the use
 class NovelVerbHandler:
     """Handles novel action verbs by recommending plugins or providing direct answers"""
 
-    def __init__(self, discovered_plugins: List[Dict[str, Any]]):
+    def __init__(self, discovered_plugins: List[Dict[str, Any]], inputs: Dict[str, Any]): # Add inputs parameter
         self.max_retries = 3
-        # Initialize the validator with the discovered plugins
+        # Prepare librarian_info
+        librarian_info = _get_librarian_info(inputs)
+
+        # Initialize the validator with the discovered plugins and librarian_info
         self.validator = PlanValidator(
             brain_call=call_brain, 
             available_plugins=discovered_plugins,
-            report_logic_failure_call=report_logic_failure_to_brain
+            report_logic_failure_call=report_logic_failure_to_brain,
+            librarian_info=librarian_info # Pass librarian_info
         )
         self.discovered_plugins = discovered_plugins
 
@@ -881,7 +914,7 @@ class AccomplishOrchestrator:
                 query = ""
                 if is_novel:
                     # Temporarily instantiate to extract info
-                    verb_info = NovelVerbHandler([])._extract_verb_info(inputs)
+                    verb_info = NovelVerbHandler([], inputs)._extract_verb_info(inputs) # Pass inputs here
                     query = verb_info.get('description', '')
                 else:
                     query = inputs.get('goal', {}).get('value', '')
@@ -893,10 +926,10 @@ class AccomplishOrchestrator:
                     discovered_plugins = discover_tools(query, inputs)
 
                 if is_novel:
-                    handler = NovelVerbHandler(discovered_plugins)
+                    handler = NovelVerbHandler(discovered_plugins, inputs) # Pass inputs here
                     result = handler.handle(inputs)
                 else:
-                    handler = RobustMissionPlanner(discovered_plugins)
+                    handler = RobustMissionPlanner(discovered_plugins, inputs) # Pass inputs here
                     result = handler.plan(inputs)
 
                 return result

@@ -104,8 +104,6 @@ function shouldBypassAuth(path: string): boolean {
         }
     }
 
-    // Log when a path is NOT bypassing auth (for debugging)
-    console.log(`[shouldBypassAuth] Requiring authentication for path: ${finalPath}`);
     return false;
 }
 

@@ -111,7 +111,6 @@ export class Librarian extends BaseEntity {
         this.app.post('/knowledge/query', (req, res) => this.queryKnowledge(req, res));
         this.app.post('/verbs/register', (req, res) => this.registerVerbForDiscovery(req, res));
         this.app.post('/verbs/discover', (req, res) => this.discoverVerbs(req, res));
-        this.app.post('/tools/index', (req, res) => this.indexTool(req, res));
 
         // Tool Source Management
         this.app.post('/tools/sources', (req, res) => this.addToolSource(req, res));
@@ -407,20 +406,33 @@ export class Librarian extends BaseEntity {
     }
 
     private async loadData(req: express.Request, res: express.Response) {
-        const { id } = req.params;
-        const { storageType = 'mongo', collection = 'mcsdata' } = req.query;
+        const { id } = req.params; // id is optional
+        const { storageType = 'mongo', collection = 'mcsdata', query: queryParam } = req.query;
+        let query: any = {};
+
+        if (queryParam && typeof queryParam === 'string') {
+            try {
+                query = JSON.parse(queryParam);
+            } catch (parseError) {
+                console.warn(`Failed to parse query parameter: ${queryParam}, using empty query.`, parseError);
+                return res.status(400).send({ error: 'Invalid JSON format for query parameter.' });
+            }
+        } else if (id) {
+            query._id = id;
+        } else {
+            // If no id in params and no query param, then request is malformed for this endpoint
+            console.log('loadData failed: ID or query parameter is required.');
+            return res.status(400).send({ error: 'ID or query parameter is required' });
+        }
+
         if (this.isRestrictedCollection(collection as string) && !this.isCallerAuthorized(req)) {
           return res.status(403).send({ error: 'Access denied to restricted collection' });
         }
-        console.log(`loadData for ${id} requested`)
-        if (!id) {
-            console.log('loadData failed for no id.')
-            return res.status(400).send({ error: 'ID is required' });
-        }
-
+        console.log(`loadData for ${id || JSON.stringify(query)} requested from collection ${collection}`)
+        
         try {
             let data;
-            const cacheKey = `librarian:${collection}:${id}`;
+            const cacheKey = `librarian:${collection}:${id || JSON.stringify(query)}`;
 
             // 1. Try to get from cache first
             if (storageType === 'mongo') { // Only cache mongo requests
@@ -438,9 +450,20 @@ export class Librarian extends BaseEntity {
             console.log(`[Librarian] Cache miss for ${cacheKey}`);
 
             if (storageType === 'redis') {
-                data = await redisCache.get(`data:${id}`);
+                // Redis specific query is only for direct ID lookup for now.
+                if (id) {
+                    data = await redisCache.get(`data:${id}`);
+                } else {
+                    return res.status(400).send({ error: 'Redis query by arbitrary fields not yet supported.' });
+                }
             } else if (storageType === 'mongo') {
-                data = await loadFromMongo(collection as string, {_id: id });
+                if (id) {
+                    data = await loadFromMongo(collection as string, {_id: id });
+                } else {
+                    const results = await loadManyFromMongo(collection as string, query, { limit: 1 });
+                    data = results.length > 0 ? results[0] : null;
+                }
+                
                 // 4. Store in cache if found in Mongo
                 if (data) {
                     try {
@@ -876,7 +899,7 @@ export class Librarian extends BaseEntity {
         };
 
         try {
-            await knowledgeStore.save('verbs', content, metadata);
+            await knowledgeStore.save('tools', content, metadata);
             res.status(200).send({ status: `Verb '${verb}' registered for discovery successfully.` });
         } catch (error) {
             console.error('Error in registerVerbForDiscovery:', error instanceof Error ? error.message : error);
@@ -924,7 +947,7 @@ export class Librarian extends BaseEntity {
             const content = `${manifest.verb}: ${manifest.explanation || ''}`;
             
             // The entire manifest is stored as metadata, along with any provided entities.
-            const metadata = { ...manifest, id: manifest.id, entities: entities || [] };
+            const metadata = { ...manifest, id: manifest.id, entities: entities || [], healthStatus: { status: 'healthy' } };
 
             await knowledgeStore.save('tools', content, metadata);
             res.status(200).send({ status: 'Tool indexed successfully' });

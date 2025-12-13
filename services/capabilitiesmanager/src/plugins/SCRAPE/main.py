@@ -151,154 +151,146 @@ class ScrapePlugin:
             logger.error(f"Error scraping content: {e}")
             raise Exception(f"Error scraping content: {str(e)}")
 
-        def parse_config(self, inputs_map: Dict[str, Any]) -> Dict[str, Any]:
-            """Parse scraping configuration from inputs"""
-            config = {
-                'selector': self._get_input_value(inputs_map, 'selector', ['css', 'query', 'css_selector']),
-                'attribute': self._get_input_value(inputs_map, 'attribute'),
-                'limit': self._get_input_value(inputs_map, 'limit', ['max', 'max_results', 'limit_results'])
-            }
-    
-            # Filter out None values so we can use .get() with defaults later
-            config = {k: v for k, v in config.items() if v is not None}
-    
-            # Convert limit to integer if provided
-            if 'limit' in config:
-                try:
-                    config['limit'] = int(config['limit'])
-                except (ValueError, TypeError):
-                    logger.warning(f"Invalid limit value provided: {config['limit']}. Ignoring limit.")
-                    del config['limit']
-    
-            return config
-    
-        @staticmethod
-        def convert_to_full_url(partial_url, default_scheme='https', context_url=None):
-            """
-            Advanced URL converter with additional features.
-        
-            Args:
-                partial_url (str): The partial URL to convert
-                default_scheme (str): Default scheme to use if none provided
-                context_url (str): Optional context URL to inherit scheme from protocol-relative URLs
-        
-            Returns:
-                str: A full URL with scheme
-            """
-            if not partial_url:
-                raise ValueError("URL cannot be empty")
-        
-            # Strip whitespace and clean up duplicated schemes
-            url = partial_url.strip()
-            while url.lower().startswith(('http://http://', 'https://https://', 'http://https://', 'https://http://')):
-                if url.lower().startswith('http://'):
-                    url = url[7:]
-                elif url.lower().startswith('https://'):
-                    url = url[8:]
-    
-            # Case 1: Already has a scheme
-            if url.startswith(('https://', 'http://', 'ftp://', 'ftps://')):
-                return url
-        
-            # Case 2: Protocol-relative URL (starts with //)
-            if url.startswith('//'):
-                # If context URL is provided, use its scheme
-                if context_url and context_url.startswith(('https://', 'http://')):
-                    context_scheme = context_url.split('://')[0]
-                    return f"{context_scheme}:{url}"
-                return f"{default_scheme}:{url}"
-        
-            # Case 3: Domain only (no scheme or //)
-            return f"{default_scheme}://{url}"
-    
-        def _get_input_value(self, inputs: Dict[str, Any], key: str, aliases: list = [], default: Any = None) -> Any:
-            """Safely gets a value from inputs, checking aliases, and strips it if it's a string."""
-            raw_val = inputs.get(key)
-            if raw_val is None:
-                for alias in aliases:
-                    raw_val = inputs.get(alias)
-                    if raw_val is not None:
-                        break
-            
-            value = default
-            if raw_val is not None:
-                if isinstance(raw_val, dict):
-                    value = raw_val.get('value', default)
-                else:
-                    value = raw_val
-    
-            if isinstance(value, str):
-                return value.strip()
-            return value
-    
-        
-    
-        def _is_valid_url(self, url: str) -> bool:
+    def parse_config(self, inputs_map: Dict[str, Any]) -> Dict[str, Any]:
+        """Parse scraping configuration from inputs"""
+        config = {
+            'selector': self._get_input_value(inputs_map, 'selector', ['css', 'query', 'css_selector']),
+            'attribute': self._get_input_value(inputs_map, 'attribute'),
+            'limit': self._get_input_value(inputs_map, 'limit', ['max', 'max_results', 'limit_results'])
+        }
+
+        # Filter out None values so we can use .get() with defaults later
+        config = {k: v for k, v in config.items() if v is not None}
+
+        # Convert limit to integer if provided
+        if 'limit' in config:
             try:
-                result = urlparse(url)
-                # Check if scheme and netloc (network location, i.e., domain) exist
-                return all([result.scheme, result.netloc])
-            except ValueError:
-                return False
+                config['limit'] = int(config['limit'])
+            except (ValueError, TypeError):
+                logger.warning(f"Invalid limit value provided: {config['limit']}. Ignoring limit.")
+                del config['limit']
+
+        return config
     
-        def _extract_url_from_input(self, url_input: Any) -> Optional[str]:
-            """
-            Extracts a URL string from various input formats.
-            This method is designed to be robust, handling raw strings, dictionaries,
-            and even JSON strings that might contain URL information.
-            """
-            if url_input is None:
-                return None
+    @staticmethod
+    def convert_to_full_url(partial_url, default_scheme='https', context_url=None):
+        """
+        Advanced URL converter with additional features.
     
-            # If it's already a string, strip and return if not empty
-            if isinstance(url_input, str):
-                url_stripped = url_input.strip()
-                if url_stripped:
-                    # Attempt to parse as JSON if it looks like a JSON object
-                    if url_stripped.startswith('{') and url_stripped.endswith('}'):
-                        try:
-                            parsed = json.loads(url_stripped)
-                            if isinstance(parsed, dict):
-                                # Recursively call with the parsed dictionary
-                                return self._extract_url_from_input(parsed)
-                        except (json.JSONDecodeError, TypeError):
-                            pass  # Not a valid JSON, treat as a plain URL string
-                    return url_stripped
-                return None
+        Args:
+            partial_url (str): The partial URL to convert
+            default_scheme (str): Default scheme to use if none provided
+            context_url (str): Optional context URL to inherit scheme from protocol-relative URLs
     
-            # If it's a dictionary, check for common URL keys and 'value'
-            if isinstance(url_input, dict):
-                # Prioritize explicit URL keys
-                for url_key in ['url', 'website', 'link', 'endpoint', 'href', 'src']:
-                    if url_key in url_input and url_input[url_key]:
-                        extracted = self._extract_url_from_input(url_input[url_key])
-                        if extracted:
-                            return extracted
+        Returns:
+            str: A full URL with scheme
+        """
+        if not partial_url:
+            raise ValueError("URL cannot be empty")
     
-                # Fallback to 'value' key, common in InputValue objects
-                if 'value' in url_input and url_input['value']:
-                    extracted = self._extract_url_from_input(url_input['value'])
+        # Strip whitespace and clean up duplicated schemes
+        url = partial_url.strip()
+        while url.lower().startswith(('http://http://', 'https://https://', 'http://https://', 'https://http://')):
+            if url.lower().startswith('http://'):
+                url = url[7:]
+            elif url.lower().startswith('https://'):
+                url = url[8:]
+
+        # Case 1: Already has a scheme
+        if url.startswith(('https://', 'http://', 'ftp://', 'ftps://')):
+            return url
+    
+        # Case 2: Protocol-relative URL (starts with //)
+        if url.startswith('//'):
+            # If context URL is provided, use its scheme
+            if context_url and context_url.startswith(('https://', 'http://')):
+                context_scheme = context_url.split('://')[0]
+                return f"{context_scheme}:{url}"
+            return f"{default_scheme}:{url}"
+    
+        # Case 3: Domain only (no scheme or //)
+        return f"{default_scheme}://{url}"
+    
+    def _get_input_value(self, inputs: Dict[str, Any], key: str, aliases: list = [], default: Any = None) -> Any:
+        """Safely gets a value from inputs, checking aliases, and strips it if it's a string."""
+        raw_val = inputs.get(key)
+        if raw_val is None:
+            for alias in aliases:
+                raw_val = inputs.get(alias)
+                if raw_val is not None:
+                    break
+        
+        value = default
+        if raw_val is not None:
+            if isinstance(raw_val, dict):
+                value = raw_val.get('value', default)
+            else:
+                value = raw_val
+
+        if isinstance(value, str):
+            return value.strip()
+        return value
+    
+        
+    
+    def _is_valid_url(self, url: str) -> bool:
+        try:
+            result = urlparse(url)
+            # Check if scheme and netloc (network location, i.e., domain) exist
+            return all([result.scheme, result.netloc])
+        except ValueError:
+            return False
+    
+    def _extract_url_from_input(self, url_input: Any) -> Optional[str]:
+        """
+        Extracts a URL string from various input formats.
+        This method is designed to be robust, handling raw strings, dictionaries,
+        and even JSON strings that might contain URL information.
+        """
+        if url_input is None:
+            return None
+
+        # If it's already a string, strip and return if not empty
+        if isinstance(url_input, str):
+            url_stripped = url_input.strip()
+            if url_stripped:
+                # Attempt to parse as JSON if it looks like a JSON object
+                if url_stripped.startswith('{') and url_stripped.endswith('}'):
+                    try:
+                        parsed = json.loads(url_stripped)
+                        if isinstance(parsed, dict):
+                            # Recursively call with the parsed dictionary
+                            return self._extract_url_from_input(parsed)
+                    except (json.JSONDecodeError, TypeError):
+                        pass  # Not a valid JSON, treat as a plain URL string
+                return url_stripped
+            return None
+
+        # If it's a dictionary, check for common URL keys and 'value'
+        if isinstance(url_input, dict):
+            # Prioritize explicit URL keys
+            for url_key in ['url', 'website', 'link', 'endpoint', 'href', 'src']:
+                if url_key in url_input and url_input[url_key]:
+                    extracted = self._extract_url_from_input(url_input[url_key])
                     if extracted:
                         return extracted
-    
-                # If it's a single key-value pair, the value might be the URL or a JSON string
-                if len(url_input) == 1:
-                    for key, value in url_input.items():
-                        extracted = self._extract_url_from_input(value)
-                        if extracted:
-                            return extracted
-    
-                # If it's a list, try to extract from the first item
-                if isinstance(url_input, list) and len(url_input) > 0:
-                    extracted = self._extract_url_from_input(url_input[0])
+            # Fallback to 'value' key, common in InputValue objects
+            if 'value' in url_input and url_input['value']:
+                extracted = self._extract_url_from_input(url_input['value'])
+                if extracted:
+                    return extracted
+            # If it's a single key-value pair, the value might be the URL or a JSON string
+            if len(url_input) == 1:
+                for key, value in url_input.items():
+                    extracted = self._extract_url_from_input(value)
                     if extracted:
                         return extracted
+            return None
     
-                return None
-    
-        def execute(self, inputs_map: Dict[str, Any]) -> List[Dict[str, Any]]:
-            try:
-                url_input = self._get_input_value(inputs_map, 'url', ['website', 'link', 'endpoint', 'websites'])
+    def execute(self, inputs_map: Dict[str, Any]) -> List[Dict[str, Any]]:
+        try:
+            url_input = self._get_input_value(inputs_map, 'url', ['website', 'link', 'endpoint', 'websites'])
+
             if url_input is None:
                 logger.warning(f"Missing required url input from: {inputs_map}")
                 return [{
@@ -309,8 +301,9 @@ class ScrapePlugin:
                     "result": None,
                     "error": "The 'url' input (or one of its aliases: website, link, endpoint) is required but was not provided."
                 }]
-            
-            if (isinstance(url_input, (list, dict)) and not url_input) or (isinstance(url_input, str) and not url_input.strip()):
+
+            if (isinstance(url_input, (list, dict)) and not url_input) or \
+               (isinstance(url_input, str) and not url_input.strip()):
                 return [{
                     "success": False,
                     "name": "error",
@@ -321,13 +314,16 @@ class ScrapePlugin:
                 }]
 
             urls_to_scrape = []
-            # Ensure url_input is always an iterable for consistent processing
             if isinstance(url_input, str):
                 items_to_process = [url_input]
             elif isinstance(url_input, list):
                 items_to_process = url_input
             elif isinstance(url_input, dict):
-                items_to_process = [url_input]
+                extracted = self._extract_url_from_input(url_input)
+                if extracted:
+                    items_to_process = [extracted]
+                else:
+                    items_to_process = []
             else:
                 items_to_process = []
 

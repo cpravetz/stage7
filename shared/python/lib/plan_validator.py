@@ -10,6 +10,7 @@ import sys
 from typing import Dict, Any, List, Optional, Set, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
+import requests
 
 # Configure logging if not already configured
 if not logging.root.handlers:
@@ -168,12 +169,45 @@ class PlanValidator:
     CONTROL_FLOW_VERBS = {'WHILE', 'SEQUENCE', 'IF_THEN', 'UNTIL', 'FOREACH', 'REPEAT', 'REGROUP'}
     ALLOWED_ROLES = {'coordinator', 'researcher', 'coder', 'creative', 'critic', 'executor', 'domain expert'}
     
-    def __init__(self, brain_call: callable = None, available_plugins: List[Dict[str, Any]] = None, report_logic_failure_call: callable = None):
+    def __init__(self, brain_call: callable = None, available_plugins: List[Dict[str, Any]] = None, report_logic_failure_call: callable = None, librarian_info: Optional[Dict[str, Any]] = None):
         self.brain_call = brain_call
         self.report_logic_failure_call = report_logic_failure_call
         self.max_retries = 3
+        self.librarian_info = librarian_info or {}
         # Initialize plugin_map from the provided list
         self._initialize_plugin_map_from_list(available_plugins or [])
+
+    def _discover_single_plugin(self, action_verb: str) -> Optional[Dict[str, Any]]:
+        """
+        Dynamically discovers a single plugin definition from the Librarian DSL.
+        """
+        if not self.librarian_info or not self.librarian_info.get('url') or not self.librarian_info.get('auth_token'):
+            logger.warning(f"Librarian info is incomplete, cannot dynamically discover plugin for '{action_verb}'.")
+            return None
+        
+        librarian_url = self.librarian_info['url']
+        auth_token = self.librarian_info['auth_token']
+
+        headers = {'Authorization': f'Bearer {auth_token}'}
+        try:
+            # Query the Librarian for this specific action verb
+            # Using /verbs/discover for exact match, or /tools/search with a precise query
+            payload = {'queryText': action_verb, 'maxResults': 1}
+            response = requests.post(f"http://{librarian_url}/tools/search", headers=headers, json=payload, timeout=5)
+            response.raise_for_status()
+            plugins = response.json()
+            
+            if plugins and isinstance(plugins, list):
+                # Filter for exact match on verb, as search can return broader results
+                for plugin in plugins:
+                    if plugin.get('verb', '').upper() == action_verb.upper():
+                        logger.info(f"Dynamically discovered plugin for verb '{action_verb}'.")
+                        return plugin
+            logger.debug(f"No exact match found for '{action_verb}' in Librarian DSL.")
+            return None
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"Failed to dynamically discover plugin '{action_verb}' from Librarian: {e}")
+            return None
 
     def _initialize_plugin_map_from_list(self, available_plugins: List[Dict[str, Any]]):
         """Initializes the plugin map from a list of plugin manifests."""
@@ -187,6 +221,11 @@ class PlanValidator:
             if action_verb:
                 self.plugin_map[action_verb.upper()] = plugin
         logger.info(f"PlanValidator: Initialized plugin_map with {len(self.plugin_map)} entries.")
+
+    def set_available_plugins(self, available_plugins: List[Dict[str, Any]]):
+        """Public method to set or update the available plugins."""
+        logger.info(f"PlanValidator: Setting available plugins from a list of {len(available_plugins) if available_plugins else 0} plugins.")
+        self._initialize_plugin_map_from_list(available_plugins or [])
 
     def validate_and_repair(self, plan: List[Dict[str, Any]], goal: str, 
                            inputs: Dict[str, Any]) -> ValidationResult:
@@ -530,6 +569,14 @@ class PlanValidator:
 
         plugin_def = self.plugin_map.get(action_verb.upper())
         is_novel_verb = plugin_def is None
+
+        # If it's a novel verb, try to discover it from Librarian DSL
+        if is_novel_verb:
+            discovered_plugin = self._discover_single_plugin(action_verb)
+            if discovered_plugin:
+                self.plugin_map[action_verb.upper()] = discovered_plugin
+                plugin_def = discovered_plugin
+                is_novel_verb = False # It's no longer novel
 
         # For novel verbs, require description
         if is_novel_verb:

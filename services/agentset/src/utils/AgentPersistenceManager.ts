@@ -171,20 +171,31 @@ export class AgentPersistenceManager {
             return;
         }
 
-        // Determine if any output of this step is marked as deliverable
-        // This relies on the `isDeliverable` property being correctly set on the PluginOutput objects
-        // by mapPluginOutputsToCustomNames.
-        const stepHasDeliverableOutputs = result.some(r => r.isDeliverable);
+        // Determine if any output of this step is marked as deliverable based on originalOutputDefinitions
+        let stepHasDeliverableOutputs = false;
+        let deliverableOutput: PluginOutput | undefined;
+        let deliverableDefinition: any | undefined; // To hold {isDeliverable, filename}
 
-        // Find the actual deliverable output object that needs to be streamed
-        const deliverableOutput = result.find(r => r.isDeliverable);
-
+        if (step.originalOutputDefinitions) {
+            for (const outputName in step.originalOutputDefinitions) {
+                const outDef = step.originalOutputDefinitions[outputName];
+                if (outDef && outDef.isDeliverable) {
+                    stepHasDeliverableOutputs = true;
+                    deliverableDefinition = outDef; // Store the definition
+                    // Find the corresponding PluginOutput in the actual result
+                    deliverableOutput = result.find(r => r.name === outputName);
+                    if (deliverableOutput) {
+                        break; // Found the first deliverable output and its definition
+                    }
+                }
+            }
+        }
+        
         // Step 1: Always save the metadata-rich WorkProduct to 'step-outputs'
         try {
             // Exclude large file content from this payload if it's going to be streamed separately.
-            // The `isDeliverable` flag is already on the PluginOutput objects in `result`.
             const metadataResult = result.map(r => {
-                if (r.isDeliverable && r.result instanceof Buffer) {
+                if (stepHasDeliverableOutputs && deliverableOutput && r.name === deliverableOutput.name && r.result instanceof Buffer) {
                     // Create a copy to modify without affecting the original result array
                     return { ...r, result: `[File Content Stored Separately as Deliverable for Step ${step.id}]` };
                 }
@@ -208,34 +219,37 @@ export class AgentPersistenceManager {
         }
 
         // Step 2 & 3: If it's a deliverable, stream the file to the new endpoint
-        if (deliverableOutput && deliverableOutput.result !== undefined && deliverableOutput.result !== null) {
+        if (deliverableOutput && deliverableDefinition && deliverableOutput.result !== undefined && deliverableOutput.result !== null) {
             try {
                 let dataToSend: string | Buffer;
                 if (deliverableOutput.result instanceof Buffer || typeof deliverableOutput.result === 'string') {
                     dataToSend = deliverableOutput.result;
                 } else {
                     // Convert non-string/non-Buffer results to a JSON string
-                    dataToSend = JSON.stringify(deliverableOutput.result);
+                    dataToSend = JSON.stringify(deliverableOutput.result, null, 2); // Pretty print JSON
                     // Update mimeType to application/json if it was text/plain and we stringified an object/boolean
                     if (deliverableOutput.mimeType === 'text/plain' && typeof deliverableOutput.result !== 'string') {
                         deliverableOutput.mimeType = 'application/json';
                     }
                 }
 
+                // Use filename from deliverableDefinition
+                const originalFileName = deliverableDefinition.filename || `deliverable_${deliverableOutput.name}.json`;
+                const mimeType = deliverableOutput.mimeType || deliverableDefinition.type || 'application/octet-stream';
+
                 const queryParams = new URLSearchParams({
                     agentId: step.ownerAgentId,
                     missionId: step.missionId,
-                    // Use fileName from deliverableOutput, fallback to a generic name
-                    originalName: deliverableOutput.fileName || `deliverable_${deliverableOutput.name}.bin`,
-                    mimeType: deliverableOutput.mimeType || 'application/octet-stream'
+                    originalName: originalFileName,
+                    mimeType: mimeType
                 }).toString();
 
                 const url = `http://${this.librarianUrl}/deliverable/${step.id}?${queryParams}`;
 
                 const uploadResponse = await this.authenticatedApi.post(url, dataToSend, {
-                    headers: { 'Content-Type': deliverableOutput.mimeType || 'application/octet-stream' }
+                    headers: { 'Content-Type': mimeType }
                 });
-                console.log(`Successfully streamed deliverable for step ${step.id} output '${deliverableOutput.name}'`);
+                console.log(`Successfully streamed deliverable for step ${step.id} output '${deliverableOutput.name}' to file: ${originalFileName}`);
 
                 // Fetch the full deliverable metadata from Librarian to get the canonical missionFile object
                 let missionFile: any | null = null;
@@ -255,8 +269,8 @@ export class AgentPersistenceManager {
                         stepId: step.id,
                         missionFile: missionFile || {
                             id: uploadResponse?.data?.assetId || `deliverable_${step.id}`,
-                            originalName: deliverableOutput.fileName || `deliverable_${deliverableOutput.name}.bin`,
-                            mimeType: deliverableOutput.mimeType || 'application/octet-stream'
+                            originalName: originalFileName,
+                            mimeType: mimeType
                         }
                     };
 

@@ -189,9 +189,10 @@ export class FileUploadService {
         }
     }
 
-    async getFile(fileId: string, storagePath: string): Promise<Buffer> {
+    async getFile(fileId: string, storagePath: string): Promise<NodeJS.ReadableStream> {
         try {
-            return await fs.readFile(storagePath);
+            // Use fs.createReadStream to return a readable stream
+            return require('fs').createReadStream(storagePath);
         } catch (error) {
             throw new Error(`Failed to retrieve file ${fileId}: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
