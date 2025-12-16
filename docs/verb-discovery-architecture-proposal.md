@@ -42,40 +42,40 @@ graph TD
 #### Architecture Overview
 
 ```
-┌───────────────────────────────────────────────────────┐
-│            Enhanced Verb Discovery Architecture        │
-├───────────────────────────────────────────────────────┤
-│  ┌─────────────┐    ┌───────────────────────────────┐  │
+┌─────────────────────────────────────────────────────────┐
+│            Enhanced Verb Discovery Architecture         │
+├─────────────────────────────────────────────────────────┤
+│  ┌──────────────┐    ┌───────────────────────────────┐  │
 │  │  ACCOMPLISH  │    │      NovelVerbHandler         │  │
 │  │   Plugin     │    │                               │  │
 │  └──────┬───────┘    └───────────┬───────────────────┘  │
-│         │                        │                     │
-│         ▼                        ▼                     │
-└─────────┼────────────────────────┼─────────────────────┘
+│         │                        │                      │
+│         ▼                        ▼                      │
+└─────────┼────────────────────────┼──────────────────────┘
           │                        │
           │                        │
 ┌─────────▼────────────────────────▼─────────────────────┐
-│           Discovery Service Layer                  │
+│           Discovery Service Layer                      │
 │  ┌─────────────────────┐    ┌───────────────────────┐  │
-│  │  Librarian API      │    │  KnowledgeStore        │  │
-│  │  /verbs/discover     │    │  (Extended)            │  │
-│  │  /verbs/register     │    │                        │  │
-│  │  /tools/search       │    │                        │  │
-│  └──────────┬─────────┘    └──────────┬─────────────┘  │
-│             │                        │               │
-│             │                        │               │
-└─────────────┼────────────────────────┼───────────────────┘
-              │                        │
-              │                        │
-┌─────────────▼────────────────────────▼───────────────────┐
-│           Chroma Vector Database Layer               │
-│  ┌─────────────────────┐    ┌───────────────────────┐  │
+│  │  Librarian API      │    │  KnowledgeStore       │  │
+│  │  /verbs/discover    │    │  (Extended)           │  │
+│  │  /verbs/register    │    │                       │  │
+│  │  /tools/search      │    │                       │  │
+│  └───────────┬─────────┘    └──────────┬─────────────┘ │
+│              │                         │               │
+│              │                         │               │
+└──────────────┼─────────────────────────┼───────────────┘
+               │                         │
+               │                         │
+┌──────────────▼─────────────────────────▼────────────────┐
+│           Chroma Vector Database Layer                  │
+│  ┌─────────────────────┐    ┌────────────────────────┐  │
 │  │   "verbs"           │    │   "tools"              │  │
 │  │   Collection        │    │   Collection           │  │
 │  │  - Verb manifests   │    │  - Tool manifests      │  │
 │  │  - Semantic vectors │    │  - Semantic vectors    │  │
-│  └─────────────────────┘    └───────────────────────┘  │
-└───────────────────────────────────────────────────────┘
+│  └─────────────────────┘    └────────────────────────┘  │
+└─────────────────────────────────────────────────────────┘
 ```
 
 #### Chroma Collection Structure
@@ -196,7 +196,8 @@ Key capabilities include:
 
 ## Key Benefits
 
-1. **Unlimited Scalability**: No more token limit constraints
+1. **Unlimited Scalability**: No 
+more token limit constraints
 2. **Intelligent Discovery**: Semantic matching finds relevant verbs and tools
 3. **Resource Optimization**: Reduces redundant verb creation
 4. **Architectural Consistency**: Leverages existing knowledge graph

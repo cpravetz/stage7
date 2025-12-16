@@ -896,6 +896,7 @@ export class Librarian extends BaseEntity {
             semanticDescription,
             capabilityKeywords,
             usageExamples,
+            healthStatus: 'healthy'
         };
 
         try {
@@ -908,9 +909,6 @@ export class Librarian extends BaseEntity {
     }
 
     private async discoverVerbs(req: express.Request, res: express.Response) {
-        if (!this.isCallerAuthorized(req)) {
-            return res.status(403).send({ error: 'Access denied: Caller not authorized.' });
-        }
         const { queryText, maxResults = 1 } = req.body;
 
         if (!queryText) {
@@ -918,11 +916,11 @@ export class Librarian extends BaseEntity {
         }
 
         try {
-            let results = await knowledgeStore.query('verbs', queryText, maxResults);
+            let results = await knowledgeStore.query('tools', queryText, maxResults);
             
             // Filter results based on healthStatus.status
             results = results.filter((result: any) => 
-                result.metadata?.healthStatus?.status === 'healthy'
+                result.metadata?.healthStatus === 'healthy'
             );
 
             res.status(200).send({ data: results });
@@ -947,7 +945,7 @@ export class Librarian extends BaseEntity {
             const content = `${manifest.verb}: ${manifest.explanation || ''}`;
             
             // The entire manifest is stored as metadata, along with any provided entities.
-            const metadata = { ...manifest, id: manifest.id, entities: entities || [], healthStatus: { status: 'healthy' } };
+            const metadata = { ...manifest, id: manifest.id, entities: entities || [], healthStatus: 'healthy' };
 
             await knowledgeStore.save('tools', content, metadata);
             res.status(200).send({ status: 'Tool indexed successfully' });
@@ -958,9 +956,6 @@ export class Librarian extends BaseEntity {
     }
 
     private async searchTools(req: express.Request, res: express.Response) {
-        if (!this.isCallerAuthorized(req)) {
-            return res.status(403).send({ error: 'Access denied: Caller not authorized.' });
-        }
         const { queryText, maxResults = 1, contextEntities = [] } = req.body;
 
         if (!queryText) {
@@ -972,7 +967,7 @@ export class Librarian extends BaseEntity {
             
             // Filter results based on healthStatus.status
             results = results.filter((result: any) => 
-                result.metadata?.healthStatus?.status === 'healthy'
+                result.metadata?.healthStatus === 'healthy'
             );
 
             if (contextEntities.length > 0) {

@@ -267,6 +267,8 @@ services:
       REPOSITORY_TOKEN: *repositoryToken
       REPOSITORY_EMAIL: *repositoryEmail
       MONGO_COLLECTION: *mongoCollection
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
     volumes:
       - ./shared/keys:/usr/src/app/shared/keys
     ports:

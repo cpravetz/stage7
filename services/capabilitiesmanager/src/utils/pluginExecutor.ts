@@ -697,13 +697,7 @@ export class PluginExecutor {
         }
 
         try {
-            const validatedInputsResult = await validateAndStandardizeInputs(actionMapping as any, step.inputValues || new Map());
-            if (!validatedInputsResult.success || !validatedInputsResult.inputs) {
-                const errorMsg = validatedInputsResult.error || "Input validation failed for MCP tool.";
-                console.error(`[${trace_id}] ${source_component}: ${errorMsg}`);
-                return [this.createErrorOutput(GlobalErrorCodes.INPUT_VALIDATION_FAILED, errorMsg, trace_id, { toolId: mcpTool.id, actionVerb: step.actionVerb })];
-            }
-            const validatedInputs = validatedInputsResult.inputs;
+            const validatedInputs = step.inputValues || new Map<string, InputValue>();
             const inputsObject: { [key: string]: any } = {};
             validatedInputs.forEach((value: InputValue, key: string) => {
                 inputsObject[key] = value.value;

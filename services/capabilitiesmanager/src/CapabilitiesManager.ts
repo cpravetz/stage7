@@ -357,26 +357,6 @@ export class CapabilitiesManager extends BaseEntity {
                     }
                 });
 
-                app.get('/availablePlugins', async (req: Request, res: Response) => {
-                    const trace_id = (req as any).trace_id || `${trace_id_parent}-avail-${uuidv4().substring(0,8)}`;
-                    try {
-                        const plugins: PluginLocator[] = (await this.pluginRegistry.list()).filter(
-                            (p: PluginLocator) => !('language' in p) || (p as any).language === 'javascript' || (p as any).language === 'python' || (p as any).language === 'container'
-                        );
-                        res.json(plugins);
-                    } catch (error:any) {
-                        const sError = generateStructuredError({
-                            error_code: GlobalErrorCodes.CAPABILITIES_MANAGER_PLUGIN_FETCH_FAILED,
-                            severity: ErrorSeverity.ERROR,
-                            message: "Failed to list available plugins.",
-                            source_component: `${source_component}.availablePlugins`,
-                            original_error: error,
-                            trace_id_param: trace_id
-                        });
-                        res.status(500).json(createPluginOutputError(sError));
-                    }
-                });
-
                 // New endpoint for intelligent plugin context generation
                 app.post('/generatePluginContext', async (req: Request, res: Response) => {
                     const trace_id = (req as any).trace_id || `${trace_id_parent}-context-${uuidv4().substring(0,8)}`;
@@ -578,18 +558,6 @@ export class CapabilitiesManager extends BaseEntity {
             missionId: req.body.missionId || uuidv4() // Ensure missionId is always present
         } as Step;
         
-        // const availablePlugins = await this._getAvailablePluginManifests();
-        // if (!step.inputValues) {
-        //     step.inputValues = new Map<string, InputValue>();
-        // }
-        // step.inputValues.set('availablePlugins', {
-        //     inputName: 'availablePlugins',
-        //     value: availablePlugins,
-        //     valueType: PluginParameterType.ARRAY, 
-        //     args: {}
-        // });
-
-
         if (!step.actionVerb || typeof step.actionVerb !== 'string') {
             const sError = generateStructuredError({
                 error_code: GlobalErrorCodes.CAPABILITIES_MANAGER_INVALID_REQUEST_GENERIC,
@@ -646,16 +614,40 @@ export class CapabilitiesManager extends BaseEntity {
                         }
                     } else if (manifest.language === DefinitionType.MCP) {
                         const definitionManifest = manifest as DefinitionManifest;
-                        if (definitionManifest.toolDefinition && (definitionManifest.toolDefinition as MCPTool).actionMappings) {
+                        const mcpTool = definitionManifest.toolDefinition as MCPTool;
+                        const actionMapping = mcpTool.actionMappings.find(m => m.actionVerb === step.actionVerb);
+
+                        if (mcpTool && actionMapping) {
                             console.log(`[${trace_id}] ${source_component}: Executing '${step.actionVerb}' as MCP tool.`);
-                            const result = await this.pluginExecutor.executeMCPTool(definitionManifest.toolDefinition as MCPTool, step, trace_id);
+                            
+                            const validatedInputsResult = await validateAndStandardizeInputs(actionMapping as any, step.inputValues || new Map());
+                            
+                            if (validatedInputsResult.inputs?.has('__validation_warnings')) {
+                                const warnings = validatedInputsResult.inputs.get('__validation_warnings')?.value;
+                                console.warn(`[${trace_id}] ${source_component}: Input validation warnings for ${step.actionVerb}:`, warnings);
+                                validatedInputsResult.inputs.delete('__validation_warnings');
+                            }
+                            
+                            if (!validatedInputsResult.success || !validatedInputsResult.inputs) {
+                                throw generateStructuredError({
+                                    error_code: GlobalErrorCodes.INPUT_VALIDATION_FAILED,
+                                    severity: ErrorSeverity.ERROR,
+                                    message: validatedInputsResult.error || "Input validation failed for MCP tool.",
+                                    source_component,
+                                    trace_id_param: trace_id,
+                                    contextual_info: { toolId: mcpTool.id, actionVerb: step.actionVerb }
+                                });
+                            }
+                            
+                            const stepWithValidatedInputs = { ...step, inputValues: validatedInputsResult.inputs };
+                            const result = await this.pluginExecutor.executeMCPTool(mcpTool, stepWithValidatedInputs, trace_id);
                             res.status(200).send(MapSerializer.transformForSerialization(result));
                             return;
                         } else {
                             throw generateStructuredError({
                                 error_code: GlobalErrorCodes.CAPABILITIES_MANAGER_INVALID_HANDLER_DEF,
                                 severity: ErrorSeverity.ERROR,
-                                message: `MCP manifest for verb '${step.actionVerb}' is missing toolDefinition.`, 
+                                message: `MCP manifest for verb '${step.actionVerb}' is missing toolDefinition or actionMapping.`, 
                                 trace_id_param: trace_id, source_component
                             });
                         }
@@ -674,17 +666,26 @@ export class CapabilitiesManager extends BaseEntity {
                             valueType: PluginParameterType.STRING,
                             args: {}
                         });
+                        
+                        if (!step.inputValues) {
+                            step.inputValues = new Map<string, InputValue>();
+                        }
                         console.log(`[${trace_id}] ${source_component}: Input values before validation for ${step.actionVerb}:`, JSON.stringify(Array.from(step.inputValues.entries())));
 
-
-
                         // Pass the full inputValues Map to validation (it expects InputValue objects, not raw values)
-                        const validatedInputs = await validateAndStandardizeInputs(pluginDefinition, step.inputValues);
-                        if (!validatedInputs.success || !validatedInputs.inputs) {
+                        const validatedInputsResult = await validateAndStandardizeInputs(pluginDefinition, step.inputValues);
+                        
+                        if (validatedInputsResult.inputs?.has('__validation_warnings')) {
+                            const warnings = validatedInputsResult.inputs.get('__validation_warnings')?.value;
+                            console.warn(`[${trace_id}] ${source_component}: Input validation warnings for ${step.actionVerb}:`, warnings);
+                            validatedInputsResult.inputs.delete('__validation_warnings');
+                        }
+                        
+                        if (!validatedInputsResult.success || !validatedInputsResult.inputs) {
                             throw generateStructuredError({
                                 error_code: GlobalErrorCodes.INPUT_VALIDATION_FAILED,
                                 severity: ErrorSeverity.ERROR,
-                                message: validatedInputs.error || "Input validation failed for plugin.",
+                                message: validatedInputsResult.error || "Input validation failed for plugin.",
                                 source_component,
                                 trace_id_param: trace_id,
                                 contextual_info: {
@@ -696,7 +697,7 @@ export class CapabilitiesManager extends BaseEntity {
                         }
                         // preparePluginForExecution expects PluginManifest, which DefinitionManifest extends
                         const { pluginRootPath, effectiveManifest } = await this.pluginRegistry.preparePluginForExecution(manifest);
-                        const result = await this.pluginExecutor.execute(effectiveManifest, validatedInputs.inputs, pluginRootPath, trace_id);
+                        const result = await this.pluginExecutor.execute(effectiveManifest, validatedInputsResult.inputs, pluginRootPath, trace_id);
                         res.status(200).send(MapSerializer.transformForSerialization(result));
                         return;
                     } else {
@@ -790,119 +791,85 @@ export class CapabilitiesManager extends BaseEntity {
 
     private async handleUnknownVerb(step: Step, trace_id: string): Promise<PluginOutput[]> {
         const source_component = "CapabilitiesManager.handleUnknownVerb";
-        const SEARCH_CONFIDENCE_THRESHOLD = 0.5; // Lower is better match
+        
+        console.log(`[${trace_id}] ${source_component}: Novel verb \'${step.actionVerb}\'. Delegating to ACCOMPLISH plugin to generate a plan.`);
 
-        // Phase 1: Reactive Tool Discovery
         try {
-            console.log(`[${trace_id}] ${source_component}: Novel verb \'${step.actionVerb}\'. Searching for a matching tool...`);
-            const searchQuery = `${step.actionVerb}: ${step.description || ''}`;
-            console.log(`[${trace_id}] ${source_component}: Attempting tool search with Librarian at ${librarianApi.defaults.baseURL}/tools/search for query: ${searchQuery}`);
-            const response = await this.authenticatedLibrarianApi.post('/tools/search', { queryText: searchQuery, maxResults: 1 });
+            const novelVerbGoal = `Handle the novel action verb \'${step.actionVerb}\'. The step's description is: \'${step.description}\'. Available inputs: ${JSON.stringify(Array.from(step.inputValues?.keys() || []))}. Expected outputs: ${JSON.stringify(step.outputs)}. Your task is to generate a plan of sub-steps to achieve this.`;
+
+            const accomplishInputs = new Map<string, InputValue>();
+            accomplishInputs.set('goal', {
+                inputName: 'goal',
+                value: novelVerbGoal,
+                valueType: PluginParameterType.STRING,
+                args: {}
+            });
+            accomplishInputs.set('missionId', {
+                inputName: 'missionId',
+                value: step.missionId || '',
+                valueType: PluginParameterType.STRING,
+                args: {}
+            });
+
+            // Pass through available plugins to ACCOMPLISH
+            const availablePlugins = await this._getAvailablePluginManifests();
+            accomplishInputs.set('availablePlugins', {
+                inputName: 'availablePlugins',
+                value: availablePlugins,
+                valueType: PluginParameterType.ANY,
+                args: {}
+            });
+
+            const accomplishResultArray = await this.executeAccomplishPlugin(accomplishInputs, trace_id);
             
-            const searchResults = response.data.data;
-
-            if (searchResults && searchResults.length > 0) {
-                const topMatch = searchResults[0];
-                console.log(`[${trace_id}] ${source_component}: Found potential match: \'${topMatch.metadata.verb}\' with distance ${topMatch.distance}`);
-
-                if (topMatch.distance < SEARCH_CONFIDENCE_THRESHOLD) {
-                    console.log(`[${trace_id}] ${source_component}: Match confidence is high. Substituting \'${step.actionVerb}\' with \'${topMatch.metadata.verb}\' and re-executing.`);
-                    
-                    const substitutedStep: Step = {
-                        ...step,
-                        actionVerb: topMatch.metadata.verb,
-                    };
-
-                    const fakeReq = { body: substitutedStep, trace_id: trace_id } as any;
-                    let resultSent = false;
-                    const fakeRes = {
-                        status: (code: number) => {
-                            return {
-                                send: (body: any) => {
-                                    if (!resultSent) {
-                                        resultSent = true;
-                                        return body;
-                                    }
-                                }
-                            }
-                        },
-                        json: (body: any) => {
-                             if (!resultSent) {
-                                resultSent = true;
-                                return body;
-                            }
-                        }
-                    } as any;
-
-                    await this.executeActionVerb(fakeReq, fakeRes);
-                    return [];
-                }
+            if (!accomplishResultArray[0].success) {
+                // If ACCOMPLISH fails, return its error output
+                return accomplishResultArray;
             }
-            console.log(`[${trace_id}] ${source_component}: No high-confidence tool found for \'${step.actionVerb}\'. Proceeding to generate a plan.`);
-            throw new Error("No suitable tool found, fallback to ACCOMPLISH");
 
-        } catch (searchError: any) {
-            if (searchError.message !== "No suitable tool found, fallback to ACCOMPLISH") {
-                 console.warn(`[${trace_id}] ${source_component}: Tool search failed with error: ${searchError.message}. Falling back to ACCOMPLISH.`);
-            }
-           
-            try {
-                const novelVerbGoal = `Handle the novel action verb \'${step.actionVerb}\'. The step's description is: \'${step.description}\'. Available inputs: ${JSON.stringify(Array.from(step.inputValues?.keys() || []))}. Expected outputs: ${JSON.stringify(step.outputs)}. Your task is to generate a plan of sub-steps to achieve this.`;
+            const accomplishResult = accomplishResultArray[0];
 
-                const accomplishInputs = new Map<string, InputValue>();
-                accomplishInputs.set('goal', {
-                    inputName: 'goal',
-                    value: novelVerbGoal,
-                    valueType: PluginParameterType.STRING,
-                    args: {}
-                });
-                accomplishInputs.set('missionId', {
-                    inputName: 'missionId',
-                    value: step.missionId || '',
-                    valueType: PluginParameterType.STRING,
-                    args: {}
-                });
-
-                const accomplishResultArray = await this.executeAccomplishPlugin(accomplishInputs, trace_id);
-                
-                if (!accomplishResultArray[0].success) {
-                    return accomplishResultArray;
-                }
-
-                const accomplishResult = accomplishResultArray[0];
-                if (accomplishResult.resultType === PluginParameterType.PLAN) {
-                    const newPlanSteps = accomplishResult.result as any[];
-                    if (!Array.isArray(newPlanSteps) || newPlanSteps.length === 0) {
-                        throw generateStructuredError({
-                            error_code: GlobalErrorCodes.INTERNAL_ERROR_CM,
-                            severity: ErrorSeverity.ERROR,
-                            message: "ACCOMPLISH plugin returned an empty or invalid plan.",
-                            source_component,
-                            trace_id_param: trace_id
-                        });
-                    }
-                    return [{
+            // If the result is a plan, wrap it in the expected PluginOutput structure
+            if (accomplishResult.resultType === PluginParameterType.PLAN) {
+                const newPlanSteps = accomplishResult.result as any[];
+                if (!Array.isArray(newPlanSteps)) { // It might be a single step object
+                     return [{
                         success: true,
                         name: 'plan',
                         resultType: PluginParameterType.PLAN,
                         resultDescription: `A plan to accomplish the original step \'${step.actionVerb}\'`,
-                        result: newPlanSteps,
+                        result: [newPlanSteps], // wrap in an array
                         mimeType: 'application/json'
                     }];
-                } else {
-                    return [accomplishResult];
                 }
-            } catch (error: any) {
-                const sError = generateStructuredError({
-                    error_code: GlobalErrorCodes.CAPABILITIES_MANAGER_UNKNOWN_VERB_HANDLING_FAILED,
-                    severity: ErrorSeverity.ERROR,
-                    message: `Error while handling unknown verb \'${step.actionVerb}\'.`,
-                    source_component,
-                    original_error: error,
-                    trace_id_param: trace_id
-                });
-                return createPluginOutputError(sError);
+                if (newPlanSteps.length === 0) {
+                    // If the plan is empty, maybe accomplish decided no action was needed.
+                    // Or it could be an error. For now, we'll treat it as success with an empty plan.
+                     console.warn(`[${trace_id}] ${source_component}: ACCOMPLISH returned an empty plan for novel verb '${step.actionVerb}'.`);
+                }
+                return [{
+                    success: true,
+                    name: 'plan',
+                    resultType: PluginParameterType.PLAN,
+                    resultDescription: `A plan to accomplish the original step \'${step.actionVerb}\'`,
+                    result: newPlanSteps,
+                    mimeType: 'application/json'
+                }];
+            } else {
+                // If it's not a plan, it might be a direct result. Return it as is.
+                return [accomplishResult];
             }
+        } catch (error: any) {
+            const sError = generateStructuredError({
+                error_code: GlobalErrorCodes.CAPABILITIES_MANAGER_UNKNOWN_VERB_HANDLING_FAILED,
+                severity: ErrorSeverity.ERROR,
+                message: `Error while handling unknown verb \'${step.actionVerb}\' with ACCOMPLISH plugin.`,
+                source_component,
+                original_error: error,
+                trace_id_param: trace_id
+            });
+            // Return the error in the format Agent expects
+            return createPluginOutputError(sError);
         }
     }
 

@@ -109,7 +109,7 @@ def discover_tools(query: str, inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
         logger.info(f"Discovering tools from Librarian with query: {query}")
         response = requests.post(f"http://{librarian_url}/tools/search", headers=headers, json={"queryText": query}, timeout=10)
         response.raise_for_status()
-        discovered_plugins = response.json()
+        discovered_plugins = response.json().get('data', [])
         if discovered_plugins and isinstance(discovered_plugins, list):
             logger.info(f"Successfully discovered {len(discovered_plugins)} plugins from Librarian.")
             return discovered_plugins
@@ -630,6 +630,25 @@ Plan Schema:
                                 break
 
             if plan_array is not None:
+                # Pre-process inputs to fix malformed serialized maps from the LLM
+                for step in plan_array:
+                    if isinstance(step, dict) and 'inputs' in step and isinstance(step['inputs'], dict):
+                        inputs_obj = step['inputs']
+                        # Check for the specific malformed structure
+                        if '_type' in inputs_obj and inputs_obj.get('_type', {}).get('value') == 'Map' and 'entries' in inputs_obj:
+                            new_inputs = {}
+                            try:
+                                # The actual entries are nested under 'value'
+                                entries = inputs_obj.get('entries', {}).get('value', [])
+                                for entry in entries:
+                                    if isinstance(entry, list) and len(entry) == 2:
+                                        key, value = entry
+                                        new_inputs[key] = value
+                                step['inputs'] = new_inputs
+                                logger.info(f"Corrected malformed inputs for step {step.get('id', 'N/A')}")
+                            except Exception as e:
+                                logger.warning(f"Failed to correct malformed inputs for step {step.get('id', 'N/A')}: {e}")
+                
                 # Validate and repair the plan
                 validated_plan_result = self.validator.validate_and_repair(plan_array, verb_info['mission_goal'], inputs)
 

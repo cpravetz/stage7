@@ -81,7 +81,7 @@ def discover_tools(query: str, inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
         logger.info("Tool discovery is explicitly disabled.")
         return []
     try:
-        auth_token = get_auth_token(inputs)
+        auth_token = _get_cm_auth_token(inputs)
         librarian_url_input = inputs.get('librarian_url')
         if isinstance(librarian_url_input, dict) and 'value' in librarian_url_input:
             librarian_url = librarian_url_input['value']
@@ -90,9 +90,9 @@ def discover_tools(query: str, inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
 
         headers = {'Authorization': f'Bearer {auth_token}'}
         logger.info(f"Discovering tools from Librarian with query: {query}")
-        response = requests.get(f"http://{librarian_url}/tools/search?q={query}", headers=headers, timeout=10)
+        response = requests.post(f"http://{librarian_url}/tools/search", json={"queryText": query}, headers=headers, timeout=10)
         response.raise_for_status()
-        discovered_plugins = response.json()
+        discovered_plugins = response.json().get('data', [])
         if discovered_plugins and isinstance(discovered_plugins, list):
             logger.info(f"Successfully discovered {len(discovered_plugins)} plugins from Librarian.")
             return discovered_plugins
@@ -109,7 +109,7 @@ def get_mission_goal(mission_id: str, inputs: Dict[str, Any]) -> Optional[str]:
         return None
     
     try:
-        auth_token = get_auth_token(inputs)
+        auth_token = _get_cm_auth_token(inputs)
         librarian_url_input = inputs.get('librarian_url')
         if isinstance(librarian_url_input, dict) and 'value' in librarian_url_input:
             librarian_url = librarian_url_input['value']
@@ -236,7 +236,12 @@ def call_brain(prompt: str, inputs: Dict[str, Any], response_type: str = "json")
         )
 
         if response.status_code != 200:
-            raise AccomplishError(f"Brain API error: {response.status_code} - {response.text}", "brain_api_error")
+            try:
+                error_json = response.json()
+                error_message = error_json.get('error', response.text)
+            except json.JSONDecodeError:
+                error_message = response.text
+            raise AccomplishError(f"Brain API error: {response.status_code} - {error_message}", "brain_api_error")
 
         result = response.json()
         if 'result' not in result:
@@ -676,7 +681,6 @@ Example format:
 }}
 ```
 
----
 **CRITICAL PLANNING PRINCIPLES (STRICTLY ENFORCED):**
 ---
 - **Direct, Actionable Plans:** Prioritize using concrete, executable `actionVerbs` from the `AVAILABLE PLUGINS` list. Your goal is to produce the most direct and actionable plan possible. Avoid creating abstract or novel verbs if the task can be accomplished with a sequence of known verbs.

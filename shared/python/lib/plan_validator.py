@@ -546,9 +546,9 @@ class PlanValidator:
         
         update_steps(plan)
 
-    def _validate_step(self, step: Dict[str, Any], 
+    def _validate_step(self, step: Dict[str, Any],
                       available_outputs: Dict[str, Dict[str, str]],
-                      all_steps: Dict[str, Any], 
+                      all_steps: Dict[str, Any],
                       parents: Dict[str, str],
                       accomplish_inputs: Dict[str, Any]) -> Tuple[List[StructuredError], List[Dict[str, Any]]]:
         """
@@ -578,13 +578,34 @@ class PlanValidator:
                 plugin_def = discovered_plugin
                 is_novel_verb = False # It's no longer novel
 
-        # For novel verbs, require description
+        # For novel verbs, we are less strict. We just check for a description.
+        # For known verbs, we check for required inputs.
         if is_novel_verb:
-            if not step.get('description') or not isinstance(step.get('description'), str) or step.get('description').strip() == '':
-                # Auto-generate a description instead of throwing an error
-                generated_description = f"Execute the action '{action_verb}' with the provided inputs to achieve the step's goal."
-                step['description'] = generated_description
-                logger.info(f"Auto-generated missing description for novel verb '{action_verb}' in step {step_id}")
+            if not step.get('description'):
+                errors.append(StructuredError(
+                    ErrorType.MISSING_FIELD,
+                    f"Novel verb '{action_verb}' requires a 'description'",
+                    step_id=step_id
+                ))
+        elif plugin_def:
+            # Validate required inputs for known plugins
+            for req_input in plugin_def.get('inputDefinitions', []):
+                if req_input.get('required'):
+                    input_found = False
+                    if req_input['name'] in step.get('inputs', {}):
+                        input_found = True
+                    elif req_input.get('aliases'):
+                        for alias in req_input['aliases']:
+                            if alias in step.get('inputs', {}):
+                                input_found = True
+                                break
+                    if not input_found:
+                        errors.append(StructuredError(
+                            ErrorType.MISSING_INPUT,
+                            f"Missing required input '{req_input['name']}' for '{action_verb}'",
+                            step_id=step_id,
+                            input_name=req_input['name']
+                        ))
 
         inputs = step.get('inputs', {})
         if not isinstance(inputs, dict):
@@ -595,27 +616,6 @@ class PlanValidator:
             ))
             return errors, wrappable_errors
 
-        # Validate required inputs (only for known plugins)
-        if plugin_def:
-            for req_input in plugin_def.get('inputDefinitions', []):
-                if req_input.get('required'):
-                    # Check if the required input is present by its canonical name or any of its aliases
-                    input_found = False
-                    if req_input['name'] in inputs:
-                        input_found = True
-                    elif req_input.get('aliases'):
-                        for alias in req_input['aliases']:
-                            if alias in inputs:
-                                input_found = True
-                                break
-                    
-                    if not input_found:
-                        errors.append(StructuredError(
-                            ErrorType.MISSING_INPUT,
-                            f"Missing required input '{req_input['name']}' (or its aliases: {', '.join(req_input['aliases']) if req_input.get('aliases') else 'None'}) for '{action_verb}'",
-                            step_id=step_id,
-                            input_name=req_input['name']
-                        ))
 
         # Validate each input
         for input_name, input_def in inputs.items():
