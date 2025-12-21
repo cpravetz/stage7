@@ -1590,5 +1590,359 @@ describe('Engineer', () => {
         consoleSpy.mockRestore();
       });
     });
+
+    describe('createPluginFromOpenAPI', () => {
+      it('should create a plugin from OpenAPI spec successfully', async () => {
+        const specUrl = 'http://example.com/openapi.json';
+        const name = 'TestAPI';
+        const description = 'Test API description';
+
+        const mockOpenApiSpec = {
+          openapi: '3.0.0',
+          info: { title: 'Test API', version: '1.0.0' },
+          paths: {
+            '/test': {
+              get: {
+                operationId: 'getTest',
+                summary: 'Get Test Data',
+                parameters: [{ name: 'param1', in: 'query', schema: { type: 'string' }, required: true }],
+                responses: { '200': { description: 'Success' } }
+              }
+            }
+          }
+        };
+
+        const mockTool = {
+          id: 'openapi-testapi',
+          name: 'TestAPI',
+          description: 'Test API description',
+          actionMappings: [{
+            actionVerb: 'GET_TEST',
+            operationId: 'getTest',
+            method: 'GET',
+            path: '/test',
+            inputs: [{ name: 'param1', type: PluginParameterType.STRING, required: true }],
+            outputs: [{ name: 'result', type: PluginParameterType.OBJECT }]
+          }]
+        };
+
+        const mockPlugin = {
+          id: 'plugin-testapi',
+          verb: 'TESTAPI',
+          description: 'Test API plugin',
+          explanation: 'Generated plugin for TestAPI',
+          inputDefinitions: [],
+          outputDefinitions: [],
+          language: 'typescript',
+          entryPoint: { main: 'index.ts', files: { 'index.ts': 'console.log("test");' } },
+          version: '1.0.0',
+          metadata: { category: [], tags: [], complexity: 1, dependencies: {}, version: '1.0.0' },
+          security: { permissions: [], sandboxOptions: {}, trust: { publisher: 'test', signature: undefined } }
+        };
+
+        mockedAxios.get.mockResolvedValueOnce({ data: mockOpenApiSpec });
+        mockedAxios.post.mockResolvedValueOnce({ data: { status: 'success' } }); // registerOpenAPITool
+        mockedAxios.post.mockResolvedValueOnce({ data: { result: JSON.stringify(mockPlugin) } }); // generateWrapperPlugin
+
+        const result = await engineer.createPluginFromOpenAPI(specUrl, name, description);
+
+        expect(result).toBeDefined();
+        expect(result?.id).toBe('plugin-testapi');
+        expect(mockedAxios.get).toHaveBeenCalledWith(specUrl);
+      });
+
+      it('should throw error if OpenAPI spec fetch fails', async () => {
+        const specUrl = 'http://example.com/fail.json';
+        const name = 'FailAPI';
+
+        mockedAxios.get.mockRejectedValueOnce(new Error('Network error'));
+
+        await expect(engineer.createPluginFromOpenAPI(specUrl, name)).rejects.toThrow('Failed to parse OpenAPI spec');
+      });
+    });
+
+    describe('onboardTool', () => {
+      it('should onboard a tool successfully', async () => {
+        const toolManifest = {
+          id: 'test-tool',
+          name: 'Test Tool',
+          description: 'A test tool',
+          type: 'openapi',
+          specUrl: 'http://example.com/spec.json'
+        };
+        const policyConfig = { rateLimit: 100 };
+
+        const mockGeneratedPlugin = {
+          id: 'plugin-test-tool',
+          verb: 'TEST_TOOL',
+          description: 'Generated wrapper plugin',
+          explanation: 'Wrapper plugin for test tool',
+          inputDefinitions: [],
+          outputDefinitions: [],
+          language: 'typescript',
+          entryPoint: { main: 'index.ts', files: { 'index.ts': 'console.log("test");' } },
+          version: '1.0.0',
+          metadata: { category: [], tags: [], complexity: 1, dependencies: {}, version: '1.0.0' },
+          security: { permissions: [], sandboxOptions: {}, trust: { publisher: 'test', signature: undefined } }
+        };
+
+        // Mock generateWrapperPlugin
+        jest.spyOn(engineer, 'generateWrapperPlugin' as any).mockResolvedValue(mockGeneratedPlugin);
+        // Mock executeWrapperTests
+        jest.spyOn(engineer, 'executeWrapperTests' as any).mockResolvedValue({ valid: true, issues: [] });
+        // Mock pluginMarketplace.store
+        jest.spyOn(engineer['pluginMarketplace'], 'store').mockResolvedValue();
+
+        const result = await engineer['onboardTool'](toolManifest, policyConfig);
+
+        expect(result.success).toBe(true);
+        expect(result.message).toContain('onboarded successfully');
+        expect(engineer['generateWrapperPlugin']).toHaveBeenCalledWith(toolManifest, policyConfig, 'typescript');
+        expect(engineer['executeWrapperTests']).toHaveBeenCalledWith(mockGeneratedPlugin);
+        expect(engineer['pluginMarketplace'].store).toHaveBeenCalled();
+      });
+
+      it('should throw error if wrapper plugin generation fails', async () => {
+        const toolManifest = { id: 'test-tool', name: 'Test Tool' };
+        const policyConfig = {};
+
+        jest.spyOn(engineer, 'generateWrapperPlugin' as any).mockResolvedValue(null);
+
+        await expect(engineer['onboardTool'](toolManifest, policyConfig)).rejects.toThrow('Failed to generate wrapper plugin');
+      });
+
+      it('should throw error if wrapper tests fail', async () => {
+        const toolManifest = { id: 'test-tool', name: 'Test Tool' };
+        const policyConfig = {};
+
+        const mockGeneratedPlugin = {
+          id: 'plugin-test-tool',
+          verb: 'TEST_TOOL',
+          description: 'Generated wrapper plugin',
+          explanation: 'Wrapper plugin for test tool',
+          inputDefinitions: [],
+          outputDefinitions: [],
+          language: 'typescript',
+          entryPoint: { main: 'index.ts', files: { 'index.ts': 'console.log("test");' } },
+          version: '1.0.0',
+          metadata: { category: [], tags: [], complexity: 1, dependencies: {}, version: '1.0.0' },
+          security: { permissions: [], sandboxOptions: {}, trust: { publisher: 'test', signature: undefined } }
+        };
+
+        jest.spyOn(engineer, 'generateWrapperPlugin' as any).mockResolvedValue(mockGeneratedPlugin);
+        jest.spyOn(engineer, 'executeWrapperTests' as any).mockResolvedValue({ valid: false, issues: ['Test failed'] });
+
+        await expect(engineer['onboardTool'](toolManifest, policyConfig)).rejects.toThrow('Wrapper plugin tests failed');
+      });
+    });
+
+    describe('generateWrapperPlugin', () => {
+      it('should generate a wrapper plugin successfully', async () => {
+        const toolManifest = {
+          id: 'test-tool',
+          name: 'Test Tool',
+          description: 'A test tool',
+          type: 'openapi'
+        };
+        const policyConfig = { rateLimit: 100 };
+        const language = 'typescript';
+
+        const mockGeneratedPlugin = {
+          id: 'plugin-test-tool',
+          verb: 'TEST_TOOL',
+          description: 'Generated wrapper plugin',
+          explanation: 'Wrapper plugin for test tool',
+          inputDefinitions: [],
+          outputDefinitions: [],
+          language: 'typescript',
+          entryPoint: { main: 'index.ts', files: { 'index.ts': 'console.log("test");' } },
+          version: '1.0.0',
+          metadata: { category: [], tags: [], complexity: 1, dependencies: {}, version: '1.0.0' },
+          security: { permissions: [], sandboxOptions: {}, trust: { publisher: 'test', signature: undefined } }
+        };
+
+        mockedAxios.post.mockResolvedValueOnce({ data: { result: JSON.stringify(mockGeneratedPlugin) } });
+
+        const result = await engineer['generateWrapperPlugin'](toolManifest, policyConfig, language);
+
+        expect(result).toEqual(mockGeneratedPlugin);
+        expect(mockedAxios.post).toHaveBeenCalledWith(
+          expect.stringContaining('/chat'),
+          expect.objectContaining({
+            exchanges: [expect.objectContaining({ role: 'user' })],
+            optimization: 'accuracy',
+            responseType: 'json'
+          })
+        );
+      });
+
+      it('should throw error if generated plugin is invalid', async () => {
+        const toolManifest = { id: 'test-tool', name: 'Test Tool' };
+        const policyConfig = {};
+        const language = 'typescript';
+
+        const invalidPlugin = { id: 'invalid' }; // Missing required fields
+
+        mockedAxios.post.mockResolvedValueOnce({ data: { result: JSON.stringify(invalidPlugin) } });
+
+        await expect(engineer['generateWrapperPlugin'](toolManifest, policyConfig, language))
+          .rejects.toThrow('Generated wrapper plugin structure is invalid');
+      });
+    });
+
+    describe('executeWrapperTests', () => {
+      it('should execute wrapper tests successfully', async () => {
+        const generatedPlugin = {
+          id: 'test-plugin',
+          language: 'javascript',
+          entryPoint: {
+            files: {
+              'index.js': 'console.log("test");',
+              'index.test.js': 'test("should pass", () => { expect(true).toBe(true); });'
+            }
+          }
+        };
+
+        jest.spyOn(engineer, 'validatePluginCode' as any).mockResolvedValue(true);
+        jest.spyOn(engineer, 'executeTestRunner' as any).mockResolvedValue({ valid: true, issues: [] });
+
+        const result = await engineer['executeWrapperTests'](generatedPlugin);
+
+        expect(result.valid).toBe(true);
+        expect(result.issues).toHaveLength(0);
+        expect(engineer['validatePluginCode']).toHaveBeenCalledWith(generatedPlugin.entryPoint, 'javascript');
+        expect(engineer['executeTestRunner']).toHaveBeenCalledWith(generatedPlugin);
+      });
+
+      it('should return invalid if code validation fails', async () => {
+        const generatedPlugin = {
+          id: 'test-plugin',
+          language: 'javascript',
+          entryPoint: { files: { 'index.js': 'invalid code {{{' } }
+        };
+
+        jest.spyOn(engineer, 'validatePluginCode' as any).mockResolvedValue(false);
+
+        const result = await engineer['executeWrapperTests'](generatedPlugin);
+
+        expect(result.valid).toBe(false);
+        expect(result.issues).toContain('Generated wrapper code failed basic validation');
+      });
+
+      it('should return invalid if test execution fails', async () => {
+        const generatedPlugin = {
+          id: 'test-plugin',
+          language: 'javascript',
+          entryPoint: { files: { 'index.js': 'console.log("test");' } }
+        };
+
+        jest.spyOn(engineer, 'validatePluginCode' as any).mockResolvedValue(true);
+        jest.spyOn(engineer, 'executeTestRunner' as any).mockResolvedValue({ valid: false, issues: ['Test failed'] });
+
+        const result = await engineer['executeWrapperTests'](generatedPlugin);
+
+        expect(result.valid).toBe(false);
+        expect(result.issues).toContain('Test failed');
+      });
+    });
+
+    describe('executeTestRunner', () => {
+      it('should execute JavaScript tests successfully', async () => {
+        const generatedPlugin = {
+          id: 'test-plugin',
+          language: 'javascript',
+          entryPoint: {
+            files: {
+              'index.js': 'console.log("test");',
+              'index.test.js': 'test("should pass", () => { expect(true).toBe(true); });'
+            }
+          }
+        };
+
+        // Mock execAsync to simulate successful test execution
+        jest.spyOn(require('util'), 'promisify').mockReturnValue(
+          jest.fn().mockResolvedValue({ stdout: 'PASS', stderr: '' })
+        );
+
+        const result = await engineer['executeTestRunner'](generatedPlugin);
+
+        expect(result.valid).toBe(true);
+        expect(result.issues).toHaveLength(0);
+      });
+
+      it('should execute Python tests successfully', async () => {
+        const generatedPlugin = {
+          id: 'test-plugin',
+          language: 'python',
+          entryPoint: {
+            files: {
+              'main.py': 'print("test")',
+              'test_main.py': 'def test_example(): assert True'
+            }
+          }
+        };
+
+        // Mock execAsync to simulate successful test execution
+        jest.spyOn(require('util'), 'promisify').mockReturnValue(
+          jest.fn().mockResolvedValue({ stdout: '1 passed', stderr: '' })
+        );
+
+        const result = await engineer['executeTestRunner'](generatedPlugin);
+
+        expect(result.valid).toBe(true);
+        expect(result.issues).toHaveLength(0);
+      });
+
+      it('should return invalid if no test files found', async () => {
+        const generatedPlugin = {
+          id: 'test-plugin',
+          language: 'javascript',
+          entryPoint: {
+            files: { 'index.js': 'console.log("test");' } // No test files
+          }
+        };
+
+        const result = await engineer['executeTestRunner'](generatedPlugin);
+
+        expect(result.valid).toBe(false);
+        expect(result.issues).toContain('No test files found for JavaScript/TypeScript plugin');
+      });
+
+      it('should return invalid if test execution fails', async () => {
+        const generatedPlugin = {
+          id: 'test-plugin',
+          language: 'javascript',
+          entryPoint: {
+            files: {
+              'index.js': 'console.log("test");',
+              'index.test.js': 'test("should fail", () => { throw new Error("fail"); });'
+            }
+          }
+        };
+
+        // Mock execAsync to simulate failed test execution
+        jest.spyOn(require('util'), 'promisify').mockReturnValue(
+          jest.fn().mockResolvedValue({ stdout: '', stderr: 'FAIL' })
+        );
+
+        const result = await engineer['executeTestRunner'](generatedPlugin);
+
+        expect(result.valid).toBe(false);
+        expect(result.issues).toContain('Tests failed: FAIL');
+      });
+
+      it('should return invalid for unsupported language', async () => {
+        const generatedPlugin = {
+          id: 'test-plugin',
+          language: 'unsupported',
+          entryPoint: { files: {} }
+        };
+
+        const result = await engineer['executeTestRunner'](generatedPlugin);
+
+        expect(result.valid).toBe(false);
+        expect(result.issues).toContain('Test execution not supported for language: unsupported');
+      });
+    });
   });
 });

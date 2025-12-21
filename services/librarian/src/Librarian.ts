@@ -19,7 +19,6 @@ const ENGINEER_SERVICE_URL = process.env.ENGINEER_SERVICE_URL || 'http://enginee
 const CAPABILITIES_MANAGER_SERVICE_URL = process.env.CAPABILITIES_MANAGER_SERVICE_URL || 'http://capabilitiesmanager:5000';
 const MISSIONCONTROL_SERVICE_URL = process.env.MISSIONCONTROL_URL || 'http://missioncontrol:5030';
 
-
 dotenv.config();
 
 interface DataVersion {
@@ -29,7 +28,6 @@ interface DataVersion {
     version: number;
 }
 
-
 export class Librarian extends BaseEntity {
     private app: express.Application;
 
@@ -37,8 +35,8 @@ export class Librarian extends BaseEntity {
         super('Librarian', 'Librarian', `librarian`, process.env.PORT || '5040');
         this.app = express();
         this.setupRoutes();
-      this.startServer();
-      this.startDiscoveryWorker();
+        this.startServer();
+        this.startDiscoveryWorker();
     }
 
     private isRestrictedCollection(collection: string): boolean {
@@ -48,17 +46,17 @@ export class Librarian extends BaseEntity {
     }
 
     private isCallerAuthorized(req: express.Request): boolean {
-      const user = (req as any).user;
-      if (!user) return false;
-      if (user.sub === 'SecurityManager' || user.componentType === 'SecurityManager') {
-        return true;
+        const user = (req as any).user;
+        if (!user) return false;
+        if (user.sub === 'SecurityManager' || user.componentType === 'SecurityManager') {
+            return true;
+        }
+        // Also allow CapabilitiesManager to register verbs
+        if (user.componentType === 'CapabilitiesManager' && user.permissions?.includes('capability:manage')) {
+            return true;
+        }
+        return false;
       }
-      // Also allow CapabilitiesManager to register verbs
-      if (user.componentType === 'CapabilitiesManager' && user.permissions?.includes('capability:manage')) {
-        return true;
-      }
-      return false;
-    }
 
     private setupRoutes() {
         this.app.get('/health', (req: express.Request, res: express.Response): void => {
@@ -100,7 +98,6 @@ export class Librarian extends BaseEntity {
         this.app.post('/deliverable/:stepId', (req, res) => this.storeDeliverable(req, res));
         this.app.get('/loadDeliverable/:stepId', (req, res) => this.loadDeliverable(req, res));
         this.app.get('/loadAllDeliverables/:agentId', (req, res) => this.loadAllDeliverables(req, res));
-        this.app.get('/loadWorkProduct/:stepId', (req, res) => this.loadStepWorkProduct(req, res));
         this.app.get('/loadStepOutput/:stepId', (req, res) => this.loadStepWorkProduct(req, res));
         this.app.get('/loadAllStepOutputs/:agentId', (req, res) => this.loadAllStepOutputs(req, res));
         this.app.get('/getSavedMissions', (req, res) => this.getSavedMissions(req, res));
@@ -111,34 +108,45 @@ export class Librarian extends BaseEntity {
         this.app.post('/knowledge/query', (req, res) => this.queryKnowledge(req, res));
         this.app.post('/verbs/register', (req, res) => this.registerVerbForDiscovery(req, res));
         this.app.post('/verbs/discover', (req, res) => this.discoverVerbs(req, res));
+        this.app.post('/verbs/discover-for-planning', (req, res) => this.discoverForPlanning(req, res));
+
+        // NEW: Knowledge Graph Query Endpoint
+        this.app.post('/graph/query', (req, res) => this.graphQuery(req, res));
 
         // Tool Source Management
         this.app.post('/tools/sources', (req, res) => this.addToolSource(req, res));
         this.app.get('/tools/sources', (req, res) => this.getToolSources(req, res));
         this.app.delete('/tools/sources/:id', (req, res) => this.deleteToolSource(req, res));
-
-        const discoveryLimiter = rateLimit({
-            windowMs: 15 * 60 * 1000, // 15 minutes
-            max: 100, // Limit each IP to 100 requests per windowMs
-            standardHeaders: true,
-            legacyHeaders: false, 
-        });
-
-        this.app.post('/verbs/discover', discoveryLimiter, (req, res) => this.discoverVerbs(req, res));
-        this.app.post('/tools/search', discoveryLimiter, (req, res) => this.searchTools(req, res));
-
-        // Pending Tool Review
-        this.app.get('/tools/pending', (req, res) => this.getPendingTools(req, res));
-        this.app.post('/tools/pending/:id/approve', (req, res) => this.approvePendingTool(req, res));
-        this.app.post('/tools/pending/:id/reject', (req, res) => this.rejectPendingTool(req, res));
-        this.app.put('/tools/:id/status', (req, res) => this.updateToolStatus(req, res));
       }
 
-      private startServer() {
+    private startServer() {
         const port = parseInt(process.env.PORT || '5040', 10);
-        this.app.listen(port, '0.0.0.0', () => {
-        console.log(`Librarian listening at http://0.0.0.0:${port}`);
+        const server = this.app.listen(port, '0.0.0.0', () => {
+            console.log(`Librarian listening at http://0.0.0.0:${port}`);
         });
+
+        // Handle server errors
+        server.on('error', (error) => {
+            console.error('Server error:', error instanceof Error ? error.message : error);
+            process.exit(1);
+        });
+
+        // Handle process exit
+        process.on('exit', (code) => {
+            console.log(`Librarian process exiting with code: ${code}`);
+        });
+
+        // Handle unhandled promise rejections
+        process.on('unhandledRejection', (reason, promise) => {
+            console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+        });
+
+        // Handle uncaught exceptions
+        process.on('uncaughtException', (error) => {
+            console.error('Uncaught Exception:', error instanceof Error ? error.message : error);
+            process.exit(1);
+        });
+
         // Keep the process alive
         setInterval(() => {}, 1 << 30);
     }
@@ -365,7 +373,7 @@ export class Librarian extends BaseEntity {
         collection = collection || 'mcsdata';
 
         if (this.isRestrictedCollection(collection) && !this.isCallerAuthorized(req)) {
-          return res.status(403).send({ error: 'Access denied to restricted collection' });
+            return res.status(403).send({ error: 'Access denied to restricted collection' });
         }
 
         /*if (!id) {
@@ -426,7 +434,7 @@ export class Librarian extends BaseEntity {
         }
 
         if (this.isRestrictedCollection(collection as string) && !this.isCallerAuthorized(req)) {
-          return res.status(403).send({ error: 'Access denied to restricted collection' });
+            return res.status(403).send({ error: 'Access denied to restricted collection' });
         }
         console.log(`loadData for ${id || JSON.stringify(query)} requested from collection ${collection}`)
         
@@ -634,11 +642,10 @@ export class Librarian extends BaseEntity {
         }
     }
 
-
     private async queryData(req: express.Request, res: express.Response) {
         const { collection, query, limit } = req.body;
         if (this.isRestrictedCollection(collection) && !this.isCallerAuthorized(req)) {
-          return res.status(403).send({ error: 'Access denied to restricted collection' });
+            return res.status(403).send({ error: 'Access denied to restricted collection' });
         }
         console.log('Querying data:', { collection, query, limit });
 
@@ -672,11 +679,10 @@ export class Librarian extends BaseEntity {
         }
     }
 
-
     private async searchData(req: express.Request, res: express.Response) {
         const {collection, query = {}, options = {}} = req.body;
         if (this.isRestrictedCollection(collection as string) && !this.isCallerAuthorized(req)) {
-          return res.status(403).send({ error: 'Access denied to restricted collection' });
+            return res.status(403).send({ error: 'Access denied to restricted collection' });
         }
         const parsedOptions = options ? JSON.parse(JSON.stringify(options)) : {};
         // Convert string '1' to number 1 for MongoDB projection
@@ -714,7 +720,6 @@ export class Librarian extends BaseEntity {
         }
     }
 
-
     private async handleMessage(req: express.Request, res: express.Response) {
         const message = req.body;
         console.log('Received message:', message);
@@ -738,7 +743,7 @@ export class Librarian extends BaseEntity {
     private async deleteCollection(req: express.Request, res: express.Response) {
         const { collection } = req.query;
         if (this.isRestrictedCollection(collection as string) && !this.isCallerAuthorized(req)) {
-          return res.status(403).send({ error: 'Access denied to restricted collection' });
+            return res.status(403).send({ error: 'Access denied to restricted collection' });
         }
         if (!collection) {
             console.log('deleteCollection failed for no collection.');
@@ -923,7 +928,23 @@ export class Librarian extends BaseEntity {
                 result.metadata?.healthStatus === 'healthy'
             );
 
-            res.status(200).send({ data: results });
+            // Remap results to prioritize the canonical verb for discovery
+            const finalResults = results.map((result: any) => {
+                if (result.metadata && result.metadata.verb) {
+                    return {
+                        ...result,
+                        id: result.metadata.verb, // Use canonical verb as primary ID
+                        verb: result.metadata.verb, // Ensure top-level verb is the canonical one
+                        metadata: {
+                            ...result.metadata,
+                            original_id: result.id // Preserve original ID
+                        }
+                    };
+                }
+                return result;
+            });
+
+            res.status(200).send({ data: finalResults });
         } catch (error) {
             console.error('Error in discoverVerbs:', error instanceof Error ? error.message : error);
             res.status(500).send({ error: 'Failed to discover verbs', details: error instanceof Error ? error.message : String(error) });
@@ -934,18 +955,38 @@ export class Librarian extends BaseEntity {
         if (!this.isCallerAuthorized(req)) {
             return res.status(403).send({ error: 'Access denied: Caller not authorized.' });
         }
-        const { manifest, entities } = req.body;
+        const { manifest, entities, consumes, produces, relatedVerbs } = req.body;
 
         if (!manifest || !manifest.verb || !manifest.id) {
             return res.status(400).send({ error: 'Plugin manifest with at least id and verb is required' });
         }
 
         try {
-            // The document to be embedded is a string combining the verb and its explanation.
-            const content = `${manifest.verb}: ${manifest.explanation || ''}`;
+            // Enhance the content string for better semantic search
+            let content = `${manifest.verb}: ${manifest.explanation || ''}`;
+            if (consumes) {
+                content += ` Consumes: ${Object.keys(consumes).join(', ')}.`;
+            }
+            if (produces) {
+                content += ` Produces: ${Object.keys(produces).join(', ')}.`;
+            }
+            if (relatedVerbs && relatedVerbs.length > 0) {
+                content += ` Related verbs: ${relatedVerbs.join(', ')}.`;
+            }
+            if (entities && entities.length > 0) {
+                content += ` Related entities: ${entities.join(', ')}.`;
+            }
             
-            // The entire manifest is stored as metadata, along with any provided entities.
-            const metadata = { ...manifest, id: manifest.id, entities: entities || [], healthStatus: 'healthy' };
+            // The entire manifest is stored as metadata, along with any provided entities and new fields.
+            const metadata = { 
+                ...manifest, 
+                id: manifest.id, 
+                entities: entities || [], 
+                consumes: consumes || {},
+                produces: produces || {},
+                relatedVerbs: relatedVerbs || [],
+                healthStatus: 'healthy' 
+            };
 
             await knowledgeStore.save('tools', content, metadata);
             res.status(200).send({ status: 'Tool indexed successfully' });
@@ -956,39 +997,81 @@ export class Librarian extends BaseEntity {
     }
 
     private async searchTools(req: express.Request, res: express.Response) {
-        const { queryText, maxResults = 1, contextEntities = [] } = req.body;
-
-        if (!queryText) {
-            return res.status(400).send({ error: 'queryText is required' });
-        }
+        const { queryText, maxResults = 5, contextEntities = [], inputType = null } = req.body;
 
         try {
-            let results = await knowledgeStore.query('tools', queryText, maxResults);
+            // Query both 'tools' and 'verbs' collections
+            const [toolsResults, verbsResults] = await Promise.all([
+                knowledgeStore.query('tools', queryText, maxResults),
+                knowledgeStore.query('verbs', queryText, maxResults), // Query 'verbs' collection
+            ]);
+
+            // Combine and flatten the results
+            let combinedResults = [...toolsResults, ...verbsResults];
             
-            // Filter results based on healthStatus.status
-            results = results.filter((result: any) => 
+            // Filter combined results based on healthStatus.status
+            combinedResults = combinedResults.filter((result: any) => 
                 result.metadata?.healthStatus === 'healthy'
             );
 
-            if (contextEntities.length > 0) {
-                // Filter or re-rank results based on contextEntities
-                results = results.map((result: any) => {
-                    const toolEntities = result.metadata?.entities || [];
+            // Disambiguation Engine Logic
+            // Use combinedResults instead of 'results'
+            let results = combinedResults.map((result: any) => {
+                let context_score = 0;
+
+                // 1. Entity Matching Score
+                if (contextEntities.length > 0) {
+                    const toolEntities = result.metadata?.entities ? JSON.parse(result.metadata.entities) : [];
                     const commonEntities = contextEntities.filter((entity: string) => toolEntities.includes(entity));
-                    const score = commonEntities.length; // Simple overlap score
-                    return { ...result, context_score: score };
-                });
+                    context_score += commonEntities.length;
+                }
 
-                // Sort by context_score (descending) then by original distance (ascending)
-                results.sort((a: any, b: any) => {
-                    if (b.context_score !== a.context_score) {
-                        return b.context_score - a.context_score;
+                // 2. Type Matching Score (Consumes)
+                if (inputType && result.metadata?.consumes) {
+                    try {
+                        const consumes = JSON.parse(result.metadata.consumes);
+                        // Check if any of the tool's consumable inputs match the provided inputType
+                        for (const key in consumes) {
+                            const requiredType = consumes[key];
+                            // Simple substring match for now (e.g., 'application/json' matches 'application/json; schema=v1')
+                            if (typeof requiredType === 'string' && requiredType.includes(inputType)) {
+                                context_score += 5; // Give a high score for a direct type match
+                                break;
+                            }
+                        }
+                    } catch (e) {
+                        console.warn(`Could not parse 'consumes' metadata for tool ${result.id}`);
                     }
-                    return a.distance - b.distance;
-                });
-            }
+                }
 
-            res.status(200).send({ data: results });
+                return { ...result, context_score };
+            });
+
+            // Sort by context_score (descending) then by original distance (ascending)
+            results.sort((a: any, b: any) => {
+                if (b.context_score !== a.context_score) {
+                    return b.context_score - a.context_score;
+                }
+                return a.distance - b.distance;
+            });
+            
+            // Remap results to prioritize the canonical verb for discovery
+            const finalResults = results.map((result: any) => {
+                if (result.metadata && result.metadata.verb) {
+                    return {
+                        ...result,
+                        id: result.metadata.verb, // Use canonical verb as primary ID
+                        verb: result.metadata.verb, // Ensure top-level verb is the canonical one
+                        metadata: {
+                            ...result.metadata,
+                            original_id: result.id // Preserve original ID
+                        }
+                    };
+                }
+                return result;
+            });
+
+            res.status(200).send({ data: finalResults });
         } catch (error) {
             console.error('Error in searchTools:', error instanceof Error ? error.message : error);
             res.status(500).send({ error: 'Failed to search for tools', details: error instanceof Error ? error.message : String(error) });
@@ -1140,6 +1223,147 @@ export class Librarian extends BaseEntity {
         } catch (error) {
             console.error('Error in updateToolStatus:', error instanceof Error ? error.message : error);
             res.status(500).send({ error: 'Failed to update tool status', details: error instanceof Error ? error.message : String(error) });
+        }
+    }
+    
+    private async discoverForPlanning(req: express.Request, res: express.Response): Promise<void> {
+        try {
+            const { goal, context, missionId } = req.body;
+            if (!goal) {
+                res.status(400).send({ error: 'Goal is required for verb discovery.' });
+                return;
+            }
+            
+            // Construct query text from goal and context
+            const queryText = goal + (context ? ' ' + context : '');
+            
+            // All verbs and tools are indexed in the 'tools' collection.
+            const discoveryResults = await knowledgeStore.query('tools', queryText, 10);
+            
+            // Filter results to only include healthy items
+            const healthyResults = discoveryResults.filter((result: any) => result.metadata?.healthStatus === 'healthy');
+            
+            // Build relevantVerbs array from all healthy results that have a verb
+            const relevantVerbs = healthyResults
+                .filter((result: any) => result.metadata?.verb)
+                .map((result: any) => ({
+                    verb: result.metadata.verb,
+                    description: result.metadata.description || '',
+                    capabilities: result.metadata.capabilityKeywords || [],
+                }));
+            
+            // Build relevantTools array from all healthy results
+            const relevantTools = healthyResults.map((result: any) => ({
+                toolId: result.metadata?.id || '',
+                verbs: result.metadata?.verb ? [result.metadata.verb] : [],
+                description: result.metadata?.description || '',
+            }));
+            
+            // Prepare discovery context
+            const discoveryContext = {
+                query: queryText,
+                goal,
+                context,
+                missionId,
+                timestamp: new Date().toISOString(),
+            };
+            
+            // Return response
+            res.status(200).send({
+                relevantVerbs,
+                relevantTools,
+                discoveryContext,
+            });
+        } catch (error) {
+            console.error('Error in verb discovery for planning:', error);
+            res.status(500).send({ error: 'Failed to discover verbs for planning', details: error instanceof Error ? error.message : String(error) });
+        }
+    }
+
+    // NEW: Knowledge Graph Query Endpoint
+    private async graphQuery(req: express.Request, res: express.Response): Promise<void> {
+        const { startType, endType, maxDepth = 3, maxResults = 100 } = req.body;
+
+        if (!startType || !endType) {
+            res.status(400).send({ error: 'startType and endType are required for a graph path query.' });
+        }
+
+        try {
+            // 1. Fetch a large set of tools to build the graph in memory.
+            // We use a generic query to fetch a wide variety of tools.
+            const allTools = await knowledgeStore.query('tools', 'tool plugin verb', maxResults);
+
+            // 2. Parse and normalize tools for graph traversal
+            const parsedTools = allTools.map(tool => {
+                try {
+                    return {
+                        id: tool.id,
+                        metadata: {
+                            ...tool.metadata,
+                            consumes: tool.metadata?.consumes ? JSON.parse(tool.metadata.consumes as string) : {},
+                            produces: tool.metadata?.produces ? JSON.parse(tool.metadata.produces as string) : {},
+                        }
+                    };
+                } catch (e) {
+                    console.warn(`Could not parse metadata for tool ${tool.id}`);
+                    return null;
+                }
+            }).filter(t => t !== null);
+
+            // 3. BFS algorithm to find paths
+            const queue: any[][] = []; // Each item in the queue is a path (an array of tools)
+            const foundPaths: any[][] = [];
+
+            // Initialize the queue with starting tools
+            for (const tool of parsedTools) {
+                const consumes = tool!.metadata.consumes;
+                for (const key in consumes) {
+                    if (typeof consumes[key] === 'string' && consumes[key].includes(startType)) {
+                        queue.push([tool]);
+                    }
+                }
+            }
+            
+            while (queue.length > 0) {
+                const currentPath = queue.shift()!;
+                const lastToolInPath = currentPath[currentPath.length - 1];
+
+                if (currentPath.length >= maxDepth) {
+                    continue; // Stop searching deeper
+                }
+
+                const produces = lastToolInPath.metadata.produces;
+                for (const outKey in produces) {
+                    const producedType = produces[outKey];
+                    
+                    // Check if we reached the end goal
+                    if (typeof producedType === 'string' && producedType.includes(endType)) {
+                        foundPaths.push(currentPath);
+                        if (foundPaths.length >= 5) break; // Limit the number of found paths
+                    }
+
+                    // Find next tools in the chain
+                    for (const nextTool of parsedTools) {
+                        // Avoid cycles in the path
+                        if (currentPath.find(p => p.id === nextTool!.id)) continue;
+
+                        const nextConsumes = nextTool!.metadata.consumes;
+                        for (const inKey in nextConsumes) {
+                            if (typeof nextConsumes[inKey] === 'string' && nextConsumes[inKey].includes(producedType)) {
+                                const newPath = [...currentPath, nextTool];
+                                queue.push(newPath);
+                            }
+                        }
+                    }
+                }
+                if (foundPaths.length >= 5) break;
+            }
+
+            res.status(200).send({ paths: foundPaths });
+
+        } catch (error) {
+            console.error('Error in knowledge graph query:', error);
+            res.status(500).send({ error: 'Failed to execute knowledge graph query', details: error instanceof Error ? error.message : String(error) });
         }
     }
 }

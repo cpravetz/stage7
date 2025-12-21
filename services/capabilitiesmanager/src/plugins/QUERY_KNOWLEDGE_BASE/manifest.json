@@ -13,7 +13,7 @@
     },
     {
       "name": "domains",
-      "required": true,
+      "required": false,
       "type": "array",
       "description": "Array of knowledge domain/collection names to search in (e.g., ['ai_development', 'research_findings'])",
       "aliases": ["collections", "collectionNames"]

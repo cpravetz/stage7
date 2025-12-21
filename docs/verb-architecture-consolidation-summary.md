@@ -1,8 +1,21 @@
-# Architecture Documentation Consolidation Summary
+# DEPRECATED: Architecture Documentation Consolidation Summary
 
-## Executive Summary
+**Status:** This document has been consolidated into [`consolidated-verb-discovery-architecture.md`](docs/consolidated-verb-discovery-architecture.md)
 
-This document summarizes the consolidation of three architecture proposals into two focused, complementary architecture documents. The consolidation resolves conflicts, eliminates redundancy, and provides clearer implementation guidance.
+**Migration Guide:** All concepts and implementation details from this document have been incorporated into the consolidated architecture with the following enhancements:
+
+- Integrated with tool discovery concepts from tool_discovery_and_planning_architecture.md
+- Combined with phased approach from verb-discovery-architecture-proposal.md
+- Enhanced with caching mechanisms from verb-discovery-and-caching.md
+- Added Brain Awareness section for LLM access to verb discovery
+
+**Key Sections Migrated:**
+- Conflict resolution between discovery vs integration architectures
+- Comprehensive implementation plan with phased roadmap
+- Detailed gap analysis and resource allocation
+- Success metrics and risk mitigation strategies
+
+Please refer to the consolidated document for the most current and comprehensive architecture.
 
 ## Original Documents
 

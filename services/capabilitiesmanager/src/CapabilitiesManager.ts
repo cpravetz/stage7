@@ -484,7 +484,20 @@ export class CapabilitiesManager extends BaseEntity {
             p.metadata?.status !== PluginStatus.STOPPED &&
             p.metadata?.status !== PluginStatus.ERROR
         );
-        return activePlugins;
+        
+        // Remap the manifests to ensure the canonical 'verb' is the primary identifier.
+        // This prevents the Brain from using internal IDs as actionVerbs.
+        const remappedPlugins = activePlugins.map(p => {
+            if (p.verb) {
+                return {
+                    ...p,
+                    id: p.verb, // Overwrite the id with the canonical verb
+                };
+            }
+            return p;
+        });
+
+        return remappedPlugins;
     }
 
     private async beginTransaction(trace_id: string, step: Step): Promise<string> {
@@ -795,8 +808,144 @@ export class CapabilitiesManager extends BaseEntity {
         console.log(`[${trace_id}] ${source_component}: Novel verb \'${step.actionVerb}\'. Delegating to ACCOMPLISH plugin to generate a plan.`);
 
         try {
-            const novelVerbGoal = `Handle the novel action verb \'${step.actionVerb}\'. The step's description is: \'${step.description}\'. Available inputs: ${JSON.stringify(Array.from(step.inputValues?.keys() || []))}. Expected outputs: ${JSON.stringify(step.outputs)}. Your task is to generate a plan of sub-steps to achieve this.`;
+            const planningSchema = {
+                "$schema": "http://json-schema.org/draft-07/schema#",
+                "title": "Combined Planning Response Schema",
+                "description": "Schema for responses from planning-related LLM calls, which can be a plan, a direct answer, or a plugin recommendation.",
+                "oneOf": [
+                    {
+                        "title": "Plan Response",
+                        "description": "A plan consisting of an array of steps.",
+                        "$ref": "#/definitions/PlanArray"
+                    },
+                    {
+                        "title": "Direct Answer Response",
+                        "description": "A direct textual answer to the query.",
+                        "$ref": "#/definitions/DirectAnswer"
+                    },
+                    {
+                        "title": "Plugin Recommendation Response",
+                        "description": "A recommendation for a new plugin to be developed.",
+                        "$ref": "#/definitions/PluginRecommendation"
+                    }
+                ],
+                "definitions": {
+                    "PlanStep": {
+                        "type": "object",
+                        "properties": {
+                            "number": {"type": "integer", "minimum": 1, "description": "Unique step number"},
+                            "actionVerb": {"type": "string", "description": "The action to be performed in this step. It may be one of the plugin actionVerbs or a new actionVerb for a new type of task."},
+                            "description": {"type": "string", "description": "A thorough description of the task to be performed in this step so that an agent or LLM can execute without needing external context beyond the inputs and output specification."},
+                            "inputs": {
+                                "type": "object",
+                                "patternProperties": {
+                                    "^[a-zA-Z][a-zA-Z0-9_]*$": {
+                                        "type": "object",
+                                        "properties": {
+                                            "value": {"type": "string", "description": "Constant string value for this input"},
+                                            "valueType": {"type": "string", "enum": ["string", "number", "boolean", "array", "object", "plan", "plugin", "any"], "description": "The natural type of the Constant input value"},
+                                            "outputName": {"type": "string", "description": "Reference to an output from a previous step at the same level or higher"},
+                                            "sourceStep": {"type": "integer", "minimum": 0, "description": "The step number that produces the output for this input. Use 0 to refer to an input from the parent step."},
+                                            "args": {"type": "object", "description": "Additional arguments for the input"}
+                                        },
+                                        "oneOf": [
+                                            {"required": ["value", "valueType"]},
+                                            {"required": ["outputName", "sourceStep"]}
+                                        ],
+                                        "additionalProperties": false
+                                    }
+                                },
+                                "additionalProperties": false
+                            },
+                            "outputs": {
+                                "type": "object",
+                                "patternProperties": {
+                                    "^[a-zA-Z][a-zA-Z0-9_]*$": {
+                                        "oneOf": [
+                                            {"type": "string", "description": "Thorough description of the expected output"},
+                                            {
+                                                "type": "object",
+                                                "properties": {
+                                                    "description": {"type": "string", "description": "Thorough description of the expected output"},
+                                                    "isDeliverable": {"type": "boolean", "description": "Whether this output is a final deliverable for the user"},
+                                                    "filename": {"type": "string", "description": "User-friendly filename for the deliverable"}
+                                                },
+                                                "required": ["description"],
+                                                "additionalProperties": false
+                                            }
+                                        ]
+                                    }
+                                },
+                                "additionalProperties": false
+                            },
+                            "recommendedRole": {"type": "string", "description": "Suggested role type for the agent executing this step. Allowed values are Coordinator, Researcher, Coder, Creative, Critic, Executor, and Domain Expert"}
+                        },
+                        "required": ["number", "actionVerb", "inputs", "outputs"],
+                        "additionalProperties": false
+                    },
+                    "PlanArray": {
+                        "type": "array",
+                        "items": { "$ref": "#/definitions/PlanStep" },
+                        "description": "A list of sequential steps to accomplish a goal."
+                    },
+                    "DirectAnswer": {
+                        "type": "object",
+                        "properties": {
+                            "direct_answer": {
+                                "type": "string",
+                                "description": "A direct answer or result, to be used only if the goal can be fully accomplished in a single step without requiring a plan."
+                            }
+                        },
+                        "required": ["direct_answer"],
+                        "additionalProperties": false
+                    },
+                    "PluginRecommendation": {
+                        "type": "object",
+                        "properties": {
+                            "plugin": {
+                                "type": "object",
+                                "properties": {
+                                    "id": {
+                                        "type": "string",
+                                        "description": "The ID of the new plugin to be developed."
+                                    },
+                                    "description": {
+                                        "type": "string",
+                                        "description": "A detailed description of the new plugin's functionality."
+                                    }
+                                },
+                                "required": ["id", "description"],
+                                "additionalProperties": false
+                            }
+                        },
+                        "required": ["plugin"],
+                        "additionalProperties": false
+                    }
+                }
+            };
+            const novelVerbGoal = `You are an expert system responsible for handling novel, unknown action verbs. An agent has encountered a step with the actionVerb '${step.actionVerb}' which is not a recognized command.
 
+Your task is to determine the best course of action to fulfill the objective of this step.
+
+**Step Details:**
+- **Action Verb:** ${step.actionVerb}
+- **Description:** ${step.description}
+- **Available Inputs:** ${JSON.stringify(Array.from(step.inputValues?.keys() || []))}
+- **Expected Outputs:** ${JSON.stringify(step.outputs)}
+
+**You have three options:**
+
+1.  **Generate a Plan:** If the step's objective can be accomplished by breaking it down into a sequence of known actions, generate a detailed plan. This is the most common and preferred option. The plan must adhere to the provided JSON schema. Use the 'availablePlugins' list to see what tools you can use.
+
+2.  **Provide a Direct Answer:** If you can accomplish the goal yourself and provide a final answer directly, respond with a 'direct_answer'.
+
+3.  **Recommend a New Plugin:** If the action is specialized and cannot be accomplished with existing tools or a simple plan, recommend the creation of a new plugin.
+
+**Response Schema:**
+You must respond with a JSON object that validates against the following schema:
+${JSON.stringify(planningSchema, null, 2)}
+
+Based on the step details, choose the best option and respond in the correct JSON format.`;
             const accomplishInputs = new Map<string, InputValue>();
             accomplishInputs.set('goal', {
                 inputName: 'goal',

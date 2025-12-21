@@ -1078,7 +1078,7 @@ export class PostOffice extends BaseEntity {
             try {
                 const deliverableResponse = await this.authenticatedApi.post(`${librarianUrl}/queryData`, {
                     collection: 'deliverables',
-                    query: { "missionFile.id": fileId, "missionId": req.params.missionId },
+                    query: { "missionFile.id": fileId },
                     limit: 1
                 });
 

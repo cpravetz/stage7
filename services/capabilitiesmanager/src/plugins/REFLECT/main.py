@@ -371,8 +371,10 @@ class ReflectHandler:
             logger.info(f"REFLECT: Discovering tools for query: {query}")
             discovered_plugins = discover_tools(query, inputs)
             
-            # Update validator with discovered plugins
-            self.validator.set_available_plugins(discovered_plugins)
+            # Add discovered plugins to inputs for the validator to use
+            if not isinstance(inputs, dict):
+                inputs = {}
+            inputs['availablePlugins'] = discovered_plugins
             # --- End Verb Discovery Integration ---
 
             # Get mission goal

@@ -24,4 +24,29 @@
     *   **Reasoning for change (FILE_OPS_PYTHON/main.py):** The `NameError` in `_write_operation` stemmed from `librarian_url`, `mission_control_url`, `mission_id`, and `headers` being used without explicit local definition. The fix involved retrieving these values at the beginning of the `_write_operation` method using the appropriate getter methods (`self._get_librarian_url`, `self._get_mission_control_url`, `self._get_input_value`) and constructing the `headers` dictionary with the authentication token.
     *   **Architectural principle/standard:** Adherence to Python's strict syntax and scoping rules. Ensuring proper variable definition and flow control within methods is crucial for robust plugin execution. The fixes reinforce the importance of local validation and compilation for Python plugins within the CapabilitiesManager service.
 
-I have applied these fixes and successfully rebuilt the `services/capabilitiesmanager`. I am now waiting for the user to relaunch the mission via the frontend to verify these latest changes.
+## Validation process
+
+1. Convert whatever step id scheme there is to uuids, ensure sourceStep references remain intact.  Once uuids are assigned, the are not changed.
+2. Does each step conform to the schema? 
+ - Are all required fields in place? 
+ - Does the step have at least one validly defined input and only one validly defined output? 
+ - Does the step have at least one relationship as a dependent or precedent?
+ - Outputs may be renamed, inputs may not. The sourceStep refernce must use the custom name.
+3. Is the step associated with a known actionVerb (using the verb or an alias?
+	If so,
+	- Are the required inputs in place and properly defined (either a value or a valid reference)
+	- Is the output of the expected type? (Custom names are acceptable)
+	If not,
+	- Is there a description that will aid the execution of the step?
+4. Are the input and output types compatible?
+	- If an input expects an iterable type, the output it depends on must be an iterable type or a string. They do not need to be the same iterable type.
+	- If the input expects a non-iterable input, the output needs to produce the same type or a string.
+	- If an output is iterable and the dependent step expects a non-iterable type for the input, implement the FOR_EACH / REGROUP logic.
+		- Take all steps dependent on the initial dependent step that use non-iterable inputs and embed them in the subplan of an inserted FOR_EACH.
+		- The sourceStep for the initial dependent step is set to 0.
+		- When a step expecting an iterable type is reached in the chain, a REGROUP step is added at the top level and made dependent on the embedded step. The step is made dependent on the REGROUP.
+5. Any deviations from expectations are either:
+ - Corrected by the validator when possible
+ - Added to the list of plan issues (step uuid, issue class, details)
+6. If the list of plan issues is not empty, the Brain is asked to fix the issues. It is provided the full plan and the list of issues.
+ - Once a new plan is returned, jump back to step 1 with the new plan. 

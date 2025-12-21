@@ -10,7 +10,6 @@ import { analyzeError } from '@cktmcs/errorhandler';
 import { v4 as uuidv4 } from 'uuid';
 import { redisCache } from '@cktmcs/shared';
 import crypto from 'crypto';
-
 dotenv.config();
 
 interface Thread {
@@ -38,6 +37,7 @@ export class Brain extends BaseEntity {
 
     private librarianUrl: string | null = null;
     private performanceDataSyncInterval: NodeJS.Timeout | null = null;
+    private enrichmentCache: Map<string, any> = new Map<string, any>;
 
     constructor() {
         super('Brain', 'Brain', `brain`, process.env.PORT || '5020');
@@ -79,7 +79,6 @@ export class Brain extends BaseEntity {
         app.get('/health', (_req: express.Request, res: express.Response) => {
             res.json({ status: 'ok', message: 'Brain service is running' });
         });
-
 
         app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
             console.error('Express error in Brain:', err instanceof Error ? err.message : String(err));
@@ -320,6 +319,16 @@ export class Brain extends BaseEntity {
                 await new Promise(resolve => setTimeout(resolve, retryDelay));
             }
         }
+
+        // If the loop completes without sending a response, it means we failed to find a model.
+        if (!res.headersSent) {
+            console.error(`[Brain Generate] Failed to find a suitable model after all retries. Last error: ${lastError}`);
+            res.status(503).json({
+                error: `Service Unavailable: Could not find a suitable model to handle the request. Last error: ${lastError}`,
+                model: lastModelName,
+                requestId: req.body.requestId || null
+            });
+        }
     }
 
     async chat(req: express.Request, res: express.Response) {
@@ -341,6 +350,17 @@ export class Brain extends BaseEntity {
         console.log(`[Brain Chat] Cache miss for request ${requestId}. Proceeding with LLM call.`);
         // No retry limit - keep trying until we find a working model
         const thread = this.createThreadFromRequest(req);
+        
+        // Enrich context with relevant verbs and tools if goal is available
+        const goal = (req.body.goal as string) || (thread.exchanges && thread.exchanges.length > 0 && thread.exchanges[0].content) || '';
+        const context = req.body.context as string;
+        const missionId = req.body.missionId as string;
+        if (goal) {
+            const enrichment = await this.enrichContextWithVerbsAndTools(goal, context, missionId);
+            // Store enrichment in thread.optionals for later use
+            if (!thread.optionals) thread.optionals = {};
+            thread.optionals.contextEnrichment = enrichment;
+        }
 
         // Estimate token count (heuristic: 1 token ~= 4 characters)
         const estimatedTokens = thread.exchanges.reduce((acc, ex) => acc + ex.content.length, 0) / 4;
@@ -574,18 +594,18 @@ export class Brain extends BaseEntity {
                     } catch (regenErr) {
                         console.warn(`[Brain Chat] Regeneration attempt failed for model ${selectedModel.name}: ${regenErr instanceof Error ? regenErr.message : String(regenErr)}`);
                     }
+                }
 
-                    // If regeneration didn't produce a usable JSON, blacklist and throw to trigger retry
-                    try {
-                        // If modelResponse was replaced by a successful regenJson above, do not blacklist
-                        if (!modelResponse || (typeof modelResponse === 'string' && modelResponse.trim().length === 0)) {
-                            console.error(`[Brain Chat] Unrecoverable JSON from model ${selectedModel.name}, blacklisting.`);
-                            this.modelManager.blacklistModel(selectedModel.name, new Date(), thread.conversationType);
-                            throw new Error('Unrecoverable JSON from model: ' + selectedModel.name);
-                        }
-                    } catch (finalErr) {
-                        throw finalErr;
+                // If regeneration didn't produce a usable JSON, blacklist and throw to trigger retry
+                try {
+                    // If modelResponse was replaced by a successful regenJson above, do not blacklist
+                    if (!modelResponse || (typeof modelResponse === 'string' && modelResponse.trim().length === 0)) {
+                        console.error(`[Brain Chat] Unrecoverable JSON from model ${selectedModel.name}, blacklisting.`);
+                        this.modelManager.blacklistModel(selectedModel.name, new Date(), thread.conversationType);
+                        throw new Error('Unrecoverable JSON from model: ' + selectedModel.name);
                     }
+                } catch (finalErr) {
+                    throw finalErr;
                 }
             }
 
@@ -613,7 +633,6 @@ export class Brain extends BaseEntity {
             throw err;
         }
     }
-
 
     getAvailableModels(): string[] {
         return this.modelManager.getAvailableModels();
@@ -895,9 +914,110 @@ export class Brain extends BaseEntity {
                 filtered[key] = value;
             }
         }
-
         return filtered;
     }
-}
 
-new Brain();
+    // Enhanced enrichContextWithVerbsAndTools method with caching and fallback
+    private async enrichContextWithVerbsAndTools(goal: string, context?: string, missionId?: string): Promise<{relevantVerbs: any[], relevantTools: any[], discoveryContext: any}> {
+        // Check cache first
+        const cacheKey = this.hashGoal(goal, context, missionId);
+        if (this.enrichmentCache.has(cacheKey)) {
+            console.log(`[Brain] Using cached enrichment for goal: ${goal}`);
+            return this.enrichmentCache.get(cacheKey)!;
+        }
+
+        try {
+            // Ensure librarian URL is discovered
+            if (!this.librarianUrl) {
+                await this.discoverLibrarianService();
+            }
+            if (!this.librarianUrl) {
+                console.warn('[Brain] Librarian service URL not found, cannot enrich context with verbs/tools.');
+                const fallbackVerbs = this.getFallbackVerbs();
+                const fallbackTools = this.getFallbackTools();
+                const result = { relevantVerbs: fallbackVerbs, relevantTools: fallbackTools, discoveryContext: {} };
+                this.enrichmentCache.set(cacheKey, result);
+                return result;
+            }
+
+            const body: any = { goal };
+            if (context && context.length > 0) {
+                body.context = context;
+            }
+            if (missionId && missionId.length > 0) {
+                body.missionId = missionId;
+            }
+
+            console.log(`[Brain] Discovering verbs and tools for goal: ${goal}`);
+
+            // Create token-efficient prompt for discovery request
+            const tokenEfficientPrompt = this.createTokenEfficientPrompt(body.goal, body.context || '', body.missionId || '');
+            body.prompt = tokenEfficientPrompt;
+            
+            // Use token-efficient prompt when sending to Librarian
+            const response = await this.authenticatedApi.post(`http://${this.librarianUrl}/verbs/discover-for-planning`, body);
+            const data = response.data;
+            const result = {
+                relevantVerbs: data.relevantVerbs || [],
+                relevantTools: data.relevantTools || [],
+                discoveryContext: data.discoveryContext || {}
+            };
+            // Cache the result
+            this.enrichmentCache.set(cacheKey, result);
+            return result;
+        } catch (error) {
+            console.error('[Brain] Error enriching context with verbs and tools:', error instanceof Error ? error.message : String(error));
+            // Fallback to common known verbs and tools when discovery fails
+            const fallbackVerbs = this.getFallbackVerbs();
+            const fallbackTools = this.getFallbackTools();
+            const result = { relevantVerbs: fallbackVerbs, relevantTools: fallbackTools, discoveryContext: {} };
+            this.enrichmentCache.set(cacheKey, result);
+            return result;
+        }
+    }
+
+    // Helper methods for context enrichment
+    private hashGoal(goal: string, context?: string, missionId?: string): string {
+        const hash = crypto.createHash('sha256');
+        hash.update(goal || '');
+        if (context) hash.update(context);
+        if (missionId) hash.update(missionId);
+        return hash.digest('hex');
+    }
+
+    private getFallbackVerbs(): any[] {
+        return [
+            { verb: "SEARCH", description: "Search the web for information", capabilities: ["web_search"] },
+            { verb: "ANALYZE", description: "Analyze data or text", capabilities: ["data_analysis"] },
+            { verb: "SUMMARIZE", description: "Summarize content", capabilities: ["summarization"] },
+        ];
+    }
+
+    private getFallbackTools(): any[] {
+        return [
+            { toolId: "web-search", name: "Web Search Tool", verbs: ["SEARCH"], description: "Perform web searches" },
+            { toolId: "data-analysis", name: "Data Analysis Tool", verbs: ["ANALYZE"], description: "Analyze datasets" },
+        ];
+    }
+
+    // Create token-efficient prompt for discovery requests
+    private createTokenEfficientPrompt(goal: string, context?: string, missionId?: string): string {
+        // Estimate token count (rough approximation: 4 chars per token)
+        let currentTokenEstimate = Math.floor(goal.length / 4);
+        if (context) currentTokenEstimate += Math.floor(context.length / 4);
+        if (missionId) currentTokenEstimate += Math.floor(missionId.length / 4);
+        // If within reasonable limit, return simple concatenation
+        if (currentTokenEstimate <= 2500) {
+            return goal + (context ? ' ' + context : '') + (missionId ? ' ' + missionId : '');
+        }
+        // If over limit, truncate each component proportionally
+        const truncate = (str: string, maxChars: number) => str.length > maxChars ? str.substring(0, maxChars) + '...' : str;
+        const truncateGoal = truncate(goal, Math.floor(2500 / 3));
+        const truncateContext = context ? truncate(context, Math.floor(2500 / 3)) : '';
+        const truncateMissionId = missionId ? truncate(missionId, Math.floor(2500 / 3)) : '';
+        return truncateGoal + ' ' + truncateContext + ' ' + truncateMissionId;
+    }
+
+} // End of Brain class
+
+new Brain()

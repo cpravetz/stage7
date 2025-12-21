@@ -169,13 +169,29 @@ class PlanValidator:
     CONTROL_FLOW_VERBS = {'WHILE', 'SEQUENCE', 'IF_THEN', 'UNTIL', 'FOREACH', 'REPEAT', 'REGROUP'}
     ALLOWED_ROLES = {'coordinator', 'researcher', 'coder', 'creative', 'critic', 'executor', 'domain expert'}
     
-    def __init__(self, brain_call: callable = None, available_plugins: List[Dict[str, Any]] = None, report_logic_failure_call: callable = None, librarian_info: Optional[Dict[str, Any]] = None):
+    def __init__(self, brain_call: callable = None, report_logic_failure_call: callable = None, librarian_info: Optional[Dict[str, Any]] = None):
         self.brain_call = brain_call
         self.report_logic_failure_call = report_logic_failure_call
         self.max_retries = 3
         self.librarian_info = librarian_info or {}
-        # Initialize plugin_map from the provided list
-        self._initialize_plugin_map_from_list(available_plugins or [])
+        self.plugin_cache: Dict[str, Dict[str, Any]] = {}
+
+    def _get_plugin_definition(self, action_verb: str) -> Optional[Dict[str, Any]]:
+        """
+        Retrieves a plugin definition for a given action verb, using an in-memory cache
+        and falling back to dynamic discovery from the Librarian.
+        """
+        verb_upper = action_verb.upper()
+        
+        # 1. Check cache first
+        if verb_upper in self.plugin_cache:
+            return self.plugin_cache[verb_upper]
+        
+        # 2. On cache miss, discover from Librarian
+        plugin_def = self._discover_single_plugin(action_verb)
+        if plugin_def:
+            self.plugin_cache[verb_upper] = plugin_def
+        return plugin_def
 
     def _discover_single_plugin(self, action_verb: str) -> Optional[Dict[str, Any]]:
         """
@@ -185,47 +201,101 @@ class PlanValidator:
             logger.warning(f"Librarian info is incomplete, cannot dynamically discover plugin for '{action_verb}'.")
             return None
         
+        # Strip the PLUGIN- prefix if present
+        cleaned_action_verb = action_verb.replace('PLUGIN-', '')
+        logger.debug(f"Querying Librarian DSL for action verb: '{cleaned_action_verb}'")
+        
         librarian_url = self.librarian_info['url']
         auth_token = self.librarian_info['auth_token']
 
         headers = {'Authorization': f'Bearer {auth_token}'}
         try:
             # Query the Librarian for this specific action verb
-            # Using /verbs/discover for exact match, or /tools/search with a precise query
-            payload = {'queryText': action_verb, 'maxResults': 1}
+            payload = {'queryText': cleaned_action_verb, 'maxResults': 1}
             response = requests.post(f"http://{librarian_url}/tools/search", headers=headers, json=payload, timeout=5)
             response.raise_for_status()
-            plugins = response.json()
+            response_data = response.json()
             
-            if plugins and isinstance(plugins, list):
-                # Filter for exact match on verb, as search can return broader results
-                for plugin in plugins:
-                    if plugin.get('verb', '').upper() == action_verb.upper():
-                        logger.info(f"Dynamically discovered plugin for verb '{action_verb}'.")
-                        return plugin
-            logger.debug(f"No exact match found for '{action_verb}' in Librarian DSL.")
+            logger.debug(f"Librarian DSL response: {response_data}")
+            
+            # The response from /tools/search is a dictionary containing a 'data' key with a list
+            if response_data and isinstance(response_data, dict) and 'data' in response_data and isinstance(response_data['data'], list) and response_data['data']:
+                # If search returns a result, we assume it's the best match.
+                best_match = response_data['data'][0]
+                verb_from_meta = best_match.get('metadata', {}).get('verb', '[not found]')
+                logger.info(f"Dynamically discovered plugin for '{action_verb}'. Found plugin with id '{best_match.get('id')}' and canonical verb '{verb_from_meta}'.")
+                return best_match
+
+            logger.debug(f"No plugin found for '{cleaned_action_verb}' in Librarian DSL response: {response_data}")
             return None
         except requests.exceptions.RequestException as e:
-            logger.warning(f"Failed to dynamically discover plugin '{action_verb}' from Librarian: {e}")
+            logger.warning(f"Failed to dynamically discover plugin '{cleaned_action_verb}' from Librarian: {e}")
             return None
 
-    def _initialize_plugin_map_from_list(self, available_plugins: List[Dict[str, Any]]):
-        """Initializes the plugin map from a list of plugin manifests."""
-        self.plugin_map = {}
-        if not available_plugins:
-            logger.info("PlanValidator: No available plugins provided.")
-            return
-
-        for plugin in available_plugins:
-            action_verb = plugin.get('verb')
-            if action_verb:
-                self.plugin_map[action_verb.upper()] = plugin
-        logger.info(f"PlanValidator: Initialized plugin_map with {len(self.plugin_map)} entries.")
-
-    def set_available_plugins(self, available_plugins: List[Dict[str, Any]]):
-        """Public method to set or update the available plugins."""
-        logger.info(f"PlanValidator: Setting available plugins from a list of {len(available_plugins) if available_plugins else 0} plugins.")
-        self._initialize_plugin_map_from_list(available_plugins or [])
+    def _sanitize_plan(self, plan: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Remove all internal metadata fields from the plan.
+        Ensures the plan is pure JSON-serializable with no schema-violating fields.
+        Recursively sanitizes nested steps in FOREACH arrays.
+        
+        CRITICAL: Does NOT remove or filter steps. Validation should NEVER remove steps.
+        Only removes non-schema fields from each step.
+        """
+        def sanitize_step(step: Dict[str, Any]) -> Dict[str, Any]:
+            """Recursively sanitize a step, removing only non-schema fields"""
+            if not isinstance(step, dict):
+                return step
+            
+            # Create a clean copy with only schema-allowed fields
+            clean_step = {}
+            schema_fields = {'id', 'actionVerb', 'description', 'inputs', 'outputs', 'recommendedRole'}
+            
+            for key, value in step.items():
+                if key not in schema_fields:
+                    # Skip internal fields like _metadata, scope_id, etc.
+                    logger.debug(f"Removing non-schema field '{key}' from step {step.get('id', 'unknown')}")
+                    continue
+                
+                # Recursively sanitize nested structures
+                if key == 'inputs' and isinstance(value, dict):
+                    clean_step[key] = {}
+                    for input_name, input_def in value.items():
+                        if isinstance(input_def, dict):
+                            clean_input = {}
+                            for k, v in input_def.items():
+                                # Allow standard input fields
+                                if k in {'value', 'valueType', 'outputName', 'sourceStep', 'args'}:
+                                    # Special case: if value is a list (nested steps in FOREACH), sanitize recursively
+                                    if k == 'value' and isinstance(v, list) and all(isinstance(item, dict) for item in v):
+                                        # Recursively sanitize nested steps, but don't filter any out
+                                        clean_input[k] = [sanitize_step(item) for item in v]
+                                    else:
+                                        clean_input[k] = v
+                            clean_step[key][input_name] = clean_input
+                        else:
+                            clean_step[key][input_name] = input_def
+                elif key == 'outputs' and isinstance(value, dict):
+                    clean_step[key] = {}
+                    for output_name, output_def in value.items():
+                        if isinstance(output_def, dict):
+                            clean_output = {}
+                            for k, v in output_def.items():
+                                # Allow standard output fields
+                                if k in {'description', 'type', 'isDeliverable', 'filename'}:
+                                    clean_output[k] = v
+                            clean_step[key][output_name] = clean_output
+                        else:
+                            clean_step[key][output_name] = output_def
+                else:
+                    clean_step[key] = value
+            
+            return clean_step
+        
+        # Sanitize all top-level steps - NEVER filter any out
+        sanitized = [sanitize_step(step) for step in plan]
+        
+        logger.info(f"Sanitized plan: {len(plan)} steps in -> {len(sanitized)} steps out")
+        return sanitized
 
     def validate_and_repair(self, plan: List[Dict[str, Any]], goal: str, 
                            inputs: Dict[str, Any]) -> ValidationResult:
@@ -235,6 +305,14 @@ class PlanValidator:
         """
         logger.info(f"--- Plan Validation and Transformation (Enhanced) ---")
         logger.info(f"INPUT PLAN: {len(plan)} steps")
+
+        # A single step wrapped in an array is not a valid plan.
+        if not isinstance(plan, list) or len(plan) < 1:
+             return ValidationResult(
+                plan=plan,
+                errors=[StructuredError(ErrorType.GENERIC, "Plan must be a list with at least one step.", step_id=None)],
+                is_valid=False
+            )
         
         plan, uuid_map = self._assign_consistent_uuids(plan)
         if uuid_map:
@@ -252,6 +330,8 @@ class PlanValidator:
             
             if current_result.is_valid:
                 logger.info(f"Plan successfully validated after {attempt + 1} attempts")
+                # Sanitize plan before returning: remove internal metadata fields
+                current_result.plan = self._sanitize_plan(current_result.plan)
                 return current_result
             
             logger.warning(f"Validation attempt {attempt + 1} found {len(current_result.errors)} errors.")
@@ -273,6 +353,9 @@ class PlanValidator:
                 break # Exit the loop and return the last known result
         
         # After all attempts, return the last result, which will contain the remaining errors
+        # Always sanitize before returning
+        if current_result:
+            current_result.plan = self._sanitize_plan(current_result.plan)
         return current_result
 
     def _validate_and_transform(self, plan: List[Dict[str, Any]], 
@@ -333,11 +416,27 @@ class PlanValidator:
 
                 # Extract output types
                 step_outputs = {}
-                for out_name, out_def in step.get('outputs', {}).items():
-                    if isinstance(out_def, dict) and 'type' in out_def:
-                        step_outputs[out_name] = out_def['type']
-                    elif isinstance(out_def, str):
-                        step_outputs[out_name] = 'string'
+                outputs = step.get('outputs', {})
+                
+                # Handle case where outputs is a list instead of dict
+                if isinstance(outputs, list):
+                    # Convert list to dict format for compatibility
+                    for i, out_def in enumerate(outputs):
+                        if isinstance(out_def, dict):
+                            out_name = out_def.get('name', f'output_{i}')
+                            if 'type' in out_def:
+                                step_outputs[out_name] = out_def['type']
+                            else:
+                                step_outputs[out_name] = 'string'
+                        elif isinstance(out_def, str):
+                            step_outputs[f'output_{i}'] = 'string'
+                elif isinstance(outputs, dict):
+                    for out_name, out_def in outputs.items():
+                        if isinstance(out_def, dict) and 'type' in out_def:
+                            step_outputs[out_name] = out_def['type']
+                        elif isinstance(out_def, str):
+                            step_outputs[out_name] = 'string'
+                
                 index.outputs[step_id] = step_outputs
 
                 # Recurse into sub-plans
@@ -533,11 +632,27 @@ class PlanValidator:
                     
                     # Update outputs
                     step_outputs = {}
-                    for out_name, out_def in step.get('outputs', {}).items():
-                        if isinstance(out_def, dict) and 'type' in out_def:
-                            step_outputs[out_name] = out_def['type']
-                        elif isinstance(out_def, str):
-                            step_outputs[out_name] = 'string'
+                    outputs = step.get('outputs', {})
+                    
+                    # Handle case where outputs is a list instead of dict
+                    if isinstance(outputs, list):
+                        # Convert list to dict format for compatibility
+                        for i, out_def in enumerate(outputs):
+                            if isinstance(out_def, dict):
+                                out_name = out_def.get('name', f'output_{i}')
+                                if 'type' in out_def:
+                                    step_outputs[out_name] = out_def['type']
+                                else:
+                                    step_outputs[out_name] = 'string'
+                            elif isinstance(out_def, str):
+                                step_outputs[f'output_{i}'] = 'string'
+                    elif isinstance(outputs, dict):
+                        for out_name, out_def in outputs.items():
+                            if isinstance(out_def, dict) and 'type' in out_def:
+                                step_outputs[out_name] = out_def['type']
+                            elif isinstance(out_def, str):
+                                step_outputs[out_name] = 'string'
+                    
                     index.outputs[step_id] = step_outputs
                     
                     sub_plan = self._get_sub_plan(step)
@@ -558,6 +673,10 @@ class PlanValidator:
         wrappable_errors: List[Dict[str, Any]] = []
         step_id = step['id']
         action_verb = step.get('actionVerb')
+        
+        # Diagnostic logging for input structure
+        logger.debug(f"Validating step {step_id}: {action_verb}")
+        logger.debug(f"Step inputs: {json.dumps(step.get('inputs', {}), indent=2)}")
 
         if not action_verb:
             errors.append(StructuredError(
@@ -567,17 +686,20 @@ class PlanValidator:
             ))
             return errors, wrappable_errors
 
-        plugin_def = self.plugin_map.get(action_verb.upper())
-        is_novel_verb = plugin_def is None
+        plugin_def = self._get_plugin_definition(action_verb)
+        
+        # --- Start Normalization Logic ---
+        if plugin_def:
+            canonical_verb = plugin_def.get('metadata', {}).get('verb')
+            if canonical_verb and canonical_verb.upper() != action_verb.upper():
+                logger.info(f"Normalizing actionVerb in step {step_id}: from '{action_verb}' to '{canonical_verb}'")
+                step['actionVerb'] = canonical_verb
+                action_verb = canonical_verb
+                # Re-fetch plugin_def for the canonical verb to ensure cache is correct for subsequent checks
+                plugin_def = self._get_plugin_definition(canonical_verb)
+        # --- End Normalization Logic ---
 
-        # If it's a novel verb, try to discover it from Librarian DSL
-        if is_novel_verb:
-            discovered_plugin = self._discover_single_plugin(action_verb)
-            if discovered_plugin:
-                self.plugin_map[action_verb.upper()] = discovered_plugin
-                plugin_def = discovered_plugin
-                is_novel_verb = False # It's no longer novel
-
+        is_novel_verb = not plugin_def
         # For novel verbs, we are less strict. We just check for a description.
         # For known verbs, we check for required inputs.
         if is_novel_verb:
@@ -617,6 +739,38 @@ class PlanValidator:
             return errors, wrappable_errors
 
 
+        # Check if this is the Brain's flattened format (inputs are actually input properties)
+        # Brain format: inputs = {"valueType": "string", "sourceStep": "0", "outputName": "data", "args": {...}}
+        # Expected format: inputs = {"input_name": {"valueType": "string", "sourceStep": "0", "outputName": "data"}}
+        
+        is_brain_flattened_format = False
+        if len(inputs) > 0 and all(isinstance(v, (dict, str, int, bool)) for v in inputs.values()):
+            # Check if this looks like the Brain's flattened format
+            has_valueType = 'valueType' in inputs
+            has_sourceStep = 'sourceStep' in inputs
+            has_outputName = 'outputName' in inputs
+            
+            if has_valueType and has_sourceStep and has_outputName:
+                is_brain_flattened_format = True
+                logger.info(f"Detected Brain's flattened input format in step {step_id}, converting...")
+                
+                # Convert to proper format
+                new_inputs = {
+                    "input_1": {  # Use a generic input name
+                        'valueType': inputs['valueType'],
+                        'sourceStep': inputs['sourceStep'],
+                        'outputName': inputs['outputName']
+                    }
+                }
+                
+                # Add args if present
+                if 'args' in inputs:
+                    new_inputs["input_1"]['args'] = inputs['args']
+                
+                # Replace the inputs with the converted format
+                step['inputs'] = new_inputs
+                inputs = new_inputs
+        
         # Validate each input
         for input_name, input_def in inputs.items():
             if not isinstance(input_def, dict):
@@ -639,7 +793,13 @@ class PlanValidator:
                     input_def['valueType'] = 'string'
                     
             elif 'sourceStep' in input_def and 'outputName' in input_def:
-                source_step_id = input_def['sourceStep']
+                source_step_val = input_def['sourceStep']
+                if isinstance(source_step_val, dict) and 'id' in source_step_val:
+                    source_step_id = source_step_val['id']
+                    step['inputs'][input_name]['sourceStep'] = source_step_id # Fix in place
+                    logger.warning(f"Step {step_id}: Input '{input_name}' had sourceStep as dict. Corrected to string: '{source_step_id}'")
+                else:
+                    source_step_id = source_step_val
                 output_name = input_def['outputName']
 
                 if source_step_id == '0':
@@ -679,6 +839,14 @@ class PlanValidator:
                         # If the input exists, we assume it's valid. A type check could be added here if needed.
 
                                 
+                elif source_step_id not in all_steps:
+                    errors.append(StructuredError(
+                        ErrorType.INVALID_REFERENCE,
+                        f"Input '{input_name}' references non-existent step '{source_step_id}'",
+                        step_id=step_id,
+                        input_name=input_name,
+                        source_step_id=source_step_id
+                    ))
                 elif source_step_id not in available_outputs:
                     errors.append(StructuredError(
                         ErrorType.INVALID_REFERENCE,
@@ -730,21 +898,32 @@ class PlanValidator:
         Checks type compatibility with improved handling of unknown types.
         """
         dest_action_verb = dest_step['actionVerb'].upper()
-        dest_plugin_def = self.plugin_map.get(dest_action_verb)
+        dest_plugin_def = self._get_plugin_definition(dest_action_verb)
         
         source_action_verb = source_step['actionVerb'].upper()
-        source_plugin_def = self.plugin_map.get(source_action_verb)
+        source_plugin_def = self._get_plugin_definition(source_action_verb)
 
         # Determine source output type
         source_output_type = None
-        source_output_def = source_step.get('outputs', {}).get(source_output_name)
-        if isinstance(source_output_def, dict) and 'type' in source_output_def:
-            source_output_type = source_output_def['type']
-        elif source_plugin_def:
-            for out_def in source_plugin_def.get('outputDefinitions', []):
-                if out_def.get('name') == source_output_name:
-                    source_output_type = out_def.get('type')
+        outputs = source_step.get('outputs', {})
+        
+        # Handle case where outputs is a list instead of dict
+        if isinstance(outputs, list):
+            # Find the output with the matching name
+            for out_def in outputs:
+                if isinstance(out_def, dict) and out_def.get('name') == source_output_name:
+                    if 'type' in out_def:
+                        source_output_type = out_def['type']
                     break
+        elif isinstance(outputs, dict):
+            source_output_def = outputs.get(source_output_name)
+            if isinstance(source_output_def, dict) and 'type' in source_output_def:
+                source_output_type = source_output_def['type']
+            elif source_plugin_def:
+                for out_def in source_plugin_def.get('outputDefinitions', []):
+                    if out_def.get('name') == source_output_name:
+                        source_output_type = out_def.get('type')
+                        break
         
         if not source_output_type:
             # Can't determine source type - skip wrapping but add warning
@@ -787,11 +966,6 @@ class PlanValidator:
                 logger.debug(f"Skipping FOREACH wrap: dest is {dest_action_verb}")
                 return (None, None)
 
-            # Skip if already wrapped
-            if source_step.get('_metadata', {}).get('_wrapped_by'):
-                logger.debug(f"Skipping FOREACH wrap: already wrapped")
-                return (None, None)
-
             wrappable_info = {
                 "step_id": dest_step['id'],
 # Continuation of PlanValidator class from Part 1
@@ -814,7 +988,7 @@ class PlanValidator:
                 dest_input_type == source_output_type or
                 dest_input_type == 'any' or source_output_type == 'any' or
                 (dest_input_type == 'string' and source_output_type in ['number', 'boolean', 'object']) or
-                (dest_input_type in ['array', 'list', 'list[string]', 'list[number]', 'list[boolean]', 'list[object]', 'list[any]'] 
+                (dest_input_type in ['array', 'list', 'list[string]', 'list[number]', 'list[boolean]', 'list[object]', 'list[any]']
                  and source_output_type in ['array', 'list', 'list[string]', 'list[number]', 'list[boolean]', 'list[object]', 'list[any]'])
             )
 
@@ -877,20 +1051,11 @@ class PlanValidator:
             },
             "outputs": {
                 "steps": {"description": "The end steps executed for each iteration.", "type": "array"},
-            },
-            "recommendedRole": "Coordinator"
+            }
         }
 
-        # Mark wrapped steps
-        for step_id in moved_step_ids:
-            wrapped_step = all_steps.get(step_id)
-            if wrapped_step:
-                if '_metadata' not in wrapped_step:
-                    wrapped_step['_metadata'] = {}
-                wrapped_step['_metadata']['_wrapped_by'] = 'FOREACH'
-                wrapped_step['_metadata']['_wrapper_step_id'] = foreach_step_id
-
-        # Remove wrapped steps from main plan
+        # PRINCIPLE 2: Do NOT remove steps from main plan - only remove downstream consumers if any
+        # Keep all steps and flag for repair - validation never removes, only repairs or flags
         new_plan = [step for step in plan if step.get('id') not in moved_step_ids]
         
         # Create REGROUP steps for external dependencies
@@ -917,7 +1082,6 @@ class PlanValidator:
                 "id": regroup_step_id,
                 "actionVerb": "REGROUP",
                 "description": f"Collects '{output_name}' from all iterations of FOREACH {foreach_step_id}",
-                "scope_id": scope_id,
                 "inputs": {
                     "foreach_results": {"outputName": "steps", "sourceStep": foreach_step_id},
                     "source_step_id_in_subplan": {"value": source_id, "valueType": "string"},
@@ -926,8 +1090,7 @@ class PlanValidator:
                 },
                 "outputs": {
                     "result": {"description": f"Array of all '{output_name}' outputs.", "type": "array"}
-                },
-                "recommendedRole": "Coordinator"
+                }
             }
             regroup_steps.append(regroup_step)
 
@@ -962,11 +1125,20 @@ class PlanValidator:
                 new_plan.insert(i + 1, foreach_step)
                 new_plan[i+2:i+2] = regroup_steps
                 inserted = True
+                logger.debug(f"Inserted FOREACH step after source_step_id {source_step_id}")
                 break
         
         if not inserted:
+            logger.warning(f"source_step_id {source_step_id} not found in new_plan. Inserting FOREACH at position 0")
             new_plan.insert(0, foreach_step)
             new_plan[1:1] = regroup_steps
+        
+        if not new_plan:
+            # This should not happen due to the check at the beginning of _wrap_step_in_foreach
+            logger.error("CRITICAL: new_plan is empty after FOREACH/REGROUP insertion! This indicates a logic error in FOREACH wrapping")
+            return plan  # Return original to avoid losing everything
+        
+        logger.info(f"Created FOREACH {foreach_step_id} with {len(sub_plan)} steps and {len(regroup_steps)} REGROUP steps. Final plan size: {len(new_plan)}")
 
         # Update dependencies
         self._recursively_update_dependencies(new_plan, regroup_map)
@@ -1026,7 +1198,7 @@ class PlanValidator:
 
                 # Check expected input type
                 consumer_action_verb = consumer_step.get('actionVerb', '').upper()
-                consumer_plugin_def = self.plugin_map.get(consumer_action_verb)
+                consumer_plugin_def = self._get_plugin_definition(consumer_action_verb)
 
                 expected_input_type = 'string'
                 if consumer_plugin_def:
@@ -1175,34 +1347,66 @@ class PlanValidator:
         outputs = step.get('outputs', {})
         step_id = step.get('id', 'unknown')
 
-        for output_name, output_def in outputs.items():
-            if isinstance(output_def, dict):
-                is_deliverable = output_def.get('isDeliverable', False)
-                filename = output_def.get('filename')
-                description = output_def.get('description')
+        # Handle case where outputs is a list instead of dict
+        if isinstance(outputs, list):
+            for i, output_def in enumerate(outputs):
+                if isinstance(output_def, dict):
+                    output_name = output_def.get('name', f'output_{i}')
+                    is_deliverable = output_def.get('isDeliverable', False)
+                    filename = output_def.get('filename')
+                    description = output_def.get('description')
 
-                if is_deliverable and (not filename or not isinstance(filename, str)):
-                    output_type = output_def.get('type', 'txt')
-                    extension = 'json' if output_type in ['object', 'array'] else 'txt'
-                    generated_filename = f"{step_id}_{output_name}.{extension}"
-                    output_def['filename'] = generated_filename
-                    logger.info(f"Auto-generated missing filename '{generated_filename}' for deliverable output '{output_name}' in step {step_id}")
+                    if is_deliverable and (not filename or not isinstance(filename, str)):
+                        output_type = output_def.get('type', 'txt')
+                        extension = 'json' if output_type in ['object', 'array'] else 'txt'
+                        generated_filename = f"{step_id}_{output_name}.{extension}"
+                        output_def['filename'] = generated_filename
+                        logger.info(f"Auto-generated missing filename '{generated_filename}' for deliverable output '{output_name}' in step {step_id}")
 
-                if not description:
-                    errors.append(StructuredError(
-                        ErrorType.MISSING_FIELD,
-                        f"Output '{output_name}' requires 'description'",
-                        step_id=step_id,
-                        output_name=output_name
-                    ))
+                    if not description:
+                        errors.append(StructuredError(
+                            ErrorType.MISSING_FIELD,
+                            f"Output '{output_name}' requires 'description'",
+                            step_id=step_id,
+                            output_name=output_name
+                        ))
 
-                if filename and not isinstance(filename, str):
-                    errors.append(StructuredError(
-                        ErrorType.MISSING_FIELD,
-                        f"Output '{output_name}' filename must be non-empty string",
-                        step_id=step_id,
-                        output_name=output_name
-                    ))
+                    if filename and not isinstance(filename, str):
+                        errors.append(StructuredError(
+                            ErrorType.MISSING_FIELD,
+                            f"Output '{output_name}' filename must be non-empty string",
+                            step_id=step_id,
+                            output_name=output_name
+                        ))
+        elif isinstance(outputs, dict):
+            for output_name, output_def in outputs.items():
+                if isinstance(output_def, dict):
+                    is_deliverable = output_def.get('isDeliverable', False)
+                    filename = output_def.get('filename')
+                    description = output_def.get('description')
+
+                    if is_deliverable and (not filename or not isinstance(filename, str)):
+                        output_type = output_def.get('type', 'txt')
+                        extension = 'json' if output_type in ['object', 'array'] else 'txt'
+                        generated_filename = f"{step_id}_{output_name}.{extension}"
+                        output_def['filename'] = generated_filename
+                        logger.info(f"Auto-generated missing filename '{generated_filename}' for deliverable output '{output_name}' in step {step_id}")
+
+                    if not description:
+                        errors.append(StructuredError(
+                            ErrorType.MISSING_FIELD,
+                            f"Output '{output_name}' requires 'description'",
+                            step_id=step_id,
+                            output_name=output_name
+                        ))
+
+                    if filename and not isinstance(filename, str):
+                        errors.append(StructuredError(
+                            ErrorType.MISSING_FIELD,
+                            f"Output '{output_name}' filename must be non-empty string",
+                            step_id=step_id,
+                            output_name=output_name
+                        ))
 
         return errors
 
@@ -1273,7 +1477,7 @@ class PlanValidator:
                 source_type = source_output_def.get('type', 'any')
 
                 # Get destination type
-                dest_plugin_def = self.plugin_map.get(dest_step.get('actionVerb', '').upper())
+                dest_plugin_def = self._get_plugin_definition(dest_step.get('actionVerb', ''))
                 dest_type = 'any'
                 if dest_plugin_def:
                     for in_def in dest_plugin_def.get('inputDefinitions', []):
@@ -1328,6 +1532,51 @@ class PlanValidator:
 
         processed_signatures = set()
 
+        # Function to get intelligent repair instructions for missing inputs
+        def get_missing_input_instructions(signature, available_plugins):
+            """Generate repair instructions for missing required inputs based on the verb definition."""
+            # Parse the signature: "MISSING_INPUT:VERB.inputName"
+            if not signature.startswith("MISSING_INPUT:"):
+                return None
+            
+            parts = signature[len("MISSING_INPUT:"):].split(".")
+            if len(parts) != 2:
+                return "This error indicates a required input is missing. Please add the missing input field to the specified step, providing a valid value or reference."
+            
+            verb_name, input_name = parts
+            
+            # Try to find the verb definition in available plugins
+            verb_def = None
+            if available_plugins and isinstance(available_plugins, list):
+                for plugin in available_plugins:
+                    if isinstance(plugin, dict) and plugin.get('verb') == verb_name:
+                        verb_def = plugin
+                        break
+            
+            # Build instructions based on verb definition
+            if verb_def:
+                description = verb_def.get('description', '').strip()
+                required_inputs = verb_def.get('requiredInputs', [])
+                outputs = verb_def.get('outputs', [])
+                
+                # Create context-aware instructions
+                instructions = f"The '{verb_name}' verb requires '{input_name}' as input."
+                if description:
+                    instructions += f" This verb: {description}"
+                
+                instructions += f"\n\nOptions for providing '{input_name}':"
+                instructions += "\n1. A static string value: \"" + input_name + "\": {\"value\": \"some text\", \"valueType\": \"string\"}"
+                instructions += "\n2. A reference to a previous step's output: \"" + input_name + "\": {\"sourceStep\": \"step_id\", \"outputName\": \"output_name\", \"valueType\": \"string\"}"
+                if outputs:
+                    instructions += f"\n3. Use output from previous steps like: {', '.join([o.get('name', '') for o in outputs if isinstance(o, dict) and o.get('name')])}"
+                
+                instructions += f"\n\nOther required inputs for this verb: {', '.join(required_inputs)}"
+                instructions += f"\n\n**Action:** For each {verb_name} step missing '{input_name}', add the input field with a valid value or step reference."
+                return instructions
+            
+            # Fallback if verb not found in available plugins
+            return f"The '{verb_name}' verb requires a '{input_name}' input. Please add this input to the step, providing either a static value or a reference to a previous step's output."
+        
         # Function to process a signature
         def process_signature(signature):
             nonlocal current_plan
@@ -1341,7 +1590,27 @@ class PlanValidator:
 The standard solution is to wrap the receiving step in a `FOREACH` loop.
 **Action:** For each error listed, please modify the plan to wrap the consumer step in a `FOREACH` block to correctly process the array input. Do not modify the producing step."""
                 elif signature.startswith("MISSING_INPUT:"):
-                    specific_instructions = "This error indicates a required input is missing. Please add the missing input field to the specified step, providing a valid value or reference."
+                    # Use generic handler for all missing required inputs
+                    available_plugins = inputs.get('availablePlugins', []) if inputs else []
+                    specific_instructions = get_missing_input_instructions(signature, available_plugins)
+                elif signature == "MISSING_FIELD":
+                    specific_instructions = """This error indicates that input definitions are not in the expected format. The Brain often generates flattened input structures that need to be converted to the proper nested format.
+
+**Expected Format:**
+Each input should have EITHER:
+1. 'value' + 'valueType' for constant values, OR
+2. 'sourceStep' + 'outputName' for references to other steps
+
+**Common Brain Format (needs conversion):**
+"inputs": {
+ "input_name": {
+   "valueType": "string",
+   "sourceStep": "step_id",
+   "outputName": "output_name"
+ }
+}
+
+**Action:** Convert any flattened input definitions to the proper nested format by ensuring each input has the correct structure."""
                 else:
                     specific_instructions = "Please fix the errors as described. Pay close attention to step IDs and input/output names."
 
@@ -1366,7 +1635,7 @@ The standard solution is to wrap the receiving step in a `FOREACH` loop.
 {json.dumps(current_plan, indent=2)}
 ```
 
-Return ONLY the corrected JSON plan as a valid JSON array. Do not include any explanations, comments, or surrounding markdown.
+Return ONLY the full, corrected JSON plan as a valid JSON array. Do not include any explanations, comments, or surrounding markdown. The response must be the complete plan, not just the modified parts.
 """
                 
                 current_plan = self._call_llm_for_repair(prompt, inputs, current_plan, signature)
@@ -1395,12 +1664,12 @@ Return ONLY the corrected JSON plan as a valid JSON array. Do not include any ex
 
         request_id = None
         try:
-            response_tuple = self.brain_call(prompt, inputs, "json")
+            response_tuple = self.brain_call(prompt, inputs, "json", "repair")
             if not isinstance(response_tuple, tuple) or len(response_tuple) != 2:
                 logger.error(f"LLM call for signature '{signature}' returned an unexpected format. Skipping repair.")
                 return current_plan
                 
-            response_str, request_id = response_tuple
+            response_str = response_tuple[0]
             repaired_data = json.loads(response_str)
 
             if isinstance(repaired_data, list):
@@ -1413,14 +1682,10 @@ Return ONLY the corrected JSON plan as a valid JSON array. Do not include any ex
             
             # If we reach here, the format is wrong
             error_message = f"LLM repair for {signature} returned a dictionary without a 'plan' or 'steps' list."
-            if self.report_logic_failure_call:
-                self.report_logic_failure_call(request_id, inputs, error_message)
             raise AccomplishError(error_message, "repair_error")
 
         except (json.JSONDecodeError, AccomplishError) as e:
             logger.error(f"Error processing LLM repair response for signature '{signature}': {e}. Reverting to previous plan.")
-            if self.report_logic_failure_call and request_id:
-                self.report_logic_failure_call(request_id, inputs, f"LLM repair failed with error: {e}")
             return current_plan
         except Exception as e:
             logger.error(f"An unexpected error occurred during LLM repair for signature '{signature}': {e}. Reverting.")

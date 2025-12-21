@@ -1,4 +1,4 @@
-import { PluginDefinition, signPlugin, verifyPluginSignature, PluginManifest, RepositoryConfig, PluginRepositoryType, PluginLocator, PluginRepository } from '@cktmcs/shared'; // PluginRepository restored
+import { PluginDefinition, signPlugin, verifyPluginSignature, PluginManifest, RepositoryConfig, PluginRepositoryType, PluginLocator, PluginRepository } from '@cktmcs/shared'; 
 
 import axios from 'axios';
 import { analyzeError } from '@cktmcs/errorhandler';

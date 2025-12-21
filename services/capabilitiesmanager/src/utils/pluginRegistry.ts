@@ -54,11 +54,11 @@ const INTERNAL_VERBS: PluginManifest[] = [
         id: 'internal-GENERATE',
         verb: 'GENERATE',
         version: '1.0.0',
-        description: 'Uses LLM services to generate content from a prompt or other content. Services include image creation, audio transcription, image editing, etc.',
+        description: 'Uses LLM services to generate content from a prompt or other content. Services include image creation, audio transcription, image editing, etc. The prompt will be sent to the LLM, and you can insert additiona inputs using the embedding syntax {} to insert inputs from previous steps into the prompt.',
         language: 'internal',
         inputDefinitions: [
             { name: 'optimization', type: PluginParameterType.STRING, required: false, description: 'Optimization strategy.' },
-            { name: 'prompt', type: PluginParameterType.STRING, required: false, description: 'Text prompt for generation.' },
+            { name: 'prompt', type: PluginParameterType.STRING, required: true, description: 'Text prompt for generation.' },
             { name: 'file', type: PluginParameterType.OBJECT, required: false, description: 'File for generation context.' },
             { name: 'audio', type: PluginParameterType.OBJECT, required: false, description: 'Audio for generation context.' },
             { name: 'video', type: PluginParameterType.OBJECT, required: false, description: 'Video for generation context.' },

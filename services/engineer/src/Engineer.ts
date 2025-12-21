@@ -346,6 +346,23 @@ export class Engineer extends BaseEntity {
             }
         });
 
+        app.post('/createPluginFromOpenAPI', async (req, res) => {
+            const { specUrl, name, description, authentication, baseUrl } = req.body;
+
+            if (!specUrl || !name) {
+                return res.status(400).json({ error: 'specUrl and name are required' });
+            }
+
+            try {
+                const result = await this.createPluginFromOpenAPI(specUrl, name, description, authentication, baseUrl);
+                res.json(result);
+            } catch (error) {
+                analyzeError(error as Error);
+                console.error('Failed to create plugin from OpenAPI spec:', error instanceof Error ? error.message : error);
+                res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+            }
+        });
+
         app.post('/repair', async (req, res) => {
             try {
                 const { errorMessage, code } = req.body;
@@ -377,139 +394,10 @@ export class Engineer extends BaseEntity {
     }
 
     async createPlugin(verb: string, context: Map<string, InputValue>, guidance: string, language?: string): Promise<PluginDefinition | undefined> {
-        console.log('Creating plugin for verb:', verb, 'with language:', language || 'auto-detect');
-        this.newPlugins.push(verb);
-        const explanation = await this.generateExplanation(verb, context);
-        // Removed unused pluginStructure, configItems, metadata variable declarations from here
-
-        try {
-            const contextString = JSON.stringify(Array.from(context.entries()));
-
-            // Determine plugin type and generate accordingly
-            if (language === 'container') {
-                return await this.createContainerPlugin(verb, context, explanation, guidance);
-            }
-
-            const engineeringPrompt = `Create a Python 3.9+ based plugin for the action verb "${verb}" with the following context: ${explanation}
-            If Python is not suitable for this specific task (provide a brief justification if so), you may generate a JavaScript plugin instead.
-
-            The planner provides this additional guidance: ${guidance}
-
-            The plugin should expect inputs structured as a Map<string, InputValue>, where InputValue is defined as:
-            interface InputValue {
-                inputName: string;
-                value: string | number | boolean | any[] | object | null;
-                valueType: 'string' | 'number' | 'boolean' | 'array' | 'object' | 'any';
-                args?: Record<string, any>;
-            }
-            (Note: dependencyOutputs and agentDependencies are usually populated by the execution environment, not directly by you or planner).
-
-            Use this context to determine the required inputs: ${contextString}
-
-            Important requirements:
-              1. The plugin MUST include comprehensive error handling.
-              2. All external dependencies must be explicitly declared (e.g., in requirements.txt for Python).
-              3. Include input validation for all parameters within the plugin code.
-              4. Add logging for important operations.
-              5. If the plugin might generate a plan, include PLAN in outputDefinitions.
-              6. Include comprehensive unit tests in a separate file (e.g., 'test_main.py' for Python or 'plugin.test.js' for JavaScript) covering primary functionality, input validation, and edge cases.
-              7. Add retry logic for external service calls if applicable.
-              8. For Python plugins, ensure the main logic is in a \`main.py\` file.
-              9. If the Python plugin requires external Python packages, include a \`requirements.txt\` file in the \`entryPoint.files\` listing these dependencies (e.g., \`requests==2.25.1\`).
-              10. Python plugins MUST read their inputs (a JSON string representing the input Map, not InputValue directly but its serialized form) from standard input (stdin) and print their results (a JSON string representing a PluginOutput[] array) to standard output (stdout).
-              11. Generated code should follow security best practices, including sanitizing any inputs used in shell commands or file paths, and avoiding common vulnerabilities.
-
-            Provide a JSON object with the following structure:
-            {
-                "id": "plugin-${verb}",
-                "verb": "${verb}",
-                "description": "A short description of the plugin",
-                "explanation": "A more complete description including inputs, process overview, and outputs",
-                "inputDefinitions": [{
-                  "name": "inputNameExample",
-                  "required": true,
-                  "type": "string", // Use PluginParameterType enum values
-                  "description": "Brief explanation of the input"
-                }],
-                "outputDefinitions": [{
-                  "name": "outputNameExample",
-                  "required": true,
-                  "type": "string", // Use PluginParameterType enum values
-                  "description": "Brief explanation of the output"
-                }],
-                "language": "python", // "python" or "javascript"
-                "entryPoint": {
-                    "main": "main.py", // For Python
-                    "files": {
-                        "main.py": "# Python code here...\nimport json, sys\nif __name__ == '__main__':\n  try:\n    inputs_map_str = sys.stdin.read()\n    # inputs_map is a list of [key, InputValue] pairs as a JSON string from MapSerializer.transformForSerialization(Map<string, InputValue>)\n    # The Python script needs to deserialize this structure properly.\n    # Example: inputs_list_of_pairs = json.loads(inputs_map_str)\n    # inputs_dict = {item[0]: item[1]['inputValue'] for item in inputs_list_of_pairs} # Simplified example, actual structure of InputValue is more complex\n    # A better approach for Python would be to expect a simple JSON object of inputs, not a serialized Map.\n    # For now, stick to the prompt that it's a serialized Map<string, InputValue> from stdin.\n    result = [{'name': 'outputName', 'result': 'resultValue', 'resultType': 'string', 'success': true}]\n  except Exception as e:\n    result = [{'name': 'error', 'result': str(e), 'resultType': 'ERROR', 'success': false}]\n  print(json.dumps(result))",
-                        "requirements.txt": "# e.g., requests>=2.20"
-                    },
-                    "test": {
-                        "test_main.py": "# Python unit tests here..."
-                    }
-                },
-                "configuration": [{
-                    "key": "API_KEY_EXAMPLE",
-                    "value": "Default value if any. If no default, this field can be omitted or set to null.",
-                    "description": "Description of the configuration item",
-                    "required": true,
-                    "type": "string" // Should be one of 'string' | 'number' | 'boolean' | 'secret'
-                }],
-                "metadata": {
-                    "category": ["text_processing"],
-                    "tags": ["example", "text"],
-                    "complexity": 3, // number from 1 to 10
-                    "dependencies": ["python>=3.9"],
-                    "version": "1.0.0" // Initial version
-                }
-            }
-            Ensure the plugin's 'inputDefinitions' field accurately defines the expected inputs.
-            The main file should implement the plugin logic.
-            Include appropriate error handling and logging.
-            Use publicly available web services where possible.
-            The code should be immediately executable without any compilation step for the target language.
-            Determine any necessary environment variables or configuration items needed for the plugin to function correctly.
-`;
-
-            const response = await this.authenticatedApi.post(`http://${this.brainUrl}/chat`, {
-                exchanges: [{ role: 'user', content: engineeringPrompt }],
-                optimization: 'accuracy',
-                responseType: 'json'
-            });
-            
-            // It's crucial that the Brain returns a JSON string that can be parsed.
-            // Add robust parsing and error handling for the Brain's response.
-            let pluginStructure;
-            try {
-                pluginStructure = JSON.parse(response.data.result || response.data.response || response.data); // Adjust based on actual Brain response structure
-            } catch (parseError) {
-                console.error('Error parsing Brain response for plugin structure:', parseError);
-                console.error('Raw Brain response:', response.data);
-                const errorMsg = (parseError && typeof parseError === 'object' && 'message' in parseError)
-                    ? (parseError as Error).message
-                    : String(parseError);
-                throw new Error(`Failed to parse plugin structure from Brain: ${errorMsg}`);
-            }
-
-
-            const validationResult = this.validatePluginStructure(pluginStructure);
-            if (!validationResult.valid) {
-                console.error('Generated plugin structure is invalid:', validationResult.issues);
-                throw new Error(`Generated plugin structure is invalid: ${validationResult.issues.join(', ')}`);
-            }
-
-            if (!await this.validatePluginCode(pluginStructure.entryPoint, pluginStructure.language)) {
-                 console.error('Generated plugin code failed validation.');
-                throw new Error('Generated plugin code failed validation');
-            }
-
-            return this.finalizePlugin(pluginStructure, explanation);
-        } catch (error) {
-            analyzeError(error as Error); // Ensure analyzeError is effective
-            console.error('Error creating plugin in Engineer.createPlugin:', error instanceof Error ? error.message : String(error));
-            return undefined; // Or rethrow, depending on desired error propagation
-        }
+        return await this.createPluginWithRecovery(verb, context, guidance, language);
     }
+
+
 
 
     private async handleMessage(req: express.Request, res: express.Response) {
@@ -622,6 +510,36 @@ Context: ${contextString}`;
         }
     }
 
+    async createPluginFromOpenAPI(specUrl: string, name: string, description: string = '', authentication?: any, baseUrl?: string): Promise<any> {
+        console.log(`Creating plugin from OpenAPI spec: ${specUrl}`);
+
+        const registrationRequest: OpenAPIToolRegistrationRequest = {
+            name,
+            specUrl,
+            description,
+            authentication,
+            baseUrl,
+        };
+
+        const parsingResult = await this.registerOpenAPITool(registrationRequest);
+
+        if (!parsingResult.success || !parsingResult.tool) {
+            throw new Error(`Failed to parse OpenAPI spec: ${parsingResult.errors?.join(', ')}`);
+        }
+
+        const toolManifest = parsingResult.tool;
+        const policyConfig = {}; // Add policy config if needed
+        const wrapperLanguage = 'typescript'; // Or make this configurable
+
+        const generatedPlugin = await this.generateWrapperPlugin(toolManifest, policyConfig, wrapperLanguage);
+
+        if (!generatedPlugin) {
+            throw new Error('Failed to generate wrapper plugin from OpenAPI tool manifest.');
+        }
+
+        return this.finalizePlugin(generatedPlugin, generatedPlugin.explanation);
+    }
+    
     /**
      * Validate container plugin structure
      */
@@ -1411,7 +1329,7 @@ The wrapper should:
         } catch (error) {
             if (attempt >= maxAttempts) {
                 console.error(`Failed to create plugin after ${maxAttempts} attempts:`, error);
-                throw error;
+                return undefined;
             }
 
             // Exponential backoff with jitter
@@ -1427,10 +1345,10 @@ The wrapper should:
             // Try to recover by generating a simpler version
             if (attempt === 1) {
                 const simplifiedGuidance = `Create a simpler version of: ${guidance}`;
-                return this.createPluginWithRecovery(verb, context, simplifiedGuidance, language, attempt + 1);
+                return await this.createPluginWithRecovery(verb, context, simplifiedGuidance, language, attempt + 1);
             }
 
-            return this.createPluginWithRecovery(verb, context, guidance, language, attempt + 1);
+            return await this.createPluginWithRecovery(verb, context, guidance, language, attempt + 1);
         }
     }
 
@@ -1506,12 +1424,16 @@ try {
         };
     }
 
-    private logPerformanceMetrics() {
+    private logPerformanceMetrics(): void {
+        const totalTime = this.performanceMetrics.validationTime +
+                         this.performanceMetrics.generationTime +
+                         this.performanceMetrics.testExecutionTime;
+
         console.log('Engineer Performance Metrics:');
         console.log(`- Validation Time: ${this.performanceMetrics.validationTime}ms`);
         console.log(`- Generation Time: ${this.performanceMetrics.generationTime}ms`);
         console.log(`- Test Execution Time: ${this.performanceMetrics.testExecutionTime}ms`);
-        console.log(`- Total Time: ${this.performanceMetrics.validationTime + this.performanceMetrics.generationTime + this.performanceMetrics.testExecutionTime}ms`);
+        console.log(`- Total Time: ${totalTime}ms`);
     }
 }
 

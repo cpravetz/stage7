@@ -1033,6 +1033,26 @@ export class Step {
             console.log(`[Step ${this.id}] All plugin output names already match planned output names. No remapping needed.`);
             return pluginOutputs;
         }
+
+        // Handle case where we have one custom output but multiple plugin outputs
+        // Map the first plugin output to the custom name (extra outputs are ignored)
+        if (customOutputKeys.length === 1 && mappablePluginOutputs.length > 1) {
+            const customName = customOutputKeys[0];
+            const primaryOutput = mappablePluginOutputs[0];
+            
+            console.log(`[Step ${this.id}] Mapping multiple plugin outputs to single custom output '${customName}'. Primary output: '${primaryOutput.name}', ignored: ${mappablePluginOutputs.slice(1).map(p => p.name).join(', ')}`);
+            
+            const mappedOutput: PluginOutput = {
+                ...primaryOutput,
+                name: customName,
+            };
+            
+            // Return the mapped output, plus error/status outputs but drop other extra outputs
+            return [
+                mappedOutput,
+                ...pluginOutputs.filter(p => p.name === 'error' || p.resultType === PluginParameterType.PLAN || p.name === 'status')
+            ];
+        }
     
         // More complex mapping for multiple outputs could be added here.
         console.warn(`[Step ${this.id}] mapPluginOutputsToCustomNames: Unhandled mapping scenario. Custom outputs: ${customOutputKeys.join(', ')}, Plugin results: ${mappablePluginOutputs.map(p => p.name).join(', ')}. Returning original outputs.`);
@@ -1398,8 +1418,22 @@ export class Step {
         let inputArray: any[];
         if (Array.isArray(arrayInput.value)) {
             inputArray = arrayInput.value;
+        } else if (typeof arrayInput.value === 'string') {
+            try {
+                const parsed = JSON.parse(arrayInput.value);
+                if (Array.isArray(parsed)) {
+                    console.log(`[Step ${this.id}] handleForeach: Parsed string input into an array of length ${parsed.length}.`);
+                    inputArray = parsed;
+                } else {
+                    console.log(`[Step ${this.id}] handleForeach: Input string is valid JSON but not an array. Treating the entire string as a single item.`);
+                    inputArray = [arrayInput.value];
+                }
+            } catch (e) {
+                console.log(`[Step ${this.id}] handleForeach: Input is a non-JSON string. Treating the entire string as a single item.`);
+                inputArray = [arrayInput.value];
+            }
         } else {
-            return this.createErrorResponse(`FOREACH "array" input must be an array. Received type: ${typeof arrayInput.value}`, '[Step]Error in FOREACH step');
+            return this.createErrorResponse(`FOREACH "array" input must be an array or a string (JSON or literal). Received type: ${typeof arrayInput.value}`, '[Step]Error in FOREACH step');
         }
         console.debug(`[Step ${this.id}] handleForeach: Input array length: ${inputArray.length}`);
 

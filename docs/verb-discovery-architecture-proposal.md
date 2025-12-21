@@ -1,8 +1,21 @@
-# Enhanced Verb Discovery & Tool Integration Architecture
+# DEPRECATED: Enhanced Verb Discovery & Tool Integration Architecture
 
-## Executive Summary
+**Status:** This document has been consolidated into [`consolidated-verb-discovery-architecture.md`](docs/consolidated-verb-discovery-architecture.md)
 
-This document presents a comprehensive architecture for dynamic verb discovery and tool integration, combining the best elements from previous proposals into a unified, phased approach. The solution leverages existing Chroma-powered knowledge graph infrastructure while incorporating reactive discovery mechanisms and future-proof evolutionary concepts.
+**Migration Guide:** All concepts and implementation details from this document have been incorporated into the consolidated architecture with the following enhancements:
+
+- Integrated with tool discovery and planning concepts from tool_discovery_and_planning_architecture.md
+- Added Brain Awareness section for LLM access to verb discovery
+- Enhanced with caching mechanisms from verb-discovery-and-caching.md
+- Incorporated implementation details from verb-architecture-consolidation-summary.md
+
+**Key Sections Migrated:**
+- Phased evolution approach (Chroma-powered discovery → Brain-aware planning → Context-aware knowledge graph)
+- Chroma collection structure for verbs and tools
+- NovelVerbHandler enhancement with reactive discovery
+- Implementation roadmap and success metrics
+
+Please refer to the consolidated document for the most current and comprehensive architecture.
 
 ## Problem Analysis
 
