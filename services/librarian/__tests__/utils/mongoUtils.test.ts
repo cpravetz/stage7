@@ -1,5 +1,5 @@
 import { MongoClient, Db, Collection, InsertOneResult, UpdateResult, DeleteResult, AggregationCursor } from 'mongodb';
-import { connectMongo, storeInMongo, loadFromMongo, loadManyFromMongo, deleteManyFromMongo, deleteFromMongo, updateInMongo, updateManyInMongo, aggregateInMongo } from '../src/utils/mongoUtils';
+import { connectMongo, storeInMongo, loadFromMongo, loadManyFromMongo, deleteManyFromMongo, deleteFromMongo, updateInMongo, updateManyInMongo, aggregateInMongo } from 'utils/mongoUtils';
 import { analyzeError } from '@cktmcs/errorhandler';
 
 // Mock external dependencies

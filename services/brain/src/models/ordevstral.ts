@@ -31,11 +31,11 @@ export class Claude2Model extends BaseModel {
         ]);
 
         super({
-            name: "anthropic/claude-3.5-haiku-20241022",
-            modelName: "anthropic/claude-3.5-haiku-20241022",
+            name: "ormistralai/devstral-2512:free",
+            modelName: "mistralai/devstral-2512:free",
             interfaceName: "openrouter",
             serviceName: "ORService",
-            tokenLimit: 100000, // Adjust this value if you know the exact token limit for Claude 2
+            tokenLimit: 250000, // Adjust this value if you know the exact token limit for Claude 2
             scoresByConversationType: scoresByConversationType,
             contentConversation: [LLMConversationType.TextToCode, LLMConversationType.CodeToText, LLMConversationType.TextToText, LLMConversationType.TextToJSON]
         });

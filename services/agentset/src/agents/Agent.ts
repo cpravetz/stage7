@@ -53,6 +53,10 @@ export class Agent extends BaseEntity {
     private agentContext: Map<string, any> = new Map();
     // Flag to ensure end-of-mission reflection runs only once
     private reflectionDone: boolean = false;
+    // REFLECT cycle detection to prevent infinite loops
+    private reflectCycleTracker: Map<string, number> = new Map(); // error signature -> count
+    private maxReflectCyclesPerError: number = 3;
+    private lastReflectPlanSignature: string = ''; // hash of last generated plan to detect repetition
 
     public get initialized(): Promise<boolean> {
         return this._initializationPromise;
@@ -84,7 +88,7 @@ export class Agent extends BaseEntity {
         return parts.join('\n\n');
     }
 
-    private async createEndOfMissionReflect(): Promise<void> {
+    private async createEndOfMissionReflect(finalSteps: Step[]): Promise<void> {
         console.log(`[Agent ${this.id}] createEndOfMissionReflect: Preparing REFLECT step at mission end.`);
         const workProductsSummary = await this.getCompletedWorkProductsSummary();
 
@@ -101,8 +105,6 @@ export class Agent extends BaseEntity {
 
         const reflectQuestion = `Did we accomplish the mission? If YES, return an empty JSON array []. If NO, return a JSON array of step objects (a plan) that when executed will achieve the mission.`;
 
-        const availablePlugins = this.inputValues?.get('availablePlugins');
-
         const reflectInputs = new Map<string, InputValue>([
             ['missionId', { inputName: 'missionId', value: this.missionId, valueType: PluginParameterType.STRING, args: {} }],
             ['plan_history', { inputName: 'plan_history', value: JSON.stringify(planHistory), valueType: PluginParameterType.STRING, args: {} }],
@@ -111,16 +113,25 @@ export class Agent extends BaseEntity {
             ['agentId', { inputName: 'agentId', value: this.id, valueType: PluginParameterType.STRING, args: {} }]
         ]);
 
-        if (availablePlugins) {
-            reflectInputs.set('availablePlugins', availablePlugins);
-        }
+        const dependencies: StepDependency[] = finalSteps.map(step => ({
+            sourceStepId: step.id,
+            inputName: `_dependency_${step.id}`, // A dummy input name to satisfy the type
+            outputName: '_step_completed' // A conceptual output that signals completion
+        }));
 
-        const recoveryStep = this.createStep('REFLECT', reflectInputs, `End-of-mission reflection: did we accomplish the mission?`, StepStatus.PENDING);
+        const recoveryStep = this.createStep(
+            'REFLECT',
+            reflectInputs,
+            `End-of-mission reflection: did we accomplish the mission?`,
+            StepStatus.PENDING,
+            dependencies
+        );
+
         recoveryStep.recommendedRole = this.role;
         this.steps.push(recoveryStep);
         await this.logEvent({ eventType: 'step_created', ...recoveryStep.toJSON() });
         await this.updateStatus();
-        console.log(`[Agent ${this.id}] createEndOfMissionReflect: REFLECT step ${recoveryStep.id} created with plan history of ${planHistory.length} steps.`);
+        console.log(`[Agent ${this.id}] createEndOfMissionReflect: REFLECT step ${recoveryStep.id} created with ${dependencies.length} dependencies and plan history of ${planHistory.length} steps.`);
     }
 
     // Properties for lifecycle management
@@ -220,7 +231,7 @@ export class Agent extends BaseEntity {
         });
     }
 
-    private createStep(actionVerb: string, inputValues : Map<string, InputValue> | undefined, description : string, status: StepStatus) : Step {
+    private createStep(actionVerb: string, inputValues : Map<string, InputValue> | undefined, description : string, status: StepStatus, dependencies: StepDependency[] = []) : Step {
         const newStep = new Step({
                 actionVerb: actionVerb,
                 missionId: this.missionId,
@@ -228,6 +239,7 @@ export class Agent extends BaseEntity {
                 inputValues: inputValues,
                 description: description,
                 status: status,
+                dependencies: dependencies,
                 persistenceManager: this.agentPersistenceManager,
                 crossAgentResolver: this.crossAgentResolver
             });
@@ -346,7 +358,18 @@ export class Agent extends BaseEntity {
             if (!this.reflectionDone && this.status === AgentStatus.RUNNING) {
                 console.log(`[Agent ${this.id}] runUntilDone: No active work left — creating end-of-mission REFLECT.`);
                 try {
-                    await this.createEndOfMissionReflect();
+                    // Find all step IDs that are used as a source for a dependency.
+                    const sourceStepIds = new Set<string>();
+                    this.steps.forEach(step => {
+                        step.dependencies.forEach(dep => {
+                            sourceStepIds.add(dep.sourceStepId);
+                        });
+                    });
+
+                    // Final steps are those that are not a source for any other step.
+                    const finalSteps = this.steps.filter(step => !sourceStepIds.has(step.id));
+
+                    await this.createEndOfMissionReflect(finalSteps);
                     this.reflectionDone = true;
                     // Continue the outer loop so the newly-created REFLECT step is executed
                     continue;
@@ -356,14 +379,14 @@ export class Agent extends BaseEntity {
             }
 
             // If we've already reflected (or agent isn't running), finalize.
-            if (this.status === AgentStatus.RUNNING) { // Only change status if it was still running
-                this.setAgentStatus(AgentStatus.COMPLETED, {eventType: 'agent_completed'});
+            if (!this.hasActiveWork() && this.reflectionDone && this.status === AgentStatus.RUNNING) {
+                console.log(`[Agent ${this.id}] runUntilDone: No active work and reflection done. Finalizing mission.`);
+                this.setAgentStatus(AgentStatus.COMPLETED, { eventType: 'agent_completed' });
                 const finalStep = this.steps.filter(s => s.status === StepStatus.COMPLETED).pop();
                 if (finalStep) {
                     this.output = await this.agentPersistenceManager.loadStepWorkProduct(this.id, finalStep.id);
                 }
-                console.log(`[Agent ${this.id}] runUntilDone: Agent has completed all active work. Final status: ${this.status}`);
-            } else {
+            } else if (this.status !== AgentStatus.COMPLETED) {
                 console.log(`[Agent ${this.id}] runUntilDone: Agent loop exited with status: ${this.status}. No active work remaining.`);
             }
 
@@ -470,8 +493,6 @@ Please consider this context when planning and executing the mission. Provide de
     }
 
     private async hasActiveWork(): Promise<boolean> {
-        console.log(`[Agent ${this.id}] DEBUG: Agent.hasActiveWork: Checking for active work. Total steps: ${this.steps.length}.`);
-        console.log(`[Agent ${this.id}] DEBUG: Agent.hasActiveWork: Step statuses: ${this.steps.map(s => `${s.id.substring(0, 8)}... (${s.status})`).join(', ')}`);
         // 1. Check for locally active steps
         const localActiveSteps = this.steps.filter(step =>
             step.status === StepStatus.PENDING ||
@@ -480,7 +501,6 @@ Please consider this context when planning and executing the mission. Provide de
         );
 
         if (localActiveSteps.length > 0) {
-            console.log(`[Agent ${this.id}] DEBUG: Agent.hasActiveWork: Found ${localActiveSteps.length} local active steps. Returning true.`);
             return true;
         }
 
@@ -488,11 +508,9 @@ Please consider this context when planning and executing the mission. Provide de
         // If we have any delegated steps being tracked, assume they're still active
         // The delegated agent will notify us when they're complete via the step completion callback
         if (this.delegatedStepIds.size > 0) {
-            console.log(`[Agent ${this.id}] DEBUG: Agent.hasActiveWork: Found ${this.delegatedStepIds.size} delegated steps. Returning true.`);
             return true;
         }
 
-        console.log(`[Agent ${this.id}] DEBUG: Agent.hasActiveWork: No active steps found. Returning false.`);
         return false;
     }
 
@@ -518,11 +536,56 @@ Please consider this context when planning and executing the mission. Provide de
         return null;
     }
 
+    /**
+     * Generate a signature for a plan to detect if the same plan is being regenerated repeatedly
+     * This helps detect infinite REFLECT loops
+     */
+    private _getPlanSignature(plan: ActionVerbTask[]): string {
+        // Create a signature based on the action verbs and count of steps
+        // This is a simple approach - if the exact same verbs in the same order are generated, it's likely the same plan
+        const signature = plan
+            .map(step => `${step.actionVerb}`)
+            .join('|');
+        
+        // Add a simple hash of the signatures to make it more unique
+        let hash = 0;
+        for (let i = 0; i < signature.length; i++) {
+            const char = signature.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash; // Convert to 32bit integer
+        }
+        
+        return `${plan.length}-${hash}`;
+    }
+
     private async _handleReflectionResult(result: PluginOutput[], step: Step): Promise<void> {
         const newPlan = this._extractPlanFromReflectionResult(result);
         const directAnswerOutput = result.find(r => r.name === 'direct_answer');
 
-        if (newPlan) {
+        if (newPlan && newPlan.length > 0) {
+            // Check for infinite REFLECT cycles
+            const planSignature = this._getPlanSignature(newPlan);
+            if (planSignature === this.lastReflectPlanSignature) {
+                console.warn(`[Agent ${this.id}] REFLECT cycle detection: Same plan generated again. Incrementing cycle counter.`);
+                const cycleCount = (this.reflectCycleTracker.get(planSignature) || 0) + 1;
+                this.reflectCycleTracker.set(planSignature, cycleCount);
+                
+                if (cycleCount >= this.maxReflectCyclesPerError) {
+                    console.error(`[Agent ${this.id}] REFLECT infinite loop detected: Plan signature repeated ${cycleCount} times. Aborting reflection and marking mission as unrecoverable.`);
+                    this.say(`ERROR: Infinite reflection loop detected. The reflection step keeps generating the same plan which fails validation. Mission aborted.`);
+                    this.setAgentStatus(AgentStatus.ERROR, { 
+                        eventType: 'reflect_infinite_loop_detected', 
+                        planSignature,
+                        cycleCount
+                    });
+                    return;
+                }
+            } else {
+                // Reset counter if plan is different
+                this.reflectCycleTracker.clear();
+                this.lastReflectPlanSignature = planSignature;
+            }
+            
             this.say('Reflection resulted in a new plan. Updating plan.');
             const currentStepIndex = this.steps.findIndex(s => s.id === step.id);
             if (currentStepIndex !== -1) {
@@ -531,7 +594,31 @@ Please consider this context when planning and executing the mission. Provide de
                     this.steps[i].status = StepStatus.CANCELLED;
                 }
             }
-            this.addStepsFromPlan(newPlan, step);
+            
+            // CRITICAL: When REFLECT returns a recovery plan, clear recommendedRole from all steps
+            // so they stay with the current agent for execution instead of being delegated.
+            // This ensures the REFLECT-generated plan is actually executed without excessive agent creation.
+            const reflectPlanWithoutRoles = newPlan.map(stepTask => {
+                const copy = { ...stepTask };
+                delete copy.recommendedRole;
+                return copy;
+            });
+            
+            this.addStepsFromPlan(reflectPlanWithoutRoles, step);
+            // After adding new steps from a PLAN result, we need to ensure reflectionDone is reset
+            // so that if these new steps also lead to a state of no active work,
+            // a new end-of-mission REFLECT step can be created if needed.
+            this.reflectionDone = false;
+            await this.updateStatus();
+        } else if (newPlan && newPlan.length === 0) {
+            // If reflection returns an empty plan, it means the mission is accomplished
+            this.say('Reflection indicates the mission is complete.');
+            this.setAgentStatus(AgentStatus.COMPLETED, {eventType: 'agent_mission_accomplished'});
+            // Additionally, set the final output of the agent
+            const finalStep = this.steps.filter(s => s.status === StepStatus.COMPLETED).pop();
+            if (finalStep) {
+                this.output = await this.agentPersistenceManager.loadStepWorkProduct(this.id, finalStep.id);
+            }
             await this.updateStatus();
         } else if (directAnswerOutput && directAnswerOutput.result) {
             const directAnswer = directAnswerOutput.result;
@@ -621,10 +708,22 @@ Please consider this context when planning and executing the mission. Provide de
                 // and then return to allow the main loop to re-evaluate.
                 await this.handleStepSuccess(step, result); // Mark the REFLECT step as completed
                 return; // Exit executeStep for the REFLECT step
-            } else if (result[0]?.resultType === PluginParameterType.PLAN) {
+            } else if (result.some(r => r.resultType === PluginParameterType.PLAN)) {
                 // Apply custom output name mapping for PLAN results
                 const mappedResult = await step.mapPluginOutputsToCustomNames(result);
-                const planningStepResult = mappedResult[0]?.result;
+                
+                // Find the actual plan output, which might not be the first element
+                const planOutput = mappedResult.find(r => r.resultType === PluginParameterType.PLAN);
+                if (!planOutput) {
+                    // This case should theoretically not be reached if the .some() check passed, but acts as a safeguard.
+                    const errorMessage = `Error: A result of type 'plan' was expected but not found in the output.`;
+                    console.error(`[Agent.ts] runAgent (${this.id}): ${errorMessage}`);
+                    this.say(`Failed to process a generated plan.`);
+                    await this.handleStepFailure(step, new Error(errorMessage));
+                    return;
+                }
+
+                const planningStepResult = planOutput.result;
                 let actualPlanArray: ActionVerbTask[] | undefined = undefined;
 
                 if (Array.isArray(planningStepResult)) {
@@ -695,7 +794,6 @@ Please consider this context when planning and executing the mission. Provide de
                     executableSteps.push(step);
                 }
             }
-            console.debug(`[Agent ${this.id}] runAgent: Executable steps: ${executableSteps.map(s => `${s.id} (${s.actionVerb}, ${s.status})`).join(', ') || 'None'}`);
 
             if (executableSteps.length > 0) {
                 const stepsToDelegate = new Map<string, Step[]>();
@@ -1619,6 +1717,17 @@ Please consider this context when planning and executing the mission. Provide de
         step.status = StepStatus.COMPLETED;
         step.result = result;
         await this.saveWorkProductWithClassification(step, result);
+
+        // Add a _step_completed output to signal completion for dependencies
+        const completionOutput: PluginOutput = {
+            success: true,
+            name: '_step_completed',
+            resultType: PluginParameterType.BOOLEAN,
+            result: true,
+            resultDescription: 'Step has completed successfully.'
+        };
+        step.result.push(completionOutput);
+        
         await this.logEvent({
             eventType: 'step_completed',
             agentId: this.id,
@@ -1653,25 +1762,24 @@ Please consider this context when planning and executing the mission. Provide de
 
 
     /**
-     * Notify the original owner agent when a delegated step completes or fails.
-     * This allows the delegating agent to remove the step from its tracking list.
+     * Notify the original/delegating agent when a delegated step completes or fails.
+     * This allows the delegating agent to remove the step from its tracking list and unblock waiting steps.
      */
     private async notifyStepCompletion(step: Step): Promise<void> {
-        // Check if this step was delegated to us (ownerAgentId != current agent id)
-        if (step.ownerAgentId && step.ownerAgentId !== this.id) {
+        // Check if this step was delegated to us (has a delegatingAgentId)
+        if (step.delegatingAgentId && step.delegatingAgentId !== this.id) {
             try {
-                const ownerAgent = this.agentSet.agents.get(step.ownerAgentId);
-                if (ownerAgent) {
-                    // Owner is on the same AgentSet, call directly
-                    ownerAgent.handleDelegatedStepCompletion(step.id, step.status);
-                    console.log(`[Agent ${this.id}] Notified owner agent ${step.ownerAgentId} about completion of delegated step ${step.id} (${step.status})`);
+                const delegatingAgent = this.agentSet.agents.get(step.delegatingAgentId);
+                if (delegatingAgent) {
+                    // Delegating agent is on the same AgentSet, call directly
+                    delegatingAgent.handleDelegatedStepCompletion(step.id, step.status, step.result);
+                    console.log(`[Agent ${this.id}] Notified delegating agent ${step.delegatingAgentId} about completion of step ${step.id} (${step.status})`);
                 } else {
-                    // Owner might be on a different AgentSet, send HTTP notification
-                    // For now, we'll skip remote notifications as all agents are on the same AgentSet
-                    console.warn(`[Agent ${this.id}] Owner agent ${step.ownerAgentId} not found for delegated step ${step.id}`);
+                    // Delegating agent might be on a different AgentSet or unavailable
+                    console.warn(`[Agent ${this.id}] Delegating agent ${step.delegatingAgentId} not found for step ${step.id}`);
                 }
             } catch (error) {
-                console.error(`[Agent ${this.id}] Error notifying owner agent about step completion:`, error);
+                console.error(`[Agent ${this.id}] Error notifying delegating agent about step completion:`, error);
             }
         }
     }
@@ -1680,10 +1788,22 @@ Please consider this context when planning and executing the mission. Provide de
      * Handle notification that a delegated step has completed or failed.
      * Remove it from the delegatedStepIds tracking set.
      */
-    public handleDelegatedStepCompletion(stepId: string, status: StepStatus): void {
+    public handleDelegatedStepCompletion(stepId: string, status: StepStatus, result?: PluginOutput[]): void {
         if (this.delegatedStepIds.has(stepId)) {
             this.delegatedStepIds.delete(stepId);
             console.log(`[Agent ${this.id}] Removed delegated step ${stepId} from tracking (status: ${status})`);
+            
+            // If the delegated step completed successfully and has results, log them
+            if (status === StepStatus.COMPLETED && result) {
+                console.log(`[Agent ${this.id}] Delegated step ${stepId} completed with results:`, 
+                    result.map(r => `${r.name}=${r.resultDescription}`).join(', ')
+                );
+            }
+            
+            // Trigger a check for steps that were waiting on this delegated step
+            // They may now have their dependencies satisfied
+        } else {
+            console.warn(`[Agent ${this.id}] Received completion notification for unknown delegated step ${stepId}`);
         }
     }
 

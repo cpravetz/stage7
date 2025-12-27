@@ -68,8 +68,6 @@ done
 # --- End Python Plugin Venv Pre-building ---
 
 # Make Python CLI tool executable
-
-
 RUN chmod +x /usr/src/app/tools/python-plugin-cli.py
 
 # Set the working directory to the service

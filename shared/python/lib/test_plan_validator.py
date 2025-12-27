@@ -11,6 +11,127 @@ except ImportError:
 def mock_call_brain(prompt: str, inputs: dict, response_type: str = "json") -> str:
     return "{}"
 
+
+def test_plan_with_list_outputs():
+    """
+    Tests if the validator correctly handles plans where outputs are returned as lists
+    instead of dictionaries. This can happen when the Brain service returns outputs
+    in a different format than expected.
+    """
+    validator = PlanValidator(brain_call=mock_call_brain)
+
+    # Plan with outputs as lists instead of dicts
+    initial_plan = [
+        {
+            "id": "step_1",
+            "actionVerb": "SEARCH",
+            "description": "Search for items.",
+            "inputs": {},
+            "outputs": [
+                {
+                    "name": "results",
+                    "type": "array",
+                    "description": "A list of search results."
+                }
+            ]
+        },
+        {
+            "id": "step_2",
+            "actionVerb": "GET_DETAILS",
+            "description": "Get details for a single item URL.",
+            "inputs": {
+                "url": {
+                    "outputName": "results",
+                    "sourceStep": "step_1"
+                }
+            },
+            "outputs": [
+                {
+                    "name": "details",
+                    "type": "object",
+                    "description": "The details of the item."
+                }
+            ]
+        }
+    ]
+    
+    inputs = {
+        "availablePlugins": {
+            "value": sample_plugins
+        }
+    }
+
+    # This should not raise an AttributeError: 'list' object has no attribute 'items'
+    result = validator.validate_and_repair(initial_plan, "test goal", inputs)
+    
+    # Assertions
+    assert result.is_valid is not False, "Plan should be valid or have recoverable errors"
+    assert len(result.plan) == 2, "Plan should still have 2 main steps"
+    
+    # Check that the validator handled the list outputs correctly
+    search_step = result.plan[0]
+    assert search_step['actionVerb'] == "SEARCH"
+    assert 'outputs' in search_step
+    
+    get_details_step = result.plan[1]
+    assert get_details_step['actionVerb'] == "GET_DETAILS"
+    assert 'outputs' in get_details_step
+
+
+def test_plan_with_mixed_output_formats():
+    """
+    Tests if the validator correctly handles plans where some steps have outputs
+    as dictionaries and others have outputs as lists.
+    """
+    validator = PlanValidator(brain_call=mock_call_brain)
+
+    # Plan with mixed output formats
+    initial_plan = [
+        {
+            "id": "step_1",
+            "actionVerb": "SEARCH",
+            "description": "Search for items.",
+            "inputs": {},
+            "outputs": {
+                "results": {
+                    "type": "array",
+                    "description": "A list of search results."
+                }
+            }
+        },
+        {
+            "id": "step_2",
+            "actionVerb": "GET_DETAILS",
+            "description": "Get details for a single item URL.",
+            "inputs": {
+                "url": {
+                    "outputName": "results",
+                    "sourceStep": "step_1"
+                }
+            },
+            "outputs": [
+                {
+                    "name": "details",
+                    "type": "object",
+                    "description": "The details of the item."
+                }
+            ]
+        }
+    ]
+    
+    inputs = {
+        "availablePlugins": {
+            "value": sample_plugins
+        }
+    }
+
+    # This should not raise an AttributeError: 'list' object has no attribute 'items'
+    result = validator.validate_and_repair(initial_plan, "test goal", inputs)
+    
+    # Assertions
+    assert result.is_valid is not False, "Plan should be valid or have recoverable errors"
+    assert len(result.plan) == 2, "Plan should still have 2 main steps"
+
 # Sample plugins for the validator, mimicking real definitions
 sample_plugins = [
     {
@@ -74,7 +195,8 @@ def test_foreach_wrapping_on_array_to_string_mismatch():
         }
     }
 
-    repaired_plan = validator.validate_and_repair(initial_plan, "test goal", inputs)
+    result = validator.validate_and_repair(initial_plan, "test goal", inputs)
+    repaired_plan = result.plan
 
     # Assertions
     assert len(repaired_plan) == 2, "Plan should still have 2 main steps"

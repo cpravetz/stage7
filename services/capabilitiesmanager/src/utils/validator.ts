@@ -153,8 +153,27 @@ export const validateAndStandardizeInputs = async (
     const trace_id = `validate-${uuidv4().substring(0,8)}`;
     const source_component = "validator.validateAndStandardizeInputs";
     
-    const MAX_ATTEMPTS = 3;  // Allow up to 3 attempts with Brain transformations
     let currentInputs = new Map(inputs);
+
+    // Early-stage rename for single-input plugins
+    const requiredInputs = plugin.inputDefinitions?.filter(def => def.required) || [];
+    const providedInputKeys = Array.from(currentInputs.keys());
+
+    if (requiredInputs.length === 1 && providedInputKeys.length === 1) {
+        const requiredInputName = requiredInputs[0].name;
+        const providedInputKey = providedInputKeys[0];
+
+        if (requiredInputName !== providedInputKey) {
+            console.log(`[${trace_id}] ${source_component}: Applying single-input rename rule: '${providedInputKey}' -> '${requiredInputName}'`);
+            const inputValue = currentInputs.get(providedInputKey)!;
+            
+            const updatedInputValue: InputValue = { ...inputValue, inputName: requiredInputName };
+
+            currentInputs = new Map([[requiredInputName, updatedInputValue]]);
+        }
+    }
+    
+    const MAX_ATTEMPTS = 3;  // Allow up to 3 attempts with Brain transformations
     let lastError: string | undefined;
     let lastValidationType: string | undefined;
 
@@ -182,49 +201,71 @@ export const validateAndStandardizeInputs = async (
         if (!Array.isArray(inputDefinitions)) {
             return {
                 success: false,
-                error: `Plugin ${plugin.verb} has invalid inputDefinitions`,
+                error: `Plugin '${plugin.verb}' has invalid inputDefinitions. Expected an array but received: ${typeof plugin.inputDefinitions}`,
                 validationType: 'InvalidPluginDefinition'
             };
+        }
+        
+        // Handle novel verbs by checking if this is a dynamic plugin
+        const isNovelVerb = !plugin.id || plugin.id.startsWith('dynamic-') || plugin.verb.includes('_DYNAMIC_');
+        if (isNovelVerb) {
+            console.log(`[${trace_id}] ${source_component}: Processing novel verb plugin: ${plugin.verb}`);
+            // For novel verbs, be more permissive with input validation
         }
 
         const standardizedInputs = new Map<string, EnhancedInputValue>();
 
         // First pass: Match and standardize inputs (prioritize direct match)
         for (const inputDef of inputDefinitions) {
+            console.log(`[${trace_id}] Processing inputDef: ${inputDef.name}`);
             const inputName = inputDef.name;
             let inputKey: string | undefined = undefined;
 
-            // Prioritize direct match
+            // Prioritize exact match first (preserve actual field names)
             if (sanitizedInputs.has(inputName)) {
+                console.log(`[${trace_id}] Found exact match for ${inputName}`);
                 inputKey = inputName;
             } else {
-                // Find an input key that matches the input definition name or any declared aliases.
+                console.log(`[${trace_id}] No exact match for ${inputName}. Checking aliases and similar names...`);
+                const aliases: string[] = (inputDef as any).aliases || [];
+                console.log(`[${trace_id}] Aliases for ${inputName}: ${JSON.stringify(aliases)}`);
+                
+                // Find an input key that matches the input definition name or any declared aliases
                 inputKey = Array.from(sanitizedInputs.keys()).find(key => {
+                    console.log(`[${trace_id}]   - Comparing sanitized key '${key}' against ${inputName}`);
                     if (typeof key !== 'string') return false;
                     const lowerKey = key.toLowerCase();
                     const lowerInputName = inputName.toLowerCase();
 
                     // Direct match (already checked above, but good for robustness)
                     if (lowerKey === lowerInputName) {
+                        console.log(`[${trace_id}]     - Direct match found (case-insensitive)`);
                         return true;
+                    }
+
+                    // Check manifest-declared aliases first (exact matches)
+                    for (const a of aliases) {
+                        if (typeof a === 'string' && lowerKey === a.toLowerCase()) {
+                             console.log(`[${trace_id}]     - Alias match found: '${key}' matches alias '${a}'`);
+                             return true;
+                        }
                     }
 
                     // Simple pluralization handling
                     if (lowerKey === lowerInputName + 's' || (lowerInputName.endsWith('s') && lowerKey + 's' === lowerInputName)) {
+                        console.log(`[${trace_id}]     - Pluralization match found`);
                         return true;
                     }
 
-                    // Check manifest-declared aliases if present
-                    const aliases: string[] = (inputDef as any).aliases || [];
-                    for (const a of aliases) {
-                        if (typeof a === 'string' && lowerKey === a.toLowerCase()) return true;
-                    }
-
                     // CamelCase vs snake_case normalization: strip underscores and compare
-                    if (lowerKey.replace(/_/g, '') === lowerInputName.replace(/_/g, '')) return true;
+                    if (lowerKey.replace(/_/g, '') === lowerInputName.replace(/_/g, '')) {
+                        console.log(`[${trace_id}]     - Case normalization (snake/camel) match found`);
+                        return true;
+                    }
 
                     return false;
                 });
+                console.log(`[${trace_id}] Result of alias search for ${inputName}: inputKey = ${inputKey}`);
             }
 
             if (inputKey) {
@@ -262,17 +303,30 @@ export const validateAndStandardizeInputs = async (
             const input = standardizedInputs.get(inputDef.name);
 
             if (!input && inputDef.required) {
-                return {
-                    success: false,
-                    error: `Missing required input: ${inputDef.name}`,
-                    validationType: 'MissingRequiredInput'
-                };
+                // Enhanced error message with available fields suggestion
+                const availableFields = Array.from(standardizedInputs.keys()).join(', ');
+                const suggestion = availableFields ? ` Available fields: ${availableFields}.` : ' No input fields provided.';
+                
+                // For novel verbs, provide more helpful guidance
+                if (isNovelVerb) {
+                    return {
+                        success: false,
+                        error: `Missing required input field: '${inputDef.name}' (type: ${inputDef.type}) for novel verb plugin '${plugin.verb}'.${suggestion} Novel verbs may require explicit field mapping.`,
+                        validationType: 'MissingRequiredInput'
+                    };
+                } else {
+                    return {
+                        success: false,
+                        error: `Missing required input field: '${inputDef.name}' (type: ${inputDef.type}). This field is mandatory for plugin '${plugin.verb}'.${suggestion}`,
+                        validationType: 'MissingRequiredInput'
+                    };
+                }
             }
 
             if (input) {
                 const value = input.value;
                 if (inputDef.required) {
-                    const isEmpty = !value || 
+                    const isEmpty = !value ||
                         (typeof value === 'string' && !value.trim()) ||
                         (Array.isArray(value) && !value.length) ||
                         (typeof value === 'object' && !Array.isArray(value) && !Object.keys(value).length);
@@ -280,7 +334,7 @@ export const validateAndStandardizeInputs = async (
                     if (isEmpty) {
                         return {
                             success: false,
-                            error: `Empty value for required input: ${inputDef.name}`,
+                            error: `Empty value for required input field: '${inputDef.name}' (type: ${inputDef.type}). Plugin '${plugin.verb}' requires a non-empty value for this field.`,
                             validationType: 'EmptyRequiredInput'
                         };
                     }
@@ -293,8 +347,39 @@ export const validateAndStandardizeInputs = async (
                     } catch (e: any) {
                         return {
                             success: false,
-                            error: `Invalid JSON for input "${inputDef.name}": ${e.message}`,
+                            error: `Invalid JSON format for input field '${inputDef.name}' (expected: ${inputDef.type}). Error: ${e.message}. Please provide valid JSON.`,
                             validationType: 'InvalidJSONFormat'
+                        };
+                    }
+                }
+                
+                // Additional type validation
+                if (value !== undefined && value !== null) {
+                    const expectedType = inputDef.type;
+                    const actualType = typeof value;
+                    
+                    // Check for type mismatches
+                    if (expectedType === PluginParameterType.NUMBER && actualType !== 'number') {
+                        return {
+                            success: false,
+                            error: `Type mismatch for input field '${inputDef.name}'. Expected: ${expectedType}, Received: ${actualType}. Value: ${JSON.stringify(value)}`,
+                            validationType: 'TypeMismatch'
+                        };
+                    }
+                    
+                    if (expectedType === PluginParameterType.BOOLEAN && actualType !== 'boolean') {
+                        return {
+                            success: false,
+                            error: `Type mismatch for input field '${inputDef.name}'. Expected: ${expectedType}, Received: ${actualType}. Value: ${JSON.stringify(value)}`,
+                            validationType: 'TypeMismatch'
+                        };
+                    }
+                    
+                    if (expectedType === PluginParameterType.ARRAY && !Array.isArray(value)) {
+                        return {
+                            success: false,
+                            error: `Type mismatch for input field '${inputDef.name}'. Expected: array, Received: ${actualType}. Value: ${JSON.stringify(value)}`,
+                            validationType: 'TypeMismatch'
                         };
                     }
                 }

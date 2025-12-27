@@ -228,20 +228,23 @@ describe('Engineer', () => {
   });
 
   describe('validatePluginStructure', () => {
-    it('should return true for a valid plugin structure', () => {
+    it('should return valid result for a valid plugin structure', () => {
       const validPlugin = {
         id: 'test-plugin',
         verb: 'TEST_VERB',
         description: 'A test plugin',
-        inputDefinitions: [],
-        outputDefinitions: [],
+        explanation: 'A detailed explanation',
+        inputDefinitions: [{ name: 'input1', type: 'string', required: true }],
+        outputDefinitions: [{ name: 'output1', type: 'string', required: true }],
         language: 'javascript',
         entryPoint: { main: 'index.js', files: { 'index.js': '// code' } }
       };
-      expect(engineer['validatePluginStructure'](validPlugin)).toBe(true);
+      const result = engineer['validatePluginStructure'](validPlugin);
+      expect(result.valid).toBe(true);
+      expect(result.issues).toHaveLength(0);
     });
 
-    it('should return false if required fields are missing', () => {
+    it('should return invalid result with issues for missing required fields', () => {
       const invalidPlugin = {
         verb: 'TEST_VERB',
         description: 'A test plugin',
@@ -250,20 +253,48 @@ describe('Engineer', () => {
         language: 'javascript',
         entryPoint: { main: 'index.js', files: { 'index.js': '// code' } }
       };
-      expect(engineer['validatePluginStructure'](invalidPlugin)).toBe(false);
+      const result = engineer['validatePluginStructure'](invalidPlugin);
+      expect(result.valid).toBe(false);
+      expect(result.issues).toHaveLength(1);
+      expect(result.issues[0]).toContain('Schema validation error');
     });
 
-    it('should return false if entryPoint.main is missing or not a string', () => {
+    it('should return invalid result for semantic issues', () => {
+      const invalidPlugin = {
+        id: 'test-plugin',
+        verb: 'TEST_VERB',
+        description: 'short',
+        explanation: 'A detailed explanation',
+        inputDefinitions: [{ name: 'input1', type: 'string', required: true }],
+        outputDefinitions: [{ name: 'output1', type: 'string', required: true }],
+        language: 'javascript',
+        entryPoint: { main: 'index.js', files: { 'index.js': '// code' } }
+      };
+      const result = engineer['validatePluginStructure'](invalidPlugin);
+      expect(result.valid).toBe(false);
+      expect(result.issues).toContain('Plugin description should be more detailed');
+    });
+
+    it('should detect duplicate input/output names', () => {
       const invalidPlugin = {
         id: 'test-plugin',
         verb: 'TEST_VERB',
         description: 'A test plugin',
-        inputDefinitions: [],
-        outputDefinitions: [],
+        explanation: 'A detailed explanation',
+        inputDefinitions: [
+          { name: 'duplicate', type: 'string', required: true },
+          { name: 'input1', type: 'string', required: true }
+        ],
+        outputDefinitions: [
+          { name: 'duplicate', type: 'string', required: true },
+          { name: 'output1', type: 'string', required: true }
+        ],
         language: 'javascript',
-        entryPoint: { files: { 'index.js': '// code' } }
+        entryPoint: { main: 'index.js', files: { 'index.js': '// code' } }
       };
-      expect(engineer['validatePluginStructure'](invalidPlugin)).toBe(false);
+      const result = engineer['validatePluginStructure'](invalidPlugin);
+      expect(result.valid).toBe(false);
+      expect(result.issues).toContain('Duplicate input/output names detected');
     });
   });
 
@@ -1181,6 +1212,737 @@ describe('Engineer', () => {
       await request(app).get('/statistics').expect(200);
 
       expect(getStatisticsSpy).toHaveBeenCalled();
+    });
+  });
+
+  describe('New Enhanced Methods', () => {
+    describe('performSemanticAnalysis', () => {
+      it('should return empty array for valid plugin', () => {
+        const validPlugin = {
+          id: 'test-plugin',
+          verb: 'TEST_VERB',
+          description: 'A detailed description of the plugin',
+          explanation: 'A comprehensive explanation of the plugin functionality',
+          inputDefinitions: [{ name: 'input1', type: 'string', required: true }],
+          outputDefinitions: [{ name: 'output1', type: 'string', required: true }],
+          language: 'javascript',
+          entryPoint: { main: 'index.js', files: { 'index.js': '// code' } },
+          metadata: { complexity: 5 }
+        };
+        const issues = engineer['performSemanticAnalysis'](validPlugin);
+        expect(issues).toHaveLength(0);
+      });
+
+      it('should detect short description', () => {
+        const invalidPlugin = {
+          id: 'test-plugin',
+          verb: 'TEST_VERB',
+          description: 'short',
+          explanation: 'A comprehensive explanation',
+          inputDefinitions: [],
+          outputDefinitions: [],
+          language: 'javascript',
+          entryPoint: { main: 'index.js', files: { 'index.js': '// code' } }
+        };
+        const issues = engineer['performSemanticAnalysis'](invalidPlugin);
+        expect(issues).toContain('Plugin description should be more detailed');
+      });
+
+      it('should detect short explanation', () => {
+        const invalidPlugin = {
+          id: 'test-plugin',
+          verb: 'TEST_VERB',
+          description: 'A detailed description',
+          explanation: 'short',
+          inputDefinitions: [],
+          outputDefinitions: [],
+          language: 'javascript',
+          entryPoint: { main: 'index.js', files: { 'index.js': '// code' } }
+        };
+        const issues = engineer['performSemanticAnalysis'](invalidPlugin);
+        expect(issues).toContain('Plugin explanation should be more comprehensive');
+      });
+
+      it('should detect duplicate names', () => {
+        const invalidPlugin = {
+          id: 'test-plugin',
+          verb: 'TEST_VERB',
+          description: 'A detailed description',
+          explanation: 'A comprehensive explanation',
+          inputDefinitions: [
+            { name: 'duplicate', type: 'string', required: true },
+            { name: 'input1', type: 'string', required: true }
+          ],
+          outputDefinitions: [
+            { name: 'duplicate', type: 'string', required: true },
+            { name: 'output1', type: 'string', required: true }
+          ],
+          language: 'javascript',
+          entryPoint: { main: 'index.js', files: { 'index.js': '// code' } }
+        };
+        const issues = engineer['performSemanticAnalysis'](invalidPlugin);
+        expect(issues).toContain('Duplicate input/output names detected');
+      });
+
+      it('should detect security concerns', () => {
+        const invalidPlugin = {
+          id: 'test-plugin',
+          verb: 'TEST_VERB',
+          description: 'This plugin requires password handling',
+          explanation: 'A comprehensive explanation',
+          inputDefinitions: [],
+          outputDefinitions: [],
+          language: 'javascript',
+          entryPoint: { main: 'index.js', files: { 'index.js': '// code' } }
+        };
+        const issues = engineer['performSemanticAnalysis'](invalidPlugin);
+        expect(issues).toContain('Potential security concern: plugin description mentions password');
+      });
+
+      it('should detect invalid complexity', () => {
+        const invalidPlugin = {
+          id: 'test-plugin',
+          verb: 'TEST_VERB',
+          description: 'A detailed description',
+          explanation: 'A comprehensive explanation',
+          inputDefinitions: [],
+          outputDefinitions: [],
+          language: 'javascript',
+          entryPoint: { main: 'index.js', files: { 'index.js': '// code' } },
+          metadata: { complexity: 15 }
+        };
+        const issues = engineer['performSemanticAnalysis'](invalidPlugin);
+        expect(issues).toContain('Complexity should be between 1 and 10');
+      });
+    });
+
+    describe('createPluginWithRecovery', () => {
+      it('should succeed on first attempt', async () => {
+        const verb = 'TEST_VERB';
+        const context = new Map<string, InputValue>();
+        const guidance = 'Test guidance';
+
+        const mockExplanation = 'Test explanation';
+        const mockPluginStructure: PluginDefinition = {
+          id: 'plugin-TEST_VERB',
+          verb: 'TEST_VERB',
+          description: 'Test description',
+          explanation: 'Test explanation',
+          inputDefinitions: [],
+          outputDefinitions: [],
+          entryPoint: {
+            main: 'index.js',
+            files: { 'index.js': 'console.log("Test plugin")' }
+          },
+          language: 'javascript',
+          version: '1.0.0',
+          metadata: {
+            category: ['test'],
+            tags: ['test'],
+            complexity: 1,
+            dependencies: {},
+            version: '1.0.0'
+          },
+          security: {
+            permissions: [],
+            sandboxOptions: {
+              allowEval: false,
+              timeout: 5000,
+              memory: 128 * 1024 * 1024,
+              allowedModules: ['fs', 'path', 'http', 'https'],
+              allowedAPIs: ['fetch', 'console']
+            },
+            trust: {
+              publisher: 'test',
+              signature: undefined
+            }
+          }
+        };
+
+        mockedAxios.post.mockResolvedValueOnce({ data: { result: mockExplanation } });
+        mockedAxios.post.mockResolvedValueOnce({ data: { result: JSON.stringify(mockPluginStructure) } });
+        mockedAxios.post.mockResolvedValueOnce({ data: { status: 'success' } });
+
+        const result = await engineer['createPluginWithRecovery'](verb, context, guidance);
+        expect(result).toBeDefined();
+        expect(result?.id).toBe('plugin-TEST_VERB');
+      });
+
+      it('should retry and succeed on second attempt', async () => {
+        const verb = 'TEST_VERB';
+        const context = new Map<string, InputValue>();
+        const guidance = 'Test guidance';
+
+        const mockExplanation = 'Test explanation';
+        const mockPluginStructure: PluginDefinition = {
+          id: 'plugin-TEST_VERB',
+          verb: 'TEST_VERB',
+          description: 'Test description',
+          explanation: 'Test explanation',
+          inputDefinitions: [],
+          outputDefinitions: [],
+          entryPoint: {
+            main: 'index.js',
+            files: { 'index.js': 'console.log("Test plugin")' }
+          },
+          language: 'javascript',
+          version: '1.0.0',
+          metadata: {
+            category: ['test'],
+            tags: ['test'],
+            complexity: 1,
+            dependencies: {},
+            version: '1.0.0'
+          },
+          security: {
+            permissions: [],
+            sandboxOptions: {
+              allowEval: false,
+              timeout: 5000,
+              memory: 128 * 1024 * 1024,
+              allowedModules: ['fs', 'path', 'http', 'https'],
+              allowedAPIs: ['fetch', 'console']
+            },
+            trust: {
+              publisher: 'test',
+              signature: undefined
+            }
+          }
+        };
+
+        // First attempt fails, second succeeds
+        mockedAxios.post.mockRejectedValueOnce(new Error('First attempt failed'));
+        mockedAxios.post.mockResolvedValueOnce({ data: { result: mockExplanation } });
+        mockedAxios.post.mockResolvedValueOnce({ data: { result: JSON.stringify(mockPluginStructure) } });
+        mockedAxios.post.mockResolvedValueOnce({ data: { status: 'success' } });
+
+        const result = await engineer['createPluginWithRecovery'](verb, context, guidance);
+        expect(result).toBeDefined();
+        expect(result?.id).toBe('plugin-TEST_VERB');
+      });
+
+      it('should throw error after max attempts', async () => {
+        const verb = 'TEST_VERB';
+        const context = new Map<string, InputValue>();
+        const guidance = 'Test guidance';
+
+        // All attempts fail
+        mockedAxios.post.mockRejectedValue(new Error('All attempts failed'));
+
+        await expect(engineer['createPluginWithRecovery'](verb, context, guidance))
+          .rejects.toThrow('All attempts failed');
+      });
+    });
+
+    describe('enhanceErrorHandlingInPlugin', () => {
+      it('should add error handling to Python plugin', async () => {
+        const plugin: PluginDefinition = {
+          id: 'test-plugin',
+          verb: 'TEST_VERB',
+          description: 'Test plugin',
+          explanation: 'Test explanation',
+          inputDefinitions: [],
+          outputDefinitions: [],
+          language: 'python',
+          entryPoint: {
+            main: 'main.py',
+            files: {
+              'main.py': 'print("Hello World")\nif __name__ == "__main__":\n    print("Running")'
+            }
+          },
+          version: '1.0.0',
+          metadata: {
+            category: ['test'],
+            tags: ['test'],
+            complexity: 1,
+            dependencies: {},
+            version: '1.0.0'
+          },
+          security: {
+            permissions: [],
+            sandboxOptions: {
+              allowEval: false,
+              timeout: 5000,
+              memory: 128 * 1024 * 1024,
+              allowedModules: ['fs', 'path', 'http', 'https'],
+              allowedAPIs: ['fetch', 'console']
+            },
+            trust: {
+              publisher: 'test',
+              signature: undefined
+            }
+          }
+        };
+
+        const enhancedPlugin = await engineer['enhanceErrorHandlingInPlugin'](plugin);
+        const entryPoint = enhancedPlugin.entryPoint as { main: string, files: { [key: string]: string } };
+        const mainCode = entryPoint.files['main.py'];
+        expect(mainCode).toContain('try:');
+        expect(mainCode).toContain('except Exception as e:');
+        expect(mainCode).toContain('logger.error');
+      });
+
+      it('should add error handling to JavaScript plugin', async () => {
+        const plugin: PluginDefinition = {
+          id: 'test-plugin',
+          verb: 'TEST_VERB',
+          description: 'Test plugin',
+          explanation: 'Test explanation',
+          inputDefinitions: [],
+          outputDefinitions: [],
+          language: 'javascript',
+          entryPoint: {
+            main: 'index.js',
+            files: {
+              'index.js': 'module.exports = function() { console.log("Hello"); }'
+            }
+          },
+          version: '1.0.0',
+          metadata: {
+            category: ['test'],
+            tags: ['test'],
+            complexity: 1,
+            dependencies: {},
+            version: '1.0.0'
+          },
+          security: {
+            permissions: [],
+            sandboxOptions: {
+              allowEval: false,
+              timeout: 5000,
+              memory: 128 * 1024 * 1024,
+              allowedModules: ['fs', 'path', 'http', 'https'],
+              allowedAPIs: ['fetch', 'console']
+            },
+            trust: {
+              publisher: 'test',
+              signature: undefined
+            }
+          }
+        };
+
+        const enhancedPlugin = await engineer['enhanceErrorHandlingInPlugin'](plugin);
+        const entryPoint = enhancedPlugin.entryPoint as { main: string, files: { [key: string]: string } };
+        const mainCode = entryPoint.files['index.js'];
+        expect(mainCode).toContain('try {');
+        expect(mainCode).toContain('} catch (error) {');
+        expect(mainCode).toContain('logger.error');
+      });
+
+      it('should return plugin unchanged if no files', async () => {
+        const plugin: PluginDefinition = {
+          id: 'test-plugin',
+          verb: 'TEST_VERB',
+          description: 'Test plugin',
+          explanation: 'Test explanation',
+          inputDefinitions: [],
+          outputDefinitions: [],
+          language: 'javascript',
+          entryPoint: {
+            main: 'index.js'
+          },
+          version: '1.0.0',
+          metadata: {
+            category: ['test'],
+            tags: ['test'],
+            complexity: 1,
+            dependencies: {},
+            version: '1.0.0'
+          },
+          security: {
+            permissions: [],
+            sandboxOptions: {
+              allowEval: false,
+              timeout: 5000,
+              memory: 128 * 1024 * 1024,
+              allowedModules: ['fs', 'path', 'http', 'https'],
+              allowedAPIs: ['fetch', 'console']
+            },
+            trust: {
+              publisher: 'test',
+              signature: undefined
+            }
+          }
+        };
+
+        const enhancedPlugin = await engineer['enhanceErrorHandlingInPlugin'](plugin);
+        expect(enhancedPlugin).toEqual(plugin);
+      });
+    });
+
+    describe('logPerformanceMetrics', () => {
+      it('should log performance metrics', () => {
+        engineer['performanceMetrics'] = {
+          validationTime: 100,
+          generationTime: 200,
+          testExecutionTime: 50
+        };
+
+        const consoleSpy = jest.spyOn(console, 'log');
+        engineer['logPerformanceMetrics']();
+
+        expect(consoleSpy).toHaveBeenCalledWith('Engineer Performance Metrics:');
+        expect(consoleSpy).toHaveBeenCalledWith('- Validation Time: 100ms');
+        expect(consoleSpy).toHaveBeenCalledWith('- Generation Time: 200ms');
+        expect(consoleSpy).toHaveBeenCalledWith('- Test Execution Time: 50ms');
+        expect(consoleSpy).toHaveBeenCalledWith('- Total Time: 350ms');
+
+        consoleSpy.mockRestore();
+      });
+    });
+
+    describe('createPluginFromOpenAPI', () => {
+      it('should create a plugin from OpenAPI spec successfully', async () => {
+        const specUrl = 'http://example.com/openapi.json';
+        const name = 'TestAPI';
+        const description = 'Test API description';
+
+        const mockOpenApiSpec = {
+          openapi: '3.0.0',
+          info: { title: 'Test API', version: '1.0.0' },
+          paths: {
+            '/test': {
+              get: {
+                operationId: 'getTest',
+                summary: 'Get Test Data',
+                parameters: [{ name: 'param1', in: 'query', schema: { type: 'string' }, required: true }],
+                responses: { '200': { description: 'Success' } }
+              }
+            }
+          }
+        };
+
+        const mockTool = {
+          id: 'openapi-testapi',
+          name: 'TestAPI',
+          description: 'Test API description',
+          actionMappings: [{
+            actionVerb: 'GET_TEST',
+            operationId: 'getTest',
+            method: 'GET',
+            path: '/test',
+            inputs: [{ name: 'param1', type: PluginParameterType.STRING, required: true }],
+            outputs: [{ name: 'result', type: PluginParameterType.OBJECT }]
+          }]
+        };
+
+        const mockPlugin = {
+          id: 'plugin-testapi',
+          verb: 'TESTAPI',
+          description: 'Test API plugin',
+          explanation: 'Generated plugin for TestAPI',
+          inputDefinitions: [],
+          outputDefinitions: [],
+          language: 'typescript',
+          entryPoint: { main: 'index.ts', files: { 'index.ts': 'console.log("test");' } },
+          version: '1.0.0',
+          metadata: { category: [], tags: [], complexity: 1, dependencies: {}, version: '1.0.0' },
+          security: { permissions: [], sandboxOptions: {}, trust: { publisher: 'test', signature: undefined } }
+        };
+
+        mockedAxios.get.mockResolvedValueOnce({ data: mockOpenApiSpec });
+        mockedAxios.post.mockResolvedValueOnce({ data: { status: 'success' } }); // registerOpenAPITool
+        mockedAxios.post.mockResolvedValueOnce({ data: { result: JSON.stringify(mockPlugin) } }); // generateWrapperPlugin
+
+        const result = await engineer.createPluginFromOpenAPI(specUrl, name, description);
+
+        expect(result).toBeDefined();
+        expect(result?.id).toBe('plugin-testapi');
+        expect(mockedAxios.get).toHaveBeenCalledWith(specUrl);
+      });
+
+      it('should throw error if OpenAPI spec fetch fails', async () => {
+        const specUrl = 'http://example.com/fail.json';
+        const name = 'FailAPI';
+
+        mockedAxios.get.mockRejectedValueOnce(new Error('Network error'));
+
+        await expect(engineer.createPluginFromOpenAPI(specUrl, name)).rejects.toThrow('Failed to parse OpenAPI spec');
+      });
+    });
+
+    describe('onboardTool', () => {
+      it('should onboard a tool successfully', async () => {
+        const toolManifest = {
+          id: 'test-tool',
+          name: 'Test Tool',
+          description: 'A test tool',
+          type: 'openapi',
+          specUrl: 'http://example.com/spec.json'
+        };
+        const policyConfig = { rateLimit: 100 };
+
+        const mockGeneratedPlugin = {
+          id: 'plugin-test-tool',
+          verb: 'TEST_TOOL',
+          description: 'Generated wrapper plugin',
+          explanation: 'Wrapper plugin for test tool',
+          inputDefinitions: [],
+          outputDefinitions: [],
+          language: 'typescript',
+          entryPoint: { main: 'index.ts', files: { 'index.ts': 'console.log("test");' } },
+          version: '1.0.0',
+          metadata: { category: [], tags: [], complexity: 1, dependencies: {}, version: '1.0.0' },
+          security: { permissions: [], sandboxOptions: {}, trust: { publisher: 'test', signature: undefined } }
+        };
+
+        // Mock generateWrapperPlugin
+        jest.spyOn(engineer, 'generateWrapperPlugin' as any).mockResolvedValue(mockGeneratedPlugin);
+        // Mock executeWrapperTests
+        jest.spyOn(engineer, 'executeWrapperTests' as any).mockResolvedValue({ valid: true, issues: [] });
+        // Mock pluginMarketplace.store
+        jest.spyOn(engineer['pluginMarketplace'], 'store').mockResolvedValue();
+
+        const result = await engineer['onboardTool'](toolManifest, policyConfig);
+
+        expect(result.success).toBe(true);
+        expect(result.message).toContain('onboarded successfully');
+        expect(engineer['generateWrapperPlugin']).toHaveBeenCalledWith(toolManifest, policyConfig, 'typescript');
+        expect(engineer['executeWrapperTests']).toHaveBeenCalledWith(mockGeneratedPlugin);
+        expect(engineer['pluginMarketplace'].store).toHaveBeenCalled();
+      });
+
+      it('should throw error if wrapper plugin generation fails', async () => {
+        const toolManifest = { id: 'test-tool', name: 'Test Tool' };
+        const policyConfig = {};
+
+        jest.spyOn(engineer, 'generateWrapperPlugin' as any).mockResolvedValue(null);
+
+        await expect(engineer['onboardTool'](toolManifest, policyConfig)).rejects.toThrow('Failed to generate wrapper plugin');
+      });
+
+      it('should throw error if wrapper tests fail', async () => {
+        const toolManifest = { id: 'test-tool', name: 'Test Tool' };
+        const policyConfig = {};
+
+        const mockGeneratedPlugin = {
+          id: 'plugin-test-tool',
+          verb: 'TEST_TOOL',
+          description: 'Generated wrapper plugin',
+          explanation: 'Wrapper plugin for test tool',
+          inputDefinitions: [],
+          outputDefinitions: [],
+          language: 'typescript',
+          entryPoint: { main: 'index.ts', files: { 'index.ts': 'console.log("test");' } },
+          version: '1.0.0',
+          metadata: { category: [], tags: [], complexity: 1, dependencies: {}, version: '1.0.0' },
+          security: { permissions: [], sandboxOptions: {}, trust: { publisher: 'test', signature: undefined } }
+        };
+
+        jest.spyOn(engineer, 'generateWrapperPlugin' as any).mockResolvedValue(mockGeneratedPlugin);
+        jest.spyOn(engineer, 'executeWrapperTests' as any).mockResolvedValue({ valid: false, issues: ['Test failed'] });
+
+        await expect(engineer['onboardTool'](toolManifest, policyConfig)).rejects.toThrow('Wrapper plugin tests failed');
+      });
+    });
+
+    describe('generateWrapperPlugin', () => {
+      it('should generate a wrapper plugin successfully', async () => {
+        const toolManifest = {
+          id: 'test-tool',
+          name: 'Test Tool',
+          description: 'A test tool',
+          type: 'openapi'
+        };
+        const policyConfig = { rateLimit: 100 };
+        const language = 'typescript';
+
+        const mockGeneratedPlugin = {
+          id: 'plugin-test-tool',
+          verb: 'TEST_TOOL',
+          description: 'Generated wrapper plugin',
+          explanation: 'Wrapper plugin for test tool',
+          inputDefinitions: [],
+          outputDefinitions: [],
+          language: 'typescript',
+          entryPoint: { main: 'index.ts', files: { 'index.ts': 'console.log("test");' } },
+          version: '1.0.0',
+          metadata: { category: [], tags: [], complexity: 1, dependencies: {}, version: '1.0.0' },
+          security: { permissions: [], sandboxOptions: {}, trust: { publisher: 'test', signature: undefined } }
+        };
+
+        mockedAxios.post.mockResolvedValueOnce({ data: { result: JSON.stringify(mockGeneratedPlugin) } });
+
+        const result = await engineer['generateWrapperPlugin'](toolManifest, policyConfig, language);
+
+        expect(result).toEqual(mockGeneratedPlugin);
+        expect(mockedAxios.post).toHaveBeenCalledWith(
+          expect.stringContaining('/chat'),
+          expect.objectContaining({
+            exchanges: [expect.objectContaining({ role: 'user' })],
+            optimization: 'accuracy',
+            responseType: 'json'
+          })
+        );
+      });
+
+      it('should throw error if generated plugin is invalid', async () => {
+        const toolManifest = { id: 'test-tool', name: 'Test Tool' };
+        const policyConfig = {};
+        const language = 'typescript';
+
+        const invalidPlugin = { id: 'invalid' }; // Missing required fields
+
+        mockedAxios.post.mockResolvedValueOnce({ data: { result: JSON.stringify(invalidPlugin) } });
+
+        await expect(engineer['generateWrapperPlugin'](toolManifest, policyConfig, language))
+          .rejects.toThrow('Generated wrapper plugin structure is invalid');
+      });
+    });
+
+    describe('executeWrapperTests', () => {
+      it('should execute wrapper tests successfully', async () => {
+        const generatedPlugin = {
+          id: 'test-plugin',
+          language: 'javascript',
+          entryPoint: {
+            files: {
+              'index.js': 'console.log("test");',
+              'index.test.js': 'test("should pass", () => { expect(true).toBe(true); });'
+            }
+          }
+        };
+
+        jest.spyOn(engineer, 'validatePluginCode' as any).mockResolvedValue(true);
+        jest.spyOn(engineer, 'executeTestRunner' as any).mockResolvedValue({ valid: true, issues: [] });
+
+        const result = await engineer['executeWrapperTests'](generatedPlugin);
+
+        expect(result.valid).toBe(true);
+        expect(result.issues).toHaveLength(0);
+        expect(engineer['validatePluginCode']).toHaveBeenCalledWith(generatedPlugin.entryPoint, 'javascript');
+        expect(engineer['executeTestRunner']).toHaveBeenCalledWith(generatedPlugin);
+      });
+
+      it('should return invalid if code validation fails', async () => {
+        const generatedPlugin = {
+          id: 'test-plugin',
+          language: 'javascript',
+          entryPoint: { files: { 'index.js': 'invalid code {{{' } }
+        };
+
+        jest.spyOn(engineer, 'validatePluginCode' as any).mockResolvedValue(false);
+
+        const result = await engineer['executeWrapperTests'](generatedPlugin);
+
+        expect(result.valid).toBe(false);
+        expect(result.issues).toContain('Generated wrapper code failed basic validation');
+      });
+
+      it('should return invalid if test execution fails', async () => {
+        const generatedPlugin = {
+          id: 'test-plugin',
+          language: 'javascript',
+          entryPoint: { files: { 'index.js': 'console.log("test");' } }
+        };
+
+        jest.spyOn(engineer, 'validatePluginCode' as any).mockResolvedValue(true);
+        jest.spyOn(engineer, 'executeTestRunner' as any).mockResolvedValue({ valid: false, issues: ['Test failed'] });
+
+        const result = await engineer['executeWrapperTests'](generatedPlugin);
+
+        expect(result.valid).toBe(false);
+        expect(result.issues).toContain('Test failed');
+      });
+    });
+
+    describe('executeTestRunner', () => {
+      it('should execute JavaScript tests successfully', async () => {
+        const generatedPlugin = {
+          id: 'test-plugin',
+          language: 'javascript',
+          entryPoint: {
+            files: {
+              'index.js': 'console.log("test");',
+              'index.test.js': 'test("should pass", () => { expect(true).toBe(true); });'
+            }
+          }
+        };
+
+        // Mock execAsync to simulate successful test execution
+        jest.spyOn(require('util'), 'promisify').mockReturnValue(
+          jest.fn().mockResolvedValue({ stdout: 'PASS', stderr: '' })
+        );
+
+        const result = await engineer['executeTestRunner'](generatedPlugin);
+
+        expect(result.valid).toBe(true);
+        expect(result.issues).toHaveLength(0);
+      });
+
+      it('should execute Python tests successfully', async () => {
+        const generatedPlugin = {
+          id: 'test-plugin',
+          language: 'python',
+          entryPoint: {
+            files: {
+              'main.py': 'print("test")',
+              'test_main.py': 'def test_example(): assert True'
+            }
+          }
+        };
+
+        // Mock execAsync to simulate successful test execution
+        jest.spyOn(require('util'), 'promisify').mockReturnValue(
+          jest.fn().mockResolvedValue({ stdout: '1 passed', stderr: '' })
+        );
+
+        const result = await engineer['executeTestRunner'](generatedPlugin);
+
+        expect(result.valid).toBe(true);
+        expect(result.issues).toHaveLength(0);
+      });
+
+      it('should return invalid if no test files found', async () => {
+        const generatedPlugin = {
+          id: 'test-plugin',
+          language: 'javascript',
+          entryPoint: {
+            files: { 'index.js': 'console.log("test");' } // No test files
+          }
+        };
+
+        const result = await engineer['executeTestRunner'](generatedPlugin);
+
+        expect(result.valid).toBe(false);
+        expect(result.issues).toContain('No test files found for JavaScript/TypeScript plugin');
+      });
+
+      it('should return invalid if test execution fails', async () => {
+        const generatedPlugin = {
+          id: 'test-plugin',
+          language: 'javascript',
+          entryPoint: {
+            files: {
+              'index.js': 'console.log("test");',
+              'index.test.js': 'test("should fail", () => { throw new Error("fail"); });'
+            }
+          }
+        };
+
+        // Mock execAsync to simulate failed test execution
+        jest.spyOn(require('util'), 'promisify').mockReturnValue(
+          jest.fn().mockResolvedValue({ stdout: '', stderr: 'FAIL' })
+        );
+
+        const result = await engineer['executeTestRunner'](generatedPlugin);
+
+        expect(result.valid).toBe(false);
+        expect(result.issues).toContain('Tests failed: FAIL');
+      });
+
+      it('should return invalid for unsupported language', async () => {
+        const generatedPlugin = {
+          id: 'test-plugin',
+          language: 'unsupported',
+          entryPoint: { files: {} }
+        };
+
+        const result = await engineer['executeTestRunner'](generatedPlugin);
+
+        expect(result.valid).toBe(false);
+        expect(result.issues).toContain('Test execution not supported for language: unsupported');
+      });
     });
   });
 });

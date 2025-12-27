@@ -1,4 +1,4 @@
-import { verifyComponentCredentials, generateServiceToken, verifyToken, authenticateService } from '../src/models/jwtAuth';
+import { verifyComponentCredentials, generateServiceToken, verifyToken, authenticateService } from '../../src/models/jwtAuth';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as jwt from 'jsonwebtoken';
@@ -103,7 +103,6 @@ describe('jwtAuth', () => {
         });
 
         it('should return true for valid shared secret', async () => {
-            process.env.SHARED_CLIENT_SECRET = 'shared-secret';
             reimportModule();
 
             const isValid = await verifyComponentCredentials('NonExistentService', 'shared-secret');

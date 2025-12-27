@@ -25,6 +25,7 @@ export class OwnershipTransferManager {
         const [step] = fromAgent.steps.splice(stepIndex, 1);
 
         step.currentOwnerAgentId = toAgentId;
+        step.delegatingAgentId = fromAgentId; // Track which agent delegated this step
         step.delegationHistory.push({
             fromAgentId: fromAgentId,
             toAgentId: toAgentId,

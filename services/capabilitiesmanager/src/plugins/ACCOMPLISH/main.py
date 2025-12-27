@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-ACCOMPLISH Plugin - Streamlined Version
-Handles mission planning and novel action verbs with LLM-driven approach
+ACCOMPLISH Plugin - Enhanced Version with Schema Validation and Error Recovery
+Handles mission planning and novel action verbs with robust error handling and retry mechanisms
 """
 
 import uuid
@@ -12,7 +12,12 @@ import requests
 import re
 import sys
 import os
-from typing import Dict, Any, List, Optional, Set
+import threading
+from typing import Dict, Any, List, Optional, Set, Tuple
+
+# Cache for verb discovery to reduce redundant API calls
+_discovery_cache = {}
+_cache_lock = threading.Lock()
 
 # Import from the installed shared library package
 try:
@@ -22,12 +27,65 @@ except ImportError:
     sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', '..', 'shared', 'python', 'lib')))
     from plan_validator import PlanValidator, AccomplishError, PLAN_STEP_SCHEMA, PLAN_ARRAY_SCHEMA
 
-# Configure logging
+# Configure enhanced logging with file handler for debugging
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - [%(funcName)s:%(lineno)d] - %(message)s'
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - [%(funcName)s:%(lineno)d] - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('accomplish_debug.log', mode='a')
+    ]
 )
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
+# Enhanced error tracking
+class ErrorRecoveryTracker:
+    """Tracks error recovery attempts and provides analytics"""
+    def __init__(self):
+        self.error_counts = {}
+        self.recovery_attempts = {}
+        self.successful_recoveries = {}
+        self.failed_recoveries = {}
+        
+    def record_error(self, error_type: str, error_message: str):
+        """Record an error occurrence"""
+        if error_type not in self.error_counts:
+            self.error_counts[error_type] = 0
+        self.error_counts[error_type] += 1
+        
+    def record_recovery_attempt(self, error_type: str, strategy: str):
+        """Record a recovery attempt"""
+        key = f"{error_type}:{strategy}"
+        if key not in self.recovery_attempts:
+            self.recovery_attempts[key] = 0
+        self.recovery_attempts[key] += 1
+        
+    def record_successful_recovery(self, error_type: str, strategy: str):
+        """Record a successful recovery"""
+        key = f"{error_type}:{strategy}"
+        if key not in self.successful_recoveries:
+            self.successful_recoveries[key] = 0
+        self.successful_recoveries[key] += 1
+        
+    def record_failed_recovery(self, error_type: str, strategy: str):
+        """Record a failed recovery"""
+        key = f"{error_type}:{strategy}"
+        if key not in self.failed_recoveries:
+            self.failed_recoveries[key] = 0
+        self.failed_recoveries[key] += 1
+        
+    def get_recovery_stats(self) -> Dict[str, Any]:
+        """Get recovery statistics"""
+        return {
+            'error_counts': self.error_counts,
+            'recovery_attempts': self.recovery_attempts,
+            'successful_recoveries': self.successful_recoveries,
+            'failed_recoveries': self.failed_recoveries
+        }
+
+# Global error recovery tracker
+error_tracker = ErrorRecoveryTracker()
 
 class ProgressTracker:
     def __init__(self):
@@ -41,14 +99,137 @@ class ProgressTracker:
 progress = ProgressTracker()
 
 def get_auth_token(inputs: Dict[str, Any]) -> str:
-    """Get authentication token from inputs"""
+    """Get the specific authentication token for the Brain service from inputs."""
     if '__brain_auth_token' in inputs:
         token_data = inputs['__brain_auth_token']
         if isinstance(token_data, dict) and 'value' in token_data:
             return token_data['value']
         elif isinstance(token_data, str):
             return token_data
-    raise AccomplishError("No authentication token found", "auth_error")
+    raise AccomplishError("No Brain authentication token found", "auth_error")
+
+def _get_cm_auth_token(inputs: Dict[str, Any]) -> str:
+    """Get the CapabilitiesManager's authentication token from inputs."""
+    if '__auth_token' in inputs:
+        token_data = inputs['__auth_token']
+        if isinstance(token_data, dict) and 'value' in token_data:
+            return token_data['value']
+        elif isinstance(token_data, str):
+            return token_data
+    raise AccomplishError("No CapabilitiesManager authentication token found", "auth_error")
+
+def _get_librarian_info(inputs: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract librarian URL and CM auth token from inputs."""
+    librarian_url_input = inputs.get('librarian_url')
+    if isinstance(librarian_url_input, dict) and 'value' in librarian_url_input:
+        librarian_url = librarian_url_input['value']
+    else:
+        librarian_url = librarian_url_input if librarian_url_input is not None else 'librarian:5040'
+    
+    cm_auth_token = _get_cm_auth_token(inputs)
+
+    return {
+        'url': librarian_url,
+        'auth_token': cm_auth_token
+    }
+
+
+STOP_WORDS = set([
+    'a', 'about', 'above', 'after', 'again', 'against', 'all', 'am', 'an', 'and', 'any', 'are', 'as', 'at',
+    'be', 'because', 'been', 'before', 'being', 'below', 'between', 'both', 'but', 'by', 'can', 'did', 'do',
+    'does', 'doing', 'don', 'down', 'during', 'each', 'few', 'for', 'from', 'further', 'had', 'has', 'have',
+    'having', 'he', 'her', 'here', 'hers', 'herself', 'him', 'himself', 'his', 'how', 'i', 'if', 'in', 'into',
+    'is', 'it', 'its', 'itself', 'just', 'me', 'more', 'most', 'my', 'myself', 'no', 'nor', 'not', 'now', 'of',
+    'off', 'on', 'once', 'only', 'or', 'other', 'our', 'ours', 'ourselves', 'out', 'over', 'own', 's', 'same',
+    'she', 'should', 'so', 'some', 'such', 't', 'than', 'that', 'the', 'their', 'theirs', 'them', 'themselves',
+    'then', 'there', 'these', 'they', 'this', 'those', 'through', 'to', 'too', 'under', 'until', 'up', 'very',
+    'was', 'we', 'were', 'what', 'when', 'where', 'which', 'while', 'who', 'whom', 'why', 'will', 'with', 'you',
+    'your', 'yours', 'yourself', 'yourselves', 'the', 'agent', 'system', 'based', 'using', 'generate', 'create',
+    'perform', 'allow', 'following', 'within', 'given', 'need', 'needs', 'new', 'existing', 'user', 'users'
+])
+
+def _extract_keywords(text: str) -> str:
+    """Extracts relevant keywords from a text by removing stop words and punctuation."""
+    if not text:
+        return ''
+    # Remove punctuation
+    text = re.sub(r'[^\w\s]', '', text)
+    # Convert to lowercase and split into words
+    words = text.lower().split()
+    # Remove stop words
+    keywords = [word for word in words if word not in STOP_WORDS]
+    # Join keywords back into a string
+    return ' '.join(keywords)
+
+def discover_verbs_for_planning(goal: str, inputs: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Discover verbs for planning by querying the Librarian service, with caching.
+    """
+    cache_key = goal.strip().lower()
+    
+    with _cache_lock:
+        if cache_key in _discovery_cache:
+            logger.info(f"Cache HIT for verb discovery with goal: {cache_key}")
+            return _discovery_cache[cache_key]
+
+    logger.info(f"Cache MISS for verb discovery with goal: {cache_key}. Querying service.")
+    try:
+        librarian_info = _get_librarian_info(inputs)
+        librarian_url = librarian_info['url']
+        auth_token = librarian_info['auth_token']
+
+        headers = {'Authorization': f'Bearer {auth_token}'}
+        truncated_goal = (goal[:500] + '...') if len(goal) > 500 else goal
+        logger.info(f"Discovering verbs from Librarian with truncated goal: {truncated_goal}")
+        
+        payload = {
+            "goal": goal,
+            "context": inputs.get('context', {}).get('value', '') if isinstance(inputs.get('context'), dict) else inputs.get('context', ''),
+            "missionId": inputs.get('missionId', {}).get('value', '') if isinstance(inputs.get('missionId'), dict) else inputs.get('missionId', '')
+        }
+        
+        response = requests.post(f"http://{librarian_url}/verbs/discover-for-planning", json=payload, headers=headers, timeout=15)
+        response.raise_for_status()
+        discovery_result = response.json()
+        
+        logger.info(f"Successfully discovered {len(discovery_result.get('relevantVerbs', []))} verbs from Librarian.")
+        
+        with _cache_lock:
+            _discovery_cache[cache_key] = discovery_result
+
+        return discovery_result
+    except Exception as e:
+        logger.warning(f"Verb discovery via /verbs/discover-for-planning failed: {e}. Planning will proceed without discovered capabilities.")
+        return {"relevantVerbs": [], "relevantTools": [], "discoveryContext": {"error": str(e)}}
+
+def create_token_efficient_prompt(goal: str, plugin_guidance: str, max_tokens: int = 4000) -> str:
+    """Create a token-efficient prompt by intelligently truncating and summarizing content."""
+    # Estimate token count (rough approximation: 4 chars per token)
+    current_token_estimate = len(goal) // 4 + len(plugin_guidance) // 4
+    
+    if current_token_estimate <= max_tokens:
+        return goal + "\n\n" + plugin_guidance
+    
+    # If we're over the token limit, try to reduce plugin guidance first
+    plugin_lines = plugin_guidance.split('\n')
+    if len(plugin_lines) > 3:  # Keep header, some plugins, and footer
+        # Keep first 2 lines (header) and last line (footer), reduce middle
+        header_lines = plugin_lines[:2]
+        footer_line = plugin_lines[-1]
+        middle_lines = plugin_lines[2:-1]
+        
+        # Reduce middle lines by 50% but keep at least 5
+        reduced_middle = middle_lines[:max(5, len(middle_lines) // 2)]
+        
+        truncated_guidance = '\n'.join(header_lines + reduced_middle + [footer_line])
+        return goal + "\n\n" + truncated_guidance
+    
+    # If still too long, truncate goal
+    max_goal_tokens = max_tokens // 2  # Allocate half to goal
+    truncated_goal = goal[:max_goal_tokens * 4] + "..."  # Convert tokens back to chars
+    
+    return truncated_goal + "\n\n" + plugin_guidance
+
 
 def get_mission_goal(mission_id: str, inputs: Dict[str, Any]) -> Optional[str]:
     """Fetches the mission goal from the Librarian service."""
@@ -56,7 +237,7 @@ def get_mission_goal(mission_id: str, inputs: Dict[str, Any]) -> Optional[str]:
         return None
     
     try:
-        auth_token = get_auth_token(inputs)
+        auth_token = _get_cm_auth_token(inputs)
         librarian_url_input = inputs.get('librarian_url')
         if isinstance(librarian_url_input, dict) and 'value' in librarian_url_input:
             librarian_url = librarian_url_input['value']
@@ -73,6 +254,7 @@ def get_mission_goal(mission_id: str, inputs: Dict[str, Any]) -> Optional[str]:
         logger.error(f"Error fetching mission {mission_id}: {e}")
         # Don't raise, just return None and let the caller decide what to do
         return None
+
 
 def _extract_json_from_string(text: str) -> Optional[str]:
     """
@@ -182,7 +364,12 @@ def call_brain(prompt: str, inputs: Dict[str, Any], response_type: str = "json")
         )
 
         if response.status_code != 200:
-            raise AccomplishError(f"Brain API error: {response.status_code} - {response.text}", "brain_api_error")
+            try:
+                error_json = response.json()
+                error_message = error_json.get('error', response.text)
+            except json.JSONDecodeError:
+                error_message = response.text
+            raise AccomplishError(f"Brain API error: {response.status_code} - {error_message}", "brain_api_error")
 
         result = response.json()
         if 'result' not in result:
@@ -220,13 +407,15 @@ def call_brain(prompt: str, inputs: Dict[str, Any], response_type: str = "json")
         raise AccomplishError(f"Brain service call failed: {e}", "brain_error")
 
 
-def report_logic_failure_to_brain(request_id: str, inputs: Dict[str, Any], reason: str) -> None:
+def report_logic_failure_to_brain(request_id: str, inputs: Dict[str, Any], reason: str, severity: str = "normal") -> None:
     """Report a logic failure back to the Brain service so it can penalize the model
 
     Args:
         request_id: The Brain request ID from the original call
         inputs: Plugin inputs containing auth token and brain URL
         reason: Description of why this was a logic failure
+        severity: "critical" for instruction-following failures, "normal" for other issues
+                  Critical failures cause immediate score penalties and potential blacklisting
     """
     if not request_id:
         logger.warning("Cannot report logic failure: no request ID available")
@@ -243,7 +432,8 @@ def report_logic_failure_to_brain(request_id: str, inputs: Dict[str, Any], reaso
         payload = {
             "requestId": request_id,
             "logicFailure": True,
-            "reason": reason
+            "reason": reason,
+            "severity": severity  # "critical" or "normal"
         }
 
         headers = {
@@ -259,12 +449,13 @@ def report_logic_failure_to_brain(request_id: str, inputs: Dict[str, Any], reaso
         )
 
         if response.status_code == 200:
-            logger.info(f"Successfully reported logic failure for request {request_id}: {reason}")
+            logger.info(f"Successfully reported {severity} logic failure for request {request_id}: {reason}")
         else:
             logger.warning(f"Failed to report logic failure: {response.status_code} - {response.text}")
 
     except Exception as e:
         logger.warning(f"Error reporting logic failure to Brain: {e}")
+
 
 def parse_inputs(inputs_str: str) -> Dict[str, Any]:
     """Parse and normalize the plugin stdin JSON payload into a dict of inputName -> InputValue.
@@ -322,58 +513,88 @@ def parse_inputs(inputs_str: str) -> Dict[str, Any]:
         logger.error(f"Input parsing failed: {e}")
         raise AccomplishError(f"Input validation failed: {e}", "input_error")
 
-def _create_detailed_plugin_guidance(inputs: Dict[str, Any]) -> str:
-    """Create a concise list of available plugins with their descriptions and add dynamic discovery."""
-    available_plugins_input = inputs.get('availablePlugins', {})
-    available_plugins = available_plugins_input.get('value', []) if isinstance(available_plugins_input, dict) else available_plugins
+def _create_detailed_plugin_guidance(goal: str, inputs: Dict[str, Any]) -> str:
+    """
+    Creates a detailed, token-efficient guidance string for the LLM by dynamically discovering relevant verbs and tools.
+    This function exclusively relies on the dynamic discovery mechanism.
+    """
+    if not inputs:
+        inputs = {}
 
-    guidance_lines = ["\n--- AVAILABLE PLUGINS ---"]
+    discovery_result = None
+    if goal:
+        try:
+            logger.info("Attempting dynamic discovery for planning guidance...")
+            discovery_result = discover_verbs_for_planning(goal, inputs)
+        except Exception as e:
+            logger.warning(f"Dynamic verb discovery failed: {e}. The planner will rely on novel verb generation.")
 
-    if available_plugins:
-        for plugin in available_plugins:
-            if isinstance(plugin, dict):
-                action_verb = plugin.get('verb', 'UNKNOWN')
-                description = plugin.get('description', 'No description available.')
-                # Create a concise, single-line summary for each plugin
-                guidance_lines.append(f"- {action_verb}: {description}")
-    else:
-        guidance_lines.append("No static plugins available - using dynamic discovery")
+    relevant_verbs = discovery_result.get('relevantVerbs') if discovery_result else None
+    relevant_tools = discovery_result.get('relevantTools') if discovery_result else None
 
-    guidance_lines.append("--------------------")
+    if relevant_verbs or relevant_tools:
+        logger.info(f"Dynamic discovery successful. Found {len(relevant_verbs or [])} verbs and {len(relevant_tools or [])} tools.")
+        guidance_lines = ["\n--- DISCOVERED CAPABILITIES ---"]
+        
+        if relevant_verbs:
+            guidance_lines.append("\n**Discovered Verbs:**")
+            for verb in relevant_verbs:
+                if isinstance(verb, dict):
+                    action_verb = verb.get('verb', 'UNKNOWN')
+                    description = verb.get('description', 'No description available.')
+                    concise_desc = description.split('.')[0] if '.' in description else description
+                    guidance_lines.append(f"- **{action_verb}**: {concise_desc}")
 
-    # Add dynamic verb discovery section
-    guidance_lines.append("\n--- DYNAMIC VERB DISCOVERY ---")
-    guidance_lines.append("When you need capabilities not listed above, use the dynamic discovery system:")
-    guidance_lines.append("1. Describe the capability you need in natural language")
-    guidance_lines.append("2. The system will automatically discover existing verbs that match")
-    guidance_lines.append("3. Use discovered verbs instead of creating new ones")
-    guidance_lines.append("Example: Need to 'create visual content' → discovers GENERATE, DRAW, CREATE_IMAGE verbs")
-    guidance_lines.append("--------------------")
+        if relevant_tools:
+            guidance_lines.append("\n**Discovered Tools:**")
+            for tool in relevant_tools:
+                if isinstance(tool, dict):
+                    tool_id = tool.get('toolId', 'unknown_tool')
+                    tool_desc = tool.get('description', 'No description available.')
+                    tool_verbs = ", ".join(tool.get('actionVerbs', []))
+                    guidance_lines.append(f"- **{tool_id}**: {tool_desc} (Verbs: {tool_verbs})")
 
-    return "\n".join(guidance_lines)
+        guidance_lines.append("\n--------------------")
+        return "\n".join(guidance_lines)
+
+    logger.warning("Dynamic discovery yielded no results. The planner must generate a plan using novel verbs with clear descriptions.")
+    return "\n--- AVAILABLE PLUGINS ---\nNo plugins were discovered for the current goal. You must generate a plan using novel verbs. Ensure each novel verb has a clear and comprehensive 'description' explaining its purpose and functionality.\n--------------------"
 
 class RobustMissionPlanner:
-    """Streamlined LLM-driven mission planner"""
+    """Enhanced LLM-driven mission planner with improved error recovery"""
     
-    def __init__(self, inputs: Dict[str, Any]):
+    def __init__(self, inputs: Dict[str, Any]): # Add inputs parameter
         self.max_retries = 5
         self.max_llm_switches = 2
+        self.retry_strategies = [
+            'original_prompt',
+            'simplified_prompt',
+            'step_by_step_guidance',
+            'alternative_approach'
+        ]
+        self.current_strategy_index = 0
         
-        # Initialize the validator with available plugins
-        try:
-            available_plugins_raw = inputs.get('availablePlugins', {})
-            available_plugins = available_plugins_raw.get('value', []) if isinstance(available_plugins_raw, dict) else (available_plugins_raw or [])
-            self.validator = PlanValidator(
-                brain_call=call_brain, 
-                available_plugins=available_plugins,
-                report_logic_failure_call=report_logic_failure_to_brain
-            )
-        except Exception as e:
-            logger.error(f"Failed to initialize PlanValidator with plugins: {e}")
-            self.validator = PlanValidator(
-                brain_call=call_brain,
-                report_logic_failure_call=report_logic_failure_to_brain
-            )
+        # Prepare librarian_info
+        librarian_info = _get_librarian_info(inputs)
+
+        # Initialize the validator with the discovered plugins and librarian_info
+        self.validator = PlanValidator(
+            brain_call=call_brain,
+            report_logic_failure_call=report_logic_failure_to_brain,
+            librarian_info=librarian_info # Pass librarian_info
+        )
+    
+    def _get_next_retry_strategy(self) -> Optional[str]:
+        """Get the next retry strategy or None if all strategies exhausted"""
+        if self.current_strategy_index < len(self.retry_strategies):
+            strategy = self.retry_strategies[self.current_strategy_index]
+            self.current_strategy_index += 1
+            return strategy
+        return None
+    
+    def _reset_retry_strategies(self):
+        """Reset retry strategies for a new planning attempt"""
+        self.current_strategy_index = 0
 
     def plan(self, inputs: Dict[str, Any]) -> str:
         """Main interface method - create plan and return as JSON string"""
@@ -395,16 +616,11 @@ class RobustMissionPlanner:
             goal = mission_goal
         
         if not goal:
-            # If we have a mission_id but couldn't fetch the goal due to connection issues,
-            # try to provide a reasonable fallback instead of failing completely
             if mission_id and mission_goal is None:
                 logger.warning(f"Could not fetch mission goal for {mission_id} due to connection issues. Using fallback approach.")
                 goal = f"Continue working on mission {mission_id} using available context and previous work products."
             else:
                 logger.error(f"Missing required 'goal' or a valid 'missionId' that resolves in {inputs}")
-                logger.error(f"Goal:{goal}")
-                logger.error(f"Goal Input:{goal_input}")
-                logger.error(f"Mission Id:{mission_id}")
                 raise AccomplishError("Missing required 'goal' or a valid 'missionId' that resolves to a goal.", "input_error")
         
         plan = self.create_plan(goal, mission_goal, mission_id, inputs)
@@ -424,18 +640,17 @@ class RobustMissionPlanner:
         if not plan:
             return []
 
-        available_plugins_input = inputs.get('availablePlugins', {})
-        available_plugins = available_plugins_input.get('value', []) if isinstance(available_plugins_input, dict) else available_plugins_input
-        plugin_map = {plugin.get('actionVerb'): plugin for plugin in available_plugins}
-        if 'REFLECT' not in plugin_map:
+        # Dynamically check if REFLECT plugin is available via a quick discovery call
+        # This avoids depending on a stale list.
+        reflect_plugin_def = self.validator._get_plugin_definition("REFLECT")
+        if not reflect_plugin_def:
+            logger.info("REFLECT plugin not discovered, cannot inject progress checks.")
             return plan
 
         all_outputs = set()
         for step in plan:
             if 'outputs' in step and isinstance(step['outputs'], dict):
                 all_outputs.update(step['outputs'].keys())
-
-        completed_steps_summary = f"The following outputs have been produced: {', '.join(all_outputs)}"
 
         last_step = plan[-1]
         last_step_outputs = list(last_step.get('outputs', {}).keys())
@@ -450,8 +665,6 @@ class RobustMissionPlanner:
             f"4. What adjustments or additional steps are needed?"
         )
 
-        # Create REFLECT step with proper dependencies on the last step's outputs
-        # This ensures REFLECT waits for the plan to complete before running
         reflect_inputs = {
             "missionId": {"value": mission_id, "valueType": "string"},
             "plan_history": {
@@ -459,11 +672,8 @@ class RobustMissionPlanner:
                 "valueType": "string"
             },
             "question": {"value": reflection_question, "valueType": "string"},
-            "availablePlugins": inputs.get('availablePlugins', {})
         }
 
-        # Add dependency on the last step's first output to ensure execution order
-        # This makes REFLECT wait for all previous steps to complete
         if last_step_outputs:
             reflect_inputs[last_step_outputs[0]] = {
                 "outputName": last_step_outputs[0],
@@ -499,8 +709,8 @@ class RobustMissionPlanner:
             "description": "Analyze mission progress and effectiveness, determine if goals were met, and recommend next steps.",
             "inputs": reflect_inputs,
             "outputs": {
-                "plan": "A detailed, step-by-step plan to achieve the goal. Each step in the plan should be a concrete action that can be executed by another plugin. The plan should be comprehensive and sufficient to fully accomplish the goal.",
-                "answer": "A direct answer or result, to be used only when a new plan is not necessary because the goal has been met."
+                "plan": "A detailed, step-by-step plan to achieve the goal...",
+                "answer": "A direct answer or result, to be used only when a new plan is not necessary..."
             }
         }
         
@@ -511,16 +721,13 @@ class RobustMissionPlanner:
     def create_plan(self, goal: str, mission_goal: Optional[str], mission_id: Optional[str], inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Create plan with mission-level awareness"""
         progress.checkpoint("planning_start")
-
-        # Ensure availablePlugins is a direct list of manifests for the validator
-        modified_inputs = inputs.copy()
         
         logger.info(f"ACCOMPLISH: Generating role-specific plan using two-phase process.")
         agent_role = inputs.get('agentRole', {}).get('value', 'General')
         structured_plan = self._generate_role_specific_plan(goal, mission_goal, mission_id, agent_role, inputs)
         
         logger.debug("Before calling validator.validate_and_repair.")
-        validation_result = self.validator.validate_and_repair(structured_plan, goal, modified_inputs)
+        validation_result = self.validator.validate_and_repair(structured_plan, goal, inputs)
         logger.debug("After calling validator.validate_and_repair.")
 
         if not validation_result.is_valid:
@@ -540,43 +747,311 @@ class RobustMissionPlanner:
             logger.exception(f"❌ Failed to inject progress checks: {e}")
             return validated_plan
 
-    def _is_mission_root_context(self, mission_id: str, inputs: Dict[str, Any]) -> bool:
-        """Determine if this ACCOMPLISH is at mission root level"""
-        # Check if this is being called from MissionControl (no parent step)
-        parent_step_id = inputs.get('__parent_step_id')
-        if not parent_step_id:
-            return True
-        
-        # Check if parent step is also ACCOMPLISH
-        parent_action_verb = inputs.get('__parent_action_verb')
-        if parent_action_verb == 'ACCOMPLISH':
-            return False  # This is delegated ACCOMPLISH, not root
-        
-        return True
-
-
     def _generate_role_specific_plan(self, goal: str, mission_goal: Optional[str], mission_id: str, agent_role: str, inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Generates a plan tailored for a specific agent role."""
-        try:
-            prose_plan = self._get_prose_plan(goal, mission_goal, inputs)
-        except Exception as e:
-            logger.exception(f"❌ Failed to generate prose plan after all retries: {e}")
-            raise AccomplishError(f"Could not generate a prose plan: {e}", "prose_plan_error")
-
-        try:
-            structured_plan = self._convert_to_structured_plan(prose_plan, goal, mission_goal, mission_id, inputs)
-        except Exception as e:
-            logger.exception(f"❌ Failed to convert prose plan to structured JSON after all retries: {e}")
-            raise AccomplishError(f"Could not convert prose to structured plan: {e}", "json_conversion_error")
+        """Generates a plan tailored for a specific agent role with enhanced error recovery."""
         
-        return structured_plan
+        # Enhanced error recovery loop
+        for attempt in range(self.max_retries):
+            strategy = self._get_next_retry_strategy()
+            if not strategy:
+                break
+                
+            logger.info(f"Attempt {attempt + 1}/{self.max_retries} with strategy: {strategy}")
+            error_tracker.record_recovery_attempt('plan_generation', strategy)
+            
+            try:
+                if strategy in ['original_prompt', 'simplified_prompt']:
+                    prose_plan = self._get_prose_plan_with_strategy(goal, mission_goal, inputs, strategy)
+                    structured_plan = self._convert_to_structured_plan_with_recovery(prose_plan, goal, mission_goal, mission_id, inputs, strategy)
+                    
+                    # Validate the plan before returning
+                    validation_result = self.validator.validate_and_repair(structured_plan, goal, inputs)
+                    
+                    if validation_result.is_valid:
+                        logger.info(f"✅ Successfully generated valid plan with strategy: {strategy}")
+                        error_tracker.record_successful_recovery('plan_generation', strategy)
+                        return validation_result.plan
+                    else:
+                        error_summary = "; ".join(validation_result.get_error_messages()[:3])
+                        logger.warning(f"⚠️  Plan generated with {strategy} has validation errors: {error_summary}")
+                        error_tracker.record_error('validation_error', error_summary)
+                        continue
+                elif strategy == 'step_by_step_guidance':
+                    # Try a more structured approach
+                    structured_plan = self._generate_step_by_step_plan(goal, mission_goal, mission_id, inputs)
+                    validation_result = self.validator.validate_and_repair(structured_plan, goal, inputs)
+                    
+                    if validation_result.is_valid:
+                        logger.info(f"✅ Successfully generated valid plan with step-by-step strategy")
+                        error_tracker.record_successful_recovery('plan_generation', strategy)
+                        return validation_result.plan
+                elif strategy == 'alternative_approach':
+                    # Try a completely different approach
+                    structured_plan = self._generate_alternative_plan(goal, mission_goal, mission_id, inputs)
+                    validation_result = self.validator.validate_and_repair(structured_plan, goal, inputs)
+                    
+                    if validation_result.is_valid:
+                        logger.info(f"✅ Successfully generated valid plan with alternative approach")
+                        error_tracker.record_successful_recovery('plan_generation', strategy)
+                        return validation_result.plan
+                        
+            except Exception as e:
+                logger.warning(f"❌ Strategy {strategy} failed: {e}")
+                error_tracker.record_failed_recovery('plan_generation', strategy)
+                error_tracker.record_error('plan_generation_error', str(e))
+                continue
+        
+        # If all strategies failed, raise an error with comprehensive details
+        stats = error_tracker.get_recovery_stats()
+        error_message = f"Could not generate a valid plan after {self.max_retries} attempts. " \
+                       f"Tried strategies: {', '.join(self.retry_strategies)}. " \
+                       f"Error stats: {json.dumps(stats, indent=2)}"
+        
+        logger.error(error_message)
+        raise AccomplishError(error_message, "plan_generation_failure")
+    
+    def _get_prose_plan_with_strategy(self, goal: str, mission_goal: Optional[str], inputs: Dict[str, Any], strategy: str) -> str:
+        """Get prose plan with different strategies based on retry attempt"""
+        if strategy == 'simplified_prompt':
+            # Use a simpler, more direct prompt
+            return self._get_simplified_prose_plan(goal, mission_goal, inputs)
+        else:
+            # Use the original approach
+            return self._get_prose_plan(goal, mission_goal, inputs)
+    
+    def _get_simplified_prose_plan(self, goal: str, mission_goal: Optional[str], inputs: Dict[str, Any]) -> str:
+        """Generate a prose plan with simplified instructions"""
+        # Detect if this is a multi-phase goal and focus on current phase
+        focused_goal, current_phase, total_phases = self._detect_and_focus_on_current_phase(goal)
+        
+        if current_phase:
+            phase_context = f"\n\n[MULTI-PHASE MISSION: You are planning Phase {current_phase} of {total_phases}. Do NOT include steps for other phases - they will be planned separately.]"
+        else:
+            phase_context = ""
+        
+        context_input = inputs.get('context')
+        context = context_input['value'] if isinstance(context_input, dict) and 'value' in context_input else (context_input or '')
+        full_goal = f"MISSION: {mission_goal}\n\nTASK: {focused_goal}" if mission_goal and mission_goal != goal else focused_goal
+        
+        # Simplified prompt for better reliability
+        prompt = f"""You are an expert strategic planner. Create a concise, actionable plan to achieve this goal:
 
+GOAL: {full_goal}
+
+CONTEXT: {context}{phase_context}
+
+Create a clear, step-by-step plan with 3-7 actionable steps. Each step should:
+1. Be a specific, executable action
+2. Produce a tangible output or result
+3. Use simple, direct language
+
+Focus on practical execution, not abstract planning. Return only the prose plan, no formatting."""
+        
+        for attempt in range(self.max_retries):
+            try:
+                response, request_id = call_brain(prompt, inputs, "text")
+                if not response or len(response.strip()) < 50:
+                    logger.warning(f"Attempt {attempt + 1}: LLM returned an insufficient prose plan.")
+                    report_logic_failure_to_brain(request_id, inputs, "LLM returned insufficient prose plan (too short or empty)")
+                    continue
+                return response.strip()[:128000]
+            except Exception as e:
+                logger.warning(f"Attempt {attempt + 1} to get prose plan failed: {e}")
+                if attempt == self.max_retries - 1:
+                    raise
+        
+        raise AccomplishError("Could not generate a valid prose plan after multiple attempts.", "prose_plan_error")
+    
+    def _convert_to_structured_plan_with_recovery(self, prose_plan: str, goal: str, mission_goal: Optional[str], mission_id: Optional[str], inputs: Dict[str, Any], strategy: str) -> List[Dict[str, Any]]:
+        """Convert prose to structured plan with enhanced error recovery"""
+        plugin_guidance = _create_detailed_plugin_guidance(goal, inputs)
+        schema_json = json.dumps(PLAN_ARRAY_SCHEMA, indent=2)
+        
+        # Add strategy-specific guidance
+        strategy_guidance = self._get_strategy_specific_guidance(strategy)
+        
+        # Create token-efficient prompt
+        full_goal = f"MISSION: {mission_goal}\n\nTASK: {goal}" if mission_goal and mission_goal != goal else goal
+        token_efficient_context = create_token_efficient_prompt(full_goal, plugin_guidance, max_tokens=3500)
+        
+        prompt = f"""You are an expert system for converting prose plans into structured JSON according to a strict schema.
+
+**1. THE GOAL:**
+---
+{full_goal}
+---
+
+**2. THE PROSE PLAN:**
+---
+{prose_plan}
+---
+
+{strategy_guidance}
+
+{token_efficient_context}
+
+**3. THE JSON SCHEMA FOR THE ENTIRE PLAN (ARRAY OF STEPS):**
+---
+{schema_json}
+---
+
+**4. YOUR TASK:**
+Follow these steps to create the final JSON output:
+
+**STEP A: Internal Analysis & Self-Correction (Your Internal Monologue)**
+1. **Analyze:** Read the Goal and Prose Plan to fully understand the user's intent and the required sequence of actions.
+2. **Verify Schema:** Carefully study the JSON SCHEMA. Your output must follow it perfectly.
+3. **Restate the Plan as Explicit Steps:** Identify a list of steps that will be taken to achieve the Goal. Each Step should be a clear, actionable task with one or more outputs.
+4. **Check Dependencies & Data Types:** For each step, ensure its `inputs` correctly reference the `outputName` and `sourceStep`. Crucially, verify that the `valueType` of the source output matches the expected `valueType` of the target input.
+5. **CRITICAL - USE UNIQUE STRING IDs:** Every single step in the plan MUST have a unique string identifier in the "id" field. This ID does NOT have to be a UUID, but it MUST be unique within the entire plan. For example: "step_1", "step_2", etc. Do NOT reuse IDs.
+6. **Final Check:** Before generating the output, perform a final check to ensure the entire JSON structure is valid and fully compliant with the schema.
+
+**STEP B: Generate Final JSON (Your Final Output)**
+After your internal analysis and self-correction is complete, provide ONLY the final, valid JSON output. The root of the JSON object MUST be a key named "steps" containing the JSON array of plan steps.
+
+Example format:
+```json
+{{
+  "steps": [
+    {{
+      "id": "step_1_unique_identifier",
+      "actionVerb": "...",
+      ...
+    }},
+    {{
+      "id": "step_2_another_one",
+      "actionVerb": "...",
+      ...
+    }}
+  ]
+}}
+```
+
+**CRITICAL PLANNING PRINCIPLES (STRICTLY ENFORCED):**
+---
+- **Direct, Actionable Plans:** Prioritize using concrete, executable `actionVerbs` from the `AVAILABLE PLUGINS` list. Your goal is to produce the most direct and actionable plan possible. Avoid creating abstract or novel verbs if the task can be accomplished with a sequence of known verbs.
+- **Autonomy is Paramount:** Your goal is to *solve* the mission, not to delegate research or information gathering back to the user.
+- **Resourcefulness:** Exhaust all available tools (`SEARCH`, `SCRAPE`, `QUERY_KNOWLEDGE_BASE`, `FILE_OPERATION`, `API_CLIENT`, `RUN_CODE`) to find answers and create deliverables *before* ever considering asking the user.
+- **Create Deliverables with `FILE_OPERATION`:** If a step's output is marked with `isDeliverable: true`, you **MUST** add a subsequent step using `FILE_OPERATION` with the `write` operation to save the output to the specified `filename`. This is essential for the user to see the work.
+- **Share Work Before Asking:** Before generating an `ASK_USER_QUESTION` step that refers to a work product, you **MUST** ensure a preceding `FILE_OPERATION` step saves that product to a file for the user to review.
+- **`ASK_USER_QUESTION` is a Last Resort:** This tool is exclusively for obtaining subjective opinions, approvals, or choices from the user. It is *never* for offloading tasks. Generating a plan that asks the user for information you can find yourself is a critical failure.
+- **Dependencies are Crucial:** Every step that uses an output from a previous step MUST declare this in its `inputs` using `sourceStep` and `outputName`. A plan with disconnected steps is invalid.
+- **Role Assignment:** Assign `recommendedRole` at the deliverable level, not per individual step. All steps contributing to a single output (e.g., a research report) should share the same role.
+- **Type Compatibility & Serialization:**
+  - If a step output is an `object` or `array` and is to be used as an input that expects a `string`, you MUST explicitly serialize the object/array to a JSON string within the plan. For example, use a `TRANSFORM` step to `json.dumps()` the object before passing it to the `string` input.
+  - If an `array` or `list` output is to be used as a `string` input, consider if the intention is to iterate over each item. If so, a `FOREACH` control flow verb will be automatically injected by the system.
+
+**DELIVERABLE IDENTIFICATION:**
+When defining outputs, you MUST identify which ones are deliverables for the user:
+- For final reports, analyses, or completed files, you MUST use the enhanced format:
+  `"outputs": {{"final_report": {{"description": "A comprehensive analysis", "isDeliverable": true, "filename": "market_analysis_2025.md"}}}}`
+
+- **CRITICAL - LINKING STEPS:** You MUST explicitly connect steps. Any step that uses the output of a previous step MUST declare this in its `inputs` using `sourceStep` and `outputName`. DO NOT simply refer to previous outputs in a `prompt` string without also adding the formal dependency in the `inputs` object. For verbs like `THINK`, `CHAT`, or `ASK_USER_QUESTION`, if the `prompt` or `question` text refers to a file or work product from a previous step, you MUST add an input that references the output of that step using `sourceStep` and `outputName`.
+ A plan with no connections between steps is invalid and will be rejected.
+- **CRITICAL - `sourceStep: '0'` Usage:**
+  - Use `sourceStep: '0'` ONLY for inputs that are explicitly provided in the initial mission context (the "PARENT STEP INPUTS" section if applicable, or the overall mission goal). This is primarily for sub-steps within a `FOREACH` or similar control flow structure to reference an item from their direct parent.
+  - DO NOT use `sourceStep: '0'` for top-level steps that are not nested within another step. Top-level steps should reference other preceding top-level steps by their actual UUID.
+"""
+        
+        for attempt in range(self.max_retries):
+            try:
+                response, request_id = call_brain(prompt, inputs, "json")
+                logger.info(f"Raw response from Brain (attempt {attempt+1}): {str(response)[:500]}...")
+                
+                try:
+                    plan = json.loads(response)
+                    if isinstance(plan, dict) and 'error' in plan:
+                        raise AccomplishError(f"Brain returned an error: {plan['error'].get('message', 'Unknown')}", plan['error'].get('type', 'brain_error'))
+                except Exception as e:
+                    logger.warning(f"Attempt {attempt + 1}: JSON parsing failed: {e}. Response: {response}")
+                    # JSON parsing failure is critical - LLM was explicitly told to return JSON
+                    report_logic_failure_to_brain(request_id, inputs, f"LLM returned invalid JSON: {str(e)}", severity="critical")
+                    if attempt == self.max_retries - 1:
+                        raise AccomplishError(f"Failed to parse structured plan JSON: {e}", "json_parse_error")
+                    continue
+                
+                plan_array = None
+                if isinstance(plan, list):
+                    plan_array = plan
+                elif isinstance(plan, dict):
+                    # Check if this dict has a 'steps' key with an array
+                    if 'steps' in plan and isinstance(plan['steps'], list):
+                        logger.info(f"ACCOMPLISH: Extracting plan from 'steps' key in response ({len(plan['steps'])} steps)")
+                        plan_array = plan['steps']
+                    # Check if this dict is itself a step (has actionVerb or id) - TREAT AS ERROR
+                    elif 'actionVerb' in plan or 'id' in plan:
+                        logger.error(f"ACCOMPLISH: LLM returned a single step object instead of a plan array. This is an error that needs correction.")
+                        # Report as critical - this is a schema violation that needs to be fixed
+                        report_logic_failure_to_brain(request_id, inputs, "LLM returned single step instead of plan array - schema violation", severity="critical")
+                        # TREAT AS ERROR: Don't wrap, fail instead
+                        logger.error(f"Attempt {attempt + 1}: LLM returned single step instead of plan array - schema violation")
+                        if attempt == self.max_retries - 1:
+                            raise AccomplishError("LLM returned single step instead of plan array - schema violation", "invalid_plan_format")
+                        continue
+                    else:
+                        # Otherwise, check if any property contains an array of step-like objects
+                        for key, value in plan.items():
+                            if isinstance(value, list) and len(value) > 0:
+                                # Check if it looks like a plan (array of objects with step-like properties)
+                                if all(isinstance(item, dict) and ('actionVerb' in item or 'id' in item) for item in value):
+                                    logger.info(f"ACCOMPLISH: Extracting plan from '{key}' key in response ({len(value)} steps)")
+                                    plan_array = value
+                                    break
+                 
+                if plan_array is not None:
+                    return plan_array
+                 
+                logger.error(f"Attempt {attempt + 1}: Could not find a valid plan array in the response.")
+                # Missing plan array is critical - explicit instruction was to return plan array
+                report_logic_failure_to_brain(request_id, inputs, "LLM response was valid JSON but did not contain a recognizable plan array - schema violation.", severity="critical")
+                if attempt == self.max_retries - 1:
+                    raise AccomplishError("LLM failed to return a valid plan structure after multiple attempts.", "invalid_plan_format")
+                continue
+            except AccomplishError as e:
+                logger.warning(f"Attempt {attempt + 1}: Brain call for JSON conversion failed: {e}")
+                if attempt == self.max_retries - 1:
+                    raise
+            except Exception as e:
+                logger.warning(f"Attempt {attempt + 1}: Brain call for JSON conversion failed: {e}")
+                if attempt == self.max_retries - 1:
+                    raise
+        
+        raise AccomplishError("Could not generate a valid structured plan after multiple attempts.", "json_conversion_error")
+    
+    def _get_strategy_specific_guidance(self, strategy: str) -> str:
+        """Get additional guidance based on the current retry strategy"""
+        if strategy == 'simplified_prompt':
+            return "**STRATEGY: SIMPLIFIED APPROACH**\nFocus on creating a minimal, reliable plan with 3-5 clear steps. Prioritize known action verbs and avoid complex dependencies."
+        elif strategy == 'step_by_step_guidance':
+            return "**STRATEGY: STEP-BY-STEP**\nBreak down the goal into the smallest possible atomic steps. Each step should do one thing and one thing only. Use explicit dependencies between steps."
+        elif strategy == 'alternative_approach':
+            return "**STRATEGY: ALTERNATIVE APPROACH**\nTry a completely different way to achieve the goal. Think outside the box and consider unconventional but valid action verbs or sequences."
+        else:
+            return "**STRATEGY: STANDARD APPROACH**\nCreate a comprehensive plan using the best available action verbs and logical sequencing."
+    
+    def _generate_step_by_step_plan(self, goal: str, mission_goal: Optional[str], mission_id: Optional[str], inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Generate a plan using a more structured, step-by-step approach"""
+        # This would implement a different planning strategy
+        # For now, we'll use the standard approach but could be enhanced
+        return self._convert_to_structured_plan_with_recovery(
+            f"Step 1: Analyze {goal}\nStep 2: Research {goal}\nStep 3: Implement {goal}\nStep 4: Test {goal}\nStep 5: Deliver {goal}",
+            goal, mission_goal, mission_id, inputs, 'step_by_step_guidance'
+        )
+    
+    def _generate_alternative_plan(self, goal: str, mission_goal: Optional[str], mission_id: Optional[str], inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Generate a plan using an alternative approach"""
+        # This would implement a different planning strategy
+        # For now, we'll use the standard approach but could be enhanced
+        return self._convert_to_structured_plan_with_recovery(
+            f"Alternative approach for {goal}:\n1. Use GENERATE to create initial content\n2. Use SEARCH to find relevant information\n3. Use FILE_OPERATION to save results\n4. Use REFLECT to analyze outcomes",
+            goal, mission_goal, mission_id, inputs, 'alternative_approach'
+        )
 
     def _get_prose_plan(self, goal: str, mission_goal: Optional[str], inputs: Dict[str, Any]) -> str:
         """Phase 1: Get a well-thought prose plan from LLM with retries."""
-
+       
         context_input = inputs.get('context')
-        context = context_input if context_input is not None else ''
+        context = context_input['value'] if isinstance(context_input, dict) and 'value' in context_input else (context_input or '')
         full_goal = f"MISSION: {mission_goal}\n\nTASK: {goal}" if mission_goal and mission_goal != goal else goal
         prompt = f"""You are an expert strategic planner and an autonomous agent. Your core purpose is to accomplish the user's mission by breaking it down into logical, functional steps. Your goal is to be resourceful and solve problems independently.
 
@@ -602,7 +1077,6 @@ EXAMPLE OF GOOD HIGH-LEVEL STEPS:
 
 IMPORTANT: Return ONLY plain text for the plan. NO markdown formatting, NO code blocks, NO special formatting.
 """
-
         for attempt in range(self.max_retries):
             try:
                 response, request_id = call_brain(prompt, inputs, "text")
@@ -610,23 +1084,32 @@ IMPORTANT: Return ONLY plain text for the plan. NO markdown formatting, NO code 
                     logger.warning(f"Attempt {attempt + 1}: LLM returned an insufficient prose plan.")
                     report_logic_failure_to_brain(request_id, inputs, "LLM returned insufficient prose plan (too short or empty)")
                     continue
-
-                # Truncate the prose plan to a maximum of 16000 characters
-                # Increased truncation limit to 128000 characters to avoid cutting off the plan
-                truncated_response = response.strip()[:128000]
-                return truncated_response
+                return response.strip()[:128000]
             except Exception as e:
                 logger.warning(f"Attempt {attempt + 1} to get prose plan failed: {e}")
                 if attempt == self.max_retries - 1:
                     raise
-
         raise AccomplishError("Could not generate a valid prose plan after multiple attempts.", "prose_plan_error")
     
     def _convert_to_structured_plan(self, prose_plan: str, goal: str, mission_goal: Optional[str], mission_id: Optional[str], inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Phase 2: Convert prose plan to structured JSON with retries."""
-
-        plugin_guidance = _create_detailed_plugin_guidance(inputs)
+        plugin_guidance = _create_detailed_plugin_guidance(goal, inputs)
         schema_json = json.dumps(PLAN_ARRAY_SCHEMA, indent=2)
+        
+        # Add explicit guidance about internal verbs
+        internal_verbs_guidance = """
+**INTERNAL VERBS (Always Available):**
+- **GENERATE**: Uses LLM to generate content. Takes a required 'prompt' input.
+- **THINK**: Internal reasoning. Takes a 'prompt' input.
+- **IF_THEN**: Conditional branching. Requires 'condition', 'trueSteps', and optionally 'falseSteps'.
+- **CHAT**: Agent conversation. Takes 'prompt' and optionally 'conversationHistory'.
+- **FOREACH**: Iteration over arrays. Wraps steps to process multiple items.
+- **WHILE**, **UNTIL**, **TIMEOUT**, **REPEAT**: Loop control verbs.
+"""
+        
+        # Create token-efficient prompt
+        full_goal = f"MISSION: {mission_goal}\n\nTASK: {goal}" if mission_goal and mission_goal != goal else goal
+        token_efficient_context = create_token_efficient_prompt(full_goal, plugin_guidance, max_tokens=3500)
         
         full_goal = f"MISSION: {mission_goal}\n\nTASK: {goal}" if mission_goal and mission_goal != goal else goal
         prompt = f"""You are an expert system for converting prose plans into structured JSON according to a strict schema.
@@ -640,6 +1123,10 @@ IMPORTANT: Return ONLY plain text for the plan. NO markdown formatting, NO code 
 ---
 {prose_plan}
 ---
+
+{internal_verbs_guidance}
+
+{token_efficient_context}
 
 **3. THE JSON SCHEMA FOR THE ENTIRE PLAN (ARRAY OF STEPS):**
 ---
@@ -678,18 +1165,20 @@ Example format:
 }}
 ```
 
----
 **CRITICAL PLANNING PRINCIPLES (STRICTLY ENFORCED):**
 ---
+- **Direct, Actionable Plans:** Prioritize using concrete, executable `actionVerbs` from the `AVAILABLE PLUGINS` list. Your goal is to produce the most direct and actionable plan possible. Avoid creating abstract or novel verbs if the task can be accomplished with a sequence of known verbs.
 - **Autonomy is Paramount:** Your goal is to *solve* the mission, not to delegate research or information gathering back to the user.
-- **Resourcefulness:** Exhaust all available tools (`SEARCH`, `SCRAPE`, `GENERATE`, `QUERY_KNOWLEDGE_BASE`) to find answers and create deliverables *before* ever considering asking the user.
+- **Resourcefulness:** Exhaust all available tools (`SEARCH`, `SCRAPE`, `QUERY_KNOWLEDGE_BASE`, `FILE_OPERATION`, `API_CLIENT`, `RUN_CODE`) to find answers and create deliverables *before* ever considering asking the user.
+- **Create Deliverables with `FILE_OPERATION`:** If a step's output is marked with `isDeliverable: true`, you **MUST** add a subsequent step using `FILE_OPERATION` with the `write` operation to save the output to the specified `filename`. This is essential for the user to see the work.
+- **Share Work Before Asking:** Before generating an `ASK_USER_QUESTION` step that refers to a work product, you **MUST** ensure a preceding `FILE_OPERATION` step saves that product to a file for the user to review.
 - **`ASK_USER_QUESTION` is a Last Resort:** This tool is exclusively for obtaining subjective opinions, approvals, or choices from the user. It is *never* for offloading tasks. Generating a plan that asks the user for information you can find yourself is a critical failure.
 - **Dependencies are Crucial:** Every step that uses an output from a previous step MUST declare this in its `inputs` using `sourceStep` and `outputName`. A plan with disconnected steps is invalid.
 - **Role Assignment:** Assign `recommendedRole` at the deliverable level, not per individual step. All steps contributing to a single output (e.g., a research report) should share the same role.
 - **Type Compatibility & Serialization:**
   - If a step output is an `object` or `array` and is to be used as an input that expects a `string`, you MUST explicitly serialize the object/array to a JSON string within the plan. For example, use a `TRANSFORM` step to `json.dumps()` the object before passing it to the `string` input.
   - If an `array` or `list` output is to be used as a `string` input, consider if the intention is to iterate over each item. If so, a `FOREACH` control flow verb will be automatically injected by the system.
-- **Novel Action Verb Description:** If you propose a novel `actionVerb` (one not in the provided `AVAILABLE PLUGINS` list), you MUST provide a comprehensive `description` for that step, clearly explaining *what* the novel action verb does and *why* it's needed.
+  - **Novel Action Verb Description:** If you propose a novel `actionVerb` (one not in the provided `AVAILABLE PLUGINS` list), you MUST provide a comprehensive `description` for that step, clearly explaining *what* the novel action verb does and *why* it's needed.
 
 **DELIVERABLE IDENTIFICATION:**
 When defining outputs, you MUST identify which ones are deliverables for the user:
@@ -702,165 +1191,173 @@ When defining outputs, you MUST identify which ones are deliverables for the use
   - Use `sourceStep: '0'` ONLY for inputs that are explicitly provided in the initial mission context (the "PARENT STEP INPUTS" section if applicable, or the overall mission goal). This is primarily for sub-steps within a `FOREACH` or similar control flow structure to reference an item from their direct parent.
   - DO NOT use `sourceStep: '0'` for top-level steps that are not nested within another step. Top-level steps should reference other preceding top-level steps by their actual UUID.
 """
-
         for attempt in range(self.max_retries):
             try:
                 response, request_id = call_brain(prompt, inputs, "json")
-                # Log raw response for debugging
                 logger.info(f"Raw response from Brain (attempt {attempt+1}): {str(response)[:500]}...")
-
-                logger.debug(f"Attempt {attempt + 1}: Before json.loads(response).")
                 try:
                     plan = json.loads(response)
-                    logger.debug(f"Attempt {attempt + 1}: After json.loads(response). Plan type: {type(plan)}")
-
-                    # Check if the parsed response is an error object from the Brain
                     if isinstance(plan, dict) and 'error' in plan:
-                        error_message = plan['error'].get('message', 'Unknown Brain error')
-                        error_type = plan['error'].get('type', 'brain_error')
-                        raise AccomplishError(f"Brain returned an error: {error_message}", error_type)
-
+                        raise AccomplishError(f"Brain returned an error: {plan['error'].get('message', 'Unknown')}", plan['error'].get('type', 'brain_error'))
                 except Exception as e:
                     logger.warning(f"Attempt {attempt + 1}: JSON parsing failed: {e}. Response: {response}")
-                    report_logic_failure_to_brain(request_id, inputs, f"LLM returned invalid JSON: {str(e)}")
+                    # JSON parsing failure is critical - LLM was explicitly told to return JSON
+                    report_logic_failure_to_brain(request_id, inputs, f"LLM returned invalid JSON: {str(e)}", severity="critical")
                     if attempt == self.max_retries - 1:
                         raise AccomplishError(f"Failed to parse structured plan JSON: {e}", "json_parse_error")
                     continue
 
-                # --- Start of Robust Parsing Logic ---
-
-                # 1. Handle if the LLM returns a direct list of steps
-                if isinstance(plan, list) and all(isinstance(step, dict) for step in plan):
-                    logger.info(f"Attempt {attempt + 1}: LLM returned a direct array of steps.")
-                    return plan
-
-                # 2. Handle if the LLM returns a dictionary (e.g. {"steps": [...]})
-                if isinstance(plan, dict):
-                    # Prefer the 'steps' key
+                plan_array = None
+                if isinstance(plan, list):
+                    plan_array = plan
+                elif isinstance(plan, dict):
+                    # Check if this dict has a 'steps' key with an array
                     if 'steps' in plan and isinstance(plan['steps'], list):
-                        logger.info(f"Attempt {attempt + 1}: Extracted plan from preferred 'steps' key.")
-                        return plan['steps']
-                    
-                    # Fallback: search for any key that holds a list of step-like objects
-                    for key, value in plan.items():
-                        if isinstance(value, list) and value and isinstance(value[0], dict):
-                            # Heuristic: if the first item has 'actionVerb' or 'id' in value, it's likely a plan
-                            if 'actionVerb' in value[0] or 'id' in value[0]:
-                                logger.warning(f"Attempt {attempt + 1}: Found plan in unexpected key '{key}'.")
-                                return value
-                    
-                    # Handle case where the dict is a single step (which is invalid)
-                    if 'actionVerb' in plan and 'id' in plan:
-                         logger.warning(f"Attempt {attempt + 1}: LLM returned a single step object, not an array.")
-                         # Allow this to fall through to the final error
+                        logger.info(f"ACCOMPLISH: Extracting plan from 'steps' key in response ({len(plan['steps'])} steps)")
+                        plan_array = plan['steps']
+                    # Check if this dict is itself a step (has actionVerb or id) - TREAT AS ERROR
+                    elif 'actionVerb' in plan or 'id' in plan:
+                        logger.error(f"ACCOMPLISH: LLM returned a single step object instead of a plan array. This is an error that needs correction.")
+                        # Report as critical - this is a schema violation that needs to be fixed
+                        report_logic_failure_to_brain(request_id, inputs, "LLM returned single step instead of plan array - schema violation", severity="critical")
+                        # TREAT AS ERROR: Don't wrap, fail instead
+                        logger.error(f"Attempt {attempt + 1}: LLM returned single step instead of plan array - schema violation")
+                        if attempt == self.max_retries - 1:
+                            raise AccomplishError("LLM returned single step instead of plan array - schema violation", "invalid_plan_format")
+                        continue
+                    else:
+                        # Otherwise, check if any property contains an array of step-like objects
+                        for key, value in plan.items():
+                            if isinstance(value, list) and len(value) > 0:
+                                # Check if it looks like a plan (array of objects with step-like properties)
+                                if all(isinstance(item, dict) and ('actionVerb' in item or 'id' in item) for item in value):
+                                    logger.info(f"ACCOMPLISH: Extracting plan from '{key}' key in response ({len(value)} steps)")
+                                    plan_array = value
+                                    break
                 
-                # 3. If no valid plan structure is found after all checks
+                if plan_array is not None:
+                    return plan_array
+                
                 logger.error(f"Attempt {attempt + 1}: Could not find a valid plan array in the response.")
-                report_logic_failure_to_brain(request_id, inputs, "LLM response was valid JSON but did not contain a recognizable plan array.")
+                # Missing plan array is critical - explicit instruction was to return plan array
+                report_logic_failure_to_brain(request_id, inputs, "LLM response was valid JSON but did not contain a recognizable plan array - schema violation.", severity="critical")
                 if attempt == self.max_retries - 1:
                     raise AccomplishError("LLM failed to return a valid plan structure after multiple attempts.", "invalid_plan_format")
                 continue
-                # --- End of Robust Parsing Logic ---
-
             except AccomplishError as e:
                 logger.warning(f"Attempt {attempt + 1}: Brain call for JSON conversion failed: {e}")
                 if attempt == self.max_retries - 1:
                     raise
-                continue
             except Exception as e:
                 logger.warning(f"Attempt {attempt + 1}: Brain call for JSON conversion failed: {e}")
                 if attempt == self.max_retries - 1:
                     raise
-                continue
-
         raise AccomplishError("Could not generate a valid structured plan after multiple attempts.", "json_conversion_error")
 
 class NovelVerbHandler:
     """Handles novel action verbs by recommending plugins or providing direct answers"""
 
-    def __init__(self, inputs: Dict[str, Any]):
-        self.goal_planner = RobustMissionPlanner(inputs)
+    def __init__(self, inputs: Dict[str, Any]): # Add inputs parameter
+        self.max_retries = 3
+        # Prepare librarian_info
+        librarian_info = _get_librarian_info(inputs)
 
-        # Initialize the validator with available plugins
-        try:
-            available_plugins_raw = inputs.get('availablePlugins', {})
-            available_plugins = available_plugins_raw.get('value', []) if isinstance(available_plugins_raw, dict) else (available_plugins_raw or [])
-            self.validator = PlanValidator(
-                brain_call=call_brain, 
-                available_plugins=available_plugins,
-                report_logic_failure_call=report_logic_failure_to_brain
-            )
-        except Exception as e:
-            logger.error(f"Failed to initialize PlanValidator in NovelVerbHandler with plugins: {e}")
-            self.validator = PlanValidator(
-                brain_call=call_brain,
-                report_logic_failure_call=report_logic_failure_to_brain
-            )
-
-        except Exception as e:
-            logger.error(f"Failed to initialize verb discovery service: {e}")
-            return None
+        # Initialize the validator with the discovered plugins and librarian_info
+        self.validator = PlanValidator(
+            brain_call=call_brain, 
+            report_logic_failure_call=report_logic_failure_to_brain,
+            librarian_info=librarian_info # Pass librarian_info
+        )
 
     def handle(self, inputs: Dict[str, Any]) -> str:
+        """
+        Handles a novel verb request by first attempting a semantic search for a replacement
+        and falling back to LLM-based plan generation if no suitable replacement is found.
+        """
         try:
-
-            # Extract verb information
             verb_info = self._extract_verb_info(inputs)
+            
+            # Phase 1: Reactive Semantic Search
+            logger.info(f"NovelVerbHandler: Attempting semantic search for verb '{verb_info.get('verb')}'...")
+            substitution_plan = self._semantic_search_for_verb(verb_info, inputs)
 
-            # Ask Brain for handling approach
+            if substitution_plan:
+                logger.info("Semantic search found a high-confidence substitute. Returning substitution plan.")
+                # The _semantic_search_for_verb method already formats the response
+                return substitution_plan
+
+            # Phase 2: Fallback to LLM Decomposition
+            logger.info("Semantic search found no substitute. Falling back to LLM-based decomposition.")
             brain_response = self._ask_brain_for_verb_handling(verb_info, inputs)
-
-            # Interpret and format response
             return self._format_response(brain_response, verb_info, inputs)
 
         except Exception as e:
-            logger.error(f"Novel verb handling failed: {e}")
-            return json.dumps([{ 
-                "success": False,
-                "name": "error",
-                "resultType": "error",
-                "resultDescription": f"Novel verb handling failed: {str(e)}",
-                "result": str(e),
-                "mimeType": "text/plain"
-            }])
+            logger.error(f"Novel verb handling failed: {e}", exc_info=True)
+            return json.dumps([{"success": False, "name": "error", "resultType": "error", "resultDescription": f"Novel verb handling failed: {str(e)}", "result": str(e), "mimeType": "text/plain"}])
+
+    def _semantic_search_for_verb(self, verb_info: Dict[str, Any], inputs: Dict[str, Any]) -> Optional[str]:
+        """
+        Performs a semantic search for a verb and returns a single-step plan if a high-confidence match is found.
+        """
+        query = verb_info.get('description') or verb_info.get('verb')
+        if not query:
+            return None
+
+        try:
+            # Use the same discovery mechanism as the main planner
+            discovery_result = discover_verbs_for_planning(query, inputs)
+            relevant_verbs = discovery_result.get('relevantVerbs', [])
+            
+            # Simple confidence check: is the first result's verb different from the novel one?
+            if relevant_verbs:
+                top_match = relevant_verbs[0]
+                top_verb = top_match.get('verb')
+                novel_verb = verb_info.get('verb')
+
+                # Check if the found verb is a legitimate, different verb and seems like a good fit
+                # (A more sophisticated confidence score/logic would go here in a real implementation)
+                if top_verb and top_verb.lower() != novel_verb.lower():
+                    logger.info(f"Found potential substitute for '{novel_verb}': '{top_verb}'")
+                    
+                    # Create a simple, one-step plan to substitute the novel verb
+                    substitution_step = {
+                        "id": str(uuid.uuid4()),
+                        "actionVerb": top_verb,
+                        "description": f"Substituted novel verb '{novel_verb}' with discovered verb '{top_verb}'. Original goal: {verb_info.get('description', '')}",
+                        "inputs": verb_info.get('inputValues', {}),
+                        "outputs": verb_info.get('outputs', {})
+                    }
+                    
+                    # We must validate this new single-step plan
+                    validation_result = self.validator.validate_and_repair([substitution_step], verb_info.get('description',''), inputs)
+                    if not validation_result.is_valid:
+                         logger.warning(f"Proposed substitution plan for '{top_verb}' failed validation. Cannot substitute.")
+                         return None
+                    
+                    # Return the formatted response directly
+                    return json.dumps([{
+                        "success": True, 
+                        "name": "plan", 
+                        "resultType": "plan", 
+                        "resultDescription": f"Plan created by substituting novel verb '{novel_verb}' with '{top_verb}'", 
+                        "result": validation_result.plan, 
+                        "mimeType": "application/json"
+                    }])
+
+        except Exception as e:
+            logger.warning(f"Semantic search for novel verb failed: {e}")
+        
+        return None
 
     def _extract_verb_info(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         """Extract verb information from inputs"""
         if 'novel_actionVerb' in inputs:
             novel_verb_data = inputs['novel_actionVerb']
-
             if isinstance(novel_verb_data, dict):
-                # Assume it's already the structured format
-                return {
-                    "id": novel_verb_data.get('id', 'novel_plugin'),
-                    "verb": novel_verb_data.get('verb', 'NOVEL_VERB'),
-                    "description": novel_verb_data.get('description', ''),
-                    "context": novel_verb_data.get('context', ''),
-                    "inputValues": novel_verb_data.get('inputValues', {}),
-                    "outputs": {},
-                }
+                return {"id": novel_verb_data.get('id', 'novel_plugin'), "verb": novel_verb_data.get('verb', 'NOVEL_VERB'), "description": novel_verb_data.get('description', ''), "context": novel_verb_data.get('context', ''), "inputValues": novel_verb_data.get('inputValues', {}), "outputs": {},}
             elif isinstance(novel_verb_data, str):
-                # Simple string format
-                return {
-                    "id": "novel_plugin",
-                    "verb": "NOVEL_VERB",
-                    "description": novel_verb_data,
-                    "context": novel_verb_data,
-                    "inputValues": {},
-                    "outputs": {}
-                }
-            else:
-                logger.warning(f"novel_actionVerb is an unexpected type: {type(novel_verb_data)}")
-
-        # Fallback
-        return {
-            "id": "novel_plugin",
-            "verb": "NOVEL_VERB",
-            "description": "A novel plugin.",
-            "context": "",
-            "inputValues": {},
-            "outputs": {}
-        }
+                return {"id": "novel_plugin", "verb": "NOVEL_VERB", "description": novel_verb_data, "context": novel_verb_data, "inputValues": {}, "outputs": {}}
+        return {"id": "novel_plugin", "verb": "NOVEL_VERB", "description": "A novel plugin.", "context": "", "inputValues": {}, "outputs": {}}
     
     def _ask_brain_for_verb_handling(self, verb_info: Dict[str, Any], inputs: Dict[str, Any]) -> str:
         """Ask Brain how to handle the novel verb"""
@@ -868,7 +1365,11 @@ class NovelVerbHandler:
         description = verb_info.get('description', 'No description provided')
         context = verb_info.get('context', description)
         schema_json = json.dumps(PLAN_ARRAY_SCHEMA, indent=2)
-        plugin_guidance = _create_detailed_plugin_guidance(inputs)
+        plugin_guidance = _create_detailed_plugin_guidance(verb_info.get('description', ''), inputs)
+        
+        # Create token-efficient context for novel verb handling
+        verb_context = f"VERB: {verb}\nDESCRIPTION: {description}\nCONTEXT: {context}"
+        token_efficient_context = create_token_efficient_prompt(verb_context, plugin_guidance, max_tokens=3000)
 
         prompt = f"""You are an expert system analyst. A user wants to use a novel action verb "{verb}" that is not currently supported.
 
@@ -877,6 +1378,8 @@ DESCRIPTION: {description}
 CONTEXT: {context}
 
 PARENT STEP INPUTS: {json.dumps(inputs)}
+
+{token_efficient_context}
 
 Your task is to create a plan to accomplish the goal of the novel verb "{verb}" using available tools.
 
@@ -925,8 +1428,6 @@ When defining outputs, you MUST identify which ones are deliverables for the use
   * Use descriptive, professional names
   * Use appropriate file extensions (.md, .txt, .json, .csv, .pdf, etc.)
   * Avoid generic names like "output.txt" or "result.json"
-
-{plugin_guidance}
 """
 
         for attempt in range(self.max_retries):
@@ -935,247 +1436,50 @@ When defining outputs, you MUST identify which ones are deliverables for the use
                 return response
             except Exception as e:
                 logger.error(f"Brain call failed for novel verb '{verb}': {e}")
-                return json.dumps({"error": f"Brain call failed: {str(e)}"})
+                if attempt == self.max_retries - 1:
+                    return json.dumps({"error": f"Brain call failed after multiple retries: {str(e)}"})
+        return json.dumps({"error": "Brain call failed after multiple retries."})
 
-    def _get_dynamic_discovery_prompt(self, verb: str, description: str, inputs: Dict[str, Any]) -> str:
-        """Generate dynamic verb discovery prompt section"""
-        if not self.verb_discovery:
-            return f"""
-**DYNAMIC VERB DISCOVERY PROTOCOL:**
-1. **Capability Analysis**: Analyze what the novel verb '{verb}' is trying to accomplish
-2. **Verb Discovery**: The system will automatically discover existing verbs that can achieve similar goals
-3. **Verb Selection**: Use discovered verbs instead of creating new ones when possible
-4. **Fallback Creation**: Only create novel verbs if no suitable existing verbs are found
-"""
-
-        try:
-            # Get auth token for discovery
-            auth_token = None
-            if '__brain_auth_token' in inputs:
-                token_data = inputs['__brain_auth_token']
-                if isinstance(token_data, dict) and 'value' in token_data:
-                    auth_token = token_data['value']
-                elif isinstance(token_data, str):
-                    auth_token = token_data
-
-            if auth_token:
-                # Perform verb discovery based on the novel verb's description
-                discovered_verbs = self.verb_discovery.discover_verbs_by_capability(description, auth_token)
-
-                if discovered_verbs:
-                    discovery_prompt = f"""
-**DYNAMIC VERB DISCOVERY RESULTS:**
-The system has discovered existing verbs that can accomplish similar goals to '{verb}':
-
-"""
-
-                    for verb_info in discovered_verbs:
-                        discovery_prompt += f"- {verb_info['verb']} ({verb_info['category']}): {verb_info['description']}\n"
-
-                    discovery_prompt += """
-**VERB USAGE INSTRUCTIONS:**
-1. **Prioritize Discovered Verbs**: Use the verbs listed above instead of creating new ones
-2. **Capability Mapping**: Match the novel verb's requirements to the discovered verbs' capabilities
-3. **Fallback Protocol**: Only create novel verbs if the discovered verbs cannot fully satisfy the requirements
-4. **Documentation**: When using discovered verbs, document why they were chosen over novel verb creation
-"""
-
-                    return discovery_prompt
-                else:
-                    return f"""
-**DYNAMIC VERB DISCOVERY RESULTS:**
-No existing verbs were discovered that match the capabilities of '{verb}'.
-
-**NOVEL VERB CREATION PROTOCOL:**
-1. **Justification**: Document why existing verbs cannot accomplish this goal
-2. **Definition**: Provide clear description of what the novel verb should do
-3. **Implementation**: Create the novel verb with comprehensive input/output specifications
-4. **Registration**: The novel verb will be registered for future discovery by other agents
-"""
-
-        except Exception as e:
-            logger.error(f"Dynamic verb discovery failed: {e}")
-            return f"""
-**DYNAMIC VERB DISCOVERY PROTOCOL:**
-1. **Capability Analysis**: Analyze what the novel verb '{verb}' is trying to accomplish
-2. **Verb Discovery**: Attempt to discover existing verbs that can achieve similar goals
-3. **Verb Selection**: Use discovered verbs instead of creating new ones when possible
-4. **Fallback Creation**: Only create novel verbs if no suitable existing verbs are found
-"""
-
-    def _clean_brain_response(self, response: str) -> str:
-        """Clean Brain response by removing markdown code blocks and extra formatting"""
-        if not response or not response.strip():
-            return "{}"
-
-        # Remove markdown code blocks
-        response = response.strip()
-
-        # Remove ```json and ``` markers
-        if response.startswith('```json'):
-            response = response[7:]  # Remove ```json
-        elif response.startswith('```'):
-            response = response[3:]   # Remove ```
-
-        if response.endswith('```'):
-            response = response[:-3]  # Remove trailing ```
-
-        # Clean up whitespace
-        response = response.strip()
-
-        # If still empty, return empty object
-        if not response:
-            return "{}"
-
-        return response
 
     def _format_response(self, brain_response: Any, verb_info: Dict[str, Any], inputs: Dict[str, Any]) -> str:
         """Format the Brain response into the expected output format"""
         try:
-            # If brain_response is already a parsed JSON object/array, use it directly
-            # Otherwise, attempt to parse it as JSON
             if isinstance(brain_response, (dict, list)):
                 data = brain_response
             else:
-                # Attempt to clean and parse if it's a string
-                cleaned_response = self._clean_brain_response(str(brain_response))
+                cleaned_response = _extract_json_from_string(str(brain_response))
+                if not cleaned_response:
+                    raise AccomplishError("Failed to extract JSON from Brain response for novel verb.", "json_parse_error")
                 data = json.loads(cleaned_response)
 
             if isinstance(data, list): # This is a plan
-                # Validate and repair the plan
-                mission_goal = verb_info.get('mission_goal', verb_info.get('description', ''))
-                validated_plan = self.validator.validate_and_repair(data, mission_goal, inputs)
+                validation_result = self.validator.validate_and_repair(data, verb_info.get('description', ''), inputs)
+                if not validation_result.is_valid:
+                    raise AccomplishError(f"Generated plan for novel verb failed validation: {'; '.join(validation_result.get_error_messages())}", "validation_error")
                 
-                # Save the generated plan to Librarian
-                # self._save_plan_to_librarian(verb_info['verb'], validated_plan, inputs)
-
-                return json.dumps([{ 
-                    "success": True,
-                    "name": "plan",
-                    "resultType": "plan",
-                    "resultDescription": f"Plan created for novel verb '{verb_info['verb']}'",
-                    "result": validated_plan,
-                    "mimeType": "application/json"
-                }])
-            elif isinstance(data, dict): # Could be direct answer or plugin recommendation
-                # First check if any property contains an array of step-like objects
-                plan_array = None
+                return json.dumps([{"success": True, "name": "plan", "resultType": "plan", "resultDescription": f"Plan created for novel verb '{verb_info['verb']}'", "result": validation_result.plan, "mimeType": "application/json"}])
+            
+            elif isinstance(data, dict):
+                # Search for a plan within the dictionary
                 for key, value in data.items():
-                    if isinstance(value, list) and len(value) > 0:
-                        if all(isinstance(item, dict) and ('actionVerb' in item or 'id' in item) for item in value):
-                            logger.info(f"Found plan array in '{key}' property for novel verb")
-                            plan_array = value
-                            break
-                        elif all(isinstance(item, dict) for item in value):
-                            logger.info(f"Found array of objects in '{key}' property, assuming it's a plan")
-                            plan_array = value
-                            break
+                    if isinstance(value, list) and value and isinstance(value[0], dict) and ('actionVerb' in value[0] or 'id' in value[0]):
+                        validation_result = self.validator.validate_and_repair(value, verb_info.get('description', ''), inputs)
+                        if not validation_result.is_valid:
+                            raise AccomplishError(f"Generated plan for novel verb failed validation: {'; '.join(validation_result.get_error_messages())}", "validation_error")
+                        return json.dumps([{"success": True, "name": "plan", "resultType": "plan", "resultDescription": f"Plan created for novel verb '{verb_info['verb']}'", "result": validation_result.plan, "mimeType": "application/json"}])
 
-                if plan_array:
-                    mission_goal = verb_info.get('mission_goal', verb_info.get('description', ''))
-                    validated_plan = self.validator.validate_and_repair(plan_array, mission_goal, inputs)
-                    # self._save_plan_to_librarian(verb_info['verb'], validated_plan, inputs)
-                    return json.dumps([{"success": True,
-                        "name": "plan",
-                        "resultType": "plan",
-                        "resultDescription": f"Plan created for novel verb '{verb_info['verb']}'",
-                        "result": validated_plan,
-                        "mimeType": "application/json"
-                    }])
-                elif "direct_answer" in data:
-                    return json.dumps([{ 
-                        "success": True,
-                        "name": "direct_answer",
-                        "resultType": "direct_answer",
-                        "resultDescription": f"Direct answer for {verb_info['verb']}",
-                        "result": data["direct_answer"],
-                        "mimeType": "application/json"
-                    }])
-                elif "plugin" in data:
-                    plugin_data = data["plugin"]
-                    return json.dumps([{ 
-                        "success": True,
-                        "name": "plugin",
-                        "resultType": "plugin",
-                        "resultDescription": f"Plugin recommended: {plugin_data.get('id', 'unknown')}",
-                        "result": plugin_data,
-                        "mimeType": "application/json"
-                    }])
-                # If the dictionary is a single step, treat it as a plan with one step
-                elif "actionVerb" in data and "id" in data:
-                    mission_goal = verb_info.get('mission_goal', verb_info.get('description', ''))
-                    validated_plan = self.validator.validate_and_repair([data], mission_goal, inputs)
-                    # self._save_plan_to_librarian(verb_info['verb'], validated_plan, inputs)
-                    return json.dumps([{"success": True,
-                        "name": "plan",
-                        "resultType": "plan",
-                        "resultDescription": f"Plan created for novel verb '{verb_info['verb']}'",
-                        "result": validated_plan,
-                        "mimeType": "application/json"
-                    }])
-                else:
-                    # Unexpected dictionary format
-                    return json.dumps([{ 
-                        "success": False,
-                        "name": "error",
-                        "resultType": "error",
-                        "resultDescription": "Unexpected Brain response format (dictionary)",
-                        "result": data,
-                        "mimeType": "application/json"
-                    }])
+                if "direct_answer" in data:
+                    return json.dumps([{"success": True, "name": "direct_answer", "resultType": "direct_answer", "resultDescription": f"Direct answer for {verb_info['verb']}", "result": data["direct_answer"], "mimeType": "application/json"}])
+                
+                raise AccomplishError("Unexpected dictionary format from Brain for novel verb.", "invalid_response_format")
             else:
-                # Truly unexpected format (e.g., non-JSON string that wasn't caught by _clean_brain_response)
-                return json.dumps([{ 
-                    "success": False,
-                    "name": "error",
-                    "resultType": "error",
-                    "resultDescription": "Unexpected Brain response format (non-JSON or unhandled type)",
-                    "result": str(brain_response),
-                    "mimeType": "text/plain"
-                }])
+                raise AccomplishError("Unexpected response format from Brain for novel verb.", "invalid_response_format")
 
         except (json.JSONDecodeError, TypeError) as e:
-            logger.error(f"Failed to parse or process Brain response in _format_response: {e}")
+            logger.error(f"Failed to parse or process Brain response in _format_response: {e}", exc_info=True)
             logger.error(f"Raw Brain response (type: {type(brain_response)}): {str(brain_response)[:500]}...")
-            return json.dumps([{ 
-                "success": False,
-                "name": "error",
-                "resultType": "error",
-                "resultDescription": f"Failed to process Brain response: {str(e)}",
-                "result": str(brain_response),
-                "mimeType": "text/plain"
-            }])
+            raise AccomplishError(f"Failed to process Brain response for novel verb: {e}", "json_parse_error")
 
-    def _save_plan_to_librarian(self, verb: str, plan_data: List[Dict[str, Any]], inputs: Dict[str, Any]):
-        """Saves the generated plan to the Librarian service."""
-        try:
-            auth_token = get_auth_token(inputs)
-            librarian_url = inputs.get('librarian_url', 'librarian:5040')
-            
-            payload = {
-                "key": verb,
-                "data": plan_data,
-                "collection": 'actionPlans', 
-                "storageType": 'mongo' 
-            }
-            headers = {
-                'Content-Type': 'application/json',
-                'Authorization': f'Bearer {auth_token}'
-            }
-            
-            response = requests.post(
-                f"http://{librarian_url}/storeData",
-                json=payload,
-                headers=headers,
-                timeout=30
-            )
-            
-            if response.status_code == 200:
-                logger.info(f"Successfully saved plan for verb '{verb}' to Librarian.")
-            else:
-                logger.error(f"Failed to save plan for verb '{verb}' to Librarian: {response.status_code} - {response.text}")
-        except Exception as e:
-            logger.error(f"Error saving plan for verb '{verb}' to Librarian: {e}")
 
 class AccomplishOrchestrator:
     """Main orchestrator for ACCOMPLISH plugin"""
@@ -1187,51 +1491,39 @@ class AccomplishOrchestrator:
         max_attempts = 3
         for attempt in range(1, max_attempts + 1):
             try:
-                # Parse inputs
                 inputs = parse_inputs(inputs_str)
                 progress.checkpoint("input_processed")
 
-                # Initialize handlers with the inputs
-                self.goal_planner = RobustMissionPlanner(inputs)
-                self.novel_verb_handler = NovelVerbHandler(inputs)
-
-                # Route to appropriate handler
-                if self._is_novel_verb_request(inputs):
-                    result = self.novel_verb_handler.handle(inputs)
+                is_novel = self._is_novel_verb_request(inputs)
+                
+                if is_novel:
+                    handler = NovelVerbHandler(inputs) # Pass inputs here
+                    result = handler.handle(inputs)
                 else:
-                    result = self.goal_planner.plan(inputs)
+                    handler = RobustMissionPlanner(inputs) # Pass inputs here
+                    result = handler.plan(inputs)
 
-                # If result indicates a recoverable data/state error, retry/remediate
-                if isinstance(result, str) and 'recoverable_error' in result and attempt < max_attempts:
-                    logger.warning(f"Recoverable error detected, attempt {attempt} - retrying...")
-                    continue
+                # Validate that result is valid JSON before returning
+                try:
+                    json.loads(result)
+                except json.JSONDecodeError as e:
+                    logger.error(f"Generated result is not valid JSON: {e}. Result (first 500 chars): {result[:500]}")
+                    raise AccomplishError(f"Internal error: generated result is malformed JSON: {e}", "internal_error")
+                
                 return result
             except AccomplishError as e:
+                logger.error(f"Attempt {attempt}: AccomplishError - {e}", exc_info=True)
                 if e.error_type != "critical_error" and attempt < max_attempts:
-                    logger.warning(f"Recoverable AccomplishError: {e}, attempt {attempt} - retrying...")
+                    logger.warning("Retrying...")
                     continue
-                logger.error(f"Critical AccomplishError: {e}")
-                return json.dumps([{ 
-                    "success": False,
-                    "name": "error",
-                    "resultType": e.error_type,
-                    "resultDescription": f"ACCOMPLISH execution failed: {str(e)}",
-                    "result": str(e),
-                    "mimeType": "text/plain"
-                }])
+                return json.dumps([{"success": False, "name": "error", "resultType": e.error_type, "resultDescription": f"ACCOMPLISH execution failed: {str(e)}", "result": str(e), "mimeType": "text/plain"}])
             except Exception as e:
-                logger.error(f"ACCOMPLISH execution failed: {e}")
+                logger.error(f"Attempt {attempt}: Unhandled exception - {e}", exc_info=True)
                 if attempt < max_attempts:
-                    logger.warning(f"Recoverable exception, attempt {attempt} - retrying...")
+                    logger.warning("Retrying...")
                     continue
-                return json.dumps([{ 
-                    "success": False,
-                    "name": "error",
-                    "resultType": "error",
-                    "resultDescription": f"ACCOMPLISH execution failed: {str(e)}",
-                    "result": str(e),
-                    "mimeType": "text/plain"
-                }])
+                return json.dumps([{"success": False, "name": "error", "resultType": "error", "resultDescription": f"ACCOMPLISH execution failed: {str(e)}", "result": str(e), "mimeType": "text/plain"}])
+
 
     def _is_novel_verb_request(self, inputs: Dict[str, Any]) -> bool:
         """Check if this is a novel verb request"""
@@ -1241,27 +1533,38 @@ def main():
     """
     Main function to run the ACCOMPLISH plugin.
     Reads input from stdin, executes the orchestrator, and prints the result.
+    Includes a top-level try-except block to ensure a JSON error is always returned on failure.
     """
     progress.checkpoint("main_start")
+    try:
+        orchestrator = AccomplishOrchestrator()
+        progress.checkpoint("orchestrator_created")
 
-    orchestrator = AccomplishOrchestrator()
-    progress.checkpoint("orchestrator_created")
+        # Read input from stdin
+        import sys
+        input_data = sys.stdin.read()
+        progress.checkpoint("input_read")
+        
+        if not input_data:
+            logger.warning("Input data is empty. Exiting.")
+            # Return a valid error structure for empty input
+            error_output = [{"success": False, "name": "error", "resultType": "error", "resultDescription": "Plugin received no input data.", "result": "Input data is empty.", "mimeType": "text/plain"}]
+            print(json.dumps(error_output, indent=2))
+            return
 
-    # Read input from stdin
-    import sys
-    input_data = sys.stdin.read()
-    progress.checkpoint("input_read")
-    
-    if not input_data:
-        logger.warning("Input data is empty. Exiting.")
-        return
+        # Execute with robust error handling
+        result = orchestrator.execute(input_data)
 
-    # Execute with robust error handling
-    result = orchestrator.execute(input_data)
-
-    # Output result
-    print(result)
-    progress.checkpoint("plan_creation_complete")
+        # Output result
+        print(result)
+        progress.checkpoint("plan_creation_complete")
+        
+    except Exception as e:
+        logger.critical(f"A critical unhandled exception occurred in main: {e}", exc_info=True)
+        error_output = [{"success": False, "name": "error", "resultType": "critical_error", "resultDescription": f"A critical unhandled exception occurred: {str(e)}", "result": str(e), "mimeType": "text/plain"}]
+        print(json.dumps(error_output, indent=2))
+        # Optionally exit with a non-zero status code, though printing the error is the main goal for the caller
+        sys.exit(1)
 
 # Main execution
 if __name__ == "__main__":

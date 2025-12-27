@@ -362,14 +362,16 @@ export class FileUploadManager {
 
             let fileToDownload: MissionFile | undefined;
 
-            // Attempt 1: Search for the file in the 'deliverables' collection
+            // Attempt 1: Search for the file in the 'deliverables' collection using /queryData
             try {
-                const deliverableResponse = await this.authenticatedApi.get(`http://${librarianUrl}/loadData/deliverable-${fileId}`, {
-                    params: { collection: 'deliverables', storageType: 'mongo' }
+                const deliverableResponse = await this.authenticatedApi.post(`http://${librarianUrl}/queryData`, {
+                    collection: 'deliverables',
+                    query: { "missionFile.id": fileId }, // Query by missionFile.id
+                    limit: 1 // Expecting only one result
                 });
 
-                if (deliverableResponse.data && deliverableResponse.data.data) {
-                    const deliverable = deliverableResponse.data.data;
+                if (deliverableResponse.data && deliverableResponse.data.data && deliverableResponse.data.data.length > 0) {
+                    const deliverable = deliverableResponse.data.data[0]; // Get the first result
                     if (deliverable.missionFile && deliverable.missionFile.id === fileId && deliverable.missionFile.missionId === missionId) {
                         fileToDownload = deliverable.missionFile;
                     }
@@ -377,7 +379,7 @@ export class FileUploadManager {
             } catch (error) {
                 // Log and ignore 404s from deliverables collection, continue search
                 if (axios.isAxiosError(error) && error.response?.status !== 404) {
-                    console.warn(`Error searching deliverables for file ${fileId}:`, error instanceof Error ? error.message : error);
+                    console.warn(`Error searching deliverables for file ${fileId} using /queryData:`, error instanceof Error ? error.message : error);
                 }
             }
 
@@ -410,16 +412,16 @@ export class FileUploadManager {
                 return res.status(404).json({ error: 'File not found on storage' });
             }
 
-            // Get the file content
-            const fileBuffer = await this.fileUploadService.getFile(fileToDownload.id, fileToDownload.storagePath);
+            // Get the file stream
+            const fileStream = await this.fileUploadService.getFile(fileToDownload.id, fileToDownload.storagePath);
 
             // Set appropriate headers for file download
             res.setHeader('Content-Type', fileToDownload.mimeType);
             res.setHeader('Content-Disposition', `attachment; filename="${fileToDownload.originalName}"`);
-            res.setHeader('Content-Length', fileBuffer.length.toString());
-
-                // Return only the file content, not the full object with metadata
-                res.status(200).send(fileBuffer);
+            // Don't set Content-Length when streaming; it's handled by pipe or chunked encoding
+            
+            // Pipe the file stream to the response
+            fileStream.pipe(res);
 
         } catch (error) {
             analyzeError(error as Error);

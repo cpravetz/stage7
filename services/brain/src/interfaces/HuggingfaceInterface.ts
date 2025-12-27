@@ -1,6 +1,6 @@
 import { BaseInterface, ConvertParamsType } from './baseInterface';
 import { LLMConversationType } from '@cktmcs/shared';
-import { HfInference } from '@huggingface/inference';
+import { InferenceClient } from '@huggingface/inference';
 import { BaseService, ExchangeType } from '../services/baseService';
 import fs from 'fs';
 import { ModelPerformanceTracker } from '../utils/performanceTracker';
@@ -130,7 +130,7 @@ export class HuggingfaceInterface extends BaseInterface {
         HuggingfaceInterface.modelsBlacklistedUntilNextMonth = true;
     }
 
-    async getChatCompletion(inference: HfInference, messages: Array<{ role: string, content: string }>, options: { max_length?: number, temperature?: number, modelName?: string, timeout?: number }): Promise<string> {
+    async getChatCompletion(inference: InferenceClient, messages: Array<{ role: string, content: string }>, options: { max_length?: number, temperature?: number, modelName?: string, timeout?: number }): Promise<string> {
         try {
             let response: string = "";
             for await (const chunk of inference.chatCompletionStream({
@@ -208,7 +208,7 @@ export class HuggingfaceInterface extends BaseInterface {
             console.log(`Token allocation: input=${inputTokens}, max_new=${max_new_tokens}, total=${inputTokens + max_new_tokens}`);
 
             // Create inference instance with API key
-            const inference = new HfInference(service.apiKey);
+            const inference = new InferenceClient(service.apiKey);
             let out = "";
 
             try {
@@ -302,7 +302,7 @@ export class HuggingfaceInterface extends BaseInterface {
                 throw new Error('HuggingfaceInterface: No service provided for text-to-text conversion');
             }
 
-            const inference = new HfInference(service.apiKey);
+            const inference = new InferenceClient(service.apiKey);
 
             // Estimate the number of tokens in the input prompt
             // A rough estimate is 1 token per 4 characters
@@ -362,15 +362,19 @@ export class HuggingfaceInterface extends BaseInterface {
         try {
             const { service, prompt, modelName } = args;
             if (!service) {
-                console.log('HuggingfaceInterface: No service provided for text-to-text conversion');
+                console.log('HuggingfaceInterface: No service provided for text-to-image conversion');
                 return Promise.resolve(undefined);
             }   
-            const inference = new HfInference(service.apiKey);
+            const inference = new InferenceClient(service.apiKey);
+            // NOTE: `@huggingface/inference` has overloads for textToImage.
+            // If we omit `outputType`, TypeScript may resolve the first overload
+            // (which can return a URL string). We explicitly request a Blob.
             const response = await inference.textToImage({
                 model: modelName || 'stabilityai/stable-diffusion-2',
                 inputs: prompt || '',
-            });
-            return response;  // This is a base64 encoded image
+            }, { outputType: 'blob' });
+
+            return response;
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             console.error('Error in Huggingface text-to-image:', errorMessage);
@@ -388,10 +392,10 @@ export class HuggingfaceInterface extends BaseInterface {
         try {
             const { service, text, modelName } = args;
             if (!service) {
-                console.log('HuggingfaceInterface: No service provided for text-to-text conversion');
+                console.log('HuggingfaceInterface: No service provided for text-to-audio conversion');
                 return Promise.resolve(undefined);
             }   
-            const inference = new HfInference(service.apiKey);
+            const inference = new InferenceClient(service.apiKey);
             const response = await inference.textToSpeech({
                 model: modelName || 'facebook/fastspeech2-en-ljspeech',
                 inputs: text||'',
@@ -417,7 +421,7 @@ export class HuggingfaceInterface extends BaseInterface {
                 console.log('HuggingfaceInterface: No service provided for text-to-text conversion');
                 return Promise.resolve('');
             }   
-            const inference = new HfInference(service.apiKey);
+            const inference = new InferenceClient(service.apiKey);
             if (!inference || !audio) {
                 console.error('No audio file provided');
                 return '';
@@ -455,7 +459,7 @@ export class HuggingfaceInterface extends BaseInterface {
                 console.log('HuggingfaceInterface: No service provided for text-to-text conversion');
                 return Promise.resolve('');
             }   
-            const inference = new HfInference(service.apiKey);
+            const inference = new InferenceClient(service.apiKey);
             if (!inference || !image) {
                 console.error('No image file provided');
                 return '';

@@ -57,6 +57,31 @@ const serviceRegistry: Record<string, ServiceCredential> = {
     secret: process.env.AGENTSET_SECRET || 'stage7AuthSecret',
     roles: ['agent:manage']
   },
+  'ServiceDiscovery': {
+    id: 'ServiceDiscovery',
+    secret: process.env.CAPABILITIESMANAGER_SECRET || 'stage7AuthSecret',
+    roles: ['service:discover']
+  },
+  'MarketplaceMongoRepository': {
+    id: 'MarketplaceMongoRepository',
+    secret: process.env.CAPABILITIESMANAGER_SECRET || 'stage7AuthSecret',
+    roles: ['data:read', 'data:write']
+  },
+  'LibrarianDefinitionRepository': {
+    id: 'LibrarianDefinitionRepository',
+    secret: process.env.LIBRARIAN_SECRET || 'stage7AuthSecret',
+    roles: ['data:read', 'data:write']
+  },
+  'Agent': {
+    id: 'Agent',
+    secret: process.env.AGENTSET_SECRET || 'stage7AuthSecret',
+    roles: ['service:basic']
+  },
+  'CapabilitiesManagerConfig': {
+    id: 'CapabilitiesManagerConfig',
+    secret: process.env.CAPABILITIESMANAGER_SECRET || 'stage7AuthSecret',
+    roles: ['service:basic']
+  },
   // Add other services as needed
   'ErrorHandler': {
     id: 'ErrorHandler',
@@ -154,13 +179,6 @@ export async function verifyComponentCredentials(componentType: string, clientSe
   // Check if the client secret matches
   if (service.secret === clientSecret) {
     console.log(`Client verified for componentType: ${normalizedComponentType} using service registry`);
-    return true;
-  }
-
-  // Check if we should use a shared secret for all services
-  const sharedSecret = process.env.SHARED_CLIENT_SECRET || 'stage7AuthSecret';
-  if (clientSecret === sharedSecret) {
-    console.log(`Client verified for componentType: ${normalizedComponentType} using shared secret`);
     return true;
   }
 

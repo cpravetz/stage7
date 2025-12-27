@@ -12,13 +12,14 @@ import * as path from 'path';
 import { createAuthenticatedAxios } from '../http/createAuthenticatedAxios';
 
 export class ServiceTokenManager {
-  private token: string = '';
-  private tokenExpiry: number = 0;
+  private static instances: Map<string, ServiceTokenManager> = new Map();
   private authUrl: string;
   private serviceId: string;
   private serviceSecret: string;
+  private token: string = '';
+  private tokenExpiry: number = 0;
   private publicKey: string = '';
-  private static instance: ServiceTokenManager | null = null;
+  private publicKeyExpiry: number = 0;
 
   /**
    * Create a new ServiceTokenManager
@@ -27,13 +28,17 @@ export class ServiceTokenManager {
    * @param serviceSecret Secret for this service
    */
   constructor(authUrl: string, serviceId: string, serviceSecret: string) {
-    this.authUrl = authUrl;
+    if (!authUrl.startsWith('http')) {
+      this.authUrl = `http://${authUrl}`;
+    } else {
+      this.authUrl = authUrl;
+    }
     this.serviceId = serviceId;
     this.serviceSecret = serviceSecret;
 
     // Fetch the public key when the token manager is created
     this.fetchPublicKey().catch(error => {
-      console.warn(`Failed to fetch public key: ${error.message}. Will retry later.`);
+      console.warn(`Failed to fetch public key for ${this.serviceId}: ${error.message}. Will retry later.`);
     });
 
     // Proactively refresh the token every minute
@@ -50,23 +55,23 @@ export class ServiceTokenManager {
       try {
         await this.getToken();
       } catch (error: any) {
-        console.warn(`[ServiceTokenManager] Proactive token refresh failed: ${error.message}`);
+        console.warn(`[ServiceTokenManager] Proactive token refresh for ${this.serviceId} failed: ${error.message}`);
       }
     }
   }
 
   /**
-   * Get a singleton instance of the ServiceTokenManager
+   * Get a service-specific instance of the ServiceTokenManager
    * @param authUrl URL of the authentication service
    * @param serviceId ID of this service
    * @param serviceSecret Secret for this service
    * @returns ServiceTokenManager instance
    */
   public static getInstance(authUrl: string, serviceId: string, serviceSecret: string): ServiceTokenManager {
-    if (!ServiceTokenManager.instance) {
-      ServiceTokenManager.instance = new ServiceTokenManager(authUrl, serviceId, serviceSecret);
+    if (!ServiceTokenManager.instances.has(serviceId)) {
+      ServiceTokenManager.instances.set(serviceId, new ServiceTokenManager(authUrl, serviceId, serviceSecret));
     }
-    return ServiceTokenManager.instance;
+    return ServiceTokenManager.instances.get(serviceId)!;
   }
 
   /**

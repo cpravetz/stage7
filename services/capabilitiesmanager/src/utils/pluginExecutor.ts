@@ -274,7 +274,9 @@ export class PluginExecutor {
             inputValues.forEach((value, key) => {
                 inputsObject[key] = value;
             });
-            const inputsJsonString = JSON.stringify(inputsObject);
+            // Convert to [key, value] pairs format for Python plugins
+            const inputsPairs = Object.entries(inputsObject);
+            const inputsJsonString = JSON.stringify(inputsPairs);
 
             return new Promise<PluginOutput[]>((resolve, reject) => {
                                         const pythonProcess = spawn(pythonExecutable, [mainFilePath, pluginRootPath], {
@@ -312,7 +314,7 @@ export class PluginExecutor {
                         (error as any).stderr = stderr;
                         reject(error);
                     } else {
-                        //console.log(`[${trace_id}] ${source_component}: Raw stdout from Python plugin ${pluginDefinition.verb} v${pluginDefinition.version}:\n${stdout}`);
+                        console.log(`[${trace_id}] ${source_component}: Raw stdout from Python plugin ${pluginDefinition.verb} v${pluginDefinition.version}:\n${stdout}`);
                         if (stderr) {
                             console.warn(`[${trace_id}] ${source_component}: Raw stderr from Python plugin ${pluginDefinition.verb} v${pluginDefinition.version}:\n${stderr}`);
                         }
@@ -329,9 +331,10 @@ export class PluginExecutor {
                     reject(new Error(`Failed to spawn Python process: ${err.message}. Executable: ${pythonExecutable}`));
                 });
 
-                // Write inputs to stdin and close it to signal end of input
-                pythonProcess.stdin.write(inputsJsonString);
-                pythonProcess.stdin.end();
+                // Write inputs to stdin and close it to signal end of input.
+                // Passing data directly to .end() is more robust for large inputs
+                // than a separate .write() call followed by .end().
+                pythonProcess.stdin.end(inputsJsonString);
             });
 
         } catch (error: any) {
@@ -697,13 +700,7 @@ export class PluginExecutor {
         }
 
         try {
-            const validatedInputsResult = await validateAndStandardizeInputs(actionMapping as any, step.inputValues || new Map());
-            if (!validatedInputsResult.success || !validatedInputsResult.inputs) {
-                const errorMsg = validatedInputsResult.error || "Input validation failed for MCP tool.";
-                console.error(`[${trace_id}] ${source_component}: ${errorMsg}`);
-                return [this.createErrorOutput(GlobalErrorCodes.INPUT_VALIDATION_FAILED, errorMsg, trace_id, { toolId: mcpTool.id, actionVerb: step.actionVerb })];
-            }
-            const validatedInputs = validatedInputsResult.inputs;
+            const validatedInputs = step.inputValues || new Map<string, InputValue>();
             const inputsObject: { [key: string]: any } = {};
             validatedInputs.forEach((value: InputValue, key: string) => {
                 inputsObject[key] = value.value;

@@ -2,6 +2,7 @@ import {
     PluginManifest,
     PluginLocator,
     PluginRepository,
+    PluginStatus,
     RepositoryConfig,
     OpenAPITool,
     MCPTool,
@@ -286,6 +287,8 @@ export class LibrarianDefinitionRepository implements PluginRepository {
         }
     }
 
+
+
     async delete(id: string, version?: string): Promise<void> {
         // ID here is toolId-actionVerb. We need to delete the parent tool definition.
         const parts = id.split('-');
@@ -335,5 +338,19 @@ export class LibrarianDefinitionRepository implements PluginRepository {
         // For now, assume one version or version is part of the ID.
         const manifest = await this.fetch(pluginId);
         return manifest ? [manifest] : undefined;
+    }
+
+    async updateToolStatus(toolId: string, status: PluginStatus, reason?: string): Promise<void> {
+        try {
+            await this.makeRequest(() => this.authenticatedApi.put(`${this.getLibrarianUrl()}/tools/${toolId}/status`, {
+                status,
+                reason,
+            }));
+            console.log(`LibrarianDefinitionRepository: Updated status for tool ${toolId} to ${status}.`);
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error(`LibrarianDefinitionRepository: Error updating status for tool ${toolId}:`, error);
+            throw error;
+        }
     }
 }

@@ -1,5 +1,7 @@
 import axios from 'axios';
 import express from 'express';
+import Ajv from 'ajv';
+import addFormats from 'ajv-formats';
 import {
     MapSerializer,
     BaseEntity,
@@ -7,11 +9,11 @@ import {
     PluginDefinition,
     PluginManifest,
     PluginParameter,
-    PluginMetadata, // Changed from MetadataType
-    PluginConfigurationItem, // Changed from ConfigItem
+    PluginMetadata,
+    PluginConfigurationItem,
     signPlugin,
-    EntryPointType,      // Added for clarity if used directly
-    PluginParameterType,  // Added for clarity if used directly
+    EntryPointType,
+    PluginParameterType,
     OpenAPITool,
     OpenAPIToolRegistrationRequest,
     OpenAPIParsingResult,
@@ -26,12 +28,12 @@ import { analyzeError } from '@cktmcs/errorhandler';
 import { PluginMarketplace } from '@cktmcs/marketplace';
 import { redisCache } from '@cktmcs/shared';
 import crypto from 'crypto';
-// Removed createHash as it wasn't used in the provided snippets
 import { promises as fs } from 'fs';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import path from 'path'; // Added for temp file operations
-import os from 'os';     // Added for temp file operations
+import path from 'path';
+import os from 'os';
+import { Worker, isMainThread, parentPort, workerData } from 'worker_threads';
 
 const execAsync = promisify(exec);
 
@@ -40,11 +42,211 @@ export class Engineer extends BaseEntity {
     private librarianUrl: string = process.env.LIBRARIAN_URL || 'librarian:5040';
     private newPlugins: Array<string> = [];
     private pluginMarketplace: PluginMarketplace;
+    private ajv: Ajv;
+    private pluginSchema: object;
+    private containerPluginSchema: object;
+    private validationCache: Map<string, { valid: boolean; issues: string[] }>;
+    private performanceMetrics: {
+        validationTime: number;
+        generationTime: number;
+        testExecutionTime: number;
+    };
 
     constructor() {
         super('Engineer', 'Engineer', `engineer`, process.env.PORT || '5050');
         this.pluginMarketplace = new PluginMarketplace();
+        this.ajv = new Ajv({ allErrors: true, strict: false });
+        this.pluginSchema = {};
+        this.containerPluginSchema = {};
+        this.validationCache = new Map();
+        this.performanceMetrics = {
+            validationTime: 0,
+            generationTime: 0,
+            testExecutionTime: 0
+        };
         this.initialize();
+        this.setupJsonSchemaValidation();
+    }
+
+    private setupJsonSchemaValidation(): void {
+        // Add formats for common data types
+        addFormats(this.ajv);
+
+        // Plugin JSON Schema
+        this.pluginSchema = {
+            type: 'object',
+            properties: {
+                id: { type: 'string', minLength: 1 },
+                verb: { type: 'string', minLength: 1 },
+                description: { type: 'string', minLength: 1 },
+                explanation: { type: 'string', minLength: 1 },
+                inputDefinitions: {
+                    type: 'array',
+                    items: {
+                        type: 'object',
+                        properties: {
+                            name: { type: 'string', minLength: 1 },
+                            required: { type: 'boolean' },
+                            type: { type: 'string', enum: ['string', 'number', 'boolean', 'array', 'object', 'any'] },
+                            description: { type: 'string' }
+                        },
+                        required: ['name', 'required', 'type']
+                    },
+                    minItems: 1
+                },
+                outputDefinitions: {
+                    type: 'array',
+                    items: {
+                        type: 'object',
+                        properties: {
+                            name: { type: 'string', minLength: 1 },
+                            required: { type: 'boolean' },
+                            type: { type: 'string', enum: ['string', 'number', 'boolean', 'array', 'object', 'any'] },
+                            description: { type: 'string' }
+                        },
+                        required: ['name', 'required', 'type']
+                    },
+                    minItems: 1
+                },
+                language: { type: 'string', enum: ['python', 'javascript', 'typescript', 'container'] },
+                entryPoint: {
+                    type: 'object',
+                    properties: {
+                        main: { type: 'string', minLength: 1 },
+                        files: {
+                            type: 'object',
+                            additionalProperties: { type: 'string', minLength: 1 }
+                        }
+                    },
+                    required: ['main']
+                },
+                configuration: {
+                    type: 'array',
+                    items: {
+                        type: 'object',
+                        properties: {
+                            key: { type: 'string', minLength: 1 },
+                            value: { type: ['string', 'number', 'boolean', 'null'] },
+                            description: { type: 'string' },
+                            required: { type: 'boolean' },
+                            type: { type: 'string', enum: ['string', 'number', 'boolean', 'secret'] }
+                        },
+                        required: ['key', 'description', 'required', 'type']
+                    }
+                },
+                version: { type: 'string', pattern: '^\\d+\\.\\d+\\.\\d+$' },
+                metadata: {
+                    type: 'object',
+                    properties: {
+                        category: { type: 'array', items: { type: 'string' } },
+                        tags: { type: 'array', items: { type: 'string' } },
+                        complexity: { type: 'number', minimum: 1, maximum: 10 },
+                        dependencies: { type: 'array', items: { type: 'string' } },
+                        version: { type: 'string' }
+                    }
+                }
+            },
+            required: ['id', 'verb', 'description', 'inputDefinitions', 'outputDefinitions', 'language', 'entryPoint']
+        };
+
+        // Container Plugin JSON Schema
+        this.containerPluginSchema = {
+            type: 'object',
+            properties: {
+                id: { type: 'string', minLength: 1 },
+                verb: { type: 'string', minLength: 1 },
+                description: { type: 'string', minLength: 1 },
+                explanation: { type: 'string', minLength: 1 },
+                inputDefinitions: {
+                    type: 'array',
+                    items: {
+                        type: 'object',
+                        properties: {
+                            name: { type: 'string', minLength: 1 },
+                            required: { type: 'boolean' },
+                            type: { type: 'string', enum: ['string', 'number', 'boolean', 'array', 'object', 'any'] },
+                            description: { type: 'string' }
+                        },
+                        required: ['name', 'required', 'type']
+                    },
+                    minItems: 1
+                },
+                outputDefinitions: {
+                    type: 'array',
+                    items: {
+                        type: 'object',
+                        properties: {
+                            name: { type: 'string', minLength: 1 },
+                            required: { type: 'boolean' },
+                            type: { type: 'string', enum: ['string', 'number', 'boolean', 'array', 'object', 'any'] },
+                            description: { type: 'string' }
+                        },
+                        required: ['name', 'required', 'type']
+                    },
+                    minItems: 1
+                },
+                language: { type: 'string', enum: ['container'] },
+                container: {
+                    type: 'object',
+                    properties: {
+                        dockerfile: { type: 'string', minLength: 1 },
+                        buildContext: { type: 'string', minLength: 1 },
+                        image: { type: 'string', minLength: 1 },
+                        ports: {
+                            type: 'array',
+                            items: {
+                                type: 'object',
+                                properties: {
+                                    container: { type: 'number' },
+                                    host: { type: 'number' }
+                                },
+                                required: ['container']
+                            }
+                        },
+                        environment: { type: 'object' },
+                        resources: {
+                            type: 'object',
+                            properties: {
+                                memory: { type: 'string' },
+                                cpu: { type: 'string' }
+                            }
+                        },
+                        healthCheck: {
+                            type: 'object',
+                            properties: {
+                                path: { type: 'string' },
+                                interval: { type: 'string' },
+                                timeout: { type: 'string' },
+                                retries: { type: 'number' }
+                            },
+                            required: ['path']
+                        }
+                    },
+                    required: ['dockerfile', 'image', 'ports']
+                },
+                api: {
+                    type: 'object',
+                    properties: {
+                        endpoint: { type: 'string', minLength: 1 },
+                        method: { type: 'string', enum: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'] },
+                        timeout: { type: 'number' }
+                    },
+                    required: ['endpoint', 'method']
+                },
+                entryPoint: {
+                    type: 'object',
+                    properties: {
+                        main: { type: 'string', minLength: 1 },
+                        files: {
+                            type: 'object',
+                            additionalProperties: { type: 'string', minLength: 1 }
+                        }
+                    },
+                    required: ['main', 'files']
+                }
+            },
+            required: ['id', 'verb', 'description', 'inputDefinitions', 'outputDefinitions', 'language', 'container', 'api', 'entryPoint']
+        };
     }
 
     private async initialize() {
@@ -144,6 +346,23 @@ export class Engineer extends BaseEntity {
             }
         });
 
+        app.post('/createPluginFromOpenAPI', async (req, res) => {
+            const { specUrl, name, description, authentication, baseUrl } = req.body;
+
+            if (!specUrl || !name) {
+                return res.status(400).json({ error: 'specUrl and name are required' });
+            }
+
+            try {
+                const result = await this.createPluginFromOpenAPI(specUrl, name, description, authentication, baseUrl);
+                res.json(result);
+            } catch (error) {
+                analyzeError(error as Error);
+                console.error('Failed to create plugin from OpenAPI spec:', error instanceof Error ? error.message : error);
+                res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+            }
+        });
+
         app.post('/repair', async (req, res) => {
             try {
                 const { errorMessage, code } = req.body;
@@ -175,138 +394,10 @@ export class Engineer extends BaseEntity {
     }
 
     async createPlugin(verb: string, context: Map<string, InputValue>, guidance: string, language?: string): Promise<PluginDefinition | undefined> {
-        console.log('Creating plugin for verb:', verb, 'with language:', language || 'auto-detect');
-        this.newPlugins.push(verb);
-        const explanation = await this.generateExplanation(verb, context);
-        // Removed unused pluginStructure, configItems, metadata variable declarations from here
-
-        try {
-            const contextString = JSON.stringify(Array.from(context.entries()));
-
-            // Determine plugin type and generate accordingly
-            if (language === 'container') {
-                return await this.createContainerPlugin(verb, context, explanation, guidance);
-            }
-
-            const engineeringPrompt = `Create a Python 3.9+ based plugin for the action verb "${verb}" with the following context: ${explanation}
-            If Python is not suitable for this specific task (provide a brief justification if so), you may generate a JavaScript plugin instead.
-
-            The planner provides this additional guidance: ${guidance}
-
-            The plugin should expect inputs structured as a Map<string, InputValue>, where InputValue is defined as:
-            interface InputValue {
-                inputName: string;
-                value: string | number | boolean | any[] | object | null;
-                valueType: 'string' | 'number' | 'boolean' | 'array' | 'object' | 'any';
-                args?: Record<string, any>;
-            }
-            (Note: dependencyOutputs and agentDependencies are usually populated by the execution environment, not directly by you or planner).
-
-            Use this context to determine the required inputs: ${contextString}
-
-            Important requirements:
-              1. The plugin MUST include comprehensive error handling.
-              2. All external dependencies must be explicitly declared (e.g., in requirements.txt for Python).
-              3. Include input validation for all parameters within the plugin code.
-              4. Add logging for important operations.
-              5. If the plugin might generate a plan, include PLAN in outputDefinitions.
-              6. Include comprehensive unit tests in a separate file (e.g., 'test_main.py' for Python or 'plugin.test.js' for JavaScript) covering primary functionality, input validation, and edge cases.
-              7. Add retry logic for external service calls if applicable.
-              8. For Python plugins, ensure the main logic is in a \`main.py\` file.
-              9. If the Python plugin requires external Python packages, include a \`requirements.txt\` file in the \`entryPoint.files\` listing these dependencies (e.g., \`requests==2.25.1\`).
-              10. Python plugins MUST read their inputs (a JSON string representing the input Map, not InputValue directly but its serialized form) from standard input (stdin) and print their results (a JSON string representing a PluginOutput[] array) to standard output (stdout).
-              11. Generated code should follow security best practices, including sanitizing any inputs used in shell commands or file paths, and avoiding common vulnerabilities.
-
-            Provide a JSON object with the following structure:
-            {
-                "id": "plugin-${verb}",
-                "verb": "${verb}",
-                "description": "A short description of the plugin",
-                "explanation": "A more complete description including inputs, process overview, and outputs",
-                "inputDefinitions": [{
-                  "name": "inputNameExample",
-                  "required": true,
-                  "type": "string", // Use PluginParameterType enum values
-                  "description": "Brief explanation of the input"
-                }],
-                "outputDefinitions": [{
-                  "name": "outputNameExample",
-                  "required": true,
-                  "type": "string", // Use PluginParameterType enum values
-                  "description": "Brief explanation of the output"
-                }],
-                "language": "python", // "python" or "javascript"
-                "entryPoint": {
-                    "main": "main.py", // For Python
-                    "files": {
-                        "main.py": "# Python code here...\nimport json, sys\nif __name__ == '__main__':\n  try:\n    inputs_map_str = sys.stdin.read()\n    # inputs_map is a list of [key, InputValue] pairs as a JSON string from MapSerializer.transformForSerialization(Map<string, InputValue>)\n    # The Python script needs to deserialize this structure properly.\n    # Example: inputs_list_of_pairs = json.loads(inputs_map_str)\n    # inputs_dict = {item[0]: item[1]['inputValue'] for item in inputs_list_of_pairs} # Simplified example, actual structure of InputValue is more complex\n    # A better approach for Python would be to expect a simple JSON object of inputs, not a serialized Map.\n    # For now, stick to the prompt that it's a serialized Map<string, InputValue> from stdin.\n    result = [{'name': 'outputName', 'result': 'resultValue', 'resultType': 'string', 'success': true}]\n  except Exception as e:\n    result = [{'name': 'error', 'result': str(e), 'resultType': 'ERROR', 'success': false}]\n  print(json.dumps(result))",
-                        "requirements.txt": "# e.g., requests>=2.20"
-                    },
-                    "test": {
-                        "test_main.py": "# Python unit tests here..."
-                    }
-                },
-                "configuration": [{
-                    "key": "API_KEY_EXAMPLE",
-                    "value": "Default value if any. If no default, this field can be omitted or set to null.",
-                    "description": "Description of the configuration item",
-                    "required": true,
-                    "type": "string" // Should be one of 'string' | 'number' | 'boolean' | 'secret'
-                }],
-                "metadata": {
-                    "category": ["text_processing"],
-                    "tags": ["example", "text"],
-                    "complexity": 3, // number from 1 to 10
-                    "dependencies": ["python>=3.9"],
-                    "version": "1.0.0" // Initial version
-                }
-            }
-            Ensure the plugin's 'inputDefinitions' field accurately defines the expected inputs.
-            The main file should implement the plugin logic.
-            Include appropriate error handling and logging.
-            Use publicly available web services where possible.
-            The code should be immediately executable without any compilation step for the target language.
-            Determine any necessary environment variables or configuration items needed for the plugin to function correctly.
-`;
-
-            const response = await this.authenticatedApi.post(`http://${this.brainUrl}/chat`, {
-                exchanges: [{ role: 'user', content: engineeringPrompt }],
-                optimization: 'accuracy',
-                responseType: 'json'
-            });
-            
-            // It's crucial that the Brain returns a JSON string that can be parsed.
-            // Add robust parsing and error handling for the Brain's response.
-            let pluginStructure;
-            try {
-                pluginStructure = JSON.parse(response.data.result || response.data.response || response.data); // Adjust based on actual Brain response structure
-            } catch (parseError) {
-                console.error('Error parsing Brain response for plugin structure:', parseError);
-                console.error('Raw Brain response:', response.data);
-                const errorMsg = (parseError && typeof parseError === 'object' && 'message' in parseError)
-                    ? (parseError as Error).message
-                    : String(parseError);
-                throw new Error(`Failed to parse plugin structure from Brain: ${errorMsg}`);
-            }
-
-
-            if (!this.validatePluginStructure(pluginStructure)) {
-                console.error('Generated plugin structure is invalid:', pluginStructure);
-                throw new Error('Generated plugin structure is invalid');
-            }
-
-            if (!await this.validatePluginCode(pluginStructure.entryPoint, pluginStructure.language)) {
-                 console.error('Generated plugin code failed validation.');
-                throw new Error('Generated plugin code failed validation');
-            }
-
-            return this.finalizePlugin(pluginStructure, explanation);
-        } catch (error) {
-            analyzeError(error as Error); // Ensure analyzeError is effective
-            console.error('Error creating plugin in Engineer.createPlugin:', error instanceof Error ? error.message : String(error));
-            return undefined; // Or rethrow, depending on desired error propagation
-        }
+        return await this.createPluginWithRecovery(verb, context, guidance, language);
     }
+
+
 
 
     private async handleMessage(req: express.Request, res: express.Response) {
@@ -419,6 +510,36 @@ Context: ${contextString}`;
         }
     }
 
+    async createPluginFromOpenAPI(specUrl: string, name: string, description: string = '', authentication?: any, baseUrl?: string): Promise<any> {
+        console.log(`Creating plugin from OpenAPI spec: ${specUrl}`);
+
+        const registrationRequest: OpenAPIToolRegistrationRequest = {
+            name,
+            specUrl,
+            description,
+            authentication,
+            baseUrl,
+        };
+
+        const parsingResult = await this.registerOpenAPITool(registrationRequest);
+
+        if (!parsingResult.success || !parsingResult.tool) {
+            throw new Error(`Failed to parse OpenAPI spec: ${parsingResult.errors?.join(', ')}`);
+        }
+
+        const toolManifest = parsingResult.tool;
+        const policyConfig = {}; // Add policy config if needed
+        const wrapperLanguage = 'typescript'; // Or make this configurable
+
+        const generatedPlugin = await this.generateWrapperPlugin(toolManifest, policyConfig, wrapperLanguage);
+
+        if (!generatedPlugin) {
+            throw new Error('Failed to generate wrapper plugin from OpenAPI tool manifest.');
+        }
+
+        return this.finalizePlugin(generatedPlugin, generatedPlugin.explanation);
+    }
+    
     /**
      * Validate container plugin structure
      */
@@ -454,24 +575,95 @@ Context: ${contextString}`;
         return true;
     }
 
-    private validatePluginStructure(plugin: any): boolean {
-      // TODO: Implement JSON schema validation for comprehensive manifest checking.
-      const requiredFields = ['id', 'verb', 'description', 'inputDefinitions', 'outputDefinitions', 'language', 'entryPoint'];
-      const allPresent = requiredFields.every(field => plugin[field]);
-      if (!allPresent) {
-          console.error('Missing one or more required fields in plugin structure:', requiredFields.filter(f => !plugin[f]));
-          return false;
-      }
-      if (!plugin.entryPoint.main || typeof plugin.entryPoint.main !== 'string') {
-          console.error('plugin.entryPoint.main is missing or not a string.');
-          return false;
-      }
-      // entryPoint.files can be optional if packageSource is used, but for LLM generation, we expect files.
-      if (!plugin.entryPoint.files || typeof plugin.entryPoint.files !== 'object' || Object.keys(plugin.entryPoint.files).length === 0) {
-          console.warn('plugin.entryPoint.files is missing or empty. This might be okay if packageSource is intended, but Engineer usually generates files.');
-          // Depending on strictness, this could return false. For now, a warning.
-      }
-      return true;
+    private validatePluginStructure(plugin: any): { valid: boolean; issues: string[] } {
+        const cacheKey = JSON.stringify(plugin);
+        if (this.validationCache.has(cacheKey)) {
+            return this.validationCache.get(cacheKey)!;
+        }
+
+        const startTime = Date.now();
+        const issues: string[] = [];
+
+        try {
+            // Use AJV for JSON schema validation
+            const validate = this.ajv.compile(this.pluginSchema);
+            const valid = validate(plugin);
+
+            if (!valid) {
+                if (validate.errors) {
+                    for (const error of validate.errors) {
+                        issues.push(`Schema validation error: ${error.instancePath || 'root'} ${error.message}`);
+                    }
+                }
+            }
+
+            // Additional semantic validation
+            if (plugin.language === 'container') {
+                const containerValidate = this.ajv.compile(this.containerPluginSchema);
+                const containerValid = containerValidate(plugin);
+                if (!containerValid && containerValidate.errors) {
+                    for (const error of containerValidate.errors) {
+                        issues.push(`Container schema validation error: ${error.instancePath || 'root'} ${error.message}`);
+                    }
+                }
+            }
+
+            // Semantic analysis for plugin descriptions
+            if (plugin.description && typeof plugin.description === 'string') {
+                const semanticIssues = this.performSemanticAnalysis(plugin);
+                issues.push(...semanticIssues);
+            }
+
+            const result = { valid: issues.length === 0, issues };
+
+            // Cache the result
+            this.validationCache.set(cacheKey, result);
+
+            // Update performance metrics
+            this.performanceMetrics.validationTime += Date.now() - startTime;
+
+            return result;
+        } catch (error) {
+            console.error('Error during plugin validation:', error instanceof Error ? error.message : String(error));
+            issues.push(`Validation error: ${error instanceof Error ? error.message : String(error)}`);
+            return { valid: false, issues };
+        }
+    }
+
+    private performSemanticAnalysis(plugin: any): string[] {
+        const issues: string[] = [];
+
+        // Check for meaningful descriptions
+        if (plugin.description && plugin.description.length < 10) {
+            issues.push('Plugin description should be more detailed (at least 10 characters)');
+        }
+
+        if (plugin.explanation && plugin.explanation.length < 20) {
+            issues.push('Plugin explanation should be more comprehensive (at least 20 characters)');
+        }
+
+        // Check for duplicate input/output names
+        const inputNames = plugin.inputDefinitions?.map((input: any) => input.name) || [];
+        const outputNames = plugin.outputDefinitions?.map((output: any) => output.name) || [];
+
+        const allNames = [...inputNames, ...outputNames];
+        const uniqueNames = new Set(allNames);
+
+        if (uniqueNames.size !== allNames.length) {
+            issues.push('Duplicate input/output names detected');
+        }
+
+        // Check for common security issues in descriptions
+        if (plugin.description && plugin.description.toLowerCase().includes('password')) {
+            issues.push('Potential security concern: plugin description mentions password');
+        }
+
+        // Check for reasonable complexity
+        if (plugin.metadata?.complexity && (plugin.metadata.complexity < 1 || plugin.metadata.complexity > 10)) {
+            issues.push('Complexity should be between 1 and 10');
+        }
+
+        return issues;
     }
 
     private async validatePluginCode(entryPoint: EntryPointType, language: string): Promise<boolean> {
@@ -999,8 +1191,9 @@ The wrapper should:
                 responseType: 'json'
             });
             const generatedPlugin = JSON.parse(response.data.result || response.data.response || response.data);
-            if (!this.validatePluginStructure(generatedPlugin)) {
-                throw new Error('Generated wrapper plugin structure is invalid.');
+            const validationResult = this.validatePluginStructure(generatedPlugin);
+            if (!validationResult.valid) {
+                throw new Error(`Generated wrapper plugin structure is invalid: ${validationResult.issues.join(', ')}`);
             }
             return generatedPlugin;
         } catch (error) {
@@ -1012,6 +1205,7 @@ The wrapper should:
     private async executeWrapperTests(generatedPlugin: any): Promise<{ valid: boolean; issues: string[] }> {
         console.log(`Executing wrapper tests for ${generatedPlugin.id}...`);
         const issues: string[] = [];
+        const startTime = Date.now();
 
         // Assuming generatedPlugin has entryPoint.files and language
         if (!generatedPlugin.entryPoint || !generatedPlugin.entryPoint.files || !generatedPlugin.language) {
@@ -1024,13 +1218,17 @@ The wrapper should:
             const codeValidationPassed = await this.validatePluginCode(generatedPlugin.entryPoint, generatedPlugin.language);
             if (!codeValidationPassed) {
                 issues.push('Generated wrapper code failed basic validation.');
+                return { valid: false, issues };
             }
 
-            // TODO: Implement actual test execution logic here
-            // This would involve writing the generated test files to a temporary location,
-            // running the test runner (e.g., `jest` for JS/TS, `pytest` for Python),
-            // and parsing the results.
-            console.warn('Actual wrapper test execution is not yet implemented. Assuming success for now.');
+            // Implement actual test execution logic
+            const testExecutionResult = await this.executeTestRunner(generatedPlugin);
+            if (!testExecutionResult.valid) {
+                issues.push(...testExecutionResult.issues);
+            }
+
+            // Update performance metrics
+            this.performanceMetrics.testExecutionTime += Date.now() - startTime;
 
             return { valid: issues.length === 0, issues };
         } catch (error) {
@@ -1040,7 +1238,205 @@ The wrapper should:
         }
     }
 
+    private async executeTestRunner(generatedPlugin: any): Promise<{ valid: boolean; issues: string[] }> {
+        const issues: string[] = [];
+        const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), `plugin-test-${generatedPlugin.id}-`));
+
+        try {
+            // Write all plugin files to temporary directory
+            for (const [filename, content] of Object.entries(generatedPlugin.entryPoint.files)) {
+                const filePath = path.join(tempDir, filename);
+                const contentStr = typeof content === 'string' ? content : String(content);
+                await fs.writeFile(filePath, contentStr);
+            }
+
+            // Determine test runner based on language
+            const language = generatedPlugin.language;
+            let testCommand = '';
+            let testPattern = '';
+
+            if (language === 'javascript' || language === 'typescript') {
+                // Look for test files (Jest/Mocha)
+                const testFiles = Object.keys(generatedPlugin.entryPoint.files || {})
+                    .filter(f => f.includes('test') || f.includes('spec'));
+
+                if (testFiles.length === 0) {
+                    issues.push('No test files found for JavaScript/TypeScript plugin');
+                    return { valid: false, issues };
+                }
+
+                testCommand = 'npx jest --passWithNoTests';
+                testPattern = testFiles.join(' ');
+            } else if (language === 'python') {
+                // Look for Python test files
+                const testFiles = Object.keys(generatedPlugin.entryPoint.files || {})
+                    .filter(f => f.startsWith('test_') || f.endsWith('_test.py'));
+
+                if (testFiles.length === 0) {
+                    issues.push('No test files found for Python plugin');
+                    return { valid: false, issues };
+                }
+
+                testCommand = 'python -m pytest --tb=short';
+                testPattern = testFiles.join(' ');
+            } else {
+                issues.push(`Test execution not supported for language: ${language}`);
+                return { valid: false, issues };
+            }
+
+            // Execute tests
+            const fullCommand = `${testCommand} ${testPattern}`;
+            console.log(`Executing test command: ${fullCommand}`);
+
+            const { stdout, stderr } = await execAsync(fullCommand, { cwd: tempDir });
+
+            // Parse test results
+            if (stderr && stderr.includes('FAIL')) {
+                issues.push(`Tests failed: ${stderr}`);
+                return { valid: false, issues };
+            }
+
+            if (stdout && (stdout.includes('PASS') || stdout.includes('passed'))) {
+                console.log(`Tests passed successfully for ${generatedPlugin.id}`);
+                return { valid: true, issues };
+            }
+
+            // If we get here, tests might have run but we couldn't determine the result
+            issues.push('Could not determine test execution result');
+            return { valid: false, issues };
+
+        } catch (error) {
+            console.error(`Test execution error for ${generatedPlugin.id}:`, error);
+            issues.push(`Test execution error: ${error instanceof Error ? error.message : String(error)}`);
+            return { valid: false, issues };
+        } finally {
+            // Clean up temporary directory
+            try {
+                await fs.rm(tempDir, { recursive: true, force: true });
+            } catch (cleanupError) {
+                console.error(`Error cleaning up test directory ${tempDir}:`, cleanupError);
+            }
+        }
+    }
+
+    private async createPluginWithRecovery(verb: string, context: Map<string, InputValue>, guidance: string, language?: string, attempt: number = 1): Promise<PluginDefinition | undefined> {
+        const maxAttempts = 3;
+        const maxBackoff = 5000; // 5 seconds
+
+        try {
+            console.log(`Attempt ${attempt} to create plugin for verb: ${verb}`);
+            return await this.createPlugin(verb, context, guidance, language);
+        } catch (error) {
+            if (attempt >= maxAttempts) {
+                console.error(`Failed to create plugin after ${maxAttempts} attempts:`, error);
+                return undefined;
+            }
+
+            // Exponential backoff with jitter
+            const backoff = Math.min(
+                maxBackoff,
+                Math.pow(2, attempt) * 1000 + Math.random() * 1000
+            );
+
+            console.warn(`Plugin creation attempt ${attempt} failed. Retrying in ${backoff}ms...`, error);
+
+            await new Promise(resolve => setTimeout(resolve, backoff));
+
+            // Try to recover by generating a simpler version
+            if (attempt === 1) {
+                const simplifiedGuidance = `Create a simpler version of: ${guidance}`;
+                return await this.createPluginWithRecovery(verb, context, simplifiedGuidance, language, attempt + 1);
+            }
+
+            return await this.createPluginWithRecovery(verb, context, guidance, language, attempt + 1);
+        }
+    }
+
+    private async enhanceErrorHandlingInPlugin(plugin: PluginDefinition): Promise<PluginDefinition> {
+        // Add enhanced error handling to the plugin code
+        if (!plugin.entryPoint || !plugin.entryPoint.files) {
+            return plugin;
+        }
+
+        const enhancedFiles = { ...plugin.entryPoint.files };
+
+        // Add error handling wrapper to main file
+        if (plugin.language === 'python' && enhancedFiles['main.py']) {
+            let mainCode = enhancedFiles['main.py'];
+            if (!mainCode.includes('try:')) {
+                mainCode = `import traceback
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+${mainCode}
+
+if __name__ == '__main__':
+    try:
+        ${mainCode.match(/if __name__ == '__main__':\\n([\\s\\S]*)/)?.[1] || 'pass'}
+    except Exception as e:
+        logger.error(f"Plugin execution failed: {str(e)}")
+        logger.debug(traceback.format_exc())
+        # Return error output
+        import json
+        print(json.dumps([{
+            'name': 'error',
+            'result': str(e),
+            'resultType': 'ERROR',
+            'success': False
+        }]))
+`;
+                enhancedFiles['main.py'] = mainCode;
+            }
+        }
+        else if ((plugin.language === 'javascript' || plugin.language === 'typescript') &&
+                 (enhancedFiles['index.js'] || enhancedFiles['main.js'])) {
+            const mainFile = enhancedFiles['index.js'] ? 'index.js' : 'main.js';
+            let jsCode = enhancedFiles[mainFile];
+            if (!jsCode.includes('try ') && !jsCode.includes('catch')) {
+                jsCode = `const logger = console;
+
+${jsCode}
+
+try {
+    ${jsCode.match(/module\\.exports = ([\\s\\S]*);/)?.[1] || jsCode}
+} catch (error) {
+    logger.error('Plugin execution failed:', error);
+    // Return error output
+    return [{
+        name: 'error',
+        result: error.message,
+        resultType: 'ERROR',
+        success: false
+    }];
+}`;
+                enhancedFiles[mainFile] = jsCode;
+            }
+        }
+
+        return {
+            ...plugin,
+            entryPoint: {
+                ...plugin.entryPoint,
+                files: enhancedFiles
+            }
+        };
+    }
+
+    private logPerformanceMetrics(): void {
+        const totalTime = this.performanceMetrics.validationTime +
+                         this.performanceMetrics.generationTime +
+                         this.performanceMetrics.testExecutionTime;
+
+        console.log('Engineer Performance Metrics:');
+        console.log(`- Validation Time: ${this.performanceMetrics.validationTime}ms`);
+        console.log(`- Generation Time: ${this.performanceMetrics.generationTime}ms`);
+        console.log(`- Test Execution Time: ${this.performanceMetrics.testExecutionTime}ms`);
+        console.log(`- Total Time: ${totalTime}ms`);
+    }
 }
+
 
 // Instantiate the Engineer - this line should typically be in an entry point file (e.g., index.ts for the service)
 // If Engineer.ts is the main file for the service, it's fine.

@@ -1,7 +1,7 @@
 import request from 'supertest';
 import express from 'express';
 import { Librarian } from '../src/Librarian';
-import { storeInRedis, loadFromRedis, deleteFromRedis } from '../src/utils/redisUtils';
+import { storeInRedis, loadFromRedis, deleteFromRedis } from 'utils/redisUtils';
 import { storeInMongo, loadFromMongo, loadManyFromMongo, aggregateInMongo, deleteManyFromMongo } from '../src/utils/mongoUtils';
 import { BaseEntity } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/errorhandler';

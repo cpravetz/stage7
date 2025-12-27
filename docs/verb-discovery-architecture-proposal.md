@@ -1,8 +1,21 @@
-# Enhanced Verb Discovery & Tool Integration Architecture
+# DEPRECATED: Enhanced Verb Discovery & Tool Integration Architecture
 
-## Executive Summary
+**Status:** This document has been consolidated into [`consolidated-verb-discovery-architecture.md`](docs/consolidated-verb-discovery-architecture.md)
 
-This document presents a comprehensive architecture for dynamic verb discovery and tool integration, combining the best elements from previous proposals into a unified, phased approach. The solution leverages existing Chroma-powered knowledge graph infrastructure while incorporating reactive discovery mechanisms and future-proof evolutionary concepts.
+**Migration Guide:** All concepts and implementation details from this document have been incorporated into the consolidated architecture with the following enhancements:
+
+- Integrated with tool discovery and planning concepts from tool_discovery_and_planning_architecture.md
+- Added Brain Awareness section for LLM access to verb discovery
+- Enhanced with caching mechanisms from verb-discovery-and-caching.md
+- Incorporated implementation details from verb-architecture-consolidation-summary.md
+
+**Key Sections Migrated:**
+- Phased evolution approach (Chroma-powered discovery → Brain-aware planning → Context-aware knowledge graph)
+- Chroma collection structure for verbs and tools
+- NovelVerbHandler enhancement with reactive discovery
+- Implementation roadmap and success metrics
+
+Please refer to the consolidated document for the most current and comprehensive architecture.
 
 ## Problem Analysis
 
@@ -42,40 +55,40 @@ graph TD
 #### Architecture Overview
 
 ```
-┌───────────────────────────────────────────────────────┐
-│            Enhanced Verb Discovery Architecture        │
-├───────────────────────────────────────────────────────┤
-│  ┌─────────────┐    ┌───────────────────────────────┐  │
+┌─────────────────────────────────────────────────────────┐
+│            Enhanced Verb Discovery Architecture         │
+├─────────────────────────────────────────────────────────┤
+│  ┌──────────────┐    ┌───────────────────────────────┐  │
 │  │  ACCOMPLISH  │    │      NovelVerbHandler         │  │
 │  │   Plugin     │    │                               │  │
 │  └──────┬───────┘    └───────────┬───────────────────┘  │
-│         │                        │                     │
-│         ▼                        ▼                     │
-└─────────┼────────────────────────┼─────────────────────┘
+│         │                        │                      │
+│         ▼                        ▼                      │
+└─────────┼────────────────────────┼──────────────────────┘
           │                        │
           │                        │
 ┌─────────▼────────────────────────▼─────────────────────┐
-│           Discovery Service Layer                  │
+│           Discovery Service Layer                      │
 │  ┌─────────────────────┐    ┌───────────────────────┐  │
-│  │  Librarian API      │    │  KnowledgeStore        │  │
-│  │  /verbs/discover     │    │  (Extended)            │  │
-│  │  /verbs/register     │    │                        │  │
-│  │  /tools/search       │    │                        │  │
-│  └──────────┬─────────┘    └──────────┬─────────────┘  │
-│             │                        │               │
-│             │                        │               │
-└─────────────┼────────────────────────┼───────────────────┘
-              │                        │
-              │                        │
-┌─────────────▼────────────────────────▼───────────────────┐
-│           Chroma Vector Database Layer               │
-│  ┌─────────────────────┐    ┌───────────────────────┐  │
+│  │  Librarian API      │    │  KnowledgeStore       │  │
+│  │  /verbs/discover    │    │  (Extended)           │  │
+│  │  /verbs/register    │    │                       │  │
+│  │  /tools/search      │    │                       │  │
+│  └───────────┬─────────┘    └──────────┬─────────────┘ │
+│              │                         │               │
+│              │                         │               │
+└──────────────┼─────────────────────────┼───────────────┘
+               │                         │
+               │                         │
+┌──────────────▼─────────────────────────▼────────────────┐
+│           Chroma Vector Database Layer                  │
+│  ┌─────────────────────┐    ┌────────────────────────┐  │
 │  │   "verbs"           │    │   "tools"              │  │
 │  │   Collection        │    │   Collection           │  │
 │  │  - Verb manifests   │    │  - Tool manifests      │  │
 │  │  - Semantic vectors │    │  - Semantic vectors    │  │
-│  └─────────────────────┘    └───────────────────────┘  │
-└───────────────────────────────────────────────────────┘
+│  └─────────────────────┘    └────────────────────────┘  │
+└─────────────────────────────────────────────────────────┘
 ```
 
 #### Chroma Collection Structure
@@ -156,9 +169,15 @@ async function handleUnknownVerb(verbInfo: VerbInfo, context: ExecutionContext) 
 
 #### Engineer Agent Enhancement
 
+The Engineer service provides the foundation for AI-driven tool engineering. For detailed architecture information, see [`engineer-plugin-architecture.md`](docs/engineer-plugin-architecture.md).
+
+Key capabilities include:
+
 1. **Autonomous Tool Wrapping**: Generate plugin wrappers for external APIs
 2. **Verification Testing**: Auto-generate and run basic functionality tests
 3. **Registration Pipeline**: Seamless integration into PluginMarketplace
+4. **Multi-language Support**: Python, JavaScript, and containerized plugins
+5. **Comprehensive Validation**: Structure, code, and security validation
 
 ## Implementation Roadmap
 
@@ -190,7 +209,8 @@ async function handleUnknownVerb(verbInfo: VerbInfo, context: ExecutionContext) 
 
 ## Key Benefits
 
-1. **Unlimited Scalability**: No more token limit constraints
+1. **Unlimited Scalability**: No 
+more token limit constraints
 2. **Intelligent Discovery**: Semantic matching finds relevant verbs and tools
 3. **Resource Optimization**: Reduces redundant verb creation
 4. **Architectural Consistency**: Leverages existing knowledge graph

@@ -292,29 +292,7 @@ describe('CapabilitiesManager Core Functionality', () => {
             expect(mockRes.send).toHaveBeenCalledWith({ status: 'Message received and processed' });
         });
 
-        it('should handle /availablePlugins GET route', async () => {
-            const mockReq: any = {};
-            const mockRes: any = { json: jest.fn(), status: jest.fn().mockReturnThis() };
-            mockPluginRegistry.prototype.list.mockResolvedValueOnce([
-                { id: 'js-plugin', verb: 'JS_VERB', language: 'javascript', repository: { type: 'local' } },
-                { id: 'py-plugin', verb: 'PY_VERB', language: 'python', repository: { type: 'local' } },
-                { id: 'container-plugin', verb: 'CONTAINER_VERB', language: 'container', repository: { type: 'local' } },
-                { id: 'other-plugin', verb: 'OTHER_VERB', language: 'unknown', repository: { type: 'local' } }, // Should be filtered out
-            ]);
-
-            await capabilitiesManager.start();
-            const availablePluginsGetHandler = mockApp.get.mock.calls.find(call => call[0] === '/availablePlugins')[1];
-            await availablePluginsGetHandler(mockReq, mockRes);
-
-            expect(mockPluginRegistry.prototype.list).toHaveBeenCalled();
-            expect(mockRes.json).toHaveBeenCalledWith([
-                { id: 'js-plugin', verb: 'JS_VERB', language: 'javascript', repository: { type: 'local' } },
-                { id: 'py-plugin', verb: 'PY_VERB', language: 'python', repository: { type: 'local' } },
-                { id: 'container-plugin', verb: 'CONTAINER_VERB', language: 'container', repository: { type: 'local' } },
-            ]);
-        });
-
-        it('should handle /generatePluginContext POST route', async () => {
+       it('should handle /generatePluginContext POST route', async () => {
             const mockReq: any = { body: { goal: 'test goal', constraints: {} } };
             const mockRes: any = { json: jest.fn(), status: jest.fn().mockReturnThis() };
             mockPluginContextManager.prototype.generateContext.mockResolvedValueOnce({ context: 'generated' });

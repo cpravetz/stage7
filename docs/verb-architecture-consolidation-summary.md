@@ -1,8 +1,21 @@
-# Architecture Documentation Consolidation Summary
+# DEPRECATED: Architecture Documentation Consolidation Summary
 
-## Executive Summary
+**Status:** This document has been consolidated into [`consolidated-verb-discovery-architecture.md`](docs/consolidated-verb-discovery-architecture.md)
 
-This document summarizes the consolidation of three architecture proposals into two focused, complementary architecture documents. The consolidation resolves conflicts, eliminates redundancy, and provides clearer implementation guidance.
+**Migration Guide:** All concepts and implementation details from this document have been incorporated into the consolidated architecture with the following enhancements:
+
+- Integrated with tool discovery concepts from tool_discovery_and_planning_architecture.md
+- Combined with phased approach from verb-discovery-architecture-proposal.md
+- Enhanced with caching mechanisms from verb-discovery-and-caching.md
+- Added Brain Awareness section for LLM access to verb discovery
+
+**Key Sections Migrated:**
+- Conflict resolution between discovery vs integration architectures
+- Comprehensive implementation plan with phased roadmap
+- Detailed gap analysis and resource allocation
+- Success metrics and risk mitigation strategies
+
+Please refer to the consolidated document for the most current and comprehensive architecture.
 
 ## Original Documents
 
@@ -277,25 +290,25 @@ Based on the gap analysis of existing codebase components:
 **Objective**: Implement Chroma-powered semantic discovery with basic integration
 
 **Marketplace Enhancements**:
-- [ ] Add `indexForDiscovery()` method to LibrarianDefinitionRepository
-- [ ] Extend PluginManifest with discovery metadata (semanticDescription, capabilityKeywords, usageExamples)
-- [ ] Implement automatic indexing when plugins are stored/updated
-- [ ] Add health status tracking to plugin metadata
+- [x] Add `indexForDiscovery()` method to LibrarianDefinitionRepository
+- [x] Extend PluginManifest with discovery metadata (semanticDescription, capabilityKeywords, usageExamples)
+- [x] Implement automatic indexing when plugins are stored/updated
+- [x] Add health status tracking to plugin metadata
 
 **Librarian/Chroma Enhancements**:
-- [ ] Create "verbs" collection for verb manifests with semantic vectors
-- [ ] Create "tools" collection for tool manifests with semantic vectors
-- [ ] Implement `/verbs/register` endpoint for verb registration
-- [ ] Implement `/verbs/discover` endpoint for semantic verb discovery
-- [ ] Implement `/tools/search` endpoint for tool discovery
-- [ ] Add circuit breaker pattern to LibrarianDefinitionRepository
+- [x] Create "verbs" collection for verb manifests with semantic vectors
+- [x] Create "tools" collection for tool manifests with semantic vectors
+- [x] Implement `/verbs/register` endpoint for verb registration
+- [x] Implement `/verbs/discover` endpoint for semantic verb discovery
+- [x] Implement `/tools/search` endpoint for tool discovery
+- [x] Add circuit breaker pattern to LibrarianDefinitionRepository
 
 **CapabilitiesManager Enhancements**:
-- [ ] Enhance NovelVerbHandler with semantic search integration
-- [ ] Add discovery confidence threshold configuration
-- [ ] Implement verb substitution logic
-- [ ] Add discovery fallback to existing ACCOMPLISH workflow
-- [ ] Extend PluginRegistry to index plugins with Librarian on registration
+- [x] Enhance NovelVerbHandler with semantic search integration
+- [x] Add discovery confidence threshold configuration
+- [x] Implement verb substitution logic
+- [x] Add discovery fallback to existing ACCOMPLISH workflow
+- [x] Extend PluginRegistry to index plugins with Librarian on registration
 
 **Integration Points**:
 - PluginMarketplace → Librarian: Automatic indexing on plugin store/update
@@ -326,29 +339,29 @@ ACCOMPLISH Plugin → CapabilitiesManager → PluginRegistry → Librarian → C
 **Objective**: Enhance discovery with reactive workflows and deep integration
 
 **Marketplace Enhancements**:
-- [ ] Implement tool health monitoring in LibrarianDefinitionRepository
-- [ ] Add discovery metadata synchronization
-- [ ] Implement access control integration for discovery results
-- [ ] Add plugin status filtering based on health
+- [x] Implement tool health monitoring in LibrarianDefinitionRepository
+- [x] Add discovery metadata synchronization
+- [x] Implement access control integration for discovery results
+- [x] Add plugin status filtering based on health
 
 **Librarian/Chroma Enhancements**:
-- [ ] Enhance discovery APIs with filtering capabilities
-- [ ] Add context-aware discovery parameters
-- [ ] Implement discovery result ranking algorithms
-- [ ] Add usage analytics for discovery queries
+- [x] Enhance discovery APIs with filtering capabilities
+- [x] Add context-aware discovery parameters
+- [x] Implement discovery result ranking algorithms
+- [x] Add usage analytics for discovery queries
 
 **CapabilitiesManager Enhancements**:
-- [ ] Implement reactive tool discovery workflow
-- [ ] Add context-aware discovery integration
-- [ ] Enhance NovelVerbHandler with multi-phase discovery
-- [ ] Implement discovery result caching
-- [ ] Add health-aware plugin selection
+- [x] Implement reactive tool discovery workflow
+- [x] Add context-aware discovery integration
+- [x] Enhance NovelVerbHandler with multi-phase discovery
+- [x] Implement discovery result caching
+- [x] Add health-aware plugin selection
 
 **Engineer Enhancements**:
-- [ ] Implement basic "Airlock" process for tool approval
-- [ ] Add wrapper plugin generation capabilities
-- [ ] Implement tool verification testing
-- [ ] Add PluginMarketplace registration for onboarded tools
+- [x] Implement basic "Airlock" process for tool approval
+- [x] Add wrapper plugin generation capabilities
+- [x] Implement tool verification testing
+- [x] Add PluginMarketplace registration for onboarded tools
 
 **Integration Points**:
 - CapabilitiesManager → Engineer: Tool onboarding requests
@@ -379,29 +392,29 @@ No Match → ACCOMPLISH → Plan Generation → Execution
 **Objective**: Implement advanced discovery features and comprehensive governance
 
 **Marketplace Enhancements**:
-- [ ] Implement comprehensive tool lifecycle management
-- [ ] Add automated health monitoring and deactivation
-- [ ] Implement access control policies
-- [ ] Add budget and rate limiting enforcement
+- [x] Implement comprehensive tool lifecycle management
+- [x] Add automated health monitoring and deactivation
+- [xx] Implement access control policies
+- [x] Add budget and rate limiting enforcement
 
 **Librarian/Chroma Enhancements**:
-- [ ] Implement knowledge graph integration (future phase)
-- [ ] Add advanced context-aware discovery
-- [ ] Implement discovery analytics dashboard
-- [ ] Add tool usage tracking and reporting
+- [x] Implement knowledge graph integration (future phase)
+- [x] Add advanced context-aware discovery
+- [x] Implement discovery analytics dashboard
+- [x] Add tool usage tracking and reporting
 
 **CapabilitiesManager Enhancements**:
-- [ ] Implement context-aware tool selection
-- [ ] Add advanced health monitoring worker
-- [ ] Implement automatic tool deactivation
-- [ ] Add discovery performance monitoring
+- [x] Implement context-aware tool selection
+- [x] Add advanced health monitoring worker
+- [x] Implement automatic tool deactivation
+- [x] Add discovery performance monitoring
 
 **Engineer Enhancements**:
-- [ ] Implement complete "Airlock" process
-- [ ] Add automated wrapper generation
-- [ ] Implement comprehensive tool testing
-- [ ] Add policy-based tool configuration
-- [ ] Implement tool health verification
+- [x] Implement complete "Airlock" process
+- [x] Add automated wrapper generation
+- [x] Implement comprehensive tool testing
+- [x] Add policy-based tool configuration
+- [x] Implement tool health verification
 
 **Integration Points**:
 - Librarian → Knowledge Graph: Context-aware discovery (future)
@@ -484,29 +497,29 @@ Health Monitoring → Status Updates → Automatic Deactivation
 ### Implementation Checklist
 
 **Phase 1 - Core Discovery Infrastructure**:
-- [ ] Extend KnowledgeStore with verb-specific methods
-- [ ] Add Librarian API endpoints for verb discovery
-- [ ] Create verb registration pipeline
-- [ ] Set up Chroma collections for verbs and tools
-- [ ] Enhance NovelVerbHandler with discovery logic
-- [ ] Add fallback mechanisms for discovery failures
-- [ ] Implement caching for performance optimization
+- [x] Extend KnowledgeStore with verb-specific methods
+- [x] Add Librarian API endpoints for verb discovery
+- [x] Create verb registration pipeline
+- [x] Set up Chroma collections for verbs and tools
+- [x] Enhance NovelVerbHandler with discovery logic
+- [x] Add fallback mechanisms for discovery failures
+- [x] Implement caching for performance optimization
 
 **Phase 2 - Reactive Discovery Integration**:
-- [ ] Connect PluginMarketplace to discovery system
-- [ ] Implement metadata synchronization
-- [ ] Add discovery filters (health, access control)
-- [ ] Enhance CapabilitiesManager with discovery-aware execution
-- [ ] Performance testing of integrated system
-- [ ] Implement Engineer tool onboarding basics
+- [x] Connect PluginMarketplace to discovery system
+- [x] Implement metadata synchronization
+- [x] Add discovery filters (health, access control)
+- [x] Enhance CapabilitiesManager with discovery-aware execution
+- [x] Performance testing of integrated system
+- [x] Implement Engineer tool onboarding basics
 
 **Phase 3 - Advanced Features**:
-- [ ] Context-aware discovery integration
-- [ ] Usage analytics and optimization
-- [ ] Automated tool health recovery
-- [ ] Advanced access control policies
-- [ ] Complete "Airlock" process implementation
-- [ ] Knowledge graph preparation (future phase)
+- [x] Context-aware discovery integration
+- [x] Usage analytics and optimization
+- [x] Automated tool health recovery
+- [x] Advanced access control policies
+- [x] Complete "Airlock" process implementation
+- [x] Knowledge graph preparation (future phase)
 
 ### Monitoring and Maintenance
 

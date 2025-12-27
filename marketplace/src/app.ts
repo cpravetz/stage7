@@ -109,4 +109,47 @@ app.get('/actionVerbHandler/:actionVerb', (req, res) => {
     })();
 });
 
+// --- Verb Discovery for Planning ---
+// POST /verbs/discover-for-planning
+app.post('/verbs/discover-for-planning', (req, res) => {
+    (async () => {
+        try {
+            const { goal, context, missionId } = req.body;
+
+            if (!goal) {
+                return res.status(400).json({ error: 'Goal is required for verb discovery.' });
+            }
+
+            // Get all available plugins from the marketplace
+            const allPlugins = await marketplace.list();
+
+            // Filter and format plugins for planning context
+            const relevantVerbs = allPlugins
+                .filter(plugin => plugin.verb && plugin.description)
+                .map(plugin => ({
+                    verb: plugin.verb,
+                    description: plugin.description,
+                    capabilities: plugin.capabilities || [],
+                    category: plugin.category || 'general'
+                }));
+
+            // Create token-efficient response
+            const response = {
+                relevantVerbs,
+                relevantTools: [], // Could be extended with tool discovery
+                discoveryContext: {
+                    goalSummary: goal.substring(0, 200),
+                    verbCount: relevantVerbs.length,
+                    timestamp: new Date().toISOString()
+                }
+            };
+
+            res.status(200).json(response);
+        } catch (err: any) {
+            console.error('Error in verb discovery:', err);
+            res.status(500).json({ error: err.message || 'Verb discovery failed.' });
+        }
+    })();
+});
+
 export default app;

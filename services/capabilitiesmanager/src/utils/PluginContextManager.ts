@@ -81,7 +81,6 @@ export class PluginContextManager {
      * Generate optimized plugin context for LLM consumption
      */
     async generateContext(goal: string, constraints: ContextConstraints): Promise<PluginContext> {
-        await this.ensureCacheValid();
         
         const allPlugins = Array.from(this.pluginCache.values());
         const scoredPlugins = this.scorePluginRelevance(goal, allPlugins, constraints);
@@ -119,55 +118,6 @@ export class PluginContextManager {
         const plugin = this.pluginCache.get(pluginId);
         if (plugin) {
             this.updatePluginUsageStats(plugin, metrics);
-        }
-    }
-
-    /**
-     * Refresh plugin cache from CapabilitiesManager
-     */
-    async refreshCache(): Promise<void> {
-        try {
-            const response = await axios.get(`http://${this.capabilitiesManagerUrl}/availablePlugins`, {
-                timeout: 10000,
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json'
-                }
-            });
-
-            const plugins = response.data;
-            this.pluginCache.clear();
-            
-            for (const plugin of plugins) {
-                const metadata: PluginMetadata = {
-                    id: plugin.id,
-                    verb: plugin.verb,
-                    description: plugin.description || '',
-                    explanation: plugin.explanation,
-                    inputDefinitions: plugin.inputDefinitions || [],
-                    outputDefinitions: plugin.outputDefinitions || [],
-                    metadata: plugin.metadata,
-                    usageStats: {
-                        totalUses: 0,
-                        successRate: 1.0,
-                        avgExecutionTime: 1000,
-                        lastUsed: new Date()
-                    }
-                };
-                
-                this.pluginCache.set(plugin.id, metadata);
-            }
-            
-            this.cacheExpiry = Date.now() + this.CACHE_TTL_MS;
-        } catch (error) {
-            console.error('[PluginContextManager] Failed to refresh cache:', error);
-            throw error;
-        }
-    }
-
-    private async ensureCacheValid(): Promise<void> {
-        if (Date.now() > this.cacheExpiry || this.pluginCache.size === 0) {
-            await this.refreshCache();
         }
     }
 

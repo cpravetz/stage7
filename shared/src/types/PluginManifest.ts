@@ -16,6 +16,8 @@ export interface PluginLocator {
     repository: PluginRepositoryLink;
     language?: string;
     name?: string; // Added name property
+    category?: string;
+    capabilities?: string[];
     // Potentially add 'publisher' or 'namespace' here for better unique identification
 }
 
@@ -62,5 +64,17 @@ export interface PluginManifest {
     };
 
     metadata?: PluginMetadata;
-    configuration?: PluginConfigurationItem[];
-}
+        configuration?: PluginConfigurationItem[];
+    
+        // Discovery metadata
+        semanticDescription?: string;
+        capabilityKeywords?: string[];
+        usageExamples?: string[];
+    
+        // Health status
+        healthStatus?: {
+            status: 'healthy' | 'unhealthy' | 'unknown';
+            lastChecked: string; // ISO 8601
+        };
+    }
+    

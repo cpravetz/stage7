@@ -41,6 +41,7 @@ export class PostOffice extends BaseEntity {
     private healthCheckManager: HealthCheckManager;
     private fileUploadManager: FileUploadManager;
     private pluginManager: PluginManager;
+    private librarianUrl: string = '';
 
     constructor() {
         // Call the BaseEntity constructor with required parameters
@@ -199,7 +200,7 @@ export class PostOffice extends BaseEntity {
                 return res.status(400).send({ error: 'Service name missing in API request' });
             }
 
-            const targetServiceUrl = this.getComponentUrl(serviceName);
+            const targetServiceUrl = await this.serviceDiscoveryManager.discoverService(serviceName);
             if (!targetServiceUrl) {
                 return res.status(503).send({ error: `Service ${serviceName} not available` });
             }
@@ -255,13 +256,30 @@ export class PostOffice extends BaseEntity {
         this.messageProcessingInterval = setInterval(() => this.messageRouter.processMessageQueue(), 100);
     }
 
+    private async getLibrarianUrl(): Promise<string> {
+        if (this.librarianUrl) {
+            return this.librarianUrl;
+        }
+
+        const librarianUrl = await this.serviceDiscoveryManager.discoverService('Librarian');
+        if (!librarianUrl) {
+            // Throw an error or handle the case where the service is not found
+            throw new Error('Librarian service not found.');
+        }
+
+        // Prepend http:// if no protocol is present
+        const fullLibrarianUrl = (librarianUrl.startsWith('http://') || librarianUrl.startsWith('https://'))
+            ? librarianUrl
+            : `http://${librarianUrl}`;
+        
+        this.librarianUrl = fullLibrarianUrl;
+        return this.librarianUrl;
+    }
+
 
     private async retrieveWorkProduct(req: express.Request, res: express.Response) {
         try {
-            const librarianUrl = this.getComponentUrl('Librarian');
-            if (!librarianUrl) {
-                res.status(404).send({ error: 'Librarian not registered' });
-            }
+            const librarianUrl = await this.getLibrarianUrl();
             const response = await this.authenticatedApi.get(`${librarianUrl}/loadWorkProduct/${req.params.id}`);
             res.status(200).send(response.data);
         }
@@ -725,7 +743,7 @@ export class PostOffice extends BaseEntity {
                     );
 
                     // Store the file metadata in Librarian
-                    const librarianUrl = this.getComponentUrl('Librarian');
+                    const librarianUrl = await this.getLibrarianUrl();
                     if (librarianUrl) {
                         const missionFile = this.fileUploadManager.fileUploadServiceInstance.convertToMissionFile(uploadedFile);
                         await this.authenticatedApi.post(`${librarianUrl}/storeData`, {
@@ -764,12 +782,6 @@ export class PostOffice extends BaseEntity {
     }
     private async getSavedMissions(req: express.Request, res: express.Response) {
         try {
-            const librarianUrl = this.getComponentUrl('Librarian') || process.env.LIBRARIAN_URL;
-            if (!librarianUrl) {
-                res.status(200).send([]);
-                return;
-            }
-
             // Extract userId from the authentication token
             const token = req.headers.authorization?.split(' ')[1];
             let userId = 'system'; // Fallback default
@@ -785,6 +797,7 @@ export class PostOffice extends BaseEntity {
 
             console.log(`Using userId: ${userId} for getSavedMissions`);
 
+            const librarianUrl = await this.getLibrarianUrl();
             const response = await this.authenticatedApi.get(`${librarianUrl}/getSavedMissions`, {
                 params: { userId }
             });
@@ -798,15 +811,9 @@ export class PostOffice extends BaseEntity {
 
     private async getModelPerformance(_req: express.Request, res: express.Response) {
         try {
-            console.log('Received request for model performance data');
-            const librarianUrl = this.getComponentUrl('Librarian');
-
-            if (!librarianUrl) {
-                console.error('Librarian service not registered');
-                return res.status(404).json({ error: 'Librarian service not available' });
-            }
 
             try {
+                const librarianUrl = await this.getLibrarianUrl();
                 const response = await this.authenticatedApi.post(`${librarianUrl}/queryData`, {
                     collection: 'mcsdata',
                     limit: 1,
@@ -866,18 +873,12 @@ export class PostOffice extends BaseEntity {
     private async getModelRankings(req: express.Request, res: express.Response) {
         try {
             console.log('Received request for model rankings');
-            const librarianUrl = this.getComponentUrl('Librarian');
-
-            if (!librarianUrl) {
-                console.error('Librarian service not registered');
-                return res.status(404).json({ error: 'Librarian service not available' });
-            }
-
             // Get query parameters
             const conversationType = req.query.conversationType as LLMConversationType || LLMConversationType.TextToText;
             const metric = req.query.metric as string || 'overall';
 
             try {
+                const librarianUrl = await this.getLibrarianUrl();
                 const response = await this.authenticatedApi.post(`${librarianUrl}/queryData`, {
                     collection: 'mcsdata',
                     limit: 1,
@@ -995,7 +996,10 @@ export class PostOffice extends BaseEntity {
     async submitModelEvaluation(req: express.Request, res: express.Response) {
         try {
             const { modelName, conversationType, requestId, prompt, response, scores } = req.body;
-            const brainUrl = this.getComponentUrl('Brain');
+            let brainUrl = this.getComponentUrl('Brain');
+            if (brainUrl && !brainUrl.startsWith('http://') && !brainUrl.startsWith('https://')) {
+                brainUrl = `http://${brainUrl}`;
+            }
 
             if (!brainUrl) {
                 console.error('Brain service not registered');
@@ -1026,7 +1030,11 @@ export class PostOffice extends BaseEntity {
         }
         try {
             // Discover AgentSet service URL
-            const agentSetUrl = this.getComponentUrl('AgentSet') || process.env.AGENTSET_URL;
+            let agentSetUrl = this.getComponentUrl('AgentSet') || process.env.AGENTSET_URL;
+            if (agentSetUrl && !agentSetUrl.startsWith('http://') && !agentSetUrl.startsWith('https://')) {
+                agentSetUrl = `http://${agentSetUrl}`;
+            }
+
             if (!agentSetUrl) {
                 return res.status(503).json({ error: 'AgentSet service not available' });
             }
@@ -1062,30 +1070,22 @@ export class PostOffice extends BaseEntity {
     private async downloadMissionFile(req: express.Request, res: express.Response) {
         try {
             const { fileId } = req.params;
-            const librarianUrl = this.getComponentUrl('Librarian');
-            if (!librarianUrl) {
-                return res.status(503).send({ error: 'Librarian service not available' });
-            }
-
             let fileToDownload: MissionFile | undefined;
             let missionId: string | undefined;
+            const librarianUrl = await this.getLibrarianUrl();
 
             // Attempt 1: Search for the file in the 'deliverables' collection
             try {
-                const deliverableResponse = await this.authenticatedApi.get(`${librarianUrl}/loadData/${fileId}`, {
-                    params: { collection: 'deliverables', storageType: 'mongo' }
+                const deliverableResponse = await this.authenticatedApi.post(`${librarianUrl}/queryData`, {
+                    collection: 'deliverables',
+                    query: { "missionFile.id": fileId },
+                    limit: 1
                 });
 
-                if (deliverableResponse.data && deliverableResponse.data.data) {
-                    const deliverable = deliverableResponse.data.data;
-                    // Assuming deliverable structure contains MissionFile-like properties or a direct MissionFile
-                    // If deliverable is directly a MissionFile
-                    if (deliverable.id === fileId && deliverable.storagePath) {
-                        fileToDownload = deliverable;
-                        missionId = deliverable.missionId; // Deliverables should have missionId
-                    } else if (deliverable.data && deliverable.data.id === fileId && deliverable.data.storagePath) {
-                        // If deliverable wraps the MissionFile in a 'data' field
-                        fileToDownload = deliverable.data;
+                if (deliverableResponse.data && deliverableResponse.data.data && deliverableResponse.data.data.length > 0) {
+                    const deliverable = deliverableResponse.data.data[0];
+                    if (deliverable.missionFile && deliverable.missionFile.id === fileId) {
+                        fileToDownload = deliverable.missionFile;
                         missionId = deliverable.missionId;
                     }
                 }
@@ -1124,14 +1124,14 @@ export class PostOffice extends BaseEntity {
                 return res.status(404).send({ error: 'File not found on storage.' });
             }
 
-            // Get the file content using FileUploadManager's service
-            const fileBuffer = await this.fileUploadManager.fileUploadServiceInstance.getFile(fileToDownload.id, fileToDownload.storagePath);
+            // Get the file stream using FileUploadManager's service
+            const fileStream = await this.fileUploadManager.fileUploadServiceInstance.getFile(fileToDownload.id, fileToDownload.storagePath);
 
             // Set appropriate headers for file download
             res.setHeader('Content-Disposition', `attachment; filename="${fileToDownload.originalName}"`);
             res.setHeader('Content-Type', fileToDownload.mimeType);
-            res.setHeader('Content-Length', fileBuffer.length.toString());
-            res.send(fileBuffer);
+            // Don't set Content-Length here, as we are streaming. It will be handled automatically.
+            fileStream.pipe(res);
 
         } catch (error) {
             analyzeError(error as Error);
@@ -1145,10 +1145,7 @@ export class PostOffice extends BaseEntity {
 
     private async getToolSources(req: express.Request, res: express.Response) {
         try {
-            const librarianUrl = this.getComponentUrl('Librarian');
-            if (!librarianUrl) {
-                return res.status(503).send({ error: 'Librarian service not available' });
-            }
+            const librarianUrl = await this.getLibrarianUrl();
             const response = await this.authenticatedApi.post(`${librarianUrl}/queryData`, {
                 collection: 'toolSources',
                 query: {}
@@ -1164,10 +1161,7 @@ export class PostOffice extends BaseEntity {
     private async addToolSource(req: express.Request, res: express.Response) {
         try {
             const newToolSource: ToolSource = { ...req.body, id: uuidv4() };
-            const librarianUrl = this.getComponentUrl('Librarian');
-            if (!librarianUrl) {
-                return res.status(503).send({ error: 'Librarian service not available' });
-            }
+            const librarianUrl = await this.getLibrarianUrl();
             await this.authenticatedApi.post(`${librarianUrl}/storeData`, {
                 collection: 'toolSources',
                 data: newToolSource,
@@ -1184,11 +1178,8 @@ export class PostOffice extends BaseEntity {
     private async deleteToolSource(req: express.Request, res: express.Response) {
         try {
             const { id } = req.params;
-            const librarianUrl = this.getComponentUrl('Librarian');
-            if (!librarianUrl) {
-                return res.status(503).send({ error: 'Librarian service not available' });
-            }
-            await this.authenticatedApi.deleteget(`${librarianUrl}/deleteData/${id}`, {
+            const librarianUrl = await this.getLibrarianUrl();
+            await this.authenticatedApi.delete(`${librarianUrl}/deleteData/${id}`, {
                 params: { collection: 'toolSources' }
             });
             res.status(204).send();
@@ -1201,10 +1192,7 @@ export class PostOffice extends BaseEntity {
 
     private async getPendingTools(req: express.Request, res: express.Response) {
         try {
-            const librarianUrl = this.getComponentUrl('Librarian');
-            if (!librarianUrl) {
-                return res.status(503).send({ error: 'Librarian service not available' });
-            }
+            const librarianUrl = await this.getLibrarianUrl();
             const response = await this.authenticatedApi.post(`${librarianUrl}/queryData`, {
                 collection: 'pendingTools',
                 query: { status: 'pending' }
@@ -1220,8 +1208,11 @@ export class PostOffice extends BaseEntity {
     private async approvePendingTool(req: express.Request, res: express.Response) {
         try {
             const { id } = req.params;
-            const librarianUrl = this.getComponentUrl('Librarian');
-            const capabilitiesManagerUrl = this.getComponentUrl('CapabilitiesManager');
+            let capabilitiesManagerUrl = await this.serviceDiscoveryManager.discoverService('CapabilitiesManager');
+            if (capabilitiesManagerUrl && !capabilitiesManagerUrl.startsWith('http://') && !capabilitiesManagerUrl.startsWith('https://')) {
+                capabilitiesManagerUrl = `http://${capabilitiesManagerUrl}`;
+            }
+            const librarianUrl = await this.getLibrarianUrl();
 
             if (!librarianUrl || !capabilitiesManagerUrl) {
                 return res.status(503).send({ error: 'Librarian or CapabilitiesManager service not available' });
@@ -1256,11 +1247,7 @@ export class PostOffice extends BaseEntity {
     private async rejectPendingTool(req: express.Request, res: express.Response) {
         try {
             const { id } = req.params;
-            const librarianUrl = this.getComponentUrl('Librarian');
-            if (!librarianUrl) {
-                return res.status(503).send({ error: 'Librarian service not available' });
-            }
-
+            const librarianUrl = await this.getLibrarianUrl();
             // 1. Fetch the pending tool
             const pendingToolResponse = await this.authenticatedApi.get(`${librarianUrl}/loadData/${id}`, {
                 params: { collection: 'pendingTools' }

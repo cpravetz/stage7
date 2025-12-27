@@ -132,7 +132,7 @@ should not be changed.
       POSTOFFICE_URL: &postofficeUrl postoffice:5020
       SECURITYMANAGER_URL: &securitymanagerUrl securitymanager:5010
       MISSIONCONTROL_URL: &missioncontrolUrl missioncontrol:5030
-      POSTOFFICE_CLIENT_SECRET: &postofficeSecret postOfficeAuthSecret
+      POSTOFFICE_SECRET: &postofficeSecret postOfficeAuthSecret
 
   missioncontrol:
     environment:
@@ -142,19 +142,19 @@ should not be changed.
       LIBRARIAN_URL: &librarianUrl librarian:5040
       BRAIN_URL: &brainUrl brain:5070
       ENGINEER_URL: &engineerUrl engineer:5050
-      MISSIONCONTROL_CLIENT_SECRET: &missioncontrolSecret missionControlAuthSecret
+      MISSIONCONTROL_SECRET: &missioncontrolSecret missionControlAuthSecret
 
   trafficmanager:
     environment:
       NODE_ENV: production
       PORT: &trafficmanagerPort 5080
-      TRAFFICMANAGER_CLIENT_SECRET: &trafficmanagerSecret trafficManagerAuthSecret
+      TRAFFICMANAGER_SECRET: &trafficmanagerSecret trafficManagerAuthSecret
 
   brain:
     environment:
       NODE_ENV: production
       PORT: &brainPort 5070
-      BRAIN_CLIENT_SECRET: &brainSecret brainAuthSecret
+      BRAIN_SECRET: &brainSecret brainAuthSecret
       # OpenAI API
       OPENAI_API_KEY=
 
@@ -178,26 +178,26 @@ should not be changed.
       NODE_ENV: production
       TRAFFICMANAGER_URL: &trafficmanagerUrl
       CAPABILITIESMANAGER_URL: &capabilitiesmanagerUrl capabilitiesmanager:5060
-      AGENTSET_CLIENT_SECRET: &agentsetSecret agentSetAuthSecret
+      AGENTSET_SECRET: &agentsetSecret agentSetAuthSecret
 
   engineer:
     environment:
       NODE_ENV: production
       PORT: &engineerPort 5050
-      ENGINEER_CLIENT_SECRET: &engineerSecret engineerAuthSecret
+      ENGINEER_SECRET: &engineerSecret engineerAuthSecret
 
   capabilitiesmanager:
     environment:
       NODE_ENV: production
       PORT: &capabilitiesmanagerPort 5060
       ENGINEER_URL: &engineerUrl
-      CAPABILITIESMANAGER_CLIENT_SECRET: &capabilitiesmanagerSecret capabilitiesManagerAuthSecret
+      CAPABILITIESMANAGER_SECRET: &capabilitiesmanagerSecret capabilitiesManagerAuthSecret
 
   librarian:
     environment:
       NODE_ENV: production
       PORT: &librarianPort 5040
-      LIBRARIAN_CLIENT_SECRET: &librarianSecret librarianAuthSecret
+      LIBRARIAN_SECRET: &librarianSecret librarianAuthSecret
       REDIS_HOST=redis
       REDIS_PORT=6379
       MONGO_URI=mongodb://mongo:27017
@@ -209,7 +209,7 @@ should not be changed.
       PORT:  &securitymanagerPort 5010
       JWT_SECRET: your-secret-key
       ADMIN_SECRET: adminSecret
-      SECURITYMANAGER_CLIENT_SECRET: &securitymanagerSecret securityManagerAuthSecret
+      SECURITYMANAGER_SECRET: &securitymanagerSecret securityManagerAuthSecret
 
   frontend:
     environment:
