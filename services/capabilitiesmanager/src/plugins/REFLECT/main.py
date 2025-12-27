@@ -458,6 +458,78 @@ class ReflectHandler:
             "agentId": agent_id,
         }
     
+    def _summarize_plan_history(self, plan_history: List[Dict[str, Any]]) -> str:
+        """Create a compressed summary of plan history for Brain to avoid token limits"""
+        if not plan_history:
+            return "No steps executed yet"
+        
+        summary_lines = []
+        for step in plan_history:
+            action_verb = step.get('actionVerb', 'UNKNOWN')
+            status = step.get('status', 'unknown')
+            description = step.get('description', '')
+            result = step.get('result')
+            
+            # Abbreviate the result
+            result_summary = ""
+            if result:
+                if isinstance(result, list) and result:
+                    result_summary = f"[{len(result)} items]"
+                elif isinstance(result, dict):
+                    result_summary = "{object}"
+                elif isinstance(result, str) and len(result) > 50:
+                    result_summary = result[:50] + "..."
+                else:
+                    result_summary = str(result)[:50]
+            
+            line = f"- {action_verb} ({status})"
+            if description:
+                line += f": {description[:60]}"
+            if result_summary:
+                line += f" → {result_summary}"
+            summary_lines.append(line)
+        
+        return "\n".join(summary_lines[:20])  # Limit to last 20 steps
+    
+
+    def _detect_next_phase(self, mission_goal: str) -> Optional[str]:
+        """
+        Detect if mission has multiple phases and suggest next phase.
+        Returns the next phase content if applicable.
+        """
+        import re
+        # Check if goal mentions phases
+        phase_pattern = r'PHASE\s+(\d+)\s*[-:]?\s*([^\n]*)'
+        matches = list(re.finditer(phase_pattern, mission_goal, re.IGNORECASE))
+        
+        if not matches or len(matches) < 2:
+            return None  # Not a multi-phase mission or only one phase
+        
+        # Extract all phases
+        phases = {}
+        for i, match in enumerate(matches):
+            phase_num = int(match.group(1))
+            phases[phase_num] = (match.start(), match.end())
+        
+        # Find the current phase (the one being worked on) - assume it's Phase 1
+        current_phase_num = min(phases.keys())
+        next_phase_num = current_phase_num + 1
+        
+        # Extract next phase content
+        if next_phase_num in phases:
+            start = phases[next_phase_num][0]
+            # Find where next phase ends (either at next PHASE or end of string)
+            if next_phase_num + 1 in phases:
+                end = phases[next_phase_num + 1][0]
+            else:
+                end = len(mission_goal)
+            
+            next_phase_content = mission_goal[start:end].strip()
+            logger.info(f"🎯 Multi-phase mission detected: Next phase is Phase {next_phase_num}")
+            return next_phase_content
+        
+        return None
+
     def _ask_brain_for_reflection_handling(self, reflection_info: Dict[str, Any], inputs: Dict[str, Any], discovered_plugins: List[Dict[str, Any]]) -> str:
         """Ask Brain how to handle the reflection request"""
         mission_goal = reflection_info['mission_goal']
@@ -469,7 +541,13 @@ class ReflectHandler:
         schema_json = json.dumps(PLAN_ARRAY_SCHEMA, indent=2)
         plugin_guidance = _create_detailed_plugin_guidance(discovered_plugins)
 
+        # Compress plan history to avoid overwhelming the Brain API
+        # Only keep summary of execution rather than full structure
+        plan_summary = self._summarize_plan_history(plan_history) if plan_history else "No plan executed yet"
+
         failed_step_info = ""
+        next_phase_info = ""
+        
         if plan_history:
             last_step = plan_history[-1]
             if not last_step.get('success', True):
@@ -477,7 +555,7 @@ class ReflectHandler:
                 failed_error = last_step.get('error', 'No error message')
                 failed_inputs = last_step.get('inputs', {})
                 
-                failed_inputs_str = json.dumps(failed_inputs, indent=2)
+                failed_inputs_str = json.dumps(failed_inputs, indent=2) if failed_inputs else "{}"
 
                 failed_step_info = f"""
 FAILED STEP DETAILS:
@@ -485,18 +563,32 @@ Action Verb: {failed_action_verb}
 Error: {failed_error}
 Inputs: {failed_inputs_str}
 """
+        
+        # Check if this is a multi-phase mission that succeeded
+        next_phase = self._detect_next_phase(mission_goal)
+        if next_phase and plan_history and plan_history[-1].get('success', False):
+            next_phase_info = f"""
 
+MULTI-PHASE MISSION ADVANCEMENT:
+The mission has multiple phases. Phase 1 has been completed successfully.
+Please create a plan for the next phase:
+
+{next_phase}
+
+Focus only on this phase. Do NOT include steps for phases beyond this one.
+"""
+        
         prompt = f"""You are a JSON-only reflection and planning assistant. Your primary task is to analyze the provided mission data and create a new plan if the mission has failed or is incomplete.
 
 MISSION ID: {mission_id}
 MISSION GOAL: {mission_goal}
-PLAN HISTORY: {plan_history}
+PLAN EXECUTION SUMMARY: {plan_summary}
 WORK PRODUCTS: {work_products}
 REFLECTION QUESTION: {question}
 
 {plugin_guidance}
 
-{failed_step_info}
+{failed_step_info}{next_phase_info}
 
 Your task is to analyze the mission's progress and determine the best course of action.
 
@@ -611,11 +703,10 @@ Plan Schema:
             if isinstance(data, list):
                 plan_array = data
             elif isinstance(data, dict):
-                # Check if this dict is itself a step (has actionVerb or id) - this is INVALID
+                # Check if this dict is itself a step (has actionVerb or id) - this is an ERROR
                 if 'actionVerb' in data or 'id' in data:
-                    logger.error(f"REFLECT: LLM returned a single step object instead of a plan array. This is invalid and will be rejected.")
-                    # Don't set plan_array - let it fall through to the direct_answer handling
-                    # The system will treat this as "mission not accomplished" and may retry
+                    logger.error(f"REFLECT: LLM returned a single step object instead of a plan array. This is invalid and requires correction.")
+                    raise ReflectError("LLM returned a single step instead of a plan array. Plans must be arrays of steps.", "invalid_plan_format")
                 else:
                     # Otherwise, check if any property contains an array of step-like objects
                     for key, value in data.items():
@@ -653,6 +744,13 @@ Plan Schema:
                 
                 # Validate and repair the plan
                 validated_plan_result = self.validator.validate_and_repair(plan_array, verb_info['mission_goal'], inputs)
+
+                # CRITICAL: Check if the plan is actually valid before returning it
+                if not validated_plan_result.is_valid:
+                    logger.error(f"REFLECT: Generated plan failed validation with {len(validated_plan_result.errors)} errors")
+                    for error in validated_plan_result.errors[:3]:  # Log first 3 errors
+                        logger.error(f"  - {error.message}")
+                    raise ReflectError(f"Generated plan failed validation: {validated_plan_result.errors[0].message if validated_plan_result.errors else 'Unknown error'}", "plan_validation_failed")
 
                 return json.dumps([{
                     "success": True,
@@ -759,7 +857,7 @@ Plan Schema:
                     }])
                 elif "plugin" in data:
                     plugin_data = data["plugin"]
-                    return json.dumps([{ 
+                    return json.dumps([{
                         "success": True,
                         "name": "plugin",
                         "resultType": "plugin",
@@ -767,16 +865,10 @@ Plan Schema:
                         "result": plugin_data,
                         "mimeType": "application/json"
                     }])
-                # If the dictionary is a single step, treat it as a plan with one step
+                # If the dictionary is a single step, this is an error
                 elif "actionVerb" in data and "id" in data:
-                    validated_plan_result = self.validator.validate_and_repair([data], verb_info['mission_goal'], inputs)
-                    return json.dumps([{"success": True,
-                        "name": "plan",
-                        "resultType": "plan",
-                        "resultDescription": f"Plan created from reflection",
-                        "result": validated_plan_result.plan,
-                        "mimeType": "application/json"
-                    }])
+                    logger.error(f"REFLECT: Received single step as direct response. This is invalid and requires correction.")
+                    raise ReflectError("Received single step instead of plan array. Plans must be arrays of steps.", "invalid_plan_format")
                 else:
                     # Unexpected dictionary format
                     return json.dumps([{ 

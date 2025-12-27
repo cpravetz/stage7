@@ -104,21 +104,22 @@ export class Brain extends BaseEntity {
 
         app.post('/reportLogicFailure', async (req: express.Request, res: express.Response) => {
             try {
-                const { requestId, reason } = req.body;
+                const { requestId, reason, severity } = req.body;
 
                 if (!requestId) {
                     res.status(400).json({ error: 'Missing requestId' });
                     return;
                 }
 
-                console.log(`[Brain] Received logic failure report for request ${requestId}: ${reason || 'No reason provided'}`);
+                const failureSeverity = severity || 'normal'; // Default to 'normal' if not specified
+                console.log(`[Brain] Received ${failureSeverity} logic failure report for request ${requestId}: ${reason || 'No reason provided'}`);
 
                 // Get the request from the model manager to find which model was used
                 const request = this.modelManager.getActiveRequest(requestId);
                 if (request) {
-                    console.log(`[Brain] Tracking logic failure for model ${request.modelName}, conversation type ${request.conversationType}`);
-                    this.modelManager.trackLogicFailure(request.modelName, request.conversationType);
-                    res.json({ success: true, message: 'Logic failure recorded' });
+                    console.log(`[Brain] Tracking ${failureSeverity} logic failure for model ${request.modelName}, conversation type ${request.conversationType}`);
+                    this.modelManager.trackLogicFailure(request.modelName, request.conversationType, failureSeverity);
+                    res.json({ success: true, message: 'Logic failure recorded', severity: failureSeverity });
                 } else {
                     console.warn(`[Brain] No active request found for ${requestId}, cannot track logic failure`);
                     res.status(404).json({ error: 'Request not found' });

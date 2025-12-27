@@ -88,6 +88,7 @@ PLAN_ARRAY_SCHEMA = {
 class ErrorType(Enum):
     """Structured error types for better error handling"""
     MISSING_INPUT = "missing_input"
+    INPUT_NAME_MISMATCH = "input_name_mismatch"
     INVALID_REFERENCE = "invalid_reference"
     TYPE_MISMATCH = "type_mismatch"
     MISSING_FIELD = "missing_field"
@@ -294,14 +295,12 @@ class PlanValidator:
         # Sanitize all top-level steps - NEVER filter any out
         sanitized = [sanitize_step(step) for step in plan]
         
-        logger.info(f"Sanitized plan: {len(plan)} steps in -> {len(sanitized)} steps out")
         return sanitized
 
     def validate_and_repair(self, plan: List[Dict[str, Any]], goal: str, 
                            inputs: Dict[str, Any]) -> ValidationResult:
         """
         Validates and attempts to repair a plan, returning a final validation result.
-        This function no longer raises an exception on failure.
         """
         logger.info(f"--- Plan Validation and Transformation (Enhanced) ---")
         logger.info(f"INPUT PLAN: {len(plan)} steps")
@@ -688,16 +687,6 @@ class PlanValidator:
 
         plugin_def = self._get_plugin_definition(action_verb)
         
-        # --- Start Normalization Logic ---
-        if plugin_def:
-            canonical_verb = plugin_def.get('metadata', {}).get('verb')
-            if canonical_verb and canonical_verb.upper() != action_verb.upper():
-                logger.info(f"Normalizing actionVerb in step {step_id}: from '{action_verb}' to '{canonical_verb}'")
-                step['actionVerb'] = canonical_verb
-                action_verb = canonical_verb
-                # Re-fetch plugin_def for the canonical verb to ensure cache is correct for subsequent checks
-                plugin_def = self._get_plugin_definition(canonical_verb)
-        # --- End Normalization Logic ---
 
         is_novel_verb = not plugin_def
         # For novel verbs, we are less strict. We just check for a description.
@@ -710,23 +699,60 @@ class PlanValidator:
                     step_id=step_id
                 ))
         elif plugin_def:
+            # Handle potential single-input-to-single-required-input mismatch
+            step_inputs = step.get('inputs', {})
+            if isinstance(step_inputs, dict):
+                required_inputs = [inp for inp in plugin_def.get('inputDefinitions', []) if inp.get('required')]
+                
+                if len(step_inputs) == 1 and len(required_inputs) == 1:
+                    provided_input_name = next(iter(step_inputs.keys()))
+                    required_input_name = required_inputs[0]['name']
+                    
+                    if provided_input_name != required_input_name:
+                        errors.append(StructuredError(
+                            ErrorType.INPUT_NAME_MISMATCH,
+                            f"Step provides one input '{provided_input_name}' but the verb '{action_verb}' requires '{required_input_name}'. This may need to be renamed.",
+                            step_id=step_id,
+                            input_name=provided_input_name 
+                        ))
+                        # Return early to avoid creating a redundant "Missing required input" error
+                        return errors, wrappable_errors
+
             # Validate required inputs for known plugins
             for req_input in plugin_def.get('inputDefinitions', []):
                 if req_input.get('required'):
                     input_found = False
                     if req_input['name'] in step.get('inputs', {}):
                         input_found = True
-                    elif req_input.get('aliases'):
-                        for alias in req_input['aliases']:
-                            if alias in step.get('inputs', {}):
-                                input_found = True
-                                break
                     if not input_found:
                         errors.append(StructuredError(
                             ErrorType.MISSING_INPUT,
                             f"Missing required input '{req_input['name']}' for '{action_verb}'",
                             step_id=step_id,
                             input_name=req_input['name']
+                        ))
+        
+        # Special validation for GENERATE - it MUST have a 'prompt' input
+        if action_verb and action_verb.upper() == 'GENERATE':
+            inputs_dict = step.get('inputs', {})
+            if not inputs_dict or 'prompt' not in inputs_dict:
+                errors.append(StructuredError(
+                    ErrorType.MISSING_INPUT,
+                    f"GENERATE step requires mandatory 'prompt' input",
+                    step_id=step_id,
+                    input_name='prompt'
+                ))
+            else:
+                # Check if the prompt input is valid (not empty)
+                prompt_input = inputs_dict.get('prompt', {})
+                if isinstance(prompt_input, dict):
+                    value = prompt_input.get('value')
+                    if value == "" or value is None:
+                        errors.append(StructuredError(
+                            ErrorType.MISSING_INPUT,
+                            f"GENERATE 'prompt' input is empty or undefined",
+                            step_id=step_id,
+                            input_name='prompt'
                         ))
 
         inputs = step.get('inputs', {})
@@ -739,37 +765,6 @@ class PlanValidator:
             return errors, wrappable_errors
 
 
-        # Check if this is the Brain's flattened format (inputs are actually input properties)
-        # Brain format: inputs = {"valueType": "string", "sourceStep": "0", "outputName": "data", "args": {...}}
-        # Expected format: inputs = {"input_name": {"valueType": "string", "sourceStep": "0", "outputName": "data"}}
-        
-        is_brain_flattened_format = False
-        if len(inputs) > 0 and all(isinstance(v, (dict, str, int, bool)) for v in inputs.values()):
-            # Check if this looks like the Brain's flattened format
-            has_valueType = 'valueType' in inputs
-            has_sourceStep = 'sourceStep' in inputs
-            has_outputName = 'outputName' in inputs
-            
-            if has_valueType and has_sourceStep and has_outputName:
-                is_brain_flattened_format = True
-                logger.info(f"Detected Brain's flattened input format in step {step_id}, converting...")
-                
-                # Convert to proper format
-                new_inputs = {
-                    "input_1": {  # Use a generic input name
-                        'valueType': inputs['valueType'],
-                        'sourceStep': inputs['sourceStep'],
-                        'outputName': inputs['outputName']
-                    }
-                }
-                
-                # Add args if present
-                if 'args' in inputs:
-                    new_inputs["input_1"]['args'] = inputs['args']
-                
-                # Replace the inputs with the converted format
-                step['inputs'] = new_inputs
-                inputs = new_inputs
         
         # Validate each input
         for input_name, input_def in inputs.items():
@@ -882,7 +877,11 @@ class PlanValidator:
                     input_name=input_name
                 ))
 
-        # Validate outputs
+        # Validate outputs against verb manifest
+        manifest_output_errors = self._validate_outputs_against_manifest(step)
+        errors.extend(manifest_output_errors)
+
+        # Validate deliverable output properties
         output_errors = self._validate_deliverable_outputs(step)
         errors.extend(output_errors)
 
@@ -959,17 +958,15 @@ class PlanValidator:
         if is_wrappable:
             # Skip wrapping for control flow steps
             if source_action_verb in self.CONTROL_FLOW_VERBS:
-                logger.debug(f"Skipping FOREACH wrap: source is {source_action_verb}")
                 return (None, None)
             
             if dest_action_verb in self.CONTROL_FLOW_VERBS:
-                logger.debug(f"Skipping FOREACH wrap: dest is {dest_action_verb}")
                 return (None, None)
 
             wrappable_info = {
                 "step_id": dest_step['id'],
-# Continuation of PlanValidator class from Part 1
-    
+                # Continuation of PlanValidator class from Part 1
+
                 "source_step_id": source_step['id'],
                 "source_output_name": source_output_name,
                 "target_input_name": dest_input_name
@@ -1012,6 +1009,10 @@ class PlanValidator:
                              scope_id: str) -> List[Dict[str, Any]]:
         """
         Wraps a step and its downstream dependencies in a FOREACH loop.
+        
+        Key principle: FOREACH is created AFTER the source step (A) that produces the array.
+        The subplan includes the step being wrapped (B) and its dependents (C).
+        Within the subplan, the wrapped step's array input is retargeted to "0" (the FOREACH item).
         """
         step_to_wrap_obj = all_steps.get(step_to_wrap_id)
         if not step_to_wrap_obj:
@@ -1020,7 +1021,7 @@ class PlanValidator:
 
         logger.info(f"Wrapping step {step_to_wrap_id} in FOREACH for input '{target_input_name}'")
 
-        # Find downstream dependencies
+        # Find downstream dependencies that consume output from step_to_wrap_id
         string_consuming_deps = self._get_string_consuming_downstream_steps(step_to_wrap_id, all_steps)
         moved_step_ids = {step_to_wrap_id} | string_consuming_deps
 
@@ -1082,11 +1083,18 @@ class PlanValidator:
                 "id": regroup_step_id,
                 "actionVerb": "REGROUP",
                 "description": f"Collects '{output_name}' from all iterations of FOREACH {foreach_step_id}",
+                "dependencies": [
+                    {
+                        "inputName": "foreach_results",
+                        "sourceStepId": foreach_step_id,
+                        "outputName": "steps"
+                    }
+                ],
                 "inputs": {
                     "foreach_results": {"outputName": "steps", "sourceStep": foreach_step_id},
                     "source_step_id_in_subplan": {"value": source_id, "valueType": "string"},
                     "output_to_collect": {"value": output_name, "valueType": "string"},
-                    "stepIdsToRegroup": [source_id]
+                    "stepIdsToRegroup": {"value": [source_id], "valueType": "array"}
                 },
                 "outputs": {
                     "result": {"description": f"Array of all '{output_name}' outputs.", "type": "array"}
@@ -1105,11 +1113,18 @@ class PlanValidator:
                         "actionVerb": "REGROUP",
                         "description": f"Collects final '{final_output_name}' from FOREACH {foreach_step_id}",
                         "scope_id": scope_id,
+                        "dependencies": [
+                            {
+                                "inputName": "foreach_results",
+                                "sourceStepId": foreach_step_id,
+                                "outputName": "steps"
+                            }
+                        ],
                         "inputs": {
                             "foreach_results": {"outputName": "steps", "sourceStep": foreach_step_id},
                             "source_step_id_in_subplan": {"value": final_step_id, "valueType": "string"},
                             "output_to_collect": {"value": final_output_name, "valueType": "string"},
-                            "stepIdsToRegroup": [final_step_id]
+                            "stepIdsToRegroup": {"value": [final_step_id], "valueType": "array"}
                         },
                         "outputs": {
                             "result": {"description": f"Array of all '{final_output_name}' outputs.", "type": "array"}
@@ -1142,6 +1157,13 @@ class PlanValidator:
 
         # Update dependencies
         self._recursively_update_dependencies(new_plan, regroup_map)
+        
+        # CRITICAL: After updating dependencies, the execution order must be invalidated
+        # because steps now reference REGROUP steps that weren't in their inputs before.
+        # This ensures the next validation pass recalculates the execution order correctly.
+        # Note: The scope_id parameter passed to this method should be used by the caller
+        # to invalidate the scope's execution order. For now, we return the plan and let
+        # the caller handle the invalidation.
 
         logger.info(f"Created FOREACH {foreach_step_id} with {len(sub_plan)} steps and {len(regroup_steps)} REGROUP steps")
         return new_plan
@@ -1340,6 +1362,46 @@ class PlanValidator:
             current_ancestor_id = parents.get(current_ancestor_id)
             
         return available
+
+    def _validate_outputs_against_manifest(self, step: Dict[str, Any]) -> List[StructuredError]:
+        """Validate that step outputs match the verb's manifest output definitions."""
+        errors: List[StructuredError] = []
+        step_id = step.get('id', 'unknown')
+        action_verb = step.get('actionVerb', '')
+        
+        if not action_verb:
+            return errors
+        
+        # Valid output types that steps can declare
+        VALID_OUTPUT_TYPES = {
+            'string', 'number', 'boolean', 'array', 'object', 'plan', 'plugin', 'any',
+            'list', 'list[string]', 'list[number]', 'list[boolean]', 'list[object]', 'list[any]'
+        }
+        
+        # Get step outputs
+        step_outputs = step.get('outputs', {})
+        if not isinstance(step_outputs, dict):
+            return errors
+        
+        # Validate each output in the step has a valid type
+        for output_name, output_def in step_outputs.items():
+            if not isinstance(output_def, dict):
+                continue
+            
+            output_type = output_def.get('type')
+            if not output_type:
+                continue
+            
+            # Check if declared output type is valid
+            if output_type not in VALID_OUTPUT_TYPES:
+                errors.append(StructuredError(
+                    ErrorType.TYPE_MISMATCH,
+                    f"Output '{output_name}' declares invalid type '{output_type}'. Valid types are: {', '.join(sorted(VALID_OUTPUT_TYPES))}",
+                    step_id=step_id,
+                    output_name=output_name
+                ))
+        
+        return errors
 
     def _validate_deliverable_outputs(self, step: Dict[str, Any]) -> List[StructuredError]:
         """Validate deliverable output properties."""
@@ -1589,6 +1651,39 @@ class PlanValidator:
                     specific_instructions = """This error commonly occurs when an output that is a list or array is passed to an input that expects a single item (like a string).
 The standard solution is to wrap the receiving step in a `FOREACH` loop.
 **Action:** For each error listed, please modify the plan to wrap the consumer step in a `FOREACH` block to correctly process the array input. Do not modify the producing step."""
+                elif signature.startswith("INPUT_NAME_MISMATCH"):
+                    specific_instructions = """This error indicates a step has exactly one input, and its verb requires exactly one input, but the names do not match.
+**Action:** For each error listed, fix the plan by renaming the provided input key to the required input key. For example, if the step has `inputs: { "my_input": ... }` but requires `needed_input`, change it to `inputs: { "needed_input": ... }`."""
+                elif signature == "MISSING_INPUT:GENERATE.prompt":
+                    specific_instructions = """The GENERATE verb requires a mandatory 'prompt' input that tells the LLM what to generate.
+
+**GENERATE Structure:**
+```
+{
+  "id": "uuid",
+  "actionVerb": "GENERATE",
+  "description": "Generate something using LLM",
+  "inputs": {
+    "prompt": {
+      "value": "Your prompt text here",
+      "valueType": "string"
+    }
+  },
+  "outputs": {
+    "output_name": {
+      "description": "The generated content",
+      "type": "string"
+    }
+  }
+}
+```
+
+The 'prompt' input can be:
+1. A static string: {"value": "Generate a report", "valueType": "string"}
+2. A reference to previous output: {"sourceStep": "step_id", "outputName": "previous_output", "valueType": "string"}
+3. Text with placeholders referencing previous steps: {"value": "Summarize this: {previous_analysis}", "valueType": "string"}
+
+**Action:** For each GENERATE step missing a 'prompt', add the prompt input with meaningful content that describes what should be generated."""
                 elif signature.startswith("MISSING_INPUT:"):
                     # Use generic handler for all missing required inputs
                     available_plugins = inputs.get('availablePlugins', []) if inputs else []
@@ -1664,7 +1759,7 @@ Return ONLY the full, corrected JSON plan as a valid JSON array. Do not include 
 
         request_id = None
         try:
-            response_tuple = self.brain_call(prompt, inputs, "json", "repair")
+            response_tuple = self.brain_call(prompt, inputs, "json")
             if not isinstance(response_tuple, tuple) or len(response_tuple) != 2:
                 logger.error(f"LLM call for signature '{signature}' returned an unexpected format. Skipping repair.")
                 return current_plan

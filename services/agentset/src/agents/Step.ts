@@ -1,11 +1,15 @@
 import { v4 as uuidv4 } from 'uuid';
-import { PluginParameterType, PluginOutput, InputReference, InputValue, StepDependency, ActionVerbTask, ExecutionContext as PlanExecutionContext, PlanTemplate, OutputType, PredefinedRoles } from '@cktmcs/shared'; 
+import { PluginParameterType, PluginOutput, InputReference, InputValue, StepDependency, ActionVerbTask, ExecutionContext as PlanExecutionContext, PlanTemplate, OutputType, PredefinedRoles } from '@cktmcs/shared';
 import { MapSerializer } from '@cktmcs/shared';
 import { AgentPersistenceManager } from '../utils/AgentPersistenceManager';
 import { RuntimeForeachDetector, ForeachModification } from '../utils/RuntimeForeachDetector.js';
 import { DelegationRecord } from '../types/DelegationTypes';
 import { CrossAgentDependencyResolver } from '../utils/CrossAgentDependencyResolver';
 import { Agent } from './Agent.js';
+
+interface ExtendedActionVerbTask extends ActionVerbTask {
+    scope_id?: string;
+}
 
 export enum StepStatus {
     PENDING = 'pending',
@@ -44,6 +48,7 @@ export class Step {
     readonly actionVerb: string;
     ownerAgentId: string;
     public delegatedToAgentId?: string;
+    public delegatingAgentId?: string; // Track which agent delegated this step
     inputReferences: Map<string, InputReference>;
     inputValues: Map<string, InputValue>; 
     description?: string;
@@ -290,11 +295,12 @@ export class Step {
         maxRecoverableRetries?: number
         // Ownership and Delegation
         currentOwnerAgentId?: string;
+        delegatingAgentId?: string;
         delegationHistory?: DelegationRecord[];
         lastOwnershipChange?: string;
         crossAgentResolver: CrossAgentDependencyResolver;
     }) {
-    
+
         console.log(`[Step constructor] params.outputs =`, params.outputs);
         
         // Enforce non-null actionVerb: this is a fundamental requirement
@@ -343,6 +349,7 @@ export class Step {
         // Initialize ownership and delegation fields
         this.originalOwnerAgentId = params.ownerAgentId || 'unknown_agent';
         this.currentOwnerAgentId = params.currentOwnerAgentId || this.originalOwnerAgentId;
+        this.delegatingAgentId = params.delegatingAgentId; // Track the agent that delegated this step
         this.delegationHistory = params.delegationHistory || [];
         this.isRemotelyOwned = this.currentOwnerAgentId !== this.ownerAgentId;
         this.lastOwnershipChange = params.lastOwnershipChange || new Date().toISOString();
@@ -481,7 +488,7 @@ export class Step {
                         } else {
                             console.debug(`[Step ${this.id}] Input '${dep.inputName}' resolved to: ${JSON.stringify(value).substring(0, 100)}`);
                         }
-                        
+                         
                         value = await this.recursivelyResolveInputReferences(value, allSteps, resolved, this.inputReferences.get(dep.inputName)?.valueType, dep.inputName);
 
                         resolved.set(dep.inputName, {
@@ -524,7 +531,7 @@ export class Step {
             return null;
         };
         this.resolvePlaceholdersInInputRunValues(resolved, findOutputFromSteps);
-        
+         
         // NEW: Check if we're missing required inputs
         for (const [inputName, value] of resolved.entries()) {
             if (value.value === undefined && !inputName.startsWith('__')) {
@@ -545,7 +552,7 @@ export class Step {
 
 
         if (value === null || typeof value !== 'object') {
-    
+     
             return value; // Base case: primitive value
         }
 
@@ -641,7 +648,7 @@ export class Step {
                     const propertyToExtract = currentInputName || outputName;
                     if (expectedValueType === PluginParameterType.STRING && (typeof resolvedValue === 'object' || Array.isArray(resolvedValue))) {
                         console.debug(`[Step ${this.id}]   - Recursively resolved value for '${outputName}' expects a string, but received object/array. currentInputName: ${currentInputName}, propertyToExtract: ${propertyToExtract}`);
-                        
+                         
                         // Check if the object/array has a property with the same name as the inputName (which acts as the input name here)
                         if (typeof resolvedValue === 'object' && resolvedValue !== null && !Array.isArray(resolvedValue) && Object.prototype.hasOwnProperty.call(resolvedValue, propertyToExtract)) {
                             let propertyValue = (resolvedValue as any)[propertyToExtract];
@@ -832,8 +839,7 @@ export class Step {
     
     public storeTempData(key: string, value: any): void {
         this.tempData.set(key, value);
-    }
-    
+    }    
     public getTempData(key: string): any {
         return this.tempData.get(key);
     }
@@ -852,6 +858,7 @@ export class Step {
             actionVerb: this.actionVerb,
             ownerAgentId: this.ownerAgentId,
             delegatedToAgentId: this.delegatedToAgentId,
+            delegatingAgentId: this.delegatingAgentId,
             inputReferences: MapSerializer.transformForSerialization(this.inputReferences),
             inputValues: MapSerializer.transformForSerialization(this.inputValues),
             description: this.description,
@@ -1013,12 +1020,12 @@ export class Step {
             
             if (originalOutput.name !== customName) {
                 console.log(`[Step ${this.id}] Remapping single plugin output '${originalOutput.name}' to planned output name '${customName}'.`);
-    
+
                 const mappedOutput: PluginOutput = {
                     ...originalOutput,
                     name: customName,
                 };
-    
+
                 // Return the mapped output, plus any special unmapped outputs
                 return [
                     mappedOutput,
@@ -1053,7 +1060,7 @@ export class Step {
                 ...pluginOutputs.filter(p => p.name === 'error' || p.resultType === PluginParameterType.PLAN || p.name === 'status')
             ];
         }
-    
+
         // More complex mapping for multiple outputs could be added here.
         console.warn(`[Step ${this.id}] mapPluginOutputsToCustomNames: Unhandled mapping scenario. Custom outputs: ${customOutputKeys.join(', ')}, Plugin results: ${mappablePluginOutputs.map(p => p.name).join(', ')}. Returning original outputs.`);
         return pluginOutputs;
@@ -1401,7 +1408,8 @@ export class Step {
     }
 
 	private async handleForeach(agent?: any): Promise<PluginOutput[]> {
-        const arrayInput = this.inputValues.get('array');
+        // Support multiple input names for the array to iterate over: 'array', 'items', or 'steps'
+        const arrayInput = this.inputValues.get('array') || this.inputValues.get('items') || this.inputValues.get('steps');
         const stepsInput = this.inputValues.get('steps');
         const batchSizeInput = this.inputValues.get('batch_size');
         const batchSize = typeof batchSizeInput?.value === 'number' ? batchSizeInput.value : null;
@@ -1453,40 +1461,58 @@ export class Step {
 
         console.log(`[Step ${this.id}] handleForeach: Processing batch from index ${startIndex} to ${endIndex} (Total items: ${inputArray.length}).`);
 
+        // Build a list of plan tasks (ActionVerbTask[]) with item/index injected
+        // This will be returned as-is to the Agent, which will then create steps from it
+        const allPlanTasks: ActionVerbTask[] = [];
+
         for (let i = 0; i < batch.length; i++) {
             const item = batch[i];
             const itemIndex = startIndex + i;
             console.log(`[Step ${this.id}] handleForeach: Processing item ${itemIndex}:`, JSON.stringify(this.truncateLargeStrings(item)));
             
-            const iterationSteps = createFromPlan(subPlanTemplate, this.persistenceManager, this.crossAgentResolver, this, agent);
+            // Clone the subplan template and inject item/index values for this iteration
+            for (const task of subPlanTemplate) {
+                const iterationTask: any = {
+                    ...(JSON.parse(JSON.stringify(task as any)) as object), // Deep clone
+                    inputs: {}
+                };
 
-            iterationSteps.forEach(step => {
-                // Tag each new step with the FOREACH loop's scope ID
-                (step as any).scope_id = this.scope_id;
+                // Copy and transform inputs
+                if ((task as any).inputs) {
+                    for (const [key, input] of Object.entries((task as any).inputs)) {
+                        const inputCopy: any = Object.assign({}, input);
 
-                console.debug(`[Step ${this.id}] handleForeach: Configuring step ${step.id} for item ${itemIndex}`);
-                for (const [inputName, inputRef] of step.inputReferences.entries()) {
-                    if (inputRef.outputName === 'item' && (inputRef.sourceId === '0' || inputRef.sourceId === this.id)) {
-                        step.inputValues.set(inputName, {
-                            inputName: inputName,
-                            value: item,
-                            valueType: this.inferValueType(item)
-                        });
-                        console.debug(`[Step ${this.id}] handleForeach: Injected item into step ${step.id} input ${inputName}`);
-                    }
-                    // Allow sub-plan to access the index
-                    if (inputRef.outputName === 'index' && (inputRef.sourceId === '0' || inputRef.sourceId === this.id)) {
-                        step.inputValues.set(inputName, {
-                            inputName: inputName,
-                            value: itemIndex,
-                            valueType: PluginParameterType.NUMBER
-                        });
-                        console.debug(`[Step ${this.id}] handleForeach: Injected index into step ${step.id} input ${inputName}`);
+                        // Check if this input references the parent FOREACH step (sourceStep = '0')
+                        if (inputCopy.sourceStep === '0' && this.parentStepId) {
+                            // This is a reference to parent inputs
+                            if (inputCopy.outputName === 'item') {
+                                // Replace the reference with the actual item value
+                                inputCopy.value = item;
+                                inputCopy.valueType = this.inferValueType(item);
+                                delete inputCopy.sourceStep;
+                                delete inputCopy.outputName;
+                            } else if (inputCopy.outputName === 'index') {
+                                // Replace the reference with the actual index value
+                                inputCopy.value = itemIndex;
+                                inputCopy.valueType = PluginParameterType.NUMBER;
+                                delete inputCopy.sourceStep;
+                                delete inputCopy.outputName;
+                            }
+                            // Other parent references stay as-is (sourceStep: '0')
+                        }
+                        // References to other steps within the subplan stay unchanged
+                        // They'll be resolved when createFromPlan processes this iteration's tasks
+
+                        iterationTask.inputs[key] = inputCopy;
                     }
                 }
-            });
 
-            allNewSteps.push(...iterationSteps);
+                // Add scope_id to the task if it exists
+                if ((task as ExtendedActionVerbTask).scope_id) {
+                    iterationTask.scope_id = (task as ExtendedActionVerbTask).scope_id;
+                }
+                allPlanTasks.push(iterationTask);
+            }
         }
 
         // Update the index for the next batch
@@ -1495,23 +1521,15 @@ export class Step {
         const isCompleted = this.currentIndex >= inputArray.length;
         const executionStatus = isCompleted ? 'completed' : 'in_progress';
 
-        console.log(`[Step ${this.id}] handleForeach: Generated ${allNewSteps.length} new steps in this batch. Execution status: ${executionStatus}.`);
-        console.debug(`[Step ${this.id}] handleForeach: All new steps: ${allNewSteps.map(s => s.id).join(', ')}`);
+        console.log(`[Step ${this.id}] handleForeach: Generated ${allPlanTasks.length} plan tasks in this batch. Execution status: ${executionStatus}.`);
+        console.debug(`[Step ${this.id}] handleForeach: All plan tasks: ${allPlanTasks.map(t => t.id).join(', ')}`);
         
         const planOutput: PluginOutput = {
             success: true,
-            name: 'newSteps',
+            name: 'plan',
             resultType: PluginParameterType.PLAN,
-            resultDescription: `[Step] FOREACH created ${allNewSteps.length} new steps.`,
-            result: allNewSteps
-        };
-        
-        const stepsOutput: PluginOutput = {
-            success: true,
-            name: 'steps',
-            resultType: PluginParameterType.ARRAY,
-            resultDescription: 'Array of all instantiated subplan steps in this batch',
-            result: allNewSteps
+            resultDescription: `[Step] FOREACH created ${allPlanTasks.length} plan tasks.`,
+            result: allPlanTasks
         };
 
         const statusOutput: PluginOutput = {
@@ -1522,7 +1540,7 @@ export class Step {
             result: executionStatus
         };
 
-        return [planOutput, stepsOutput, statusOutput];
+        return [planOutput, statusOutput];
     }
     
     private async handleRegroup(allSteps: Step[]): Promise<PluginOutput[]> {
@@ -1532,15 +1550,26 @@ export class Step {
             return this.createErrorResponse('REGROUP requires a "stepIdsToRegroup" input of type array.', '[Step]Error in REGROUP step');
         }
 
-        const stepIds: string[] = stepIdsToRegroupInput.value;
+        const templateStepIds: string[] = stepIdsToRegroupInput.value;
         const regroupedResults: any[] = [];
         let allCompleted = true;
 
-        for (const stepId of stepIds) {
+        // Get the registered instances from tempData (populated by createFromPlan during FOREACH execution)
+        const registeredKey = `registered_instances_${templateStepIds[0]}`;
+        let instanceStepIds: string[] = [];
+        
+        if (this.tempData && this.tempData.has(registeredKey)) {
+            instanceStepIds = this.tempData.get(registeredKey);
+            console.log(`[Step ${this.id}] handleRegroup: Found ${instanceStepIds.length} registered instances for template ${templateStepIds[0]}`);
+        } else {
+            console.log(`[Step ${this.id}] handleRegroup: No registered instances yet for template ${templateStepIds[0]}. Waiting...`);
+        }
+
+        // Iterate over the actual instance step IDs (not template IDs)
+        for (const stepId of instanceStepIds) {
             const step = allSteps.find(s => s.id === stepId);
             if (!step) {
-                // If a step is not found, we can't complete the regroup.
-                // This could be a temporary state if steps are still being created.
+                console.log(`[Step ${this.id}] handleRegroup: Instance step ${stepId} not yet found. Waiting...`);
                 allCompleted = false;
                 break;
             }
@@ -1551,14 +1580,16 @@ export class Step {
                 }
             } else if (step.status === StepStatus.ERROR || step.status === StepStatus.CANCELLED) {
                 // If any step in the group failed, the regroup fails.
-                return this.createErrorResponse(`Step ${stepId} in the regroup set failed with status ${step.status}.`, '[Step]Error in REGROUP step');
+                return this.createErrorResponse(`Instance step ${stepId} in the regroup set failed with status ${step.status}.`, '[Step]Error in REGROUP step');
             } else {
                 // If any step is not yet completed, we have to wait.
+                console.log(`[Step ${this.id}] handleRegroup: Instance step ${stepId} still running (status: ${step.status}). Waiting...`);
                 allCompleted = false;
             }
         }
 
-        if (allCompleted) {
+        // If we have instances and all are complete, return the aggregated results
+        if (instanceStepIds.length > 0 && allCompleted) {
             this.status = StepStatus.COMPLETED;
             return [{
                 success: true,
@@ -1567,6 +1598,11 @@ export class Step {
                 resultDescription: 'The aggregated results from the regrouped steps.',
                 result: regroupedResults
             }];
+        }
+
+        // If no instances registered yet, or still waiting for some to complete
+        if (instanceStepIds.length === 0) {
+            console.log(`[Step ${this.id}] handleRegroup: Waiting for registered instances to be populated...`);
         }
 
         return [{
@@ -1737,12 +1773,58 @@ export function createFromPlan(plan: ActionVerbTask[], persistenceManager: Agent
 
     });
 
-    // Pass 3: Register steps with agent
+    // Pass 3: Register steps with agent and with REGROUP steps
     newSteps.forEach(step => {
         if (agent) {
             agent.agentSet.registerStepLocation(step.id, agent.id, agent.agentSetUrl);
         }
     });
+
+    // Pass 4: If this is a FOREACH subplan, register instances with matching REGROUP steps
+    if (parentStep && parentStep.actionVerb === 'FOREACH' && agent) {
+        console.log(`[createFromPlan] Pass 4: Registering FOREACH subplan instances with REGROUP steps. Parent FOREACH: ${parentStep.id}`);
+        
+        // Find all REGROUP steps in the agent that depend on this FOREACH
+        const regroupSteps = agent.steps.filter((step: Step) => 
+            step.actionVerb === 'REGROUP' && 
+            step.dependencies.some((dep: StepDependency) => dep.sourceStepId === parentStep!.id)
+        );
+
+        console.log(`[createFromPlan] Found ${regroupSteps.length} REGROUP steps depending on FOREACH ${parentStep.id}`);
+
+        // For each REGROUP, register matching step instances
+        for (const regroupStep of regroupSteps) {
+            // Get the template step ID from REGROUP's stepIdsToRegroup input
+            const stepIdsToRegroupInput = regroupStep.inputValues.get('stepIdsToRegroup');
+            if (!stepIdsToRegroupInput || !Array.isArray(stepIdsToRegroupInput.value)) {
+                console.warn(`[createFromPlan] REGROUP ${regroupStep.id} does not have a valid stepIdsToRegroup input`);
+                continue;
+            }
+
+            const templateStepId = stepIdsToRegroupInput.value[0]; // Template IDs to match
+            console.log(`[createFromPlan] REGROUP ${regroupStep.id} looks for template step ${templateStepId}`);
+
+            // Find all instances in newSteps that match this template ID
+            const matchingInstances = newSteps.filter(step => step.templateId === templateStepId);
+            console.log(`[createFromPlan] Found ${matchingInstances.length} instances matching template ${templateStepId}`);
+
+            // Register each instance as a dynamic input to the REGROUP
+            if (matchingInstances.length > 0) {
+                // Store instance IDs in a new map for REGROUP to use at runtime
+                if (!regroupStep.tempData) {
+                    regroupStep.tempData = new Map();
+                }
+                
+                // Create or append to the list of registered instances
+                const registeredKey = `registered_instances_${templateStepId}`;
+                let registeredInstances = regroupStep.tempData.get(registeredKey) || [];
+                registeredInstances.push(...matchingInstances.map(inst => inst.id));
+                regroupStep.tempData.set(registeredKey, registeredInstances);
+
+                console.log(`[createFromPlan] Registered ${registeredInstances.length} instances with REGROUP ${regroupStep.id}`);
+            }
+        }
+    }
 
     return newSteps;
 }

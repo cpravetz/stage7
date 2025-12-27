@@ -11,6 +11,9 @@ export interface ModelPerformanceMetrics {
   successCount: number;
   failureCount: number;
   logicFailureCount?: number;
+  criticalFailureCount?: number;
+  isTemporarilyBlacklisted?: boolean;
+  blacklistUntil?: string;
   successRate: number;
   averageLatency: number;
   averageTokenCount: number;
@@ -100,6 +103,8 @@ export class ModelPerformanceTracker {
         successCount: 0,
         failureCount: 0,
         logicFailureCount: 0,
+        criticalFailureCount: 0,
+        isTemporarilyBlacklisted: false,
         successRate: 0,
         averageLatency: 0,
         averageTokenCount: 0,
@@ -684,6 +689,20 @@ export class ModelPerformanceTracker {
 
     const metrics = this.getPerformanceMetrics(modelName, conversationType);
 
+    // Check if temporarily blacklisted due to critical failures
+    if (metrics.isTemporarilyBlacklisted && metrics.blacklistUntil) {
+      const blacklistedUntil = new Date(metrics.blacklistUntil);
+      const now = new Date();
+
+      if (now < blacklistedUntil) {
+        return true;
+      } else {
+        // Blacklist period has expired, clear the temporary blacklist
+        metrics.isTemporarilyBlacklisted = false;
+        metrics.blacklistUntil = undefined;
+      }
+    }
+
     // If the model has no blacklistedUntil date, it's not blacklisted
     if (!metrics.blacklistedUntil) {
         return false;
@@ -827,8 +846,9 @@ export class ModelPerformanceTracker {
    * Track a logic failure for a model
    * @param modelName Model name
    * @param conversationType Conversation type
+   * @param severity "critical" for instruction-following failures (counts as multiple failures), "normal" for others
    */
-  trackLogicFailure(modelName: string, conversationType: LLMConversationType): void {
+  trackLogicFailure(modelName: string, conversationType: LLMConversationType, severity: string = 'normal'): void {
     let modelData = this.performanceData.get(modelName);
     if (!modelData) {
       modelData = {
@@ -845,7 +865,23 @@ export class ModelPerformanceTracker {
       modelData.metrics[conversationType] = metrics;
     }
 
-    metrics.logicFailureCount = (metrics.logicFailureCount || 0) + 1;
+    // Critical failures are counted as 5x weight (instruction-following is fundamental)
+    const failureWeight = severity === 'critical' ? 5 : 1;
+    metrics.logicFailureCount = (metrics.logicFailureCount || 0) + failureWeight;
+    
+    // If critical failure, also add to critical failure count for potential blacklisting
+    if (severity === 'critical') {
+      metrics.criticalFailureCount = (metrics.criticalFailureCount || 0) + 1;
+      console.log(`[PerformanceTracker] CRITICAL FAILURE for ${modelName} (${conversationType}): count now ${metrics.criticalFailureCount}`);
+      
+      // Blacklist model temporarily if too many critical failures
+      if (metrics.criticalFailureCount >= 3) {
+        metrics.isTemporarilyBlacklisted = true;
+        metrics.blacklistUntil = new Date(Date.now() + 30 * 60 * 1000).toISOString(); // 30 min blacklist
+        console.warn(`[PerformanceTracker] ⚠️  MODEL BLACKLISTED: ${modelName} (${conversationType}) due to ${metrics.criticalFailureCount} critical failures. Blacklisted until ${metrics.blacklistUntil}`);
+      }
+    }
+    
     modelData.lastUpdated = new Date().toISOString();
 
     this.savePerformanceData().catch(error => {

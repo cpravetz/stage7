@@ -471,10 +471,11 @@ export class ModelManager {
      * Track a logic failure for a model
      * @param modelName Model name
      * @param conversationType Conversation type
+     * @param severity "critical" for instruction-following failures, "normal" for others
      */
-    public trackLogicFailure(modelName: string, conversationType: LLMConversationType): void {
-        console.log(`[ModelManager] Tracking logic failure for model ${modelName}, conversation type ${conversationType}`);
-        this.performanceTracker.trackLogicFailure(modelName, conversationType);
+    public trackLogicFailure(modelName: string, conversationType: LLMConversationType, severity: string = 'normal'): void {
+        console.log(`[ModelManager] Tracking ${severity} logic failure for model ${modelName}, conversation type ${conversationType}`);
+        this.performanceTracker.trackLogicFailure(modelName, conversationType, severity);
         // Clear cache so next selection considers the updated logic failure count
         this.clearModelSelectionCache();
     }
