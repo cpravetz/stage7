@@ -1,0 +1,101 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Plan Schema",
+  "description": "Schema for validating plan structures",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "format": "uuid",
+        "description": "Unique step ID (UUID)"
+      },
+      "actionVerb": {
+        "type": "string",
+        "minLength": 1,
+        "description": "The action to be performed in this step"
+      },
+      "description": {
+        "type": "string",
+        "description": "Description of the task to be performed"
+      },
+      "inputs": {
+        "type": "object",
+        "patternProperties": {
+          "^[a-zA-Z][a-zA-Z0-9_]*$": {
+            "type": "object",
+            "properties": {
+              "value": {
+                "type": ["string", "number", "boolean", "array", "object"],
+                "description": "Constant value for this input"
+              },
+              "valueType": {
+                "type": "string",
+                "enum": ["string", "number", "boolean", "array", "object", "plan", "plugin", "any"],
+                "description": "The natural type of the Constant input value"
+              },
+              "outputName": {
+                "type": "string",
+                "description": "Reference to an output from a previous step"
+              },
+              "sourceStep": {
+                "type": "string",
+                "format": "uuid",
+                "description": "The step ID (UUID) that produces the output for this input"
+              },
+              "args": {
+                "type": "object",
+                "description": "Additional arguments for the input"
+              }
+            },
+            "oneOf": [
+              {"required": ["value", "valueType"]},
+              {"required": ["outputName", "sourceStep"]}
+            ],
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputs": {
+        "type": "object",
+        "patternProperties": {
+          "^[a-zA-Z][a-zA-Z0-9_]*$": {
+            "type": "object",
+            "properties": {
+              "description": {
+                "type": "string",
+                "description": "Description of the expected output"
+              },
+              "type": {
+                "type": "string",
+                "enum": ["string", "number", "boolean", "array", "object", "plan", "plugin", "any", "list", "list[string]", "list[number]", "list[boolean]", "list[object]", "list[any]"],
+                "description": "The type of the output"
+              },
+              "isDeliverable": {
+                "type": "boolean",
+                "description": "Whether this output is a final deliverable"
+              },
+              "filename": {
+                "type": "string",
+                "description": "User-friendly filename for deliverable outputs"
+              }
+            },
+            "required": ["description", "type"],
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "recommendedRole": {
+        "type": "string",
+        "enum": ["Coordinator", "Researcher", "Coder", "Creative", "Critic", "Executor", "Domain Expert"],
+        "description": "Suggested role type for the agent executing this step"
+      }
+    },
+    "required": ["id", "actionVerb", "inputs", "outputs"],
+    "additionalProperties": false
+  },
+  "minItems": 1
+}

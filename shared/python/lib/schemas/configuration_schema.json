@@ -1,0 +1,51 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Configuration Schema",
+  "description": "Schema for validating configuration structures",
+  "type": "object",
+  "properties": {
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "Configuration version"
+    },
+    "settings": {
+      "type": "object",
+      "description": "General settings",
+      "additionalProperties": {
+        "type": ["string", "number", "boolean", "array", "object"]
+      }
+    },
+    "environment": {
+      "type": "object",
+      "description": "Environment-specific configuration",
+      "additionalProperties": {
+        "type": ["string", "number", "boolean"]
+      }
+    },
+    "features": {
+      "type": "object",
+      "description": "Feature flags",
+      "additionalProperties": {
+        "type": "boolean"
+      }
+    },
+    "logging": {
+      "type": "object",
+      "properties": {
+        "level": {
+          "type": "string",
+          "enum": ["debug", "info", "warning", "error", "critical"],
+          "description": "Logging level"
+        },
+        "format": {
+          "type": "string",
+          "description": "Log format"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "required": ["version"],
+  "additionalProperties": false
+}

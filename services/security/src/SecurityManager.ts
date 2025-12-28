@@ -10,6 +10,9 @@ import { analyzeError } from '@cktmcs/errorhandler';
 import { refreshToken, register, login, logout } from './controllers/authController';
 import { BaseEntity } from '@cktmcs/shared';
 import { initUserService } from './services/userService';
+import { SecurityAuditService } from './services/SecurityAuditService';
+import { SecurityMonitoringService } from './services/SecurityMonitoringService';
+import { FrameworkIntegrationService } from './services/FrameworkIntegrationService';
 
 // Define Request and Response types for consistency
 type Request = express.Request;
@@ -17,9 +20,26 @@ type Response = express.Response;
 
 const app = express();
 export class SecurityManager extends BaseEntity {
+    private securityAuditService: SecurityAuditService;
+    private securityMonitoringService: SecurityMonitoringService;
+    private frameworkIntegrationService: FrameworkIntegrationService;
 
     constructor() {
         super('SecurityManager', 'SecurityManager', 'securitymanager', process.env.PORT || '5010');
+
+        // Initialize security services
+        this.securityAuditService = new SecurityAuditService();
+        this.securityMonitoringService = new SecurityMonitoringService();
+        this.frameworkIntegrationService = new FrameworkIntegrationService(
+            this.securityAuditService,
+            this.securityMonitoringService
+        );
+        
+        // Start security monitoring
+        this.securityMonitoringService.start();
+
+        // Perform framework integration
+        this.performFrameworkIntegration();
 
         // Initialize user service with this SecurityManager instance
         initUserService(this);
@@ -198,10 +218,144 @@ export class SecurityManager extends BaseEntity {
             res.json({ status: 'ok', message: 'Security service is running' });
         });
 
+        // Security audit endpoints
+        app.post('/audit/log', async (req: Request, res: Response) => {
+            try {
+                const auditEvent = req.body;
+                this.securityAuditService.logAuditEvent(auditEvent);
+                res.status(200).json({ success: true, message: 'Audit event logged successfully' });
+            } catch (error) {
+                analyzeError(error as Error);
+                console.error('Error logging audit event:', error);
+                res.status(500).json({ error: 'Internal server error' });
+            }
+        });
+
+        app.get('/audit/logs', async (req: Request, res: Response) => {
+            try {
+                const filter = req.query;
+                const logs = this.securityAuditService.getAuditLogs(filter as any);
+                res.status(200).json(logs);
+            } catch (error) {
+                analyzeError(error as Error);
+                console.error('Error getting audit logs:', error);
+                res.status(500).json({ error: 'Internal server error' });
+            }
+        });
+
+        app.get('/audit/compliance', async (req: Request, res: Response) => {
+            try {
+                const report = this.securityAuditService.generateComplianceReport();
+                res.status(200).json(report);
+            } catch (error) {
+                analyzeError(error as Error);
+                console.error('Error generating compliance report:', error);
+                res.status(500).json({ error: 'Internal server error' });
+            }
+        });
+
+        // Security monitoring endpoints
+        app.post('/monitor/event', async (req: Request, res: Response) => {
+            try {
+                const securityEvent = req.body;
+                this.securityMonitoringService.processSecurityEvent(securityEvent);
+                res.status(200).json({ success: true, message: 'Security event processed successfully' });
+            } catch (error) {
+                analyzeError(error as Error);
+                console.error('Error processing security event:', error);
+                res.status(500).json({ error: 'Internal server error' });
+            }
+        });
+
+        app.get('/monitor/alerts', async (req: Request, res: Response) => {
+            try {
+                const filter = req.query;
+                const alerts = this.securityMonitoringService.getSecurityAlerts(filter as any);
+                res.status(200).json(alerts);
+            } catch (error) {
+                analyzeError(error as Error);
+                console.error('Error getting security alerts:', error);
+                res.status(500).json({ error: 'Internal server error' });
+            }
+        });
+
+        app.get('/monitor/status', async (req: Request, res: Response) => {
+            try {
+                const status = this.securityMonitoringService.getStatus();
+                res.status(200).json(status);
+            } catch (error) {
+                analyzeError(error as Error);
+                console.error('Error getting monitoring status:', error);
+                res.status(500).json({ error: 'Internal server error' });
+            }
+        });
+
+        // Security status endpoint
+        app.get('/security/status', async (req: Request, res: Response) => {
+            try {
+                const status = this.getSecurityStatus();
+                res.status(200).json(status);
+            } catch (error) {
+                analyzeError(error as Error);
+                console.error('Error getting security status:', error);
+                res.status(500).json({ error: 'Internal server error' });
+            }
+        });
+
+        // Framework integration endpoints
+        app.get('/integration/status', async (req: Request, res: Response) => {
+            try {
+                const status = this.frameworkIntegrationService.getStatus();
+                res.status(200).json(status);
+            } catch (error) {
+                analyzeError(error as Error);
+                console.error('Error getting integration status:', error);
+                res.status(500).json({ error: 'Internal server error' });
+            }
+        });
+
+        app.post('/integration/perform', async (req: Request, res: Response) => {
+            try {
+                const result = this.frameworkIntegrationService.performFullIntegration();
+                res.status(200).json(result);
+            } catch (error) {
+                analyzeError(error as Error);
+                console.error('Error performing integration:', error);
+                res.status(500).json({ error: 'Internal server error' });
+            }
+        });
+
         // Error handler
         app.use(errorHandler);
     }
 
+
+    private performFrameworkIntegration() {
+        try {
+            const result = this.frameworkIntegrationService.performFullIntegration();
+            if (result.success) {
+                console.log('Framework integration completed successfully');
+            } else {
+                console.warn('Framework integration completed with some failures:', result);
+            }
+        } catch (error) {
+            analyzeError(error as Error);
+            console.error('Failed to perform framework integration:', error);
+        }
+    }
+
+    public getSecurityStatus() {
+        return {
+            service: 'SecurityManager',
+            status: 'running',
+            timestamp: new Date().toISOString(),
+            components: {
+                securityAuditService: this.securityAuditService.getStatus(),
+                securityMonitoringService: this.securityMonitoringService.getStatus(),
+                frameworkIntegrationService: this.frameworkIntegrationService.getStatus()
+            }
+        };
+    }
 
     public start() {
         app.listen(this.port, () => {

@@ -1,0 +1,55 @@
+{
+  "id": "ARCH-003",
+  "category": "architecture",
+  "title": "Reflection and Learning",
+  "description": "The system must learn and use reflection to improve, with persistent knowledge base growth.",
+  "rules": [
+    "Implement reflection mechanisms for agents to analyze their performance",
+    "Capture lessons learned from execution for future improvement",
+    "Persist improvements to knowledge base for long-term retention",
+    "Use historical data and patterns to improve future performance",
+    "Implement continuous learning loops in agent workflows",
+    "Share knowledge between agents appropriately",
+    "Implement knowledge validation and quality control",
+    "Use reflection to improve decision-making processes"
+  ],
+  "enforcementMechanisms": [
+    "Reflection logging and analysis tools",
+    "Knowledge base integration validation",
+    "Performance improvement tracking and measurement",
+    "Continuous learning effectiveness analysis",
+    "Knowledge sharing pattern validation",
+    "Knowledge quality control checks",
+    "Decision-making improvement analysis"
+  ],
+  "complianceMetrics": [
+    "Reflection completion rate",
+    "Knowledge base growth rate",
+    "Performance improvement percentage",
+    "Learning loop effectiveness",
+    "Knowledge sharing success rate",
+    "Knowledge quality score",
+    "Decision-making improvement rate"
+  ],
+  "severity": "medium",
+  "documentation": "docs/ENGINEERING_POLICIES.md#policy-6-reflection-and-learning",
+  "examples": [
+    "Implementing post-execution reflection for agents",
+    "Capturing and storing lessons learned in knowledge base",
+    "Using historical patterns to optimize future executions",
+    "Implementing knowledge sharing between related agents",
+    "Using reflection data to improve planning and decision-making"
+  ],
+  "exceptions": [
+    "Time-sensitive operations where reflection would cause delays",
+    "Critical operations where learning could impact reliability"
+  ],
+  "validationChecks": [
+    "validate-reflection-mechanisms",
+    "check-knowledge-integration",
+    "analyze-performance-improvement",
+    "test-learning-effectiveness",
+    "validate-knowledge-sharing",
+    "check-knowledge-quality"
+  ]
+}

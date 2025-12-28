@@ -1047,15 +1047,6 @@ export class Librarian extends BaseEntity {
                 return { ...result, context_score };
             });
 
-            // Sort by context_score (descending) then by original distance (ascending)
-            results.sort((a: any, b: any) => {
-                if (b.context_score !== a.context_score) {
-                    return b.context_score - a.context_score;
-                }
-                return a.distance - b.distance;
-            });
-            
-            // Remap results to prioritize the canonical verb for discovery
             const finalResults = results.map((result: any) => {
                 if (result.metadata && result.metadata.verb) {
                     return {
@@ -1063,7 +1054,7 @@ export class Librarian extends BaseEntity {
                         id: result.metadata.verb, // Use canonical verb as primary ID
                         verb: result.metadata.verb, // Ensure top-level verb is the canonical one
                         metadata: {
-                            ...result.metadata,
+                            ...result.metadata, // Keep all original metadata
                             original_id: result.id // Preserve original ID
                         }
                     };

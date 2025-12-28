@@ -1,0 +1,45 @@
+{
+  "id": "CODE-002",
+  "category": "code",
+  "title": "Error Handling at Local Level",
+  "description": "All data or state issues must be handled at the lowest, most local level possible and never thrown as exceptions.",
+  "rules": [
+    "Use local error handling and recovery mechanisms",
+    "Implement graceful degradation where possible",
+    "Never let exceptions bubble up to user-facing layers",
+    "Use structured error handling patterns",
+    "Log errors appropriately for debugging"
+  ],
+  "enforcementMechanisms": [
+    "Static code analysis for exception handling patterns",
+    "Code review focus on error handling strategies",
+    "Automated testing of error scenarios"
+  ],
+  "complianceMetrics": [
+    "Exception handling coverage",
+    "Error recovery success rate",
+    "Graceful degradation effectiveness",
+    "Error logging completeness",
+    "User-facing error message quality",
+    "Retry mechanism success rate"
+  ],
+  "severity": "critical",
+  "documentation": "docs/ENGINEERING_POLICIES.md#policy-2-error-handling-at-local-level",
+  "examples": [
+    "Using try-catch blocks with local recovery logic",
+    "Implementing fallback mechanisms when primary operations fail",
+    "Logging detailed error information for debugging while showing user-friendly messages",
+    "Using circuit breakers to prevent cascading failures",
+    "Implementing exponential backoff for retry operations"
+  ],
+  "exceptions": [
+    "Critical system errors that require immediate attention",
+    "Security-related exceptions that need special handling"
+  ],
+  "validationChecks": [
+    "check-error-handling-patterns",
+    "test-error-scenarios",
+    "validate-error-logging",
+    "check-graceful-degradation"
+  ]
+}

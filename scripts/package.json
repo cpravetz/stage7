@@ -1,0 +1,21 @@
+{
+  "name": "mcs-policy-enforcement",
+  "version": "1.0.0",
+  "description": "Policy enforcement tools for MCS engineering policies",
+  "main": "policy-enforcement.js",
+  "scripts": {
+    "enforce": "node policy-enforcement.js",
+    "check": "node policy-enforcement.js",
+    "test": "echo \"Policy enforcement test\"",
+    "syntax-validate": "python automated-syntax-validation.py",
+    "integrated-validate": "python integrated-validation.py",
+    "test-integration": "python test-syntax-validation-integration.py"
+  },
+  "dependencies": {
+    "ajv": "^8.0.0",
+    "commander": "^10.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^18.0.0"
+  }
+}
